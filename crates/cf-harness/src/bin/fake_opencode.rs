@@ -17,7 +17,9 @@
 //!   for so far, what the request said, and the `directory` it named.
 //! - `CF_FIXTURE_MODE`, how it fails, `ok` where it does not: `early-exit` (it
 //!   ends with 1 before it listens), `ignore-sigterm` (where there are signals,
-//!   it ignores SIGTERM), `hang-health` and `hang-session` (it takes the
+//!   it ignores SIGTERM), `holds-its-error-stream` (it starts a program that keeps
+//!   its error stream open past its end, and leaves its process in `.holder`),
+//!   `hang-health` and `hang-session` (it takes the
 //!   request and never answers), and for a session it makes: `bad-json`
 //!   (an answer that is no JSON), `oversized` (an id of two mebibytes),
 //!   `invalid-id` (one the channel refuses) and `wrong-dir` (a folder that is
@@ -62,6 +64,28 @@ impl Fixture {
     fn leave(&self, name: &str, text: &str) {
         let _ = fs::write(format!("{}.{name}", self.state), text);
     }
+
+    /// Starts a program that holds this process's error stream open, as a program
+    /// a server starts does, or one that was left a copy of the pipe by a program
+    /// started beside it, and for far longer than the server runs: the pipe reaches
+    /// its end when that program ends, and the server's process has ended before.
+    /// Its process is left in `.holder`, for the test to end.
+    #[cfg(unix)]
+    #[allow(clippy::disallowed_methods)] // The stand-in starts what it leaves.
+    fn hold_the_error_stream(&self) {
+        let held = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::inherit())
+            .spawn();
+        if let Ok(held) = held {
+            self.leave("holder", &held.id().to_string());
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn hold_the_error_stream(&self) {}
 
     fn authorized(&self, request: &Request) -> bool {
         request.header("authorization") == Some(self.want.as_str())
@@ -165,6 +189,9 @@ fn main() -> ExitCode {
         return ended;
     }
     let pass = env.text("OPENCODE_SERVER_PASSWORD").unwrap_or_default();
+    if fixture.mode == "holds-its-error-stream" {
+        fixture.hold_the_error_stream();
+    }
     fixture.leave(
         "startup",
         &json!({

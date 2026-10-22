@@ -262,7 +262,10 @@ async fn with_only_doors_and_idle_connections_open_the_stop_is_prompt() {
         .await;
 }
 
-#[tokio::test]
+// In the clock of the timers it waits on, not the machine's: the stop's own work
+// is under 2 ms, and a bound on the machine's clock (700 ms) failed once at 779 on
+// a CI Windows that was running 500 tests beside this one.
+#[tokio::test(start_paused = true)]
 async fn a_pass_that_ends_within_the_deadline_is_waited_for_and_no_longer() {
     LocalSet::new()
         .run_until(async {
@@ -279,14 +282,43 @@ async fn a_pass_that_ends_within_the_deadline_is_waited_for_and_no_longer() {
             .await;
             rig.stopping.passes.get().unwrap().kick();
             tokio::time::sleep(Duration::from_millis(50)).await;
-            let started = Instant::now();
+            let started = tokio::time::Instant::now();
             rig.stopping.run("SIGTERM").await;
-            let took = started.elapsed();
             assert!(finished.get(), "it was let end");
-            assert!(
-                took >= Duration::from_millis(200) && took < Duration::from_millis(700),
-                "{took:?}"
+            // What the pass had left to run, and not the deadline, which a stop
+            // that waited on after the pass took.
+            assert_eq!(
+                started.elapsed(),
+                Duration::from_millis(250),
+                "waiting for the pass, not for the {DEADLINE:?} deadline"
             );
+        })
+        .await;
+}
+
+// The old test's bound (700 ms) was crossed by 761 ms of a stop whose tail the machine
+// stalled for half a second: the stall is the machine's time, and none of the stop's wait.
+#[tokio::test(start_paused = true)]
+async fn a_machine_that_stalls_in_the_tail_changes_nothing_of_how_long_the_stop_waited() {
+    LocalSet::new()
+        .run_until(async {
+            let mut rig = rig(Box::new(|| {
+                Box::pin(async {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    Ok(())
+                })
+            }))
+            .await;
+            let ends = Rc::clone(&rig.stopping.ends_children);
+            rig.stopping.ends_children = Rc::new(move || {
+                std::thread::sleep(Duration::from_millis(500));
+                ends();
+            });
+            rig.stopping.passes.get().unwrap().kick();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let started = tokio::time::Instant::now();
+            rig.stopping.run("SIGTERM").await;
+            assert_eq!(started.elapsed(), Duration::from_millis(250));
         })
         .await;
 }

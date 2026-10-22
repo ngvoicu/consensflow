@@ -17,6 +17,7 @@ mod daemon;
 
 use std::time::{Duration, Instant};
 
+use cf_base::time::{parse, Clock, SystemClock};
 use daemon::{Client, Daemon, Root};
 use serde_json::{json, Value};
 
@@ -97,6 +98,23 @@ fn stop(daemon: &mut Daemon, how: How) -> Instant {
     }
 }
 
+/// When the daemon's log says its stop began (`stop: …`) and when it says it
+/// ended (`exit 0`), in milliseconds since the epoch: the daemon's own count of
+/// its stop, which a test that is slow to look does not read late.
+fn stop_in_its_log(log: &str) -> (i64, i64) {
+    let stamp = |line: &str| {
+        let at = log
+            .lines()
+            .find_map(|each| {
+                each.split_once(' ')
+                    .filter(|(_, rest)| rest.starts_with(line))
+            })
+            .and_then(|(at, _)| parse(at));
+        at.unwrap_or_else(|| panic!("no {line:?} line in the log:\n{log}"))
+    };
+    (stamp("info stop: "), stamp("info exit 0"))
+}
+
 fn hows() -> Vec<How> {
     vec![
         How::InputEnded,
@@ -104,6 +122,15 @@ fn hows() -> Vec<How> {
         #[cfg(unix)]
         How::Sigterm,
     ]
+}
+
+#[test]
+fn a_stop_is_counted_from_the_stamps_of_the_lines_that_begin_and_end_it_across_midnight() {
+    let log = "2026-10-20T23:59:59.500Z info start pid 7 rust 3.0.5 home /h\n\
+               2026-10-20T23:59:59.900Z info stop: SIGTERM; rss 14 MB\n\
+               2026-10-21T00:00:00.950Z info exit 0\n";
+    let (began, ended) = stop_in_its_log(log);
+    assert_eq!(ended - began, 1_050);
 }
 
 #[test]
@@ -230,16 +257,29 @@ fn a_busy_daemon_is_stopped_within_one_deadline_whatever_is_open() {
             daemon.ping("r-last");
             std::thread::sleep(Duration::from_millis(300));
         }
+        let asked_at = SystemClock.now_ms();
         let asked = stop(&mut daemon, how);
         let (code, took) = daemon.exits(asked, Duration::from_secs(10));
         assert_eq!(code, Some(0), "{how:?}");
-        // One deadline of a second for all of it, which the body half sent
-        // and the pass hold to the end; the app waits 2 s.
-        assert!(
-            took >= Duration::from_millis(900),
-            "{how:?}: the stop did not wait: {took:?}"
+        // The time of the stop is the daemon's own, from the lines of its log:
+        // from the ask to the line that says it began (the daemon reads the ask),
+        // the stop, and from the line that says it ended to the process gone
+        // (the system ends it). Each is bounded by what it is.
+        let (stop_began, stop_ended) = stop_in_its_log(&root.log());
+        let (lead_in, stop, to_gone) = (
+            stop_began - asked_at,
+            stop_ended - stop_began,
+            i64::try_from(took.as_millis()).unwrap_or(i64::MAX) - (stop_ended - asked_at),
         );
-        assert!(took < Duration::from_millis(1_600), "{how:?}: {took:?}");
+        let phases = format!(
+            "{how:?}: {lead_in} ms to begin, the stop {stop} ms, {to_gone} ms to be gone; {took:?} in all"
+        );
+        // One deadline of a second for all of it, which the body half sent
+        // and the pass hold to the end.
+        assert!(stop >= 900, "the stop did not wait: {phases}");
+        assert!(stop < 1_600, "{phases}");
+        // The app ends the daemon 2 s after it asks: by then the stop is over.
+        assert!(stop_ended - asked_at < 2_000, "{phases}");
 
         let (answered, ended) = door.read_to_the_end();
         assert!(ended, "{how:?}: the door's connection ended");

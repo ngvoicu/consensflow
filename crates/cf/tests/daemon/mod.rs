@@ -257,15 +257,12 @@ impl Daemon {
         self.stdin = None;
     }
 
-    /// SIGTERM, with its input left open.
+    /// SIGTERM, with its input left open: sent by this process, as the app
+    /// sends it. (`kill` run as a program would put the start of a program in
+    /// the time a stop is counted from.)
     #[cfg(unix)]
     pub fn terminate(&self) {
-        let pid = self.child.id().to_string();
-        let sent = Command::new("kill").args(["-TERM", &pid]).status();
-        assert!(
-            sent.is_ok_and(|status| status.success()),
-            "kill -TERM {pid}"
-        );
+        cf_process::terminate(self.child.id(), cf_process::Ending::Asked);
     }
 
     /// Waits for it to exit: its code and how long it took from `since`.

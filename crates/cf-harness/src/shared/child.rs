@@ -1,18 +1,21 @@
 //! Ending a child process as OpenCode's throwaway server is ended: asked to
 //! end, forced once it has had long enough, and given up on, in a sentence of
-//! its own, when it will not close at all.
+//! its own, when it will not end at all. What is waited for is the process: its
+//! error stream is read by no one here, and a program that holds the pipe open
+//! (one the server started, or one started beside it that was left a copy) holds
+//! up the stream's end, not the server's, nor the port it freed.
 
 use crate::seams::processes::{Child, Ending};
 use crate::seams::{arm, Time};
 
-/// How long a child asked to end has to close before it is forced to.
+/// How long a child asked to end has to end before it is forced to.
 const FORCE_AFTER_MS: u64 = 2000;
 
-/// How long past that it has to close, forced, before it is given up on.
+/// How long past that it has to end, forced, before it is given up on.
 const SETTLE_MS: u64 = 2000;
 
 /// Asks `child` to end unless it has exited already, and waits until it has
-/// closed: forced at two seconds if it has not closed by then, and failed at
+/// ended: forced at two seconds if it has not ended by then, and failed at
 /// four, both counted from the ask. Each call goes through all of it again,
 /// so a child that failed to stop is asked, forced and waited for once more.
 pub(crate) async fn stop(time: &dyn Time, child: &dyn Child) -> Result<(), String> {
@@ -21,12 +24,12 @@ pub(crate) async fn stop(time: &dyn Time, child: &dyn Child) -> Result<(), Strin
     }
     let forcing = arm(time, FORCE_AFTER_MS);
     let giving_up = arm(time, FORCE_AFTER_MS + SETTLE_MS);
-    if forcing.bound(child.closed()).await.is_some() {
+    if forcing.bound(child.ended()).await.is_some() {
         return Ok(());
     }
     child.terminate(Ending::Forced);
     giving_up
-        .bound(child.closed())
+        .bound(child.ended())
         .await
         .ok_or_else(|| "opencode session failed to stop the server".to_owned())
 }

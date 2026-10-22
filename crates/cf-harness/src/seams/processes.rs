@@ -54,6 +54,12 @@ pub trait Child {
     fn exited(&self) -> bool;
     /// Waits until it has exited and its streams have closed (`close`).
     fn closed(&self) -> Work<'_, ()>;
+    /// Waits until it has exited, its streams closed or not: a program it left may hold
+    /// them open for as long as it lives. A child whose streams close with it (a scripted
+    /// one) is ended when it is closed.
+    fn ended(&self) -> Work<'_, ()> {
+        self.closed()
+    }
     /// Asks or forces it to end, not waiting (Windows: its whole tree).
     fn terminate(&self, how: Ending);
 }
@@ -158,6 +164,10 @@ impl Child for cf_process::Child {
 
     fn closed(&self) -> Work<'_, ()> {
         Box::pin(cf_process::Child::closed(self))
+    }
+
+    fn ended(&self) -> Work<'_, ()> {
+        Box::pin(cf_process::Child::ended(self))
     }
 
     fn terminate(&self, how: Ending) {

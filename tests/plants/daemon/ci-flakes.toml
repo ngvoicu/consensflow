@@ -1,0 +1,135 @@
+# The tests that failed now and then on the CI runners (T-178, 3.0.6), each held by the test
+# written for its cause; one plant takes one rule out and a test fails.
+#
+# - a throwaway OpenCode server is stopped when its process has ended, whatever still holds its
+#   error stream open (`crates/cf-harness/src/shared/child.rs`, `cf_process::Child::ended`);
+# - a stop waits for the pass it found running and for no longer than that, counted in the
+#   timers' own time (`crates/cf-daemon/src/stop.rs`);
+# - a daemon's stop is counted from the lines of its own log, and its limit is one deadline
+#   for the waiting and the app's two seconds from the ask (`crates/cf/tests/daemon_stop.rs`).
+#
+# Every name holds `ci flakes`, so `npm run plants:daemon -- "ci flakes"` runs them all.
+
+[run]
+harness-channels-create = ["cargo", "test", "--offline", "-p", "cf-harness", "--features", "test-support", "--test", "channels", "a_server_that_has_exited"]
+process-child-ended = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "child::tests::a_program_is_ended"]
+daemon-lib-stop-pass = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "stop::tests::a_pass_that_ends"]
+daemon-lib-stop-stall = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "stop::tests::a_machine_that_stalls"]
+stop-busy = ["cargo", "test", "--offline", "-p", "cf", "--test", "daemon_stop", "a_busy_daemon_is_stopped"]
+
+[[plant]]
+name = "ci flakes: a server's stop waits for its error stream to close"
+meant = "a_server_that_has_exited_is_stopped_though_a_program_holds_its_error_stream"
+runs = ["harness-channels-create"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/child.rs"
+find = '''
+    if forcing.bound(child.ended()).await.is_some() {
+'''
+replace = '''
+    if forcing.bound(child.closed()).await.is_some() {
+'''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/child.rs"
+find = '''
+    giving_up
+        .bound(child.ended())
+'''
+replace = '''
+    giving_up
+        .bound(child.closed())
+'''
+
+[[plant]]
+name = "ci flakes: a real child is ended when its streams have closed"
+meant = "a_server_that_has_exited_is_stopped_though_a_program_holds_its_error_stream"
+runs = ["harness-channels-create"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/processes.rs"
+find = "        Box::pin(cf_process::Child::ended(self))"
+replace = "        Box::pin(cf_process::Child::closed(self))"
+
+[[plant]]
+name = "ci flakes: the stand-in's server holds nothing after it ends"
+meant = "a_server_that_has_exited_is_stopped_though_a_program_holds_its_error_stream"
+runs = ["harness-channels-create"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/bin/fake_opencode.rs"
+find = '''
+        let held = std::process::Command::new("/bin/sleep")
+            .arg("30")
+'''
+replace = '''
+        let held = std::process::Command::new("/bin/true")
+            .arg("30")
+'''
+
+[[plant]]
+name = "ci flakes: a program is ended only once its error stream has closed"
+meant = "a_program_is_ended_when_it_exits_and_closed_when_its_error_stream_has_closed_too"
+runs = ["process-child-ended"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/child.rs"
+find = '''
+            let _ = self.poll_closing(context);
+            if self.exited.get() {
+'''
+replace = '''
+            if self.poll_closing(context).is_ready() && self.exited.get() {
+'''
+
+[[plant]]
+name = "ci flakes: a stop waits out the whole deadline for a pass that ended"
+meant = "a_pass_that_ends_within_the_deadline_is_waited_for_and_no_longer"
+runs = ["daemon-lib-stop-pass"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = "            tokio::join!(passes, self.api.close());"
+replace = "            tokio::join!(passes, self.api.close(), tokio::time::sleep(DEADLINE));"
+
+[[plant]]
+name = "ci flakes: the stop's wait is told in the machine's clock"
+meant = "a_machine_that_stalls_in_the_tail_changes_nothing_of_how_long_the_stop_waited"
+runs = ["daemon-lib-stop-stall"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop/tests.rs"
+find = """
+#[tokio::test(start_paused = true)]
+async fn a_machine_that_stalls_in_the_tail_changes_nothing_of_how_long_the_stop_waited() {"""
+replace = """
+#[tokio::test]
+async fn a_machine_that_stalls_in_the_tail_changes_nothing_of_how_long_the_stop_waited() {"""
+
+[[plant]]
+name = "ci flakes: a stop's tail waits a second"
+meant = "a_busy_daemon_is_stopped_within_one_deadline_whatever_is_open"
+runs = ["stop-busy"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = '''
+        self.errors.log().info("exit 0");
+        (self.exit)(0);
+'''
+replace = '''
+        std::thread::sleep(Duration::from_millis(1_000));
+        self.errors.log().info("exit 0");
+        (self.exit)(0);
+'''
+
+[[plant]]
+name = "ci flakes: a stop does not wait for what is open"
+meant = "a_busy_daemon_is_stopped_within_one_deadline_whatever_is_open"
+runs = ["stop-busy"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = "pub const DEADLINE: Duration = Duration::from_secs(1);"
+replace = "pub const DEADLINE: Duration = Duration::from_millis(300);"
