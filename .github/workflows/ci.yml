@@ -82,13 +82,31 @@ jobs:
       # The workspace's other crates, the pane host's tests among them, from
       # its root: they link no dialog code, so they need no manifest. The
       # headless tests (cf-panes/tests/headless.rs) drive the helper; they are
-      # Unix-only and build empty on Windows. A limit for the same reason, with
-      # room for a slow runner: the ledger's replay alone has taken from 2 to 7
-      # minutes on Windows' (2026-10-06), the step 9 to 15. The black-box suites
-      # of crates/cf-e2e ran above, each with a limit of its own; what is left
-      # of that crate is its support and the stand-in agents' own tests. On
-      # 2026-10-19 Windows' step, 19 to 21 minutes in the runs before, passed
-      # 25 with no test failed or hung, in the ledger's replay: hence 40.
+      # Unix-only and build empty on Windows. The black-box suites of
+      # crates/cf-e2e ran above, each with a limit of its own; what is left of
+      # that crate is its support and the stand-in agents' own tests.
+      # The limit is a bound over what the step takes on Windows' runner, with a
+      # margin, and `cargo xtask ci-times` fails when a run passes 80 % of it (32
+      # minutes). The step took 17.8 minutes there in the median (13 to 23) until
+      # 2026-10-18, 25 once on 2026-10-19, then grew run after run to 34 (main at
+      # 04bc9d66, 2026-10-21) and was cut at 40 in the Release run of
+      # 3.0.6-alpha.1, in the ledger's replay, which did not grow (203 s in the
+      # median before, 232 after): the clock ran out there. What grew, binary by
+      # binary: the dispatcher's schedule exploring (B5, 2026-10-18, +170 s, more
+      # since), the history viewer (2026-10-21: the daemon's tests +160 s, its
+      # whole-history tests +115 s), the long run (2026-10-19, +110 s) and the
+      # release commands' tests (2026-10-21, +60 s). Much of it was the commits of
+      # ledgers made for a test, each a flush on Windows, which wait for no disk
+      # now (cf-ledger's `synchronous`), and the replay of Node's recordings runs
+      # four at a time. On zeewin the binaries took 645 s before and 443 s after;
+      # applied binary by binary to CI's last three runs (30.7 minutes in the
+      # median), that is about 20 minutes: a floor of the saving, as zeewin's disk
+      # is quicker than the runner's. 40 stays, as it was: the slowest of the runs
+      # before the growth (25 minutes) was 1.4 times their median, and 1.4 times 20
+      # is 28, under the 32 the check allows. The runs after this one confirm it (`cargo xtask
+      # ci-times --step "cargo test --workspace" --binaries`). The step is not
+      # split by crate: each part would build the workspace again (3.5 minutes),
+      # and the largest binary left, the dispatcher's, is about a quarter of it.
       - run: cargo test --workspace --exclude app --exclude cf-e2e
         timeout-minutes: 40
       - run: cargo test -p cf-e2e --lib --bins

@@ -1,0 +1,59 @@
+# The ledger's replay of Node's recordings (crates/cf-ledger/tests/replay.rs), which makes its
+# replays a few at a time (`alongside`): each replay once, its answer in the order of its trace,
+# and every trace told.
+
+[run]
+replay = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-ledger", "--test", "replay"]
+shared = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-ledger", "--test", "replay", "--", "the_replays_are_shared_out"]
+
+[[plant]]
+name = "replay: a replay is skipped in every two"
+meant = "the_replays_are_shared_out_once_each_and_answered_in_the_order_they_came"
+runs = ["shared"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/tests/replay.rs"
+find = "let at = next.fetch_add(1, Ordering::Relaxed);"
+replace = "let at = next.fetch_add(2, Ordering::Relaxed);"
+
+[[plant]]
+name = "replay: every thread makes every replay"
+meant = "the_replays_are_shared_out_once_each_and_answered_in_the_order_they_came"
+runs = ["shared"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/tests/replay.rs"
+find = '''
+    let next = AtomicUsize::new(0);
+    let answers: Vec<Mutex<Option<R>>>'''
+replace = '''
+    let answers: Vec<Mutex<Option<R>>>'''
+
+[[plant.edit]]
+file = "crates/cf-ledger/tests/replay.rs"
+find = '''
+            scope.spawn(|| loop {'''
+replace = '''
+            scope.spawn(|| {
+                let next = AtomicUsize::new(0);
+                loop {'''
+
+[[plant.edit]]
+file = "crates/cf-ledger/tests/replay.rs"
+find = '''
+                *answers[at].lock().unwrap() = Some(work(item));
+            });'''
+replace = '''
+                *answers[at].lock().unwrap() = Some(work(item));
+                }
+            });'''
+
+[[plant]]
+name = "replay: a departed trace is told to nobody"
+meant = "every_ledger_the_node_suite_opened_answers_here_as_it_answered_there"
+runs = ["replay"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/tests/replay.rs"
+find = '''Some((at, why)) => left.push(format!("  {trace} at call {at}: {why}")),'''
+replace = '''Some((at, why)) => left.extend(Some(format!("  {trace} at call {at}: {why}")).filter(|_| false)),'''
