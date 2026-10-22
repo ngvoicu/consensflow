@@ -226,12 +226,33 @@ fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
     Ok(Said::new(answer.into_value(), text))
 }
 
-/// `cf task get T-n`: the task with its whole thread, and said of each answer
-/// in it still waiting to be pasted that it was written whole; or, with
-/// `--transcript`, what its window did, which says of no answer that it was
-/// written: the thread is not what was asked for there (its text does not
-/// print it, and what its JSON carries of it is along the way). What is wrong
-/// with the command is said before the board is asked anything.
+/// The brief `cf task get` prints under the header, or nothing. A window that was
+/// given the task holds its brief in its own task message in the thread
+/// (`delivery_body` wrote it there), so it is not printed twice. A task no window
+/// holds (open, blocked, or taken back to the board, whose brief may have grown
+/// since its old message) gets its body here, as the board keeps it. A brief the
+/// board withholds at the human's gate reads `""` and prints nothing.
+fn brief_under_head<'a>(task: &'a Value, messages: &[Value]) -> Option<&'a str> {
+    let brief = match task.get("body").and_then(Value::as_str) {
+        Some(brief) if !brief.is_empty() => brief,
+        _ => return None,
+    };
+    let window = task.get("assignee").and_then(Value::as_str);
+    let carried = window.is_some_and(|window| {
+        messages.iter().any(|message| {
+            message.get("kind").and_then(Value::as_str) == Some("task")
+                && message.get("recipient").and_then(Value::as_str) == Some(window)
+        })
+    });
+    (!carried).then_some(brief)
+}
+
+/// `cf task get T-n`: the task with its brief (`brief_under_head`) and its whole
+/// thread, and said of each answer in it still waiting to be pasted that it was
+/// written whole; or, with `--transcript`, what its window did, which says of no
+/// answer that it was written: the thread is not what was asked for there (its
+/// text does not print it, and what its JSON carries of it is along the way).
+/// What is wrong with the command is said before the board is asked anything.
 fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
     let words = split(rest, GET);
     let last = if words.on("--transcript") {
@@ -255,7 +276,12 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
             })
             .collect::<Vec<_>>()
             .join("\n\n");
-        let text = format!("{}\n\n{thread}", task_head(&task));
+        let body = match brief_under_head(&task, messages) {
+            Some(brief) if thread.is_empty() => brief.to_owned(),
+            Some(brief) => format!("{brief}\n\n{thread}"),
+            None => thread,
+        };
+        let text = format!("{}\n\n{body}", task_head(&task));
         let answers = waiting_answers(messages);
         return Ok(Said::new(task, text).having_written("task", answers));
     };

@@ -1,11 +1,9 @@
 //! What the pane host said last of its windows as a rig closes: every exit it told
 //! before it ended, read to its end, each with when the rig saw it, and the root kept.
 //! The long run of the evals reads it after the close, so that a window that ended
-//! between its last look and the close is taken with what its close ended.
-//!
-//! (The host tells no exit of the windows it reaps as it shuts down: its stream
-//! threads send `pane.exit` after the bridge has closed. What it does tell before its
-//! end is all a case can read.)
+//! between its last look and the close is taken with what its close ended. That
+//! includes the windows still open as the rig closes: the host ends them as it shuts
+//! down and tells the exit of each before it closes its output.
 
 use cf_e2e::process::{signal, Signal};
 use cf_e2e::rig::{Project, OPEN};
@@ -37,6 +35,41 @@ fn the_last_word_of_a_closed_rig_holds_every_exit_the_pane_host_told() -> Outcom
     rig.wait_for("the chief's window to exit", secs(10), || {
         Ok(rig.exits().iter().any(|exit| exit["id"] == chief.as_str()))
     })?;
+
+    let last = rig.close_with_the_last_exits_within(secs(30))?;
+
+    assert!(
+        last.exits
+            .iter()
+            .any(|(exit, at)| exit["id"] == chief.as_str() && *at > 0),
+        "{:?}",
+        last.exits
+    );
+    assert!(last.root.is_dir(), "the root is kept");
+    std::fs::remove_dir_all(&last.root)?;
+    Ok(())
+}
+
+/// A window still open as the rig closes is ended with the pane host, which tells its exit
+/// before it closes its output: the long run's final drain learns what the window left from
+/// it, and not only from the looks before.
+#[test]
+fn the_last_word_of_a_closed_rig_holds_the_exit_of_a_window_the_pane_host_ended_as_it_stopped(
+) -> Outcome {
+    let rig = rig()?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let chief = format!("p{}-chief", project.id());
+    rig.open_frame(&chief, OPEN)?;
+    rig.wait_for("the chief's window to run", secs(10), || {
+        Ok(rig
+            .window_pids()
+            .iter()
+            .any(|window| window["id"] == chief.as_str()))
+    })?;
+    assert!(
+        !rig.exits().iter().any(|exit| exit["id"] == chief.as_str()),
+        "the window is still open as the rig closes"
+    );
 
     let last = rig.close_with_the_last_exits_within(secs(30))?;
 

@@ -111,6 +111,11 @@ impl Shown {
         }
     }
 
+    /// The last lines of the screen the host sent: none where it sent none.
+    pub(crate) fn lines(&self) -> &[String] {
+        self.tail.as_deref().unwrap_or_default()
+    }
+
     /// Whether the host said anything of the window.
     /// Whether the window's program is gone, as far as the host said: yes where
     /// it said how the window ended and named no program it could not end, no

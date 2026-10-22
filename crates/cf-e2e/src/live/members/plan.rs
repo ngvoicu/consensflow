@@ -102,6 +102,10 @@ pub struct Plan {
     pub roster: Vec<Value>,
     /// The id of the agent that is the project's chief.
     pub chief: String,
+    /// Whether the folder is a new git repository nobody was asked to trust: a
+    /// harness that asks of one asks in the project's own windows, and ConsensFlow
+    /// answers ([`Plan::in_a_new_repository`]).
+    pub repository: bool,
 }
 
 impl Plan {
@@ -115,7 +119,17 @@ impl Plan {
             vars: Vec::new(),
             chief: chief["id"].as_str().unwrap_or_default().to_owned(),
             roster: vec![chief],
+            repository: false,
         }
+    }
+
+    /// In a folder made a git repository (`git init`) before anything opens, which
+    /// Claude Code is not asked to trust first: the project's windows meet the
+    /// question of any harness that asks of it.
+    #[must_use]
+    pub fn in_a_new_repository(mut self) -> Self {
+        self.repository = true;
+        self
     }
 
     /// With `brief` as what the folder tells every window.

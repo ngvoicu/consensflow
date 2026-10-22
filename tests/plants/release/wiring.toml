@@ -41,7 +41,7 @@ replace = '"eval:summary": "cargo xtask eval",'
 
 [[plant]]
 name = "wiring: the npm check is the lint alone"
-meant = "the_npm_check_is_the_lint_and_the_tests"
+meant = "the_npm_check_is_the_lint_and_the_tests_which_cargo_xtask_check_runs_as_two_steps"
 runs = ["xtask-test-scripts"]
 
 [[plant.edit]]

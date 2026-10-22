@@ -185,7 +185,7 @@ mod on_unix {
         let (_parent, sandbox) = made();
         let env = sandbox.terminal_env(&sandbox.state);
         for (name, version) in [
-            ("claude", "2.1.266"),
+            ("claude", "2.1.305"),
             ("codex", "0.0.0"),
             ("pi", "0.0.0"),
             ("opencode", "0.0.0"),

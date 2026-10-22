@@ -69,9 +69,10 @@ const RESULT_SENT_BACK: &str = "the chief sends the task back while its result i
 
 /// The traces the receipt and stop redesign moved on purpose: a choice answer
 /// is received, not read at its creation, a resume takes in what its window
-/// kept, and a command written wrong asks the board nothing; and those the
-/// decision on a result moved: the result is withdrawn, not pasted after it. Found by
-/// playing them against the daemon.
+/// kept, a command written wrong asks the board nothing, and `cf task get`
+/// prints the brief of a task no window holds under its header; and those the
+/// decision on a result moved: the result is withdrawn, not pasted after it.
+/// Found by playing them against the daemon.
 const DEPARTED: &[Departed] = &[
     ("core-api-003", RESULT_ACCEPTED),
     (
@@ -87,6 +88,10 @@ const DEPARTED: &[Departed] = &[
     (
         "cf-board-003",
         "a resume carries the brief that never arrived and logs `message.carried`: one more clock reading, so the task's `updatedAt` is a second later",
+    ),
+    (
+        "cf-board-015",
+        "`cf task get` prints the brief of a task no window ever held (here one cancelled, then deleted, while it was open) under its header, so the whole brief can be read before it goes out: Node printed the header alone",
     ),
     (
         "cf-board-023",

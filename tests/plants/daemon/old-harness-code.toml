@@ -1,0 +1,157 @@
+# What a harness's record is read by, once the code kept for old harness versions
+# is out (3.0.6, item 10, T-38): Codex's rollouts by the names Codex writes now
+# (`text` of a content part, `call_id` of a call, `aggregated_output` of a
+# command, `agent_thread_id` of a sub-agent's activity), and OpenCode's store
+# where OpenCode keeps it on every system, the XDG place. The names Node's reader
+# also took in their place (`Text`, `id`, `formatted_output`, `stdout` with
+# `stderr`) are in no rollout of Codex 0.77 to 0.163.0, and `%LOCALAPPDATA%` and
+# `%APPDATA%` hold no OpenCode store on Windows (zeewin, OpenCode 1.19.3). One
+# plant puts a removed name back and a test of the reader fails; one takes a name
+# that stayed out of the reader and a test fails. Every name holds `old harness
+# code`, so `npm run plants:daemon -- "old harness code"` runs them all.
+
+[run]
+# What Codex's rollouts read as.
+harness-codex-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
+# Where OpenCode's store is looked for.
+harness-opencode-paths = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::paths"]
+
+# --- the removed names, put back ---
+
+[[plant]]
+name = "old harness code: a content part's words are read from `Text` where it has no `text`"
+meant = "a_messages_parts_are_read_by_their_text_and_no_other_key"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/fields.rs"
+find = '.filter_map(|part| part.get("text")?.as_str())'
+replace = '.filter_map(|part| part.get("text").or(part.get("Text"))?.as_str())'
+
+[[plant]]
+name = "old harness code: a call with no `call_id` is named by its `id`"
+meant = "a_tool_call_is_named_by_its_call_id_and_no_other_field"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+            (Some("function_call" | "custom_tool_call"), _) => {
+                let call = self.keys.of(field(payload, "call_id"));
+'''
+replace = '''
+            (Some("function_call" | "custom_tool_call"), _) => {
+                let call = self
+                    .keys
+                    .of(field(payload, "call_id").or(field(payload, "id")));
+'''
+
+[[plant]]
+name = "old harness code: a command with no `aggregated_output` is read by its `formatted_output`"
+meant = "a_commands_output_is_its_aggregated_output_and_no_other_field"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '                let output = or_empty(field(native, "aggregated_output"))?;'
+replace = '''                let output = or_empty(
+                    field(native, "aggregated_output").or(field(native, "formatted_output")),
+                )?;'''
+
+[[plant]]
+name = "old harness code: a command with no `aggregated_output` is read by its `stdout`"
+meant = "a_commands_output_is_its_aggregated_output_and_no_other_field"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '                let output = or_empty(field(native, "aggregated_output"))?;'
+replace = '''                let output = or_empty(
+                    field(native, "aggregated_output").or(field(native, "stdout")),
+                )?;'''
+
+[[plant]]
+name = "old harness code: a sub-agent with no `agent_thread_id` is named by its `id`"
+meant = "a_sub_agent_is_named_by_its_agent_thread_id_and_no_other_field"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '                let agent = self.keys.of(field(native, "agent_thread_id"));'
+replace = '''                let agent = self
+                    .keys
+                    .of(field(native, "agent_thread_id").or(field(native, "id")));'''
+
+[[plant]]
+name = "old harness code: on Windows OpenCode's store is looked for under `%LOCALAPPDATA%` too"
+meant = "on_windows_it_is_the_xdg_place_and_the_local_and_roaming_folders_are_not_looked_in"
+runs = ["harness-opencode-paths"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/paths.rs"
+find = '''
+    Ok(vec![path::join(&[
+        &data_home(env)?,
+        "opencode",
+        "opencode.db",
+    ])])
+'''
+replace = '''
+    let xdg = path::join(&[&data_home(env)?, "opencode", "opencode.db"]);
+    if !env.on_windows() {
+        return Ok(vec![xdg]);
+    }
+    let windows = ["LOCALAPPDATA", "APPDATA"]
+        .into_iter()
+        .filter_map(|name| set(env, name))
+        .map(|folder| path::join(&[&folder, "opencode", "opencode.db"]));
+    Ok(std::iter::once(xdg).chain(windows).collect())
+'''
+
+# --- the names that stayed, taken out ---
+
+[[plant]]
+name = "old harness code: a content part's words are not read from `text`"
+meant = "a_messages_parts_are_read_by_their_text_and_no_other_key"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/fields.rs"
+find = '.filter_map(|part| part.get("text")?.as_str())'
+replace = '.filter_map(|part| part.get("Text")?.as_str())'
+
+[[plant]]
+name = "old harness code: a call is not named by its `call_id`"
+meant = "a_call_left_open_keeps_a_turn_that_ended_in_flight"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+            (Some("function_call" | "custom_tool_call"), _) => {
+                let call = self.keys.of(field(payload, "call_id"));
+'''
+replace = '''
+            (Some("function_call" | "custom_tool_call"), _) => {
+                let call = self.keys.of(field(payload, "id"));
+'''
+
+[[plant]]
+name = "old harness code: a command's output is not read from `aggregated_output`"
+meant = "a_commands_output_is_its_aggregated_output_and_no_other_field"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '                let output = or_empty(field(native, "aggregated_output"))?;'
+replace = '                let output = or_empty(field(native, "formatted_output"))?;'
+
+[[plant]]
+name = "old harness code: a sub-agent is not named by its `agent_thread_id`"
+meant = "a_sub_agent_is_named_by_its_agent_thread_id_and_no_other_field"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '                let agent = self.keys.of(field(native, "agent_thread_id"));'
+replace = '                let agent = self.keys.of(field(native, "id"));'

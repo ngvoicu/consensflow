@@ -284,7 +284,8 @@ async function open(page, data = model()) {
     window.__calls = []
     window.__model = data
     // Every listener of each event, as the app keeps them: one registered twice hears it
-    // twice. `__listeners.get(name)` says the event to all of them.
+    // twice. `__listeners.get(name)` says the event to all of them; an event no listener
+    // is there for is heard by none, as the app says it.
     window.__handlers = new Map()
     window.__listeners = new Map()
     // The drops the app keeps for the page to ask of, by their numbers, as file_drop.rs keeps
@@ -301,7 +302,7 @@ async function open(page, data = model()) {
         window.__drops.set(id, paths)
         if (window.__drops.size > 16) window.__drops.delete(window.__drops.keys().next().value)
       }
-      window.__listeners.get('file-drop')({
+      window.__listeners.get('file-drop')?.({
         event: 'file-drop',
         id: 0,
         payload: { id, paths, position },
@@ -2822,6 +2823,14 @@ test('adds a saved agent to the staff as a tester, or as one more role of a memb
   await expect(dialog.locator('.dialog-help')).toContainText(
     'a tester checks it by running it when the chief asks',
   )
+  // The tester has its place among the roles, after the reviewer.
+  await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
+    'Worker',
+    'Advisor',
+    'Reviewer',
+    'Tester',
+    'Image designer',
+  ])
   // Any agent may test but the image agent, which only draws.
   await dialog.getByLabel('Role').selectOption('tester')
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([

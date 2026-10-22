@@ -65,10 +65,12 @@ once, with the reason here and in the commit.
   and says the agents are pending (`agentsPending`, said only when true, which no
   reading of Node's has). A count that is no count (a string, a fraction, a number
   below 0) is still no end of the turn. `records/` moved for it in 4 of its 399
-  scenarios, all of `suite`: the readings of `claude-v263` and `claude-v265` whose
-  records say a count of 1 (of agents and of workflows, two each) are settled, the
-  answers a turn's end completes are complete, and they say `agentsPending`; the
-  six that say a count of none (−1, `"0"`, `null`) are Node's still. No look was
+  scenarios, all of `suite`: the readings of `claude-v263` and `claude-v265`
+  (captures of Claude Code 2.1.263 and 2.1.265, whose `turn_duration` 2.1.305,
+  the newest seen, still writes) whose records say a count of 1 (of agents and
+  of workflows, two each) are settled, the answers a turn's end completes are
+  complete, and they say `agentsPending`; the six that say a count of none (−1,
+  `"0"`, `null`) are Node's still. No look was
   added or taken, so the counts in `../records/main.rs` stand.
 
 - **An OpenCode 2, and an OpenCode that updates itself** (2026-10-15, the
@@ -140,6 +142,34 @@ once, with the reason here and in the commit.
   work), which moved one more step: `codex: a thread never named in a minute is an
   error`, step 3, which records one `GET /session` more, at the minute; its answer
   is Node's.
+
+- **OpenCode's store is the XDG place on Windows too** (2026-10-21, 3.0.6 item 10).
+  Node looked for it in `opencode` under `%LOCALAPPDATA%` and `%APPDATA%` as well,
+  after the XDG place, "where some versions keep it". OpenCode 1.19.3 keeps it in
+  the XDG place on Windows (zeewin: `.local\share\opencode` in the home, and no
+  `opencode` folder under `AppData`), so the Rust adapter looks nowhere else
+  (`opencode/paths.rs`). `records/` moved for it in one scenario of `suite`:
+  `opencode: its store is found where this OpenCode keeps it` (it ended in "the
+  one holding the session first"). Its two looks that found the session in the
+  store under `%LOCALAPPDATA%` (steps 34 and 40) are taken, and so is the
+  Windows environment of the look that stays beside the other two; the two that
+  stand read as Node's did. `suite` holds 199 looks now, 98 of OpenCode's in all
+  (`../records/main.rs`), and 1510 are played.
+
+- **A Codex record is read by the names Codex writes** (2026-10-21, 3.0.6 item 10).
+  Node's reader took other names where the usual one was none: `Text` for a
+  content part's `text`, a record's `id` for its `call_id` and for a sub-agent's
+  `agent_thread_id`, and for a command's `aggregated_output` its `formatted_output`
+  or its `stdout` and `stderr` joined. No rollout of Codex holds one of them in
+  place of the usual name (619 rollouts on the Mac, 0.77 to 0.163.0, and 119 on
+  zeewin), so the Rust reader reads the usual names only
+  (`codex/record.rs`, `codex/record/fields.rs`). `records/` moved for it in one
+  scenario of `sweep`: `sweep 7: codex/errored-task-complete.jsonl, record 8,
+  payload.item.agent_thread_id nulled`. Node took the record's `id` for the
+  nulled name, so the sub-agent it started was never reported done and the turn
+  stayed in flight; the record now names no agent, and the turn is settled. Its
+  one look read `inFlight: true` and `settlement: in-flight`, and reads `false`
+  and `settled` now; its items, `failed` and `quota` are Node's.
 
 ## The launch scenarios
 

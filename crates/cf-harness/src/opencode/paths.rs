@@ -7,10 +7,11 @@ use cf_proto::specs::Variant;
 use crate::shared::paths::{agents_skills, config_home, data_home, home, set};
 use crate::shared::specmint;
 
-/// Where OpenCode's store may be, likeliest first: `OPENCODE_DB`, or
-/// `opencode.db` in `OPENCODE_DATA`, when set (OpenCode honours both
-/// everywhere); else its XDG place, and on Windows `opencode` in
-/// `%LOCALAPPDATA%` and `%APPDATA%` after it, where some versions keep it.
+/// Where OpenCode's store may be: `OPENCODE_DB`, or `opencode.db` in
+/// `OPENCODE_DATA`, when set (OpenCode honours both everywhere); else its XDG
+/// place, which is where it keeps it on Windows too (zeewin, OpenCode 1.19.3:
+/// `%USERPROFILE%\.local\share\opencode`, nothing in `%LOCALAPPDATA%` or
+/// `%APPDATA%`).
 pub(crate) fn stores(env: &Env) -> Result<Vec<String>, String> {
     if let Some(store) = set(env, "OPENCODE_DB") {
         return Ok(vec![store]);
@@ -18,15 +19,11 @@ pub(crate) fn stores(env: &Env) -> Result<Vec<String>, String> {
     if let Some(data) = set(env, "OPENCODE_DATA") {
         return Ok(vec![path::join(&[&data, "opencode.db"])]);
     }
-    let xdg = path::join(&[&data_home(env)?, "opencode", "opencode.db"]);
-    if !env.on_windows() {
-        return Ok(vec![xdg]);
-    }
-    let windows = ["LOCALAPPDATA", "APPDATA"]
-        .into_iter()
-        .filter_map(|name| set(env, name))
-        .map(|folder| path::join(&[&folder, "opencode", "opencode.db"]));
-    Ok(std::iter::once(xdg).chain(windows).collect())
+    Ok(vec![path::join(&[
+        &data_home(env)?,
+        "opencode",
+        "opencode.db",
+    ])])
 }
 
 /// The `SKILL.md` of the Specmint variant the human installed for OpenCode, in
@@ -114,26 +111,31 @@ mod tests {
     }
 
     #[test]
-    fn on_windows_its_local_and_roaming_folders_follow_the_xdg_place() {
-        let windows = ("OS", "Windows_NT");
+    fn on_windows_it_is_the_xdg_place_and_the_local_and_roaming_folders_are_not_looked_in() {
         assert_eq!(
             stores_of(&[
-                windows,
+                ("OS", "Windows_NT"),
                 ("HOME", "/h"),
                 ("LOCALAPPDATA", "/l"),
                 ("APPDATA", "/r")
             ])
             .unwrap(),
-            [
-                path::join(&["/h", ".local", "share", "opencode", "opencode.db"]),
-                path::join(&["/l", "opencode", "opencode.db"]),
-                path::join(&["/r", "opencode", "opencode.db"]),
-            ]
+            [path::join(&[
+                "/h",
+                ".local",
+                "share",
+                "opencode",
+                "opencode.db"
+            ])]
         );
+    }
+
+    #[test]
+    fn a_missing_home_in_env_is_said_so() {
         assert_eq!(
-            stores_of(&[windows, ("XDG_DATA_HOME", "/x"), ("APPDATA", "")]).unwrap(),
-            [path::join(&["/x", "opencode", "opencode.db"])]
+            stores_of(&[("OS", "Windows_NT")]).unwrap_err(),
+            "missing home in env"
         );
-        assert_eq!(stores_of(&[windows]).unwrap_err(), "missing home in env");
+        assert_eq!(stores_of(&[]).unwrap_err(), "missing home in env");
     }
 }
