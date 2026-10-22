@@ -353,3 +353,46 @@ fn harness_words_with_nothing_of_a_word_leave_the_reason_to_the_screen() {
         )]
     );
 }
+
+#[test]
+fn a_tasks_failure_is_its_failed_turn_told_in_a_window_the_human_keeps_open() {
+    // The window stays after its task failed: its next looks find the failure told
+    // by the task's own note, and say nothing more.
+    let context = Context::new();
+    let tiers = working(&context);
+    context
+        .open_window(tiers.project.id, &tiers.assignee(1))
+        .unwrap();
+    fails(&context, Some("The model is busy, try another."));
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "failed");
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            "@zeus's harness reported a failure; it said: \"The model is busy, try another.\""
+        )]
+    );
+}
+
+#[test]
+fn the_lines_consensflow_typed_into_the_window_are_no_reason_and_are_not_quoted() {
+    let context = Context::new();
+    let tiers = working(&context);
+    let brief = context.task(tiers.project.id, 1).messages[0].clone();
+    let header = format!("[ConsensFlow m-{} · T-1 · task from @chief]", brief.id);
+    context.host.set_snapshot(json!({
+        "tail": [header, brief.body, "", "Error: model 'gpt-0-nonesuch' not found"]
+    }));
+    fails(&context, None);
+
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            "@zeus's harness reported a failure; its screen ended with: \"Error: model 'gpt-0-nonesuch' not found\""
+        )]
+    );
+}

@@ -19,7 +19,7 @@ use crate::record::Record;
 use crate::role_change::{answers_to_the_task, Prelude};
 use crate::runtime::returning;
 use crate::seams::EngineError;
-use crate::shown::{after_words, Shown};
+use crate::shown::{after_words, words_key, Shown};
 
 /// The one message on its way into a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,9 +67,11 @@ pub(crate) struct DeliveryPart {
     /// been given, and to whom the failure was told or found told
     /// ([`Dispatcher::untold_failure`]). The ledger says the same after a restart.
     pub(crate) failure_settled: Option<(i64, String)>,
-    /// The words of the failure last told of the window, while no turn of it has
-    /// ended with an answer since: the same words are not told again, once an
-    /// outage however many turns it fails (the chief's decision of 2026-10-22, T-245).
+    /// What the failure last told of the window said ([`Why::key`]), while no
+    /// turn of it has ended with an answer since: the same is not told again, once
+    /// an outage however many turns it fails (the chief's decision of 2026-10-22,
+    /// T-245). Known limit, kept on purpose (the chief, T-274): this is the
+    /// record's alone, so after a restart the same outage may be told once more.
     pub(crate) failure_told: Option<String>,
 }
 
@@ -243,7 +245,7 @@ impl Dispatcher {
             .rposition(|item| item.role == Role::User)
             .map_or(pasted + 1, |at| pasted + 1 + at);
         if observed.failed {
-            let because = self.why_it_failed(participant, record, observed).await;
+            let because = self.why_it_failed(participant, record, observed).await.said;
             // The task may have moved on while the window was looked at.
             let still = self
                 .seams
@@ -324,8 +326,12 @@ impl Dispatcher {
         let Some(given) = self.untold_failure(project, participant, record, requester)? else {
             return Ok(());
         };
-        let because = self.why_it_failed(participant, record, observed).await;
-        if self.forgotten(record) || !self.settle_told(record, given, requester, &because) {
+        let why = self.why_it_failed(participant, record, observed).await;
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        if self.same_outage(record, &why.key) {
+            self.settle_told(record, given, requester, &why.key);
             return Ok(());
         }
         // As the task is once the window was looked at.
@@ -345,11 +351,13 @@ impl Dispatcher {
                 to: requester.clone(),
                 task: Some(number),
                 body: format!(
-                    "A turn of T-{number}'s window failed while T-{number} was {}, as it stays: {because}.",
-                    now.task.state
+                    "A turn of T-{number}'s window failed while T-{number} was {}, as it stays: {}.",
+                    now.task.state, why.said
                 ),
             },
         )?;
+        // Settled once written: a note the ledger refused is told at the next look.
+        self.settle_told(record, given, requester, &why.key);
         self.changed();
         Ok(())
     }
@@ -366,8 +374,12 @@ impl Dispatcher {
         let Some(given) = self.untold_failure(project, participant, record, "human")? else {
             return Ok(());
         };
-        let because = self.why_it_failed(participant, record, observed).await;
-        if self.forgotten(record) || !self.settle_told(record, given, "human", &because) {
+        let why = self.why_it_failed(participant, record, observed).await;
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        if self.same_outage(record, &why.key) {
+            self.settle_told(record, given, "human", &why.key);
             return Ok(());
         }
         self.seams.ledger.borrow_mut().note(
@@ -376,9 +388,11 @@ impl Dispatcher {
                 from: None,
                 to: "human".to_owned(),
                 task: None,
-                body: format!("The chief's turn failed: {because}."),
+                body: format!("The chief's turn failed: {}.", why.said),
             },
         )?;
+        // Settled once written: a note the ledger refused is told at the next look.
+        self.settle_told(record, given, "human", &why.key);
         self.changed();
         Ok(())
     }
@@ -421,29 +435,29 @@ impl Dispatcher {
         Ok(Some(given))
     }
 
+    /// Whether a failed turn of the window says what the failure last told of it
+    /// said ([`Why::key`]), with no turn of it answered since: the same outage, its
+    /// wake-ups failing as the first did, which is not told again.
+    fn same_outage(&self, record: &Record, key: &str) -> bool {
+        record.delivery.borrow().failure_told.as_deref() == Some(key)
+    }
+
     /// The failed turn of the window, after the message `given`, settled as told
-    /// `recipient` because of `because`. Says whether its note is to be written:
-    /// not where the failure last told of the window said the same, and no turn
-    /// of it has ended with an answer since (an outage, its wake-ups failing as
-    /// the first did).
-    fn settle_told(&self, record: &Record, given: i64, recipient: &str, because: &str) -> bool {
+    /// `recipient`, and what it said kept as the outage's.
+    fn settle_told(&self, record: &Record, given: i64, recipient: &str, key: &str) {
         let mut part = record.delivery.borrow_mut();
         part.failure_settled = Some((given, recipient.to_owned()));
-        if part.failure_told.as_deref() == Some(because) {
-            return false;
-        }
-        part.failure_told = Some(because.to_owned());
-        true
+        part.failure_told = Some(key.to_owned());
     }
 
     /// A look whose turn ended with the window's answer: the failure last told of
     /// it is over, and the same words are news again.
     pub(crate) fn answered_again(&self, record: &Record, observed: &Observed) {
+        // Its last word, what the harness put after the reply itself aside.
         let answered = observed.settled
             && !observed.failed
             && observed
-                .items()
-                .last()
+                .last_word()
                 .is_some_and(|item| item.role == Role::Assistant && item.complete);
         if answered {
             record.delivery.borrow_mut().failure_told = None;
@@ -454,21 +468,37 @@ impl Dispatcher {
     /// words where its record has them, and otherwise in the last lines its
     /// window shows, which is where a harness that says nothing in its record
     /// says why (a crash, a model it does not know), or that it could not be read.
-    /// Both are held to a quote's bounds ([`after_words`], [`Shown::after`]).
+    /// Both are held to a quote's bounds ([`after_words`], [`Shown::after`]). The
+    /// lines ConsensFlow typed into the window itself (a paste's header and words)
+    /// are no reason of its own, and are neither quoted nor compared.
     async fn why_it_failed(
         &self,
         participant: &ParticipantView,
         record: &Record,
         observed: &Observed,
-    ) -> String {
+    ) -> Why {
         let failed = format!("@{}'s harness reported a failure", participant.handle);
         // Words with nothing of a word in them ("…") say nothing: the screen may.
-        if let Some(said) = observed
-            .failure()
-            .and_then(|words| after_words(&failed, words))
-        {
-            return said;
+        if let Some(words) = observed.failure() {
+            if let Some(said) = after_words(&failed, words) {
+                return Why {
+                    said,
+                    key: words_key(words),
+                };
+            }
         }
+        let pasted: Vec<String> = self
+            .seams
+            .ledger
+            .borrow()
+            .inbox(participant.id, PASTES_ON_SCREEN)
+            .map(|messages| {
+                messages
+                    .iter()
+                    .map(|message| one_line(&delivery_text(message, &[])))
+                    .collect()
+            })
+            .unwrap_or_default();
         let pane = record.window.borrow().pane.clone();
         let shown = match pane {
             Some(pane) => self.look_at(&pane).await,
@@ -476,10 +506,16 @@ impl Dispatcher {
         };
         // A host that refused the look, or answered it late, said nothing of the
         // screen: the note says so, not the bare words the field had.
-        if shown.is_known() {
-            shown.after(&failed)
-        } else {
-            format!("{failed}; its screen could not be read")
+        if !shown.is_known() {
+            return Why {
+                said: format!("{failed}; its screen could not be read"),
+                key: String::new(),
+            };
+        }
+        let shown = shown.without(|line| typed_by_consensflow(line, &pasted));
+        Why {
+            said: shown.after(&failed),
+            key: shown.outage_key(),
         }
     }
 
@@ -604,4 +640,31 @@ impl Dispatcher {
         )?;
         Ok(())
     }
+}
+
+/// Why a window's turn failed: the words its note says, and what the failure
+/// said for telling one outage from the next ([`words_key`], [`Shown::outage_key`]),
+/// which is no other failure for a number that differs.
+pub(crate) struct Why {
+    pub(crate) said: String,
+    pub(crate) key: String,
+}
+
+/// How many of a window's newest messages are read for what ConsensFlow typed
+/// into it: a screen's last lines hold no more pastes than that.
+const PASTES_ON_SCREEN: i64 = 5;
+
+/// `text` with its blanks made one, on one line.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Whether a screen's `line` is ConsensFlow's own: a paste's header, or words of
+/// the texts `pasted` into the window, however the window wrapped or framed them.
+fn typed_by_consensflow(line: &str, pasted: &[String]) -> bool {
+    if line.contains("[ConsensFlow m-") {
+        return true;
+    }
+    let words = one_line(line.trim_matches(|c: char| !c.is_alphanumeric()));
+    words.chars().count() >= 4 && pasted.iter().any(|text| text.contains(&words))
 }

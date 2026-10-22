@@ -111,6 +111,23 @@ impl Shown {
         }
     }
 
+    /// The window's screen without the lines `ours` says ConsensFlow itself typed
+    /// into it (a paste's header and words): those are no reason of the window's.
+    pub(crate) fn without(mut self, ours: impl Fn(&str) -> bool) -> Self {
+        if let Some(tail) = self.tail.as_mut() {
+            tail.retain(|line| !ours(line));
+        }
+        self
+    }
+
+    /// What the screen says of a failure, to tell one outage from the next
+    /// ([`outage_key`]): its last lines with a word in them.
+    pub(crate) fn outage_key(&self) -> String {
+        self.tail
+            .as_deref()
+            .map_or_else(String::new, |tail| outage_key(tail, Keep::Last))
+    }
+
     /// Whether the host said anything of the window.
     /// Whether the window's program is gone, as far as the host said: yes where
     /// it said how the window ended and named no program it could not end, no
@@ -189,6 +206,42 @@ impl Shown {
 pub(crate) fn after_words(because: &str, words: &str) -> Option<String> {
     let lines: Vec<String> = words.lines().map(str::to_owned).collect();
     Quote::of(&lines, Keep::First).map(|quote| format!("{because}{}", quote.after("; it said")))
+}
+
+/// What a harness's `words` say of a failure, to tell one outage from the next
+/// ([`outage_key`]): their first lines with a word in them.
+pub(crate) fn words_key(words: &str) -> String {
+    let lines: Vec<String> = words.lines().map(str::to_owned).collect();
+    outage_key(&lines, Keep::First)
+}
+
+/// The lines a quote of `lines` would keep, its blanks made one and every run
+/// of digits made one `#`: a retry-after, a countdown or a request's number
+/// that differs from one turn to the next is no other failure.
+fn outage_key(lines: &[String], keep: Keep) -> String {
+    let lines: Vec<String> = lines
+        .iter()
+        .filter(|line| line.chars().any(char::is_alphanumeric))
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    let chosen: Vec<&String> = match keep {
+        Keep::Last => lines.iter().rev().take(QUOTE_LINES).rev().collect(),
+        Keep::First => lines.iter().take(QUOTE_LINES).collect(),
+    };
+    let mut key = String::new();
+    for (at, line) in chosen.into_iter().enumerate() {
+        if at > 0 {
+            key.push('\n');
+        }
+        for c in line.chars() {
+            if !c.is_ascii_digit() {
+                key.push(c);
+            } else if !key.ends_with('#') {
+                key.push('#');
+            }
+        }
+    }
+    key
 }
 
 fn plural(count: usize) -> &'static str {

@@ -8,9 +8,10 @@
 //! quota's to say. The words here are made up for the tests.
 
 use crate::background::working;
-use crate::fixtures::{after, exhausted, now, Tiers};
+use crate::fixtures::{after, exhausted, fail_next_note, now, Tiers};
 use cf_engine::testing::Context;
 use cf_engine::ActivityState;
+use cf_harness::records::Role;
 use cf_ledger::NewNote;
 
 /// The chief's turn fails, its record saying `words` of why.
@@ -70,7 +71,9 @@ fn a_message_on_its_way_to_the_chief_does_not_make_its_failed_turn_news_again() 
     context.pass().unwrap();
     assert_eq!(chief_failures(&tiers).len(), 1);
     // A message goes into the window, and its record does not show it yet (Devin's
-    // wire log is read a while after); the screen shows it.
+    // wire log is read a while after); the screen shows it. The failed turn is the
+    // one told, and the screen is not looked at again for it.
+    let looked = context.host.tails_asked();
     context.adapter.with("chief", |agent| agent.arrive = false);
     context.note_from_consensflow(tiers.project.id, "chief", "Look at the board");
     context.host.set_snapshot(serde_json::json!({
@@ -86,6 +89,7 @@ fn a_message_on_its_way_to_the_chief_does_not_make_its_failed_turn_news_again() 
         "{:?}",
         tiers.notes("human")
     );
+    assert_eq!(context.host.tails_asked(), looked, "no new turn to look at");
 }
 
 #[test]
@@ -339,4 +343,86 @@ fn a_member_removed_while_its_window_is_looked_at_tells_nothing_of_its_failed_tu
     context.finish(removing).unwrap();
 
     assert_eq!(turn_failures(&tiers), Vec::<String>::new());
+}
+
+#[test]
+fn an_outage_told_from_the_screen_is_one_whatever_was_pasted_and_however_long_its_retry() {
+    // A harness that says nothing of why in its record (Pi with no errorMessage,
+    // Codex with no message, Devin with no error): the reason is the screen's, and
+    // each wake-up's screen holds its own paste and the provider's new countdown.
+    let context = Context::new();
+    let tiers = working(&context);
+    let screen = |lines: &[&str]| {
+        context
+            .host
+            .set_snapshot(serde_json::json!({ "tail": lines }))
+    };
+    let fails = || {
+        context.adapter.with("chief", |agent| agent.failed = true);
+        context.adapter.answer("chief", "Looking at the board");
+    };
+    screen(&["Error: provider unreachable, retrying in 30 s"]);
+    fails();
+    context.pass().unwrap();
+    for (wake, retry) in [("Wake up", 12), ("Wake up", 7)] {
+        let note = context.note_from_consensflow(tiers.project.id, "chief", wake);
+        context.pass().unwrap();
+        context.pass().unwrap();
+        let header = format!("[ConsensFlow m-{} · note from ConsensFlow]", note.id);
+        let error = format!("Error: provider unreachable, retrying in {retry} s");
+        screen(&[&header, wake, "", &error]);
+        fails();
+        context.pass().unwrap();
+        context.pass().unwrap();
+    }
+
+    let told = chief_failures(&tiers);
+    assert_eq!(told.len(), 1, "{told:?}");
+}
+
+#[test]
+fn an_answered_turn_ends_the_outage_whatever_the_harness_put_after_the_reply() {
+    // Devin's system messages and Pi's extensions' messages can follow a reply.
+    let context = Context::new();
+    let tiers = working(&context);
+    chief_fails(&context, "API Error: 529 Overloaded");
+    context.pass().unwrap();
+    given(&context, &tiers, "chief", "Wake up");
+    context.adapter.answer("chief", "All quiet on the board");
+    let custom = context
+        .adapter
+        .item(Role::Custom, "extension: status refreshed");
+    context
+        .adapter
+        .with("chief", |agent| agent.items.push(custom));
+    context.pass().unwrap();
+    given(&context, &tiers, "chief", "Wake up again");
+    chief_fails(&context, "API Error: 529 Overloaded");
+    context.pass().unwrap();
+
+    assert_eq!(
+        chief_failures(&tiers).len(),
+        2,
+        "{:?}",
+        tiers.notes("human")
+    );
+}
+
+#[test]
+fn a_failure_whose_note_the_ledger_refused_is_told_at_the_next_look() {
+    let context = Context::new();
+    let tiers = working(&context);
+    chief_fails(&context, "API Error: 529 Overloaded");
+    fail_next_note(&context);
+    let _ = context.pass();
+    assert_eq!(chief_failures(&tiers), Vec::<String>::new());
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    assert_eq!(
+        chief_failures(&tiers).len(),
+        1,
+        "{:?}",
+        tiers.notes("human")
+    );
 }

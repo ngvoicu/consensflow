@@ -419,6 +419,12 @@ impl Observed {
         }
     }
 
+    /// The conversation's last word ([`last_word`]): none where its record says
+    /// nothing, or could not be read.
+    pub fn last_word(&self) -> Option<&Item> {
+        last_word(self.items())
+    }
+
     /// Whether the conversation's turn ended and left background agents or
     /// workflows running: the window takes input between turns, and its agent
     /// is woken when they end.
@@ -488,12 +494,14 @@ pub trait Records {
 /// Whether the last word of `record` (what the harness put in it itself aside)
 /// is the agent's reply: what a turn at rest ends in.
 fn ends_in_a_reply(record: &Record) -> bool {
-    record
-        .items
-        .iter()
-        .rev()
-        .find(|item| item.role != Role::Custom)
-        .is_some_and(|item| item.role == Role::Assistant)
+    last_word(&record.items).is_some_and(|item| item.role == Role::Assistant)
+}
+
+/// The last word of a conversation's `items`: its last item but what the harness
+/// put in it itself (Devin's system and custom messages, Pi's extensions' messages,
+/// a hook's context), which can come after a reply.
+fn last_word(items: &[Item]) -> Option<&Item> {
+    items.iter().rev().find(|item| item.role != Role::Custom)
 }
 
 #[cfg(test)]

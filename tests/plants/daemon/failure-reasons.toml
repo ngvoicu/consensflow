@@ -34,7 +34,7 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-            let because = self.why_it_failed(participant, record, observed).await;
+            let because = self.why_it_failed(participant, record, observed).await.said;
 '''
 replace = '''
             let because = format!("@{}'s harness reported a failure", participant.handle);
@@ -48,17 +48,14 @@ runs = ["failure-reason-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        if let Some(said) = observed
-            .failure()
-            .and_then(|words| after_words(&failed, words))
-        {
-            return said;
-        }
+            if let Some(said) = after_words(&failed, words) {
+                return Why {
+                    said,
 '''
 replace = '''
-        if observed.failure().is_some() {
-            return failed;
-        }
+            if after_words(&failed, words).is_some() {
+                return Why {
+                    said: failed,
 '''
 
 [[plant]]
@@ -294,12 +291,10 @@ runs = ["failure-reason-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        if shown.is_known() {
-            shown.after(&failed)
+        if !shown.is_known() {
 '''
 replace = '''
-        if true {
-            shown.after(&failed)
+        if false {
 '''
 
 [[plant]]
@@ -379,10 +374,10 @@ replace = '''
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        if part.failure_told.as_deref() == Some(because) {
+        record.delivery.borrow().failure_told.as_deref() == Some(key)
 '''
 replace = '''
-        if false {
+        false
 '''
 
 [[plant]]
@@ -418,10 +413,10 @@ replace = '''
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        if part.failure_told.as_deref() == Some(because) {
+        record.delivery.borrow().failure_told.as_deref() == Some(key)
 '''
 replace = '''
-        if false {
+        false
 '''
 
 [[plant]]
@@ -516,10 +511,10 @@ runs = ["failure-reason-told"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        if part.failure_told.as_deref() == Some(because) {
+        record.delivery.borrow().failure_told.as_deref() == Some(key)
 '''
 replace = '''
-        if false {
+        false
 '''
 
 [[plant]]
@@ -558,10 +553,17 @@ runs = ["failure-reason-told"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        if self.forgotten(record) || !self.settle_told(record, given, requester, &because) {
+        let why = self.why_it_failed(participant, record, observed).await;
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        if self.same_outage(record, &why.key) {
+            self.settle_told(record, given, requester, &why.key);
 '''
 replace = '''
-        if !self.settle_told(record, given, requester, &because) {
+        let why = self.why_it_failed(participant, record, observed).await;
+        if self.same_outage(record, &why.key) {
+            self.settle_told(record, given, requester, &why.key);
 '''
 
 [[plant]]
@@ -579,4 +581,68 @@ replace = '''
         || because.to_owned(),
         |quote| format!("{because}{}", quote.after("; it said")),
     ))
+'''
+
+[[plant]]
+name = "failure reason: the screen's countdown makes every wake-up's failure a new outage"
+meant = "an_outage_told_from_the_screen_is_one_whatever_was_pasted_and_however_long_its_retry"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+            if !c.is_ascii_digit() {
+'''
+replace = '''
+            if true {
+'''
+
+[[plant]]
+name = "failure reason: what ConsensFlow pasted into the window is quoted and compared as its reason"
+meant = "the_lines_consensflow_typed_into_the_window_are_no_reason_and_are_not_quoted"
+runs = ["failure-reason-engine", "failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        let shown = shown.without(|line| typed_by_consensflow(line, &pasted));
+'''
+replace = '''
+        let _ = &pasted;
+'''
+
+[[plant]]
+name = "failure reason: an answered turn whose record ends in the harness's own message ends no outage"
+meant = "an_answered_turn_ends_the_outage_whatever_the_harness_put_after_the_reply"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+                .last_word()
+'''
+replace = '''
+                .items()
+                .last()
+'''
+
+[[plant]]
+name = "failure reason: a failure is settled as told before its note is written"
+meant = "a_failure_whose_note_the_ledger_refused_is_told_at_the_next_look"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if self.same_outage(record, &why.key) {
+            self.settle_told(record, given, "human", &why.key);
+            return Ok(());
+        }
+'''
+replace = '''
+        if self.same_outage(record, &why.key) {
+            self.settle_told(record, given, "human", &why.key);
+            return Ok(());
+        }
+        self.settle_told(record, given, "human", &why.key);
 '''

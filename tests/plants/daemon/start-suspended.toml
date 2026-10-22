@@ -124,8 +124,8 @@ runs = ["harness-contract"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/contract.rs"
-find = '''        .is_some_and(|item| item.role == Role::Assistant)'''
-replace = '''        .is_some_and(|_| true)'''
+find = '''    last_word(&record.items).is_some_and(|item| item.role == Role::Assistant)'''
+replace = '''    last_word(&record.items).is_some_and(|_| true)'''
 
 # --- the engine: a start ---
 

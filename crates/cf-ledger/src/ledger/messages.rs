@@ -14,6 +14,8 @@ impl Ledger {
 
     /// A note from a participant, or from ConsensFlow itself.
     pub fn note(&mut self, project_id: i64, note: &NewNote) -> Result<MessageView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("note", None)?;
         messages::note(&mut self.store, project_id, note)
     }
 
