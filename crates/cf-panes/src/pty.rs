@@ -17,6 +17,11 @@ use crate::screen::PaneScreen;
 mod close;
 #[cfg(windows)]
 mod conpty;
+#[cfg(all(test, windows))]
+thread_local! {
+    /// Whether a test has the exit watcher of the windows this thread opens fail to start.
+    static WATCH_FAILS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 #[cfg(test)]
 mod keys;
 mod output_end;
@@ -640,15 +645,22 @@ impl PaneTable {
                 terminal_of(pane),
             )
         };
+        // A window that fails here lets go of its output before it is ended: on Windows a
+        // console closed while its output is held open and unread may wait for ever (`conpty`).
         let terminal = match terminal {
             Ok(terminal) => terminal,
             Err(error) => {
+                drop(reader);
                 let _ = self.kill(&key);
                 return Err(error);
             }
         };
         #[cfg(windows)]
-        self.watch_exit(&key)?;
+        if let Err(error) = self.watch_exit(&key) {
+            drop(reader);
+            let _ = self.kill(&key);
+            return Err(error);
+        }
 
         let (sender, output) = mpsc::channel();
         let output_key = key.clone();
@@ -903,7 +915,7 @@ impl PaneTable {
     /// on the program, gives the pseudoconsole a moment to pass on what it
     /// printed last, and retires the pane; its master's drop closes the
     /// pseudoconsole, the output ends, and `pane.exit` follows as anywhere.
-    /// A window whose end could not be seen does not open.
+    /// A window whose end could not be seen does not open: its opener ends it.
     #[cfg(windows)]
     fn watch_exit(self: &Arc<Self>, key: &PaneKey) -> Result<(), PaneError> {
         use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
@@ -921,6 +933,10 @@ impl PaneTable {
             }
         }
 
+        #[cfg(test)]
+        if WATCH_FAILS.get() {
+            return Err(PaneError::Io(io::Error::other("planted: no watcher")));
+        }
         let pid = self
             .lock_panes()?
             .get(key)
@@ -950,11 +966,7 @@ impl PaneTable {
                     })
                     .map(|_| ())
             });
-        if let Err(error) = watched {
-            let _ = self.kill(key);
-            return Err(PaneError::Io(error));
-        }
-        Ok(())
+        watched.map_err(PaneError::Io)
     }
 
     pub fn list(&self) -> Result<Vec<PaneInfo>, PaneError> {

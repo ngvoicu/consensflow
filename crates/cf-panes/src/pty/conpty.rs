@@ -12,17 +12,24 @@
 //!
 //! The rest is portable-pty 0.9's recipe, kept as it was, so that a window behaves as it
 //! did: the console host is the `conpty.dll` Windows' search for libraries finds (the one
-//! the app ships, beside its `OpenConsole.exe`: `portable::find_libraries_in`), or else the
-//! system's own; the console is made with the flags portable-pty gives it; the program has
-//! none of the host's handles (its standard ones are none, and nothing is inherited); its
-//! environment is the command's whole, its folder the command's (or the user's, where that
-//! is no folder), and its command line is quoted as portable-pty quotes it. What it is
-//! started from is portable-pty's `CommandBuilder`, read through what it makes public: an
-//! environment variable whose name or value is not Unicode is left out.
+//! the app ships, beside its `OpenConsole.exe`: `find_libraries_in` in
+//! `app/src-tauri/src/portable.rs`), or else the system's own; the console is made with the
+//! flags portable-pty gives it; the program has none of the host's handles (its standard
+//! ones are none, and nothing is inherited); its environment is the command's whole, each
+//! value as the system keeps it, Unicode or not; its folder the command's (or the user's,
+//! where that is no folder), and its command line is quoted as portable-pty quotes it.
+//!
+//! **The close.** Before Windows 11 24H2 a console that is closed waits for its host, and
+//! the host waits to write what the program printed: a close while the output is held open
+//! and unread waited for ever. So what is read of the output goes before the console does:
+//! a window that fails as it opens lets go of its reader before it is ended (`pty`), and the
+//! master closes its ends of the pipes before the console ([`Master`]); a window that opened
+//! has its output read to its end, whatever its close (`stream_output`).
 //!
 //! What is made answers portable-pty's own traits, so a pane holds its master and its
 //! child as it does on Unix.
 
+use std::collections::BTreeMap;
 use std::ffi::{c_void, OsStr, OsString};
 use std::fs::File;
 use std::io;
@@ -39,7 +46,7 @@ use portable_pty::{
 };
 use windows_sys::core::HRESULT;
 use windows_sys::Win32::Foundation::{
-    HANDLE, INVALID_HANDLE_VALUE, S_OK, WAIT_FAILED, WAIT_OBJECT_0,
+    FreeLibrary, HANDLE, INVALID_HANDLE_VALUE, S_OK, WAIT_FAILED, WAIT_OBJECT_0,
 };
 use windows_sys::Win32::System::Console::{COORD, HPCON, PSEUDOCONSOLE_INHERIT_CURSOR};
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
@@ -87,10 +94,10 @@ impl ConPty {
                 job: Arc::clone(&self.job),
             }),
             master: Box::new(Master {
-                console,
-                output: output_read,
+                output: Output::new(output_read, &console),
                 input: Mutex::new(Some(input_write)),
                 size: Mutex::new(size),
+                console,
             }),
         })
     }
@@ -120,10 +127,11 @@ impl Host {
             })
     }
 
+    /// The three functions of `library`, which stays loaded for the life of the process
+    /// once they are taken from it; one that lacks any of them is let go.
     fn load(library: &str) -> Option<Self> {
         let name = wide(OsStr::new(library));
-        // SAFETY: a NUL-terminated name. The library is never let go: its functions are
-        // kept for the life of the process.
+        // SAFETY: a NUL-terminated name.
         let module = unsafe { LoadLibraryW(name.as_ptr()) };
         if module.is_null() {
             return None;
@@ -132,11 +140,15 @@ impl Host {
             // SAFETY: the module is loaded, and the name is NUL-terminated.
             unsafe { GetProcAddress(module, name.as_ptr().cast()) }
         };
-        let (create, resize, close) = (
-            function(c"CreatePseudoConsole")?,
-            function(c"ResizePseudoConsole")?,
-            function(c"ClosePseudoConsole")?,
-        );
+        let (Some(create), Some(resize), Some(close)) = (
+            function(c"CreatePseudoConsole"),
+            function(c"ResizePseudoConsole"),
+            function(c"ClosePseudoConsole"),
+        ) else {
+            // SAFETY: loaded above, and nothing taken from it is kept.
+            unsafe { FreeLibrary(module) };
+            return None;
+        };
         // SAFETY: each is the function Windows declares under its name, whose signature
         // is the one its type says (`consoleapi.h`); a pointer to a function is one size.
         unsafe {
@@ -166,6 +178,8 @@ fn pipe() -> io::Result<(File, File)> {
 struct Console {
     handle: HPCON,
     host: &'static Host,
+    #[cfg(test)]
+    id: u64,
 }
 
 impl Console {
@@ -189,7 +203,12 @@ impl Console {
                 "failed to create a pseudoconsole: HRESULT {made:#x}"
             )));
         }
-        Ok(Self { handle, host })
+        Ok(Self {
+            handle,
+            host,
+            #[cfg(test)]
+            id: closes::next(),
+        })
     }
 
     fn resize(&self, size: PtySize) -> io::Result<()> {
@@ -207,6 +226,8 @@ impl Console {
 
 impl Drop for Console {
     fn drop(&mut self) {
+        #[cfg(test)]
+        closes::record(self.id, closes::Closed::Console);
         // SAFETY: the console was made by `Console::new` and is closed once, here.
         unsafe { (self.host.close)(self.handle) };
     }
@@ -219,13 +240,53 @@ fn coord(size: PtySize) -> COORD {
     }
 }
 
-/// What a window reads, writes and resizes. The console is its first field, so that it
-/// is closed before the ends of the pipes go, as portable-pty closed it.
+/// What a window reads, writes and resizes. The console is its last field, so that the
+/// ends of the pipes go before it is closed: a host left with output to write then fails
+/// to write it, where one whose output is held open waited, and the close with it.
+/// (portable-pty closed the console first.)
 struct Master {
-    console: Arc<Console>,
-    output: File,
+    output: Output,
     input: Mutex<Option<File>>,
     size: Mutex<PtySize>,
+    console: Arc<Console>,
+}
+
+/// An end of the console's output: the master's, or a reader's copy of it.
+struct Output {
+    file: File,
+    #[cfg(test)]
+    console: u64,
+}
+
+impl Output {
+    fn new(file: File, _console: &Console) -> Self {
+        Self {
+            file,
+            #[cfg(test)]
+            console: _console.id,
+        }
+    }
+
+    fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            file: self.file.try_clone()?,
+            #[cfg(test)]
+            console: self.console,
+        })
+    }
+}
+
+impl io::Read for Output {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        self.file.read(bytes)
+    }
+}
+
+#[cfg(test)]
+impl Drop for Output {
+    fn drop(&mut self) {
+        closes::record(self.console, closes::Closed::Output);
+    }
 }
 
 impl MasterPty for Master {
@@ -272,14 +333,17 @@ impl SlavePty for Slave {
 /// Starts `command` on `console`, in `job` from its first instruction.
 fn spawn(command: &CommandBuilder, console: &Console, job: &JobObject) -> io::Result<Program> {
     let argv = command.get_argv();
-    let program = program_of(
-        argv.first().ok_or_else(|| io::Error::other("no program"))?,
-        command,
-    );
-    let application = wide(&program);
+    let named = argv.first().ok_or_else(|| io::Error::other("no program"))?;
+    // Before the search for its extensions, which would read a path cut at a NUL as
+    // another program.
+    whole(named, "program")?;
+    let program = program_of(named, command);
+    let application = whole(&program, "program")?;
     let mut line = command_line(&program, &argv[1..])?;
     let environment = environment_block(command);
-    let folder = folder_of(command).map(|folder| wide(folder.as_os_str()));
+    let folder = folder_of(command)
+        .map(|folder| whole(folder.as_os_str(), "folder"))
+        .transpose()?;
 
     let jobs = [job.handle()];
     let mut attributes = Attributes::new(2)?;
@@ -321,7 +385,7 @@ fn spawn(command: &CommandBuilder, console: &Console, job: &JobObject) -> io::Re
         return Err(io::Error::new(
             error.kind(),
             format!(
-                "CreateProcessW `{}` in `{}` failed: {error}",
+                "could not start `{}` in `{}` in its window's job: {error}",
                 Path::new(&program).display(),
                 folder_of(command).unwrap_or_default().display()
             ),
@@ -602,14 +666,44 @@ fn append_quoted(argument: &OsStr, line: &mut Vec<u16>) {
     line.push(quote);
 }
 
-/// The command's whole environment, as `NAME=value` wide strings in the command's order
-/// (its names sorted, as Windows wants them), ended by an empty one.
+/// The command's whole environment, as `NAME=value` wide strings in the order
+/// portable-pty wrote them (by its key for each name: the name in lower case, or as it is
+/// where it is not Unicode), ended by an empty one, and by a second where there is none.
+///
+/// Each value is the command's own, as the system keeps it ([`CommandBuilder::get_env`]),
+/// Unicode or not. `CommandBuilder` lists only the names of its variables that are Unicode
+/// in name and value, so the names are its list and the host's own environment, which is
+/// where any other comes from: it starts from the host's, and what the frame or the
+/// registry adds is Unicode. A name the command took away has no value, and is left out.
+/// The one variable this cannot find is one whose name only the registry has (set after
+/// the user logged in) and whose value is not Unicode.
 fn environment_block(command: &CommandBuilder) -> Vec<u16> {
+    let key = |name: &OsStr| match name.to_str() {
+        Some(name) => OsString::from(name.to_lowercase()),
+        None => name.to_owned(),
+    };
+    let mut names: BTreeMap<OsString, OsString> = BTreeMap::new();
+    // The host's environment, which the command started from: what portable-pty read
+    // as it was made, read again for the names it does not list.
+    #[allow(clippy::disallowed_methods)]
+    for (name, _) in std::env::vars_os() {
+        names.insert(key(&name), name);
+    }
+    // The command's list says each name as the command holds it.
+    for (name, _) in command.iter_full_env_as_str() {
+        names.insert(key(OsStr::new(name)), OsString::from(name));
+    }
     let mut block = Vec::new();
-    for (name, value) in command.iter_full_env_as_str() {
-        block.extend(OsStr::new(name).encode_wide());
+    for name in names.values() {
+        let Some(value) = command.get_env(name) else {
+            continue;
+        };
+        block.extend(name.encode_wide());
         block.push(u16::from(b'='));
-        block.extend(OsStr::new(value).encode_wide());
+        block.extend(value.encode_wide());
+        block.push(0);
+    }
+    if block.is_empty() {
         block.push(0);
     }
     block.push(0);
@@ -618,6 +712,60 @@ fn environment_block(command: &CommandBuilder) -> Vec<u16> {
 
 fn wide(text: &OsStr) -> Vec<u16> {
     text.encode_wide().chain(std::iter::once(0)).collect()
+}
+
+/// `text` NUL-terminated, refused where it holds a NUL of its own, which would end it
+/// early and name something else: the `what` it is says which.
+fn whole(text: &OsStr, what: &str) -> io::Result<Vec<u16>> {
+    if text.encode_wide().any(|unit| unit == 0) {
+        return Err(io::Error::other(format!(
+            "invalid encoding for the {what} {text:?}: it holds a NUL"
+        )));
+    }
+    Ok(wide(text))
+}
+
+/// What a test reads of the order a console and the ends of its output were closed in.
+#[cfg(test)]
+pub(super) mod closes {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(in crate::pty) enum Closed {
+        Output,
+        Console,
+    }
+
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    static CLOSED: Mutex<Vec<(u64, Closed)>> = Mutex::new(Vec::new());
+
+    /// The number the next console made is given.
+    pub(in crate::pty) fn upcoming() -> u64 {
+        NEXT.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn next() -> u64 {
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    }
+
+    pub(super) fn record(console: u64, closed: Closed) {
+        CLOSED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((console, closed));
+    }
+
+    /// What of `console` has been closed, in order.
+    pub(in crate::pty) fn of(console: u64) -> Vec<Closed> {
+        CLOSED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .filter(|(id, _)| *id == console)
+            .map(|(_, closed)| *closed)
+            .collect()
+    }
 }
 
 #[cfg(test)]

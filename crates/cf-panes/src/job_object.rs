@@ -7,8 +7,16 @@
 //! agent detached from a shell that ended (`Start-Process`, `start`) is in the job
 //! still, with no parent, which the window's close ends and an ending of the turn does
 //! not: a job with no parent is no proof of whose work it is
-//! ([`crate::background`]). What the job does not hold is what a service starts for
-//! it (`schtasks`, a WMI `Win32_Process.Create`): that is no child of the pane's.
+//! ([`crate::background`]). What the job does not hold, and a close does not end:
+//! - what another program starts for the harness: a service (`schtasks`, a WMI
+//!   `Win32_Process.Create`), the shell or COM activating a program, UAC starting one
+//!   elevated; none of it is a child of the pane's;
+//! - a process started with `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` naming a parent
+//!   outside the job, which takes its jobs from that parent;
+//! - what is no Windows process of the job at all: a WSL distribution's, a container
+//!   daemon's;
+//! - the console host, which is the pane host's, and ends when the pane's pseudoconsole
+//!   is closed.
 //!
 //! The job is also the list of what the harness started: its processes are what a
 //! pane's tree has ([`JobObject::members`]). Each is held open as it is looked at,
@@ -28,8 +36,8 @@
 //! ([`cf_proto::panes::ENDING_BOUND`]).
 //!
 //! The harness is in the job from its first instruction: it is started with the job
-//! in its attributes ([`crate::pty`]'s `conpty`), so nothing it starts, however soon,
-//! is outside it.
+//! in its attributes ([`crate::pty`]'s `conpty`), so nothing it starts itself, however
+//! soon, is outside it.
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::mem::{offset_of, size_of, size_of_val};
