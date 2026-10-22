@@ -9,7 +9,15 @@ use super::*;
 
 /// What `cargo xtask smoke-updater <words>` is, run here: the status, what it said, and what it said as a failure.
 fn smoke_updater(words: &[&str]) -> (std::result::Result<i32, String>, String, String) {
-    let context = Context::new(&Env::from_process()).unwrap();
+    smoke_updater_in(&Env::from_process(), words)
+}
+
+/// The same, in this environment.
+fn smoke_updater_in(
+    env: &Env,
+    words: &[&str],
+) -> (std::result::Result<i32, String>, String, String) {
+    let context = Context::new(env).unwrap();
     let args: Vec<OsString> = words.iter().map(OsString::from).collect();
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run(
@@ -98,6 +106,117 @@ impl World {
             })
             .unwrap_or_default()
     }
+}
+
+/// A context for a checkout at `root`, whose user's home is `home`.
+fn context_at(root: &str, home: &Path) -> Context {
+    Context {
+        root: PathBuf::from(root),
+        env: Env::from_vars([("HOME", home.as_os_str())]),
+    }
+}
+
+#[test]
+fn keeps_the_builds_by_default_outside_every_checkout() {
+    // The release a run installs is exported into the cache and built there with its own
+    // `.cargo/config.toml`. Inside a checkout, Cargo reads the checkout's too, and an alias
+    // that both write is doubled: `cargo xtask stage` ran as `cargo xtask run … stage`.
+    let home = tempfile::tempdir().unwrap();
+    let context = Context::new(&Env::from_vars([("HOME", home.path().as_os_str())])).unwrap();
+    let cache = default_cache(&context).unwrap();
+    let checkout = cache
+        .ancestors()
+        .skip(1)
+        .find(|folder| folder.join("Cargo.toml").exists());
+    assert_eq!(
+        checkout,
+        None,
+        "the default cache {} is inside a checkout",
+        cache.display()
+    );
+    assert!(
+        !cache.starts_with(&context.root),
+        "the default cache {} is inside {}",
+        cache.display(),
+        context.root.display()
+    );
+    assert!(
+        cache.starts_with(home.path().join("Library/Caches/ConsensFlow/updater-smoke")),
+        "{}",
+        cache.display()
+    );
+}
+
+#[test]
+fn keeps_each_checkouts_builds_in_a_folder_of_its_own_that_is_the_same_every_run() {
+    // The update is this checkout's app, and a run with `--reuse` takes the one it finds:
+    // another tree's would be taken for this one's. And two runs at once build in two places.
+    let home = tempfile::tempdir().unwrap();
+    let cache_of = |root: &str| default_cache(&context_at(root, home.path())).unwrap();
+    let main = cache_of("/work/consensflow");
+    let tree = cache_of("/work/consensflow-trees/smoke-cache");
+    assert_eq!(main, cache_of("/work/consensflow"));
+    assert_ne!(main, tree);
+    // Two checkouts of one name, in two places.
+    assert_ne!(cache_of("/a/tree"), cache_of("/b/tree"));
+    // They sit side by side, each named for its checkout.
+    assert_eq!(main.parent(), tree.parent());
+    let named = |cache: &Path| cache.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(named(&main).starts_with("consensflow-"), "{}", named(&main));
+    assert!(named(&tree).starts_with("smoke-cache-"), "{}", named(&tree));
+    assert_eq!(named(&tree).len(), "smoke-cache-".len() + 8);
+}
+
+#[test]
+fn says_there_is_no_home_to_keep_the_builds_in_and_that_a_cache_names_one() {
+    let context = Context {
+        root: PathBuf::from("/work/consensflow"),
+        env: Env::default(),
+    };
+    assert_eq!(
+        default_cache(&context).unwrap_err().to_string(),
+        "there is no home to keep the builds in: name a folder with --cache"
+    );
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the update path is macOS bundles and codesign"
+)]
+fn says_where_the_builds_are_kept_when_no_cache_is_named() {
+    if !can_run() {
+        return;
+    }
+    let world = World::new();
+    let home = tempfile::tempdir().unwrap();
+    let vars: Vec<(OsString, OsString)> = Env::from_process()
+        .iter()
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .chain([("HOME".into(), home.path().as_os_str().to_owned())])
+        .collect();
+    let env = Env::from_vars(vars);
+    let (status, out, err) = smoke_updater_in(
+        &env,
+        &[
+            "--from-app",
+            &format!("{}/ConsensFlow.app", world.path("from")),
+            "--from-release",
+            "flip",
+            "--to-app",
+            &format!("{}/ConsensFlow.app", world.path("to")),
+            "--build-only",
+        ],
+    );
+    assert_eq!(status.unwrap(), 0, "{err}\n{out}");
+    let cache = default_cache(&Context::new(&env).unwrap()).unwrap();
+    assert_eq!(
+        out.lines().next(),
+        Some(format!("smoke:updater: the builds are kept in {}", cache.display()).as_str()),
+        "{out}"
+    );
+    // The run's folder went with the run; the cache stays.
+    assert!(cache.is_dir() && cache.read_dir().unwrap().next().is_none());
 }
 
 #[test]

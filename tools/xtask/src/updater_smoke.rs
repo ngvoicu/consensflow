@@ -43,7 +43,8 @@
 //! - `--bridge <dir>`: a checkout of the bridge to build from (else its tag is exported)
 //! - `--flip <dir>`: a checkout of the flip release to build from (else its tag is exported)
 //! - `--flip-ref <ref>`: the tag or commit of the flip release to export (else the newest after the bridge)
-//! - `--cache <dir>`: where the builds are kept (`app/src-tauri/target/updater-smoke`)
+//! - `--cache <dir>`: where the builds are kept (`~/Library/Caches/ConsensFlow/updater-smoke/<this checkout>`,
+//!   which the run says; not in the checkout, whose Cargo configuration a build there would also read)
 //! - `--reuse`: take the apps a run kept in the cache, and build only what is not there
 //! - `--build-only`: build, say where, and run nothing
 //! - `--export-bridge`: export the bridge's source from its tag into the cache, say where, and stop
@@ -110,6 +111,7 @@ use std::thread;
 use std::time::Duration;
 
 use cf_release::version::source_version;
+use sha2::{Digest, Sha256};
 
 use crate::context::Context;
 use crate::dispatch::{Console, Failure};
@@ -236,15 +238,46 @@ fn talk(say: &Say, text: impl AsRef<str>) {
     say.out(format!("smoke:updater: {}", text.as_ref()));
 }
 
+/// Where the builds are kept unless `--cache` names a folder: the user's cache
+/// folder (the smoke is macOS's), a folder of this checkout's in it. Never inside
+/// the checkout: the release a run installs is exported into the cache and built
+/// there, and Cargo reads every `.cargo/config.toml` above the folder it builds
+/// in, the checkout's too, where both write the `xtask` alias. A folder for each
+/// checkout, because the update is this checkout's app and a run with `--reuse`
+/// takes the one it finds, and two trees' runs at once would build in one place.
+fn default_cache(context: &Context) -> Result<PathBuf> {
+    let home = context.env.path("HOME").ok_or_else(|| {
+        Error::new("there is no home to keep the builds in: name a folder with --cache")
+    })?;
+    let name = context
+        .root
+        .file_name()
+        .map_or_else(|| "checkout".into(), |name| name.to_string_lossy());
+    let place: String = Sha256::digest(context.root.as_os_str().as_encoded_bytes())
+        .iter()
+        .take(4)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(home
+        .join("Library")
+        .join("Caches")
+        .join("ConsensFlow")
+        .join("updater-smoke")
+        .join(format!("{name}-{place}")))
+}
+
 /// The smoke itself: its apps built or taken, then each release's cases.
 fn smoke(context: &Context, options: &Options, releases: &[Release], say: &Say) -> Result<i32> {
     let root = &context.root;
     let in_the_checkout = |path: &Path| root.join(path);
-    let cache = options.cache.as_deref().map_or_else(
-        || context.path("app/src-tauri/target/updater-smoke"),
-        in_the_checkout,
-    );
+    let cache = match options.cache.as_deref() {
+        Some(named) => in_the_checkout(named),
+        None => default_cache(context)?,
+    };
     fs::create_dir_all(&cache).map_err(files("make", &cache))?;
+    if options.cache.is_none() {
+        talk(say, format!("the builds are kept in {}", cache.display()));
+    }
     if options.export_bridge {
         let source = export_release(root, &cache.join("bridge-source"), BRIDGE_TAG, &context.env)?;
         talk(

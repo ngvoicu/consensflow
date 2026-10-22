@@ -860,3 +860,47 @@ runs = ["xtask-process"]
 file = "tools/xtask/src/process.rs"
 find = "command.spawn().map_err(|cause| failure(invocation, cause))"
 replace = "command.spawn().map_err(|cause| Failure::Refused { program: String::new(), cause })"
+
+# Where the smoke keeps its builds: the release it installs is built in the cache, and a cache in
+# the checkout has Cargo read the checkout's configuration too (the `xtask` alias, doubled).
+[[plant]]
+name = "updater driver: the builds are kept inside the checkout"
+meant = "keeps_the_builds_by_default_outside_every_checkout"
+runs = ["smoke-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = '''
+    Ok(home
+        .join("Library")
+'''
+replace = '''
+    let _ = home;
+    Ok(context
+        .root
+        .join("Library")
+'''
+
+[[plant]]
+name = "updater driver: every checkout keeps its builds in one folder"
+meant = "keeps_each_checkouts_builds_in_a_folder_of_its_own_that_is_the_same_every_run"
+runs = ["smoke-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = ".join(format!(\"{name}-{place}\"))"
+replace = ".join(\"checkout\")"
+
+[[plant]]
+name = "updater driver: the run does not say where it keeps its builds"
+meant = "says_where_the_builds_are_kept_when_no_cache_is_named"
+runs = ["smoke-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = '''
+    if options.cache.is_none() {
+        talk(say, format!("the builds are kept in {}", cache.display()));
+    }
+'''
+replace = ""

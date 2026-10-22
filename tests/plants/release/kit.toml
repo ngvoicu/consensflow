@@ -30,6 +30,8 @@ tables = ["feeds", "publish", "workflow", "portable", "agents", "updater", "upda
 agents-proof = { command = ["cargo", "xtask", "test", "agents", "--offline"], builds = true }
 # The smoke's readers of evidence (processes, daemon, ledger), and of the terminal command.
 smoke-evidence = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::evidence", "updater_smoke::ledger"]
+# The smoke's driver: where it keeps its builds, and what it does with the apps it is given.
+smoke-driver = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::tests::"]
 # The rule of the feeds and its checks, against GitHub as the simulator has it.
 feeds = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "feeds_rule", "--test", "feeds_plan", "--test", "feeds_prerequisites", "--test", "feeds_check", "--test", "feeds_cli"]
 smoke-launchers = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::launchers"]
