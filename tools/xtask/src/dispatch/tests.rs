@@ -61,6 +61,7 @@ fn every_command_of_the_plan_is_there_once() {
             "release alpha",
             "release promote",
             "check",
+            "ci-times",
         ]
     );
 }

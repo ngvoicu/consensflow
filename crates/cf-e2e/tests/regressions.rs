@@ -38,6 +38,8 @@ mod a_command_that_goes_on_reporting_held_a_devin_workers_result;
 mod a_command_that_never_exits_held_a_workers_result;
 #[path = "regressions/a_compact_typed_into_an_idle_chief_held_a_workers_result.rs"]
 mod a_compact_typed_into_an_idle_chief_held_a_workers_result;
+#[path = "regressions/a_compaction_written_beside_an_answer_tore_its_line.rs"]
+mod a_compaction_written_beside_an_answer_tore_its_line;
 #[path = "regressions/a_follow_up_could_not_be_queued_behind_its_windows_own_work.rs"]
 mod a_follow_up_could_not_be_queued_behind_its_windows_own_work;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
@@ -48,6 +50,8 @@ mod a_result_delivered_twice_to_a_devin_chief;
 mod a_result_pasted_again_after_its_window_went;
 #[path = "regressions/a_resumed_devin_worker_skipped_every_call.rs"]
 mod a_resumed_devin_worker_skipped_every_call;
+#[path = "regressions/a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task.rs"]
+mod a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task;
 #[path = "regressions/a_task_stuck_working_after_its_window_was_resumed.rs"]
 mod a_task_stuck_working_after_its_window_was_resumed;
 #[path = "regressions/a_task_waiting_on_a_cancelled_task_stayed_blocked_for_good.rs"]

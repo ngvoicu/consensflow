@@ -7,8 +7,9 @@
 //! paste skips it from then on, until the door says it handed it to its
 //! harness (`POST /api/answers/<id>/receipt`) or the claim is voided. The
 //! ledger is asked every 250 ms, one claim at a time, and never holds
-//! anything across the wait. A door that was shut by a pause is told so at
-//! once (409 `door-closed`), in words its model is to take as they are; a
+//! anything across the wait. A door that was shut by a pause, or by the acceptance
+//! of its task, is told so at once (409 `door-closed`), in words its model is to
+//! take as they are, the task's state deciding which; a
 //! daemon that is stopping, a window that exited (its token revoked), and a
 //! client that has gone (the server runs a handler on after its client left)
 //! end the wait with no answer and claim nothing: an answer claimed for
@@ -85,7 +86,17 @@ pub(super) async fn handle(
                 (context.kick)();
                 return answered(&asked, &answer);
             }
-            Claim::Closed => return Err(shut(&asked)),
+            Claim::Closed => {
+                let accepted = match asked.task_number {
+                    Some(number) => context
+                        .ledger
+                        .borrow()
+                        .task(caller.project.id, number)?
+                        .is_some_and(|thread| thread.task.state == "accepted"),
+                    None => false,
+                };
+                return Err(shut(&asked, accepted));
+            }
             Claim::Waiting => {}
         }
         let left = until.saturating_duration_since(Instant::now());
@@ -116,16 +127,20 @@ fn answered(asked: &MessageView, answer: &MessageView) -> Result<Answer, Failure
     })))
 }
 
-/// The door is shut: its task was stopped, and the answer comes to the window
-/// as a message when the task goes on. What the door's model is told is
-/// these words, whole.
-fn shut(asked: &MessageView) -> Failure {
+/// The door is shut, and the words its model is told say why, whole: its task was
+/// stopped, and the answer comes to the window as a message when the task goes on;
+/// or its task was accepted (`accepted`), which goes on no more, so nothing waits on
+/// the question and no answer will come.
+fn shut(asked: &MessageView, accepted: bool) -> Failure {
     let id = asked.id;
-    let words = match asked.task_number {
-        Some(task) => format!(
+    let words = match (asked.task_number, accepted) {
+        (Some(task), true) => format!(
+            "T-{task} is accepted, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now."
+        ),
+        (Some(task), false) => format!(
             "T-{task} was stopped, so m-{id} is not answered here: its answer comes to you as a message when the task goes on. Do not ask it again; end your turn now."
         ),
-        None => format!(
+        (None, _) => format!(
             "m-{id} is not answered here: its answer comes to you as a message. Do not ask it again; end your turn now."
         ),
     };

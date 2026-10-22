@@ -36,13 +36,22 @@ serde_json.workspace = true
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
+# A window's pseudoconsole and its program, started in the window's job
+# (src/pty/conpty.rs), answer portable-pty's traits, whose errors are anyhow's. Its
+# environment is read whole from portable-pty's own serde form (`serde_support`:
+# src/pty/conpty/environment.rs), every value as the system keeps it.
 [target.'cfg(windows)'.dependencies]
+anyhow.workspace = true
+portable-pty = { workspace = true, features = ["serde_support"] }
 windows-sys = { workspace = true, features = [
     "Wdk_System_Threading",
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_System_Console",
     "Win32_System_JobObjects",
     "Win32_System_Kernel",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Pipes",
     "Win32_System_Threading",
 ] }
 

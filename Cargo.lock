@@ -585,6 +585,7 @@ dependencies = [
 name = "cf-panes"
 version = "3.0.6-alpha.1"
 dependencies = [
+ "anyhow",
  "cf-bridge",
  "cf-panes",
  "cf-proto",
@@ -2949,6 +2950,8 @@ dependencies = [
  "libc",
  "log",
  "nix",
+ "serde",
+ "serde_derive",
  "serial2",
  "shared_library",
  "shell-words",

@@ -25,7 +25,7 @@
 //! meant = "every_list_of_words_is_read_as_node_reads_it"   # the test it was written for
 //! runs = ["args", ["cargo", "test", "--offline", "-p", "cf"]]   # a name, or the words
 //! builds = true             # optional: its runs build the native `cf`
-//! prepare = [["cargo", "xtask", "smoke-updater", "--export-bridge"]]   # optional: must succeed first
+//! prepare = [["cargo", "xtask", "smoke-updater", "--export-bridge", "--cache", "app/src-tauri/target/updater-smoke"]]   # optional: must succeed first
 //! requires = ["app/src-tauri/target/…"]   # optional: files its runs take as given
 //! platforms = ["macos"]     # optional: the systems it is run on ("macos", "windows", "linux")
 //!

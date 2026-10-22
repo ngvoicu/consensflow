@@ -18,6 +18,7 @@ use cf_proto::ledger::{TaskMoved, TaskView};
 use rusqlite::params;
 use serde_json::json;
 
+use super::pausing::shut_doors;
 use super::{carrier_body, delivery_body, require_on_board, require_task_state, task_by_id};
 use crate::messages::{fold, leave_pause_notes, tell_sent_back};
 use crate::model::{
@@ -64,7 +65,8 @@ pub(crate) fn record_result(
 /// A coordinator accepts a task's result: the task is finished, and the
 /// tasks given by name that waited for it go to their windows. The result is
 /// withdrawn if its requester has not been given it yet: it asks for the
-/// decision just taken.
+/// decision just taken. A question its window has open at a door is shut out
+/// of waiting ([`shut_doors`]).
 pub(crate) fn accept_task(
     store: &mut Store,
     project_id: i64,
@@ -97,6 +99,12 @@ pub(crate) fn accept_task(
         }
         store.move_task(&task, "accepted", json!({ "by": by }))?;
         release_ready(store, project_id)?;
+        // A question the window asked through its harness's tool, still open at its
+        // door, is not answered any more (`answer` refuses it): the door is told so at
+        // once, as a pause tells it, and not when its poll gives up.
+        if let Some(window) = task.assignee_id {
+            shut_doors(store, &task, window)?;
+        }
         task_by_id(store, task.id)
     })
 }
