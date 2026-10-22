@@ -426,3 +426,120 @@ fn a_failure_whose_note_the_ledger_refused_is_told_at_the_next_look() {
         tiers.notes("human")
     );
 }
+
+/// The chief's screen: `lines`, its last ones.
+fn chief_screen(context: &Context, lines: &[&str]) {
+    context
+        .host
+        .set_snapshot(serde_json::json!({ "tail": lines }));
+}
+
+/// The chief's turn fails with nothing of why in its record: its screen says.
+fn chief_fails_on_screen(context: &Context) {
+    context.adapter.with("chief", |agent| agent.failed = true);
+    context.adapter.answer("chief", "Looking at the board");
+}
+
+/// The header of message `id` as the chief's window shows it.
+fn header(context: &Context, id: i64) -> String {
+    let message = context.message(id);
+    format!("[ConsensFlow m-{id} · {} from ConsensFlow]", message.kind)
+}
+
+#[test]
+fn a_message_that_quotes_the_windows_error_is_no_part_of_the_error_on_its_screen() {
+    // The chief was told once what its screen said; a note quoting that line goes
+    // into its window, whose next turn fails the same way.
+    let context = Context::new();
+    let tiers = working(&context);
+    let error = "Error: provider unreachable";
+    chief_screen(&context, &[error]);
+    chief_fails_on_screen(&context);
+    context.pass().unwrap();
+    let quoting = format!("zeus's window says: {error}");
+    let note = context.note_from_consensflow(tiers.project.id, "chief", &quoting);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    chief_screen(&context, &[&header(&context, note.id), &quoting, "", error]);
+    chief_fails_on_screen(&context);
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    let told = chief_failures(&tiers);
+    assert_eq!(told.len(), 1, "{told:?}");
+}
+
+#[test]
+fn what_the_chiefs_screen_shows_of_its_paste_is_known_however_many_messages_wait_behind_it() {
+    // An outage builds a backlog: each failed turn takes the next message, and
+    // its screen shows that one. Five and more wait behind it.
+    let context = Context::new();
+    let tiers = working(&context);
+    let error = "Error: provider unreachable";
+    let chief = tiers.id("chief");
+    chief_screen(&context, &[error]);
+    chief_fails_on_screen(&context);
+    context.pass().unwrap();
+    for n in 0..8 {
+        context.note_from_consensflow(tiers.project.id, "chief", &format!("Wake up, round {n}"));
+    }
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.pass().unwrap();
+        let on_screen = context.ledger.borrow().last_given(chief).unwrap().unwrap();
+        let words = context.message(on_screen).body;
+        chief_screen(&context, &[&header(&context, on_screen), &words, "", error]);
+        chief_fails_on_screen(&context);
+        context.pass().unwrap();
+    }
+
+    let told = chief_failures(&tiers);
+    assert_eq!(told.len(), 1, "{told:?}");
+}
+
+/// The chief told of failures that said `first`, then, a turn later, `second`.
+fn told_of(first: &str, second: &str) -> usize {
+    let context = Context::new();
+    let tiers = working(&context);
+    chief_fails(&context, first);
+    context.pass().unwrap();
+    given(&context, &tiers, "chief", "Wake up");
+    chief_fails(&context, second);
+    context.pass().unwrap();
+    chief_failures(&tiers).len()
+}
+
+#[test]
+fn a_model_named_one_digit_apart_is_another_failure() {
+    assert_eq!(told_of("model gpt-5 not found", "model gpt-6 not found"), 2);
+}
+
+#[test]
+fn a_status_of_another_number_is_another_failure() {
+    assert_eq!(
+        told_of(
+            "API Error: 500 Internal error",
+            "API Error: 502 Internal error"
+        ),
+        2
+    );
+}
+
+#[test]
+fn a_retry_after_that_counts_down_is_the_same_failure() {
+    assert_eq!(
+        told_of("Overloaded, retry in 12s", "Overloaded, retry in 7s"),
+        1
+    );
+}
+
+#[test]
+fn a_request_id_that_differs_each_turn_is_the_same_failure() {
+    assert_eq!(
+        told_of(
+            "Overloaded (request_id: req_011CVabcd1234efgh5678)",
+            "Overloaded (request_id: req_011CWzyxw9876vuts5432)"
+        ),
+        1
+    );
+}

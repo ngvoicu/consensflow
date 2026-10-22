@@ -151,6 +151,41 @@ pub(crate) fn last_given(store: &Store, participant_id: i64) -> Result<Option<i6
     )?)
 }
 
+/// The `limit` messages last pasted into a participant's window, newest first,
+/// each with the rows its paste carried: what its screen can show of
+/// ConsensFlow's own. A message on its way is pasted already (its record may
+/// show it later); one still queued is not.
+pub(crate) fn last_pastes(
+    store: &Store,
+    participant_id: i64,
+    limit: i64,
+) -> Result<Vec<Begun>, LedgerError> {
+    let pasted = messages(
+        store,
+        &format!(
+            "{MESSAGE_SELECT} WHERE m.recipient_id = ?
+         AND m.state IN ('delivering', 'delivered', 'read') AND m.carried_by IS NULL
+       ORDER BY m.id DESC LIMIT ?"
+        ),
+        params![participant_id, limit],
+    )?;
+    pasted
+        .into_iter()
+        .map(|message| {
+            let carried = messages(
+                store,
+                &format!(
+                    "{MESSAGE_SELECT} WHERE m.recipient_id = ?
+                 AND m.state IN ('delivering', 'delivered', 'read') AND m.carried_by = ?
+               ORDER BY m.id"
+                ),
+                params![participant_id, message.id],
+            )?;
+            Ok(Begun { message, carried })
+        })
+        .collect()
+}
+
 /// The newest note the engine wrote a participant after the message `after`
 /// whose words hold `words`, of whatever state.
 pub(crate) fn note_since(

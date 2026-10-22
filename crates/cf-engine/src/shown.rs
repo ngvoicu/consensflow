@@ -31,14 +31,20 @@
 //! that opens on its conversation opens beside it, which the words warn of.
 
 pub(crate) mod mask;
+mod ours;
 mod secret;
 #[cfg(test)]
 mod tests;
 
+use std::sync::LazyLock;
+
 use cf_proto::panes::{BackgroundProcess, PaneExit, SnapshotTail};
+use regex::Regex;
 use serde_json::Value;
 
 use mask::mask;
+use ours::ours;
+pub(crate) use ours::Paste;
 use secret::names_a_secret;
 
 /// The most lines of a screen a note quotes: the last ones.
@@ -64,6 +70,8 @@ pub struct Shown {
     /// The window's program, where the host could not prove it gone (0 where its
     /// number was not known): it may still run.
     survivor: Option<u32>,
+    /// Lines of the screen were ConsensFlow's own and are left out ([`Shown::without_pastes`]).
+    pasted: bool,
 }
 
 impl Shown {
@@ -75,6 +83,7 @@ impl Shown {
             tail: exit.tail,
             background: exit.background,
             survivor: exit.survivor,
+            pasted: false,
         }
     }
 
@@ -111,11 +120,14 @@ impl Shown {
         }
     }
 
-    /// The window's screen without the lines `ours` says ConsensFlow itself typed
-    /// into it (a paste's header and words): those are no reason of the window's.
-    pub(crate) fn without(mut self, ours: impl Fn(&str) -> bool) -> Self {
+    /// The window's screen without what ConsensFlow itself typed into it, of
+    /// the `pastes` it typed ([`ours`]): those lines are no reason of the window's.
+    pub(crate) fn without_pastes(mut self, pastes: &[Paste]) -> Self {
         if let Some(tail) = self.tail.as_mut() {
-            tail.retain(|line| !ours(line));
+            let before = tail.len();
+            let mut ours = ours(tail, pastes).into_iter();
+            tail.retain(|_| !ours.next().unwrap_or(false));
+            self.pasted = tail.len() < before;
         }
         self
     }
@@ -172,6 +184,7 @@ impl Shown {
             return said;
         }
         match Quote::of(tail, Keep::Last) {
+            None if self.pasted => said.push_str("; its screen showed nothing of its own"),
             None => said.push_str("; its screen was empty"),
             Some(quote) => said.push_str(&quote.after("; its screen ended with")),
         }
@@ -215,33 +228,69 @@ pub(crate) fn words_key(words: &str) -> String {
     outage_key(&lines, Keep::First)
 }
 
-/// The lines a quote of `lines` would keep, its blanks made one and every run
-/// of digits made one `#`: a retry-after, a countdown or a request's number
-/// that differs from one turn to the next is no other failure.
+/// The lines a quote of `lines` would keep, their blanks made one and what
+/// changes by itself within one outage folded ([`folded`]).
 fn outage_key(lines: &[String], keep: Keep) -> String {
     let lines: Vec<String> = lines
         .iter()
         .filter(|line| line.chars().any(char::is_alphanumeric))
         .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
         .collect();
-    let chosen: Vec<&String> = match keep {
-        Keep::Last => lines.iter().rev().take(QUOTE_LINES).rev().collect(),
-        Keep::First => lines.iter().take(QUOTE_LINES).collect(),
+    let chosen: Vec<&str> = match keep {
+        Keep::Last => lines
+            .iter()
+            .rev()
+            .take(QUOTE_LINES)
+            .rev()
+            .map(String::as_str)
+            .collect(),
+        Keep::First => lines.iter().take(QUOTE_LINES).map(String::as_str).collect(),
     };
-    let mut key = String::new();
-    for (at, line) in chosen.into_iter().enumerate() {
-        if at > 0 {
-            key.push('\n');
-        }
-        for c in line.chars() {
-            if !c.is_ascii_digit() {
-                key.push(c);
-            } else if !key.ends_with('#') {
-                key.push('#');
-            }
-        }
+    folded(&chosen.join("\n"))
+}
+
+/// What changes by itself from one turn of an outage to the next, each with
+/// what it is folded to: an id-like token (16 letters, digits, `_` or `-` or
+/// more, a digit among them: a request's id), a clock time, and a duration (a
+/// number joined to a unit of time: a retry-after, a countdown). Every other
+/// number is the failure's own: `gpt-5` is not `gpt-6`, and a 500 is not a 502
+/// (the chief's decision of 2026-10-22, T-286).
+static CHANGING: LazyLock<[(Regex, &str); 3]> = LazyLock::new(|| {
+    [
+        (pattern(r"[A-Za-z0-9_-]{16,}"), "#id"),
+        (pattern(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"), "#time"),
+        (
+            pattern(
+                r"(?i)\b\d+(?:\.\d+)?\s?(?:ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)\b",
+            ),
+            "#duration",
+        ),
+    ]
+});
+
+/// The patterns are constants of this file, and a test folds with each.
+#[allow(clippy::expect_used)]
+fn pattern(source: &str) -> Regex {
+    Regex::new(source).expect("a pattern of the outage key")
+}
+
+/// `text` with what changes by itself within one outage folded.
+fn folded(text: &str) -> String {
+    let mut text = text.to_owned();
+    for (at, (changing, to)) in CHANGING.iter().enumerate() {
+        text = changing
+            .replace_all(&text, |found: &regex::Captures<'_>| {
+                let found = &found[0];
+                // An id is one only with a digit in it: a long word is a word.
+                if at == 0 && !found.chars().any(|c| c.is_ascii_digit()) {
+                    found.to_owned()
+                } else {
+                    (*to).to_owned()
+                }
+            })
+            .into_owned();
     }
-    key
+    text
 }
 
 fn plural(count: usize) -> &'static str {

@@ -18,6 +18,7 @@
 [run]
 failure-reason-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "failure_reasons"]
 failure-reason-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "told_once"]
+failure-reason-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::"]
 failure-reason-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 failure-reason-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
 failure-reason-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
@@ -34,7 +35,10 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-            let because = self.why_it_failed(participant, record, observed).await.said;
+            let because = self
+                .why_it_failed(participant, record, observed)
+                .await?
+                .said;
 '''
 replace = '''
             let because = format!("@{}'s harness reported a failure", participant.handle);
@@ -49,12 +53,12 @@ runs = ["failure-reason-engine"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
             if let Some(said) = after_words(&failed, words) {
-                return Why {
+                return Ok(Why {
                     said,
 '''
 replace = '''
             if after_words(&failed, words).is_some() {
-                return Why {
+                return Ok(Why {
                     said: failed,
 '''
 
@@ -553,7 +557,7 @@ runs = ["failure-reason-told"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        let why = self.why_it_failed(participant, record, observed).await;
+        let why = self.why_it_failed(participant, record, observed).await?;
         if self.forgotten(record) {
             return Ok(());
         }
@@ -561,7 +565,7 @@ find = '''
             self.settle_told(record, given, requester, &why.key);
 '''
 replace = '''
-        let why = self.why_it_failed(participant, record, observed).await;
+        let why = self.why_it_failed(participant, record, observed).await?;
         if self.same_outage(record, &why.key) {
             self.settle_told(record, given, requester, &why.key);
 '''
@@ -591,10 +595,10 @@ runs = ["failure-reason-told"]
 [[plant.edit]]
 file = "crates/cf-engine/src/shown.rs"
 find = '''
-            if !c.is_ascii_digit() {
+                r"(?i)\b\d+(?:\.\d+)?\s?(?:ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)\b",
 '''
 replace = '''
-            if true {
+                r"(?i)\bnever-a-duration\b",
 '''
 
 [[plant]]
@@ -605,10 +609,10 @@ runs = ["failure-reason-engine", "failure-reason-told"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        let shown = shown.without(|line| typed_by_consensflow(line, &pasted));
+        let shown = shown.without_pastes(&pastes);
 '''
 replace = '''
-        let _ = &pasted;
+        let _ = &pastes;
 '''
 
 [[plant]]
@@ -645,4 +649,95 @@ replace = '''
             return Ok(());
         }
         self.settle_told(record, given, "human", &why.key);
+'''
+
+[[plant]]
+name = "failure reason: a screen line that only holds a paste's header starts a paste"
+meant = "a_line_that_only_holds_a_header_is_the_windows"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/ours.rs"
+find = '''
+        .strip_prefix(HEADER_START)?
+'''
+replace = '''
+        .split_once(HEADER_START)?
+        .1
+'''
+
+[[plant]]
+name = "failure reason: a line that repeats what was pasted is taken for the paste's after its run ended"
+meant = "a_message_that_quotes_the_windows_error_is_no_part_of_the_error_on_its_screen"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/ours.rs"
+find = '''
+                None => {
+                    run = None;
+                    false
+                }
+'''
+replace = '''
+                None => {
+                    run = None;
+                    pasted.iter().any(|(_, text)| text.contains(&words))
+                }
+'''
+
+[[plant]]
+name = "failure reason: the pasted words are read from the window's newest messages in any state"
+meant = "what_the_chiefs_screen_shows_of_its_paste_is_known_however_many_messages_wait_behind_it"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+         AND m.state IN ('delivering', 'delivered', 'read') AND m.carried_by IS NULL
+'''
+replace = '''
+         AND m.state != 'gated' AND m.carried_by IS NULL
+'''
+
+[[plant]]
+name = "failure reason: every number in the words makes the same failure"
+meant = "a_model_named_one_digit_apart_is_another_failure"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+        (pattern(r"[A-Za-z0-9_-]{16,}"), "#id"),
+'''
+replace = '''
+        (pattern(r"\d+"), "#id"),
+'''
+
+[[plant]]
+name = "failure reason: a request's id makes every turn of an outage another failure"
+meant = "a_request_id_that_differs_each_turn_is_the_same_failure"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+        (pattern(r"[A-Za-z0-9_-]{16,}"), "#id"),
+'''
+replace = '''
+        (pattern(r"[A-Za-z0-9_-]{160,}"), "#id"),
+'''
+
+[[plant]]
+name = "failure reason: a screen of nothing but ConsensFlow's pastes is said to be empty"
+meant = "a_screen_of_nothing_but_what_consensflow_pasted_showed_nothing_of_its_own"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+            None if self.pasted => said.push_str("; its screen showed nothing of its own"),
+'''
+replace = '''
+            None if false => said.push_str("; its screen showed nothing of its own"),
 '''

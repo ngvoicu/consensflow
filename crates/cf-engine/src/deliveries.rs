@@ -19,7 +19,7 @@ use crate::record::Record;
 use crate::role_change::{answers_to_the_task, Prelude};
 use crate::runtime::returning;
 use crate::seams::EngineError;
-use crate::shown::{after_words, words_key, Shown};
+use crate::shown::{after_words, words_key, Paste, Shown};
 
 /// The one message on its way into a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,7 +245,10 @@ impl Dispatcher {
             .rposition(|item| item.role == Role::User)
             .map_or(pasted + 1, |at| pasted + 1 + at);
         if observed.failed {
-            let because = self.why_it_failed(participant, record, observed).await.said;
+            let because = self
+                .why_it_failed(participant, record, observed)
+                .await?
+                .said;
             // The task may have moved on while the window was looked at.
             let still = self
                 .seams
@@ -326,7 +329,7 @@ impl Dispatcher {
         let Some(given) = self.untold_failure(project, participant, record, requester)? else {
             return Ok(());
         };
-        let why = self.why_it_failed(participant, record, observed).await;
+        let why = self.why_it_failed(participant, record, observed).await?;
         if self.forgotten(record) {
             return Ok(());
         }
@@ -374,7 +377,7 @@ impl Dispatcher {
         let Some(given) = self.untold_failure(project, participant, record, "human")? else {
             return Ok(());
         };
-        let why = self.why_it_failed(participant, record, observed).await;
+        let why = self.why_it_failed(participant, record, observed).await?;
         if self.forgotten(record) {
             return Ok(());
         }
@@ -469,36 +472,36 @@ impl Dispatcher {
     /// window shows, which is where a harness that says nothing in its record
     /// says why (a crash, a model it does not know), or that it could not be read.
     /// Both are held to a quote's bounds ([`after_words`], [`Shown::after`]). The
-    /// lines ConsensFlow typed into the window itself (a paste's header and words)
-    /// are no reason of its own, and are neither quoted nor compared.
+    /// lines ConsensFlow typed into the window itself, its last pastes as the
+    /// screen shows them ([`Shown::without_pastes`]), are no reason of its own,
+    /// and are neither quoted nor compared.
     async fn why_it_failed(
         &self,
         participant: &ParticipantView,
         record: &Record,
         observed: &Observed,
-    ) -> Why {
+    ) -> Result<Why, EngineError> {
         let failed = format!("@{}'s harness reported a failure", participant.handle);
         // Words with nothing of a word in them ("…") say nothing: the screen may.
         if let Some(words) = observed.failure() {
             if let Some(said) = after_words(&failed, words) {
-                return Why {
+                return Ok(Why {
                     said,
                     key: words_key(words),
-                };
+                });
             }
         }
-        let pasted: Vec<String> = self
+        let pastes: Vec<Paste> = self
             .seams
             .ledger
             .borrow()
-            .inbox(participant.id, PASTES_ON_SCREEN)
-            .map(|messages| {
-                messages
-                    .iter()
-                    .map(|message| one_line(&delivery_text(message, &[])))
-                    .collect()
+            .last_pastes(participant.id, PASTES_ON_SCREEN)?
+            .into_iter()
+            .map(|begun| Paste {
+                id: begun.message.id,
+                text: delivery_text(&begun.message, &begun.carried),
             })
-            .unwrap_or_default();
+            .collect();
         let pane = record.window.borrow().pane.clone();
         let shown = match pane {
             Some(pane) => self.look_at(&pane).await,
@@ -507,16 +510,16 @@ impl Dispatcher {
         // A host that refused the look, or answered it late, said nothing of the
         // screen: the note says so, not the bare words the field had.
         if !shown.is_known() {
-            return Why {
+            return Ok(Why {
                 said: format!("{failed}; its screen could not be read"),
                 key: String::new(),
-            };
+            });
         }
-        let shown = shown.without(|line| typed_by_consensflow(line, &pasted));
-        Why {
+        let shown = shown.without_pastes(&pastes);
+        Ok(Why {
             said: shown.after(&failed),
             key: shown.outage_key(),
-        }
+        })
     }
 
     /// What a window was to receive goes back to its queue with its attempt:
@@ -650,21 +653,7 @@ pub(crate) struct Why {
     pub(crate) key: String,
 }
 
-/// How many of a window's newest messages are read for what ConsensFlow typed
-/// into it: a screen's last lines hold no more pastes than that.
+/// How many of the messages last pasted into a window are read for what
+/// ConsensFlow typed into it: a key reads the last six lines with a word, which
+/// hold no more pastes than that.
 const PASTES_ON_SCREEN: i64 = 5;
-
-/// `text` with its blanks made one, on one line.
-fn one_line(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// Whether a screen's `line` is ConsensFlow's own: a paste's header, or words of
-/// the texts `pasted` into the window, however the window wrapped or framed them.
-fn typed_by_consensflow(line: &str, pasted: &[String]) -> bool {
-    if line.contains("[ConsensFlow m-") {
-        return true;
-    }
-    let words = one_line(line.trim_matches(|c: char| !c.is_alphanumeric()));
-    words.chars().count() >= 4 && pasted.iter().any(|text| text.contains(&words))
-}

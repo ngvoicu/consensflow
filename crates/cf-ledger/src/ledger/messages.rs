@@ -184,6 +184,12 @@ impl Ledger {
         messages::last_given(&self.store, participant_id)
     }
 
+    /// The `limit` messages last pasted into a participant's window, newest first,
+    /// each with the rows its paste carried.
+    pub fn last_pastes(&self, participant_id: i64, limit: i64) -> Result<Vec<Begun>, LedgerError> {
+        messages::last_pastes(&self.store, participant_id, limit)
+    }
+
     /// The id of the newest note the engine wrote `recipient_id` after the
     /// message `after` whose words hold `words`.
     pub fn note_since(

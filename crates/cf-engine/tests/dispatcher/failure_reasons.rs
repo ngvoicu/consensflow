@@ -396,3 +396,51 @@ fn the_lines_consensflow_typed_into_the_window_are_no_reason_and_are_not_quoted(
         )]
     );
 }
+
+#[test]
+fn an_error_line_a_waiting_message_repeats_is_still_the_windows() {
+    // A note to zeus already quotes the line its window is about to show (the
+    // outage's own shape: the chief told the team what another window said).
+    let context = Context::new();
+    let tiers = working(&context);
+    let error = "Error: model 'gpt-0-nonesuch' not found";
+    context.note_from_consensflow(
+        tiers.project.id,
+        &tiers.assignee(1),
+        &format!("The chief's window says: {error}"),
+    );
+    let brief = context.task(tiers.project.id, 1).messages[0].clone();
+    let header = format!("[ConsensFlow m-{} · T-1 · task from @chief]", brief.id);
+    context.host.set_snapshot(json!({
+        "tail": [header, brief.body, "", error]
+    }));
+    fails(&context, None);
+
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            &format!("@zeus's harness reported a failure; its screen ended with: \"{error}\"")
+        )]
+    );
+}
+
+#[test]
+fn a_screen_of_nothing_but_what_consensflow_pasted_showed_nothing_of_its_own() {
+    let context = Context::new();
+    let tiers = working(&context);
+    let brief = context.task(tiers.project.id, 1).messages[0].clone();
+    let header = format!("[ConsensFlow m-{} · T-1 · task from @chief]", brief.id);
+    context
+        .host
+        .set_snapshot(json!({ "tail": [header, brief.body] }));
+    fails(&context, None);
+
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            "@zeus's harness reported a failure; its screen showed nothing of its own"
+        )]
+    );
+}

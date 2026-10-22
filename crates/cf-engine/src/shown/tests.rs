@@ -22,6 +22,7 @@ fn shown(code: Option<u32>, signal: Option<&str>, tail: Option<&[&str]>) -> Show
         tail: tail.map(|lines| lines.iter().map(|line| (*line).to_owned()).collect()),
         background: Vec::new(),
         survivor: None,
+        pasted: false,
     }
 }
 
@@ -441,5 +442,29 @@ fn a_snapshot_answer_gives_its_tail_when_it_was_a_success() {
     assert_eq!(
         Shown::from_snapshot(&json!({ "ok": true, "tail": "not a list" })),
         Shown::default()
+    );
+}
+
+#[test]
+fn what_changes_by_itself_in_an_outage_is_folded_and_every_other_number_kept() {
+    let key = |words: &str| words_key(words);
+    assert_eq!(
+        key("Overloaded, retry in 12s"),
+        key("Overloaded, retry in 7s")
+    );
+    assert_eq!(key("retrying in 30 s"), key("retrying in 5 minutes"));
+    assert_eq!(key("limit resets at 14:05"), key("limit resets at 9:30:12"));
+    assert_eq!(
+        key("Overloaded (request_id: req_011CVabcd1234efgh5678)"),
+        key("Overloaded (request_id: req_011CWzyxw9876vuts5432)")
+    );
+    assert_ne!(key("model gpt-5 not found"), key("model gpt-6 not found"));
+    assert_ne!(
+        key("API Error: 500 Internal error"),
+        key("API Error: 502 Internal error")
+    );
+    assert_eq!(
+        key("rate_limit_exceeded_error"),
+        "rate_limit_exceeded_error"
     );
 }
