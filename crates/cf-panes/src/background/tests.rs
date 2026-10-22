@@ -525,7 +525,7 @@ fn in_group(member: Member, group: i32) -> Member {
 /// The numbers of the commands `baseline` tells in `tree`, or none where it cannot.
 fn commands(baseline: &Baseline, tree: &[Member]) -> Option<Vec<u32>> {
     baseline
-        .commands(tree)
+        .commands(tree, None)
         .map(|found| found.processes.iter().map(|process| process.pid).collect())
 }
 
@@ -581,4 +581,49 @@ fn the_commands_are_not_told_of_a_window_whose_servers_are_not_in_its_group() {
         assert_eq!(commands(&marked(&[], kept, None), &tree), None, "{kept:?}");
     }
     assert_eq!(commands(&Baseline::default(), &tree), None);
+}
+
+#[test]
+fn what_ran_at_the_rest_a_look_names_is_no_command_and_what_began_after_it_is() {
+    // Astraeus on 472b1d96: an MCP server that left the window's group (`setsid`) leads a
+    // group of its own and was started by the program, as a command is; it ran when the
+    // window was at rest before the monitor began, and no command the monitor runs did.
+    let mut baseline = marked(&[], Kept::of(Servers::InGroup, Some(10)), None);
+    let server = in_group(member(11, "python3 server.py", "Python", of(10)), 11);
+    let resting = [in_group(program(), 10), server.clone()];
+    let rest = baseline.rest(&resting).expect("a rest kept");
+    let mut running = resting.to_vec();
+    running.push(in_group(member(41, "sleep 300", "sleep", of(10)), 41));
+    assert_eq!(
+        commands_since(&baseline, &running, Some(rest)),
+        Some(vec![41])
+    );
+    // A look that names no rest, or one not kept, leaves nothing out: the server counts.
+    assert_eq!(
+        commands_since(&baseline, &running, None),
+        Some(vec![11, 41])
+    );
+    assert_eq!(
+        commands_since(&baseline, &running, Some(rest + 1)),
+        Some(vec![11, 41])
+    );
+    // The last rests are kept, and the oldest let go.
+    for _ in 0..RESTS {
+        baseline.rest(&resting);
+    }
+    assert_eq!(
+        commands_since(&baseline, &running, Some(rest)),
+        Some(vec![11, 41])
+    );
+    // A window whose commands are not told keeps no rest.
+    let mut untold = marked(&[], None, None);
+    assert_eq!(untold.rest(&resting), None);
+    assert!(!untold.tells_commands());
+}
+
+/// [`commands`], less what ran at the rest `since`.
+fn commands_since(baseline: &Baseline, tree: &[Member], since: Option<u64>) -> Option<Vec<u32>> {
+    baseline
+        .commands(tree, since)
+        .map(|found| found.processes.iter().map(|process| process.pid).collect())
 }

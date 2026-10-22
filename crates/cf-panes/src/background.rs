@@ -80,7 +80,7 @@
 mod harness;
 mod work;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -89,6 +89,10 @@ use cf_proto::panes::{
 };
 
 pub(crate) use harness::Kept;
+
+/// How many of a window's rests are kept ([`Baseline::rest`]): a rest asked of in a look is
+/// the latest a few turns before it, and one no longer kept leaves nothing out.
+const RESTS: usize = 16;
 
 /// How long the host waits before it looks again at what it found the turn's work, where
 /// it names what a window left running (see above): longer than a run of a harness's
@@ -142,6 +146,11 @@ pub(crate) struct Baseline {
     /// Which harness it is, as the daemon said at the latest mark: the name its own
     /// programs are told by.
     harness: Option<String>,
+    /// The window's processes at the latest of its rests the daemon asked to be kept
+    /// ([`Baseline::rest`]), each by the number the host gave it, oldest first: a few.
+    rests: VecDeque<(u64, HashSet<ProcessKey>)>,
+    /// The number the next rest is given.
+    next_rest: u64,
     /// What was seen to descend from a process of the harness's own at the latest
     /// look, and runs still: kept for the day the process that started it has gone. It
     /// is shared by the copies a look is made with: whatever one sees, the next knows.
@@ -164,13 +173,43 @@ impl Baseline {
         self.protected(tree);
     }
 
-    /// The commands of the window's harness that run in `tree` now ([`harness::commands`]):
-    /// none where the host cannot tell them, a window whose harness does not keep its
-    /// servers in the window's group or that was never marked, or a platform with no
-    /// groups (`cf_proto::panes::Commands`).
-    pub fn commands(&self, tree: &[Member]) -> Option<Background> {
-        let kept = self.kept.filter(|kept| kept.servers == Servers::InGroup)?;
-        Some(listed(harness::commands(kept, tree)))
+    /// Whether the host can tell the commands of the window's harness: a window whose
+    /// harness keeps its servers in the window's group, as the daemon said at a mark, on a
+    /// platform with groups. Asked before the tree is walked (Calliope on 472b1d96).
+    pub fn tells_commands(&self) -> bool {
+        self.commands_kept().is_some()
+    }
+
+    fn commands_kept(&self) -> Option<Kept> {
+        self.kept.filter(|kept| kept.servers == Servers::InGroup)
+    }
+
+    /// The window is at rest, its tree `tree`: kept, under the number answered, for a
+    /// look at its commands to leave out ([`Baseline::commands`]). The last [`RESTS`] are
+    /// kept. None where the host cannot tell the commands.
+    pub fn rest(&mut self, tree: &[Member]) -> Option<u64> {
+        self.commands_kept()?;
+        let number = self.next_rest;
+        self.next_rest += 1;
+        self.rests
+            .push_back((number, tree.iter().map(|member| member.key).collect()));
+        while self.rests.len() > RESTS {
+            self.rests.pop_front();
+        }
+        Some(number)
+    }
+
+    /// The commands of the window's harness that run in `tree` now ([`harness::commands`]),
+    /// less what ran at the rest `since` where it is one kept: none where the host cannot
+    /// tell them (`cf_proto::panes::Commands`). A rest no longer kept, or never kept, leaves
+    /// nothing out.
+    pub fn commands(&self, tree: &[Member], since: Option<u64>) -> Option<Background> {
+        let kept = self.commands_kept()?;
+        let empty = HashSet::new();
+        let rest = since
+            .and_then(|since| self.rests.iter().find(|(number, _)| *number == since))
+            .map_or(&empty, |(_, rest)| rest);
+        Some(listed(harness::commands(kept, tree, rest)))
     }
 
     /// Whether a turn was ever said to begin: where it was not, the tree is

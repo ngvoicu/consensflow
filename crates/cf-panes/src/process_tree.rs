@@ -199,6 +199,34 @@ impl ProcessTree {
         Ok(self.members_in(&snapshot, &tree))
     }
 
+    /// [`ProcessTree::members`], where every process the pane's program and each of them
+    /// started is one of them: none where one is not, which the system names and will not
+    /// say what it is (another user's, as a command that `exec`s `sudo` becomes; one that
+    /// ended and was not reaped yet), or where the tree has no program. A look that
+    /// must not take what it cannot read for nothing running (`pane.commands`) asks this.
+    pub fn readable_members(&self) -> io::Result<Option<Vec<Member>>> {
+        self.readable_members_by(&Native)
+    }
+
+    fn readable_members_by(&self, system: &impl System) -> io::Result<Option<Vec<Member>>> {
+        let Some(root) = self.root else {
+            return Ok(None);
+        };
+        let snapshot = system.processes()?;
+        self.bound.observe(&Table::of(&snapshot));
+        let tree = self.select(&snapshot, &HashMap::new());
+        for parent in std::iter::once(root.pid).chain(tree.keys().copied()) {
+            if system
+                .children(parent)?
+                .iter()
+                .any(|child| !tree.contains_key(child))
+            {
+                return Ok(None);
+            }
+        }
+        Ok(Some(self.members_in(&snapshot, &tree)))
+    }
+
     /// The turn's work as `baseline` proves it, chosen once: what an ending of the
     /// turn is bound to ([`Lineage`]). It is what one look at the tree finds and a look
     /// `settle` after it finds too, by identity, and the choice is made of the second:

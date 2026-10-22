@@ -496,3 +496,39 @@ fn a_tree_with_no_program_signals_nothing_whatever_is_selected() {
     assert!(machine.signalled_none());
     assert!(asked.identities.is_empty() && forced.members.is_empty());
 }
+
+#[test]
+fn a_look_that_must_not_miss_a_process_is_none_where_one_of_the_windows_cannot_be_read() {
+    // Astraeus on 472b1d96: a command that `exec`s `sudo` becomes a process of another
+    // user, which no look reads and which the table leaves out; the program, or a command
+    // of its, still names it as one it started.
+    let readable = Machine::new(a_window_among_strangers());
+    let table = readable.processes().expect("the table");
+    let tree = tree_of(&table);
+    let seen = tree
+        .readable_members_by(&readable)
+        .expect("a look")
+        .expect("all of it read");
+    assert_eq!(numbers_of(&seen), the_windows());
+    for parent in [PROGRAM, SHELL, DEEP] {
+        let hidden = Machine::new(a_window_among_strangers()).with_unreadable(parent, 4_000_099);
+        assert_eq!(
+            tree.readable_members_by(&hidden).expect("a look"),
+            None,
+            "a process {parent} started that cannot be read"
+        );
+    }
+    // One that a stranger started is none of the window's.
+    let elsewhere = Machine::new(a_window_among_strangers()).with_unreadable(BUILD, 4_000_099);
+    assert!(tree
+        .readable_members_by(&elsewhere)
+        .expect("a look")
+        .is_some());
+    // A tree with no program says nothing.
+    assert_eq!(
+        ProcessTree::new()
+            .readable_members_by(&readable)
+            .expect("a look"),
+        None
+    );
+}

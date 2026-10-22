@@ -122,8 +122,23 @@ fn descends_from_a_server(
 /// MCP server, a `*` PostToolUse hook, a Stop hook and a status line). A process whose
 /// group could not be read is not known to be outside the window's, nor in it: one the
 /// program started is counted.
-pub(super) fn commands(kept: Kept, tree: &[Member]) -> Vec<Member> {
+///
+/// What ran when the window was last at rest before the monitors asked of began
+/// (`rest`, [`super::Baseline::rest`]) is none of them: a server or a helper that left
+/// the window's group (`setsid`) and runs for good is no command (Astraeus on 472b1d96),
+/// and no command a monitor asked of runs began before it. Hooks and the status line
+/// begin and end in a moment, and need none of it.
+///
+/// Limits. A process another left when it ended, which keeps the group of the process
+/// that started it and does not lead one (a job a command's shell started and left), is
+/// none of them: the command it was started by has ended, which ended its monitor by its
+/// status. And a server or helper that left the window's group before the window's first
+/// rest, which is before its first message (Claude Code starts its servers as it takes
+/// that), is counted for as long as it runs: a monitor armed in the window's first turn
+/// waits for it, the safe way.
+pub(super) fn commands(kept: Kept, tree: &[Member], rest: &HashSet<ProcessKey>) -> Vec<Member> {
     tree.iter()
+        .filter(|member| !rest.contains(&member.key))
         .filter(|member| member.group != Some(kept.group))
         .filter(|member| match member.parent {
             Some(parent) => i32::try_from(parent.pid) == Ok(kept.group),

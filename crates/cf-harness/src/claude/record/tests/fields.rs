@@ -616,6 +616,12 @@ fn read() -> Vec<Row> {
             monitor_input(|input| input["command"] = Value::Null),
         ),
         (
+            "block.input.ws, of a Monitor call",
+            monitor_expired,
+            monitor_called(),
+            monitor_input(|input| input["ws"] = json!({ "url": "wss://example.org/events" })),
+        ),
+        (
             "block.input.description, of a Monitor call",
             monitor_expired,
             monitor_called(),

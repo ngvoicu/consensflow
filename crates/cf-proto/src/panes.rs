@@ -136,8 +136,28 @@ pub struct Background {
 /// what one `exec`s keeps the group), and its hooks and status line, a moment each; its
 /// MCP servers and helpers stay in the window's group. The host tells them only of a
 /// window whose harness keeps its servers in the window's group ([`Servers::InGroup`]),
-/// on a platform with groups: nowhere else does a group say what a process is.
+/// on a platform with groups: nowhere else does a group say what a process is. It is
+/// `null` too where a process of the window cannot be read (another user's, as a command
+/// that `exec`s `sudo` becomes), which may be a command. What ran at the rest the request
+/// names (`since`, a number `pane.rest` answered) is left out: a server or helper that
+/// left the window's group.
 pub type Commands = Option<Background>;
+
+/// A `pane.commands` request: the pane, and the rest whose processes are no command
+/// (`since`), where the daemon names one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CommandsRequest {
+    pub id: String,
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<u64>,
+}
+
+/// `pane.rest`'s answer, under `rest`: the number the host keeps the window's processes
+/// under, now that the daemon says the window is at rest, for a later `pane.commands` to
+/// name; `null` where it tells no commands of the window.
+pub type Rest = Option<u64>;
 
 /// A `pane.end_background` request: the pane's turn is over and the daemon has
 /// taken its answer for the task's result, so what the turn left running is

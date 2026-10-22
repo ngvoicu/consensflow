@@ -59,7 +59,13 @@
 //! (`Pending::noticed`): the engine takes those on a command for over once, on a pass after
 //! the one that saw them, the window runs no command of its harness's at all
 //! (`cf-engine`'s `turn_end`). A command that printed such a line is running then, by its
-//! line; one that printed it and exited ended its monitor by its exit.
+//! line; one that printed it and exited ended its monitor by its exit. A look that cannot
+//! read a process of the window (another user's, as a command that `exec`s `sudo` becomes)
+//! tells nothing, and the monitor holds; what ran when the window was last at rest before
+//! the monitor began (a server that left the window's group) is no command of it (both on
+//! Astraeus's review of 472b1d96). A monitor is a command's only where its call names a
+//! command that is not empty and no socket ([`Source`]): Claude Code runs the socket of a
+//! call that names both, an empty command beside a socket among them.
 //!
 //! **What ends a monitor after a real notice** (Calliope on f0bc0308). Claude Code's own
 //! notice comes as it ends the monitor in its registry: no status of it reaches the record
@@ -67,8 +73,8 @@
 //! which ends nothing here). So a status or a TaskStop ends only a monitor whose "notice"
 //! was a line of its command's, while the monitor runs on. One whose notice was real is
 //! ended by the look above, where the host can tell the window's commands; elsewhere (a
-//! socket's monitor, which has no command, and every monitor where a Windows job has no
-//! groups) by Finish alone. A monitor's status ends it as it ends any job: its command
+//! socket's or an MCP server's monitor, which has no command, and every monitor where a
+//! Windows job has no groups) by Finish alone. A monitor's status ends it as it ends any job: its command
 //! ended (`completed`,
 //! "Monitor … stream ended", written as its shell exits, whatever the command left running:
 //! T-179's probe), or the human stopped a command's monitor from Claude Code's tasks
@@ -127,7 +133,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::shared::record::reading::{End, Monitor, Notice};
+use crate::shared::record::reading::{End, Monitor, Notice, Source};
 
 /// The marker of 2.1.301's summary of the shells a previous process left (see above),
 /// before the kind of task it is of, and the marker of one it found still running,
@@ -187,12 +193,12 @@ struct Job {
     notice: Option<Notice>,
 }
 
-/// A monitor as the call that armed it says it: what its agent called it, and whether
-/// it watches a command (`command`), and not a socket (`ws`).
+/// A monitor as the call that armed it says it: what its agent called it, and what it
+/// watches ([`Source`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Watch {
     pub description: Arc<str>,
-    pub command: bool,
+    pub source: Source,
 }
 
 /// The jobs started, each once, by their ids, in the order they started.
@@ -290,8 +296,9 @@ impl Jobs {
             .filter_map(|job| {
                 let watch = job.watch.as_ref()?;
                 Some(Monitor {
+                    id: Arc::clone(&job.id),
                     description: Arc::clone(&watch.description),
-                    command: watch.command,
+                    source: watch.source,
                     notice: job.notice.clone(),
                 })
             })

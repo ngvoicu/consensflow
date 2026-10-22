@@ -21,6 +21,7 @@ use super::jobs::Watch;
 use super::patterns::OUTPUT;
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
+use crate::shared::record::reading::Source;
 
 /// What Claude Code says, in a message of its own, as it closes the turn it
 /// found cut when it resumed the conversation.
@@ -391,8 +392,8 @@ fn first_call(content: Option<&Value>) -> Option<Value> {
 }
 
 /// What call of the main conversation (`main`) a `tool_use` block makes, by its tool's
-/// name: a Monitor's input says what it is called (`description`) and whether it watches
-/// a command (`command`, where a socket's says `ws`).
+/// name: a Monitor's input says what it is called (`description`) and what it watches
+/// ([`source`]).
 fn call(block: &Value, main: bool) -> Call {
     if !main || kind(block) != Some("tool_use") {
         return Call::Other;
@@ -404,9 +405,34 @@ fn call(block: &Value, main: bool) -> Call {
             description: field(input, "description")
                 .and_then(Value::as_str)
                 .map_or_else(|| Arc::from(""), Arc::from),
-            command: field(input, "command").is_some_and(Value::is_string),
+            source: source(input),
         }),
         _ => Call::Other,
+    }
+}
+
+/// What a Monitor's `input` watches, as Claude Code chooses it (2.1.307, 2.1.308: it takes
+/// exactly one source that is truthy, and runs a socket where `ws` is one, whatever
+/// `command` says, `"command":""` among it: Astraeus on 472b1d96). A command only where
+/// `command` is a text that is not empty and nothing else is a source; a socket where `ws`
+/// is one; and where neither, a monitor with no process of the window to look for, as an
+/// MCP server's is.
+fn source(input: Option<&Value>) -> Source {
+    let truthy = |value: Option<&Value>| match value {
+        None | Some(Value::Null | Value::Bool(false)) => false,
+        Some(Value::String(text)) => !text.is_empty(),
+        Some(Value::Number(number)) => number.as_f64().is_some_and(|number| number != 0.0),
+        Some(_) => true,
+    };
+    if truthy(field(input, "ws")) {
+        Source::Socket
+    } else if field(input, "command")
+        .and_then(Value::as_str)
+        .is_some_and(|command| !command.is_empty())
+    {
+        Source::Command
+    } else {
+        Source::Server
     }
 }
 

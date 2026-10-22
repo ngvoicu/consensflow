@@ -52,6 +52,20 @@ struct Tree {
 }
 
 impl Tree {
+    /// [`Tree::members`], where every process the window's program and each of them
+    /// started can be read: none where one cannot, or where the platform cannot say
+    /// (`ProcessTree::readable_members`; a Windows job is asked of no commands).
+    fn readable_members(&self) -> io::Result<Option<Vec<Member>>> {
+        #[cfg(target_os = "macos")]
+        {
+            self.tree.readable_members()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(None)
+        }
+    }
+
     /// The processes it has now. A platform that cannot look has none.
     fn members(&self) -> io::Result<Vec<Member>> {
         #[cfg(target_os = "macos")]
@@ -195,7 +209,11 @@ impl PaneTable {
 
     /// The commands of the window's harness that run in the pane's tree now
     /// ([`Baseline::commands`]): none where the host cannot tell them.
-    pub fn commands(&self, key: &PaneKey) -> Result<Option<Background>, PaneError> {
+    pub fn commands(
+        &self,
+        key: &PaneKey,
+        since: Option<u64>,
+    ) -> Result<Option<Background>, PaneError> {
         let (tree, baseline) = {
             let panes = self.lock_panes()?;
             let pane = panes
@@ -203,7 +221,36 @@ impl PaneTable {
                 .ok_or_else(|| PaneError::NotFound(key.clone()))?;
             (pane.tree(), pane.baseline.clone())
         };
-        Ok(baseline.commands(&tree.members()?))
+        // Where it cannot tell them the tree is not walked.
+        if !baseline.tells_commands() {
+            return Ok(None);
+        }
+        Ok(tree
+            .readable_members()?
+            .and_then(|members| baseline.commands(&members, since)))
+    }
+
+    /// The pane is at rest, the daemon says: its tree now is kept, under the number
+    /// answered, for a look at its commands to leave out ([`Baseline::rest`]). None where
+    /// the host tells no commands of it, and its tree is not walked then.
+    pub fn rest(&self, key: &PaneKey) -> Result<Option<u64>, PaneError> {
+        let (tree, tells) = {
+            let panes = self.lock_panes()?;
+            let pane = panes
+                .get(key)
+                .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+            (pane.tree(), pane.baseline.tells_commands())
+        };
+        if !tells {
+            return Ok(None);
+        }
+        let members = tree.members()?;
+        Ok(self
+            .lock_panes()?
+            .get_mut(key)
+            .ok_or_else(|| PaneError::NotFound(key.clone()))?
+            .baseline
+            .rest(&members))
     }
 
     /// Ends what the pane's turn left running, and nothing of the pane's own, the

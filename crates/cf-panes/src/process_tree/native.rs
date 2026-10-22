@@ -189,6 +189,37 @@ pub(super) fn processes() -> io::Result<Vec<Process>> {
     Err(io::Error::other("could not snapshot pane processes"))
 }
 
+/// The numbers of the processes `pid` started that the system names now
+/// (`proc_listchildpids`), which it says of a process of another user, and of one that
+/// ended and was not reaped, as of any: what [`process`] cannot read is among them.
+pub(super) fn children(pid: i32) -> io::Result<Vec<i32>> {
+    for _ in 0..3 {
+        // SAFETY: a null buffer of size 0 only asks how many there may be; nothing is
+        // written.
+        let count = unsafe { libc::proc_listchildpids(pid, std::ptr::null_mut(), 0) };
+        if count < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut pids = vec![0i32; count as usize + 64];
+        let size = (pids.len() * std::mem::size_of::<i32>()) as i32;
+        // SAFETY: the buffer is `pids`, writable for the `size` bytes passed with it, and
+        // proc_listchildpids writes no more than that.
+        let read = unsafe { libc::proc_listchildpids(pid, pids.as_mut_ptr().cast(), size) };
+        if read < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if read as usize >= pids.len() {
+            continue;
+        }
+        return Ok(pids[..read as usize]
+            .iter()
+            .copied()
+            .filter(|pid| *pid > 0)
+            .collect());
+    }
+    Err(io::Error::other("could not list a process's children"))
+}
+
 pub(super) fn has_marker(pid: i32, marker: &str) -> bool {
     // No arguments or environment values are logged, retained, or returned to
     // the app: the environment is only read for the marker.

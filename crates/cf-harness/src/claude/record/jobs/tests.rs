@@ -215,15 +215,15 @@ fn words_that_are_no_notification_name_no_job() {
 /// The monitor `byuz6ka89` of the live run of 2026-10-21, on a command.
 fn armed() -> Jobs {
     let mut jobs = Jobs::default();
-    jobs.started(Arc::from("byuz6ka89"), Some(watch(true)));
+    jobs.started(Arc::from("byuz6ka89"), Some(watch(Source::Command)));
     jobs
 }
 
 /// A monitor called `tick lines`, on a command or a socket.
-fn watch(command: bool) -> Watch {
+fn watch(source: Source) -> Watch {
     Watch {
         description: Arc::from("tick lines"),
-        command,
+        source,
     }
 }
 
@@ -270,8 +270,9 @@ fn no_notice_of_a_monitors_end_ends_it_for_a_line_of_its_command_could_say_it() 
         assert_eq!(
             jobs.monitors(),
             [Monitor {
+                id: Arc::from("byuz6ka89"),
                 description: Arc::from("tick lines"),
-                command: true,
+                source: Source::Command,
                 notice: Some(Notice {
                     end,
                     at: Some(Arc::from("2026-10-21T23:03:10.329Z")),
@@ -305,10 +306,10 @@ fn only_claude_codes_own_words_of_a_monitors_end_alone_in_its_notification_are_a
     let noticed = |jobs: &Jobs| (jobs.running(), jobs.noticed_count());
     // A socket's monitor: its notice is kept and counted, and it is no command's.
     let mut jobs = Jobs::default();
-    jobs.started(Arc::from("byuz6ka89"), Some(watch(false)));
+    jobs.started(Arc::from("byuz6ka89"), Some(watch(Source::Socket)));
     jobs.ended_by(&Written::event("byuz6ka89", "tick lines", expired), None);
     assert_eq!(noticed(&jobs), (1, 1));
-    assert!(!jobs.monitors()[0].command);
+    assert_eq!(jobs.monitors()[0].source, Source::Socket);
     assert!(jobs.monitors()[0].notice.is_some());
     // A background command is no monitor, and has no notice.
     let mut jobs = started(&["byuz6ka89"]);

@@ -453,3 +453,86 @@ mod windows {
         table.kill(&key).expect("close the pane");
     }
 }
+
+/// The commands of a window whose harness keeps its servers in its group, on real
+/// processes: what ran at the window's rest is none of them, and a process of the window's
+/// that no look can read leaves them untold (Astraeus on 472b1d96).
+#[cfg(target_os = "macos")]
+mod commands {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use cf_proto::panes::Servers;
+
+    use crate::pty::turn::support::{kill, started};
+    use crate::pty::{serial_pty_test, PaneTable};
+
+    /// A Claude-shaped window: a server in the program's group and one that left it
+    /// (`setsid`), both there before the turn; then, told to go, a command of the agent's
+    /// in a group of its own; and, told again, a command that `exec`s `su`, which runs as
+    /// another user and waits at its password prompt.
+    const WINDOW: &str = r#"
+import json, os, subprocess, sys, time
+
+grouped = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(40)"])
+alone = subprocess.Popen([sys.executable, "-c", "import os, time; os.setsid(); time.sleep(40)"])
+time.sleep(0.3)
+print("ready", flush=True)
+input()
+tool = subprocess.Popen(["/bin/sleep", "40"], preexec_fn=os.setpgrp)
+print("started " + json.dumps({"grouped": grouped.pid, "alone": alone.pid, "tool": tool.pid}), flush=True)
+input()
+su = subprocess.Popen(["/usr/bin/su"], preexec_fn=os.setpgrp)
+print("su " + str(su.pid), flush=True)
+time.sleep(60)
+"#;
+
+    #[test]
+    fn what_ran_at_the_rest_is_no_command_and_a_process_no_look_can_read_leaves_them_untold() {
+        let _serial = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let (pane, pid) = started(
+            &table,
+            WINDOW,
+            Servers::InGroup,
+            Some("claude"),
+            &HashMap::new(),
+        );
+        let total = |since: Option<u64>| {
+            table
+                .commands(&pane.key, since)
+                .expect("a look at its commands")
+                .map(|commands| commands.total)
+        };
+        // A rest taken now has the server that left the group and the command: the look
+        // that names it leaves both out, and one that names none counts both.
+        let rest = table.rest(&pane.key).expect("a rest").expect("one kept");
+        assert_eq!(total(Some(rest)), Some(0));
+        assert_eq!(
+            total(None),
+            Some(2),
+            "the server that left the group, and the command"
+        );
+        table.write(&pane.key, b"go\n").expect("tell it to go on");
+        let su = crate::pty::turn::support::until_line(&pane.output, "su ")
+            .trim()
+            .parse::<i32>()
+            .expect("the number of su");
+        crate::process_tree::guard::register(su);
+        // su is another user's while it waits: the look cannot read it, and tells nothing.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while total(Some(rest)).is_some() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_eq!(
+            total(Some(rest)),
+            None,
+            "a process of the window no look can read"
+        );
+        kill(su);
+        table.kill(&pane.key).expect("close the pane");
+        for name in ["alone", "tool"] {
+            kill(pid[name]);
+        }
+    }
+}

@@ -22,7 +22,8 @@ use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::panes::{
-    BackgroundProcess, EndRequest, MarkRequest, PaneExit, SnapshotRequest, TAIL_LINES,
+    BackgroundProcess, Commands, CommandsRequest, EndRequest, MarkRequest, PaneExit, Rest,
+    SnapshotRequest, TAIL_LINES,
 };
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
@@ -254,16 +255,26 @@ pub fn register_pane_handlers(
         Ok(json!({"ok":true,"total":background.total,"processes":background.processes}))
     });
 
-    // Which commands of the window's harness run in its tree now, where the host can tell
-    // them: `null` where it cannot.
+    // Which commands of the window's harness run in its tree now, less what ran at the
+    // rest the request names, where the host can tell them: `null` where it cannot.
     let commands_panes = Arc::clone(&panes);
     builder.on("pane.commands", move |_bridge, body| {
-        let request: PaneRequest = parse_body(body)?;
+        let request: CommandsRequest = parse_body(body)?;
         let key = pane_key(&request.id, request.generation)?;
-        let commands = commands_panes
-            .commands(&key)
+        let commands: Commands = commands_panes
+            .commands(&key, request.since)
             .map_err(|error| error.to_string())?;
         Ok(json!({"ok":true,"commands":commands}))
+    });
+
+    // The window is at rest: what its tree runs now is kept, under the number answered,
+    // for a look at its commands to leave out; `null` where the host tells none of them.
+    let rest_panes = Arc::clone(&panes);
+    builder.on("pane.rest", move |_bridge, body| {
+        let request: PaneRequest = parse_body(body)?;
+        let key = pane_key(&request.id, request.generation)?;
+        let rest: Rest = rest_panes.rest(&key).map_err(|error| error.to_string())?;
+        Ok(json!({"ok":true,"rest":rest}))
     });
 
     // What the window's turn left running ends, the window staying open: it is

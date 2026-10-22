@@ -11,7 +11,7 @@ use std::rc::Rc;
 use cf_harness::contract::{Pane, Work};
 use cf_proto::panes::Servers;
 
-use crate::seams::BackgroundWork;
+use crate::seams::{BackgroundWork, CommandsSeen};
 
 /// What a mark told the host of a window.
 struct Marked {
@@ -26,11 +26,14 @@ struct Marked {
 pub struct FakeBackground {
     /// What the engine told of each window a turn begins in, in order.
     marked: RefCell<Vec<Marked>>,
-    /// What a look at a window's commands answers: none (the host cannot tell) unless a
+    /// What a look at a window's commands answers: that the host cannot tell, unless a
     /// test says.
-    commands: Cell<Option<usize>>,
-    /// The panes the engine looked at the commands of, in order.
-    looked: RefCell<Vec<Pane>>,
+    commands: Cell<Option<CommandsSeen>>,
+    /// The panes the engine looked at the commands of, in order, and the rest each named.
+    looked: RefCell<Vec<(Pane, Option<u64>)>>,
+    /// The rests the engine asked the host to keep, in order: each is given the number of
+    /// its place, from 0.
+    rests: RefCell<Vec<Pane>>,
 }
 
 impl FakeBackground {
@@ -57,14 +60,36 @@ impl FakeBackground {
             .collect()
     }
 
-    /// A look at a window's commands answers `commands` from now on.
+    /// A look at a window's commands answers that `commands` run from now on, or that the
+    /// host cannot tell them (none).
     pub fn commands_run(&self, commands: Option<usize>) {
-        self.commands.set(commands);
+        self.commands.set(Some(
+            commands.map_or(CommandsSeen::Untold, CommandsSeen::Running),
+        ));
+    }
+
+    /// A look at a window's commands is answered with nothing from now on.
+    pub fn commands_unanswered(&self) {
+        self.commands.set(Some(CommandsSeen::Unanswered));
     }
 
     /// How many looks at a window's commands the engine made.
     pub fn looks(&self) -> usize {
         self.looked.borrow().len()
+    }
+
+    /// The rest each look at a window's commands named, in order.
+    pub fn looked_since(&self) -> Vec<Option<u64>> {
+        self.looked
+            .borrow()
+            .iter()
+            .map(|(_, since)| *since)
+            .collect()
+    }
+
+    /// How many rests the engine asked the host to keep.
+    pub fn rests(&self) -> usize {
+        self.rests.borrow().len()
     }
 
     /// What each of those marks said of which harness the window is.
@@ -87,9 +112,16 @@ impl BackgroundWork for FakeBackground {
         Box::pin(async {})
     }
 
-    fn commands<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<usize>> {
-        self.looked.borrow_mut().push(pane.clone());
-        let commands = self.commands.get();
+    fn commands<'a>(&'a self, pane: &'a Pane, since: Option<u64>) -> Work<'a, CommandsSeen> {
+        self.looked.borrow_mut().push((pane.clone(), since));
+        let commands = self.commands.get().unwrap_or(CommandsSeen::Untold);
         Box::pin(async move { commands })
+    }
+
+    fn rest<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<u64>> {
+        let mut rests = self.rests.borrow_mut();
+        rests.push(pane.clone());
+        let number = u64::try_from(rests.len() - 1).ok();
+        Box::pin(async move { number })
     }
 }

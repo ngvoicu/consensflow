@@ -201,9 +201,15 @@ fn look(window: &Window) -> Option<Look> {
 /// The looks at the window until it is settled with its agent's last words `until`, or
 /// [`WORK`] has passed: each that differs from the one before.
 fn watch(window: &Window, until: &str) -> Vec<Look> {
+    watch_timed(window, until, &mut Vec::new())
+}
+
+/// [`watch`], each look's time and the commands it found kept in `commands` too.
+fn watch_timed(window: &Window, until: &str, commands: &mut Vec<(i64, Option<u64>)>) -> Vec<Look> {
     let (mut seen, started) = (Vec::<Look>::new(), Instant::now());
     while started.elapsed() < WORK && !window.closed() {
         if let Some(now) = look(window) {
+            commands.push((jiff::Timestamp::now().as_millisecond(), now.commands));
             if seen.last() != Some(&now) {
                 seen.push(now.clone());
             }
@@ -556,7 +562,10 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     // of its commands rests on it.
     window.mark_turn()?;
     window.paste(&window.given(ARM)?)?;
-    let looks = watch(&window, EXPIRED);
+    // The looks of the first message, timed: when its monitor's command was gone after its
+    // notice is measured by them (Calliope on 472b1d96: not by the ten monitors' looks).
+    let mut first_commands = Vec::new();
+    let looks = watch_timed(&window, EXPIRED, &mut first_commands);
     let raw = raw_records(&window);
     let told = notifications(&raw);
     let config = window.claude_config();
@@ -709,8 +718,15 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
                     expiry.delivered,
                     if expiry.at_rest { "at rest" } else { "in a turn" },
                     expiry.after_the_call,
-                    ended_after(expiry.delivered_at, &commands)
-                        .map_or_else(|| "never".to_owned(), |ms| format!("after {ms}"))
+                    ended_after(
+                        expiry.delivered_at,
+                        if expiry.description.starts_with("exp-") {
+                            &commands
+                        } else {
+                            &first_commands
+                        }
+                    )
+                    .map_or_else(|| "not measured".to_owned(), |ms| format!("after {ms}"))
                 )
             })
             .chain([format!(

@@ -12,7 +12,7 @@
 
 use super::*;
 use crate::claude::record::jobs::Written;
-use crate::shared::record::reading::{End, Monitor, Notice, Pending, Record, Role};
+use crate::shared::record::reading::{End, Monitor, Notice, Pending, Record, Role, Source};
 
 /// The id Claude Code gave the job.
 const JOB: &str = "bayehs8y4";
@@ -1039,8 +1039,9 @@ fn a_real_monitors_notice_of_expiry_is_kept_for_it_with_what_its_call_says_it_wa
     assert_eq!(
         record.monitors,
         [Monitor {
+            id: Arc::from("b615qv2gd"),
             description: Arc::from("ticks"),
-            command: true,
+            source: Source::Command,
             notice: Some(Notice {
                 end: End::Expired,
                 at: Some(Arc::from("2026-10-20T23:03:10.329Z")),
@@ -1058,8 +1059,48 @@ fn a_real_monitors_notice_of_expiry_is_kept_for_it_with_what_its_call_says_it_wa
         }
     });
     assert_eq!((record.pending.jobs, record.pending.noticed), (1, 1));
-    assert!(!record.monitors[0].command);
+    assert_eq!(record.monitors[0].source, Source::Socket);
     assert!(record.monitors[0].notice.is_some());
+}
+
+#[test]
+fn a_monitor_on_a_socket_whose_call_says_an_empty_command_beside_it_is_a_sockets() {
+    // Astraeus on 472b1d96: Claude Code 2.1.307 takes this call, whose one truthy source
+    // is the socket, and runs the socket; read as a command's, a look that found no
+    // command would end it while the socket watches on.
+    let source_of = |input: Value| {
+        read_to_the_expiry(|record| {
+            if let Some(parts) = record["message"]["content"].as_array_mut() {
+                for part in parts {
+                    if part["name"] == "Monitor" {
+                        part["input"] = input.clone();
+                    }
+                }
+            }
+        })
+        .monitors[0]
+            .source
+    };
+    assert_eq!(
+        source_of(
+            json!({"description":"feed","command":"","ws":{"url":"wss://example.org/events"},"timeout_ms":600000})
+        ),
+        Source::Socket
+    );
+    // A call with neither source that runs (an MCP server's monitor is armed so) watches
+    // no process of the window either.
+    for input in [
+        json!({ "description": "feed", "command": "" }),
+        json!({ "description": "feed", "command": null }),
+        json!({ "description": "feed", "command": 5 }),
+        json!({ "description": "feed" }),
+    ] {
+        assert_eq!(source_of(input.clone()), Source::Server, "{input}");
+    }
+    assert_eq!(
+        source_of(json!({ "description": "feed", "command": "tail -f log", "ws": null })),
+        Source::Command
+    );
 }
 
 #[test]

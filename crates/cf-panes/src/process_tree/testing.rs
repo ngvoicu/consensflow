@@ -103,6 +103,9 @@ pub(super) fn identity_of(table: &[Process], pid: i32) -> Identity {
 /// A made-up machine: the processes it has, and the signals sent to them and to groups.
 pub(super) struct Machine {
     processes: Vec<Process>,
+    /// Processes it has that no look can read (another user's): each by the number of
+    /// the process that started it, and its own.
+    unreadable: Vec<(i32, i32)>,
     sent: RefCell<Vec<(i32, i32)>>,
     sent_to_groups: RefCell<Vec<(i32, i32)>>,
 }
@@ -111,9 +114,16 @@ impl Machine {
     pub fn new(processes: Vec<Process>) -> Self {
         Self {
             processes,
+            unreadable: Vec::new(),
             sent: RefCell::default(),
             sent_to_groups: RefCell::default(),
         }
+    }
+
+    /// The machine, with a process `pid` that `parent` started and no look can read.
+    pub fn with_unreadable(mut self, parent: i32, pid: i32) -> Self {
+        self.unreadable.push((parent, pid));
+        self
     }
 
     /// The numbers of the groups sent `signal` whole, each once, in order of number.
@@ -165,6 +175,26 @@ impl System for Machine {
                 .borrow()
                 .iter()
                 .any(|(pid, signal)| u32::try_from(*pid) == Ok(key.pid) && *signal == libc::SIGKILL)
+    }
+
+    fn children(&self, pid: i32) -> io::Result<Vec<i32>> {
+        let unique = self
+            .processes
+            .iter()
+            .find(|process| process.identity.pid == pid)
+            .map(|process| process.identity.unique);
+        Ok(self
+            .processes
+            .iter()
+            .filter(|process| unique.is_some_and(|unique| process.parent == unique))
+            .map(|process| process.identity.pid)
+            .chain(
+                self.unreadable
+                    .iter()
+                    .filter(|(parent, _)| *parent == pid)
+                    .map(|(_, child)| *child),
+            )
+            .collect())
     }
 
     fn send(&self, to: Identity, signal: i32) -> io::Result<()> {

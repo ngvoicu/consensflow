@@ -19,10 +19,10 @@ use cf_bridge::local::{Bridge, BridgeBuilder, Subscription};
 use cf_bridge::BridgeError;
 use cf_engine::host::{EngineHost, Killed, OpenPane, Opened};
 use cf_engine::runtime::LocalWork;
-use cf_engine::seams::BackgroundWork;
+use cf_engine::seams::{BackgroundWork, CommandsSeen};
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::Role;
-use cf_proto::panes::{Commands, MarkRequest, PaneExit, Servers};
+use cf_proto::panes::{Commands, CommandsRequest, MarkRequest, PaneExit, Rest, Servers};
 use serde_json::{json, Map, Value};
 
 use crate::errors::contain_now;
@@ -116,16 +116,46 @@ impl BackgroundWork for BridgeHost {
         })
     }
 
-    fn commands<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<usize>> {
+    fn commands<'a>(&'a self, pane: &'a Pane, since: Option<u64>) -> Work<'a, CommandsSeen> {
+        let request = CommandsRequest {
+            id: pane.id.clone(),
+            generation: pane.generation,
+            since,
+        };
+        let sent = serde_json::to_value(&request)
+            .ok()
+            .map(|body| self.bridge.request("pane.commands", body, None));
+        Box::pin(async move {
+            match sent {
+                Some(sent) => commands_seen(sent.await.ok().as_ref()),
+                None => CommandsSeen::Unanswered,
+            }
+        })
+    }
+
+    fn rest<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<u64>> {
         let body = json!({ "id": pane.id, "generation": pane.generation });
-        let sent = self.bridge.request("pane.commands", body, None);
-        // A host that cannot tell them, does not answer or is older says nothing of them.
+        let sent = self.bridge.request("pane.rest", body, None);
+        // A host that keeps none, does not answer or is older keeps no rest.
         Box::pin(async move {
             let answer = sent.await.ok()?;
-            let commands: Commands =
-                serde_json::from_value(answer.get("commands")?.clone()).ok()?;
-            commands.map(|commands| commands.total)
+            let rest: Rest = serde_json::from_value(answer.get("rest")?.clone()).ok()?;
+            rest
         })
+    }
+}
+
+/// What `pane.commands`' answer says (none where no answer came): so many commands run,
+/// the host cannot tell them (`commands: null`), or nothing that is an answer (an older
+/// host's, which knows no such request, among it).
+fn commands_seen(answer: Option<&Value>) -> CommandsSeen {
+    let Some(commands) = answer.and_then(|answer| answer.get("commands")) else {
+        return CommandsSeen::Unanswered;
+    };
+    match serde_json::from_value::<Commands>(commands.clone()) {
+        Ok(Some(commands)) => CommandsSeen::Running(commands.total),
+        Ok(None) => CommandsSeen::Untold,
+        Err(_) => CommandsSeen::Unanswered,
     }
 }
 

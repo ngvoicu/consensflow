@@ -63,22 +63,36 @@ pub struct Record {
     pub monitors: Vec<Monitor>,
 }
 
-/// A monitor a turn armed that its harness has said no end of: what its agent called
-/// it, whether it watches a command (and not a socket, which no process of the window
-/// runs), and the notice of its end that came with no word of how it ended, where one
-/// did.
+/// A monitor a turn armed that its harness has said no end of: its task's id, what its
+/// agent called it, what it watches, and the notice of its end that came with no word
+/// of how it ended, where one did.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Monitor {
+    pub id: Arc<str>,
     pub description: Arc<str>,
-    pub command: bool,
+    pub source: Source,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<Notice>,
 }
 
-/// A harness's notice of a monitor's end, which says no status (Claude Code's: the
-/// line in `<event>` that a line of the watched command's could say too), and the time
-/// its record says it came, where it says one.
+/// What a monitor watches, as the call that armed it says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Source {
+    /// A command, which a process of the window runs: its call names one, not empty,
+    /// and no other source.
+    Command,
+    /// A socket (`ws`), which no process of the window runs.
+    Socket,
+    /// Neither, as an MCP server's monitor is: no process of the window to look for.
+    Server,
+}
+
+/// A notice of a monitor's end as the record reports it, not verified: the line in
+/// `<event>` with no status, which is Claude Code's own or a line of the watched
+/// command's that says the same, and the time its record says it came, where it says
+/// one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Notice {
@@ -86,16 +100,16 @@ pub struct Notice {
     pub at: Option<Arc<str>>,
 }
 
-/// How a monitor's notice says it ended.
+/// How a monitor's notice says it ended, which may be a command's line that says so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum End {
-    /// Its time ran out (`[Monitor expired after …]`, `[Monitor timed out …]`).
+    /// It says its time ran out (`[Monitor expired after …]`, `[Monitor timed out …]`).
     Expired,
-    /// The harness stopped it (`[Monitor stopped]`, `[Monitor stopped — too much output
+    /// It says it was stopped (`[Monitor stopped]`, `[Monitor stopped — too much output
     /// …]`).
     Stopped,
-    /// Its socket closed (`[WebSocket closed: …]`).
+    /// It says its socket closed (`[WebSocket closed: …]`).
     Closed,
 }
 
@@ -126,10 +140,11 @@ pub struct Pending {
     /// ended (a job its shell detached can outlive its window).
     #[serde(rename = "jobsRetired", skip_serializing_if = "is_none")]
     pub retired: usize,
-    /// The monitors among the jobs whose notice of their end came ([`Notice`]): pending all
-    /// the same, as a line of a watched command's could say it, but awake no more, as
-    /// where the notice is Claude Code's the monitor is over in Claude Code (T-181); what
-    /// runs in the window tells it of a command's ([`Record::monitors`] says which).
+    /// The monitors among the jobs that said they ended ([`Notice`]): pending all the same,
+    /// as a line of a watched command's could say it. Where the notice is Claude Code's
+    /// the monitor is over in Claude Code and wakes its agent no more (T-181); where it is
+    /// a command's line, the monitor watches on. What runs in the window tells which of a
+    /// command's ([`Record::monitors`] says which watch one).
     #[serde(rename = "monitorsNoticed", skip_serializing_if = "is_none")]
     pub noticed: usize,
 }
@@ -333,8 +348,9 @@ mod tests {
             noticed: 1,
         };
         pending.monitors = vec![Monitor {
+            id: Arc::from("b615qv2gd"),
             description: Arc::from("ticks"),
-            command: true,
+            source: Source::Command,
             notice: Some(Notice {
                 end: End::Expired,
                 at: Some(Arc::from("2026-10-21T23:03:10.329Z")),
@@ -342,7 +358,7 @@ mod tests {
         }];
         let written = serde_json::to_string(&Reading::Known(pending)).unwrap();
         assert!(
-            written.ends_with(r#""agentsPending":true,"jobsPending":1,"jobsRetired":3,"monitorsNoticed":1,"monitors":[{"description":"ticks","command":true,"notice":{"end":"expired","at":"2026-10-21T23:03:10.329Z"}}]}"#),
+            written.ends_with(r#""agentsPending":true,"jobsPending":1,"jobsRetired":3,"monitorsNoticed":1,"monitors":[{"id":"b615qv2gd","description":"ticks","source":"command","notice":{"end":"expired","at":"2026-10-21T23:03:10.329Z"}}]}"#),
             "{written}"
         );
         assert_eq!(

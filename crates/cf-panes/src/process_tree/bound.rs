@@ -64,6 +64,11 @@ pub(super) trait System {
     /// has taken its number does.
     fn runs(&self, key: ProcessKey) -> bool;
 
+    /// The numbers of the processes `pid` started that the system names now, whatever
+    /// of them [`System::processes`] can read: one of another user, or one that ended and
+    /// was not yet reaped, among them.
+    fn children(&self, pid: i32) -> io::Result<Vec<i32>>;
+
     /// Sends `signal` to the process `to` names, and to none that has taken its
     /// number: one that is gone is no error. Only [`Bound::signal`] calls it.
     fn send(&self, to: Identity, signal: i32) -> io::Result<()>;
@@ -86,6 +91,10 @@ impl System for Native {
             .ok()
             .and_then(native::process)
             .is_some_and(|process| key_of(process.identity) == key)
+    }
+
+    fn children(&self, pid: i32) -> io::Result<Vec<i32>> {
+        native::children(pid)
     }
 
     fn send(&self, to: Identity, signal: i32) -> io::Result<()> {

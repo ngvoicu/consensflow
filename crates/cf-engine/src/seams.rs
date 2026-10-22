@@ -218,10 +218,25 @@ pub trait BackgroundWork {
     /// work either, however late it began.
     fn mark<'a>(&'a self, pane: &'a Pane, servers: Servers, harness: &'a str) -> Work<'a, ()>;
 
-    /// How many commands of its harness `pane`'s tree runs now, where the host can tell
-    /// them (`pane.commands`): none where it cannot, or does not answer, which is no
-    /// "none run".
-    fn commands<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<usize>>;
+    /// How many commands of its harness `pane`'s tree runs now, less what ran at the rest
+    /// `since` (`pane.commands`), where the host can tell them ([`CommandsSeen`]).
+    fn commands<'a>(&'a self, pane: &'a Pane, since: Option<u64>) -> Work<'a, CommandsSeen>;
+
+    /// `pane` is at rest: the host keeps what its tree runs now, under the number answered,
+    /// for a look at its commands to leave out (`pane.rest`). None where it keeps none.
+    fn rest<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<u64>>;
+}
+
+/// What a look at the commands of a window's harness found (`pane.commands`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandsSeen {
+    /// So many run in the window.
+    Running(usize),
+    /// The host answered that it cannot tell them: a platform with no groups, a harness
+    /// that keeps its servers otherwise, or a process of the window it cannot read.
+    Untold,
+    /// The host did not answer, or answered what is no answer.
+    Unanswered,
 }
 
 /// Everything the engine is made with: each seam shared, so a second
