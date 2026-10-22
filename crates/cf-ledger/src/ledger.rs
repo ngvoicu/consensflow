@@ -23,6 +23,7 @@ use crate::model::LedgerError;
 use crate::names;
 use crate::schema::{migrate, MIGRATIONS};
 use crate::store::Store;
+use crate::tasks::note_stranded_waits;
 
 /// An event as it is logged: when, of which project, what kind, and its data.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,7 +72,9 @@ pub struct Ledger {
 /// messages of their own again (`messages::release_stranded`). The tasks of what
 /// was let go of, there or by migration 0019 (what rode in every carrier an
 /// earlier build began to paste), are reconciled once, by the first start after
-/// it that gets that far (`messages::reconcile_released`).
+/// it that gets that far (`messages::reconcile_released`). A task that waits
+/// for a cancelled one, which a cancel up to 3.0.5 left behind, is told to the
+/// chief once (`tasks::note_stranded_waits`).
 pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError> {
     let db = Connection::open(file)?;
     // SQLite's own default waits five seconds for a lock: a second instance
@@ -94,6 +97,7 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
     let mut store = Store::new(db, options.clock, options.names, options.trace);
     release_stranded(&mut store)?;
     reconcile_released(&mut store)?;
+    note_stranded_waits(&mut store)?;
     Ok(Ledger {
         store,
         #[cfg(feature = "test-support")]

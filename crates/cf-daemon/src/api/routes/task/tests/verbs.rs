@@ -1,5 +1,5 @@
-//! The verbs that move a task (`done`, `accept`, `reopen`, `cancel`, `pause`,
-//! `resume`, `tell`): the body before who may, who may, what the ledger is
+//! The verbs that move a task (`done`, `accept`, `reopen`, `edit`, `cancel`,
+//! `pause`, `resume`, `tell`): the body before who may, who may, what the ledger is
 //! asked and what it says, the wake-ups, and the view of the task a request
 //! acts on once its body is in. Where a test says what Node answered, it is
 //! what the real API answered the same request (the probe that printed those
@@ -8,7 +8,7 @@
 use hyper::Method;
 use serde_json::json;
 
-use super::{post, refused};
+use super::{get, post, refused};
 use crate::api::routes::tests::support::{
     open_task, read_while, state_of, through, with_body, working_task,
 };
@@ -20,7 +20,7 @@ async fn the_body_is_read_before_it_is_decided_who_may_do_what() {
     let number = working_task(&scene);
     let huge = "x".repeat(3 * 1024 * 1024);
     for verb in [
-        "done", "accept", "pause", "resume", "reopen", "cancel", "tell",
+        "done", "accept", "pause", "resume", "reopen", "edit", "cancel", "tell",
     ] {
         // zeus did not give the task and, but for `done`, is no one to move it.
         for (body, status, code) in [
@@ -43,7 +43,9 @@ async fn the_body_is_read_before_it_is_decided_who_may_do_what() {
 async fn a_window_that_is_no_coordinator_is_told_which_verb_it_may_not() {
     let scene = scene();
     let number = working_task(&scene);
-    for verb in ["accept", "pause", "resume", "reopen", "cancel", "tell"] {
+    for verb in [
+        "accept", "pause", "resume", "reopen", "edit", "cancel", "tell",
+    ] {
         let said = post(&scene, &scene.zeus, &format!("{number}/{verb}"), "{}").await;
         assert_eq!(
             refused(&said),
@@ -379,4 +381,50 @@ async fn the_one_who_may_move_a_task_is_decided_on_the_task_as_it_was_read() {
             format!("cannot record a result for T-{number}: it is cancelled").as_str()
         )
     );
+}
+
+#[tokio::test]
+async fn the_chief_replaces_the_brief_of_a_task_no_window_has_and_is_refused_for_one_that_does() {
+    let scene = scene();
+    let open = open_task(&scene);
+    // The new brief is asked for, and is words.
+    for body in ["{}", r#"{"body":5}"#, r#"{"body":"  "}"#] {
+        let said = post(&scene, &scene.chief, &format!("{open}/edit"), body).await;
+        assert_eq!(said.1["error"], "invalid-text", "{body}");
+    }
+    assert_eq!(scene.kicks.get(), 0);
+
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"body":"A new brief\nin two lines"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["title"], "A new brief");
+    assert_eq!(said["task"]["state"], "open");
+    assert_eq!(scene.kicks.get(), 1);
+    let (_, read) = get(&scene, &scene.chief, &open.to_string()).await;
+    assert_eq!(read["task"]["body"], "A new brief\nin two lines");
+
+    // A task its window has is told, never edited; nothing wakes.
+    let working = working_task(&scene);
+    let kicks = scene.kicks.get();
+    let said = post(
+        &scene,
+        &scene.chief,
+        &format!("{working}/edit"),
+        r#"{"body":"Another"}"#,
+    )
+    .await;
+    assert_eq!(
+        refused(&said),
+        (
+            409,
+            "already-given",
+            format!("cannot edit T-{working}: it was given to @zeus, which has the brief; tell its window: cf tell T-{working} \"…\"").as_str()
+        )
+    );
+    assert_eq!(scene.kicks.get(), kicks);
 }

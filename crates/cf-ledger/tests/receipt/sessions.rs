@@ -300,7 +300,13 @@ fn a_waiting_follow_up_paused_is_not_resumed_into_a_session_at_work_on_another()
         .expect("a follow-up")
         .task
         .number;
-    let first = at_work_on_a_follow_up(&mut w, a, "First");
+    // First is put before the one that waits, which the chief says: it goes now.
+    let first = w
+        .follow_up_before(a, "First", &[later])
+        .expect("a follow-up put before the waiting one");
+    w.deliver(first.message.expect("its brief").id);
+    let first = first.task.number;
+    assert_eq!(w.state(first), "working");
     w.pause(later);
     assert_eq!(w.state(later), "paused");
 

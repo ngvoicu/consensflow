@@ -9,7 +9,8 @@ use hyper::Method;
 use serde_json::{json, Value};
 
 use crate::api::routes::tests::support::{
-    api, finished_session_task, open_task, read_while, through, with_body, working_task,
+    api, finished_session_task, open_task, read_while, session_task_at_work, through, with_body,
+    working_task,
 };
 use crate::testing::{scene, Scene};
 
@@ -487,4 +488,35 @@ async fn a_follow_up_goes_back_to_the_session_that_did_the_task_whatever_the_spe
         );
         assert_eq!(scene.kicks.get(), 1);
     }
+}
+
+#[tokio::test]
+async fn a_follow_up_of_a_task_still_at_work_waits_for_it_and_is_not_queued_for_the_window() {
+    let scene = scene();
+    let working = session_task_at_work(&scene);
+    let body = format!(r#"{{"after":{working},"body":"Then the lexer"}}"#);
+    let (status, said) = post(&scene, &scene.chief, &body).await;
+    assert_eq!(status, 201, "{said}");
+    assert_eq!(said["task"]["state"], "open");
+    assert_eq!(said["task"]["blockedBy"], json!([working]));
+    assert!(
+        said["task"]["assignee"]
+            .as_str()
+            .unwrap()
+            .starts_with("zeus-"),
+        "{said}"
+    );
+    assert!(
+        said["message"].is_null(),
+        "nothing is queued for the window"
+    );
+
+    // A follow-up of the follow-up waits for it in turn.
+    let next = said["task"]["number"].as_i64().unwrap();
+    let body = format!(r#"{{"after":{next},"body":"And the docs"}}"#);
+    let (status, said) = post(&scene, &scene.chief, &body).await;
+    assert_eq!(
+        (status, said["task"]["blockedBy"].clone()),
+        (201, json!([next]))
+    );
 }
