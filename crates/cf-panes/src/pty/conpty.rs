@@ -16,7 +16,7 @@
 //! `app/src-tauri/src/portable.rs`), or else the system's own; the console is made with the
 //! flags portable-pty gives it; the program has none of the host's handles (its standard
 //! ones are none, and nothing is inherited); its environment is the command's whole, each
-//! value as the system keeps it, Unicode or not; its folder the command's (or the user's,
+//! value as the system keeps it, Unicode or not ([`environment`]); its folder the command's (or the user's,
 //! where that is no folder), and its command line is quoted as portable-pty quotes it.
 //!
 //! **The close.** Before Windows 11 24H2 a console that is closed waits for its host, and
@@ -24,12 +24,17 @@
 //! and unread waited for ever. So what is read of the output goes before the console does:
 //! a window that fails as it opens lets go of its reader before it is ended (`pty`), and the
 //! master closes its ends of the pipes before the console ([`Master`]); a window that opened
-//! has its output read to its end, whatever its close (`stream_output`).
+//! has its output read to its end, whatever its close (`stream_output`). And before 24H2 a
+//! console made to take its cursor from its terminal (`PSEUDOCONSOLE_INHERIT_CURSOR`) asks
+//! where the cursor is as it starts and reads its input until it is told: a window closed
+//! before its terminal answered waited for ever. A pane is a new window, whose cursor starts
+//! at the top left, so its console is not made to ask; and a pane lets go of its input
+//! before its console is closed (`pty`'s `Pane`), so a console that waits on its input is
+//! told it has ended.
 //!
 //! What is made answers portable-pty's own traits, so a pane holds its master and its
 //! child as it does on Unix.
 
-use std::collections::BTreeMap;
 use std::ffi::{c_void, OsStr, OsString};
 use std::fs::File;
 use std::io;
@@ -48,7 +53,7 @@ use windows_sys::core::HRESULT;
 use windows_sys::Win32::Foundation::{
     FreeLibrary, HANDLE, INVALID_HANDLE_VALUE, S_OK, WAIT_FAILED, WAIT_OBJECT_0,
 };
-use windows_sys::Win32::System::Console::{COORD, HPCON, PSEUDOCONSOLE_INHERIT_CURSOR};
+use windows_sys::Win32::System::Console::{COORD, HPCON};
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
@@ -60,10 +65,14 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use crate::job_object::JobObject;
+use environment::environment_block;
 
-/// The two flags portable-pty adds to the cursor it has the console inherit, which
+mod environment;
+
+/// The two flags portable-pty gives a console besides the cursor it has it inherit, which
 /// Windows' headers do not name: a resize that does not redraw what scrolled away, and
 /// the keys passed on as Windows' input records, which the window's input is written for.
+/// The cursor is not inherited here (the module's **The close**).
 const PSEUDOCONSOLE_RESIZE_QUIRK: u32 = 0x2;
 const PSEUDOCONSOLE_WIN32_INPUT_MODE: u32 = 0x4;
 
@@ -95,7 +104,7 @@ impl ConPty {
             }),
             master: Box::new(Master {
                 output: Output::new(output_read, &console),
-                input: Mutex::new(Some(input_write)),
+                input: Mutex::new(Some(Input::new(input_write, &console))),
                 size: Mutex::new(size),
                 console,
             }),
@@ -192,9 +201,7 @@ impl Console {
                 coord(size),
                 input.as_raw_handle(),
                 output.as_raw_handle(),
-                PSEUDOCONSOLE_INHERIT_CURSOR
-                    | PSEUDOCONSOLE_RESIZE_QUIRK
-                    | PSEUDOCONSOLE_WIN32_INPUT_MODE,
+                PSEUDOCONSOLE_RESIZE_QUIRK | PSEUDOCONSOLE_WIN32_INPUT_MODE,
                 &mut handle,
             )
         };
@@ -246,7 +253,7 @@ fn coord(size: PtySize) -> COORD {
 /// (portable-pty closed the console first.)
 struct Master {
     output: Output,
-    input: Mutex<Option<File>>,
+    input: Mutex<Option<Input>>,
     size: Mutex<PtySize>,
     console: Arc<Console>,
 }
@@ -286,6 +293,40 @@ impl io::Read for Output {
 impl Drop for Output {
     fn drop(&mut self) {
         closes::record(self.console, closes::Closed::Output);
+    }
+}
+
+/// The end of the console's input the window writes to.
+struct Input {
+    file: File,
+    #[cfg(test)]
+    console: u64,
+}
+
+impl Input {
+    fn new(file: File, _console: &Console) -> Self {
+        Self {
+            file,
+            #[cfg(test)]
+            console: _console.id,
+        }
+    }
+}
+
+impl io::Write for Input {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.file.write(bytes)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+}
+
+#[cfg(test)]
+impl Drop for Input {
+    fn drop(&mut self) {
+        closes::record(self.console, closes::Closed::Input);
     }
 }
 
@@ -341,9 +382,12 @@ fn spawn(command: &CommandBuilder, console: &Console, job: &JobObject) -> io::Re
     let application = whole(&program, "program")?;
     let mut line = command_line(&program, &argv[1..])?;
     let environment = environment_block(command);
-    let folder = folder_of(command)
-        .map(|folder| whole(folder.as_os_str(), "folder"))
-        .transpose()?;
+    // The folder asked for, before it is chosen: one cut at a NUL is no folder, and the
+    // program would start in another.
+    if let Some(asked) = command.get_cwd() {
+        whole(asked, "folder")?;
+    }
+    let folder = folder_of(command).map(|folder| wide(folder.as_os_str()));
 
     let jobs = [job.handle()];
     let mut attributes = Attributes::new(2)?;
@@ -666,50 +710,6 @@ fn append_quoted(argument: &OsStr, line: &mut Vec<u16>) {
     line.push(quote);
 }
 
-/// The command's whole environment, as `NAME=value` wide strings in the order
-/// portable-pty wrote them (by its key for each name: the name in lower case, or as it is
-/// where it is not Unicode), ended by an empty one, and by a second where there is none.
-///
-/// Each value is the command's own, as the system keeps it ([`CommandBuilder::get_env`]),
-/// Unicode or not. `CommandBuilder` lists only the names of its variables that are Unicode
-/// in name and value, so the names are its list and the host's own environment, which is
-/// where any other comes from: it starts from the host's, and what the frame or the
-/// registry adds is Unicode. A name the command took away has no value, and is left out.
-/// The one variable this cannot find is one whose name only the registry has (set after
-/// the user logged in) and whose value is not Unicode.
-fn environment_block(command: &CommandBuilder) -> Vec<u16> {
-    let key = |name: &OsStr| match name.to_str() {
-        Some(name) => OsString::from(name.to_lowercase()),
-        None => name.to_owned(),
-    };
-    let mut names: BTreeMap<OsString, OsString> = BTreeMap::new();
-    // The host's environment, which the command started from: what portable-pty read
-    // as it was made, read again for the names it does not list.
-    #[allow(clippy::disallowed_methods)]
-    for (name, _) in std::env::vars_os() {
-        names.insert(key(&name), name);
-    }
-    // The command's list says each name as the command holds it.
-    for (name, _) in command.iter_full_env_as_str() {
-        names.insert(key(OsStr::new(name)), OsString::from(name));
-    }
-    let mut block = Vec::new();
-    for name in names.values() {
-        let Some(value) = command.get_env(name) else {
-            continue;
-        };
-        block.extend(name.encode_wide());
-        block.push(u16::from(b'='));
-        block.extend(value.encode_wide());
-        block.push(0);
-    }
-    if block.is_empty() {
-        block.push(0);
-    }
-    block.push(0);
-    block
-}
-
 fn wide(text: &OsStr) -> Vec<u16> {
     text.encode_wide().chain(std::iter::once(0)).collect()
 }
@@ -734,6 +734,7 @@ pub(super) mod closes {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub(in crate::pty) enum Closed {
         Output,
+        Input,
         Console,
     }
 

@@ -22,6 +22,15 @@
 # pseudoconsole is let go; a NUL in the program's name is refused; an empty environment ends with
 # two NULs. Each has its case in `pty::conpty::tests`.
 #
+# Round 3 (Astraeus's re-check, T-173): a console that inherits its cursor asks where it is
+# as it starts and, before 24H2, reads its input until it is told, so a window closed before
+# its terminal answered waited for ever: the pane host's consoles no longer inherit their
+# cursor, and a pane lets go of its input before its master closes the console. The
+# environment's names are read from portable-pty's own serde form (`serde_support`), so a
+# variable only the builder holds (one the registry gained after the user logged in) with a
+# value that is not Unicode goes too; a form that cannot be read is said once in the pane
+# host's log. A folder with a NUL in its name is refused before the folder is chosen.
+#
 # **Where each is caught.** A plant whose name says `(Windows: zeewin)` is of code only Windows
 # compiles: a Mac runs no test of it, and reads it MISSED. Run them there:
 # `cargo xtask windows --host zeewin -- cargo xtask plants daemon "(Windows: zeewin)"`. The plant
@@ -105,7 +114,7 @@ file = "crates/cf-panes/src/pty/conpty.rs"
 find = """
 struct Master {
     output: Output,
-    input: Mutex<Option<File>>,
+    input: Mutex<Option<Input>>,
     size: Mutex<PtySize>,
     console: Arc<Console>,
 }"""
@@ -113,7 +122,7 @@ replace = """
 struct Master {
     console: Arc<Console>,
     output: Output,
-    input: Mutex<Option<File>>,
+    input: Mutex<Option<Input>>,
     size: Mutex<PtySize>,
 }"""
 
@@ -123,7 +132,7 @@ meant = "a_value_that_is_not_unicode_reaches_the_program_as_it_is"
 runs = ["panes-conpty"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty/conpty.rs"
+file = "crates/cf-panes/src/pty/conpty/environment.rs"
 find = "let Some(value) = command.get_env(name) else {"
 replace = "let Some(value) = command.get_env(name).filter(|value| value.to_str().is_some()) else {"
 
@@ -153,7 +162,7 @@ meant = "an_empty_environment_is_two_nuls"
 runs = ["panes-conpty"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty/conpty.rs"
+file = "crates/cf-panes/src/pty/conpty/environment.rs"
 find = """
     if block.is_empty() {
         block.push(0);
@@ -161,3 +170,67 @@ find = """
 """
 replace = """
 """
+
+[[plant]]
+name = "windows job (Windows: zeewin): the console inherits its cursor, and asks where it is"
+meant = "a_windows_console_does_not_ask_where_the_cursor_is"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = "                PSEUDOCONSOLE_RESIZE_QUIRK | PSEUDOCONSOLE_WIN32_INPUT_MODE,"
+replace = "                1 | PSEUDOCONSOLE_RESIZE_QUIRK | PSEUDOCONSOLE_WIN32_INPUT_MODE,"
+
+[[plant]]
+name = "windows job (Windows: zeewin): a pane closes its console before it lets go of its input"
+meant = "a_window_killed_as_it_opens_lets_go_of_its_input_before_its_console_and_closes_in_its_bound"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = """
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    master: Box<dyn MasterPty + Send>,
+"""
+replace = """
+    master: Box<dyn MasterPty + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+"""
+
+[[plant]]
+name = "windows job (Windows: zeewin): the environment's names are the builder's Unicode ones alone"
+meant = "a_variable_only_the_builder_holds_whose_value_is_not_unicode_is_passed_on"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty/environment.rs"
+find = "    block_of(command, names_of(command))"
+replace = """    block_of(
+        command,
+        Ok(command
+            .iter_full_env_as_str()
+            .map(|(name, _)| OsString::from(name))
+            .collect()),
+    )"""
+
+[[plant]]
+name = "windows job (Windows: zeewin): a form that cannot be read is said each time"
+meant = "a_form_that_cannot_be_read_is_said_once_and_its_unicode_variables_go"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty/environment.rs"
+find = """    if !said.get_or_insert_with(HashSet::new).insert(line.clone()) {
+        return;
+    }"""
+replace = """    said.get_or_insert_with(HashSet::new).insert(line.clone());"""
+
+[[plant]]
+name = "windows job (Windows: zeewin): a folder with a NUL in its name is let through"
+meant = "a_folder_with_a_nul_in_its_name_is_refused"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = """        whole(asked, "folder")?;"""
+replace = """        let _ = asked;"""

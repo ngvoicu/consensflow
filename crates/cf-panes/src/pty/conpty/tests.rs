@@ -24,8 +24,9 @@ use windows_sys::Win32::System::Threading::{
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 
 use super::closes::{self, Closed};
-use super::{environment_block, wide, Host, HOLD_STARTED};
-use crate::pty::conpty_test::{open, powershell, read_until, system};
+use super::environment::{block_of, environment_block, names_of, Unread, SAID};
+use super::{wide, Host, HOLD_STARTED};
+use crate::pty::conpty_test::{open, powershell, read_until, system, take};
 use crate::pty::{serial_pty_test, PaneEnvironment, PaneTable, WATCH_FAILS};
 
 /// How long the launcher's start is held once it has been made: where portable-pty's
@@ -52,6 +53,20 @@ impl Drop for Found {
             CloseHandle(self.0);
         }
     }
+}
+
+/// The process `pid`, held open.
+fn held(pid: u32) -> Found {
+    // SAFETY: the rights a look, a wait and an end need; closed by `Found`.
+    let handle = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE | PROCESS_TERMINATE,
+            0,
+            pid,
+        )
+    };
+    assert!(!handle.is_null(), "open the process {pid}");
+    Found(handle, pid)
 }
 
 /// The process `parent` started that runs `program`, held open, once there is one.
@@ -87,16 +102,7 @@ fn child_of(parent: u32, program: &str) -> Found {
         // SAFETY: the snapshot was opened above and is closed once.
         unsafe { CloseHandle(snapshot) };
         if let Some(pid) = found {
-            // SAFETY: the rights a look, a wait and an end need; closed by `Found`.
-            let handle = unsafe {
-                OpenProcess(
-                    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE | PROCESS_TERMINATE,
-                    0,
-                    pid,
-                )
-            };
-            assert!(!handle.is_null(), "open the child {pid}");
-            return Found(handle, pid);
+            return held(pid);
         }
         assert!(
             Instant::now() < deadline,
@@ -160,19 +166,33 @@ fn a_child_a_launcher_starts_at_once_is_the_jobs_and_the_close_ends_it() {
         .iter()
         .any(|member| member.key.pid == child.1);
 
-    table
-        .kill(&streamed.key)
-        .expect("close the launcher's window");
+    // The close ends the job, and waits for the launcher to be gone: one that is in no job
+    // is never ended, and the close waits on it for ever. So it is waited for in a bound,
+    // and the launcher and its child are ended after, whatever the close did.
+    let launcher = held(launched);
+    let (closing, key) = (Arc::clone(&table), streamed.key.clone());
+    let (sender, closed) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(closing.kill(&key).map_err(|error| error.to_string()));
+    });
+    let ended = closed
+        .recv_timeout(CLOSE_BOUND)
+        .map(|closed| closed.expect("close the launcher's window"))
+        .is_ok();
     let deadline = Instant::now() + Duration::from_secs(5);
     while child.runs() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
     let survived = child.runs();
-    drop(child);
+    drop((child, launcher));
+    if !ended {
+        let _ = closed.recv_timeout(CLOSE_BOUND);
+    }
     let _ = fs::remove_dir_all(&folder);
     assert!(
-        listed && !survived,
-        "the launcher's child: listed by the job {listed}, outlived the close {survived}"
+        listed && ended && !survived,
+        "the launcher's child: listed by the job {listed}, the close ended in its bound \
+         {ended}, the child outlived the close {survived}"
     );
 }
 
@@ -248,25 +268,69 @@ fn a_window_whose_exit_watcher_fails_lets_go_of_its_output_before_its_console_is
     );
     assert_eq!(
         closed(console),
-        [Closed::Output, Closed::Output, Closed::Console],
-        "the reader's and the master's ends of the output go before the console"
+        [
+            Closed::Output,
+            Closed::Input,
+            Closed::Output,
+            Closed::Console
+        ],
+        "the reader, the window's input and the master's end of the output go before the console"
     );
 }
 
-/// A window closed before the cursor query its console asks first is answered, with its
-/// output unread past a small backlog: the close ends in its bound.
+/// A window killed the moment it opens, its output unread past a small backlog, closes
+/// in its bound, and lets go of its input and its output before its console is closed.
+/// Before Windows 11 24H2 a console that waits on its input for an answer (the cursor
+/// query of one made to inherit its cursor) waited for ever on a close that left its
+/// input open. (dc3012bb closed the console before the window's input.)
 #[test]
-fn a_window_closed_before_its_cursor_query_is_answered_closes_in_its_bound() {
+fn a_window_killed_as_it_opens_lets_go_of_its_input_before_its_console_and_closes_in_its_bound() {
     let _pty_guard = serial_pty_test();
+    let console = closes::upcoming();
     let table = Arc::new(PaneTable::new());
     let (key, _output) = open(&table, &chatty(), &HashMap::new(), 64);
-    std::thread::sleep(Duration::from_secs(2));
     let closing = Arc::clone(&table);
-    within_the_bound(
-        "the close of a window whose cursor query was not answered",
-        move || closing.kill(&key).map_err(|error| error.to_string()),
-    )
+    within_the_bound("the close of a window killed as it opened", move || {
+        closing.kill(&key).map_err(|error| error.to_string())
+    })
     .expect("close the window");
+    let closed = closed(console);
+    let at = |what: Closed| closed.iter().position(|one| *one == what);
+    assert!(
+        at(Closed::Input) < at(Closed::Console) && at(Closed::Input).is_some(),
+        "the window's input goes before its console: {closed:?}"
+    );
+}
+
+/// A window's console does not ask where the cursor is: a pane is a new window, whose
+/// cursor starts at the top left, and a console that asks waits on its input until it is
+/// told, which a close before the answer made wait for ever before Windows 11 24H2.
+/// (dc3012bb's consoles asked, `ESC [ 6 n`, before the program could print.)
+#[test]
+fn a_windows_console_does_not_ask_where_the_cursor_is() {
+    let _pty_guard = serial_pty_test();
+    let table = Arc::new(PaneTable::new());
+    let (key, output) = open(
+        &table,
+        &powershell("Write-Output 'READY#'; Start-Sleep 1000"),
+        &HashMap::new(),
+        1 << 20,
+    );
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut seen = Vec::new();
+    while !String::from_utf8_lossy(&seen).contains("READY#") {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let chunk = output.recv_timeout(left).expect("the window's output");
+        seen.extend_from_slice(&chunk.bytes);
+        // Answered all the same, so that a console that asks goes on to the program's text.
+        take(&table, &key, &chunk);
+    }
+    let _ = table.kill(&key);
+    assert!(
+        !seen.windows(4).any(|bytes| bytes == b"\x1b[6n"),
+        "the console asked where the cursor is: {:?}",
+        String::from_utf8_lossy(&seen)
+    );
 }
 
 /// A variable of the host's whose value is not Unicode (a lone surrogate) reaches the
@@ -337,6 +401,35 @@ fn a_program_with_a_nul_in_its_name_is_refused() {
     );
 }
 
+/// A window asked to start in a folder with a NUL in its name is refused: the folder is
+/// no folder, and the program would start in the user's. (dc3012bb started it there.)
+#[test]
+fn a_folder_with_a_nul_in_its_name_is_refused() {
+    let _pty_guard = serial_pty_test();
+    let table = Arc::new(PaneTable::new());
+    let folder = std::env::temp_dir().join("cf-conpty\0folder");
+    let opened = table.open_streamed(
+        &folder,
+        &[system("cmd.exe")],
+        PaneEnvironment::new(&HashMap::new(), &[]),
+        size(),
+        1 << 20,
+    );
+    let refused = match opened {
+        Ok(streamed) => {
+            let _ = table.kill(&streamed.key);
+            None
+        }
+        Err(error) => Some(error.to_string()),
+    };
+    assert!(
+        refused
+            .as_deref()
+            .is_some_and(|error| error.contains("folder") && error.contains("NUL")),
+        "{refused:?}"
+    );
+}
+
 /// An environment with nothing in it is ended by two NULs, as Windows reads a block.
 /// (235547a0 wrote one.)
 #[test]
@@ -344,4 +437,96 @@ fn an_empty_environment_is_two_nuls() {
     let mut command = portable_pty::CommandBuilder::new("program");
     command.env_clear();
     assert_eq!(environment_block(&command), [0, 0]);
+}
+
+/// The units of `name=value` in `block`, where it has them.
+fn holds(block: &[u16], name: &str, value: &[u16]) -> bool {
+    let mut entry: Vec<u16> = name.encode_utf16().collect();
+    entry.push(u16::from(b'='));
+    entry.extend_from_slice(value);
+    entry.push(0);
+    block
+        .windows(entry.len())
+        .any(|window| window == entry.as_slice())
+}
+
+/// portable-pty 0.9's serde form, as the environment is read from it: an `OsString` is
+/// `{"Windows":[u16…]}`, and a builder's names are its map `envs`, each entry's in
+/// `preferred_key`, in the order of the builder's keys. A portable-pty that wrote another
+/// form fails here first.
+#[test]
+fn the_names_are_read_from_portable_ptys_serde_form() {
+    assert_eq!(
+        serde_json::to_value(OsString::from_wide(&[0xD800, u16::from(b'A')])).expect("form"),
+        serde_json::json!({ "Windows": [0xD800, 0x41] })
+    );
+    let mut command = portable_pty::CommandBuilder::new("program");
+    command.env_clear();
+    command.env("Zed", "1");
+    command.env("Cf_Lone", OsString::from_wide(&[0xD800]));
+    command.env("alpha", "2");
+    let names = names_of(&command).expect("the builder's form");
+    assert_eq!(
+        names,
+        ["alpha", "Cf_Lone", "Zed"].map(OsString::from),
+        "its names, by its keys"
+    );
+}
+
+/// A variable the builder holds and the host's process does not (as one the registry gained
+/// after the user logged in), whose value is not Unicode, is in the block as the builder has
+/// it. (dc3012bb found its names in the host's environment and the builder's list of
+/// Unicode ones, and left this one out.)
+#[test]
+fn a_variable_only_the_builder_holds_whose_value_is_not_unicode_is_passed_on() {
+    let value = [0xD800, u16::from(b'A')];
+    let mut command = portable_pty::CommandBuilder::new("program");
+    command.env("CF_ONLY_IN_THE_BUILDER", OsString::from_wide(&value));
+    #[allow(clippy::disallowed_methods)] // The host's environment, which has no such name.
+    let host_has_it = std::env::var_os("CF_ONLY_IN_THE_BUILDER").is_some();
+    assert!(!host_has_it);
+    assert!(holds(
+        &environment_block(&command),
+        "CF_ONLY_IN_THE_BUILDER",
+        &value
+    ));
+}
+
+/// Where the builder's form cannot be read, the variables it lists go, one whose value is
+/// not Unicode is left out, and the pane host's log says so once, never with a value.
+#[test]
+fn a_form_that_cannot_be_read_is_said_once_and_its_unicode_variables_go() {
+    let mut command = portable_pty::CommandBuilder::new("program");
+    command.env_clear();
+    command.env("CF_SAID", "plain");
+    command.env("CF_LONE", OsString::from_wide(&[0xD800, 0xD801]));
+    let unread = || Err(Unread("a form of another version".into()));
+    let first = block_of(&command, unread());
+    let second = block_of(&command, unread());
+    assert_eq!(first, second);
+    assert!(holds(
+        &first,
+        "CF_SAID",
+        &"plain".encode_utf16().collect::<Vec<_>>()
+    ));
+    assert!(!first.windows(2).any(|units| units == [0xD800, 0xD801]));
+    let said: Vec<String> = SAID
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .filter(|line| line.contains("a form of another version"))
+        .cloned()
+        .collect();
+    assert_eq!(said.len(), 1, "said once: {said:?}");
+}
+
+/// What is not portable-pty's builder has no `envs`, and is said so.
+#[test]
+fn a_form_with_no_envs_is_not_read() {
+    #[derive(serde::Serialize)]
+    struct Other {
+        args: Vec<String>,
+    }
+    let unread = names_of(&Other { args: vec![] }).expect_err("no envs");
+    assert!(unread.to_string().contains("envs"), "{unread}");
 }

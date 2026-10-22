@@ -256,8 +256,10 @@ fn advertise_terminal(
 }
 
 struct Pane {
-    master: Box<dyn MasterPty + Send>,
+    /// Before the master, so that the terminal's input is let go before the master closes
+    /// it: on Windows a console that waits on its input is then told it has ended (`conpty`).
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
     process_group_id: Option<i32>,
     #[cfg(target_os = "macos")]
@@ -1350,7 +1352,8 @@ pub(crate) mod conpty_test {
     /// Everything the pane printed until `needle`, acknowledged as read.
     /// ConPTY wraps the child's text in its own escape sequences, and its
     /// output does not end when the child does, so a test reads for text. It
-    /// also opens by asking where the cursor is and holds the child's output
+    /// may open by asking where the cursor is (a console made to inherit its cursor does;
+    /// the pane host's are not) and hold the child's output
     /// until a terminal answers; the page's xterm does, and so does this.
     pub fn read_until(
         table: &PaneTable,
