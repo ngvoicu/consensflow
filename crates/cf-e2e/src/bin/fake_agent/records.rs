@@ -97,6 +97,11 @@ impl Records {
 
     /// The number the next record's message id is made with: of the record
     /// last written, as the records of a turn have always been numbered.
+    /// The conversation's transcript.
+    pub fn transcript(&self) -> &Path {
+        &self.transcript
+    }
+
     pub fn ordinal(&self) -> u64 {
         self.ordinal
     }

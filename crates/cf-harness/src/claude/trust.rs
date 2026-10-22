@@ -18,18 +18,18 @@ const YES: &str = "Yes, I trust this folder";
 const NO: &str = "No, exit";
 
 /// The key toward a yes where `screen` shows the question: Enter once the `❯` is
-/// on the yes, Down until then.
+/// on the yes, Down while it is on the no. The question is its two choices with the
+/// `❯` on one of them: a screen that only names them (a message that quotes the
+/// question) asks nothing, and one drawn halfway is read again at the next look.
 pub(crate) fn toward_trust(screen: &[String]) -> Option<&'static [u8]> {
     if !(shows(screen, YES) && shows(screen, NO)) {
         return None;
     }
-    Some(
-        if chosen(screen, '❯').is_some_and(|choice| choice.ends_with(YES)) {
-            ENTER
-        } else {
-            DOWN
-        },
-    )
+    match chosen(screen, '❯') {
+        Some(choice) if choice.ends_with(YES) => Some(ENTER),
+        Some(choice) if choice.ends_with(NO) => Some(DOWN),
+        _ => None,
+    }
 }
 
 /// Whether `screen` is Claude's prompt, as ConsensFlow opens its windows: the
@@ -71,6 +71,17 @@ mod tests {
         let asked = lines(" Quick safety check\n ❯ No, exit\n   Yes, I trust this folder");
         assert!(!shows_prompt(&asked));
         assert!(!shows_prompt(&lines(" Accessing workspace:\n /work")));
+    }
+
+    #[test]
+    fn a_message_that_quotes_the_question_asks_nothing() {
+        // A conversation about this very dialog, as a resumed window shows it.
+        let quoted = lines(" ⏺ Claude asks whether you trust the folder: it offers \"No, exit\" and\n   \"Yes, I trust this folder\", the cursor on the first.\n ❯ \n   ⏵⏵ bypass permissions on (shift+tab to cycle)");
+        assert_eq!(toward_trust(&quoted), None);
+        assert!(shows_prompt(&quoted));
+        // The cursor on neither choice: drawn halfway, read again at the next look.
+        let halfway = lines(" Quick safety check\n   No, exit\n   Yes, I trust this folder");
+        assert_eq!(toward_trust(&halfway), None);
     }
 
     #[test]
