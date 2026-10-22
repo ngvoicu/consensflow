@@ -325,8 +325,12 @@ async fn run(
     let zone = records::machine_zone();
     let records = Rc::new(DaemonRecords::new(
         Rc::new(
-            Thread::new(env.clone(), zone.clone(), Rc::clone(&time) as _)
-                .map_err(|failed| StartError::System(failed.to_string()))?,
+            Thread::new(env.clone(), zone.clone(), Rc::clone(&time) as _, {
+                // What a reader passes over, said on the records' own thread.
+                let said = Log::new(&home);
+                Box::new(move |line| said.warn(line, None))
+            })
+            .map_err(|failed| StartError::System(failed.to_string()))?,
         ),
         Rc::clone(&spawn),
     ));

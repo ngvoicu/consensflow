@@ -132,6 +132,20 @@ impl Records {
                 }),
             )?;
         }
+        let record = self.record(pid, fields);
+        write_line(&mut self.open()?, &record)
+    }
+
+    /// Writes the first half of a record and no more, as a short write leaves one
+    /// (a full disk, a process killed in a large write): the next record's append
+    /// makes one line of it and itself, which is not JSON, for good.
+    pub fn cut_short(&mut self, pid: u32, fields: Value) -> io::Result<()> {
+        let line = self.record(pid, fields).to_string();
+        self.open()?.write_all(&line.as_bytes()[..line.len() / 2])
+    }
+
+    /// The record `fields` make, numbered as the next.
+    fn record(&mut self, pid: u32, fields: Value) -> Value {
         self.ordinal += 1;
         self.said |= fields["type"] == "user";
         let mut record = Map::new();
@@ -150,12 +164,16 @@ impl Records {
         if let Value::Object(fields) = fields {
             record.extend(fields);
         }
+        Value::Object(record)
+    }
+
+    /// The transcript, open to be appended to.
+    fn open(&self) -> io::Result<fs::File> {
         make_folder_of(&self.transcript)?;
-        let mut file = OpenOptions::new()
+        OpenOptions::new()
             .append(true)
             .create(true)
-            .open(&self.transcript)?;
-        write_line(&mut file, &Value::Object(record))
+            .open(&self.transcript)
     }
 
     /// Writes the status the window is in: `idle` or `busy`.
@@ -349,6 +367,36 @@ mod tests {
 
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
+        }
+    }
+
+    #[test]
+    fn a_record_cut_short_and_the_next_appended_to_it_are_one_line_that_is_not_json() {
+        let config = tempfile::tempdir().unwrap();
+        let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
+        let said =
+            |text: &str| json!({ "type": "user", "message": { "role": "user", "content": text } });
+        records.append(4242, said("before")).unwrap();
+        records
+            .cut_short(4242, json!({ "type": "assistant" }))
+            .unwrap();
+        let written = config.path().join("projects/integration/sess-1.jsonl");
+        assert!(
+            !fs::read_to_string(&written).unwrap().ends_with('\n'),
+            "half a line"
+        );
+        records.append(4242, said("next")).unwrap();
+        records.append(4242, said("after")).unwrap();
+        let text = fs::read_to_string(&written).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(
+            serde_json::from_str::<Value>(lines[1]).is_err(),
+            "{}",
+            lines[1]
+        );
+        for whole in [lines[0], lines[2]] {
+            serde_json::from_str::<Value>(whole).unwrap();
         }
     }
 

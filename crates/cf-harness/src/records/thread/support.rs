@@ -195,7 +195,7 @@ fn opens(script: &Arc<Script>) -> impl Fn() -> Open + Send + Sync + 'static {
 /// test moves.
 pub(super) fn scripted_with(script: &Arc<Script>, time: &Rc<ManualTime>, queue: usize) -> Thread {
     let time: Rc<dyn Time> = Rc::clone(time) as Rc<dyn Time>;
-    Thread::start(Env::default(), time, queue, opens(script)).unwrap()
+    Thread::start(Env::default(), time, queue, opens(script), Box::new(|_| {})).unwrap()
 }
 
 pub(super) fn scripted(script: &Arc<Script>, time: &Rc<ManualTime>) -> Thread {

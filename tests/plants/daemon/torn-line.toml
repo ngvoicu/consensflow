@@ -1,0 +1,122 @@
+# A line of a harness's record torn for good (T-187, T-213, T-223, 2026-10-22): a short write
+# leaves part of a record and the next append makes one line of it and itself, which is not JSON.
+# The reader failed every look at the record from then on, as Node's did, and the engine read
+# nothing more of the conversation: no delivery confirmed, no turn's end, no result, no copy. The
+# rules (crates/cf-harness/src/shared/record/jsonl.rs): a torn line is passed over once a record
+# follows it, and said once in the daemon's log by its file and record; one with nothing after it
+# waits, the records before it read, for TORN_WAIT_MS, and is then passed over; an unterminated
+# last line waits, whatever it holds. The cases are the reader's own
+# (`shared::record::jsonl::tests`, `shared::record::followed::tests`) and the rig's
+# `crates/cf-e2e/tests/regressions/a_torn_record_line_hid_the_rest_of_a_conversation.rs`, which
+# builds the native `cf` from the sources as planted, so its plants say `builds`. Every name
+# begins `torn line`, so `npm run plants:daemon -- "torn line"` runs them all.
+
+[run]
+rig-regression-torn-line = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_torn_record_line_hid_the_rest_of_a_conversation::"], builds = true }
+harness-record-shared = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::"]
+
+[[plant]]
+name = "torn line: a torn line fails the look, as Node's did, and the worker's task is never done"
+meant = "a_worker_whose_record_tore_a_line_is_read_past_it_its_results_taken_and_its_conversation_copied"
+runs = ["rig-regression-torn-line"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = "        Err(_) => Ok(Line::Torn),\n"
+replace = "        Err(_) => Err(Stop::Failed(format!(\"malformed JSONL at record {index}\"))),\n"
+
+[[plant]]
+name = "torn line: the reader fails the look at a torn line with records after it"
+meant = "a_torn_line_with_records_after_it_is_passed_over_once_and_they_are_read"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = "        Err(_) => Ok(Line::Torn),\n"
+replace = "        Err(_) => Err(Stop::Failed(format!(\"malformed JSONL at record {index}\"))),\n"
+
+[[plant]]
+name = "torn line: a torn last line with nothing after it waits for good"
+meant = "a_torn_last_line_with_nothing_after_it_is_passed_over_once_its_wait_is_over"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = ".is_some_and(|since| looked_ms.saturating_sub(since) >= TORN_WAIT_MS)"
+replace = ".is_some_and(|_| false)"
+
+[[plant]]
+name = "torn line: a quiet record whose torn line's wait is over is taken as unchanged"
+meant = "a_torn_last_line_with_nothing_after_it_is_passed_over_once_its_wait_is_over"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = " && done_waiting.is_none();"
+replace = ";"
+
+[[plant]]
+name = "torn line: a torn line's wait starts again at each look that reads it"
+meant = "a_torn_last_line_with_nothing_after_it_is_passed_over_once_its_wait_is_over"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = "Some(seen) if seen.offset == offset => seen.torn_since.unwrap_or(looked_ms),"
+replace = "Some(_) => looked_ms,"
+
+[[plant]]
+name = "torn line: an unterminated last line that cannot become JSON fails the look"
+meant = "a_last_line_that_cannot_become_json_waits_for_its_newline_and_fails_nothing"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''            // next is being written into. Either waits for its newline.
+            Err(_) => {}'''
+replace = '''            // next is being written into. Either waits for its newline.
+            Err(_) => return Err(Stop::Failed(format!("malformed JSONL at record {records}"))),'''
+
+[[plant]]
+name = "torn line: a torn line is said again each time its record is read from the start"
+meant = "a_torn_line_with_records_after_it_is_passed_over_once_and_they_are_read"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/torn.rs"
+find = "if saying.said.insert((file.to_owned(), at)) {"
+replace = "if saying.said.insert((file.to_owned(), at)) || at > 0 {"
+
+[[plant]]
+name = "torn line: the daemon's log is never told of a torn line passed over"
+meant = "a_worker_whose_record_tore_a_line_is_read_past_it_its_results_taken_and_its_conversation_copied"
+runs = ["rig-regression-torn-line"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = "                Box::new(move |line| said.warn(line, None))"
+replace = "                Box::new(move |line| drop((&said, line)))"
+
+[[plant]]
+name = "torn line: the stand-in's TORN writes its record whole, and the case tears nothing"
+meant = "a_worker_whose_record_tore_a_line_is_read_past_it_its_results_taken_and_its_conversation_copied"
+runs = ["rig-regression-torn-line"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/records.rs"
+find = "self.open()?.write_all(&line.as_bytes()[..line.len() / 2])"
+replace = "self.open()?.write_all(format!(\"{line}\\n\").as_bytes())"
+
+[[plant]]
+name = "torn line: the records thread's readers are told nowhere to say a torn line"
+meant = "a_worker_whose_record_tore_a_line_is_read_past_it_its_results_taken_and_its_conversation_copied"
+runs = ["rig-regression-torn-line"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/records/thread.rs"
+find = "                say_with(say);\n"
+replace = "                drop(say);\n"

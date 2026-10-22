@@ -36,6 +36,10 @@
 //! and, as the line says, the command with it or not. A turn that runs a build
 //! (`BUILD`, in `build`) waits for it as for a command, and the build leaves a
 //! daemon running, as Gradle's does: the program is the build too (`--build`).
+//! A message with a line `TORN <words>` tears its record as it works, as a short
+//! write does: the first half of the record of a tool it runs, a moment, and the
+//! tool's result appended to it, one line that is not JSON for good; then it
+//! answers the message as it would have.
 //! `/compact` typed alone compacts the conversation as Claude Code 2.1.303 does
 //! while idle: the bare command as it is typed, its boundary and its summary, then
 //! the command's own records and what it printed, in the record, and no turn; with
@@ -94,7 +98,7 @@ use regex::Regex;
 use serde_json::json;
 
 use agents::Agents;
-use background::{Jobs, Server};
+use background::{Jobs, Server, THINKING};
 use records::{note_process, Records, INTERRUPTED};
 use reply::{is_session_of, reply_to, Reply, Window};
 use stop::Stop;
@@ -107,6 +111,10 @@ const NO_LOGIN: &str =
 
 /// What a window the provider refuses says, in the record Claude writes for it.
 const LIMIT: &str = "You've hit your limit. Resets in 2 hours.";
+
+/// How long a torn record's half stays unfinished before the next record is
+/// appended to it: two of the daemon's looks.
+const SHORT_WRITE: Duration = Duration::from_secs(2);
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -486,6 +494,9 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
         }
         records.status(pid, "busy").map_err(failed)?;
     }
+    if text.lines().any(|line| line.starts_with("TORN ")) {
+        tear(records, pid, window).map_err(failed)?;
+    }
     let reply = match tool::reply(text, window).or_else(|| build::reply(text, window)) {
         Some(reply) => reply?,
         None => reply_to(text, window)?,
@@ -581,6 +592,32 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
         "idle"
     };
     records.status(pid, status).map_err(failed)
+}
+
+/// A record torn as a short write tears it: the first half of the assistant's
+/// call of a tool, and once a moment has passed the tool's result appended to it.
+fn tear(records: &mut Records, pid: u32, window: &Window) -> io::Result<()> {
+    thread::sleep(THINKING);
+    let tool = format!("{}-torn-{pid}", window.session);
+    records.cut_short(
+        pid,
+        json!({
+            "type": "assistant",
+            "message": {
+                "id": format!("{tool}-message"),
+                "role": "assistant",
+                "content": [{ "type": "tool_use", "id": tool, "name": "Bash", "input": { "command": "true" } }],
+            },
+        }),
+    )?;
+    thread::sleep(SHORT_WRITE);
+    records.append(
+        pid,
+        json!({
+            "type": "user",
+            "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": tool, "content": "" }] },
+        }),
+    )
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 use super::*;
 use crate::testing::{EPOCH_MS, LONG_AFTER_MS};
 use std::fs;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 /// Every record a look visits, with its place, the look long after the file was
@@ -160,28 +161,185 @@ fn a_whole_unterminated_record_is_visited_once_and_an_unfinished_one_waits() {
     assert_eq!(visited, [(serde_json::json!({ "a": 3 }), 2)]);
 }
 
+/// What the readers on this thread say they passed over, from now on.
+fn said() -> Arc<Mutex<Vec<String>>> {
+    let said = Arc::new(Mutex::new(Vec::new()));
+    let saying = Arc::clone(&said);
+    torn::say_with(Box::new(move |line| {
+        saying.lock().unwrap().push(line.to_owned());
+    }));
+    said
+}
+
+/// The line a look says of the torn line at `byte` of `file`, where the record `index` is.
+fn passed_over(file: &Path, index: usize, byte: u64) -> String {
+    format!(
+        "passed over a torn line of {}: not JSON, at record {index} (byte {byte})",
+        file.display()
+    )
+}
+
+/// Appends `text` to `file`, last written at `ms` after the epoch.
+fn append(file: &Path, text: &str, ms: u64) {
+    let mut appended = fs::OpenOptions::new().append(true).open(file).unwrap();
+    std::io::Write::write_all(&mut appended, text.as_bytes()).unwrap();
+    drop(appended);
+    stamp(file, ms);
+}
+
+/// A record a short write cut, and the next one, which its append makes one line with.
+const CUT: &str = "{\"type\":\"assistant\",\"text\":\"cut sh";
+const NEXT: &str = "{\"type\":\"user\",\"n\":2}\n";
+
 #[test]
-fn a_malformed_line_fails_with_its_place_and_so_does_a_last_line_that_cannot_become_json() {
+fn a_torn_line_with_records_after_it_is_passed_over_once_and_they_are_read() {
+    // A short write left part of a record, and the next append made one line of
+    // it and itself; the harness went on writing after it.
+    let said = said();
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("t.jsonl");
-    fs::write(&file, "{\"a\":1}\n{\"malformed\":\n{\"a\":2}\n").unwrap();
+    fs::write(
+        &file,
+        format!("{{\"a\":0}}\n{CUT}{NEXT}{{\"a\":3}}\n{{\"a\":4}}\n"),
+    )
+    .unwrap();
+    for _ in 0..2 {
+        let (looked, visited) = collect(&file, None, None);
+        assert_eq!(
+            visited,
+            [
+                (serde_json::json!({ "a": 0 }), 0),
+                (serde_json::json!({ "a": 3 }), 1),
+                (serde_json::json!({ "a": 4 }), 2),
+            ]
+        );
+        let seen = read(looked);
+        assert_eq!((seen.records, seen.torn_since), (3, None));
+    }
     assert_eq!(
-        collect(&file, None, None).0.unwrap_err().reason(),
-        "malformed JSONL at record 1"
+        *said.lock().unwrap(),
+        [passed_over(&file, 1, 8)],
+        "said once, by its file and its place, and read again from the start not said again"
     );
+}
+
+#[test]
+fn a_torn_last_line_waits_with_what_is_before_it_read_until_a_record_comes_after_it() {
+    let said = said();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    // The short write: an unfinished last line, which waits.
+    fs::write(&file, format!("{{\"a\":0}}\n{CUT}")).unwrap();
+    stamp(&file, 1_000);
+    let (looked, visited) = collect(&file, None, None);
+    assert_eq!(visited, [(serde_json::json!({ "a": 0 }), 0)]);
+    let seen = read(looked);
+    // The next append makes it a whole line that is not JSON: it waits, and fails nothing.
+    append(&file, NEXT, 2_000);
+    let (looked, visited) = collect(&file, Some(&seen), None);
+    assert!(visited.is_empty());
+    let seen = read(looked);
+    assert_eq!((seen.offset, seen.torn_since), (8, Some(LONG_AFTER_MS)));
+    assert!(said.lock().unwrap().is_empty(), "nothing passed over yet");
+    // A record after it: passed over, and the record read in its place.
+    append(&file, "{\"a\":3}\n", 3_000);
+    let (looked, visited) = collect(&file, Some(&seen), None);
+    assert_eq!(visited, [(serde_json::json!({ "a": 3 }), 1)]);
+    assert_eq!(read(looked).torn_since, None);
+    assert_eq!(*said.lock().unwrap(), [passed_over(&file, 1, 8)]);
+}
+
+#[test]
+fn a_torn_last_line_with_nothing_after_it_is_passed_over_once_its_wait_is_over() {
+    // A window that tore its last line and went quiet.
+    let said = said();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    fs::write(&file, format!("{{\"a\":0}}\n{CUT}{NEXT}")).unwrap();
+    stamp(&file, 1_000);
+    let found = EPOCH_MS;
+    let (looked, visited) = collect_at(&file, None, found, None);
+    assert_eq!(visited.len(), 1);
+    let seen = read(looked);
+    assert_eq!(seen.torn_since, Some(found));
+    // The start of a record after it is no record yet: it waits on, from when it was found.
+    append(&file, "{\"a\":", 2_000);
+    let (looked, visited) = collect_at(&file, Some(&seen), found + 1_000, None);
+    assert!(visited.is_empty());
+    let seen = read(looked);
+    assert_eq!(seen.torn_since, Some(found));
+    // Not yet: the file as it was, and nothing read.
+    let (looked, _) = collect_at(&file, Some(&seen), found + TORN_WAIT_MS - 1, None);
+    assert!(matches!(looked, Ok(Looked::Unchanged)));
+    assert!(said.lock().unwrap().is_empty());
+    // Its wait over, the file unchanged: passed over, and said.
+    let (looked, visited) = collect_at(&file, Some(&seen), found + TORN_WAIT_MS, None);
+    assert!(visited.is_empty());
+    let seen = read(looked);
+    let after = 8 + CUT.len() + NEXT.len();
+    assert_eq!((seen.offset, seen.torn_since), (after as u64, None));
+    assert_eq!(*said.lock().unwrap(), [passed_over(&file, 1, 8)]);
+    let (looked, _) = collect_at(&file, Some(&seen), found + TORN_WAIT_MS + 1, None);
+    assert!(matches!(looked, Ok(Looked::Unchanged)));
+    // What the window writes later is read on from there.
+    append(&file, "3}\n", 3_000);
+    let (_, visited) = collect_at(&file, Some(&seen), found + TORN_WAIT_MS + 2, None);
+    assert_eq!(visited, [(serde_json::json!({ "a": 3 }), 1)]);
+    assert_eq!(said.lock().unwrap().len(), 1, "said once");
+}
+
+#[test]
+fn a_record_written_in_pieces_waits_and_is_read_whole_once_and_nothing_is_passed_over() {
+    // A writer that writes a line in pieces is no short write: each piece is the
+    // start of the record, and its newline comes last, a piece of its own or not.
+    let said = said();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let record = "{\"type\":\"assistant\",\"text\":\"a \\\"quoted\\\" {brace} [line]\",\"n\":[1,2.5,{\"k\":null}]}";
+    let whole: Value = serde_json::from_str(record).unwrap();
+    for piece in [1, 3, 7, 40, record.len()] {
+        fs::write(&file, "{\"a\":0}\n").unwrap();
+        stamp(&file, 1_000);
+        let (looked, _) = collect(&file, None, None);
+        let mut seen = read(looked);
+        let mut records = Vec::new();
+        let mut written = 1_000;
+        let line = format!("{record}\n");
+        for bytes in line.as_bytes().chunks(piece) {
+            written += 1;
+            append(&file, std::str::from_utf8(bytes).unwrap(), written);
+            let (looked, visited) = collect(&file, Some(&seen), None);
+            records.extend(visited);
+            match looked {
+                Ok(Looked::Read(next) | Looked::Held(next)) => seen = next,
+                other => panic!("pieces of {piece}: {other:?}"),
+            }
+            assert_eq!(seen.torn_since, None, "pieces of {piece}");
+        }
+        assert_eq!(records, [(whole.clone(), 1)], "pieces of {piece}");
+    }
+    assert!(said.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_last_line_that_cannot_become_json_waits_for_its_newline_and_fails_nothing() {
+    // A torn line the next append is still being written into.
+    let said = said();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
     for last in [
         "definitely-not-json",
         "{\"type\":!}",
         "\u{a0}",
         "{\"type\":\u{b}",
+        "{\"type\":\"assi{\"type\":\"us",
     ] {
         fs::write(&file, format!("{{\"a\":1}}\n{last}")).unwrap();
-        assert_eq!(
-            collect(&file, None, None).0.unwrap_err().reason(),
-            "malformed JSONL at record 1",
-            "{last:?}"
-        );
+        let (looked, visited) = collect(&file, None, None);
+        assert_eq!(visited.len(), 1, "{last:?}");
+        assert_eq!(read(looked).torn_since, None, "{last:?}: no whole line yet");
     }
+    assert!(said.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -405,7 +563,6 @@ fn json_this_build_cannot_hold_fails_its_look_in_a_sentence_of_its_own() {
             "JSON this build cannot hold at record 1",
         ),
         (deep, "JSON this build cannot hold at record 1"),
-        ("{bad}".to_owned(), "malformed JSONL at record 1"),
     ] {
         for ended in ["\n", ""] {
             fs::write(&file, format!("{{\"a\":1}}\n{line}{ended}")).unwrap();

@@ -106,11 +106,48 @@ fn every_look_node_took_reads_through_the_switch_what_node_read() {
     let ours = our_reasons();
     let mut answered = 0;
     let mut played = 0;
+    let mut departed = Vec::new();
     for group in GROUPS {
         for scenario in scenarios(group) {
-            answered += play::play(&scenario, &ours);
+            let play = play::play(&scenario, &ours);
+            answered += play.answered;
+            departed.extend(play.departed);
             played += 1;
         }
     }
     assert_eq!((played, answered), (399, 1510));
+    // Node failed these looks at a torn line, which this build passes over
+    // (T-223): each reads the records around it. A record of nothing but a
+    // torn line reads as one with no records, and fails all the same.
+    let appended = [
+        r#"\ndefinitely-not-json"#,
+        r#"\n{\"type\":!}"#,
+        r#"\n\u000b"#,
+        r#"\n{\"type\":\u000b"#,
+        "\\n\u{a0}",
+        "\\n{\\\"type\\\":\u{a0}",
+        r#"\n\f"#,
+        r#"\n{\"type\":\f"#,
+    ];
+    let grows = "codex: a whole unterminated last record that then grows into something else is read again, step 6";
+    let mut expected: Vec<(String, String)> = [
+        format!("{grows}, cached"),
+        format!("{grows}, fresh"),
+    ]
+    .into_iter()
+    .chain(appended.iter().map(|last| {
+        format!(
+            r#"JSONL streams tolerate only an incomplete final append: "{last}", step 2, fresh"#
+        )
+    }))
+    .chain([
+        "JSONL: a malformed whole line fails closed, naming its record, step 2, fresh".to_owned(),
+    ])
+    .map(|look| (look, "2 items".to_owned()))
+    .collect();
+    expected.push((
+        "readable corrupted storage fails closed, step 2, fresh".to_owned(),
+        "unreadable: empty codex rollout for corrupt".to_owned(),
+    ));
+    assert_eq!(departed, expected);
 }

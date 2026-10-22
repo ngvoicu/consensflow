@@ -4,7 +4,9 @@
 //! replaced is read again from its start. One rewritten in place before its
 //! last kilobyte, that kilobyte and its unterminated last line kept, is not
 //! seen to change, as Node did not see it either. A final unterminated JSONL
-//! append may be incomplete; a malformed whole line fails the look.
+//! append may be incomplete; a whole line that is not JSON is torn, and passed
+//! over once a record follows it or its wait is over, where Node failed the
+//! look (`shared::record::jsonl`).
 //!
 //! Each harness's reader is in its own module, and [`reader`] is the switch
 //! between them. The readers kept from look to look are a [`Cache`], which
@@ -29,6 +31,7 @@ mod thread;
 pub use crate::shared::quota::{Level, Quota};
 pub use crate::shared::record::cache::{Cache, Look, Open, Options, PiSettlement, IDLE_MS};
 pub use crate::shared::record::reading::{Item, Reading, Record, Role, Settlement};
+pub use crate::shared::record::torn::Say;
 pub use thread::Thread;
 
 /// The reader of the conversation `session` in `harness`'s record, in the
