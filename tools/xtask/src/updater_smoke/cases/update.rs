@@ -137,7 +137,7 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
                 .join("\n")
         );
         kase.note(format!(
-            "the app started again holds nothing of the installed app's: fds {} and {} it was left, and none of its sockets or pipes",
+            "the app started again holds nothing of the installed app's: neither the file it was left at fd {1} nor the pipe at fd {0}, which no process holds, and nothing it could not mark",
             left.pipe, left.file_fd
         ));
     }
