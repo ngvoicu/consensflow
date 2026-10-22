@@ -399,7 +399,7 @@ find = "        self.env = Env::from_vars(kept.into_iter().chain(given));"
 replace = "        let _ = given;\n        self.env = Env::from_vars(kept);"
 
 # The round of T-226 (Calliope's check T-214): a plant run keeps its folder when a plant was not
-# caught; a live rig's home is under the checkout's build folder on Unix; a rig that starts sweeps
+# caught; a live rig's home stays in the temp folder (no git repository); a rig that starts sweeps
 # the stale homes of its folder; a rig's programs are told the temp folder on Unix too.
 
 [[plant]]
@@ -433,14 +433,14 @@ find = "            if wrong == 1 { \"its\" } else { \"their\" },\n            s
 replace = "            if wrong == 1 { \"its\" } else { \"their\" },\n            \"somewhere\""
 
 [[plant]]
-name = "rig reports: a live rig's home is in the temp folder on Unix"
-meant = "a_live_rigs_home_is_under_the_checkouts_build_folder_on_unix_and_in_the_temp_folder_on_windows"
+name = "rig reports: a live rig's home is made under the checkout, in ConsensFlow's own git repository"
+meant = "a_live_rigs_home_is_in_the_temp_folder_and_in_no_git_repository"
 runs = ["reports-homes"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = "    if !cfg!(windows) {\n        config = config.homes_in(checkout::path(HOMES));"
-replace = "    if false {\n        config = config.homes_in(checkout::path(HOMES));"
+find = "        .reports_in(checkout::path(REPORTS));"
+replace = "        .reports_in(checkout::path(REPORTS))\n        .homes_in(checkout::path(\"app/src-tauri/target/live-homes\"));"
 
 [[plant]]
 name = "rig reports: a rig's home is in the temp folder whatever folder its case names"

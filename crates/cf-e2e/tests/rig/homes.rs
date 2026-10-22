@@ -1,53 +1,59 @@
-//! Where a rig's home is, and the homes a killed run left. A rig's home is in the
-//! machine's temp folder, but for a rig built for the real harnesses on Unix
-//! (`live::rig`), whose windows write what a real harness writes with the person's login
-//! there: that one is under the checkout's build folder, where `cargo clean` takes it
-//! and the machine's temp folder does not hold it for good. On Windows it stays in the
-//! temp folder: a checkout's deep path and a harness's own under it come near MAX_PATH.
-//! (A Unix socket is no reason: the Codex session's falls back to the temp folder's when
-//! its home's is too long.)
+//! Where a rig's home is, and the homes a killed run left. A rig's home is in the machine's
+//! temp folder, whatever the rig is built for: the real harnesses' too (`live::rig`), whose
+//! windows then open in no git repository. A home under the checkout would put them in
+//! ConsensFlow's own: Claude Code would read the repository's settings and instructions,
+//! Codex would take its root as the project for trust, and OpenCode would name its project
+//! by it, so that every live window shared one. That is another test than the one the live
+//! suites were made for.
 //!
 //! A run that was killed leaves its rigs' homes, and so does `CONSENSFLOW_LIVE_KEEP`. A
 //! rig that starts sweeps the ones in the folder it makes its own in that are older than
 //! a day, and that no process works in, without reading what is in them.
 
 use std::fs;
+use std::path::Path;
 
+use cf_e2e::live;
+use cf_e2e::process::Run;
 use cf_e2e::rig::Rig;
-use cf_e2e::{checkout, live};
 
 use crate::{config, Outcome};
 
-/// Where the homes of rigs built for the real harnesses are, under the checkout.
-const LIVE_HOMES: &str = "app/src-tauri/target/live-homes";
+/// Whether `folder` is in a git repository, as `git` says.
+fn in_a_repository(folder: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    let ran = Run::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .cwd(folder)
+        .inheriting_env()
+        .run()?;
+    Ok(ran.code == Some(0))
+}
 
 #[test]
-fn a_live_rigs_home_is_under_the_checkouts_build_folder_on_unix_and_in_the_temp_folder_on_windows(
-) -> Outcome {
-    let rig = Rig::start(live::rig(&[], crate::FAKE_AGENT))?;
-    let workspace = rig.workspace().to_path_buf();
-    rig.close()?;
+fn a_live_rigs_home_is_in_the_temp_folder_and_in_no_git_repository() -> Outcome {
+    for (what, config) in [
+        (
+            "a rig built for the real harnesses",
+            live::rig(&[], crate::FAKE_AGENT),
+        ),
+        ("a rig that is not", config()),
+    ] {
+        let rig = Rig::start(config)?;
+        let workspace = rig.workspace().to_path_buf();
+        let repository = in_a_repository(&workspace);
+        rig.close()?;
 
-    let folder = if cfg!(windows) {
-        std::env::temp_dir()
-    } else {
-        checkout::path(LIVE_HOMES)
-    };
-    assert!(
-        workspace.starts_with(&folder),
-        "{} is not under {}",
-        workspace.display(),
-        folder.display()
-    );
-    // And a rig that is not built for the real harnesses has its home in the temp folder.
-    let plain = Rig::start(config())?;
-    let workspace = plain.workspace().to_path_buf();
-    plain.close()?;
-    assert!(
-        workspace.starts_with(std::env::temp_dir()),
-        "{}",
-        workspace.display()
-    );
+        assert!(
+            workspace.starts_with(std::env::temp_dir()),
+            "the home of {what} is not in the temp folder: {}",
+            workspace.display()
+        );
+        assert!(
+            !repository?,
+            "the home of {what} is in a git repository: {}",
+            workspace.display()
+        );
+    }
     Ok(())
 }
 

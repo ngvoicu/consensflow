@@ -93,8 +93,7 @@ pub const PREFIX: &str = "CONSENSFLOW_LIVE_";
 
 /// The variable that leaves a live run's home and project where they are, for a
 /// person to look at (the flag `--keep`, which takes no value). A rig that starts
-/// takes away the homes left so that are older than a day and worked in by no
-/// process ([`crate::rig::Config::homes_in`]).
+/// takes away the homes left so that are older than a day and worked in by no process.
 pub const KEEP: &str = "CONSENSFLOW_LIVE_KEEP";
 
 /// The variable that limits a live run to some harnesses, `claude,pi` (the flag

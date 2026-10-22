@@ -40,15 +40,12 @@ impl Rig {
     pub fn start(config: Config) -> Result<Self> {
         let turn = serial::turn();
         // A home of its own, which goes if the rig never starts; or the one it is
-        // to resume on. In the machine's temp folder, but for a rig built for the real
-        // harnesses on Unix, whose home is under the checkout's build folder as its report
-        // is ([`Config::homes_in`]): what a real harness's windows write there, with the
-        // person's login, is not left in the temp folder if the run is killed. On Windows
-        // it stays in the temp folder: a checkout's deep path and a harness's own under it
-        // come near MAX_PATH. (A Unix socket is no reason either way: the Codex session
-        // falls back to the temp folder's when its home's path is too long.) The homes a
-        // killed run left in the folder, older than a day and worked in by no process, are
-        // taken away first, unread.
+        // to resume on. In the machine's temp folder, whatever the rig is built for: the
+        // real harnesses' windows open in no git repository there, where a home under the
+        // checkout would put them in ConsensFlow's own (the repository's settings and
+        // instructions, a project by its root for trust, one project for every window).
+        // The homes a killed run left in the folder, older than a day and worked in by no
+        // process, are taken away first, unread (`sweep`).
         let (root, scratch) = match &config.existing_root {
             Some(root) => (root.clone(), None),
             None => {
