@@ -388,6 +388,15 @@ fn the_words_that_resume_a_task_queued_while_its_window_goes_on_by_itself_are_wi
         .map(|m| m.body.as_str())
         .collect();
     assert_eq!(results, ["The parser is done."], "{:?}", task.task.state);
+    let notes = tiers.notes("chief");
+    assert_eq!(
+        notes
+            .iter()
+            .filter(|n| n.starts_with("T-1 goes on"))
+            .count(),
+        1,
+        "the words withdrawn, it is told it goes on once: {notes:?}"
+    );
 }
 
 #[test]
@@ -721,4 +730,78 @@ fn a_held_tasks_own_turn_gives_its_answer_alone_though_the_daemon_restarted_in_i
         !results[0].contains("hit your"),
         "no word of the refusal: {results:?}"
     );
+}
+
+/// T-1 held with zeus, no reset named, its hold note given the chief; the hour
+/// passes and the words that resume it go in, and the window writes a word of
+/// its answer a second later, not complete: a call it makes.
+fn resumed_and_a_fragment_written(context: &Context) -> (Tiers<'_>, String) {
+    let tiers = Tiers::new(context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context
+        .adapter
+        .refuse(&session, exhausted(Some(&now(context)), None));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    context.advance(61 * 60_000);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted_saying(context, &session, "Resumed:"), 1);
+    context.advance(1_000);
+    let mut fragment = context
+        .adapter
+        .item(Role::Assistant, "Reading the parser first.");
+    fragment.complete = false;
+    fragment.at = Some(serde_json::json!(now(context)));
+    context.adapter.with(&session, |agent| {
+        agent.items.push(fragment);
+        agent.settled = false;
+        agent.failed = false;
+        agent.quota = None;
+    });
+    context.pass().unwrap();
+    (tiers, session)
+}
+
+fn goes_on_told(tiers: &Tiers) -> usize {
+    tiers
+        .notes("chief")
+        .iter()
+        .filter(|n| n.starts_with("T-1 goes on"))
+        .count()
+}
+
+#[test]
+fn a_fragment_of_the_resumed_turn_refused_a_minute_later_tells_no_goes_on() {
+    // "Goes on" was told on the resumed turn's first word, a fragment; the
+    // refusal a minute later was the same wait, and the chief had heard a
+    // false "goes on" and nothing after (T-165).
+    let context = Context::new();
+    let (tiers, session) = resumed_and_a_fragment_written(&context);
+    assert_eq!(goes_on_told(&tiers), 0, "a fragment a second in");
+    context.advance(60_000);
+    context
+        .adapter
+        .refuse(&session, exhausted(Some(&now(&context)), None));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert_eq!(goes_on_told(&tiers), 0, "{:?}", tiers.notes("chief"));
+}
+
+#[test]
+fn a_resumed_turn_still_at_work_past_the_time_a_refusal_is_the_same_wait_tells_it_goes_on() {
+    let context = Context::new();
+    let (tiers, _session) = resumed_and_a_fragment_written(&context);
+    assert_eq!(goes_on_told(&tiers), 0);
+    context.advance(6 * 60_000);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(goes_on_told(&tiers), 1, "{:?}", tiers.notes("chief"));
 }

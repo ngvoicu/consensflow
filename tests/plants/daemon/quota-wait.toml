@@ -376,3 +376,40 @@ replace = '''
             tell_goes_on(store, &task)?;
         }
 '''
+
+[[plant]]
+name = "quota wait: a requester is told a held task goes on at the resumed turn's first word, a fragment a refusal may follow"
+meant = "a_fragment_of_the_resumed_turn_refused_a_minute_later_tells_no_goes_on"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "        if !last.complete && !working {"
+replace = "        if false && !last.complete && !working {"
+
+[[plant]]
+name = "quota wait: a resumed turn at work past the time a refusal is the same wait tells nothing until its answer is complete"
+meant = "a_resumed_turn_still_at_work_past_the_time_a_refusal_is_the_same_wait_tells_it_goes_on"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "        if !last.complete && !working {"
+replace = "        if !last.complete {"
+
+[[plant]]
+name = "quota wait: the daemon's words withdrawn as its window goes on by itself, its requester is told nothing"
+meant = "the_words_that_resume_a_task_queued_while_its_window_goes_on_by_itself_are_withdrawn_and_never_pasted"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+                tell_goes_on(store, &task)?;
+            }
+            _ => return Err(not_going_on(number)),
+'''
+replace = '''
+            }
+            _ => return Err(not_going_on(number)),
+'''

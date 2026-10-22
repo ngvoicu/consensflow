@@ -464,10 +464,24 @@ impl Dispatcher {
         let Some(pasted) = self.pasted_at(&latest, items) else {
             return Ok(());
         };
-        if !items[pasted + 1..]
+        // Through, with no refusal since: its answer is complete, as a turn of the
+        // window's own must be (`went_on_by_itself`), or it has worked past the
+        // time in which a refusal is still the same wait (`AGAIN_MS`). A fragment a
+        // second in is neither: a refusal a minute later would then be the same
+        // wait, and the requester would have heard a false "goes on" (T-165).
+        let Some(last) = items[pasted + 1..]
             .iter()
-            .any(|item| item.role == Role::Assistant)
-        {
+            .rev()
+            .find(|item| item.role == Role::Assistant)
+        else {
+            return Ok(());
+        };
+        let working = latest
+            .delivered_at
+            .as_deref()
+            .and_then(time::parse)
+            .is_some_and(|delivered| self.now() - delivered > AGAIN_MS);
+        if !last.complete && !working {
             return Ok(());
         }
         self.seams
