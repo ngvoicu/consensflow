@@ -48,6 +48,9 @@
 //! and with `CF_TEST_PLAIN_PROMPT` its first line does not say it is in
 //! full-permission mode, as a prompt drawn otherwise.
 //!
+//! The window of a participant `CF_TEST_INPUT_BOX` names draws Claude Code's input
+//! box, and opens its model picker for `/model` (`input_box`).
+//!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
 //! `cf_e2e::process`, the one place a program starts and the environment is read.
@@ -62,6 +65,8 @@ mod args;
 mod background;
 #[path = "fake_agent/build.rs"]
 mod build;
+#[path = "fake_agent/input_box.rs"]
+mod input_box;
 #[path = "fake_agent/records.rs"]
 mod records;
 #[path = "fake_agent/reply.rs"]
@@ -192,6 +197,7 @@ fn run(
 
     // Claude Code's question about a folder it was never told to trust comes first.
     let asking = named("CF_TEST_TRUST");
+    let draws_box = named("CF_TEST_INPUT_BOX");
     if asking {
         trust::bring_the_record_back(records.transcript());
     }
@@ -284,6 +290,9 @@ fn run(
         let _ = turns.send(seed.clone());
     }
 
+    // Claude Code's input box and its model picker, drawn as it draws them.
+    let mut input_box = draws_box.then(input_box::InputBox::default);
+
     // Raw input, like a real TUI: a bracketed paste is text, Enter outside one
     // submits, and an Escape that nothing follows is the key.
     loop {
@@ -294,15 +303,27 @@ fn run(
         for event in events {
             match event {
                 Event::Submit(text) => {
-                    let _ = turns.send(text);
+                    if !input_box.as_mut().is_some_and(|shown| shown.takes(&text)) {
+                        let _ = turns.send(text);
+                    }
                 }
                 // A real TUI draws what was pasted, and a paste's Enter waits for that.
                 Event::Pasted(characters) => {
                     let _ = say(&format!("[pasted, {characters} characters]\n"));
                 }
-                Event::Escape => stop.press(),
+                Event::Escape => {
+                    if !input_box
+                        .as_mut()
+                        .is_some_and(|shown| shown.escape(&mut keys))
+                    {
+                        stop.press();
+                    }
+                }
                 Event::Interrupt => leave(&status_file, 0),
             }
+        }
+        if let Some(shown) = input_box.as_mut() {
+            let _ = shown.draw(keys.typed(), say);
         }
     }
 }

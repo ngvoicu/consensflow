@@ -219,6 +219,24 @@ fn the_tail_leaves_out_what_only_draws_and_keeps_the_last_lines_asked() {
 }
 
 #[test]
+fn the_bottom_keeps_rules_and_an_empty_prompt_and_ends_at_the_last_drawn_line() {
+    // An input box with nothing typed in it, as Claude Code draws one, and the
+    // blank rows under the last line drawn.
+    let screen = after(8, 20, "answer\r\n\r\n────\r\n❯ \r\n────\r\n  ⏵⏵ bypass");
+    assert_eq!(
+        screen.bottom(10),
+        ["answer", "", "────", "❯", "────", "  ⏵⏵ bypass"]
+    );
+    assert_eq!(screen.bottom(3), ["❯", "────", "  ⏵⏵ bypass"]);
+    assert_eq!(
+        screen.tail(10),
+        ["answer", "  ⏵⏵ bypass"],
+        "the tail has no box"
+    );
+    assert_eq!(Screen::new(24, 80).bottom(5), Vec::<String>::new());
+}
+
+#[test]
 fn a_screen_resized_keeps_its_text_and_its_cursor_on_it() {
     let mut screen = after(4, 10, "one\r\ntwo\r\nthree\r\nfour");
     screen.resize(2, 6);

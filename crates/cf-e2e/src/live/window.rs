@@ -250,6 +250,21 @@ impl Window<'_> {
         )
     }
 
+    /// Types `bytes` into the window as the human does at the app's page
+    /// ([`Rig::types`]): the pane host counts what they leave unsent.
+    pub fn types(&self, bytes: &[u8]) -> Result<()> {
+        self.rig.types(&self.pane(), bytes)
+    }
+
+    /// What the pane host says of the window now (`pane.snapshot`), with the
+    /// last `bottom` lines of its screen as drawn.
+    pub fn snapshot(&self, bottom: usize) -> Result<Value> {
+        self.rig.host(
+            "pane.snapshot",
+            json!({ "id": self.id, "generation": 1, "bottom": bottom }),
+        )
+    }
+
     /// Interrupts the window as the daemon does: Escape as many times in a row
     /// (150 ms apart, the daemon's own gap) as the harness's adapter asks for
     /// ([`ask::interrupt`]) and, where those presses open a dialog at a turn that
@@ -275,9 +290,26 @@ impl Window<'_> {
     /// two strokes, which the screen's text then splits. Nothing presses Enter a
     /// second time.
     pub fn send(&self, body: &str, answer: &str) -> Result<Sent> {
+        self.sent(answer, || self.paste(body))
+    }
+
+    /// [`Window::send`], the paste telling the pane host that the input box read
+    /// empty when it had taken `typed` writes of the human's keys (`readEmpty`), as
+    /// an adapter that reads its harness's box sends one.
+    pub fn send_read_empty(&self, body: &str, answer: &str, typed: u64) -> Result<Sent> {
+        self.sent(answer, || {
+            self.rig.host(
+                "pane.write_paste",
+                json!({ "id": self.id, "generation": 1, "body": body, "readEmpty": typed }),
+            )
+        })
+    }
+
+    /// What came of the paste `paste` makes, `answer` waited for.
+    fn sent(&self, answer: &str, paste: impl FnOnce() -> Result<Value>) -> Result<Sent> {
         let mark = self.mark();
         let pasted = Instant::now();
-        let written = self.paste(body)?;
+        let written = paste()?;
         let mut shown = false;
         while !shown && pasted.elapsed() < ANSWER && !self.closed() {
             sleep(ASKING);

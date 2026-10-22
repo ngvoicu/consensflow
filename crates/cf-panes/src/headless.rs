@@ -13,7 +13,7 @@ use serde_json::json;
 use crate::arbiter::{EnterTiming, InputArbiter};
 use crate::input_queue::InputQueue;
 use crate::output_hub::{OutputHub, PaneOutputMessage};
-use crate::pane_handlers::register_pane_handlers;
+use crate::pane_handlers::{register_pane_handlers, register_typed};
 use crate::pty::{PaneError, PaneKey, PaneTable};
 
 /// The largest frame the pane host's bridge carries; one over it is refused.
@@ -133,6 +133,7 @@ pub fn run_headless() -> Result<(), String> {
         Arc::clone(&output),
         Arc::clone(&inputs),
     );
+    register_typed(&mut builder, Arc::clone(&inputs));
     builder.on_error(|error| eprintln!("consensflow-bridge: {error}"));
 
     let bridge = builder

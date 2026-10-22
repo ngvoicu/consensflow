@@ -1,7 +1,7 @@
 //! How a Devin window names the conversation it opened, how a message reaches
 //! it, and what its own wire log and record say (Node's Devin adapter suite).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::fs;
 use std::rc::Rc;
 use std::time::Duration;
@@ -132,6 +132,52 @@ fn pastes_only_into_the_conversation_it_knows_and_never_into_what_the_human_has_
         finished(window.ready(&host, &pane())),
         Ok(Readiness::Held(Held::Unsent))
     );
+}
+
+/// Keys the human typed into Devin's model picker and left with Escape count as
+/// unsent, though its input box shows its hint again (T-288, `cargo xtask live
+/// escape-unsent`): read empty, with the human's last key a second past, the window
+/// is ready and its paste says at which count the box read empty. Words in the box,
+/// or a key a moment ago, still hold it.
+#[test]
+fn a_window_whose_input_box_shows_its_hint_takes_the_paste_over_keys_left_in_its_picker() {
+    const RULE: &str = "────────────────────────────────────────";
+    let home = Home::new();
+    let adapter = home.adapter();
+    let window = window(&adapter, &Request::resumed("mild-coin"));
+    home.selects("mild-coin");
+    let typed_in_box =
+        RefCell::new("❭ Ask Devin to build features, fix bugs, or work on your code".to_owned());
+    let quiet = Cell::new(5_000_u64);
+    let host = AnsweringHost::new(|op| {
+        Ok(match op {
+            "pane.snapshot" => json!({
+                "ok": true, "pasteInFlight": false, "unsent": true,
+                "typed": 9, "typedQuietMs": quiet.get(),
+                "bottom": ["❭ /model", "", format!("{RULE} (bypass permissions on) ─"),
+                    typed_in_box.borrow().clone(), RULE, "SWE-2 Medium"],
+            }),
+            _ => json!({ "ok": true }),
+        })
+    });
+    let ready = || finished(window.ready(&host, &pane()));
+    assert_eq!(ready(), Ok(Readiness::Ready));
+    assert_eq!(
+        finished(window.deliver(&host, &pane(), "hi")),
+        Ok(Admission::Admitted { queued: false })
+    );
+    assert_eq!(
+        host.asked.borrow().last().unwrap(),
+        &(
+            "pane.write_paste".to_owned(),
+            json!({ "id": "s1-zeus", "generation": 2, "body": "hi", "readEmpty": 9 })
+        )
+    );
+    quiet.set(200);
+    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
+    quiet.set(5_000);
+    *typed_in_box.borrow_mut() = "❭ probe words".to_owned();
+    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
 }
 
 #[test]

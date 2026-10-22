@@ -275,6 +275,25 @@ fn windows_environment(
 /// ask the system's keychain by; on Windows they also have the machine's own
 /// folders for settings and programs ([`WINDOWS`]).
 pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
+    rig_keeping_claude_in(installs, stand_in, None)
+}
+
+/// [`rig`], whose Claude windows keep their config in the folder `claude_config`
+/// (`CLAUDE_CONFIG_DIR`), a throwaway one that holds a copy of the login: none of
+/// the owner's Claude files is read or written.
+pub fn rig_with_claude_config(
+    installs: &[Installed],
+    stand_in: impl Into<PathBuf>,
+    claude_config: &Path,
+) -> Config {
+    rig_keeping_claude_in(installs, stand_in, Some(claude_config))
+}
+
+fn rig_keeping_claude_in(
+    installs: &[Installed],
+    stand_in: impl Into<PathBuf>,
+    claude_config: Option<&Path>,
+) -> Config {
     let machine = |name: &str| own_var(name);
     let mut config = Config::new(stand_in).var("LANG", "en_US.UTF-8");
     for name in ["USER", "LOGNAME"] {
@@ -297,7 +316,10 @@ pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
             config = config.var(&name, value);
         }
         if install.harness == Harness::Claude {
-            config = config.unset("CLAUDE_CONFIG_DIR");
+            config = match claude_config {
+                Some(folder) => config.var("CLAUDE_CONFIG_DIR", folder.to_string_lossy()),
+                None => config.unset("CLAUDE_CONFIG_DIR"),
+            };
         }
     }
     config

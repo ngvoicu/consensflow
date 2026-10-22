@@ -26,6 +26,7 @@ fn window(fakes: &Fakes, wire: &Path, session: Option<&str>) -> Rc<DevinWindow> 
         discover_for_ms: MINUTE_MS,
         switch: Cell::default(),
         looked: Cell::default(),
+        read_empty: Cell::default(),
     })
 }
 
@@ -228,6 +229,7 @@ fn a_look_takes_the_wires_word_on_the_quota_never_the_records_and_the_rest_from_
         discover_for_ms: MINUTE_MS,
         switch: Cell::default(),
         looked: Cell::default(),
+        read_empty: Cell::default(),
     });
     let observed = finished(window.observe()).unwrap();
     assert_eq!(observed.quota, None, "the log says nothing of the quota");
@@ -266,6 +268,7 @@ fn window_reading(fakes: &Fakes, wire: &Path, env: Env, record: Record) -> Rc<De
         discover_for_ms: MINUTE_MS,
         switch: Cell::default(),
         looked: Cell::default(),
+        read_empty: Cell::default(),
     })
 }
 

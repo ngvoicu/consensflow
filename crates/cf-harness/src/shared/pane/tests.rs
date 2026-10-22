@@ -78,6 +78,7 @@ fn a_paste_into_a_window_is_read_as_the_delivery_contract_has_it_whatever_the_ho
             &host,
             &pane(),
             "the cache key is per conversation",
+            None,
         )));
         assert_eq!(admission(&sent, "refused", false), read, "{way}");
         assert_eq!(

@@ -72,6 +72,7 @@ use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
 use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
+use crate::shared::input_box::{self, Unsent};
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::switched_to;
 use crate::shared::resumable::transcript_kept;
@@ -185,6 +186,7 @@ impl Adapter for ClaudeAdapter {
                     asked: RefCell::new(None),
                     pressed: RefCell::new(None),
                     restored: Cell::new(false),
+                    read_empty: Cell::new(None),
                     left_open: RefCell::new(left_open),
                     relaunched,
                     trusts: trust::trusts(launch.directory),
@@ -244,6 +246,10 @@ struct ClaudeWindow {
     /// The latest look read the window at rest by that press: Claude has put
     /// the message back in its input box.
     restored: Cell<bool>,
+    /// The human's keys left something unsent by the pane host's count, and the
+    /// latest readiness read the input box empty on the screen, at this count of
+    /// their keys: the delivery's paste says so ([`Unsent::ReadEmpty`]).
+    read_empty: Cell<Option<u64>>,
     /// The turn the record had open when the window was opened, while the
     /// window has begun no turn of its own: the old process's.
     left_open: RefCell<Option<LeftOpen>>,
@@ -343,7 +349,8 @@ impl Window for ClaudeWindow {
     }
 
     /// A paste waits for the window to be readable, on its conversation,
-    /// with no paste going in.
+    /// with no paste going in, and for what the human typed and did not send,
+    /// unless the input box reads empty on the screen ([`input_box::unsent`]).
     fn ready<'a>(
         &'a self,
         host: &'a dyn PaneHost,
@@ -369,11 +376,20 @@ impl Window for ClaudeWindow {
                 let reason = "a paste is on its way to the window".to_owned();
                 return Ok(Readiness::Held(Held::Because(reason)));
             }
-            Ok(if js::truthy(snapshot.get("unsent")) {
-                Readiness::Held(Held::Unsent)
-            } else {
-                Readiness::Ready
-            })
+            self.read_empty.set(None);
+            if !js::truthy(snapshot.get("unsent")) {
+                return Ok(Readiness::Ready);
+            }
+            // The count is the human's keys, a guess: the box on the screen says.
+            Ok(
+                match input_box::unsent(host, pane, Harness::Claude, &snapshot).await {
+                    Unsent::ReadEmpty(typed) => {
+                        self.read_empty.set(Some(typed));
+                        Readiness::Ready
+                    }
+                    Unsent::Held => Readiness::Held(Held::Unsent),
+                },
+            )
         })
     }
 
@@ -393,7 +409,8 @@ impl Window for ClaudeWindow {
                     return Ok(Admission::Refused { reason });
                 }
             }
-            let sent = pane::write_paste(host, pane, &window_text(text)).await;
+            let read_empty = self.read_empty.take();
+            let sent = pane::write_paste(host, pane, &window_text(text), read_empty).await;
             let admitted = admission(&sent, "the window refused the paste", false);
             if matches!(admitted, Admission::Admitted { .. }) {
                 // The turn the paste begins is its own: no press was for it.

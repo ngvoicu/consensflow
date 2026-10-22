@@ -30,6 +30,9 @@ use serde::{Deserialize, Serialize};
 /// request for it gets. Empty lines are not counted: they are not sent.
 pub const TAIL_LINES: usize = 12;
 
+/// The most lines of a screen as drawn (`bottom`) a snapshot sends.
+pub const BOTTOM_LINES: usize = 40;
+
 /// The most the host takes to end what a turn left, and to answer that it has: the
 /// moment it waits before it looks again at what it found (two seconds), the grace a
 /// close gives what it asks to end (ten), what it waits after it has killed what
@@ -232,6 +235,11 @@ pub struct SnapshotRequest {
     pub generation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tail: Option<usize>,
+    /// The screen's last lines as drawn, its rules and empty prompt among
+    /// them: the answer's `bottom`, where an adapter reads its harness's
+    /// input box.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom: Option<usize>,
 }
 
 /// The part of a `pane.snapshot` answer a request for the tail adds.
@@ -498,6 +506,7 @@ mod tests {
             id: "p1-zeus".to_owned(),
             generation: 2,
             tail: None,
+            bottom: None,
         };
         assert_eq!(
             serde_json::to_value(&plain).unwrap(),
@@ -516,6 +525,22 @@ mod tests {
             json!({ "id": "p", "generation": 1, "lines": 3 })
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_snapshot_asks_for_the_screen_as_drawn_only_when_it_wants_it() {
+        let asking = SnapshotRequest {
+            id: "p1-zeus".to_owned(),
+            generation: 2,
+            tail: None,
+            bottom: Some(BOTTOM_LINES),
+        };
+        let body = json!({ "id": "p1-zeus", "generation": 2, "bottom": BOTTOM_LINES });
+        assert_eq!(serde_json::to_value(&asking).unwrap(), body);
+        assert_eq!(
+            serde_json::from_value::<SnapshotRequest>(body).unwrap(),
+            asking
+        );
     }
 
     #[test]

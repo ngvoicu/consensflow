@@ -22,6 +22,7 @@
 //! | `devin_ready` | `wire`: the wire log of a Devin window's launch | `{shown, mode, command}`: what the daemon's readiness reads of it (the conversation the window shows, the permission mode it is in) and the command the window is given before it is ready for work (`/bypass` where the wire says the normal mode), or null |
 //! | `devin_readiness` | `wire`, `session`, `pane` (`id`, `generation`), `withinMs`, `everyMs`: a Devin window that is open, asked whether it is ready as the engine asks it, until it is ready or unfit or the time is up; the pane host it asks is the asker's, a request a line of the output and its answer a line of the input (`readiness`) | `{answers, ready}`: what the looks answered, in order (`ready`, `held: …`, `unfit: …`, one that came again in a row said once), and whether the last was ready |
 //! | `devin_hooks` | `cf`, `member`: the hooks ConsensFlow adds to the owner's in a Devin launch (a member's, or the chief's), its session hook run by `cf` | `{event: [entry]}`: each event with the entries added, as the launch's config has them written |
+//! | `input_box` | `kind`, `screen` (a window's last lines as drawn, the pane host's `bottom`): what the adapter reads of the window's input box there | `"empty"`, `"holds"`, or null where it reads no box |
 //! | `trust` | `kind`, `screen` (a window's last lines), and `directory` where asked: what the engine reads there of the harness's question about trusting the window's folder | `{key, prompt}`: the key it presses next toward a yes (`down`, `enter`), or null where the lines show no such question or the harness never asks one, and whether they are the harness's prompt; with `directory`, `trusts` too: `{folder, inside}`, what a yes trusts for a window opened in that project's folder |
 //!
 //! The last eight are the evals' and the live tests' own: the program a window
@@ -52,6 +53,7 @@ use crate::claude::install;
 use crate::contract::{Agent, Interrupt, LaunchId, Skill};
 use crate::launch::adapter;
 use crate::records::{self, Options};
+use crate::shared::input_box::{self, InputBox};
 use crate::shared::record_state::record_state;
 use crate::shared::{trust, window_args};
 use crate::testing::Fakes;
@@ -73,8 +75,9 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "devin_readiness" => readiness::devin_readiness(question),
         "devin_hooks" => launch::devin_hooks(question),
         "trust" => trust(question),
+        "input_box" => input_box(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, program, newest_session, specmint, devin_launch, devin_ready, devin_readiness, devin_hooks and trust"
+            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, program, newest_session, specmint, devin_launch, devin_ready, devin_readiness, devin_hooks, trust and input_box"
         )),
     }
 }
@@ -135,6 +138,25 @@ fn trust(question: &Value) -> Result<Value, String> {
         answer["trusts"] = json!({ "folder": folder, "inside": inside });
     }
     Ok(answer)
+}
+
+/// What the adapter reads of a window's input box in `screen` (its last lines as
+/// drawn): `empty`, `holds`, or null where it reads none.
+fn input_box(question: &Value) -> Result<Value, String> {
+    let screen: Vec<String> = question
+        .get("screen")
+        .and_then(Value::as_array)
+        .ok_or("the question names no screen")?
+        .iter()
+        .filter_map(|line| line.as_str().map(str::to_owned))
+        .collect();
+    Ok(
+        match input_box::read(harness(text(question, "kind")?)?, &screen) {
+            Some(InputBox::Empty) => json!("empty"),
+            Some(InputBox::Holds) => json!("holds"),
+            None => Value::Null,
+        },
+    )
 }
 
 /// What the harness's own record of a conversation says, read whole once.

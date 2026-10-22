@@ -76,6 +76,7 @@ use crate::detect::executable;
 use crate::records::{Options, Reading, Role};
 use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
+use crate::shared::input_box::{self, Unsent};
 use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
 use crate::shared::role::write_role;
 use crate::shared::{pane, specmint, window_args};
@@ -348,6 +349,10 @@ struct DevinWindow {
     /// How many prompts of its conversation the wire had read at the engine's last
     /// look at the window (`observe`), which found it at rest or not.
     looked: Cell<Option<u64>>,
+    /// The human's keys left something unsent by the pane host's count, and the
+    /// latest readiness read the input box empty on the screen, at this count of
+    /// their keys: the delivery's paste says so ([`Unsent::ReadEmpty`]).
+    read_empty: Cell<Option<u64>>,
 }
 
 impl DevinWindow {
@@ -363,6 +368,7 @@ impl DevinWindow {
             discover_for_ms,
             switch: Cell::default(),
             looked: Cell::default(),
+            read_empty: Cell::default(),
         }
     }
 
@@ -421,8 +427,15 @@ impl DevinWindow {
                 }
             } else {
                 let session = self.session.borrow().clone();
-                let sent =
-                    channel::send(host, pane, self.wire.path(), session.as_deref(), BYPASS).await;
+                let sent = channel::send(
+                    host,
+                    pane,
+                    self.wire.path(),
+                    session.as_deref(),
+                    BYPASS,
+                    self.read_empty.get(),
+                )
+                .await;
                 if !sent.refused {
                     switch.pasted = Some(now);
                     switch.entered = None;
@@ -494,8 +507,13 @@ impl Window for DevinWindow {
             {
                 return Ok(Readiness::Held(Held::Unsaid));
             }
+            self.read_empty.set(None);
+            // The count is the human's keys, a guess: the box on the screen says.
             if js::truthy(snapshot.get("unsent")) {
-                return Ok(Readiness::Held(Held::Unsent));
+                match input_box::unsent(host, pane, Harness::Devin, &snapshot).await {
+                    Unsent::ReadEmpty(typed) => self.read_empty.set(Some(typed)),
+                    Unsent::Held => return Ok(Readiness::Held(Held::Unsent)),
+                }
             }
             // The window as it is once the host answered: the human may have chosen
             // a mode, opened another conversation or begun a turn meanwhile, and
@@ -539,7 +557,16 @@ impl Window for DevinWindow {
             let first = body.lines().find(|line| !js::trim(line).is_empty());
             self.wire.expect(first.unwrap_or_default());
             let session = self.session.borrow().clone();
-            let sent = channel::send(host, pane, self.wire.path(), session.as_deref(), &body).await;
+            let read_empty = self.read_empty.take();
+            let sent = channel::send(
+                host,
+                pane,
+                self.wire.path(),
+                session.as_deref(),
+                &body,
+                read_empty,
+            )
+            .await;
             Ok(admission(&sent, "Devin refused the paste", false))
         })
     }

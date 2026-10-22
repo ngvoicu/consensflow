@@ -769,6 +769,18 @@ impl PaneTable {
         Ok(screen.tail(max))
     }
 
+    /// The last `max` lines of a pane's screen as it is drawn ([`PaneScreen::bottom`]).
+    pub fn bottom(&self, key: &PaneKey, max: usize) -> Result<Vec<String>, PaneError> {
+        let screen = Arc::clone(
+            &self
+                .lock_panes()?
+                .get(key)
+                .ok_or_else(|| PaneError::NotFound(key.clone()))?
+                .screen,
+        );
+        Ok(screen.bottom(max))
+    }
+
     /// How a pane's program ended, waiting up to `wait` for its status to be
     /// readable: a program closes its terminal a moment before it has gone.
     /// A pane that left the table is being taken down by whoever took it out

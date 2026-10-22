@@ -64,6 +64,21 @@ impl Screen {
         lines.drain(..lines.len().saturating_sub(max));
         lines
     }
+
+    /// The last `max` lines of the screen as it is drawn, the oldest first,
+    /// from its last line with anything on it: its rules, its empty lines
+    /// and a prompt with nothing typed at it too, which [`Screen::tail`]
+    /// leaves out. A harness's input box is read here.
+    pub fn bottom(&self, max: usize) -> Vec<String> {
+        let mut lines = self.grid.lines();
+        let drawn = lines
+            .iter()
+            .rposition(|line| !line.is_empty())
+            .map_or(0, |last| last + 1);
+        lines.truncate(drawn);
+        lines.drain(..lines.len().saturating_sub(max));
+        lines
+    }
 }
 
 /// A pane's [`Screen`], shared between the thread that feeds it, the table that
@@ -95,6 +110,11 @@ impl PaneScreen {
     /// The last `max` lines the screen shows ([`Screen::tail`]).
     pub fn tail(&self, max: usize) -> Vec<String> {
         self.locked().tail(max)
+    }
+
+    /// The last `max` lines of the screen as it is drawn ([`Screen::bottom`]).
+    pub fn bottom(&self, max: usize) -> Vec<String> {
+        self.locked().bottom(max)
     }
 
     /// A panic in a thread that held the lock leaves a screen that was only

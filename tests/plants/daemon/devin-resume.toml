@@ -457,8 +457,10 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''                    channel::send(host, pane, self.wire.path(), session.as_deref(), BYPASS).await;'''
-replace = '''                    channel::send(host, pane, self.wire.path(), session.as_deref().filter(|_| false), BYPASS).await;'''
+find = '''                    session.as_deref(),
+                    BYPASS,'''
+replace = '''                    session.as_deref().filter(|_| false),
+                    BYPASS,'''
 
 # The diagnostic launch without the owner's hooks (Sol 6): hook by hook, not entry by entry.
 [[plant]]

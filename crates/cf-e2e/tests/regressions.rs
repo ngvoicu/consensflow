@@ -76,6 +76,8 @@ mod devin_window_closed_mid_task;
 mod follow_up_refused_behind_a_waiting_follow_up;
 #[path = "regressions/idle_compaction_read_as_a_cut_turn.rs"]
 mod idle_compaction_read_as_a_cut_turn;
+#[path = "regressions/keys_cleared_with_escape_held_every_delivery.rs"]
+mod keys_cleared_with_escape_held_every_delivery;
 // Windows keeps the limit the report documents (a job object has no process
 // groups or parents to look at), so there is nothing there to assert.
 #[cfg(unix)]
