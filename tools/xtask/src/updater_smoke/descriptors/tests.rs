@@ -38,23 +38,54 @@ fn what_lsof_says_is_read_as_each_descriptor_above_the_streams_by_its_object_or_
 /// numbers this process had them at.
 fn old_with(left: &Left) -> Vec<Held> {
     vec![
-        held(900, "unix", Some("0x4728cfc0aca56d7a"), None, "->0x1e1b0426067da685"),
-        held(901, "REG", None, Some(("0x100000e", 77)), "default.metallib"),
-        held(902, "systm", Some("0xdcbcb4e125cc7e2f"), None, "[ctl com.apple.netsrc]"),
+        held(
+            900,
+            "unix",
+            Some("0x4728cfc0aca56d7a"),
+            None,
+            "->0x1e1b0426067da685",
+        ),
+        held(
+            901,
+            "REG",
+            None,
+            Some(("0x100000e", 77)),
+            "default.metallib",
+        ),
+        held(
+            902,
+            "systm",
+            Some("0xdcbcb4e125cc7e2f"),
+            None,
+            "[ctl com.apple.netsrc]",
+        ),
         held(left.pipe, "PIPE", Some("0xaaaa"), None, "->0xbbbb"),
-        held(left.file_fd, "REG", None, Some(("0x100000e", left.node)), "/x/left-to-the-app"),
+        held(
+            left.file_fd,
+            "REG",
+            None,
+            Some(("0x100000e", left.node)),
+            "/x/left-to-the-app",
+        ),
     ]
 }
 
 #[test]
-fn a_new_app_that_holds_none_of_the_old_ones_objects_has_no_fault_and_a_file_at_its_number_is_noted() {
+fn a_new_app_that_holds_none_of_the_old_ones_objects_has_no_fault_and_a_file_at_its_number_is_noted(
+) {
     let folder = tempfile::tempdir().unwrap();
     let left = Left::make(folder.path()).unwrap();
     let old = old_with(&left);
     // The new app opened its own socket, and the framework's file again at the same number.
     let new = vec![
         held(900, "unix", Some("0x1111"), None, "->0x2222"),
-        held(901, "REG", None, Some(("0x100000e", 77)), "default.metallib"),
+        held(
+            901,
+            "REG",
+            None,
+            Some(("0x100000e", 77)),
+            "default.metallib",
+        ),
     ];
     let (faults, notes) = compare(&old, &new, &left);
     assert_eq!(faults, Vec::<String>::new());
@@ -73,7 +104,10 @@ fn a_new_app_left_the_old_ones_descriptors_is_at_fault_for_each() {
     assert!(said.contains("0xdcbcb4e125cc7e2f"), "{said}");
     assert!(said.contains("0x4728cfc0aca56d7a"), "{said}");
     assert!(said.contains("0xaaaa"), "{said}");
-    assert!(said.contains("the file the installed app was left"), "{said}");
+    assert!(
+        said.contains("the file the installed app was left"),
+        "{said}"
+    );
 }
 
 #[test]
