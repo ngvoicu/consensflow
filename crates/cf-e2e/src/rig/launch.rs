@@ -10,7 +10,6 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::Value;
 
-use super::forget::Forget;
 use super::install::{environment, var, write_fake_install, write_roster};
 use super::route::Shared;
 use super::stranger::Stranger;
@@ -38,6 +37,12 @@ impl Rig {
     /// line says it is not the native one.
     pub fn start(config: Config) -> Result<Self> {
         let turn = serial::turn();
+        // A Claude config folder of the case's own is made (or refused) before
+        // anything else is: nothing is spent on a login that cannot be used.
+        let claude_config = match &config.claude_config {
+            Some(claude_config) => Some((claude_config.folder()?, Arc::clone(claude_config))),
+            None => None,
+        };
         // A home of its own, which goes if the rig never starts; or the one it is
         // to resume on.
         let (root, scratch) = match &config.existing_root {
@@ -57,7 +62,12 @@ impl Rig {
         let workspace = root.join("workspace");
         files::make_dir(&workspace)?;
         let fake_bin = write_fake_install(&root, &config)?;
-        let env = environment(&root, &fake_bin, &config);
+        let env = environment(
+            &root,
+            &fake_bin,
+            &config,
+            claude_config.as_ref().map(|(folder, _)| folder.as_path()),
+        );
         // A restart over the same home keeps its roster, as the app's does: the
         // agents a case wrote are still the ones its chief and staff run on.
         if config.existing_root.is_none() {
@@ -83,7 +93,8 @@ impl Rig {
             daemon,
             host,
             stranger,
-            forget: config.stand_in_records.map(Forget::new),
+            claude_config: claude_config.map(|(_, claude_config)| claude_config),
+            claude_config_finished: false,
             masker: config.masker,
             keep_root: false,
             closed: false,

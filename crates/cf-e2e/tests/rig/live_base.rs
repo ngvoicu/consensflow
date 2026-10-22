@@ -135,58 +135,51 @@ fn a_tell_waits_as_long_as_it_is_given_for_the_chief_to_be_idle_and_says_so_when
 /// The rig whose Claude windows are the stand-in's or the real Claude Code's by
 /// the model, through a shell script: a macOS and Linux rig.
 #[cfg(unix)]
-mod in_the_machines_claude_folder {
-    use std::fs;
-    use std::path::{Path, PathBuf};
+mod on_a_claude_config_of_the_cases_own {
+    use std::path::Path;
+    use std::sync::Arc;
 
     use cf_e2e::live::{Harness, Installed};
-    use cf_e2e::rig::{project_name, Project, Rig};
+    use cf_e2e::rig::{Project, Rig};
     use serde_json::json;
 
+    use crate::kept_config::Kept;
     use crate::{secs, Outcome, FAKE_AGENT};
 
-    /// A file of the machine's Claude folder `config`, written.
-    fn at(config: &Path, relative: &str, text: &str) -> cf_e2e::Result<PathBuf> {
-        let file = config.join(relative);
-        cf_e2e::files::write(&file, text)?;
-        Ok(file)
+    /// A rig on the machine `machine`, whose real Claude is `/nowhere/claude` (started through
+    /// the shim made in `shims`) and whose Claude windows run on `folder`.
+    fn started(
+        machine: &Path,
+        shims: &Path,
+        folder: &Arc<Kept>,
+    ) -> Result<Rig, Box<dyn std::error::Error>> {
+        let claude = Installed::at(Harness::Claude, "/nowhere/claude", machine)
+            .with_claude_config(folder.clone());
+        Ok(Rig::start(cf_e2e::live::rig_with_stand_ins(
+            &[claude],
+            shims,
+            Path::new(FAKE_AGENT),
+        )?)?)
     }
 
     #[test]
-    fn a_rig_whose_stand_ins_write_in_the_machines_claude_folder_takes_away_what_they_wrote_and_nothing_else(
+    fn a_rig_whose_claude_windows_run_on_a_config_of_the_cases_own_writes_nothing_in_the_machines(
     ) -> Outcome {
-        // The machine is a folder of the test's own: the rig reads its Claude from there.
+        // The machine is a folder of the test's own, with a Claude folder of the person's.
         let machine = tempfile::tempdir()?;
-        let config = machine.path().join(".claude");
-        let theirs = [
-            at(&config, "projects/integration/theirs.jsonl", "{}\n")?,
-            at(&config, "projects/-Users-me-work/c.jsonl", "{}\n")?,
-            at(
-                &config,
-                "sessions/999999.json",
-                r#"{"pid":999999,"sessionId":"theirs","status":"idle"}"#,
-            )?,
-            at(&config, "history.jsonl", "{}\n")?,
-        ];
+        let persons = machine.path().join(".claude");
+        cf_e2e::files::write(&persons.join("history.jsonl"), "{}\n")?;
+        let kept = tempfile::tempdir()?;
+        let folder = Kept::new(kept.path().join("claude-config"), None);
         let shims = tempfile::tempdir()?;
-        let claude = Installed::at(Harness::Claude, "/nowhere/claude", machine.path());
-        let mut rig = Rig::start(cf_e2e::live::rig_with_stand_ins(
-            &[claude],
-            shims.path(),
-            Path::new(FAKE_AGENT),
-        )?)?;
-        // The project's folder: what a real Claude would keep of it is taken away too.
+        let rig = started(machine.path(), shims.path(), &folder)?;
+        assert_eq!(
+            rig.var("CLAUDE_CONFIG_DIR"),
+            folder.path.to_str(),
+            "the daemon and every window run on the case's folder"
+        );
         let work = rig.workspace().join("live-folder");
-        fs::create_dir_all(&work)?;
-        let memory = at(
-            &config,
-            &format!(
-                "projects/{}/memory/MEMORY.md",
-                project_name(&work.to_string_lossy())
-            ),
-            "# what it learned",
-        )?;
-        rig.forget_claude_memory_of(&work);
+        std::fs::create_dir_all(&work)?;
         let project = Project::open(&rig, "chief", json!({ "directory": work }))?;
         let added = project.add_member("worker")?;
         let tier = added["member"]["tier"]
@@ -201,35 +194,62 @@ mod in_the_machines_claude_folder {
             Ok(project.task(1)?["state"] == "done")
         })?;
 
-        // The stand-ins wrote where the machine's Claude keeps its own, and not in the rig's home.
+        // The stand-ins, the chief's and the worker's, wrote where the daemon reads Claude's:
+        // in the case's folder.
         let started = rig.started();
         assert!(started.len() >= 2, "a chief and a worker: {started:?}");
-        let records: Vec<PathBuf> = started
-            .iter()
-            .map(|window| config.join(format!("projects/integration/{}.jsonl", window.session)))
-            .collect();
-        for record in &records {
+        for window in &started {
+            let record = folder
+                .path
+                .join(format!("projects/integration/{}.jsonl", window.session));
             assert!(record.is_file(), "{} was not written", record.display());
         }
+        assert_eq!(folder.asked_what_it_came_to(), 0);
         rig.close()?;
 
-        // Gone: what they wrote. Left: all that was the person's, and the folder they shared.
-        for record in &records {
-            assert!(!record.exists(), "{} is left", record.display());
-        }
-        for window in &started {
-            assert!(!config
-                .join(format!("sessions/{}.json", window.pid))
-                .exists());
-        }
-        assert!(
-            !memory.exists(),
-            "what Claude kept of the run's folder is taken away"
-        );
-        for kept in &theirs {
-            assert!(kept.exists(), "{} was the person's", kept.display());
-        }
-        assert!(config.join("projects/integration").is_dir());
+        assert_eq!(folder.asked_for(), 1);
+        assert_eq!(folder.asked_what_it_came_to(), 1);
+        // The person's Claude folder is as it was.
+        let left: Vec<_> = std::fs::read_dir(&persons)?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<Result<_, _>>()?;
+        assert_eq!(left, ["history.jsonl"]);
+        Ok(())
+    }
+
+    #[test]
+    fn a_rig_that_ends_fails_with_what_its_claude_config_says_the_run_did_and_one_dropped_is_asked_once(
+    ) -> Outcome {
+        let machine = tempfile::tempdir()?;
+        let kept = tempfile::tempdir()?;
+        let said = "the run touched the person's settings";
+        let folder = Kept::new(kept.path().join("claude-config"), Some(said));
+        let shims = tempfile::tempdir()?;
+        let rig = started(machine.path(), shims.path(), &folder)?;
+        let failed = rig.close().unwrap_err().to_string();
+        assert!(failed.contains(said), "{failed}");
+        assert_eq!(folder.asked_what_it_came_to(), 1);
+
+        // A rig a failed case dropped is asked what the run came to, once, and cannot fail the case again.
+        let dropped = Kept::new(kept.path().join("another"), Some(said));
+        drop(started(machine.path(), shims.path(), &dropped)?);
+        assert_eq!(dropped.asked_what_it_came_to(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn a_claude_config_that_cannot_be_made_stops_the_rig_before_anything_starts() -> Outcome {
+        let machine = tempfile::tempdir()?;
+        // A folder that is a file's child cannot be made.
+        let file = machine.path().join("a-file");
+        std::fs::write(&file, "")?;
+        let folder = Kept::new(file.join("claude-config"), None);
+        let shims = tempfile::tempdir()?;
+        let failed = started(machine.path(), shims.path(), &folder)
+            .err()
+            .map(|failed| failed.to_string());
+        assert!(failed.is_some_and(|failed| failed.contains("claude-config")));
+        assert_eq!(folder.asked_for(), 1);
         Ok(())
     }
 }

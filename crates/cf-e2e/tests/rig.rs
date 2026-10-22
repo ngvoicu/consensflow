@@ -89,6 +89,9 @@ mod described;
 mod devin_bypass_first;
 #[path = "rig/help.rs"]
 mod help;
+#[cfg(unix)]
+#[path = "rig/kept_config.rs"]
+mod kept_config;
 #[path = "rig/last_exits.rs"]
 mod last_exits;
 #[path = "rig/live_base.rs"]

@@ -245,13 +245,7 @@ fn folder() -> Result<PathBuf> {
 fn a_real_claude_worker_with_an_mcp_server_finishes_its_task_and_the_chief_gets_the_result(
 ) -> Result {
     let log = Log::begin("live mcp")?;
-    let claude = live::installed(Harness::Claude)?;
-    log.say(format!(
-        "Claude Code is {} ({}); its login is read from {}",
-        claude.command().display(),
-        claude.version(),
-        claude.home().display()
-    ));
+    let claude = log.found(Harness::Claude)?;
     let python = live::working_command("python3", &["--version"])?;
     let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-mcp");
     files::make_dir(&made)?;
@@ -268,11 +262,7 @@ fn a_real_claude_worker_with_an_mcp_server_finishes_its_task_and_the_chief_gets_
         server::NAME,
         server.config().display()
     ));
-    let mut rig = Rig::start(
-        claude
-            .rig(&shim)
-            .stand_ins_write_in(claude.home().join(".claude")),
-    )?;
+    let mut rig = Rig::start(claude.rig(&shim))?;
     if live::keep_requested() {
         log.say(format!(
             "{} is set: the home stays at {}",
@@ -282,7 +272,6 @@ fn a_real_claude_worker_with_an_mcp_server_finishes_its_task_and_the_chief_gets_
     }
     live_agents::write_roster(&rig, &roster(), &log)?;
     let folder = folder()?;
-    rig.forget_claude_memory_of(&folder);
     let trust = live::window::trust_claude(&rig, &[shim.to_string_lossy().into_owned()], &folder)?;
     log.say(format!("Claude Code and the folder: {trust}"));
     // The window that trusted the folder had the server too, and said so: what it

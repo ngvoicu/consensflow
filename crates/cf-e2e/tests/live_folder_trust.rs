@@ -49,8 +49,11 @@
 //! follow-up's window be a resumed one, and the human's notes must say that ConsensFlow
 //! answered yes once for Claude Code, and never for Codex.
 //!
-//! What Claude Code writes of a yes is taken back with `claude purge` at the end;
-//! the run says which folders it could not have it forget. Codex writes nothing here.
+//! Claude Code's windows run on a config folder of the run's own, with a copy of the
+//! machine's login ([`cf_e2e::live::login`]): what it writes of a yes is in that
+//! folder, which goes with each rig, and nothing of it reaches the owner's `~/.claude`.
+//! A fresh folder has trusted nothing, so the questions are the run's own. Codex writes
+//! nothing here.
 //!
 //! ```text
 //! cargo xtask live folder-trust                       every harness, both parts
@@ -63,7 +66,6 @@ use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::Duration;
 
-use cf_e2e::live::cleanup::forget_in_claude;
 use cf_e2e::live::machine::live_folder_in;
 use cf_e2e::live::members::{member, member_as, named, stand_in_chief, Members, Plan};
 use cf_e2e::live::report::{self, Check};
@@ -85,6 +87,10 @@ const FOLDER: &str = "asks-probe";
 
 /// How long a window has to draw, and to draw what follows a key.
 const DRAWS: Duration = Duration::from_secs(60);
+
+/// How long the daemon and the pane host have to end when a rig is closed: a real
+/// harness's window takes longer than the stand-ins'.
+const CLOSES: Duration = Duration::from_secs(30);
 
 /// How many keys a question is given before it counts as not answered: the engine's own.
 const MOST_KEYS: usize = 6;
@@ -225,10 +231,22 @@ fn predicted(directory: &Path) -> Result<(String, bool)> {
     ))
 }
 
-/// The folders Claude Code keeps a yes for in its own record of them (`.claude.json`
-/// in `home`), read and never written: below `under` alone.
-fn claude_trusted(home: &Path, under: &str) -> Vec<String> {
-    let record: serde_json::Value = fs::read_to_string(home.join(".claude.json"))
+/// Where Claude Code keeps its own record of folders: `.claude.json` in the config folder
+/// the rig gave its windows, and in the user's home where it gave none.
+fn claude_record(rig: &Rig, install: &Installed) -> PathBuf {
+    match rig
+        .var("CLAUDE_CONFIG_DIR")
+        .filter(|config| !config.is_empty())
+    {
+        Some(config) => Path::new(config).join(".claude.json"),
+        None => install.home().join(".claude.json"),
+    }
+}
+
+/// The folders Claude Code keeps a yes for in its own record of them (`record`, its
+/// `.claude.json`), read and never written: below `under` alone.
+fn claude_trusted(record: &Path, under: &str) -> Vec<String> {
+    let record: serde_json::Value = fs::read_to_string(record)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
@@ -352,7 +370,8 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     let under = live_folder_in(&home, FOLDER)?
         .to_string_lossy()
         .into_owned();
-    let trusted_before = claude_trusted(install.home(), &under);
+    let record = claude_record(rig, install);
+    let trusted_before = claude_trusted(&record, &under);
     let window = Open::new(rig, install, &name, &id)
         .without_trust()
         .open(log)?;
@@ -392,7 +411,7 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     let mut kept_where_said = true;
     if asked && harness == Harness::Claude {
         let (folder, inside) = predicted(&directory)?;
-        let kept: Vec<String> = claude_trusted(install.home(), &under)
+        let kept: Vec<String> = claude_trusted(&record, &under)
             .into_iter()
             .filter(|folder| !trusted_before.contains(folder))
             .collect();
@@ -409,18 +428,11 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     })
 }
 
-/// The windows part for `install`: each case, in folders of the run's own, which are
-/// added to `folders`.
-fn windows(
-    install: &Installed,
-    stamp: &str,
-    log: &Log,
-    folders: &mut Vec<String>,
-) -> Result<Vec<Check>> {
+/// The windows part for `install`: each case, in folders of the run's own.
+fn windows(install: &Installed, stamp: &str, log: &Log) -> Result<Vec<Check>> {
     let harness = install.harness();
     let rig = Rig::start(live::rig(std::slice::from_ref(install), FAKE_AGENT))?;
     let base = format!("{FOLDER}/{stamp}/{}", harness.name());
-    let home = PathBuf::from(rig.var("HOME").unwrap_or_default());
     let mut checks = Vec::new();
     for case in Case::ALL {
         let seen = look(&rig, install, &base, case, log)?;
@@ -444,16 +456,8 @@ fn windows(
             },
         ));
     }
-    let made = Case::ALL.into_iter().map(|case| case.folder().0).chain([
-        "untrusted",
-        "worktree-main",
-        "superproject",
-        "submodule-source",
-    ]);
-    for folder in made {
-        let path = live_folder_in(&home, &format!("{base}/{folder}"))?;
-        folders.push(path.to_string_lossy().into_owned());
-    }
+    // The rig is closed, not dropped: what the run did in the owner's setup fails it.
+    rig.close_within(CLOSES)?;
     Ok(checks)
 }
 
@@ -507,17 +511,10 @@ fn done_task(members: &Members, number: i64, words: &[String], brief: &str) -> R
 }
 
 /// The projects part for `harness` as `role`: a project in a new repository nobody
-/// trusted (a follow-up's is made one after the first task), whose folder is added
-/// to `folders`. The chief must come up idle, a worker's tasks be done, a follow-up's
+/// trusted (a follow-up's is made one after the first task). The chief must come up idle, a worker's tasks be done, a follow-up's
 /// window be opened again on its conversation, and the notes speak of a yes once
 /// for Claude Code and never for a harness that does not ask.
-fn project(
-    harness: Harness,
-    role: &str,
-    stamp: &str,
-    log: &Log,
-    folders: &mut Vec<String>,
-) -> Check {
+fn project(harness: Harness, role: &str, stamp: &str, log: &Log) -> Check {
     let who = format!("{} {role}", harness.name());
     let folder = format!("{FOLDER}-project/{stamp}-{}-{role}", harness.name());
     let plan = match role {
@@ -529,7 +526,6 @@ fn project(
     };
     let scoped = log.scoped(&who);
     let came = Members::open(&plan, Path::new(FAKE_AGENT), &scoped).and_then(|mut members| {
-        folders.push(members.folder().to_string_lossy().into_owned());
         let done = if role == "chief" {
             true
         } else {
@@ -608,35 +604,17 @@ fn which_harness_asks_to_trust_a_folder_and_consensflow_answers_it_in_the_projec
     let parts = named(&live::list("part"), &PARTS, |part| part, "part", &PARTS)?;
     let stamp = jiff::Timestamp::now().as_second().to_string();
     let mut checks = Vec::new();
-    let mut claude = None;
     for harness in harnesses {
         let install = log.found(harness)?;
-        let mut folders = Vec::new();
         // Codex's bare window is not the app's: its question is no window ConsensFlow opens.
         if parts.contains(&"windows") && harness != Harness::Codex {
-            checks.extend(windows(&install, &stamp, &log, &mut folders)?);
+            checks.extend(windows(&install, &stamp, &log)?);
         }
         if parts.contains(&"projects") && matches!(harness, Harness::Claude | Harness::Codex) {
             for role in ROLES {
-                checks.push(project(harness, role, &stamp, &log, &mut folders));
+                checks.push(project(harness, role, &stamp, &log));
             }
         }
-        if harness == Harness::Claude {
-            claude = Some((install, folders));
-        }
-    }
-    // Claude Code forgets the run's folders, and the trust it wrote down for them.
-    if let Some((claude, folders)) = claude {
-        let forgot = forget_in_claude(claude.command(), claude.home(), &folders);
-        let kept: Vec<&String> = folders
-            .iter()
-            .filter(|folder| !forgot.contains(folder))
-            .collect();
-        log.say(format!(
-            "Claude Code forgot {} of the run's {} folders; not: {kept:?}",
-            forgot.len(),
-            folders.len()
-        ));
     }
     report::conclude(&log, "which harness asks, and what came of it", &checks)
 }

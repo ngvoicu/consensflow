@@ -221,24 +221,26 @@ fn a_chief_that_went_is_said_to_have_gone_and_how_where_its_token_is_refused() -
     Ok(())
 }
 
-/// The runs of a machine share the Claude folder the stand-ins write in
-/// (`projects/integration`), and a rig that ends takes the folder away when it is
-/// empty (`rig::forget`: `remove_dir`). A chief hears nothing until a member says
-/// something, so for a while its folder is empty, and a rig of another run that ends
-/// then leaves it without. The stand-in made the folder only when it started, and
-/// the first thing the chief was told after that ended it (the door check of
-/// 2026-10-12: `cf answer` was refused, "this window has no ConsensFlow access", for
-/// a chief that had gone). It makes its folder again where it writes, as Claude does.
+/// A chief hears nothing until a member says something, so for a while its folder of
+/// conversations (`projects/integration` of the Claude config folder) is empty. The
+/// stand-in made the folder only when it started, and the first thing the chief was told
+/// after something took the empty folder away ended it (the door check of 2026-10-12:
+/// `cf answer` was refused, "this window has no ConsensFlow access", for a chief that
+/// had gone). It makes its folder again where it writes, as Claude does.
 #[cfg(unix)]
 #[test]
-fn a_chief_that_has_written_nothing_stays_when_another_rig_of_the_machine_takes_its_empty_folder(
+fn a_chief_that_has_written_nothing_stays_when_its_empty_folder_of_conversations_is_taken_away(
 ) -> Outcome {
     use cf_e2e::rig::{Project, Rig};
 
-    // The machine is a folder of the test's own: the rig reads its Claude from there.
+    use crate::kept_config::Kept;
+
     let machine = tempfile::tempdir()?;
     let shims = tempfile::tempdir()?;
-    let claude = Installed::at(Harness::Claude, "/nowhere/claude", machine.path());
+    let kept = tempfile::tempdir()?;
+    let config = Kept::new(kept.path().join("claude-config"), None);
+    let claude = Installed::at(Harness::Claude, "/nowhere/claude", machine.path())
+        .with_claude_config(config.clone());
     let rig = Rig::start(cf_e2e::live::rig_with_stand_ins(
         &[claude],
         shims.path(),
@@ -251,11 +253,10 @@ fn a_chief_that_has_written_nothing_stays_when_another_rig_of_the_machine_takes_
         Ok(project.lane("chief")?["activity"]["state"] == "idle")
     })?;
     // It has written nothing: its folder is made, and empty.
-    let records = machine.path().join(".claude/projects/integration");
+    let records = config.path.join("projects/integration");
     assert!(records.is_dir() && std::fs::read_dir(&records)?.next().is_none());
 
-    // Another rig of the machine ends, and takes the folder, which is empty. (One daemon
-    // at a time runs in a test's process: what the other rig does is done here.)
+    // Something takes the folder, which is empty.
     std::fs::remove_dir(&records)?;
 
     // The chief hears something: it writes it, and stays.
