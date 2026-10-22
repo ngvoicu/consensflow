@@ -48,6 +48,9 @@ pub struct FakeAgent {
     pub agents_pending: bool,
     /// The lines of its record torn and passed over, by their places (the reading says so).
     pub lost: Vec<usize>,
+    /// Its reading says the record each item is of, as every harness's but
+    /// Devin's does: each item a record of its own, at its place.
+    pub says_places: bool,
     pub waiting: Option<Waiting>,
     pub quota: Option<Arc<Quota>>,
     /// Whether a delivery is taken.
@@ -211,6 +214,9 @@ pub struct FakeAdapter {
     /// last window on it left it, as a harness's `--resume` does: not, as the fake of
     /// Node's suite, whose every window began with an empty record.
     pub resumes_records: Cell<bool>,
+    /// The readings of the windows opened from now on say the record each item
+    /// is of: every harness's but Devin's, whose items are its store's.
+    pub says_places: Cell<bool>,
 }
 
 impl FakeAdapter {
@@ -259,6 +265,7 @@ impl FakeAdapter {
             wraps_pastes: Cell::new(false),
             forgets_first_messages: Cell::new(false),
             resumes_records: Cell::new(false),
+            says_places: Cell::new(true),
         })
     }
 
@@ -340,10 +347,14 @@ impl FakeAdapter {
         self.with(handle, |agent| agent.agents_pending = true);
     }
 
-    /// A line of the agent's record is torn and passed over, where the record
-    /// `place` would be: its reading says so from now on.
-    pub fn loses_a_line(&self, handle: &str, place: usize) {
-        self.with(handle, |agent| agent.lost.push(place));
+    /// A line of the agent's record is torn and passed over, where its next
+    /// record goes: its reading says so from now on. The place it stood at.
+    pub fn loses_a_line(&self, handle: &str) -> usize {
+        self.with(handle, |agent| {
+            let place = agent.items.len();
+            agent.lost.push(place);
+            place
+        })
     }
 
     /// The agent is at work on a turn.
@@ -586,6 +597,7 @@ impl Asked {
             settled: true,
             agents_pending: false,
             lost,
+            says_places: fake.says_places.get(),
             waiting: None,
             quota: None,
             admit: true,

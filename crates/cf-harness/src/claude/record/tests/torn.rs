@@ -22,6 +22,8 @@ fn a_reading_past_a_torn_line_says_where_it_was_and_reads_what_follows() {
     match &*stage.reader.look(&Options::default(), 0) {
         Reading::Known(record) => {
             assert_eq!(record.lost, [2]);
+            // Each item with its record's place: the user's at 0, the answer at 1.
+            assert_eq!(record.places, Some(vec![0, 1]));
             assert_eq!(
                 record.settlement,
                 Settlement::Settled,

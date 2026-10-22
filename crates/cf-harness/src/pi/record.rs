@@ -117,6 +117,10 @@ struct Session {
     /// The zone a reset that names none is read in.
     local: TimeZone,
     items: Vec<Item>,
+    /// The place among the records of the record each item is of.
+    places: Vec<usize>,
+    /// The place among the records of the one being read.
+    reading: usize,
     /// The tool calls made and not yet answered in the turn.
     open_tools: HashSet<Key>,
     turn_open: bool,
@@ -150,6 +154,8 @@ impl Session {
             session,
             local,
             items: Vec::new(),
+            places: Vec::new(),
+            reading: 0,
             open_tools: HashSet::new(),
             turn_open: false,
             terminal: None,
@@ -161,6 +167,7 @@ impl Session {
     }
 
     fn push(&mut self, id: Arc<str>, role: Role, text: String, complete: bool, at: Value) {
+        self.places.push(self.reading);
         self.items.push(Item {
             id,
             role,
@@ -327,6 +334,7 @@ impl Session {
             };
         let mut record = Record::new();
         record.items = self.items.clone();
+        record.places = Some(self.places.clone());
         record.in_flight = in_flight;
         record.failed = self.failed;
         record.quota = self.quota.clone();
@@ -344,6 +352,7 @@ impl Session {
 impl Parser for Session {
     fn visit(&mut self, record: Value, index: usize) -> Result<(), Stop> {
         self.records += 1;
+        self.reading = index;
         if record.is_null() {
             return Err(Stop::Failed(null_record(index)));
         }

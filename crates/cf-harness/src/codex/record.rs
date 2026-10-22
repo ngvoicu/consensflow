@@ -92,6 +92,8 @@ struct Rollout {
     latest_turn: Key,
     quota: Option<Arc<Quota>>,
     records: usize,
+    /// The place among the records of the one being read.
+    reading: usize,
     keys: Keys,
 }
 
@@ -100,6 +102,8 @@ struct Rollout {
 struct Kept {
     item: Item,
     final_text: Option<Arc<str>>,
+    /// The place among the rollout's records of the record that first named it.
+    began: usize,
 }
 
 /// A tool call as the rollout told it.
@@ -147,6 +151,7 @@ impl Rollout {
             latest_turn: Key::Null,
             quota: None,
             records: 0,
+            reading: 0,
             keys: Keys::default(),
         }
     }
@@ -435,6 +440,7 @@ impl Rollout {
                 compaction: false,
             },
             final_text: None,
+            began: self.reading,
         });
         place
     }
@@ -469,6 +475,7 @@ impl Rollout {
 impl Parser for Rollout {
     fn visit(&mut self, record: Value, index: usize) -> Result<(), Stop> {
         self.records += 1;
+        self.reading = index;
         if record.is_null() {
             return Err(Stop::Failed(null_record(index)));
         }
@@ -513,6 +520,7 @@ impl Answer for Rollout {
             .iter()
             .map(|kept| handed_out(&kept.item))
             .collect();
+        record.places = Some(self.items.iter().map(|kept| kept.began).collect());
         record.in_flight = in_flight;
         record.failed = matches!(end, Some((_, End::Failed)));
         record.quota = self.quota.clone();

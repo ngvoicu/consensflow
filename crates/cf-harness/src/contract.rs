@@ -447,6 +447,16 @@ impl Observed {
         }
     }
 
+    /// The place among the records of the record each item began in, where the
+    /// harness says it: none for Devin, whose items are its store's, and where
+    /// the record could not be read.
+    pub fn places(&self) -> Option<&[usize]> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => record.places.as_deref(),
+            Some(Reading::Unknown(_)) | None => None,
+        }
+    }
+
     /// Whether the conversation's turn ended and left background agents or
     /// workflows running: the window takes input between turns, and its agent
     /// is woken when they end.

@@ -436,6 +436,7 @@ pub(super) fn empty_record() -> Reading {
         settlement: Settlement::Unknown,
         agents_pending: false,
         lost: Vec::new(),
+        places: None,
     })
 }
 
@@ -458,5 +459,6 @@ pub(super) fn working_record() -> Record {
         settlement: Settlement::InFlight,
         agents_pending: false,
         lost: Vec::new(),
+        places: None,
     }
 }

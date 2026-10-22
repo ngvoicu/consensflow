@@ -326,4 +326,6 @@ fn a_record_whose_newline_a_short_write_dropped_keeps_its_place_and_its_time() {
     assert_eq!(after.items[0], before[0], "the same id, at the same place");
     assert_eq!(after.items[1].at, Some(json!(2)));
     assert!(after.lost.is_empty());
+    // Each item with its record's place, the header's at 0.
+    assert_eq!(after.places, Some(vec![1, 2]));
 }

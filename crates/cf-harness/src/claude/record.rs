@@ -346,7 +346,9 @@ impl Answer for Transcript {
         }
         let settlement = self.settlement();
         let mut record = Record::new();
-        record.items = self.items.sorted()?;
+        let (items, places) = self.items.sorted()?;
+        record.items = items;
+        record.places = Some(places);
         record.in_flight = settlement == Settlement::InFlight;
         record.failed = self.failed;
         record.quota = self.quota.clone();

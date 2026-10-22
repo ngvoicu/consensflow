@@ -348,6 +348,7 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         settlement,
         agents_pending: false,
         lost: Vec::new(),
+        places: None,
     }))
 }
 

@@ -65,6 +65,11 @@ pub struct Record {
     /// items miss. Never said: no reading Node wrote has it.
     #[serde(skip)]
     pub lost: Vec<usize>,
+    /// The place among the records of the record each item began in, one an
+    /// item, which [`Record::lost`] is counted in: none where the harness's
+    /// items are not its record's lines (Devin's, from its store). Never said.
+    #[serde(skip)]
+    pub places: Option<Vec<usize>>,
 }
 
 impl Record {
@@ -79,6 +84,7 @@ impl Record {
             settlement: Settlement::Unknown,
             agents_pending: false,
             lost: Vec::new(),
+            places: None,
         }
     }
 }

@@ -360,6 +360,7 @@ pub(super) fn settled(session: &str) -> Record {
         settlement: Settlement::Settled,
         agents_pending: false,
         lost: Vec::new(),
+        places: None,
     }
 }
 

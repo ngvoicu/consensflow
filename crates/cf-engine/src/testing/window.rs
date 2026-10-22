@@ -271,6 +271,7 @@ impl Window for FakeWindow {
 /// What a look at `agent`'s window finds, its launch on `session`.
 fn looked(agent: &FakeAgent, session: &str) -> Observed {
     let reading = |items: Vec<Item>| {
+        let places = agent.says_places.then(|| (0..items.len()).collect());
         Some(Arc::new(Reading::Known(Record {
             items,
             in_flight: false,
@@ -280,6 +281,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             settlement: Settlement::Unknown,
             agents_pending: agent.agents_pending,
             lost: agent.lost.clone(),
+            places,
         })))
     };
     // A window that shows another conversation than its launch's: that

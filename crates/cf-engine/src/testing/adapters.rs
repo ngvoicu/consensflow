@@ -86,6 +86,7 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
             },
             agents_pending: false,
             lost: Vec::new(),
+            places: None,
         }),
     }
 }

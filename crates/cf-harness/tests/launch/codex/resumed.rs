@@ -42,6 +42,7 @@ fn reading(items: Vec<Item>, settlement: Settlement) -> Arc<Reading> {
         settlement,
         agents_pending: false,
         lost: Vec::new(),
+        places: None,
     }))
 }
 

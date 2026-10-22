@@ -2,7 +2,7 @@
 //! and its trace both do.
 
 use std::ffi::OsString;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -21,12 +21,16 @@ static APPENDING: Mutex<()> = Mutex::new(());
 /// the limit by at most one append.
 ///
 /// A failure of either step is the caller's to ignore or to say: nothing is
-/// appended after a failed move. The appends of a process take turns.
+/// appended after a failed move. The appends of a process take turns, and so
+/// do those of processes, through an advisory lock on a file beside it
+/// ([`lock_beside`]): a second daemon starting on a home writes its first line
+/// to the log before its ledger refuses it.
 pub fn append_rotating(file: &Path, text: &str, limit: u64) -> io::Result<()> {
     // A thread that panicked holding it left nothing half done that matters here.
     let _turn = APPENDING
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _held = held(file);
     // A file that cannot be looked at has no size: it is made, or fails below.
     let size = fs::metadata(file).map_or(0, |found| found.len());
     if size > limit {
@@ -37,6 +41,28 @@ pub fn append_rotating(file: &Path, text: &str, limit: u64) -> io::Result<()> {
         .append(true)
         .open(file)?
         .write_all(text.as_bytes())
+}
+
+/// The lock beside `file`, taken: released when it is dropped. None where it
+/// cannot be made or taken (a home that cannot be written fails the append
+/// itself), which leaves the append to take turns within its process only.
+fn held(file: &Path) -> Option<File> {
+    let beside = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(lock_beside(file))
+        .ok()?;
+    beside.lock().ok()?;
+    Some(beside)
+}
+
+/// The file whose advisory lock the appends to `file` take: its name and
+/// `.lock`, which is never moved aside.
+pub fn lock_beside(file: &Path) -> PathBuf {
+    let mut name = OsString::from(file.as_os_str());
+    name.push(".lock");
+    PathBuf::from(name)
 }
 
 /// Where a file moved aside goes: its name and `.1`.

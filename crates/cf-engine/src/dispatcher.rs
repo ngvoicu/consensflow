@@ -39,7 +39,7 @@ use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
 use crate::background::quote;
 use crate::chief_switch::SwitchTo;
-use crate::deliveries::lost_in_turn;
+use crate::deliveries::{last_paste, lost_in_turn};
 use crate::record::Record;
 use crate::resume::Coming;
 use crate::resume::ResumeState;
@@ -1008,7 +1008,7 @@ impl Dispatcher {
                     ActivityState::Working
                 };
                 // A line of the record lost in the turn is said while the turn is the last.
-                match lost_in_turn(record, &observed) {
+                match lost_in_turn(record, &observed, last_paste(&observed)) {
                     Some(lost) => Activity::because(
                         state,
                         format!(

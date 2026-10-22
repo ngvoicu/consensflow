@@ -13,6 +13,8 @@
 
 [run]
 base-append = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "file::append"]
+base-append-processes = ["cargo", "test", "--offline", "-p", "cf-base", "--test", "append_processes"]
+harness-codex-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record::tests"]
 engine-lost-lines = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "lost_lines::"]
 harness-claude-torn = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::torn"]
 harness-launch-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "devin::"]
@@ -158,8 +160,8 @@ runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "        if let Some(lost) = lost_in_turn(record, observed) {"
-replace = "        if let Some(lost) = lost_in_turn(record, observed).filter(|_| false) {"
+find = "        if let Some(lost) = lost_in_turn(record, observed, Some(start)) {"
+replace = "        if let Some(lost) = lost_in_turn(record, observed, Some(start)).filter(|_| false) {"
 
 [[plant]]
 name = "torn line: the window's activity says nothing of a line lost in its turn"
@@ -168,12 +170,12 @@ runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "                match lost_in_turn(record, &observed) {"
-replace = "                match lost_in_turn(record, &observed).filter(|_| false) {"
+find = "                match lost_in_turn(record, &observed, last_paste(&observed)) {"
+replace = "                match lost_in_turn(record, &observed, last_paste(&observed)).filter(|_| false) {"
 
 [[plant]]
 name = "torn line: a message handed over takes the record's lost lines for its turn's"
-meant = "a_message_pasted_into_an_open_window_begins_a_turn_that_has_lost_nothing_yet"
+meant = "devins_message_pasted_into_an_open_window_begins_a_turn_that_has_lost_nothing_yet"
 runs = ["engine-lost-lines"]
 
 [[plant.edit]]
@@ -183,7 +185,7 @@ replace = "            delivery.lost_before = Some((message.id, 0));"
 
 [[plant]]
 name = "torn line: a launch's first message takes the record's lost lines for its turn's"
-meant = "a_line_lost_before_a_message_was_handed_over_is_no_part_of_its_turn"
+meant = "devins_line_lost_before_a_launch_s_first_message_is_no_part_of_its_turn"
 runs = ["engine-lost-lines"]
 
 [[plant.edit]]
@@ -242,7 +244,7 @@ find = "            while let Some(Ok(_)) = values.next() {"
 replace = "            while let Some(Ok(_)) = values.next().filter(|_| false) {"
 
 [[plant]]
-name = "torn line: two threads that append at the log's limit both move it aside"
+name = "torn line: two threads that append at the log's limit both move it aside, neither the process's turn nor the lock beside the file taken"
 meant = "two_threads_that_append_at_the_limit_move_the_file_aside_once_and_lose_no_line"
 runs = ["base-append"]
 
@@ -252,3 +254,70 @@ find = '''    let _turn = APPENDING
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);'''
 replace = "    let _turn = &APPENDING;"
+
+[[plant.edit]]
+file = "crates/cf-base/src/file/append.rs"
+find = "    let _held = held(file);"
+replace = "    let _held = ();"
+
+# Round 3 (T-290, Calliope's T-285).
+
+[[plant]]
+name = "torn line: a turn is counted from the count kept at its hand-over, which a restart loses, though the record says where its paste is"
+meant = "a_line_lost_before_a_turn_is_no_part_of_it_after_a_restart"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "    let Some(places) = observed.places() else {"
+replace = "    let Some(places) = observed.places().filter(|_| false) else {"
+
+[[plant]]
+name = "torn line: the window's activity finds no paste in its record to count its turn from"
+meant = "a_result_taken_past_a_line_lost_in_its_turn_ends_with_a_line_for_the_chief_and_the_window_says_it"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "    observed.items().iter().rposition(|item| {"
+replace = "    observed.items().iter().rposition(|item| false && {"
+
+[[plant]]
+name = "torn line: a Claude item is said at no record of its own"
+meant = "a_reading_past_a_torn_line_says_where_it_was_and_reads_what_follows"
+runs = ["harness-claude-torn"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/items.rs"
+find = "            began: seq,"
+replace = "            began: 0,"
+
+[[plant]]
+name = "torn line: a Codex item is said at no record of its own"
+meant = "each_item_is_said_with_the_place_of_the_record_that_first_named_it"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = "            began: self.reading,"
+replace = "            began: 0,"
+
+[[plant]]
+name = "torn line: a Pi item is said at no record of its own"
+meant = "a_record_whose_newline_a_short_write_dropped_keeps_its_place_and_its_time"
+runs = ["harness-pi-steps"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "        self.places.push(self.reading);"
+replace = "        self.places.push(0);"
+
+[[plant]]
+name = "torn line: two processes that append at the log's limit both move it aside"
+meant = "two_processes_that_append_at_the_limit_move_the_file_aside_once_and_lose_no_line"
+runs = ["base-append-processes"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file/append.rs"
+find = "    let _held = held(file);"
+replace = "    let _held = ();"

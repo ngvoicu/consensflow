@@ -9,10 +9,11 @@ use std::rc::Rc;
 
 use cf_base::js;
 use cf_harness::contract::{Admission, Held, Observed, PaneHost, Readiness};
+use cf_harness::records::Role;
 use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView, TaskView};
 use cf_proto::trace::WindowEvent;
 
-use crate::delivery_text::{delivery_text, marker_of};
+use crate::delivery_text::{delivery_text, header_id, is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::{answers_to_the_task, Prelude};
@@ -62,24 +63,48 @@ pub(crate) struct DeliveryPart {
     /// window leaves it as it was.
     pub(crate) prelude: Option<Prelude>,
     /// How many lines of the window's record were lost (torn, and passed
-    /// over) as its last look read it.
+    /// over) as its last look read it: for a harness whose reading cannot say
+    /// where its turn began ([`lost_in_turn`]).
     pub(crate) lost: usize,
     /// The message last handed over to the window, and how many lines its
     /// record had lost before it: one lost since is lost from that turn.
     pub(crate) lost_before: Option<(i64, usize)>,
 }
 
-/// The first line of the window's record lost since the message last handed
-/// over to it, by the place among the records it stood at: since the record
-/// began where no hand-over is known (the daemon started since), so a result
-/// is marked rather than taken whole in silence.
-pub(crate) fn lost_in_turn(record: &Record, observed: &Observed) -> Option<usize> {
-    let before = record
-        .delivery
-        .borrow()
-        .lost_before
-        .map_or(0, |(_, lost)| lost);
-    observed.lost().get(before).copied()
+/// The first line of the window's record lost in its turn, by the place among
+/// the records it stood at. The turn is what follows the paste that began it,
+/// the item `pasted`: where the reading says the record each item is of, a line
+/// past that paste's own record is the turn's, and nothing is kept, so a
+/// restart or a resume loses nothing; a record with no paste in it has no turn
+/// to mark. Devin's reading cannot say (its items are its store's, its lost
+/// lines its wire log's): the count taken at the last hand-over stands in, and
+/// where there is none (the daemon started since) every line counts, so a
+/// result is marked rather than taken whole in silence.
+pub(crate) fn lost_in_turn(
+    record: &Record,
+    observed: &Observed,
+    pasted: Option<usize>,
+) -> Option<usize> {
+    let lost = observed.lost();
+    let Some(places) = observed.places() else {
+        let before = record
+            .delivery
+            .borrow()
+            .lost_before
+            .map_or(0, |(_, lost)| lost);
+        return lost.get(before).copied();
+    };
+    let began = *places.get(pasted?)?;
+    lost.iter().copied().find(|&line| line > began)
+}
+
+/// The item of the last paste the window's record shows: where its latest turn
+/// of ConsensFlow's began.
+pub(crate) fn last_paste(observed: &Observed) -> Option<usize> {
+    observed.items().iter().rposition(|item| {
+        item.role == Role::User
+            && header_id(&item.text).is_some_and(|id| is_paste_of(&item.text, id, None))
+    })
 }
 
 impl Dispatcher {
@@ -272,7 +297,7 @@ impl Dispatcher {
             words.join("\n\n")
         };
         // A line of the record torn and passed over in the turn: the result may have a hole.
-        if let Some(lost) = lost_in_turn(record, observed) {
+        if let Some(lost) = lost_in_turn(record, observed, Some(start)) {
             body.push_str(&format!(
                 "\n\nA line of @{}'s record was lost (record {lost}); this result may miss part of the turn.",
                 participant.handle
