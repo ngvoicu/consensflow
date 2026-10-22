@@ -21,10 +21,10 @@
 //! rows between the replies of `tests/engine/fixtures/completion/devin/
 //! native-tui.json`, each named on the wire by the step that runs it; a live run
 //! of 2026-10-13, Devin 3000.11.3: a note pasted a second after another showed
-//! in the record 63 s later, when the turn before it ended). A turn's prompt is
-//! on the wire as a request of the TUI when the message is run. Whether a real
-//! Devin's TUI puts a message typed in a turn to its agent at once is not
-//! recorded: `cargo xtask live notes devin` shows it.
+//! in the record 63 s later, when the turn before it ended). Its history row is
+//! written at the Enter, before then (`store::submitted`), as Devin 3000.11.92 writes
+//! it. A turn's prompt is on the wire as a request of the TUI when the message is run,
+//! which no real Devin writes (T-102): the daemon reads none.
 //!
 //! A turn can leave a command running (`BACKGROUND <seconds> <words>`: `command`):
 //! its agent runs it as a tool once it has thought, answers, and the turn ends; the
@@ -100,9 +100,9 @@ use terminal::{Event, Keys};
 use turn::{Pace, Window};
 use wire::Wire;
 
-/// What Devin says to `--version`: a version the daemon takes for one that records
-/// complete worker replies.
-const VERSION: &str = "devin 3000.11.0 (stand-in)";
+/// What Devin says to `--version`: the Devin whose store and TUI it plays, which writes a
+/// prompt's history row at its Enter (`store::submitted`).
+const VERSION: &str = "devin 3000.11.92 (stand-in)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -228,6 +228,9 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
                 // Enter at a dialog takes its first option; anywhere else it submits.
                 Event::Submit(text) => {
                     if !permission.answer(Answer::Approved) {
+                        if let Err(failed) = store::submitted(Path::new(&file), &session, &text) {
+                            let _ = writeln!(io::stderr(), "fake-devin: {failed}");
+                        }
                         let _ = turns.send((text, false));
                     }
                 }

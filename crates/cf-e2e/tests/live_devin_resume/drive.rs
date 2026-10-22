@@ -395,21 +395,6 @@ fn ask_all(run: &Run, case: Case, scene: &mut Scene, place: &Place, done: &mut D
         for line in outcome.lines() {
             done.account.say(line);
         }
-        // The engine waits for a paste Devin's agent has (`Window::took`) by the TUI's
-        // prompt of it, whole: one Devin puts to its agent otherwise is waited for as
-        // one it may have dropped, and goes again where its record is late. A log that
-        // holds no prompt of the TUI's at all (3000.11.92 writes its requests as `{}`)
-        // gives the daemon no such word, whatever the rule: the ask's lines say so.
-        if outcome
-            .took
-            .is_some_and(|read| read.prompts > 0 && !read.took)
-        {
-            done.account.fail(format!(
-                "ask {}: the TUI's prompt of the paste did not begin with the whole of it, as \
-                 the daemon reads the wire (Window::took)",
-                ask.name()
-            ));
-        }
         if !outcome.turn.ended && outcome.turn.dialog.is_some() {
             back::release(run, scene, &mut done.account);
         }

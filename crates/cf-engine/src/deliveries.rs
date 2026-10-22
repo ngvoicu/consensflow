@@ -56,6 +56,10 @@ pub(crate) struct DeliveryPart {
     pub(crate) delivering: Option<Delivering>,
     /// A message waits for what the human typed and has not sent.
     pub(crate) unsent: bool,
+    /// For the message on its way, pasted into a conversation the window left: how many
+    /// items that conversation's record held while it read a turn at work, and since when
+    /// it has held as many (`arrival`'s `watch_left`).
+    pub(crate) left_at_work: Option<(i64, usize, i64)>,
     /// The message a window not ready for a paste holds, told to the trace once.
     pub(crate) held: Option<i64>,
     /// What goes into the window before anything else of its queue, in this

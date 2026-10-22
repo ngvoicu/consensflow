@@ -1,28 +1,25 @@
-# Three Devin arrival gaps main had, found by GPT-6-Astra and GPT-6.1-Sol reviewing B5 on
-# 2026-10-18, and two of the live guard of a resumed window's first message (3.0.6, item 7):
+# The Devin arrival branch (3.0.6, item 7): the review of B5 by GPT-6-Astra and GPT-6.1-Sol
+# (2026-10-18), the live probe of what Devin writes (T-102, 2026-10-21) and the review of
+# c2e29f2d (T-101):
 #
-# - a turn the human began as a paste went in, which no look saw before it ended, held the
-#   paste; a look that woke half an hour on found the window at rest and pasted again,
-#   seconds before Devin ran the paste it had queued. The window says a turn that held the
-#   paste ended since the last look (`Window::released`), and the paste's time starts at
-#   that look (`arrival`'s `rested`);
-# - a paste Devin had taken (`Window::took`) was waited for in the record of the
-#   conversation the human switched the window to (`/new`, `/resume`), which never shows
-#   it, and the window's queue behind it waited for good. A delivery keeps the conversation
-#   it went into (`Delivering::session`), and that record, read with no window, confirms it
-#   or gives it back once it rests without it;
-# - the wire took any text of any request that began with the paste's first line for the
-#   paste put to the agent: a human's prompt whose later part quoted it, a request that is
-#   no prompt, a prompt of another conversation. Only a prompt of the conversation shown
-#   whose text, its parts joined as Devin's record joins them, begins with the whole paste;
-# - the live guard asked Devin's store only where the wait for the note's turn saw it
-#   arrive, and read the daemon's reader once, whatever lock its store was under.
+# - Devin 3000.6.14 to 3000.11.92 write no request of the TUI's to the wire log: whether
+#   Devin took a paste, and holds it queued, is read from its store (`devin/history.rs`):
+#   from 3000.11.92 on, a `prompt_history` row of the conversation shown, written since
+#   the hand-over, that begins with the whole paste, is its word that the TUI took it, and
+#   one its record does not show yet is held. An older Devin's window says nothing of it.
+#   A prompt submitted since the engine's look holds the window from a paste; and a
+#   message of the user's the agent has not answered, which Devin's record reads at rest,
+#   is a turn begun for 30 s (`adapter`'s `begun_on_the_store`);
+# - a paste taken in a conversation the human left (`/new`, `/resume`) is settled by that
+#   conversation's record (`Delivering::session`, `arrival`'s `watch_left`): confirmed where
+#   it shows it, given back after a whole arrival window of rest without it, a record that
+#   cannot be read being at rest, or after half an hour of reading at work, unchanged; and
+#   a window that closes settles it by that record too (`in_flight`);
+# - the live guard asks Devin's store whether or not the wait for the note's turn saw it
+#   arrive, and reads the daemon's reader again until it holds the note.
 #
-# The engine's rules run on its fake windows and on the schedules of looks against a model
-# of Devin's queue; the wire log's and the window's in the Devin adapter's tests; the
-# guard's in the live suite's own unit tests. One plant takes one rule out; a test fails.
-#
-# Every name holds `devin arrival`, so `npm run plants:daemon -- "devin arrival"` runs them all.
+# One plant takes one rule out; a test fails. Every name holds `devin arrival`, so
+# `npm run plants:daemon -- "devin arrival"` runs them all.
 
 [run]
 engine-slow-records = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "slow_records"]
@@ -31,59 +28,136 @@ engine-schedules = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "
 harness-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::"]
 live-devin-resume-back = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_devin_resume", "back::tests::"]
 
-# 1. A turn that held the paste, ended before the next look.
+# 1. Devin's store: the TUI took the paste, or holds it queued.
 
 [[plant]]
-name = "devin arrival: the engine takes no word that a turn which held the paste ended since the last look, and a look that wakes pastes again"
-meant = "waits_from_the_look_that_finds_ended_a_turn_that_held_the_paste_however_late_that_look_comes"
-runs = ["engine-slow-records"]
+name = "devin arrival: a history row that begins with the paste's header and goes on in other words is the paste"
+meant = "the_tui_took_a_paste_once_its_store_has_a_row_of_it_whole_in_the_conversation_shown_since_the_hand_over"
+runs = ["harness-devin"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/arrival.rs"
-find = "        if released {"
-replace = "        if false && released {"
+file = "crates/cf-harness/src/devin/history.rs"
+find = "window_text(content).trim_start().starts_with(text.as_str())"
+replace = "window_text(content).contains(text.lines().next().unwrap_or_default())"
 
 [[plant]]
-name = "devin arrival: the engine takes no word that a turn which held the paste ended, over the grid's sleep from the hand-over behind a racing turn"
+name = "devin arrival: a history row of another conversation than the one shown is the paste"
+meant = "the_tui_took_a_paste_once_its_store_has_a_row_of_it_whole_in_the_conversation_shown_since_the_hand_over"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/history.rs"
+find = "where session_id = ? and is_shell = 0"
+replace = "where (session_id = ? or 1) and is_shell = 0"
+
+[[plant]]
+name = "devin arrival: a history row written before the hand-over, an earlier attempt's, is the paste"
+meant = "the_tui_took_a_paste_once_its_store_has_a_row_of_it_whole_in_the_conversation_shown_since_the_hand_over"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/history.rs"
+find = "if *at >= *since as f64"
+replace = "if *at >= *since as f64 - 3600.0"
+
+[[plant]]
+name = "devin arrival: Devin's window never says its TUI took the paste"
+meant = "the_tui_took_a_paste_once_its_store_has_a_row_of_it_whole_in_the_conversation_shown_since_the_hand_over"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "        self.history().is_some_and(|seen| seen.took)"
+replace = "        self.history().is_some_and(|seen| seen.took && false)"
+
+[[plant]]
+name = "devin arrival: a paste the store took is held whatever its record shows"
+meant = "a_paste_its_store_took_is_held_until_its_record_shows_it"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "        self.took() && !self.recorded.get()"
+replace = "        self.took()"
+
+[[plant]]
+name = "devin arrival: an older Devin's window reads its store's history as a 3000.11.92 one does"
+meant = "an_older_devins_window_says_nothing_of_its_stores_history"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/history.rs"
+find = "    super::install::at_least(version, AT_ENTER)"
+replace = "    super::install::at_least(version, AT_ENTER) || !version.is_empty()"
+
+[[plant]]
+name = "devin arrival: a store its writer holds locked takes back its word that the TUI took the paste"
+meant = "a_locked_store_answers_what_the_last_look_that_read_it_answered"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/history.rs"
+find = "            Err(_) => self.seen.get(),"
+replace = "            Err(_) => Seen::default(),"
+
+[[plant]]
+name = "devin arrival: a prompt submitted since the engine's look holds nothing, and a paste goes into the turn it begins"
+meant = "a_prompt_submitted_since_the_engines_look_holds_the_window_from_a_paste"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "                .is_some_and(|(now, then)| now > then)"
+replace = "                .is_some_and(|(now, then)| now > then && false)"
+
+[[plant]]
+name = "devin arrival: a message of the user's its agent has not answered yet reads at rest"
+meant = "a_message_of_the_users_its_agent_has_not_answered_yet_is_a_turn_begun_for_a_while"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "            if self.begun_on_the_store(&observed) {"
+replace = "            if false && self.begun_on_the_store(&observed) {"
+
+[[plant]]
+name = "devin arrival: a turn whose agent never says a word reads at work for good"
+meant = "a_message_of_the_users_its_agent_has_not_answered_yet_is_a_turn_begun_for_a_while"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "        at.is_some_and(|at| self.time.wall_ms() - at < TAKEN_IN_MS)"
+replace = "        at.is_some()"
+
+[[plant]]
+name = "devin arrival: the engine takes no word that the TUI took the paste, nor that it holds it queued, over the grid's racing turn and sleep"
 meant = "never_pastes_again_a_message_whose_paste_the_window_did_not_drop_whatever_the_looks"
 runs = ["engine-schedules"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        if released {"
-replace = "        if false && released {"
+find = "        if self.took(record) {"
+replace = "        if false && self.took(record) {"
 
-[[plant]]
-name = "devin arrival: the wire log never says a turn that held the paste ended"
-meant = "a_turn_that_held_the_paste_and_ended_is_said_released_once_whether_or_not_a_look_saw_it_held"
-runs = ["harness-devin"]
-
+# The store's word that the paste is queued (`held`: taken, not shown) keeps it once on
+# its own over the schedules: it is taken out too, or the plant takes out only one of two.
 [[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "            self.released |= self.into_a_turn;"
-replace = ""
+file = "crates/cf-engine/src/arrival.rs"
+find = "        } = self.rested(record, observed, self.held(record));"
+replace = "        } = self.rested(record, observed, self.held(record) && false);"
 
 [[plant]]
-name = "devin arrival: the wire log says a turn released the paste at every look after, not once"
-meant = "a_turn_that_held_the_paste_and_ended_is_said_released_once_whether_or_not_a_look_saw_it_held"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "        std::mem::take(&mut self.state.borrow_mut().released)"
-replace = "        self.state.borrow().released"
-
-[[plant]]
-name = "devin arrival: Devin's window does not ask its wire at a look whether a turn released the paste"
-meant = "a_look_says_a_turn_that_held_the_paste_ended_since_the_look_before_once"
+name = "devin arrival: the live tests read a paste taken by another rule than the engine's"
+meant = "the_live_tests_read_a_paste_taken_from_the_store_as_the_engine_does"
 runs = ["harness-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = "            self.released.set(self.wire.released());"
-replace = ""
+find = "    history.expect(pasted, at_ms);"
+replace = "    history.expect(pasted.lines().next().unwrap_or_default(), at_ms);"
 
-# 2. A conversation switch after the paste was taken.
+# 2. A paste taken in a conversation the human left.
 
 [[plant]]
 name = "devin arrival: a paste taken in a conversation the human left is waited for in the one the window shows now, for good"
@@ -122,8 +196,38 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        let at_rest = found.settlement == Settlement::Settled"
-replace = "        let at_rest = true || found.settlement == Settlement::Settled"
+find = "        let at_rest = found.is_none_or(|found| {"
+replace = "        let at_rest = true || found.is_none_or(|found| {"
+
+[[plant]]
+name = "devin arrival: a record of the conversation left that cannot be read is waited on for good"
+meant = "gives_back_a_paste_taken_in_a_conversation_the_human_left_whose_record_cannot_be_read"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        let at_rest = found.is_none_or(|found| {"
+replace = "        let at_rest = found.is_some_and(|found| {"
+
+[[plant]]
+name = "devin arrival: a record of the conversation left that reads at work is waited on for good"
+meant = "gives_back_a_paste_taken_in_a_conversation_left_at_work_once_its_record_has_not_changed_for_half_an_hour"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        } else if at_work > RECONCILE_MS {"
+replace = "        } else if false && at_work > RECONCILE_MS {"
+
+[[plant]]
+name = "devin arrival: a record of the conversation left that changes as it works keeps no half hour of its own"
+meant = "gives_back_a_paste_taken_in_a_conversation_left_at_work_once_its_record_has_not_changed_for_half_an_hour"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "if of == delivering.message && seen == items => since,"
+replace = "if of == delivering.message && seen <= items => since,"
 
 [[plant]]
 name = "devin arrival: the rest of the conversation left counts the time before the switch"
@@ -132,8 +236,8 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "                delivering.rested_since = None;\n            }\n            return self.follow(participant, record, session);"
-replace = "                let _ = delivering;\n            }\n            return self.follow(participant, record, session);"
+find = "                delivering.rested_since = None;\n            }\n            part.left_at_work = None;"
+replace = "            }\n            part.left_at_work = None;"
 
 [[plant]]
 name = "devin arrival: the conversation left gives the paste back at once, with no arrival window of rest"
@@ -142,62 +246,20 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        if rested <= self.seams.limits.arrival_ms {\n            return Ok(());\n        }\n        record.delivery.borrow_mut().delivering = None;\n        self.give_back("
-replace = "        if rested < 0 {\n            return Ok(());\n        }\n        record.delivery.borrow_mut().delivering = None;\n        self.give_back("
-
-# 3. What the wire takes for the paste put to the agent.
+find = "        let because = if rested > self.seams.limits.arrival_ms {"
+replace = "        let because = if rested >= 0 {"
 
 [[plant]]
-name = "devin arrival: the last part of a prompt is taken for its words, and a human's prompt that quotes the paste in its second part is the paste"
-meant = "the_tui_put_the_paste_to_its_agent_only_in_a_prompt_of_the_conversation_shown_whose_joined_text_begins_with_the_whole_paste"
-runs = ["harness-devin"]
+name = "devin arrival: a window that closes reads the conversation it shows, not the one its paste went into"
+meant = "a_window_that_closes_with_a_paste_in_the_conversation_left_settles_it_by_that_record"
+runs = ["engine-slow-records"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "    parts_text(parts)\n        .ok()"
-replace = "    parts.last().and_then(|part| part.get(\"text\")?.as_str()).map(str::to_owned)"
+file = "crates/cf-engine/src/in_flight.rs"
+find = "delivering.session.as_deref()"
+replace = "None"
 
-[[plant]]
-name = "devin arrival: a prompt of any conversation is the paste put to the agent"
-meant = "the_tui_put_the_paste_to_its_agent_only_in_a_prompt_of_the_conversation_shown_whose_joined_text_begins_with_the_whole_paste"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '        if method == "session/prompt" && session.is_some() && session == self.shown.as_deref() {'
-replace = '        if method == "session/prompt" && session.is_some() {'
-
-[[plant]]
-name = "devin arrival: a request of any method that carries the paste as a prompt is the paste put to the agent"
-meant = "the_tui_put_the_paste_to_its_agent_only_in_a_prompt_of_the_conversation_shown_whose_joined_text_begins_with_the_whole_paste"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '        if method == "session/prompt" && session.is_some() && session == self.shown.as_deref() {'
-replace = '        if session.is_some() && session == self.shown.as_deref() {'
-
-[[plant]]
-name = "devin arrival: the window tells the wire the paste's first line alone, and a prompt of it with other words is the paste"
-meant = "the_agent_has_a_paste_only_once_a_prompt_of_the_tui_begins_with_the_whole_of_it"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = "            self.wire.expect(&body);"
-replace = "            self.wire.expect(body.lines().next().unwrap_or_default());"
-
-[[plant]]
-name = "devin arrival: the paste is expected with the space it ends in, which the TUI's prompt does not keep"
-meant = "the_paste_is_the_text_of_its_prompt_after_the_space_it_begins_with_and_one_with_quotes_is_found_whole"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "        state.expected = Some(js::trim(text).to_owned())"
-replace = "        state.expected = Some(text.to_owned())"
-
-# 4. The live guard of a resumed window's first message.
+# 3. The live guard of a resumed window's first message.
 
 [[plant]]
 name = "devin arrival: the live guard asks Devin's store only where the wait for the note's turn saw it arrive"
@@ -216,17 +278,15 @@ runs = ["live-devin-resume-back"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_devin_resume/back.rs"
-find = "        match until(within, step, &mut read) {"
-replace = "        match read() {"
-
-# The live suite's own word on a paste taken, read as the engine reads it.
+find = "        let holding = until(within, step, || {"
+replace = "        let holding = until(Duration::ZERO, step, || {"
 
 [[plant]]
-name = "devin arrival: the live tests read a paste taken by another rule than the engine's"
-meant = "the_live_tests_read_a_paste_taken_from_the_wire_as_the_engine_does"
-runs = ["harness-devin"]
+name = "devin arrival: the live guard judges the first record it reads, though it holds the note nowhere yet"
+meant = "the_daemons_reader_is_read_again_while_the_record_cannot_be_read_and_judged_once_it_is"
+runs = ["live-devin-resume-back"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = "    log.expect(pasted);\n    let said = log.read(0)?;"
-replace = "    log.expect(pasted.lines().next().unwrap_or_default());\n    let said = log.read(0)?;"
+file = "crates/cf-e2e/tests/live_devin_resume/back.rs"
+find = "            if holds {\n                return Some(record);\n            }"
+replace = "            if holds || !holds {\n                return Some(record);\n            }"

@@ -17,16 +17,39 @@ const MINUTE_MS: i64 = 60_000;
 
 /// A window of Devin on `wire`, on `session` if it has one, served by `fakes`.
 fn window(fakes: &Fakes, wire: &Path, session: Option<&str>) -> Rc<DevinWindow> {
+    devin_window(
+        Env::default(),
+        Rc::clone(&fakes.records) as Rc<dyn Records>,
+        fakes,
+        wire,
+        session,
+        true,
+    )
+}
+
+/// A window of Devin on `wire` and `session`, its store the one `env` names, its record
+/// `records`, the clock `fakes`'; `at_enter` where its Devin writes a prompt's history
+/// row at the Enter.
+fn devin_window(
+    env: Env,
+    records: Rc<dyn Records>,
+    fakes: &Fakes,
+    wire: &Path,
+    session: Option<&str>,
+    at_enter: bool,
+) -> Rc<DevinWindow> {
     Rc::new(DevinWindow {
-        env: Env::default(),
-        records: Rc::clone(&fakes.records) as Rc<dyn Records>,
+        env,
+        records,
         time: Rc::clone(&fakes.time) as Rc<dyn Time>,
         session: RefCell::new(session.map(str::to_owned)),
         wire: WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC),
         discover_for_ms: MINUTE_MS,
         switch: Cell::default(),
+        at_enter,
+        history: History::default(),
         looked: Cell::default(),
-        released: Cell::default(),
+        recorded: Cell::default(),
     })
 }
 
@@ -220,17 +243,14 @@ fn a_look_takes_the_wires_word_on_the_quota_never_the_records_and_the_rest_from_
         at: Some("2026-01-01T00:00:00.000Z".to_owned()),
         resets_at: None,
     }));
-    let window = Rc::new(DevinWindow {
-        env: Env::default(),
-        records: Rc::new(Says(record)),
-        time: Rc::clone(&fakes.time) as Rc<dyn Time>,
-        session: RefCell::new(Some("mild-coin".to_owned())),
-        wire: WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC),
-        discover_for_ms: MINUTE_MS,
-        switch: Cell::default(),
-        looked: Cell::default(),
-        released: Cell::default(),
-    });
+    let window = devin_window(
+        Env::default(),
+        Rc::new(Says(record)),
+        &fakes,
+        &wire,
+        Some("mild-coin"),
+        true,
+    );
     let observed = finished(window.observe()).unwrap();
     assert_eq!(observed.quota, None, "the log says nothing of the quota");
     assert!(
@@ -246,402 +266,438 @@ fn append(wire: &Path, text: &str) {
     fs::write(wire, log).unwrap();
 }
 
-/// A prompt of the TUI to its agent, as its request is in the log.
-fn asks(session: &str, text: &str) -> String {
-    let record = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "session/prompt",
-        "params": { "sessionId": session, "prompt": [{ "type": "text", "text": text }] },
-    });
-    format!("{record}\n")
+/// Devin's store of a window's sessions, under a root of its own: its env names it.
+struct Store {
+    _root: tempfile::TempDir,
+    env: Env,
+    db: rusqlite::Connection,
 }
 
-/// A window on `wire`, conversation `mild-coin`, whose record says `record`.
-fn window_reading(fakes: &Fakes, wire: &Path, env: Env, record: Record) -> Rc<DevinWindow> {
-    Rc::new(DevinWindow {
-        env,
-        records: Rc::new(Says(record)),
-        time: Rc::clone(&fakes.time) as Rc<dyn Time>,
-        session: RefCell::new(Some("mild-coin".to_owned())),
-        wire: WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC),
-        discover_for_ms: MINUTE_MS,
-        switch: Cell::default(),
-        looked: Cell::default(),
-        released: Cell::default(),
+impl Store {
+    /// A store whose history has no row yet, where `vars` (more of the env) say so.
+    fn new(vars: &[(&str, &str)]) -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        let under = data.to_string_lossy().into_owned();
+        let mut all = vec![
+            ("XDG_DATA_HOME", under.as_str()),
+            ("APPDATA", under.as_str()),
+        ];
+        all.extend_from_slice(vars);
+        let env = Env::from_vars(all);
+        fs::create_dir_all(data.join("devin/cli")).unwrap();
+        let db = rusqlite::Connection::open(data.join("devin/cli/sessions.db")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE prompt_history (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL,
+               timestamp INTEGER NOT NULL, session_id TEXT NOT NULL, is_shell INTEGER NOT NULL DEFAULT 0)",
+        )
+        .unwrap();
+        Self {
+            _root: root,
+            env,
+            db,
+        }
+    }
+
+    /// The TUI of `session` submitted `text` at `at_ms` (Devin writes the second).
+    fn submit(&self, session: &str, text: &str, at_ms: i64) {
+        self.db
+            .execute(
+                "INSERT INTO prompt_history (content, timestamp, session_id) VALUES (?, ?, ?)",
+                (text, at_ms / 1_000, session),
+            )
+            .unwrap();
+    }
+}
+
+/// A host that takes every paste and says every screen is drawn and still.
+fn host() -> crate::testing::AnsweringHost<
+    impl Fn(&str) -> Result<serde_json::Value, crate::contract::HostError>,
+> {
+    crate::testing::AnsweringHost::new(|_| {
+        Ok(serde_json::json!({ "ok": true, "outputQuietMs": 60_000 }))
     })
 }
 
-/// A window on `wire`, conversation `mild-coin`, whose record reads at rest: its
-/// message is the last of it, and its agent has said nothing.
-fn window_at_rest(fakes: &Fakes, wire: &Path, env: Env) -> Rc<DevinWindow> {
-    let mut record = Record::new();
-    record.settlement = Settlement::Settled;
-    record.items.push(crate::records::Item {
-        id: Arc::from("row-1"),
-        role: crate::records::Role::User,
-        text: Arc::from("hello"),
-        complete: true,
-        at: None,
-        commentary: false,
-    });
-    window_reading(fakes, wire, env, record)
-}
-
-#[test]
-fn a_window_its_record_reads_at_rest_is_read_in_the_turn_its_tui_begins_by_a_prompt_for_the_gap() {
-    let dir = tempfile::tempdir().unwrap();
-    let wire = dir.path().join("wire.jsonl");
-    fs::write(&wire, shows("mild-coin")).unwrap();
-    let fakes = Fakes::new(&Env::default());
-    let window = window_at_rest(&fakes, &wire, Env::default());
-    assert!(
-        finished(window.observe()).unwrap().settled,
-        "nothing asked of its agent: at rest"
-    );
-    // The TUI puts a prompt to its agent, which has said nothing of it.
-    append(&wire, &asks("mild-coin", "hello"));
-    assert!(!finished(window.observe()).unwrap().settled);
-    fakes.time.settle_at(EPOCH_MS + PROMPT_GAP_MS - 1);
-    assert!(!finished(window.observe()).unwrap().settled);
-    // An agent that says nothing for the whole gap is read as its record reads it.
-    fakes.time.settle_at(EPOCH_MS + PROMPT_GAP_MS);
-    assert!(finished(window.observe()).unwrap().settled);
-}
-
-#[test]
-fn a_prompt_begins_no_turn_of_a_conversation_whose_record_holds_no_message_yet() {
-    let dir = tempfile::tempdir().unwrap();
-    let wire = dir.path().join("wire.jsonl");
-    fs::write(&wire, shows("mild-coin")).unwrap();
-    let fakes = Fakes::new(&Env::default());
-    let mut record = Record::new();
-    record.settlement = Settlement::Settled;
-    let window = window_reading(&fakes, &wire, Env::default(), record);
-    append(&wire, &asks("mild-coin", "hello"));
-    assert!(finished(window.observe()).unwrap().settled);
-}
-
-#[test]
-fn a_turn_the_agent_ends_or_a_prompt_it_answers_ends_the_turn_its_tui_began_in_the_window() {
-    let dir = tempfile::tempdir().unwrap();
-    let wire = dir.path().join("wire.jsonl");
-    fs::write(&wire, shows("mild-coin")).unwrap();
-    let fakes = Fakes::new(&Env::default());
-    let window = window_at_rest(&fakes, &wire, Env::default());
-    append(&wire, &asks("mild-coin", "hello"));
-    assert!(!finished(window.observe()).unwrap().settled);
-    append(
-        &wire,
-        "{\"cause\":\"complete\",\"sessionId\":\"mild-coin\"}\n",
-    );
-    assert!(finished(window.observe()).unwrap().settled);
-    // A prompt the agent refuses ends with its answer, and no turn's end.
-    append(&wire, &asks("mild-coin", "again"));
-    assert!(!finished(window.observe()).unwrap().settled);
-    append(
-        &wire,
-        "{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32011,\"message\":\"Quota exhausted.\"}}\n",
-    );
-    assert!(finished(window.observe()).unwrap().settled);
-    // A prompt of another conversation is none of this window's.
-    append(&wire, &asks("another-one", "elsewhere"));
-    assert!(finished(window.observe()).unwrap().settled);
-}
-
-/// The end of the turn the window's conversation is in, as Devin's agent writes it.
-fn turn_ends() -> &'static str {
-    "{\"cause\":\"complete\",\"sessionId\":\"mild-coin\"}\n"
-}
-
-#[test]
-fn a_message_pasted_is_held_in_the_turn_of_the_tuis_prompt_its_line_begins_and_no_longer() {
-    let dir = tempfile::tempdir().unwrap();
-    let wire = dir.path().join("wire.jsonl");
-    fs::write(&wire, shows("mild-coin")).unwrap();
-    let fakes = Fakes::new(&Env::default());
-    let window = window_at_rest(&fakes, &wire, Env::default());
-    let host = crate::testing::AnsweringHost::new(|_| Ok(serde_json::json!({ "ok": true })));
-    let pane = Pane {
+fn pane() -> Pane {
+    Pane {
         id: "s1-zeus".to_owned(),
         generation: 2,
-    };
-    let text = "[ConsensFlow m-9 · T-1 · note from ConsensFlow]\n@human cancelled T-1";
-    assert_eq!(
-        finished(window.deliver(&host, &pane, text)),
-        Ok(Admission::Admitted { queued: false }),
-        "the paste is the window's, and no word of the agent's queue"
-    );
-    assert!(!window.held(), "pasted at rest");
-    // What was pasted, as the TUI has it: on Windows, what the console carried
-    // (Windows CI, 2026-10-15: the middle dots).
-    let pasted = if Env::default().on_windows() {
-        console_text(&window_text(text))
-    } else {
-        text.to_owned()
-    };
-    let line = pasted.lines().next().unwrap();
-    // The human's prompt that quotes its line is no paste of it (the reviews of
-    // 2026-10-16): a turn begun after the paste, which may hold it, while it is on.
-    append(
-        &wire,
-        &asks("mild-coin", &format!("Why is \"{line}\" still queued?")),
-    );
-    assert!(window.held());
-    append(&wire, turn_ends());
-    assert!(!window.held(), "its turn is over");
-    // None of the TUI's prompts was the paste, and a turn ended since: a prompt asked
-    // now is no turn it went into.
-    append(&wire, &asks("mild-coin", "and now?"));
-    assert!(!window.held());
-    append(&wire, turn_ends());
-    // The TUI's prompt of what was pasted: the agent runs it in that prompt's turn,
-    // and its record shows it when the turn ends.
-    append(&wire, &asks("mild-coin", &pasted));
-    assert!(window.held());
-    append(&wire, turn_ends());
-    assert!(!window.held());
-    // The next paste is another message, pasted at rest.
-    let next = "[ConsensFlow m-10 · T-1 · note from ConsensFlow]\nlater";
-    assert!(finished(window.deliver(&host, &pane, next)).is_ok());
-    assert!(!window.held());
+    }
 }
 
-/// Its agent has the paste once the TUI put it to its agent in a prompt its line begins,
-/// whatever came of that turn; words that quote the line put nothing to it, and the
-/// next paste is another's to say.
-#[test]
-fn the_agent_has_a_paste_once_the_tuis_prompt_its_line_begins_is_read_and_ever_after() {
-    let dir = tempfile::tempdir().unwrap();
-    let wire = dir.path().join("wire.jsonl");
-    fs::write(&wire, shows("mild-coin")).unwrap();
-    let fakes = Fakes::new(&Env::default());
-    let window = window_at_rest(&fakes, &wire, Env::default());
-    let host = crate::testing::AnsweringHost::new(|_| Ok(serde_json::json!({ "ok": true })));
-    let pane = Pane {
-        id: "s1-zeus".to_owned(),
-        generation: 2,
-    };
-    let text = "[ConsensFlow m-9 · T-1 · note from ConsensFlow]\n@human cancelled T-1";
-    assert!(finished(window.deliver(&host, &pane, text)).is_ok());
-    assert!(!window.took(), "pasted, not yet put to the agent");
-    let pasted = if Env::default().on_windows() {
-        console_text(&window_text(text))
-    } else {
-        text.to_owned()
-    };
-    let line = pasted.lines().next().unwrap();
-    append(
-        &wire,
-        &asks("mild-coin", &format!("Why is \"{line}\" still queued?")),
-    );
-    append(&wire, turn_ends());
-    assert!(!window.took(), "words that quote it are no paste of it");
-    append(&wire, &asks("mild-coin", &pasted));
-    assert!(window.took());
-    append(&wire, turn_ends());
-    assert!(window.took(), "and its turn's end takes nothing back");
-    let next = "[ConsensFlow m-10 · T-1 · note from ConsensFlow]\nlater";
-    assert!(finished(window.deliver(&host, &pane, next)).is_ok());
-    assert!(!window.took(), "the next paste is not yet put to it");
+/// A record whose items are `texts`, each the user's, at rest.
+fn record_of(texts: &[&str]) -> Record {
+    let mut record = Record::new();
+    record.settlement = Settlement::Settled;
+    for (at, text) in texts.iter().enumerate() {
+        record.items.push(crate::records::Item {
+            id: Arc::from(format!("row-{at}")),
+            role: crate::records::Role::User,
+            text: Arc::from(*text),
+            complete: true,
+            at: None,
+            commentary: false,
+        });
+    }
+    record
 }
 
+/// T-102 (Devin 3000.11.92, probed live): the TUI writes a prompt's history row, whole,
+/// at the Enter, a paste queued behind a turn at work too, and the wire log holds no
+/// request of the TUI's. The store's row is the window's word that its TUI took the paste:
+/// a row of the conversation shown, written since the hand-over, beginning with the whole
+/// paste, and no other.
 #[test]
-fn a_message_pasted_into_a_turn_whose_agent_has_said_nothing_past_the_gap_is_held_while_the_turn_is_on(
+fn the_tui_took_a_paste_once_its_store_has_a_row_of_it_whole_in_the_conversation_shown_since_the_hand_over(
 ) {
     let dir = tempfile::tempdir().unwrap();
     let wire = dir.path().join("wire.jsonl");
     fs::write(&wire, shows("mild-coin")).unwrap();
+    let store = Store::new(&[]);
     let fakes = Fakes::new(&Env::default());
-    let window = window_at_rest(&fakes, &wire, Env::default());
-    let host = crate::testing::AnsweringHost::new(|_| Ok(serde_json::json!({ "ok": true })));
-    let pane = Pane {
-        id: "s1-zeus".to_owned(),
-        generation: 2,
-    };
-    // The TUI put a prompt to its agent, which says nothing past the gap: the window
-    // reads at rest, as its record does, and a message goes in.
-    append(&wire, &asks("mild-coin", "hello"));
-    assert!(!finished(window.observe()).unwrap().settled, "a turn begun");
-    fakes.time.settle_at(EPOCH_MS + PROMPT_GAP_MS);
-    assert!(finished(window.observe()).unwrap().settled);
-    assert!(finished(window.ready(&host, &pane)).is_ok());
-    let text = "[ConsensFlow m-9 · T-1 · result from @worker]\nRESULT_ONE";
-    assert!(finished(window.deliver(&host, &pane, text)).is_ok());
-    // The turn is on still: Devin holds the message, and has said nothing of it.
-    assert!(window.held());
-    // The turn ends: the message is held no longer, and the next paste, at rest, is
-    // held by nothing.
-    append(
+    let window = devin_window(
+        store.env.clone(),
+        Rc::new(Says(record_of(&[]))),
+        &fakes,
         &wire,
-        "{\"cause\":\"complete\",\"sessionId\":\"mild-coin\"}\n",
+        Some("mild-coin"),
+        true,
     );
-    assert!(!window.held());
-    let next = "[ConsensFlow m-10 · T-2 · result from @worker]\nRESULT_TWO";
-    assert!(finished(window.deliver(&host, &pane, next)).is_ok());
-    assert!(!window.held());
-}
-
-#[test]
-fn a_message_pasted_as_a_prompt_begins_while_it_is_handed_over_is_held_in_its_turn() {
-    let dir = tempfile::tempdir().unwrap();
-    let wire = dir.path().join("wire.jsonl");
-    fs::write(&wire, shows("mild-coin")).unwrap();
-    let fakes = Fakes::new(&Env::default());
-    let window = window_at_rest(&fakes, &wire, Env::default());
-    // The human's prompt begins after readiness read the wire at rest, as the paste is
-    // handed over (a review of 2026-10-16). One begun while the screen is looked at holds
-    // the window (B1's second read of the wire).
-    let human = std::cell::Cell::new(false);
-    let host = crate::testing::AnsweringHost::new(|op| {
-        if op == "pane.write_paste" && !human.replace(true) {
-            append(&wire, &asks("mild-coin", "a message of the human's"));
-        }
-        Ok(serde_json::json!({ "ok": true }))
-    });
-    let pane = Pane {
-        id: "s1-zeus".to_owned(),
-        generation: 2,
-    };
-    assert!(finished(window.observe()).unwrap().settled);
-    assert!(matches!(
-        finished(window.ready(&host, &pane)),
-        Ok(Readiness::Ready)
-    ));
-    let text = "[ConsensFlow m-9 · T-1 · result from @worker]\nRESULT_ONE";
-    assert!(finished(window.deliver(&host, &pane, text)).is_ok());
-    assert!(human.get(), "the prompt began as the paste was handed over");
-    // The TUI queued the paste behind the human's turn: held, however long its agent
-    // says nothing.
-    fakes.time.settle_at(EPOCH_MS + PROMPT_GAP_MS);
-    assert!(window.held());
-}
-
-#[test]
-fn on_windows_a_message_is_told_as_the_console_carries_it_to_devin() {
-    let dir = tempfile::tempdir().unwrap();
-    let wire = dir.path().join("wire.jsonl");
-    fs::write(&wire, shows("mild-coin")).unwrap();
-    let fakes = Fakes::new(&Env::default());
-    let window = window_at_rest(&fakes, &wire, Env::from_vars([("OS", "Windows_NT")]));
-    let host = crate::testing::AnsweringHost::new(|_| Ok(serde_json::json!({ "ok": true })));
-    let pane = Pane {
-        id: "s1-zeus".to_owned(),
-        generation: 2,
-    };
-    let text = "[ConsensFlow m-9 · T-1 · note from ConsensFlow]\n@human cancelled T-1";
-    assert!(finished(window.deliver(&host, &pane, text)).is_ok());
-    // The TUI had what the console carried: the middle dots are bars. A turn begun after
-    // the paste may be the one it went into; once it ends, words with the dots are no
-    // paste of it, and their turn holds nothing.
-    append(&wire, &asks("mild-coin", "a message of the human's"));
-    assert!(window.held(), "the turn it may have gone into");
-    append(&wire, turn_ends());
-    append(&wire, &asks("mild-coin", text));
-    assert!(!window.held(), "words that were not pasted");
-    append(&wire, turn_ends());
-    append(
-        &wire,
-        &asks(
-            "mild-coin",
-            "[ConsensFlow m-9 | T-1 | note from ConsensFlow]\n@human cancelled T-1",
-        ),
-    );
-    assert!(window.held(), "in its own prompt's turn");
-    append(&wire, turn_ends());
-    // The TUI put it to its agent: a prompt after it is no turn it waits behind.
-    append(&wire, &asks("mild-coin", "and now?"));
-    assert!(!window.held());
-}
-
-/// The reviews of 2026-10-18: the TUI's prompt of the paste's first line with other
-/// words after it was taken for the paste. The window tells the wire the whole paste.
-#[test]
-fn the_agent_has_a_paste_only_once_a_prompt_of_the_tui_begins_with_the_whole_of_it() {
-    let dir = tempfile::tempdir().unwrap();
-    let wire = dir.path().join("wire.jsonl");
-    fs::write(&wire, shows("mild-coin")).unwrap();
-    let fakes = Fakes::new(&Env::default());
-    let window = window_at_rest(&fakes, &wire, Env::default());
-    let host = crate::testing::AnsweringHost::new(|_| Ok(serde_json::json!({ "ok": true })));
-    let pane = Pane {
-        id: "s1-zeus".to_owned(),
-        generation: 2,
-    };
-    let text = "[ConsensFlow m-9 · T-1 · result from @worker]\nRESULT_ONE";
-    assert!(finished(window.deliver(&host, &pane, text)).is_ok());
+    let text = "[ConsensFlow m-9 \u{b7} T-1 \u{b7} result from @worker]\nRESULT_ONE";
     let pasted = if Env::default().on_windows() {
         console_text(&window_text(text))
     } else {
-        text.to_owned()
+        window_text(text)
     };
-    let line = pasted.lines().next().unwrap();
-    append(
-        &wire,
-        &asks("mild-coin", &format!("{line}\nnot what was pasted")),
+    // An earlier attempt's row, a minute before the hand-over, is no word of this one.
+    store.submit("mild-coin", &pasted, EPOCH_MS - MINUTE_MS);
+    assert!(finished(window.deliver(&host(), &pane(), text)).is_ok());
+    assert!(!window.took(), "nothing submitted since the hand-over");
+    // Another conversation's row, and one that begins with its header and goes on in
+    // other words, are none of it.
+    store.submit("fresh-leaf", &pasted, EPOCH_MS);
+    let header = pasted.lines().next().unwrap();
+    store.submit("mild-coin", &format!("{header}\nother words"), EPOCH_MS);
+    store.submit(
+        "mild-coin",
+        &format!("Why is this queued? {pasted}"),
+        EPOCH_MS,
     );
-    append(&wire, turn_ends());
-    assert!(!window.took(), "its first line, and other words");
-    append(&wire, &asks("mild-coin", &pasted));
+    assert!(!window.took());
+    // Its own row, in the second of the hand-over, behind the space the TUI keeps.
+    store.submit("mild-coin", &format!("\n{pasted}\n"), EPOCH_MS + 300);
+    assert!(window.took());
+    assert!(window.took(), "and ever after");
+    // The next paste is another's to say.
+    assert!(
+        finished(window.deliver(&host(), &pane(), "[ConsensFlow m-10 \u{b7} note]\nlater")).is_ok()
+    );
+    assert!(!window.took());
+}
+
+#[test]
+fn a_paste_its_store_took_is_held_until_its_record_shows_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let store = Store::new(&[]);
+    let fakes = Fakes::new(&Env::default());
+    let text = "[ConsensFlow m-9 \u{b7} note]\nwords";
+    let pasted = if Env::default().on_windows() {
+        console_text(&window_text(text))
+    } else {
+        window_text(text)
+    };
+    // The record of the turn the paste is queued behind, without the paste.
+    let behind = devin_window(
+        store.env.clone(),
+        Rc::new(Says(record_of(&["a message of the human's"]))),
+        &fakes,
+        &wire,
+        Some("mild-coin"),
+        true,
+    );
+    assert!(finished(behind.deliver(&host(), &pane(), text)).is_ok());
+    assert!(!behind.held(), "not taken yet");
+    store.submit("mild-coin", &pasted, EPOCH_MS);
+    finished(behind.observe()).unwrap();
+    assert!(
+        behind.took() && behind.held(),
+        "taken, queued behind the turn at work"
+    );
+    // The turn takes it in: the record shows it, and nothing holds it any more.
+    let taken = devin_window(
+        store.env.clone(),
+        Rc::new(Says(record_of(&["a message of the human's", &pasted]))),
+        &fakes,
+        &wire,
+        Some("mild-coin"),
+        true,
+    );
+    assert!(finished(taken.deliver(&host(), &pane(), text)).is_ok());
+    finished(taken.observe()).unwrap();
+    assert!(taken.took() && !taken.held());
+}
+
+/// An older Devin writes the row only as the turn takes the paste in, as late as its
+/// record: its window says nothing of it, and the engine's rest-based wait is its path.
+#[test]
+fn an_older_devins_window_says_nothing_of_its_stores_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let store = Store::new(&[]);
+    let fakes = Fakes::new(&Env::default());
+    let window = devin_window(
+        store.env.clone(),
+        Rc::new(Says(record_of(&[]))),
+        &fakes,
+        &wire,
+        Some("mild-coin"),
+        false,
+    );
+    let text = "[ConsensFlow m-9 \u{b7} note]\nwords";
+    assert!(finished(window.deliver(&host(), &pane(), text)).is_ok());
+    store.submit("mild-coin", &window_text(text), EPOCH_MS);
+    store.submit("mild-coin", &console_text(&window_text(text)), EPOCH_MS);
+    assert!(!window.took() && !window.held());
+    assert!(history::at_enter("devin 3000.11.92 (7f4e64980e22)"));
+    assert!(history::at_enter("devin 3000.12.0"));
+    assert!(!history::at_enter("devin 3000.11.3 (abc)"));
+    assert!(!history::at_enter("devin 3000.10.31"));
+    assert!(!history::at_enter("no version"));
+}
+
+/// The store is never waited on: a look that meets its writer's lock answers what the
+/// last look that read it answered.
+#[test]
+fn a_locked_store_answers_what_the_last_look_that_read_it_answered() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let store = Store::new(&[]);
+    let fakes = Fakes::new(&Env::default());
+    let window = devin_window(
+        store.env.clone(),
+        Rc::new(Says(record_of(&[]))),
+        &fakes,
+        &wire,
+        Some("mild-coin"),
+        true,
+    );
+    let text = "[ConsensFlow m-9 \u{b7} note]\nwords";
+    let pasted = if Env::default().on_windows() {
+        console_text(&window_text(text))
+    } else {
+        window_text(text)
+    };
+    assert!(finished(window.deliver(&host(), &pane(), text)).is_ok());
+    store.submit("mild-coin", &pasted, EPOCH_MS);
+    assert!(window.took());
+    store.db.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    assert!(window.took(), "the lock takes nothing back");
+    store.db.execute_batch("COMMIT").unwrap();
+    // A store gone between looks is one that cannot be read either.
+    let gone = devin_window(
+        Env::from_vars([("XDG_DATA_HOME", "/nowhere"), ("APPDATA", "/nowhere")]),
+        Rc::new(Says(record_of(&[]))),
+        &fakes,
+        &wire,
+        Some("mild-coin"),
+        true,
+    );
+    assert!(finished(gone.deliver(&host(), &pane(), text)).is_ok());
+    assert!(!gone.took());
+}
+
+/// A prompt the human submitted after the engine's look found the window at rest begins
+/// or queues a turn the record may not show yet: the window is not ready for a paste
+/// (Astra on the B1 fix), by its store's history, its wire writing no prompt.
+#[test]
+fn a_prompt_submitted_since_the_engines_look_holds_the_window_from_a_paste() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let store = Store::new(&[]);
+    store.submit("mild-coin", "an earlier prompt", EPOCH_MS - MINUTE_MS);
+    let fakes = Fakes::new(&Env::default());
+    let window = devin_window(
+        store.env.clone(),
+        Rc::new(Says(record_of(&["an earlier prompt"]))),
+        &fakes,
+        &wire,
+        Some("mild-coin"),
+        true,
+    );
+    assert!(finished(window.observe()).unwrap().settled);
+    assert!(matches!(
+        finished(window.ready(&host(), &pane())),
+        Ok(Readiness::Ready)
+    ));
+    // Another conversation's prompt is none of this window's.
+    store.submit("fresh-leaf", "elsewhere", EPOCH_MS);
+    assert!(matches!(
+        finished(window.ready(&host(), &pane())),
+        Ok(Readiness::Ready)
+    ));
+    store.submit("mild-coin", "a message of the human's", EPOCH_MS);
+    assert!(matches!(
+        finished(window.ready(&host(), &pane())),
+        Ok(Readiness::Held(Held::Unsaid))
+    ));
+    // The next look sees it: the record says the rest.
+    finished(window.observe()).unwrap();
+    assert!(matches!(
+        finished(window.ready(&host(), &pane())),
+        Ok(Readiness::Ready)
+    ));
+    // An older Devin's window holds nothing for it.
+    let older = devin_window(
+        store.env.clone(),
+        Rc::new(Says(record_of(&[]))),
+        &fakes,
+        &wire,
+        Some("mild-coin"),
+        false,
+    );
+    finished(older.observe()).unwrap();
+    store.submit("mild-coin", "and again", EPOCH_MS);
+    assert!(matches!(
+        finished(older.ready(&host(), &pane())),
+        Ok(Readiness::Ready)
+    ));
+}
+
+#[test]
+fn on_windows_a_paste_is_told_by_its_history_row_as_the_console_carries_it_to_devin() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let store = Store::new(&[("OS", "Windows_NT")]);
+    let fakes = Fakes::new(&Env::default());
+    let window = devin_window(
+        store.env.clone(),
+        Rc::new(Says(record_of(&[]))),
+        &fakes,
+        &wire,
+        Some("mild-coin"),
+        true,
+    );
+    let text = "[ConsensFlow m-9 \u{b7} T-1 \u{b7} note from ConsensFlow]\n@human cancelled T-1";
+    assert!(finished(window.deliver(&host(), &pane(), text)).is_ok());
+    // The TUI had what the console carried: the middle dots are bars.
+    store.submit("mild-coin", text, EPOCH_MS);
+    assert!(!window.took(), "words that were not pasted");
+    store.submit("mild-coin", &console_text(&window_text(text)), EPOCH_MS);
     assert!(window.took());
 }
 
-/// The reviews of 2026-10-18: a turn the human began as the paste was handed over, and
-/// that ended before any look read the wire, held the paste; the look after says so.
+/// What the live tests ask of a window they pasted into themselves: the store's word,
+/// by the same rule the engine reads it by.
 #[test]
-fn a_look_says_a_turn_that_held_the_paste_ended_since_the_look_before_once() {
+fn the_live_tests_read_a_paste_taken_from_the_store_as_the_engine_does() {
+    let store = Store::new(&[]);
+    let pasted = "[ConsensFlow m-9 \u{b7} note]\nRun this.";
+    assert_eq!(
+        store_took(&store.env, "mild-coin", pasted, EPOCH_MS),
+        (false, 0)
+    );
+    store.submit(
+        "mild-coin",
+        "[ConsensFlow m-9 \u{b7} note]\nother words",
+        EPOCH_MS,
+    );
+    assert_eq!(
+        store_took(&store.env, "mild-coin", pasted, EPOCH_MS),
+        (false, 1)
+    );
+    store.submit("mild-coin", pasted, EPOCH_MS);
+    assert_eq!(
+        store_took(&store.env, "mild-coin", pasted, EPOCH_MS),
+        (true, 2)
+    );
+    assert_eq!(
+        store_took(&store.env, "mild-coin", pasted, EPOCH_MS + 5 * MINUTE_MS),
+        (false, 2)
+    );
+}
+
+/// T-102 (Devin 3000.11.92, probed live): a paste at rest shows in the store at once, a
+/// message of the user's the agent has not answered, which the record reads at rest until
+/// the agent's first word; and the wire says nothing of the turn before then. The window
+/// reads it as a turn begun, for a while and no longer.
+#[test]
+fn a_message_of_the_users_its_agent_has_not_answered_yet_is_a_turn_begun_for_a_while() {
     let dir = tempfile::tempdir().unwrap();
     let wire = dir.path().join("wire.jsonl");
     fs::write(&wire, shows("mild-coin")).unwrap();
     let fakes = Fakes::new(&Env::default());
-    let window = window_at_rest(&fakes, &wire, Env::default());
-    let human = std::cell::Cell::new(false);
-    let host = crate::testing::AnsweringHost::new(|op| {
-        if op == "pane.write_paste" && !human.replace(true) {
-            append(&wire, &asks("mild-coin", "a message of the human's"));
-        }
-        Ok(serde_json::json!({ "ok": true }))
-    });
-    let pane = Pane {
-        id: "s1-zeus".to_owned(),
-        generation: 2,
+    let at = |record: &mut Record, when: Option<serde_json::Value>| {
+        record.items.last_mut().unwrap().at = when;
     };
-    assert!(finished(window.observe()).unwrap().settled);
-    assert!(!window.released(), "nothing pasted");
-    let text = "[ConsensFlow m-9 · T-1 · result from @worker]\nRESULT_ONE";
-    assert!(finished(window.deliver(&host, &pane, text)).is_ok());
-    assert!(human.get(), "the prompt began as the paste was handed over");
-    // Its turn ends before the next look, which comes half an hour on.
-    append(&wire, turn_ends());
-    fakes.time.settle_at(EPOCH_MS + 31 * MINUTE_MS);
-    assert!(finished(window.observe()).unwrap().settled);
-    assert!(!window.held());
-    assert!(window.released(), "the look that read its end");
-    assert!(window.released(), "as long as that look is the last");
-    assert!(finished(window.observe()).unwrap().settled);
-    assert!(!window.released(), "the look after it");
-}
-
-/// What the live tests ask of a window they pasted into themselves: the wire's word that
-/// the TUI put the paste to its agent, by the same rule the engine reads it by.
-#[test]
-fn the_live_tests_read_a_paste_taken_from_the_wire_as_the_engine_does() {
-    let dir = tempfile::tempdir().unwrap();
-    let wire = dir.path().join("wire.jsonl");
-    let pasted = "[ConsensFlow m-9 · T-1 · note from @chief]\nRun this.";
-    fs::write(&wire, shows("mild-coin")).unwrap();
-    append(
+    let mut asked = record_of(&["[ConsensFlow m-9 \u{b7} note]\nwords"]);
+    at(
+        &mut asked,
+        Some(serde_json::json!(cf_base::time::iso(EPOCH_MS))),
+    );
+    let window = devin_window(
+        Env::default(),
+        Rc::new(Says(asked.clone())),
+        &fakes,
         &wire,
-        &asks(
-            "mild-coin",
-            "[ConsensFlow m-9 · T-1 · note from @chief]\nother words",
-        ),
+        Some("mild-coin"),
+        true,
     );
-    assert_eq!(super::wire_took(&wire, pasted).unwrap(), (false, 1));
-    append(&wire, &asks("mild-coin", pasted));
-    assert_eq!(super::wire_took(&wire, pasted).unwrap(), (true, 2));
-    assert_eq!(
-        super::wire_took(&dir.path().join("none.jsonl"), pasted).unwrap(),
-        (false, 0)
+    assert!(!finished(window.observe()).unwrap().settled, "a turn begun");
+    fakes.time.settle_at(EPOCH_MS + TAKEN_IN_MS - 1);
+    assert!(!finished(window.observe()).unwrap().settled);
+    fakes.time.settle_at(EPOCH_MS + TAKEN_IN_MS);
+    assert!(
+        finished(window.observe()).unwrap().settled,
+        "a turn that says nothing for longer is read as the record reads it"
     );
+    // Devin's own row time, in seconds, says the same.
+    at(
+        &mut asked,
+        Some(serde_json::json!((EPOCH_MS + TAKEN_IN_MS) / 1_000)),
+    );
+    let seconds = devin_window(
+        Env::default(),
+        Rc::new(Says(asked.clone())),
+        &fakes,
+        &wire,
+        Some("mild-coin"),
+        true,
+    );
+    assert!(!finished(seconds.observe()).unwrap().settled);
+    // An answer, or no time to tell by, is the record's word.
+    let mut answered = asked.clone();
+    answered.items.push(crate::records::Item {
+        id: Arc::from("row-2"),
+        role: crate::records::Role::Assistant,
+        text: Arc::from("done"),
+        complete: true,
+        at: Some(serde_json::json!(cf_base::time::iso(EPOCH_MS))),
+        commentary: false,
+    });
+    let window = devin_window(
+        Env::default(),
+        Rc::new(Says(answered)),
+        &fakes,
+        &wire,
+        Some("mild-coin"),
+        true,
+    );
+    assert!(finished(window.observe()).unwrap().settled);
+    at(&mut asked, None);
+    let window = devin_window(
+        Env::default(),
+        Rc::new(Says(asked)),
+        &fakes,
+        &wire,
+        Some("mild-coin"),
+        true,
+    );
+    assert!(finished(window.observe()).unwrap().settled);
 }

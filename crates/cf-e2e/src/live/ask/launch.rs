@@ -35,19 +35,28 @@ pub fn devin_ready(wire: &Path) -> Result<DevinReady> {
     })
 }
 
-/// What the daemon reads of a paste in a Devin window's wire log.
+/// What the daemon reads of a paste in Devin's store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DevinTook {
-    /// The TUI put the paste to its agent (`Window::took`).
+    /// The TUI took the paste (`Window::took`): a history row of it, written since.
     pub took: bool,
-    /// How many prompts of the conversation the window shows the log holds.
+    /// How many history rows the session has.
     pub prompts: u64,
 }
 
-/// What the wire log `wire` of a Devin window says of `pasted`, the text the window was
-/// given as it was pasted, as the daemon reads the window after a paste.
-pub fn devin_took(wire: &Path, pasted: &str) -> Result<DevinTook> {
-    let answer = question(&json!({ "op": "devin_took", "wire": wire, "pasted": pasted }))?;
+/// What Devin's store, in the places `env` names, says of `pasted`, the text a window on
+/// `session` was given as it was pasted at `at_ms`, as the daemon reads the window after
+/// a paste.
+pub fn devin_took(
+    env: &[(String, String)],
+    session: &str,
+    pasted: &str,
+    at_ms: i64,
+) -> Result<DevinTook> {
+    let answer = question(&json!({
+        "op": "devin_took", "env": env_object(env), "session": session,
+        "pasted": pasted, "atMs": at_ms,
+    }))?;
     match (answer["took"].as_bool(), answer["prompts"].as_u64()) {
         (Some(took), Some(prompts)) => Ok(DevinTook { took, prompts }),
         _ => Err(Error::Daemon(format!(

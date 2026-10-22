@@ -227,13 +227,33 @@ pub fn note_faults(
 ) -> Vec<String> {
     let mut faults: Vec<String> = stored_fault(messages, header).into_iter().collect();
     if arrived || stored_shape(messages, header).is_some() {
-        match until(within, step, &mut read) {
-            Some(record) if read_header_first(Some(&record), header) => {}
-            Some(record) => faults.push(format!(
+        // Read again until a record holds the note: one a beat behind the store has it
+        // nowhere yet (the review of c2e29f2d).
+        let mut last = None;
+        let holding = until(within, step, || {
+            let record = read()?;
+            let holds = record
+                .items
+                .iter()
+                .any(|item| item.role == "user" && item.text.contains(header));
+            if holds {
+                return Some(record);
+            }
+            last = Some(record);
+            None
+        });
+        match (holding, last) {
+            (Some(record), _) if read_header_first(Some(&record), header) => {}
+            (Some(record), _) => faults.push(format!(
                 "the daemon's reader has the note behind other words: {}",
                 tail(Some(&record), 4)
             )),
-            None => faults.push(format!(
+            (None, Some(record)) => faults.push(format!(
+                "the daemon's reader has the note nowhere in {} s: {}",
+                secs(within),
+                tail(Some(&record), 4)
+            )),
+            (None, None) => faults.push(format!(
                 "the daemon's reader read no record of the note in {} s",
                 secs(within)
             )),
@@ -574,7 +594,25 @@ mod tests {
             reads.set(reads.get() + 1);
             Some(read(&format!("Look: {NOTE}")))
         });
-        assert_eq!(reads.get(), 1, "read once it can be");
+        assert_eq!(reads.get(), 1, "read once it can be, and holds the note");
+        // The review of c2e29f2d: a record a beat behind the store, without the note yet,
+        // is read again, and judged once it holds it.
+        let lagging = std::cell::Cell::new(2);
+        let caught_up = faults(true, &[stored(NOTE)], || {
+            if lagging.get() > 0 {
+                lagging.set(lagging.get() - 1);
+                return Some(read("an earlier message"));
+            }
+            Some(read(NOTE))
+        });
+        assert_eq!(caught_up, Vec::<String>::new());
+        let never = faults(true, &[stored(NOTE)], || Some(read("an earlier message")));
+        assert!(
+            never
+                .iter()
+                .any(|fault| fault.contains("has the note nowhere")),
+            "{never:?}"
+        );
         assert!(behind
             .iter()
             .any(|fault| fault.contains("behind other words")));

@@ -19,10 +19,16 @@ static VERSION: LazyLock<Regex> =
 /// worker replies: its first three dotted numbers are the minimum's or
 /// higher, compared a number at a time.
 pub(crate) fn supported(output: &str) -> bool {
+    at_least(output, MINIMUM)
+}
+
+/// Whether the first three dotted numbers of `output`, what Devin says to `--version`,
+/// are `minimum`'s or higher, compared a number at a time.
+pub(crate) fn at_least(output: &str, minimum: [u32; 3]) -> bool {
     let Some(found) = VERSION.captures(output) else {
         return false;
     };
-    for (at, minimum) in MINIMUM.into_iter().enumerate() {
+    for (at, minimum) in minimum.into_iter().enumerate() {
         let (part, minimum) = (js::number(&found[at + 1]), f64::from(minimum));
         if part != minimum {
             return part > minimum;

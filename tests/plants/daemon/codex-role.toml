@@ -926,8 +926,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = '''                item.role == Role::User && is_paste_of(&item.text, message, first.as_deref())'''
-replace = '''                item.role == Role::User && item.text.contains("[ConsensFlow m-")'''
+find = '''        .find(|item| item.role == Role::User && is_paste_of(&item.text, message, first))'''
+replace = '''        .find(|item| item.role == Role::User && item.text.contains("[ConsensFlow m-"))'''
 
 [[plant]]
 name = "codex role: a replacement found in the record is not taken out of the launch's first message, which is told it again"

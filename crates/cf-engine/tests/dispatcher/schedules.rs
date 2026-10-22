@@ -7,19 +7,15 @@
 //! The model. A paste given while a turn runs waits in Devin's queue and begins as a
 //! turn of its own up to [`Q_MS`] after that turn ends; one given at rest begins at
 //! once; one the model drops is never run nor recorded. A turn waits for the one before
-//! it, the human's too. The record shows a turn's prompt when the turn ends, up to
-//! [`LAG_MS`] late. The adapter's word comes from Devin's wire log, whose lines carry
-//! no time of their own: a look reads what was written since the last, stamped with its
-//! own time. So the window reads busy while its agent works and for [`PROMPT_GAP_MS`]
-//! after a look first read a turn's prompt, and a silent turn reads at rest after that;
-//! and `held` is the wire log's rule: a paste given while a prompt was asked, or ahead of
-//! a prompt read before any turn ended since, or put to the agent in its own, is held
-//! while that prompt is asked; and `took`, that a prompt the paste's own words begin put
-//! it to the agent; and `released`, that a turn which held the paste ended since the last
-//! look. The adapter is asked whether it holds the paste as it goes in, and a turn the
-//! human begins as a paste goes in, after the readiness read the wire (a moment the
-//! adapter's second read leaves), is known only when a look reads its prompt, if only
-//! as one that has ended.
+//! it, the human's too. The record shows a turn's prompt as the turn begins, up to
+//! [`LAG_MS`] late. The adapter's word comes from Devin's store and record, as Devin
+//! 3000.11.92 writes them (T-102): the window reads busy while its agent works, and a
+//! silent turn for [`TAKEN_IN_MS`] from its beginning (a message of the user's its agent
+//! has not answered), at rest after that; `took` is the paste's history row, which the
+//! store has from the paste's Enter, a paste the model drops excepted; and `held` is
+//! taken and not yet shown. The adapter is asked whether it holds the paste as it goes
+//! in, which it never does, the row a moment behind; and a turn the human begins as a
+//! paste goes in, after the readiness looked, is known only when a look reads it.
 //!
 //! The schedules. Each seed makes looks in stretches of the daemon's second and of slow
 //! passes of 5 to 30 s, over 20 to 80 min; the human's turns of a second to 20 min and
@@ -31,7 +27,7 @@
 //! alignment of the hold's end with the looks after the hand-over, with no sleep or one.
 //!
 //! What holds. Never twice: once a paste the window did not drop is given, nothing more
-//! is pasted. Its record shows it at most [`LAG_MS`] after its turn ends, and the record
+//! is pasted. Its record shows it at most [`LAG_MS`] after its turn begins, and the record
 //! is read before anything goes again, so a later paste is always a second copy Devin
 //! runs: given while the first is queued (within Q of the end of the turn it waits
 //! behind), while it runs, or before its record showed it. Never for good: a paste the
@@ -58,11 +54,11 @@ const MINUTE: i64 = 60 * SECOND;
 const HOUR: i64 = 60 * MINUTE;
 /// The longest Devin takes to begin a paste it queued, once the turn before it ends.
 const Q_MS: i64 = 5 * SECOND;
-/// The latest a record shows a turn's prompt after the turn ends: under the arrival window.
+/// The latest a record shows a turn's prompt after the turn begins: under the arrival window.
 const LAG_MS: i64 = 29_900;
-/// How long after a look first read a prompt Devin's adapter reads its window as in that
-/// turn, its agent silent as it may be (the wire log's `PROMPT_GAP_MS`).
-const PROMPT_GAP_MS: i64 = 30 * SECOND;
+/// How long from a turn's beginning Devin's adapter reads its window as in that turn, its
+/// agent silent as it may be (the adapter's `TAKEN_IN_MS`).
+const TAKEN_IN_MS: i64 = 30 * SECOND;
 /// How soon a paste given at rest begins.
 const AT_ONCE_MS: i64 = 100;
 /// How soon the human's turn begins after the turn it waited for.
@@ -167,11 +163,13 @@ struct Schedule {
     turns: Vec<Planned>,
     handling: Vec<Handling>,
     /// A turn of the human's that begins as the first paste goes in, after the readiness
-    /// read the wire and before the paste did (the paste waits behind it): its end.
+    /// looked and before the paste went in (the paste waits behind it): its end.
     race: Option<i64>,
     /// The human switches the window to a new conversation (`/new`) at the look after the
-    /// first that found the paste put to the agent: the paste runs in the conversation it
-    /// went into, whose record, no window showing it, reads at rest but while it runs.
+    /// first that found the paste taken in: Devin switches once the turn at work ends, and
+    /// a paste queued behind it is taken in, runs and is answered in the conversation it
+    /// went into (T-107, probed live), whose record, no window showing it, reads at rest
+    /// but while it runs.
     switch: bool,
 }
 
@@ -197,63 +195,13 @@ struct Paste {
     shown: Option<i64>,
 }
 
-/// What Devin's adapter has read of its wire log (`wire_log::State`), for the message pasted.
-#[derive(Clone, Copy, Debug, Default)]
-struct Wire {
-    expected: bool,
-    sent: bool,
-    into_a_turn: bool,
-    turn_ended: bool,
-    /// When a look first read the prompt asked still.
-    asked: Option<i64>,
-    /// A turn that held the paste ended since the last look.
-    released: bool,
-}
-
-impl Wire {
-    /// `WireLog::expect`, at a paste.
-    fn expect(&mut self) {
-        self.expected = true;
-        self.sent = false;
-        self.into_a_turn = self.asked.is_some();
-        self.turn_ended = false;
-        self.released = false;
-    }
-
-    /// A prompt line, read at `at`: the paste's own words, or others.
-    fn prompt(&mut self, pasted: bool, at: i64) {
-        if pasted {
-            self.sent = true;
-        }
-        if self.expected && (pasted || (!self.sent && !self.turn_ended)) {
-            self.into_a_turn = true;
-        }
-        self.asked = Some(at);
-    }
-
-    /// A turn's end.
-    fn end(&mut self) {
-        let asking = self.asked.is_some();
-        self.asked = None;
-        self.released |= self.into_a_turn;
-        self.into_a_turn = false;
-        self.turn_ended |= asking;
-    }
-
-    fn held(&self) -> bool {
-        self.into_a_turn && self.asked.is_some()
-    }
-}
-
 /// What a look at the window finds, as Devin's adapter reports it.
 #[derive(Clone, Copy, Debug)]
 struct Seen {
     busy: bool,
-    /// The TUI put the paste to its agent (`Window::took`).
+    /// The store has the paste's history row (`Window::took`).
     sent: bool,
     held: bool,
-    /// A turn that held the paste ended since the last look (`Window::released`).
-    released: bool,
     shown: bool,
 }
 
@@ -265,9 +213,6 @@ struct Window {
     handling: Vec<Handling>,
     turns: Vec<Turn>,
     pastes: Vec<Paste>,
-    wire: Wire,
-    /// The wire log's lines read: two a turn, its prompt and its end.
-    lines: usize,
     /// The end of the turn that begins as the first paste goes in (`Schedule::race`).
     race: Option<i64>,
 }
@@ -281,8 +226,6 @@ impl Window {
             handling: schedule.handling.clone(),
             turns: Vec::new(),
             pastes: Vec::new(),
-            wire: Wire::default(),
-            lines: 0,
             race: schedule.race,
         }
     }
@@ -308,38 +251,26 @@ impl Window {
         }
     }
 
-    /// A look at `at`: the wire log read as far as it is written.
+    /// A look at `at`: the record and the store as they are.
     fn look(&mut self, at: i64) -> Seen {
         self.begin_turns(at);
-        while let Some(turn) = self.turns.get(self.lines / 2).copied() {
-            let ends = self.lines % 2 == 1;
-            if (if ends { turn.end } else { turn.start }) > at {
-                break;
-            }
-            if ends {
-                self.wire.end();
-            } else {
-                self.wire.prompt(turn.paste.is_some(), at);
-            }
-            self.lines += 1;
-        }
-        let working = self
-            .turns
+        let busy = self.turns.iter().any(|turn| {
+            turn.start <= at && at < turn.end && (!turn.silent || at - turn.start < TAKEN_IN_MS)
+        });
+        let shown = self
+            .pastes
             .iter()
-            .any(|turn| turn.start <= at && at < turn.end && !turn.silent);
-        let prompted = self
-            .wire
-            .asked
-            .is_some_and(|read| at - read < PROMPT_GAP_MS);
+            .any(|paste| paste.shown.is_some_and(|shown| shown <= at));
+        // The store has the last paste's history row from its Enter on, one dropped excepted.
+        let took = self
+            .pastes
+            .last()
+            .is_some_and(|paste| !paste.dropped && paste.at < at);
         Seen {
-            busy: working || prompted,
-            sent: self.wire.sent,
-            held: self.wire.held(),
-            released: std::mem::take(&mut self.wire.released),
-            shown: self
-                .pastes
-                .iter()
-                .any(|paste| paste.shown.is_some_and(|shown| shown <= at)),
+            busy,
+            sent: took,
+            held: took && !shown,
+            shown,
         }
     }
 
@@ -355,9 +286,8 @@ impl Window {
     fn paste(&mut self, at: i64) {
         let index = self.pastes.len();
         let handling = self.handling[index.min(self.handling.len() - 1)];
-        self.wire.expect();
-        // The human's turn that began between the readiness and the paste, at rest: the
-        // wire said nothing of it when the paste went in, and the paste waits behind it.
+        // The human's turn that began between the readiness and the paste, at rest: no
+        // look saw it when the paste went in, and the paste waits behind it.
         if let Some(end) = self.race.take() {
             if self.turns.last().is_none_or(|turn| turn.end <= at) {
                 self.turns.push(Turn {
@@ -398,7 +328,7 @@ impl Window {
             dropped: handling.dropped,
             behind,
             turn,
-            shown: turn.map(|_| end + handling.lag),
+            shown: turn.map(|_| start + handling.lag),
         });
     }
 }
@@ -434,12 +364,11 @@ fn run(schedule: &Schedule) -> Outcome {
     let adapter = Rc::downgrade(&context.adapter);
     *context.adapter.deliver.borrow_mut() = Some(Rc::new(move |taking| {
         pasting.borrow_mut().paste(at.get());
-        // The adapter's word on the paste as it goes in: held where it went into a
-        // turn, and not yet put to the agent.
-        let held = pasting.borrow().wire.held();
+        // The adapter's word on the paste as it goes in: its history row a moment behind,
+        // neither taken nor held yet.
         if let Some(adapter) = adapter.upgrade() {
             adapter.with("chief", |agent| {
-                agent.held = held;
+                agent.held = false;
                 agent.took = false;
             });
         }
@@ -471,7 +400,6 @@ fn run(schedule: &Schedule) -> Outcome {
             agent.settled = !seen.busy;
             agent.took = seen.sent;
             agent.held = seen.held;
-            agent.released = seen.released;
             match &left {
                 // The paste runs in the conversation it went into, and its record shows it.
                 Some(left) => {
@@ -492,7 +420,13 @@ fn run(schedule: &Schedule) -> Outcome {
             }
         });
         recorded |= seen.shown;
-        taken |= seen.sent;
+        // Taken in: its own turn has begun.
+        taken |= window
+            .borrow()
+            .pastes
+            .last()
+            .and_then(|paste| paste.turn)
+            .is_some_and(|turn| window.borrow().turns[turn].start <= look);
         context.pass().unwrap();
         rows.push(Row { at: look, seen });
         state = context.message(note.id).state;
@@ -801,8 +735,8 @@ enum Meets {
     Rest,
     /// A silent turn the paste waits behind.
     Queued,
-    /// A turn the human began between the window's readiness and the paste, which the
-    /// wire had not said when the paste went in (`Schedule::race`).
+    /// A turn the human began between the window's readiness and the paste, which no
+    /// look had seen when the paste went in (`Schedule::race`).
     Racing,
 }
 

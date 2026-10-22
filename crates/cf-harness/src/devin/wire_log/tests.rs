@@ -12,7 +12,6 @@ use super::*;
 use crate::testing::EPOCH_MS;
 
 mod modes;
-mod prompts;
 
 const MINUTE: i64 = 60_000;
 

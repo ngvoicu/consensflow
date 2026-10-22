@@ -58,7 +58,7 @@ impl Dispatcher {
     /// is read again once the record is: one that is on its way no more (its task
     /// cancelled meanwhile, as the human may while the start reads) is left as it is.
     async fn settle_one_in_flight(&self, message: &MessageView) -> Result<(), EngineError> {
-        let arrived = self.arrived(message).await?;
+        let arrived = self.arrived(message, None).await?;
         let Some(message) = self.still_delivering(message.id)? else {
             return Ok(());
         };
@@ -104,7 +104,11 @@ impl Dispatcher {
         let Some(message) = self.still_delivering(delivering.message)? else {
             return Ok(());
         };
-        let arrived = self.arrived(&message).await?;
+        // The record of the conversation it was pasted into, which the window may
+        // have been switched away from since (the review of c2e29f2d).
+        let arrived = self
+            .arrived(&message, delivering.session.as_deref())
+            .await?;
         let Some(message) = self.still_delivering(message.id)? else {
             return Ok(());
         };
@@ -145,7 +149,13 @@ impl Dispatcher {
     /// window is given first where it was its launch's first
     /// ([`Dispatcher::brief_given_first`]). None where neither shows it, or the record
     /// cannot be read.
-    async fn arrived(&self, message: &MessageView) -> Result<Option<String>, EngineError> {
+    /// `pasted`, where known, is the conversation it was pasted into: its record is read,
+    /// else the participant's current conversation's.
+    async fn arrived(
+        &self,
+        message: &MessageView,
+        pasted: Option<&str>,
+    ) -> Result<Option<String>, EngineError> {
         let first = self.brief_given_first(message)?;
         let copied = self
             .seams
@@ -157,9 +167,21 @@ impl Dispatcher {
         match copied {
             Some((item, _)) => Ok(Some(item)),
             // An `async` method: its answer reaches this a turn after it was made.
-            None => {
-                returning(self.recorded_paste_of(message.recipient_id, message.id, first)).await
-            }
+            None => match pasted {
+                // Boxed, so that the work of an operation that settles it stays small.
+                Some(session) => {
+                    returning(Box::pin(self.recorded_paste_in(
+                        message.recipient_id,
+                        session,
+                        message.id,
+                        first,
+                    )))
+                    .await
+                }
+                None => {
+                    returning(self.recorded_paste_of(message.recipient_id, message.id, first)).await
+                }
+            },
         }
     }
 
@@ -184,21 +206,12 @@ impl Dispatcher {
                 .look(harness, &session, &Options::default()),
         )
         .await;
-        let Reading::Known(record) = &*reading else {
-            return Ok(None);
-        };
-        Ok(record
-            .items
-            .iter()
-            .find(|item| {
-                item.role == Role::User && is_paste_of(&item.text, message, first.as_deref())
-            })
-            .map(|item| item.id.to_string()))
+        Ok(paste_in(&reading, message, first.as_deref()))
     }
 
-    /// The record of `session`, a conversation of a participant's harness other than the
-    /// one it is on now, read with no window open: none where its harness is none an
-    /// adapter opens, or the participant has no conversation.
+    /// The record of `session`, one of a participant's harness's conversations, read
+    /// with no window open: none where its harness is none an adapter opens, or the
+    /// participant has no conversation.
     pub(crate) async fn record_left(
         &self,
         participant: i64,
@@ -215,6 +228,20 @@ impl Dispatcher {
             )
             .await,
         ))
+    }
+
+    /// The first item a participant's harness recorded it was given in `session`, one
+    /// of its conversations, that is the paste of `message` ([`is_paste_of`]), read with
+    /// no window open: none when none is, or when that record cannot be read.
+    async fn recorded_paste_in(
+        &self,
+        participant: i64,
+        session: &str,
+        message: i64,
+        first: Option<String>,
+    ) -> Result<Option<String>, EngineError> {
+        let reading = self.record_left(participant, session).await?;
+        Ok(reading.and_then(|reading| paste_in(&reading, message, first.as_deref())))
     }
 
     /// Whether a participant's harness's record of its current conversation,
@@ -250,4 +277,18 @@ impl Dispatcher {
             .filter(|_| self.seams.adapters.adapter(&conversation.harness).is_some())
             .map(|harness| (harness, session)))
     }
+}
+
+/// The first item of `reading`, a record, that is the paste of `message`
+/// ([`is_paste_of`]), behind `first` where that is what its window was given ahead of
+/// it: none when none is, or when the record could not be read.
+fn paste_in(reading: &Reading, message: i64, first: Option<&str>) -> Option<String> {
+    let Reading::Known(record) = reading else {
+        return None;
+    };
+    record
+        .items
+        .iter()
+        .find(|item| item.role == Role::User && is_paste_of(&item.text, message, first))
+        .map(|item| item.id.to_string())
 }

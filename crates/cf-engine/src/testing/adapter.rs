@@ -59,9 +59,6 @@ pub struct FakeAgent {
     pub took: bool,
     /// The harness holds the delivery in a turn it is in still (`Window::held`).
     pub held: bool,
-    /// A turn that held the delivery ended since the engine's last look
-    /// (`Window::released`).
-    pub released: bool,
     pub failed: bool,
     /// The conversation the window shows, when the human switched it.
     pub shows: Option<String>,
@@ -70,6 +67,8 @@ pub struct FakeAgent {
     /// Whether each of those records, read with no window open, reads at rest: as the
     /// window was when it switched away, unless the test says otherwise.
     pub records_settled: HashMap<String, bool>,
+    /// Those of them that cannot be read: Devin's of a session its store holds no row of.
+    pub records_unreadable: Vec<String>,
     /// Why the window has not said which conversation it shows yet.
     pub unnamed: Option<String>,
     /// How often the engine told the window it pressed the interrupt keys.
@@ -474,6 +473,7 @@ impl FakeAdapter {
             .iter()
             .rev()
             .find(|agent| agent.native == session)
+            .filter(|agent| !agent.records_unreadable.iter().any(|left| left == session))
             .map(
                 |agent| match agent.shows.as_ref().filter(|shows| *shows != session) {
                     // A conversation the window switched away from is its record as it was left.
@@ -583,11 +583,11 @@ impl Asked {
             queued: false,
             took: false,
             held: false,
-            released: false,
             failed: false,
             shows: None,
             records: HashMap::new(),
             records_settled: HashMap::new(),
+            records_unreadable: Vec::new(),
             unnamed: None,
             interrupted: 0,
             stops_when_interrupted: false,

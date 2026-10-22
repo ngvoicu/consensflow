@@ -278,7 +278,7 @@ pub trait Window {
     /// handed to it to its agent: its record shows it when it gets to it, however long
     /// that is. A harness that says so at the hand-over ([`Admission::Admitted`]'s
     /// `queued`) needs no answer here; one that can say it only later, by what it
-    /// writes (Devin's wire log), does. The engine asks at each look until the answer
+    /// writes (Devin's store), does. The engine asks at each look until the answer
     /// is yes.
     fn took(&self) -> bool {
         false
@@ -290,16 +290,6 @@ pub trait Window {
     /// work: until then, its record has had no time to show it. Once the turn ends,
     /// its record has the whole wait any record has. Asked at the hand-over too.
     fn held(&self) -> bool {
-        false
-    }
-    /// Whether a turn that held the message last handed to the window (`held`) ended
-    /// since the engine's last look at it: one that began and ended between two looks
-    /// too, which neither look found holding it (a review of 2026-10-18: the human's
-    /// turn began as the paste went in, no look came for half an hour, and it ended a
-    /// moment before the look that woke). The record has had no time to show the message
-    /// before that end, so its wait is counted from the look that finds it. Read once a
-    /// look, after it: the next look says what came since.
-    fn released(&self) -> bool {
         false
     }
     /// The engine pressed the interrupt keys into the window, and the host

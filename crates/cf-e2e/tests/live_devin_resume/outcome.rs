@@ -3,7 +3,6 @@
 //! refusal or a permission that was seen with where and after which key of the check,
 //! and, at the end of the run, a table of what each case let the window do.
 
-use cf_e2e::live::ask::DevinTook;
 use cf_e2e::live::secs;
 
 use crate::asks::{Ask, Proof};
@@ -32,10 +31,6 @@ pub struct Outcome {
     /// Where the window ran the long command again in the turn of the ask: what the check
     /// did about it.
     pub again: Option<String>,
-    /// Where the ask arrived: what the daemon's reading of the window's wire log says of
-    /// the paste: whether its TUI put it to its agent (`Window::took`), its whole text the
-    /// prompt's, and how many prompts the log holds.
-    pub took: Option<DevinTook>,
 }
 
 impl Outcome {
@@ -87,17 +82,6 @@ impl Outcome {
         ));
         lines.push(format!("  its terminal said: {}", self.states));
         lines.extend(self.again.iter().map(|again| format!("  {again}")));
-        lines.extend(self.took.map(|read| {
-            format!(
-                "  the daemon's reading of the wire: {} ({} prompt(s) of the TUI's in the log)",
-                if read.took {
-                    "the TUI put the paste, whole, to its agent"
-                } else {
-                    "no prompt of the TUI's began with the whole paste"
-                },
-                read.prompts
-            )
-        }));
         if self.sightings.is_empty() {
             lines.push("  no word of a permission or of a call that was not run".to_owned());
         }
@@ -250,7 +234,6 @@ mod tests {
             keys: "paste m-10 (141 chars) +0.0 s".to_owned(),
             states: "working (Thinking) +0.5 s, done +8.0 s".to_owned(),
             again: None,
-            took: None,
         }
     }
 

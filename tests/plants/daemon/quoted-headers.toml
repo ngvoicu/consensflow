@@ -38,8 +38,8 @@ runs = ["engine-dispatcher-quoted-headers"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = "                item.role == Role::User && is_paste_of(&item.text, message, first.as_deref())"
-replace = "                item.role == Role::User && item.text.contains(&marker_of(message))"
+find = "        .find(|item| item.role == Role::User && is_paste_of(&item.text, message, first))"
+replace = "        .find(|item| item.role == Role::User && item.text.contains(&marker_of(message)))"
 
 [[plant]]
 name = "quoted header: ConsensFlow's copy of a window, read as it ends, has a header quoted in the human's words taken for the paste"

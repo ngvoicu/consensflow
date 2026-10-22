@@ -255,11 +255,6 @@ impl Window for FakeWindow {
         self.fake.of_launch(&self.launch, |agent| agent.held)
     }
 
-    /// Not written down, as `took` is not.
-    fn released(&self) -> bool {
-        self.fake.of_launch(&self.launch, |agent| agent.released)
-    }
-
     /// Counted on the agent, and not written down: the JavaScript fake was
     /// never told, so the Node traces have no such call.
     fn interrupted(&self) {

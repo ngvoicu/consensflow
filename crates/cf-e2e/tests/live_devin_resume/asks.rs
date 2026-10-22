@@ -16,13 +16,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use cf_e2e::devin_store::Message;
+use cf_e2e::live::calls;
 use cf_e2e::live::members::squash;
-use cf_e2e::live::{ask as harness, calls};
 use cf_e2e::{files, Result};
 use serde_json::Value;
 
 use crate::again::Again;
-use crate::drive::wire_of;
 use crate::outcome::Outcome;
 use crate::scene::{Scene, QUIET_MS};
 use crate::tools::{called, tools_after, Called};
@@ -248,13 +247,6 @@ pub fn put(scene: &mut Scene, place: &Place, ask: Ask, number: u32) -> Result<Ou
     let mut again = Again::default();
     let turn = deliver(scene, number, &text, ASKED, |scene| again.look(scene))?;
     let messages = scene.watch.messages(scene.window);
-    // The daemon reads a paste its TUI put to its agent by the wire's prompt whose text
-    // begins with the whole paste: Devin's own prompt of it must (the reviews of
-    // 2026-10-18, which made the rule that strict).
-    let took = match wire_of(scene.window.argv()).filter(|_| turn.arrived) {
-        Some(wire) => Some(harness::devin_took(&wire, &text)?),
-        None => None,
-    };
     Ok(Outcome {
         ask,
         number,
@@ -265,7 +257,6 @@ pub fn put(scene: &mut Scene, place: &Place, ask: Ask, number: u32) -> Result<Ou
         keys: scene.trail.since(keys),
         states: scene.watch.marks.since(said),
         again: again.said(),
-        took,
     })
 }
 
