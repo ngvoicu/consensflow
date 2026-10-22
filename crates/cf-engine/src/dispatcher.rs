@@ -1042,7 +1042,9 @@ impl Dispatcher {
                 return Ok(());
             }
             // A held task's window that went on with it by itself: its task goes on.
-            self.went_on_by_itself(project, participant, record, &observed)?;
+            self.went_on_by_itself(project, participant, &observed)?;
+            // A task the daemon resumed whose turn got through: its requester hears it goes on.
+            self.tell_it_went_on(project, participant, record, &observed)?;
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
             if self.cut_short(&observed) {
                 self.go_on(project, participant)?;
@@ -1122,9 +1124,9 @@ impl Dispatcher {
         )?;
         // A refusal of its own, dated before its member was marked out, holds the
         // window's work as the first did, with no note of its own.
-        if participant.role != "chief" && self.refused_while_out(record) {
+        if participant.role != "chief" && self.refused_unhandled(record) {
             self.handled(record);
-            self.hold_work(project, participant, owner, &until, false)?;
+            self.hold_work(project, participant, owner, &until, None)?;
             self.changed();
         }
         // The time a launch waits while its member is out is no slowness of its
@@ -1220,7 +1222,8 @@ impl Dispatcher {
         if let Some(delivering) = delivering {
             self.give_back(delivering, "the harness ran out of quota")?;
         }
-        self.hold_work(project, participant, owner, &until, true)?;
+        let refused_at = self.refused_at(reported.as_deref());
+        self.hold_work(project, participant, owner, &until, Some(refused_at))?;
         if participant.role != "chief" {
             self.close_if_free(record).await?;
         }

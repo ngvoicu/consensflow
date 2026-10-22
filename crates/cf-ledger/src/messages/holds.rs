@@ -73,27 +73,34 @@ pub(crate) fn note_hold(
     )
 }
 
-/// The daemon resumes a held task: its requester is told it goes on, if it was
-/// given the note that said it waits. That is the note of this hold (written
-/// since the task was last paused) which has reached its reader or is
-/// reaching it; one still queued was withdrawn by the resume, and its reader
-/// was told nothing to correct.
+/// A held task went on: its window got a turn through after the words that
+/// resumed it, or went on with it by itself. Its requester is told it goes on,
+/// once, if it was given a note that said it waits and has not been told it
+/// goes on since: that note reached its reader or is reaching it; one still
+/// queued was withdrawn by the resume, and its reader was told nothing to
+/// correct. Not when the words go in: a limit still spent refuses them at once,
+/// and the wait goes on with no word to correct (T-96).
 pub(crate) fn tell_goes_on(store: &mut Store, task: &TaskRow) -> Result<(), LedgerError> {
-    let Some(paused_at) = &task.paused_at else {
-        return Ok(());
-    };
     let notes = store
         .db
         .prepare(
-            "SELECT body FROM message
+            "SELECT body, state FROM message
            WHERE task_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
-             AND state IN ('delivering', 'delivered', 'read') AND created_at >= ?",
+           ORDER BY id",
         )?
-        .query_map(params![task.id, task.requester_id, paused_at], |row| {
-            row.get::<_, String>(0)
+        .query_map(params![task.id, task.requester_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    if !notes.iter().any(|body| is_hold_note(task.number, body)) {
+    let told = goes_on(task.number);
+    let given = notes.iter().rposition(|(body, state)| {
+        is_hold_note(task.number, body)
+            && matches!(state.as_str(), "delivering" | "delivered" | "read")
+    });
+    let Some(given) = given else {
+        return Ok(());
+    };
+    if notes[given..].iter().any(|(body, _)| *body == told) {
         return Ok(());
     }
     let requester = store.participant_row(task.requester_id)?;

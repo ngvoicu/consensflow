@@ -376,11 +376,25 @@ pub(crate) fn go_on_in_window(
                 for (id, ..) in &words {
                     cancel_message(store, *id, "its window went on by itself")?;
                 }
+                tell_goes_on(store, &task)?;
             }
             _ => return Err(not_going_on(number)),
         }
         reconcile(store, task.id)?;
         task_by_id(store, task.id)
+    })
+}
+
+/// A task the daemon resumed went on: its window got a turn through after the
+/// words that resumed it. Its requester, told it waits, is told once it goes on.
+pub(crate) fn tell_it_goes_on(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+) -> Result<(), LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        tell_goes_on(store, &task)
     })
 }
 
@@ -517,9 +531,6 @@ pub(crate) fn resume_task(
             "queued",
             json!({ "by": by, "message": message_id }),
         )?;
-        if by.is_none() {
-            tell_goes_on(store, &task)?;
-        }
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,

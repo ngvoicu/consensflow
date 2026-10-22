@@ -152,6 +152,13 @@ impl Ledger {
         tasks::go_on_in_window(&mut self.store, project_id, number)
     }
 
+    /// A task the daemon resumed went on: its window got a turn through after
+    /// the words that resumed it. Its requester, told it waits, is told once
+    /// that it goes on.
+    pub fn tell_it_goes_on(&mut self, project_id: i64, number: i64) -> Result<(), LedgerError> {
+        tasks::tell_it_goes_on(&mut self.store, project_id, number)
+    }
+
     /// A follow-up on a finished or failed task, back to its assignee. A
     /// question of the window's whose answer did not stand is still to be
     /// answered, and the one who was asked is told so.

@@ -271,6 +271,12 @@ fn tells_a_requester_it_was_told_a_task_waits_that_the_task_goes_on_when_the_acc
 
     switches_account(&context, &tiers);
     assert_eq!(tiers.task(1).task.state, "working");
+    // The words that resume it go in; it is told it goes on once a turn gets through.
+    assert!(notes_saying(&context, &tiers, GOES_ON).is_empty());
+    context
+        .adapter
+        .answer("zeus", "Picking the lexer up again.");
+    context.pass().unwrap();
     assert_eq!(
         fate(&context, &notes[0]),
         ("delivered".to_owned(), None),
@@ -314,6 +320,11 @@ fn tells_a_requester_it_was_told_a_task_waits_that_the_task_goes_on_when_the_res
         context.pass().unwrap();
     }
     assert_eq!(tiers.task(1).task.state, "working");
+    assert!(notes_saying(&context, &tiers, GOES_ON).is_empty());
+    context
+        .adapter
+        .answer("zeus", "Picking the lexer up again.");
+    context.pass().unwrap();
     let told: Vec<String> = notes_saying(&context, &tiers, GOES_ON)
         .into_iter()
         .map(|note| note.body)

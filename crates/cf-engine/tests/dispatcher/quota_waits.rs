@@ -214,10 +214,11 @@ fn a_refusal_of_the_words_that_resumed_the_task_holds_it_again_without_telling_t
             ("paused", Some(session.as_str())),
             "round {round}"
         );
+        // Told it waits once, and never that it goes on: no turn got through (T-96).
         let chief = tiers.notes("chief");
         assert_eq!(
             (waits(&chief), goes_on(&chief)),
-            (1, 1),
+            (1, 0),
             "round {round}: {chief:?}"
         );
         let human = tiers.notes("human");
@@ -556,5 +557,168 @@ fn a_turn_of_the_windows_own_that_fails_while_the_words_that_resume_the_task_wai
         pasted_saying(&context, &session, "Resumed:"),
         1,
         "the words that resume it go in after the failed turn"
+    );
+}
+
+#[test]
+fn a_refusal_hours_into_the_turn_the_words_that_resumed_it_began_is_a_new_wait_its_requester_is_told_of(
+) {
+    // A task that worked for hours in the turn its resume began, and then runs
+    // out for real, was taken for refused "as soon as it went on" (T-96).
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context.adapter.refuse(
+        &session,
+        exhausted(Some(&now(&context)), Some(&after(&context, 20 * 60_000))),
+    );
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    context.advance(21 * 60_000);
+    context.adapter.quota(&session, None);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted_saying(&context, &session, "Resumed:"), 1);
+    // It works three hours in the turn the words began, and then runs out.
+    context.adapter.busy(&session);
+    context.advance(3 * 3_600_000);
+    context.adapter.refuse(
+        &session,
+        exhausted(Some(&now(&context)), Some(&after(&context, 2 * 3_600_000))),
+    );
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let chief = tiers.notes("chief");
+    assert_eq!(
+        chief.iter().filter(|n| n.starts_with("T-1 waits")).count(),
+        2,
+        "told it waits anew: {chief:?}"
+    );
+    let human = tiers.notes("human");
+    assert!(
+        human.iter().all(|n| !n.contains("may need you")),
+        "{human:?}"
+    );
+}
+
+#[test]
+fn the_requester_hears_it_goes_on_when_the_resumed_turn_gets_through_not_when_its_words_go_in() {
+    // With no named reset, the hour's resume was refused at once: the requester
+    // heard a false "goes on" an hour in, and nothing at the real return (T-96).
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context
+        .adapter
+        .refuse(&session, exhausted(Some(&now(&context)), None));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let told = |start: &str| {
+        tiers
+            .notes("chief")
+            .iter()
+            .filter(|n| n.starts_with(start))
+            .count()
+    };
+    assert_eq!(told("T-1 waits"), 1);
+    // The hour passes: the words go in, and are refused at once.
+    context.advance(61 * 60_000);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted_saying(&context, &session, "Resumed:"), 1);
+    assert_eq!(
+        told("T-1 goes on"),
+        0,
+        "the words went in, no turn got through"
+    );
+    context.advance(1_000);
+    context
+        .adapter
+        .refuse(&session, exhausted(Some(&now(&context)), None));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "paused");
+    // Days later the account has quota again: the words go in, and a turn gets through.
+    context.advance(3 * 24 * 3_600_000);
+    context.adapter.quota(&session, None);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted_saying(&context, &session, "Resumed:"), 2);
+    assert_eq!(told("T-1 goes on"), 0);
+    context.adapter.answer(&session, "The parser is done.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!((told("T-1 waits"), told("T-1 goes on")), (1, 1));
+    let task = tiers.task(1);
+    assert!(
+        task.messages.iter().any(|m| m.kind == "result"),
+        "{:?}",
+        task.task.state
+    );
+}
+
+#[test]
+fn a_held_tasks_own_turn_gives_its_answer_alone_though_the_daemon_restarted_in_it() {
+    // What the engine kept of where the window's own turn began was in memory
+    // only: after a restart the result began with the refusal's words (T-96).
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let (tiers, session) = held_for_two_hours(&context);
+    context.advance(60_000);
+    context
+        .adapter
+        .begins_its_own_turn(&session, CONTINUE, &now(&context));
+    // A word of its answer, complete, and it works on.
+    let mut said = context
+        .adapter
+        .item(Role::Assistant, "Picking the parser up.");
+    said.at = Some(serde_json::json!(now(&context)));
+    // As a harness reads a turn that gets through, the refusal before it is no
+    // longer its last word.
+    context.adapter.with(&session, |agent| {
+        agent.items.push(said);
+        agent.quota = None;
+    });
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    // The daemon restarts in that turn, and the human resumes the project.
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    after.resume_project(tiers.project.id).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    context.adapter.answer(&session, "The parser is done.");
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    let task = tiers.task(1);
+    let results: Vec<&str> = task
+        .messages
+        .iter()
+        .filter(|m| m.kind == "result")
+        .map(|m| m.body.as_str())
+        .collect();
+    assert_eq!(results.len(), 1, "{results:?} {:?}", task.task.state);
+    assert!(
+        !results[0].contains("hit your"),
+        "no word of the refusal: {results:?}"
     );
 }

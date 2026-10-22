@@ -161,3 +161,41 @@ fn a_reset_the_limits_name_after_the_refusal_is_its_reset() {
     .unwrap();
     assert_eq!(earlier.quota.as_deref().and_then(Quota::resets_at), None);
 }
+
+#[test]
+fn a_limit_whose_window_is_far_from_spent_borrows_no_reset_from_it() {
+    // Codex names its weekly window in every snapshot, days from its reset and
+    // mostly unspent: a rate limit Codex gave up on is no wait of a week (T-96).
+    for info in ["rate_limit_exceeded", "usage_limit_exceeded"] {
+        let read = read(&[
+            limits(30.0, RESETS),
+            started(json!("t1")),
+            failed("t1", info, AT),
+        ])
+        .unwrap();
+        assert_eq!(
+            read.quota.as_deref(),
+            Some(&Quota::Exhausted {
+                at: Some(AT.to_owned()),
+                resets_at: None,
+            }),
+            "{info}"
+        );
+        let after_it = read_after_limits(info);
+        assert_eq!(
+            after_it.quota.as_deref().and_then(Quota::resets_at),
+            None,
+            "{info}"
+        );
+    }
+}
+
+/// A turn ended for `info`, its rate limits reported after it at 30 percent.
+fn read_after_limits(info: &str) -> Record {
+    read(&[
+        started(json!("t1")),
+        failed("t1", info, AT),
+        limits(30.0, RESETS),
+    ])
+    .unwrap()
+}

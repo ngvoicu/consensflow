@@ -5,7 +5,7 @@
 # While a member is out its task waits with its window, whoever else of its tier
 # is free (`crates/cf-engine/src/scheduler.rs`, `hold_work`), and so does the work
 # of a window whose own refusal is dated before its member was marked out
-# (`refused_while_out`, `crates/cf-engine/src/dispatcher.rs`, `while_out`); what
+# (`refused_unhandled`, `crates/cf-engine/src/dispatcher.rs`, `while_out`); what
 # the window was receiving arrived if its record shows it, else goes again with
 # its attempt (`out_of_quota`). A refusal of the words that resumed a task holds
 # it again with no new note to its requester, and the human is told once that the
@@ -99,11 +99,13 @@ runs = ["quota-wait-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-            let again = self.refused_its_resume(participant, &task)?;
+                None => false,
+            };
             self.seams.ledger.borrow_mut().hold_task(
 '''
 replace = '''
-            let again = self.refused_its_resume(participant, &task)?;
+                None => false,
+            };
             let far = time::parse(until).is_some_and(|until| until - self.now() > 30 * 60_000);
             let teammate = task.pool.is_some()
                 && self
@@ -133,8 +135,8 @@ runs = ["quota-wait-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = "            let again = self.refused_its_resume(participant, &task)?;"
-replace = "            let again = self.refused_its_resume(participant, &task)? && false;"
+find = "                Some(at) => self.refused_its_resume(participant, &task, at)?,"
+replace = "                Some(at) => self.refused_its_resume(participant, &task, at)? && false,"
 
 [[plant]]
 name = "quota wait: the human is told at every refusal of a task's resume that its account may need them"
@@ -157,8 +159,8 @@ runs = ["quota-wait-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''        if participant.role != "chief" && self.refused_while_out(record) {'''
-replace = '''        if participant.role != "chief" && self.refused_while_out(record) && false {'''
+find = '''        if participant.role != "chief" && self.refused_unhandled(record) {'''
+replace = '''        if participant.role != "chief" && self.refused_unhandled(record) && false {'''
 
 [[plant]]
 name = "quota wait: what the window took before its harness refused it goes into it again"
@@ -261,7 +263,7 @@ runs = ["quota-wait-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "            self.went_on_by_itself(project, participant, record, &observed)?;"
+find = "            self.went_on_by_itself(project, participant, &observed)?;"
 replace = ""
 
 [[plant]]
@@ -272,7 +274,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "            self.went_on_by_itself(project, participant, record, &observed)?;"
+find = "            self.went_on_by_itself(project, participant, &observed)?;"
 replace = ""
 
 [[plant]]
@@ -286,14 +288,14 @@ find = """            "queued" => {"""
 replace = """            "queued-never" => {"""
 
 [[plant]]
-name = "quota wait: the task's turn is read from its latest paste, the refusal before the window's own turn with it"
-meant = "a_held_tasks_window_that_goes_on_by_itself_is_the_task_going_on_and_its_answer_is_the_result"
+name = "quota wait: the task's turn is read from its latest paste, the refusal before the window's own turn with it, after a restart"
+meant = "a_held_tasks_own_turn_gives_its_answer_alone_though_the_daemon_restarted_in_it"
 runs = ["quota-wait-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "        let start = own.map_or(pasted, |own| own.max(pasted));"
-replace = "        let start = own.map_or(pasted, |_| pasted);"
+find = "            .map_or(pasted + 1, |at| pasted + 1 + at);"
+replace = "            .map_or(pasted + 1, |_| pasted + 1);"
 
 [[plant]]
 name = "quota wait: a held task goes on as soon as its window begins a turn of its own, answered or not"
@@ -325,3 +327,52 @@ runs = ["quota-wait-engine"]
 file = "crates/cf-engine/src/scheduler.rs"
 find = "            .any(|item| item.role == Role::User && header_id(&item.text).is_some())"
 replace = "            .any(|item| item.role == Role::User && header_id(&item.text).is_some() && false)"
+
+[[plant]]
+name = "quota wait: Codex's refusal borrows the reset of a window far from spent, a week's wait for a minute's limit"
+meant = "a_limit_whose_window_is_far_from_spent_borrows_no_reset_from_it"
+runs = ["quota-wait-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = "        .filter(|quota| quota.level() != Level::Ok)"
+replace = "        .filter(|quota| quota.level() != Level::Exhausted || true)"
+
+[[plant]]
+name = "quota wait: a refusal hours into the turn the words that resumed the task began is taken for refused as soon as it went on"
+meant = "a_refusal_hours_into_the_turn_the_words_that_resumed_it_began_is_a_new_wait_its_requester_is_told_of"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "                    .is_some_and(|delivered| refused_at - delivered <= AGAIN_MS)"
+replace = "                    .is_some_and(|delivered| refused_at - delivered <= AGAIN_MS || true)"
+
+[[plant]]
+name = "quota wait: a requester is never told a held task goes on when its resumed turn gets through"
+meant = "the_requester_hears_it_goes_on_when_the_resumed_turn_gets_through_not_when_its_words_go_in"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.tell_it_went_on(project, participant, record, &observed)?;"
+replace = ""
+
+[[plant]]
+name = "quota wait: the words that resume a task tell its requester it goes on as they go in, before a turn gets through"
+meant = "the_requester_hears_it_goes_on_when_the_resumed_turn_gets_through_not_when_its_words_go_in"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+            json!({ "by": by, "message": message_id }),
+        )?;
+'''
+replace = '''
+            json!({ "by": by, "message": message_id }),
+        )?;
+        if by.is_none() {
+            tell_goes_on(store, &task)?;
+        }
+'''

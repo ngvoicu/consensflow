@@ -177,9 +177,9 @@ const CHIEF_FIRST_TAKEN: &str = "the human closes the project as the chief's han
 /// the reset.
 const HOLD_WORDS: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself (`, or sooner if its account has quota again; it goes on by itself.`), where Node's says it goes on at the reset (`; it goes on by itself then.`)";
 
-/// The same, and what the engine does when the daemon resumes a task whose
-/// requester was given the hold note.
-const HOLD_THEN_GOES_ON: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself, where Node's says it goes on at the reset; and when the daemon resumes T-1, the chief, who was given that note, is told `T-1 goes on: its account has quota again.`, where Node tells it nothing";
+/// The same, and what the engine does once a task whose requester was given
+/// the hold note goes on.
+const HOLD_THEN_GOES_ON: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself, where Node's says it goes on at the reset; and the chief, who was given that note, is told `T-1 goes on: its account has quota again.` once a turn of the window gets through after the words that resumed T-1 (T-96), which these tests do not reach, so it is told nothing as the daemon resumes T-1, where Node tells it nothing either";
 
 /// What the engine does with the task of a member that runs out of quota while
 /// another of its tier is free (dip-agentos, 2026-10-19): it waits with its

@@ -13,10 +13,10 @@ use std::sync::Arc;
 use cf_base::refusal::Refusal;
 use cf_base::time;
 use cf_harness::contract::Observed;
-use cf_harness::records::{Level, Quota, Role};
+use cf_harness::records::{Item, Level, Quota, Role};
 use cf_ledger::{
-    Candidate, HeldTask, LedgerError, NewNote, ParticipantView, ProjectView, TaskCard, TaskThread,
-    RESUME_WORDS,
+    Candidate, HeldTask, LedgerError, MessageView, NewNote, ParticipantView, ProjectView, TaskCard,
+    TaskThread, RESUME_WORDS,
 };
 use serde_json::Value;
 
@@ -30,6 +30,10 @@ use crate::seams::{EngineError, SavedAgent};
 /// task went on.
 const MAY_NEED_YOU: &str = "may need you";
 
+/// How soon after the words that resumed a task a refusal answers them, and
+/// is the same wait going on.
+const AGAIN_MS: i64 = 5 * 60_000;
+
 /// How long a quota lasts when its harness names no reset.
 const UNKNOWN_RESET_MS: i64 = 60 * 60_000;
 
@@ -42,6 +46,9 @@ pub(crate) struct QuotaPart {
     pub(crate) handled: Option<Arc<Quota>>,
     /// On a member's own record: until when it is low, and gets no new work.
     pub(crate) low_until: Option<String>,
+    /// The words that resumed the window's task whose going on its requester
+    /// was told of (`tell_it_went_on`): the ledger tells it once anyway.
+    pub(crate) told_going_on: Option<i64>,
 }
 
 /// What the scheduler keeps across records: the open tasks whose requester
@@ -241,11 +248,12 @@ impl Dispatcher {
         }
     }
 
-    /// Whether a window of a member already out shows a refusal of its own it has
-    /// not acted on, whose reset has not passed: one its harness dated before the
-    /// daemon marked the member out, which `refused_here` takes for history (two
-    /// windows of a member refused in one pass; the review of the quota wait, T-88).
-    pub(crate) fn refused_while_out(&self, record: &Record) -> bool {
+    /// Whether a window shows a refusal of its own it has not acted on, whose
+    /// reset has not passed: in a window of a member already out, one its harness
+    /// dated before the daemon marked the member out, which `refused_here` takes
+    /// for history (two windows of a member refused in one pass; the review of the
+    /// quota wait, T-88).
+    pub(crate) fn refused_unhandled(&self, record: &Record) -> bool {
         let (reported, handled) = {
             let quota = record.quota.borrow();
             (quota.reported.clone(), quota.handled.clone())
@@ -320,6 +328,14 @@ impl Dispatcher {
         self.record_of(owner.id).quota.borrow_mut().low_until = low_until;
     }
 
+    /// When a refusal happened: the time its record names, or now.
+    pub(crate) fn refused_at(&self, quota: Option<&Quota>) -> i64 {
+        quota
+            .and_then(Quota::at)
+            .and_then(time::parse)
+            .unwrap_or_else(|| self.now())
+    }
+
     /// When a quota resets: the time its harness names, or an hour from now.
     pub(crate) fn reset_of(&self, quota: Option<&Quota>) -> String {
         quota
@@ -331,10 +347,11 @@ impl Dispatcher {
     /// its harness refused it: it waits with its window, which has its work,
     /// and goes on there by itself, whoever else of its tier is free; only the
     /// human or the chief gives it to another (dip-agentos, 2026-10-19). The
-    /// chief keeps its own tasks. Its requester is told it waits (`tell`),
-    /// unless the refusal answered the words that resumed it: that is the same
-    /// wait going on, which a reset nobody named, or a limit that does not reset
-    /// by itself, would tell again at every hour; the human is told once, then,
+    /// chief keeps its own tasks. Its requester is told it waits, where a
+    /// refusal at `refused_at` (ms) holds it (none: held with no note), unless
+    /// the refusal answered the words that resumed it: that is the same wait
+    /// going on, which a reset nobody named, or a limit that does not reset by
+    /// itself, would tell again at every hour; the human is told once, then,
     /// that the account may need them (the review of the quota wait, T-88).
     pub(crate) fn hold_work(
         &self,
@@ -342,20 +359,23 @@ impl Dispatcher {
         participant: &ParticipantView,
         owner: &ParticipantView,
         until: &str,
-        tell: bool,
+        refused_at: Option<i64>,
     ) -> Result<(), EngineError> {
         if participant.role == "chief" {
             return Ok(());
         }
         for task in self.active_work(project, participant)? {
-            let again = self.refused_its_resume(participant, &task)?;
+            let again = match refused_at {
+                Some(at) => self.refused_its_resume(participant, &task, at)?,
+                None => false,
+            };
             self.seams.ledger.borrow_mut().hold_task(
                 project.id,
                 task.number,
                 until,
                 "out of quota",
             )?;
-            if !tell {
+            if refused_at.is_none() {
                 continue;
             }
             if again {
@@ -373,12 +393,15 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// Whether the last words a window was given about `task` are the
-    /// daemon's own that resumed it.
+    /// Whether a refusal at `refused_at` (ms) answered the daemon's own words
+    /// that resumed `task`: they are the last the window was given about it, and
+    /// went in within `AGAIN_MS` of it. A task that worked for hours in the turn
+    /// they began, and then runs out, waits anew (T-96).
     fn refused_its_resume(
         &self,
         participant: &ParticipantView,
         task: &TaskCard,
+        refused_at: i64,
     ) -> Result<bool, EngineError> {
         let last = self
             .seams
@@ -386,8 +409,82 @@ impl Dispatcher {
             .borrow()
             .last_pasted(participant.id, task.id)?;
         Ok(last.is_some_and(|message| {
-            message.sender.is_none() && message.body == format!("Resumed: {RESUME_WORDS}")
+            message.sender.is_none()
+                && message.body == format!("Resumed: {RESUME_WORDS}")
+                && message
+                    .delivered_at
+                    .as_deref()
+                    .and_then(time::parse)
+                    .is_some_and(|delivered| refused_at - delivered <= AGAIN_MS)
         }))
+    }
+
+    /// A task the daemon resumed whose window got a turn through in it: the
+    /// words that resumed it are the last the window was given about it, and
+    /// its harness answered after them, with no failure and no refusal. Its
+    /// requester, told it waits, is told once that it goes on: not when the
+    /// words go in, which a limit that is still spent refuses at once (T-96).
+    pub(crate) fn tell_it_went_on(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        observed: &Observed,
+    ) -> Result<(), EngineError> {
+        // A refusal the window has not acted on yet is no turn through; one it
+        // acted on before the words went in is the record's last word no more.
+        if participant.role == "chief" || observed.failed || self.refused_unhandled(record) {
+            return Ok(());
+        }
+        let task = self
+            .seams
+            .ledger
+            .borrow()
+            .active_task(participant.id, false)?;
+        let Some(TaskThread { task, .. }) = task else {
+            return Ok(());
+        };
+        let latest = self
+            .seams
+            .ledger
+            .borrow()
+            .last_pasted(participant.id, task.id)?;
+        let Some(latest) = latest.filter(|message| {
+            message.sender.is_none()
+                && message
+                    .body
+                    .starts_with(&format!("Resumed: {RESUME_WORDS}"))
+        }) else {
+            return Ok(());
+        };
+        if record.quota.borrow().told_going_on == Some(latest.id) {
+            return Ok(());
+        }
+        let items = observed.items();
+        let Some(pasted) = self.pasted_at(&latest, items) else {
+            return Ok(());
+        };
+        if !items[pasted + 1..]
+            .iter()
+            .any(|item| item.role == Role::Assistant)
+        {
+            return Ok(());
+        }
+        self.seams
+            .ledger
+            .borrow_mut()
+            .tell_it_goes_on(project.id, task.number)?;
+        record.quota.borrow_mut().told_going_on = Some(latest.id);
+        self.changed();
+        Ok(())
+    }
+
+    /// Where among a window's `items` the message `latest` was pasted: the
+    /// first item that holds its marker. Turn-end's `delivered_at` is to take
+    /// its place, so that every reading of the task's turn starts at one item.
+    fn pasted_at(&self, latest: &MessageView, items: &[Item]) -> Option<usize> {
+        let marker = marker_of(latest.id);
+        items.iter().position(|item| item.text.contains(&marker))
     }
 
     /// The human is told, once for a task, that the account of the member its
@@ -583,13 +680,13 @@ impl Dispatcher {
     /// no paste of ConsensFlow's, after the latest words the window was given
     /// about the task, and an answer follows them; a failed turn, or one refused
     /// again, is none. The task goes on with no words, or with the daemon's bare
-    /// words that resume it withdrawn (`go_on_in_window`), and the turn is its
-    /// turn (`collect`).
+    /// words that resume it withdrawn (`go_on_in_window`, which tells its
+    /// requester it goes on), and the turn is its turn (`collect`, which reads
+    /// the task's turn from the last user's words after its paste).
     pub(crate) fn went_on_by_itself(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
-        record: &Record,
         observed: &Observed,
     ) -> Result<(), EngineError> {
         let refused = observed
@@ -617,8 +714,7 @@ impl Dispatcher {
             return Ok(());
         };
         let items = observed.items();
-        let marker = marker_of(latest.id);
-        let Some(pasted) = items.iter().position(|item| item.text.contains(&marker)) else {
+        let Some(pasted) = self.pasted_at(&latest, items) else {
             return Ok(());
         };
         let after = &items[pasted + 1..];
@@ -648,7 +744,6 @@ impl Dispatcher {
             Err(LedgerError::Refused(_)) => return Ok(()),
             Err(failed) => return Err(failed.into()),
         }
-        record.delivery.borrow_mut().own_turn = Some((task.id, Arc::clone(&after[own].id)));
         self.changed();
         Ok(())
     }

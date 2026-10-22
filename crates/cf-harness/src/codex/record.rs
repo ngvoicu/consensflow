@@ -40,7 +40,7 @@ use self::images::output_text;
 use self::inputs::{Inputs, Telling};
 use super::paths::transcript;
 use super::quota::codex_quota;
-use crate::shared::quota::Quota;
+use crate::shared::quota::{Level, Quota};
 use crate::shared::record::cache::Look;
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
@@ -531,9 +531,14 @@ impl Rollout {
     }
 }
 
-/// The reset the rate limits `quota` names, where it comes after `at` (ms).
+/// The reset the rate limits `quota` names, where that window is spent (low or
+/// exhausted, past 95 percent) and it comes after `at` (ms). Codex names its
+/// fullest window in every snapshot, a weekly one days from its reset and mostly
+/// unspent on this Mac's account: a limit it is not is no wait of a week, and
+/// takes the hour a refusal that names no reset waits (T-96).
 fn reset_after(quota: Option<&Quota>, at: Option<i64>) -> Option<String> {
     quota
+        .filter(|quota| quota.level() != Level::Ok)
         .and_then(Quota::resets_at)
         .filter(|reset| {
             time::parse(reset)
