@@ -267,6 +267,7 @@ mod tests {
         if !crate::testing::is_alone() {
             return;
         }
+        let _ran = crate::testing::Ran;
         // Probed on Node v26.8.1: the streams are closed before the program is
         // asked to end, so the trap's `echo` meets a closed pipe (SIGPIPE).
         let run = shell("trap 'echo bye; exit 0' TERM; echo hi; while true; do sleep 0.05; done");

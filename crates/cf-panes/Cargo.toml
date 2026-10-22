@@ -21,7 +21,7 @@ test-support = ["dep:cf-process"]
 # only its streams.
 [dev-dependencies]
 cf-panes = { path = ".", features = ["test-support"] }
-cf-process.workspace = true
+cf-process = { workspace = true, features = ["test-support"] }
 
 [dependencies]
 cf-bridge.workspace = true

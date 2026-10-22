@@ -183,6 +183,7 @@ pub fn archive_of(names: &[&str]) -> Vec<u8> {
     let target = dir.path().join("archive.tar.gz");
     // The test starts what it archives with.
     #[allow(clippy::disallowed_methods)]
+    // Bare, as this crate's tests start every program (see `testing`'s words: no dependency here).
     let made = Command::new("tar")
         .args(["--format", "ustar", "-czf"])
         .arg(&target)

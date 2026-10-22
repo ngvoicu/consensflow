@@ -273,34 +273,11 @@ fn a_child_a_test_starts_holds_nothing_of_the_tests_but_its_streams() {
     use std::os::fd::AsRawFd;
 
     let folder = tempfile::tempdir().expect("a folder");
-    let stray = stray();
+    let stray = cf_process::test_support::stray();
     let mut child = spawn_child("hold", &folder.path().join("consensflow.db"));
     assert_eq!(said(&mut child), "ready");
-    let held = holds_null(child.id(), stray.as_raw_fd());
+    let held = cf_process::test_support::holds_null(child.id(), stray.as_raw_fd());
     let _ = child.kill();
     let _ = child.wait();
     assert!(!held, "the child holds it");
-}
-
-/// Whether the process `pid` holds `/dev/null` at `fd`, as `lsof` says.
-#[cfg(target_os = "macos")]
-fn holds_null(pid: u32, fd: i32) -> bool {
-    let held = Command::new("/usr/sbin/lsof")
-        .args(["-a", "-p", &pid.to_string(), "-d", &fd.to_string()])
-        .output()
-        .expect("lsof");
-    String::from_utf8_lossy(&held.stdout).contains("/dev/null")
-}
-
-/// A `/dev/null` this process holds, open and not close-on-exec, as std leaves a descriptor for
-/// a moment as it makes it: a program started then would hold it.
-#[cfg(target_os = "macos")]
-fn stray() -> std::fs::File {
-    use std::os::fd::AsRawFd;
-
-    use nix::fcntl::{fcntl, FcntlArg, FdFlag};
-
-    let stray = std::fs::File::open("/dev/null").expect("a file");
-    fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).expect("its flags");
-    stray
 }

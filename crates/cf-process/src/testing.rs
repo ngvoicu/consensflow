@@ -129,6 +129,7 @@ pub(crate) fn alone(through: &[&str], name: &str) {
     );
     assert!(ran.status.success(), "{said}");
     assert!(said.contains("1 passed"), "the test did not run: {said}");
+    assert!(said.contains(RAN), "the test's body did not run: {said}");
 }
 
 /// Whether this process is one [`alone`] started.
@@ -147,4 +148,24 @@ pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Com
     let mut command = std::process::Command::new(program);
     crate::hold_only_the_streams(&mut command);
     command
+}
+
+/// What a test [`alone`] ran says once its body has run to its end: the run that started it
+/// asserts it, so a body that returned at once (the variable lost on the way) is no pass.
+#[cfg(unix)]
+pub(crate) const RAN: &str = "the test ran alone to its end";
+
+/// Says [`RAN`] as it is dropped, at the end of the body it was made at the start of, unless the
+/// body panicked.
+#[cfg(unix)]
+pub(crate) struct Ran;
+
+#[cfg(unix)]
+impl Drop for Ran {
+    #[allow(clippy::print_stdout)] // To the run that started this one, which reads it.
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            println!("{RAN}");
+        }
+    }
 }

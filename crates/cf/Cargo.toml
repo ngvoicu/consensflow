@@ -26,8 +26,8 @@ cf-board = { workspace = true, features = ["test-support"] }
 # The daemon as a process: a home of its own with a ledger and a fake `claude`.
 cf-harness = { workspace = true, features = ["test-support"] }
 cf-ledger.workspace = true
-# Whether a daemon's process is alive.
-cf-process.workspace = true
+# Whether a daemon's process is alive, and what a program a test starts holds.
+cf-process = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]

@@ -175,6 +175,7 @@ fn crowded(hard: bool) {
     if !crate::testing::is_alone() {
         return;
     }
+    let _ran = crate::testing::Ran;
     let (_, most) = getrlimit(Resource::RLIMIT_NOFILE).unwrap();
     setrlimit(Resource::RLIMIT_NOFILE, most.min(16_384), most).unwrap();
     let null = File::open("/dev/null").unwrap();
@@ -413,6 +414,7 @@ fn swept() {
     if !crate::testing::is_alone() {
         return;
     }
+    let _ran = crate::testing::Ran;
     let (_, most) = getrlimit(Resource::RLIMIT_NOFILE).unwrap();
     setrlimit(Resource::RLIMIT_NOFILE, most.min(16_384), most).unwrap();
     let null = File::open("/dev/null").unwrap();
@@ -487,6 +489,7 @@ fn unlisted() {
     if !crate::testing::is_alone() {
         return;
     }
+    let _ran = crate::testing::Ran;
     let (_open, _) = Open::not_yet_close_on_exec();
     let runtime = runtime();
     let _entered = runtime.enter();

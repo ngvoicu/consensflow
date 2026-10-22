@@ -862,14 +862,38 @@ find = "command.spawn().map_err(|cause| failure(invocation, cause))"
 replace = "command.spawn().map_err(|cause| Failure::Refused { program: String::new(), cause })"
 
 [[plant]]
-name = "updater evidence: a socket the new app was given at an address the old app's had is taken for the old app's"
+name = "updater evidence: a socket the new app was given at an address the old app's had is noted as the old app's"
 meant = "a_socket_at_an_address_the_old_app_had_with_another_peer_is_the_new_apps_own"
 runs = ["smoke-descriptors"]
 
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/descriptors.rs"
-find = "        && was.name == held.name"
+find = "        && (was.name == held.name || was.fd == held.fd)"
 replace = ""
+
+[[plant]]
+name = "updater evidence: a socket at the old app's address is a fault, not a note, and fails a sound restart"
+meant = "a_socket_at_the_old_apps_address_with_its_peer_is_noted_with_both_numbers"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = """
+            notes.push(format!(
+                "the new app's fd {} may be the old app's fd {}, given again or left: {} {} {}","""
+replace = """
+            faults.push(format!(
+                "the new app's fd {} may be the old app's fd {}, given again or left: {} {} {}","""
+
+[[plant]]
+name = "updater evidence: a socket left whose peer closed is not noted"
+meant = "a_socket_at_the_old_apps_address_and_number_whose_peer_closed_is_noted"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = "        && (was.name == held.name || was.fd == held.fd)"
+replace = "        && was.name == held.name"
 
 [[plant]]
 name = "updater evidence: the new app holding the file the installed app was left is no fault"
@@ -886,3 +910,29 @@ replace = """
             .is_some_and(|(_, node)| *node == left.node && false)
         {
             faults.push("""
+
+[[plant]]
+name = "updater evidence: the smoke's test run alone is not told it is alone, and passes having run nothing"
+meant = "the_pipe_left_reaches_its_end_once_no_process_holds_it_and_not_before"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/testing.rs"
+find = """
+        .var(ALONE, "1");
+"""
+replace = """
+        ;
+"""
+
+[[plant]]
+name = "updater evidence: the programs xtask's own tests start do not ask to hold only their streams"
+meant = "a_program_a_test_starts_holds_nothing_of_the_tests_but_its_streams"
+runs = [["cargo", "test", "--offline", "-p", "xtask", "--target-dir", "app/src-tauri/target/xtask-check", "--test", "process", "a_program_a_test_starts"]]
+
+[[plant.edit]]
+file = "tools/xtask/tests/common/mod.rs"
+find = """
+    cf_process::hold_only_the_streams(&mut command);
+"""
+replace = ""

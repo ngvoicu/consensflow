@@ -161,6 +161,7 @@ mod tests {
     #[test]
     #[allow(clippy::disallowed_methods)] // The test starts what it ends.
     fn the_end_that_waits_for_nothing_returns_before_the_child_is_gone() {
+        // Bare: a Windows test, and Windows hands a program no descriptor it is not asked to.
         let mut child = std::process::Command::new("ping")
             .args(["-n", "30", "127.0.0.1"])
             .stdout(std::process::Stdio::null())

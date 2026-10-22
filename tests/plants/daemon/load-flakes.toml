@@ -213,6 +213,7 @@ find = '''
         if !crate::testing::is_alone() {
             return;
         }
+        let _ran = crate::testing::Ran;
         // Probed on Node v26.8.1: the streams are closed before the program is
 '''
 replace = '''

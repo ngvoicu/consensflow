@@ -137,6 +137,7 @@ mod tests {
     #[test]
     #[allow(clippy::disallowed_methods)] // The test starts what it waits for.
     fn a_child_that_exited_with_the_code_still_active_reads_as_is_gone() {
+        // Bare: a Windows test, and Windows hands a program no descriptor it is not asked to.
         let mut child = std::process::Command::new("cmd")
             .args(["/c", "exit 259"])
             .spawn()

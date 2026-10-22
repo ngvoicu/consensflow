@@ -33,6 +33,7 @@ cf-daemon-tests-descriptors = ["cargo", "test", "--offline", "-p", "cf", "--test
 harness-loopback-descriptors = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "loopback", "the_server_a_test_keeps"]
 ledger-opening-descriptors = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "opening", "a_child_a_test_starts"]
 cf-goldens-descriptors = ["cargo", "test", "--offline", "-p", "cf", "--test", "cli_goldens", "the_command_a_case_starts"]
+process-test-support = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "test_support::"]
 sentinel-descriptors = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "a_sentinel_holds_nothing"]
 headless-descriptors = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "the_helper_a_test_starts"]
 daemon-runs-descriptors = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "api", "a_run_holds_nothing"]
@@ -438,3 +439,30 @@ find = """
     cf_process::hold_only_the_streams(&mut command);
 """
 replace = ""
+
+[[plant]]
+name = "descriptors: a test cf-process runs alone is not told it is alone, and passes having run nothing"
+meant = "a_program_holds_none_of_a_crowd_of_descriptors_whatever_the_limit_was_lowered_to"
+runs = ["process-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/testing.rs"
+find = """
+        .env(ALONE, "1")
+"""
+replace = """
+"""
+
+[[plant]]
+name = "descriptors: the stray the tests leave a program is close-on-exec, and proves nothing"
+meant = "a_program_started_bare_holds_the_stray_and_lsof_says_so"
+runs = ["process-test-support"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/test_support.rs"
+find = """
+    fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).expect("its flags");
+"""
+replace = """
+    let _ = (fcntl, FcntlArg::F_SETFD(FdFlag::empty()), stray.as_raw_fd());
+"""

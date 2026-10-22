@@ -20,6 +20,8 @@ mod memory;
 mod runnable;
 mod search;
 mod terminate;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 #[cfg(test)]
 mod testing;
 

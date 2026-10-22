@@ -1130,16 +1130,6 @@ fn helper_is_inert_when_stdin_is_not_a_pipe() {
     assert!(output.stdout.is_empty());
 }
 
-/// Whether the process `pid` holds the descriptor `fd`, which is `/dev/null`, as `lsof` says.
-#[cfg(target_os = "macos")]
-fn holds_null(pid: u32, fd: i32) -> bool {
-    let held = Command::new("/usr/sbin/lsof")
-        .args(["-a", "-p", &pid.to_string(), "-d", &fd.to_string()])
-        .output()
-        .expect("lsof");
-    String::from_utf8_lossy(&held.stdout).contains("/dev/null")
-}
-
 /// The helper a test starts runs beside the other tests, which open sockets and pipes: on macOS
 /// std makes each close-on-exec in a second step, and the helper started between the two would
 /// hold it for as long as it runs. Here a descriptor is left open and not close-on-exec as it
@@ -1149,18 +1139,15 @@ fn holds_null(pid: u32, fd: i32) -> bool {
 fn the_helper_a_test_starts_holds_nothing_of_the_tests_but_its_streams() {
     use std::os::fd::AsRawFd;
 
-    unsafe extern "C" {
-        fn fcntl(fd: i32, command: i32, argument: i32) -> i32;
-    }
-    const F_SETFD: i32 = 2;
+    use cf_process::test_support::{holds_null, stray};
 
     let _pty_guard = serial_headless_test();
-    let stray = std::fs::File::open("/dev/null").expect("a file");
-    let fd = stray.as_raw_fd();
-    // SAFETY: `fcntl` clears the flags of a descriptor this test holds.
-    assert_eq!(unsafe { fcntl(fd, F_SETFD, 0) }, 0);
+    let stray = stray();
     let mut helper = Headless::spawn();
-    assert!(!holds_null(helper.child.id(), fd), "the helper holds it");
+    assert!(
+        !holds_null(helper.child.id(), stray.as_raw_fd()),
+        "the helper holds it"
+    );
     helper.close_input_and_wait();
 }
 

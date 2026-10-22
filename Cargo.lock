@@ -578,7 +578,6 @@ dependencies = [
  "cf-process",
  "cf-proto",
  "flate2",
- "nix",
  "rusqlite",
  "serde",
  "serde_json",
@@ -619,6 +618,7 @@ name = "cf-process"
 version = "3.0.6-alpha.1"
 dependencies = [
  "cf-base",
+ "cf-process",
  "libc",
  "nix",
  "tempfile",

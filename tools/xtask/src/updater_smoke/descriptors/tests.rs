@@ -1,5 +1,5 @@
 use super::*;
-use crate::updater_smoke::testing::{alone, is_alone};
+use crate::updater_smoke::testing::{alone, is_alone, Ran};
 
 /// `lsof -F ftdDin` of a running ConsensFlow 3.0.5 on this Mac, cut down: its streams, a unix
 /// socket, a file a framework opened, a kqueue and a socket of the system's.
@@ -100,16 +100,24 @@ fn a_new_app_left_the_old_ones_descriptors_is_at_fault_for_each() {
     let old = old_with(&left);
     // Tauri's bare start, with nothing made close-on-exec: the new app holds them at their numbers.
     let new = old.clone();
-    let (faults, _) = compare(&old, &new, &left);
-    let said = faults.join("\n");
-    assert!(said.contains("0xdcbcb4e125cc7e2f"), "{said}");
-    assert!(said.contains("0x4728cfc0aca56d7a"), "{said}");
-    // The pipe is the pipe's own check's ([`Left::closed_everywhere`]), not the comparison's.
-    assert!(!said.contains("0xaaaa"), "{said}");
-    assert!(
-        said.contains("the file the installed app was left"),
-        "{said}"
+    let (faults, notes) = compare(&old, &new, &left);
+    // The file it was left is the fault; the pipe is the pipe's own check's
+    // ([`Left::closed_everywhere`]).
+    assert_eq!(
+        faults,
+        [format!(
+            "the new app holds the file the installed app was left (fd {} REG /x/left-to-the-app)",
+            left.file_fd
+        )]
     );
+    // The sockets are noted, both numbers said: lsof's address is no identity.
+    let noted = notes.join("\n");
+    assert!(noted.contains("0xdcbcb4e125cc7e2f"), "{noted}");
+    assert!(
+        noted.contains("the new app's fd 900 may be the old app's fd 900"),
+        "{noted}"
+    );
+    assert!(!noted.contains("0xaaaa"), "{noted}");
 }
 
 /// The system gave the new app's socket an address one of the old app's had (it reuses the
@@ -136,14 +144,16 @@ fn a_socket_at_an_address_the_old_app_had_with_another_peer_is_the_new_apps_own(
             "->0xa65099d04f5df15f",
         ),
     ];
-    let (faults, _) = compare(&old, &new, &left);
+    let (faults, notes) = compare(&old, &new, &left);
     assert_eq!(faults, Vec::<String>::new());
+    assert_eq!(notes, Vec::<String>::new());
 }
 
-/// The same address and the same peer is the old app's socket, at whatever number the new app
-/// holds it: the fault says both numbers.
+/// The same address and the same peer may be the old app's socket, at whatever number the new
+/// app holds it, or the new app's own to the same service at an address given again: a note,
+/// which says both numbers.
 #[test]
-fn a_socket_at_the_old_apps_address_with_its_peer_is_the_old_apps_and_both_numbers_are_said() {
+fn a_socket_at_the_old_apps_address_with_its_peer_is_noted_with_both_numbers() {
     let folder = tempfile::tempdir().unwrap();
     let left = Left::make(folder.path()).unwrap();
     let old = old_with(&left);
@@ -154,10 +164,33 @@ fn a_socket_at_the_old_apps_address_with_its_peer_is_the_old_apps_and_both_numbe
         None,
         "->0x1e1b0426067da685",
     )];
-    let (faults, _) = compare(&old, &new, &left);
+    let (faults, notes) = compare(&old, &new, &left);
+    assert_eq!(faults, Vec::<String>::new());
     assert_eq!(
-        faults,
-        ["the new app's fd 18 is the old app's fd 900: unix 0x4728cfc0aca56d7a ->0x1e1b0426067da685"]
+        notes,
+        ["the new app's fd 18 may be the old app's fd 900, given again or left: unix 0x4728cfc0aca56d7a ->0x1e1b0426067da685"]
+    );
+}
+
+/// A socket left whose peer has since closed shows no peer: at the old one's address and number,
+/// it is noted all the same (T-277).
+#[test]
+fn a_socket_at_the_old_apps_address_and_number_whose_peer_closed_is_noted() {
+    let folder = tempfile::tempdir().unwrap();
+    let left = Left::make(folder.path()).unwrap();
+    let old = old_with(&left);
+    let new = vec![held(
+        900,
+        "unix",
+        Some("0x4728cfc0aca56d7a"),
+        None,
+        "->(none)",
+    )];
+    let (faults, notes) = compare(&old, &new, &left);
+    assert_eq!(faults, Vec::<String>::new());
+    assert_eq!(
+        notes,
+        ["the new app's fd 900 may be the old app's fd 900, given again or left: unix 0x4728cfc0aca56d7a ->(none)"]
     );
 }
 
@@ -198,6 +231,7 @@ fn the_pipe_left_alone() {
     if !is_alone() {
         return;
     }
+    let _ran = Ran;
     let folder = tempfile::tempdir().unwrap();
     let mut left = Left::make(folder.path()).unwrap();
     let mut held = Left::make(folder.path()).unwrap();
