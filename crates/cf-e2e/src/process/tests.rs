@@ -261,6 +261,17 @@ mod shell {
     }
 
     #[test]
+    fn a_spawned_program_that_ended_has_said_all_of_its_error_output() {
+        // Its last words reach the pipe a moment after it ended, as they reach the
+        // reader late under load: seen on 2026-10-22, a refused second `cf ui` had
+        // said nothing when its exit was read, under a load of 28 (T-269).
+        let mut program = sh("(sleep 0.3; printf late >&2) & exit 1").spawn().unwrap();
+        let status = program.wait(Duration::from_secs(30)).unwrap();
+        assert_eq!(status.and_then(|status| status.code()), Some(1));
+        assert_eq!(program.errors(), "late");
+    }
+
+    #[test]
     fn a_spawned_program_is_given_the_input_it_was_told_first_and_its_error_output_is_kept() {
         let mut program = sh("read a; printf 'said %s' \"$a\" >&2; sleep 30")
             .input("first\n")

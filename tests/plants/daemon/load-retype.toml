@@ -15,6 +15,7 @@
 [run]
 engine-unknown-looks = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unknown_looks::"]
 harness-reading = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::reading::"]
+e2e-lib-process-shell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell::"]
 rig-regression-load-retype = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_message_the_chief_took_was_typed_in_again_under_load::"]
 
 # The case of the rig.
@@ -46,7 +47,11 @@ runs = ["engine-unknown-looks"]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
         // A look that could not read the record says nothing of the paste.
-        if observed.reading.as_deref().is_some_and(Reading::read_failed) {
+        if observed
+            .reading
+            .as_deref()
+            .is_some_and(Reading::read_failed)
+        {
             self.unknown(record);
             return Ok(());
         }'''
@@ -192,3 +197,22 @@ runs = ["harness-reading"]
 file = "crates/cf-harness/src/shared/record/reading.rs"
 find = "        matches!(self, Reading::Unknown(reason) if !reason.starts_with(MISSING))"
 replace = "        matches!(self, Reading::Unknown(reason) if !reason.starts_with(MISSING) || reason.contains(\"no \"))"
+
+# The rig's.
+
+[[plant]]
+name = "load retype: a program's exit is read before the rest of its error output is (a refused second `cf ui` said nothing, under load)"
+meant = "a_spawned_program_that_ended_has_said_all_of_its_error_output"
+runs = ["e2e-lib-process-shell"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/spawned.rs"
+find = """
+                Ok(Some(status)) => {
+                    self.errors_read();
+                    return Ok(Some(status));
+                }"""
+replace = """
+                Ok(Some(status)) => {
+                    return Ok(Some(status));
+                }"""

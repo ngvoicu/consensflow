@@ -86,6 +86,11 @@ replace = '''
             ..self.rested(record, observed, self.held(record))
         };'''
 
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if !self.read_once_more(record, delivering.message).await? {"
+replace = "        if false && !self.read_once_more(record, delivering.message).await? {"
+
 [[plant]]
 name = "results twice: the chief at work when the second result comes, the arrival window counted from the hand-over, turns or none (3.0.3)"
 meant = "two_results_for_a_devin_chief_at_work_when_the_second_comes_go_in_once_each_whole_and_apart"
@@ -106,6 +111,11 @@ replace = '''
             turned: false,
             ..self.rested(record, observed, self.held(record))
         };'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if !self.read_once_more(record, delivering.message).await? {"
+replace = "        if false && !self.read_once_more(record, delivering.message).await? {"
 
 [[plant]]
 name = "results twice: every paste is held, so a paste Devin's TUI dropped waits half an hour"
