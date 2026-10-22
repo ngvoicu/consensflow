@@ -655,3 +655,66 @@ fn two_runs_that_overlap_send_their_trees_to_files_of_their_own() {
     );
     assert_ne!(a_file, b_file, "two runs sent their trees to the same file");
 }
+
+/// The machine's script as far as the lock goes, for a stand-in: the lock is a file that is
+/// created in one act or not at all (`set -C`, which makes the shell's `>` fail on a file that
+/// exists, as `FileShare.None` makes the open of a file that is open), so of two runs that
+/// ask at once one has it. The one that has it unpacks (here: says the tree of the tarball
+/// it was sent), waits until the other has been refused, and ends well; the other is
+/// refused, takes away what it sent and ends with 75. Each run's tarball is the one its own
+/// `scp` was told of, which is what its script names.
+const RACES: &str = r#"printf 'ssh\t%s\t%s\n' "$1" "$2" >> "$CF_LOG"
+sent=$(awk -F'\t' '$1 == "scp" { print $3 }' "$CF_LOG"); mine="$CF_HOME/${sent#*:}"
+if ( set -C; : > "$CF_HOME/lock" ) 2>/dev/null; then
+  echo "== tree $(tar -xzOf "$mine" .windows-tree)"
+  while [ ! -e "$CF_HOME/refused" ]; do sleep 0.02; done
+  rm -f "$CF_HOME/lock" "$mine"
+  printf '\n== exit 0\n'; exit 0
+else
+  echo "A run is still going on this machine: one at a time."
+  rm -f "$mine"; : > "$CF_HOME/refused"
+  printf '\n== exit 75\n'; exit 1
+fi"#;
+
+#[test]
+fn of_two_runs_that_ask_for_the_lock_together_one_runs_and_the_other_ends_with_75_having_sent_nothing_that_stays(
+) {
+    // Both runs start at once (from two trees, as two workers' do) on one machine whose
+    // lock is created or refused in one act: whichever is first, there is one of each.
+    let home = tempfile::tempdir().unwrap();
+    let (a, b) = (Rig::on(Some(home.path())), Rig::on(Some(home.path())));
+    a.file("a-only.txt", "from A's tree");
+    b.file("b-only.txt", "from B's tree");
+    for rig in [&a, &b] {
+        rig.program("scp", KEEPS);
+        rig.program("ssh", RACES);
+    }
+    let (from_a, from_b) = std::thread::scope(|scope| {
+        let a_run = scope.spawn(|| run_it(&a, &Interrupt::default()));
+        let b_run = scope.spawn(|| run_it(&b, &Interrupt::default()));
+        (a_run.join().unwrap(), b_run.join().unwrap())
+    });
+    let statuses = (
+        from_a.0.as_ref().ok().map(|ended| format!("{ended:?}")),
+        from_b.0.as_ref().ok().map(|ended| format!("{ended:?}")),
+    );
+    let (won, refused) = match (&from_a.0, &from_b.0) {
+        (Ok(Outcome::Exited(0)), Ok(Outcome::Exited(75))) => (&from_a, &from_b),
+        (Ok(Outcome::Exited(75)), Ok(Outcome::Exited(0))) => (&from_b, &from_a),
+        _ => panic!("one run and one refused with 75, not {statuses:?}"),
+    };
+    // The one that ran said the tree it sent; the other said none and ran nothing.
+    assert!(won.1.contains("== tree none "), "{}", won.1);
+    assert!(!refused.1.contains("== tree "), "{}", refused.1);
+    assert!(
+        refused.1.contains("A run is still going on this machine"),
+        "{}",
+        refused.1
+    );
+    // Nothing of either stays on the machine but the lock the stand-in leaves.
+    let left: Vec<String> = fs::read_dir(home.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(left, ["refused"], "{left:?}");
+}

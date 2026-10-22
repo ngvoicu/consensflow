@@ -586,16 +586,3 @@ fn a_tree_that_was_said_does_not_change_what_a_failed_run_answers() {
         "windows: no `== exit N` line ended the output, so ssh's own status is the answer: 3\n"
     );
 }
-
-/// Known failure (seen on zeewin, 2026-10-22, T-219): a command whose last output has no
-/// line end (`type marker.txt` of a file with no final newline) has the script's `== exit N`
-/// written on the same line, so that is not the line the run ends by, and a command that
-/// passed is answered as 1 with "no `== exit N` line ended the output". The fix is the
-/// script's: a line end before the line it ends by.
-#[test]
-#[ignore = "known failure: issues/a-commands-last-output-without-a-line-end-hides-its-exit-line.md"]
-fn a_command_whose_last_output_has_no_line_end_still_passes() {
-    let (ended, err) = exits("0", "marker of tree A== exit 0");
-    assert_eq!(shown(&ended), "exited 0");
-    assert_eq!(err, "");
-}

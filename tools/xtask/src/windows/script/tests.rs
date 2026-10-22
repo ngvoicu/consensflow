@@ -3,10 +3,13 @@
 //! the script.
 
 mod golden;
+#[cfg(windows)]
+mod lock;
 mod sweep;
 mod unpack;
 
 use super::*;
+use crate::windows::tail::Tail;
 use crate::windows::testing::{script_of, strings};
 
 const DIR: &str = "consensflow-build";
@@ -239,7 +242,7 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
         .collect();
     assert_eq!(
         leaving,
-        [r#"function Exit-Run([int]$code) { Write-Output "== exit $code"; exit $code }"#]
+        [r#"function Exit-Run([int]$code) { Write-Output "`n== exit $code"; exit $code }"#]
     );
     // And it is what the lock, the unpacking, the sweep, a step and the command leave by.
     assert_eq!(text.matches("Exit-Run ").count(), 5, "{text}");
@@ -248,7 +251,7 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
         "{text}"
     );
     assert!(
-        text.contains(r#"$($other.Id)): one at a time."; Exit-Run 75 }"#),
+        text.contains(r#"$($other.Id))" }): one at a time."; Exit-Run 75 }"#),
         "{text}"
     );
     // The last of the script is what the command ended with, said, and what the run
@@ -256,7 +259,7 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
     // (so the line is the last).
     assert!(
         text.contains(
-            "cmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n} finally {\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($held) { Remove-Item -LiteralPath $running, $owner -Force -ErrorAction SilentlyContinue }\n}\n"
+            "cmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n} finally {\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($held) { Remove-Item -LiteralPath $running, $owner -Force -ErrorAction SilentlyContinue }\n  if ($lock) { $lock.Dispose() }\n}\n"
         ),
         "{text}"
     );
@@ -272,7 +275,6 @@ fn powershell_says_how_it_went_in_its_last_line_from_every_place_the_script_leav
     use cf_base::env::Env;
 
     use crate::process::{self, Invocation};
-    use crate::windows::tail::Tail;
 
     let text = script(&[], "x", &[]);
     let function = text
@@ -310,6 +312,55 @@ fn powershell_says_how_it_went_in_its_last_line_from_every_place_the_script_leav
             tail.last_line().as_deref().and_then(exit_said),
             Some(status),
             "{body}\n{}{}",
+            ran.stdout,
+            ran.stderr
+        );
+        assert_eq!(ran.code, status, "{body}\n{}{}", ran.stdout, ran.stderr);
+    }
+}
+
+/// The machine's own PowerShell: a command that leaves its last line unfinished (as a
+/// program does that writes to the stream itself, `cmd`'s `set /p` with no input among them,
+/// and `type` of a file with no final line end) has the line ended before the one that
+/// says how the run went, and that line is read back, a pass answered as a pass.
+#[cfg(windows)]
+#[test]
+fn powershell_ends_the_line_a_command_left_unfinished_before_it_says_how_it_went() {
+    use cf_base::env::Env;
+
+    use crate::process::{self, Invocation};
+
+    let text = script(&[], "x", &[]);
+    let function = text
+        .lines()
+        .find(|line| line.starts_with("function Exit-Run"))
+        .unwrap();
+    for (body, status) in [
+        (r#"cmd /c "<nul set /p x=unfinished"; Exit-Run 0"#, 0),
+        (r#"[Console]::Out.Write('unfinished'); Exit-Run 0"#, 0),
+        (r#"cmd /c "<nul set /p x=unfinished"; Exit-Run 7"#, 7),
+        // And one that did end its last line is as well read, with a blank line before the exit line.
+        (r#"Write-Output 'finished'; Exit-Run 0"#, 0),
+    ] {
+        let script = format!("$ProgressPreference = 'SilentlyContinue'\n{function}\n{body}\n");
+        let ran = process::capture(
+            &Invocation::new("powershell", ".")
+                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+                .arg(encode_script(&script).unwrap()),
+            &Env::from_process(),
+        )
+        .unwrap();
+        assert!(
+            !ran.stdout.contains("unfinished== exit"),
+            "{body}\n{}",
+            ran.stdout
+        );
+        let mut tail = Tail::default();
+        tail.push(ran.stdout.as_bytes());
+        assert_eq!(
+            tail.last_line().as_deref().and_then(exit_said),
+            Some(status),
+            "{body}\n{:?}{}",
             ran.stdout,
             ran.stderr
         );
@@ -432,18 +483,61 @@ fn a_run_removes_its_own_tarball_whichever_way_it_ends_and_the_lock_only_if_it_h
 }
 
 #[test]
-fn the_lock_is_the_process_as_every_version_reads_it_and_the_run_that_holds_it_is_named_beside_it()
+fn the_lock_is_a_file_opened_for_the_run_alone_before_anything_else_is_done_in_the_folder() {
+    let text = plain(&[]);
+    let at = |what: &str| {
+        text.find(what)
+            .unwrap_or_else(|| panic!("{what} is not there: {text}"))
+    };
+    // Opened in one act of the system that no other run can share, so that of two runs
+    // that start within a millisecond one is refused: not looked at and then written.
+    let open = "try { $lock = [IO.File]::Open((Join-Path $dir '.windows-run.lock'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {}\n";
+    assert!(text.contains(open), "{text}");
+    assert_eq!(text.matches("[IO.File]::Open(").count(), 1, "{text}");
+    // A run that cannot open it is refused, and so is one that can while a process of the older
+    // form of the lock is alive; both with the answer 75, and the process said where it is known.
+    assert!(
+        text.contains("if (-not $lock -or $other) { Write-Output \"A run is still going on this machine$(if ($other) { \" (process $($other.Id))\" }): one at a time.\"; Exit-Run 75 }\n"),
+        "{text}"
+    );
+    // Before the folder is touched by the run: the record, the owner, the unpack.
+    assert!(at(open.trim_end()) < at("Exit-Run 75"));
+    assert!(at("Exit-Run 75") < at("Set-Content -Path $running"));
+    assert!(at("Exit-Run 75") < at("tar.exe -xmzf"));
+    assert!(at("New-Item -ItemType Directory") < at(open.trim_end()));
+    // Closed when the run ends however it ends, a refusal too; the file stays in the folder.
+    let finally = &text[at("} finally {\n")..];
+    assert!(
+        finally.contains("  if ($lock) { $lock.Dispose() }\n"),
+        "{finally}"
+    );
+    assert!(!finally.contains("windows-run.lock"), "{finally}");
+    assert_eq!(LOCK, ".windows-run.lock");
+    assert!(
+        KEPT.contains(&LOCK),
+        "the sweep would remove the lock the run holds"
+    );
+}
+
+#[test]
+fn the_process_is_still_written_and_read_as_every_version_reads_it_and_the_run_is_named_beside_it()
 {
     let text = plain(&[]);
-    // The lock is a file that holds the process, and nothing else, as it was: a script
-    // that is older reads it, and refuses a run that is still going, as this one does.
+    // A script of an older form holds the process in the file and refuses a run that is
+    // still going by looking at it: this one writes it, so that such a script refuses, and
+    // reads it, so that it is refused by one.
     assert!(
         text.contains("Set-Content -Path $running -Value $PID\n"),
         "{text}"
     );
     assert!(
+        text.contains("$holder = if (Test-Path $running) { Get-Content $running }\n"),
+        "{text}"
+    );
+    // A record that is empty (a run is writing it) is no process: it is not asked of Get-Process.
+    assert!(
         text.contains(
-            "$other = Get-Process -Id (Get-Content $running) -ErrorAction SilentlyContinue\n"
+            "$other = if ($holder) { Get-Process -Id $holder -ErrorAction SilentlyContinue }\n"
         ),
         "{text}"
     );
@@ -455,6 +549,40 @@ fn the_lock_is_the_process_as_every_version_reads_it_and_the_run_that_holds_it_i
     assert_eq!(RUNNING, ".windows-run.pid");
     assert_eq!(OWNER, ".windows-run.id");
     assert!(KEPT.contains(&OWNER) && KEPT.contains(&RUNNING));
+    // Written once the lock is the run's, never before.
+    let at = |what: &str| text.find(what).unwrap();
+    assert!(at("Exit-Run 75") < at("Set-Content -Path $running -Value $PID"));
+}
+
+#[test]
+fn a_command_whose_last_output_has_no_line_end_still_passes() {
+    // The command's output goes to the stream as it writes it, so it may end inside a line
+    // (`type` of a file with no final line end does, and the script's line was written onto
+    // it: `marker of tree A== exit 0`, which is no exit line, and a pass was answered as 1,
+    // seen on zeewin 2026-10-22). The line the run ends by begins with a line feed, and
+    // that is the only line of the script that is read back, so it is the only one that must.
+    let text = plain(&[]);
+    assert!(
+        text.contains(
+            "function Exit-Run([int]$code) { Write-Output \"`n== exit $code\"; exit $code }\n"
+        ),
+        "{text}"
+    );
+    // What reads it back takes the last line that is not blank, so the blank line that
+    // comes of a command that did end its last line is no matter.
+    for output in [
+        "marker of tree A\n\n== exit 0\r\n",
+        "marker of tree A\r\n\n== exit 0\r\n",
+        "\n== exit 0\r\n",
+    ] {
+        let mut tail = Tail::default();
+        tail.push(output.as_bytes());
+        assert_eq!(
+            tail.last_line().as_deref().and_then(exit_said),
+            Some(0),
+            "{output:?}"
+        );
+    }
 }
 
 #[test]

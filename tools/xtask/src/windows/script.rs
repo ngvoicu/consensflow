@@ -33,10 +33,18 @@ pub const EXIT_MARK: &str = "== exit ";
 /// The list of what went over, kept beside it there, so the next run knows what left the tree.
 pub const SYNCED: &str = ".synced-files";
 
-/// The running script's process id, there, while a run goes on: the lock, in the form
-/// every version of the script reads (a script that has an older form refuses a run that
-/// is still going, and so does this one, whichever of them holds it).
+/// The running script's process id, there, while a run goes on: the lock as every version
+/// of the script before [`LOCK`] read it, which this one still writes and reads (a script
+/// of an older form refuses a run that is still going, and so does this one, whichever of
+/// them holds it).
 pub const RUNNING: &str = ".windows-run.pid";
+
+/// The lock itself, there: the file a run opens for itself alone (`FileShare.None`) as the
+/// first thing it does, and holds open until it ends. Opening it is one act of the system,
+/// so of two runs that start within a millisecond one is refused; and a run that ended
+/// any way (killed, the machine reset) has closed it, so a lock left by a dead run is no
+/// lock and needs no looking at. It stays in the folder, empty, between runs.
+pub const LOCK: &str = ".windows-run.lock";
 
 /// The id of the run ([`run_id`]) that holds the lock, there, beside it: so that a run
 /// that is ended there ends its own and no other.
@@ -64,7 +72,7 @@ pub const SWEEP: &str = ".windows-sweep.ps1";
 /// the list of what went over ([`SYNCED`]) does not name is removed after the unpack,
 /// wherever it came from: a run of another tree left 87 files there no sync listed,
 /// which a test of the `cli` suite named (zeewin, 2026-10-16).
-pub const KEPT: [&str; 15] = [
+pub const KEPT: [&str; 16] = [
     // The run's own: the list of what went over, the tree's identity and the sweep (the
     // tarball holds them beside the files, and the list names the files only), the lock
     // taken before the unpack, the command's batch file.
@@ -73,6 +81,7 @@ pub const KEPT: [&str; 15] = [
     SWEEP,
     RUNNING,
     OWNER,
+    LOCK,
     COMMAND_FILE,
     // The packages, which `npm ci` (the build's first two steps) takes away and installs
     // again from the tree's lockfiles.
@@ -292,6 +301,7 @@ pub fn remote_script(script: &Script) -> String {
             ("tree_file", TREE),
             ("running", RUNNING),
             ("owner", OWNER),
+            ("lock", LOCK),
             ("sweep", SWEEP),
             ("command_file", COMMAND_FILE),
             ("steps", &steps.join(", ")),
@@ -383,24 +393,35 @@ fn fill(template: &str, parts: &[(&str, &str)]) -> String {
 /// ends with a line feed, as the JavaScript's template did. `Exit-Run` is the one
 /// way out: the line that says how the run went, then the exit (the `finally`
 /// that takes the run's record away writes nothing, so the line is the last).
+///
+/// - The command's output goes to the stream as the command writes it, not line by line
+///   through PowerShell, so it may end in the middle of a line (`type` of a file that has
+///   no final line end does): the exit line begins with a line feed, so that it is always
+///   a line of its own and never glued to the command's last words.
+/// - What the command prints is UTF-8, and goes back as it came.
+/// - Codex's own PATH entry is a junction an SSH session may not cross ("an untrusted mount
+///   point"): its release folder is named outright.
+/// - The lock is opened before anything else is done in the folder, and a run that is
+///   refused closes it and leaves the folder as it found it. The process in
+///   [`RUNNING`] is looked at after it: a script of the form before [`LOCK`] holds only that.
 const REMOTE: &str = r##"
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Stop'
-# What the command prints is UTF-8, and goes back as it came.
 try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) } catch {}
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
-function Exit-Run([int]$code) { Write-Output "«exit»$code"; exit $code }
+function Exit-Run([int]$code) { Write-Output "`n«exit»$code"; exit $code }
 $dir = Join-Path $env:USERPROFILE '«dir»'
 $tarball = Join-Path $env:USERPROFILE '«tarball»'
 $running = Join-Path $dir '«running»'
 $owner = Join-Path $dir '«owner»'
 $held = $false
+$lock = $null
 try {
 New-Item -ItemType Directory -Force $dir | Out-Null
-if (Test-Path $running) {
-  $other = Get-Process -Id (Get-Content $running) -ErrorAction SilentlyContinue
-  if ($other) { Write-Output "A run is still going on this machine (process $($other.Id)): one at a time."; Exit-Run 75 }
-}
+try { $lock = [IO.File]::Open((Join-Path $dir '«lock»'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {}
+$holder = if (Test-Path $running) { Get-Content $running }
+$other = if ($holder) { Get-Process -Id $holder -ErrorAction SilentlyContinue }
+if (-not $lock -or $other) { Write-Output "A run is still going on this machine$(if ($other) { " (process $($other.Id))" }): one at a time."; Exit-Run 75 }
 Set-Content -Path $running -Value $PID
 Set-Content -Path $owner -Value '«id»'
 $held = $true
@@ -410,8 +431,6 @@ if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
 if ($failed.Count) { Exit-Run 1 }
 Write-Output "«tree_mark»$(Get-Content -LiteralPath (Join-Path $dir '«tree_file»') -TotalCount 1)"
 $env:Path = "C:\Program Files\nodejs;$env:USERPROFILE\.cargo\bin;" + $env:Path
-# Codex's own PATH entry is a junction an SSH session may not cross ("an
-# untrusted mount point"): its release folder, named outright.
 $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorAction SilentlyContinue).Target
 if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
 Set-Location $dir
@@ -429,6 +448,7 @@ Exit-Run $LASTEXITCODE
 } finally {
   Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue
   if ($held) { Remove-Item -LiteralPath $running, $owner -Force -ErrorAction SilentlyContinue }
+  if ($lock) { $lock.Dispose() }
 }
 "##;
 

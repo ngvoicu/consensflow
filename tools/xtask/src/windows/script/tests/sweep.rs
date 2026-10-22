@@ -21,6 +21,7 @@ fn the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else() {
             ".windows-sweep.ps1",
             ".windows-run.pid",
             ".windows-run.id",
+            ".windows-run.lock",
             ".windows-run.cmd",
             "node_modules",
             "app/node_modules",

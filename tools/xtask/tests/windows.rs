@@ -771,15 +771,13 @@ impl Drop for Folder {
 fn two_runs_started_together_from_two_trees_each_run_their_own_tree_or_are_refused() {
     let folder = format!("cf-test-two-runs-{}", std::process::id());
     let _cleanup = Folder(folder.clone());
-    let (a, a_commit) = live_tree("marker of tree A\n");
-    let (b, b_commit) = live_tree("marker of tree B\n");
+    let (a, a_commit) = live_tree("marker of tree A");
+    let (b, b_commit) = live_tree("marker of tree B");
+    // Together, to the millisecond: both are started before either has sent a word, so that
+    // their scripts ask the machine for its lock at the moments their uploads end.
     let (first, second) = (
         live_start(&a, &folder, &["hold.cmd"]),
-        // Together: the second begins while the first is still sending its tree.
-        {
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            live_start(&b, &folder, &["hold.cmd"])
-        },
+        live_start(&b, &folder, &["hold.cmd"]),
     );
     let (first, second) = (
         first.wait_with_output().unwrap(),
@@ -844,7 +842,9 @@ fn two_runs_started_together_from_two_trees_each_run_their_own_tree_or_are_refus
     // And what either sent is gone, the refused one's too.
     assert_eq!(left.trim(), "", "tarballs left on the machine");
 
-    // Once the lock is free, the run that was refused runs its own tree.
+    // Once the lock is free, the run that was refused runs its own tree. Its command ends
+    // with a marker that has no line end (`type` of the file), which the run must still
+    // answer as a pass: the line it ends by is on a line of its own.
     let again = live_start(lost_tree, &folder, &["type", "marker.txt"])
         .wait_with_output()
         .unwrap();
