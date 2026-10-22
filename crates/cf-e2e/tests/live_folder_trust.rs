@@ -11,7 +11,10 @@
 //!
 //! - Claude Code asks in a git repository it was never told to trust, whatever the
 //!   folders above it, and in a git repository below a trusted one; not in a plain
-//!   folder below a trusted one, nor in a plain folder of a trusted repository. Its
+//!   folder below a trusted one, nor in a plain folder of a trusted repository. (A
+//!   plain folder with nothing trusted above it asks as well: the owner's own config
+//!   trusts their home, so on it none ever did, and the run's config, which trusts
+//!   nothing, shows it, 2026-10-22.) Its
 //!   question opens on "No, exit"; Down, then Enter, says yes, which it writes down
 //!   for the repository's root (its question names the window's own folder), so a
 //!   window opened anywhere in it again does not ask.
@@ -169,13 +172,15 @@ impl Case {
     }
 }
 
-/// Whether `harness` must ask in `case`: Claude Code in a repository nobody
+/// Whether `harness` must ask in `case`: Claude Code in a folder nobody answered above
+/// (a plain one too: the config of the run trusts nothing) and in a repository nobody
 /// answered; nobody else, ever.
 fn must_ask(harness: Harness, case: Case) -> bool {
     harness == Harness::Claude
         && matches!(
             case,
-            Case::Repository
+            Case::Fresh
+                | Case::Repository
                 | Case::Parent
                 | Case::RepositoryBelow
                 | Case::Untrusted
@@ -624,7 +629,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn claude_must_ask_in_a_repository_nobody_answered_and_no_harness_ever_elsewhere() {
+    fn claude_must_ask_where_nobody_answered_above_and_in_a_repository_nobody_answered_and_no_harness_ever_elsewhere(
+    ) {
         let asking: Vec<&str> = Case::ALL
             .into_iter()
             .filter(|case| must_ask(Harness::Claude, *case))
@@ -633,6 +639,7 @@ mod tests {
         assert_eq!(
             asking,
             [
+                "fresh",
                 "repository",
                 "parent",
                 "repository below",
