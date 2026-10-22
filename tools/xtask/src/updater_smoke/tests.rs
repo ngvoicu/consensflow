@@ -4,7 +4,7 @@ use cf_base::env::Env;
 
 use super::build::BRIDGE_TAG;
 use super::signing::tauri_bin;
-use super::testing::{fake_bundle, Fake};
+use super::testing::{fake_bundle, hold_when_free, Fake};
 use super::*;
 
 /// What `cargo xtask smoke-updater <words>` is, run here: the status, what it said, and what it said as a failure.
@@ -108,77 +108,6 @@ impl World {
     }
 }
 
-/// A context for a checkout at `root`, whose user's home is `home`.
-fn context_at(root: &str, home: &Path) -> Context {
-    Context {
-        root: PathBuf::from(root),
-        env: Env::from_vars([("HOME", home.as_os_str())]),
-    }
-}
-
-#[test]
-fn keeps_the_builds_by_default_outside_every_checkout() {
-    // The release a run installs is exported into the cache and built there with its own
-    // `.cargo/config.toml`. Inside a checkout, Cargo reads the checkout's too, and an alias
-    // that both write is doubled: `cargo xtask stage` ran as `cargo xtask run … stage`.
-    let home = tempfile::tempdir().unwrap();
-    let context = Context::new(&Env::from_vars([("HOME", home.path().as_os_str())])).unwrap();
-    let cache = default_cache(&context).unwrap();
-    let checkout = cache
-        .ancestors()
-        .skip(1)
-        .find(|folder| folder.join("Cargo.toml").exists());
-    assert_eq!(
-        checkout,
-        None,
-        "the default cache {} is inside a checkout",
-        cache.display()
-    );
-    assert!(
-        !cache.starts_with(&context.root),
-        "the default cache {} is inside {}",
-        cache.display(),
-        context.root.display()
-    );
-    assert!(
-        cache.starts_with(home.path().join("Library/Caches/ConsensFlow/updater-smoke")),
-        "{}",
-        cache.display()
-    );
-}
-
-#[test]
-fn keeps_each_checkouts_builds_in_a_folder_of_its_own_that_is_the_same_every_run() {
-    // The update is this checkout's app, and a run with `--reuse` takes the one it finds:
-    // another tree's would be taken for this one's. And two runs at once build in two places.
-    let home = tempfile::tempdir().unwrap();
-    let cache_of = |root: &str| default_cache(&context_at(root, home.path())).unwrap();
-    let main = cache_of("/work/consensflow");
-    let tree = cache_of("/work/consensflow-trees/smoke-cache");
-    assert_eq!(main, cache_of("/work/consensflow"));
-    assert_ne!(main, tree);
-    // Two checkouts of one name, in two places.
-    assert_ne!(cache_of("/a/tree"), cache_of("/b/tree"));
-    // They sit side by side, each named for its checkout.
-    assert_eq!(main.parent(), tree.parent());
-    let named = |cache: &Path| cache.file_name().unwrap().to_string_lossy().into_owned();
-    assert!(named(&main).starts_with("consensflow-"), "{}", named(&main));
-    assert!(named(&tree).starts_with("smoke-cache-"), "{}", named(&tree));
-    assert_eq!(named(&tree).len(), "smoke-cache-".len() + 8);
-}
-
-#[test]
-fn says_there_is_no_home_to_keep_the_builds_in_and_that_a_cache_names_one() {
-    let context = Context {
-        root: PathBuf::from("/work/consensflow"),
-        env: Env::default(),
-    };
-    assert_eq!(
-        default_cache(&context).unwrap_err().to_string(),
-        "there is no home to keep the builds in: name a folder with --cache"
-    );
-}
-
 #[test]
 #[cfg_attr(
     not(target_os = "macos"),
@@ -209,14 +138,139 @@ fn says_where_the_builds_are_kept_when_no_cache_is_named() {
         ],
     );
     assert_eq!(status.unwrap(), 0, "{err}\n{out}");
-    let cache = default_cache(&Context::new(&env).unwrap()).unwrap();
+    let cache = cache::default_cache(&Context::new(&env).unwrap()).unwrap();
     assert_eq!(
         out.lines().next(),
         Some(format!("smoke:updater: the builds are kept in {}", cache.display()).as_str()),
         "{out}"
     );
-    // The run's folder went with the run; the cache stays.
-    assert!(cache.is_dir() && cache.read_dir().unwrap().next().is_none());
+    // The run's folder went with the run; the cache stays, with its lock and the checkout it is for.
+    let mut kept: Vec<String> = cache
+        .read_dir()
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    kept.sort();
+    assert_eq!(kept, [".checkout", ".lock"]);
+    assert_eq!(
+        fs::read_to_string(cache.join(".checkout")).unwrap(),
+        format!("{}\n", Context::new(&env).unwrap().root.display())
+    );
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the update path is macOS bundles and codesign"
+)]
+fn refuses_a_cache_another_run_holds_and_says_so_before_it_makes_anything() {
+    let world = World::new();
+    let cache = world.folder.path().join("cache");
+    fs::create_dir_all(&cache).unwrap();
+    let first = cache::hold(&cache).unwrap();
+    let (status, out, err) = world.smoke(&["--only", "no case has this word"]);
+    assert_eq!(status.unwrap(), 1, "{out}");
+    assert_eq!(out, "");
+    assert!(
+        err.starts_with("smoke:updater: another run of the smoke"),
+        "{err}"
+    );
+    assert!(err.contains(&format!("holds {}", cache.display())), "{err}");
+    assert!(
+        err.ends_with("with --cache\n") && err.lines().count() == 1,
+        "{err}"
+    );
+    // Nothing of the second run was made in the first's cache.
+    assert_eq!(world.runs(), Vec::<String>::new());
+    drop(first);
+}
+
+#[test]
+fn lets_go_of_the_cache_when_the_run_ends() {
+    if !can_run() {
+        return;
+    }
+    let world = World::new();
+    let (status, out, err) = world.smoke(&["--only", "no case has this word"]);
+    assert_eq!(status.unwrap(), 0, "{err}\n{out}");
+    hold_when_free(&world.folder.path().join("cache"));
+}
+
+#[test]
+fn says_a_kept_update_that_is_not_the_checkouts_when_told_to_reuse_it() {
+    if !can_run() {
+        return;
+    }
+    let world = World::new();
+    for (kept, from) in [("flip", "from"), ("update", "to")] {
+        bundle::copy_bundle(
+            &world.folder.path().join(from).join("ConsensFlow.app"),
+            &world
+                .folder
+                .path()
+                .join("cache")
+                .join(kept)
+                .join("ConsensFlow.app"),
+            &Env::from_process(),
+        )
+        .unwrap();
+    }
+    let reuse = [
+        "--reuse",
+        "--build-only",
+        "--cache",
+        &world.path("cache"),
+        "--from",
+        "flip",
+    ];
+    // Kept with no record of what it was built from.
+    let (status, out, err) = smoke_updater(&reuse);
+    assert_eq!(status.unwrap(), 0, "{err}");
+    assert!(
+        out.contains("smoke:updater: the kept update has no record of what it was built from: build it again without --reuse\n"),
+        "{out}"
+    );
+    // The rest compares it with the checkout, which a tree with no git (an exported one) cannot say.
+    let git = process::capture(
+        &process::Invocation::new("git", &Context::new(&Env::from_process()).unwrap().root)
+            .args(["rev-parse", "HEAD"]),
+        &Env::from_process(),
+    )
+    .unwrap();
+    if git.code != 0 {
+        eprintln!("skipped the rest: this checkout has no git");
+        return;
+    }
+    // And with a record of another commit.
+    fs::write(
+        world.folder.path().join("cache/update/.built-from"),
+        format!("commit {}\nchanges none\n", "0".repeat(40)),
+    )
+    .unwrap();
+    let (status, out, err) = smoke_updater(&reuse);
+    assert_eq!(status.unwrap(), 0, "{err}");
+    assert!(
+        out.contains("smoke:updater: the kept update is not of this checkout as it is: it was built from commit 0000000000 with no changes, and the checkout is at commit "),
+        "{out}"
+    );
+    // The update is taken all the same: it is said to be old, not refused.
+    assert!(out.contains("smoke:updater: update: "), "{out}");
+    // A named update is the caller's, and nothing is said of it.
+    let (status, out, err) = smoke_updater(&[
+        "--build-only",
+        "--cache",
+        &world.path("cache"),
+        "--from-app",
+        &format!("{}/ConsensFlow.app", world.path("from")),
+        "--from-release",
+        "flip",
+        "--to-app",
+        &format!("{}/ConsensFlow.app", world.path("to")),
+        "--reuse",
+    ]);
+    assert_eq!(status.unwrap(), 0, "{err}");
+    assert!(!out.contains("kept update"), "{out}");
 }
 
 #[test]

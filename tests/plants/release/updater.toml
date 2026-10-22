@@ -866,10 +866,10 @@ replace = "command.spawn().map_err(|cause| Failure::Refused { program: String::n
 [[plant]]
 name = "updater driver: the builds are kept inside the checkout"
 meant = "keeps_the_builds_by_default_outside_every_checkout"
-runs = ["smoke-driver"]
+runs = ["smoke-cache"]
 
 [[plant.edit]]
-file = "tools/xtask/src/updater_smoke.rs"
+file = "tools/xtask/src/updater_smoke/cache.rs"
 find = '''
     Ok(home
         .join("Library")
@@ -884,10 +884,10 @@ replace = '''
 [[plant]]
 name = "updater driver: every checkout keeps its builds in one folder"
 meant = "keeps_each_checkouts_builds_in_a_folder_of_its_own_that_is_the_same_every_run"
-runs = ["smoke-driver"]
+runs = ["smoke-cache"]
 
 [[plant.edit]]
-file = "tools/xtask/src/updater_smoke.rs"
+file = "tools/xtask/src/updater_smoke/cache.rs"
 find = ".join(format!(\"{name}-{place}\"))"
 replace = ".join(\"checkout\")"
 
@@ -899,8 +899,141 @@ runs = ["smoke-driver"]
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke.rs"
 find = '''
-    if options.cache.is_none() {
         talk(say, format!("the builds are kept in {}", cache.display()));
-    }
 '''
 replace = ""
+
+# The file that names the checkout a cache is for, which a cleanup reads to find the caches of
+# checkouts that are gone.
+[[plant]]
+name = "updater driver: the run does not name its checkout in the cache"
+meant = "says_where_the_builds_are_kept_when_no_cache_is_named"
+runs = ["smoke-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = '''
+        cache::mark_checkout(&cache, root)?;
+'''
+replace = ""
+
+[[plant]]
+name = "updater cache: the file that names the checkout names nothing"
+meant = "names_the_checkout_a_cache_is_for_in_a_file_of_its_own_that_a_cleanup_reads"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = '''fs::write(&mark, format!("{}\n", root.display())).map_err(files("write", &mark))'''
+replace = '''fs::write(&mark, format!("{}\n", cache.display())).map_err(files("write", &mark))'''
+
+# One run to a cache: a second would wipe the first's exports and kept apps.
+[[plant]]
+name = "updater driver: a run takes no hold on its cache"
+meant = "refuses_a_cache_another_run_holds_and_says_so_before_it_makes_anything"
+runs = ["smoke-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = '''
+    let _hold = cache::hold(&cache)?;
+'''
+replace = ""
+
+[[plant]]
+name = "updater cache: a cache that is held is taken"
+meant = "a_cache_is_held_by_one_run_at_a_time_and_the_second_is_told_so"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = "    match file.try_lock() {"
+replace = '''
+    match file.try_lock().or_else(|held| match held {
+        TryLockError::WouldBlock => Ok(()),
+        other => Err(other),
+    }) {
+'''
+
+# What the kept update was built from, and the word that a `--reuse` run says of an old one.
+[[plant]]
+name = "updater driver: a kept update is reused without a word of its age"
+meant = "says_a_kept_update_that_is_not_the_checkouts_when_told_to_reuse_it"
+runs = ["smoke-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = "                talk(say, older);"
+replace = "                let _ = older;"
+
+[[plant]]
+name = "updater cache: a kept update is not older for the changes made in the checkout"
+meant = "says_when_the_kept_update_is_not_of_the_checkout_as_it_is"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = "(then != now).then(|| {"
+replace = "(then.commit != now.commit).then(|| {"
+
+[[plant]]
+name = "updater cache: the checkout is read after the build, not as the build started"
+meant = "keeps_the_update_with_what_the_checkout_was_when_the_build_started_to_read_it"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = '''
+    let state = State::of(root, env);
+    let built = build()?;
+'''
+replace = '''
+    let built = build()?;
+    let state = State::of(root, env);
+'''
+
+[[plant]]
+name = "updater cache: the update is kept with no record of what it was built from"
+meant = "keeps_the_update_with_what_the_checkout_was_when_the_build_started_to_read_it"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = '''
+        fs::write(&mark, state.text()).map_err(files("write", &mark))?;
+'''
+replace = '''
+        let _ = state;
+'''
+
+[[plant]]
+name = "updater cache: an update built where the checkout cannot be read keeps the record of the one before"
+meant = "an_update_built_where_the_checkout_cannot_be_read_has_no_record_and_one_that_failed_keeps_its_own"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = '''
+    remove_all(&mark)?;
+'''
+replace = ""
+
+[[plant]]
+name = "updater cache: a file in no commit is no change in the checkout"
+meant = "the_state_of_a_checkout_is_its_commit_and_what_is_changed_in_it_staged_or_not"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = '''.filter(|path| !path.is_empty())'''
+replace = '''.filter(|path| path.is_empty())'''
+
+[[plant]]
+name = "updater cache: a change that is staged is no change in the checkout"
+meant = "the_state_of_a_checkout_is_its_commit_and_what_is_changed_in_it_staged_or_not"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = '''&["diff", "HEAD", "--binary"]'''
+replace = '''&["diff", "--binary"]'''
