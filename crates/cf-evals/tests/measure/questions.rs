@@ -3,7 +3,8 @@
 //! is that a question on a task that is over (accepted, cancelled or failed) is
 //! not open, whatever became of its answer; the counts agree with it (T-192).
 //! An answer the cancel of its task took back was rightly never delivered, as a
-//! result withdrawn with its task was (`chief.rs`).
+//! result withdrawn with its task was (`chief.rs`). The chief's tells follow the
+//! same rule for a task that was cancelled or failed after them (T-227).
 
 use cf_evals::measure::{measure, mechanics, Check, MemberQuestions, Options};
 
@@ -134,5 +135,92 @@ fn holds_the_plumbing_when_every_question_on_a_finished_task_was_answered_and_ta
             ),
             ("every answer reached the member (0/0)", true),
         ]
+    );
+}
+
+/// The chief (2) tells zeus's window (3) something on `task`, delivered; zeus's
+/// answer, if any, is in `answer`.
+fn told(db: &rusqlite::Connection, project: i64, task: i64, answer: Option<&str>) {
+    let at = |time: &str| format!("2026-10-08T{time}.000Z");
+    message(
+        db,
+        project,
+        (3, 2),
+        "question",
+        task,
+        "delivered",
+        &at("10:03:00"),
+        Some(&at("10:03:01")),
+    );
+    let tell = db.last_insert_rowid();
+    db.execute("UPDATE message SET urgent = 1 WHERE id = ?1", [tell])
+        .unwrap();
+    if let Some(state) = answer {
+        db.execute(
+            "INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, reply_to, body, state, created_at)
+             VALUES (?1, 2, 3, 'answer', ?2, ?3, 'x', ?4, ?5)",
+            rusqlite::params![project, task, tell, state, at("10:04:00")],
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn does_not_count_a_tell_on_a_task_later_cancelled_or_failed_as_owed_an_answer_unless_it_was_answered(
+) {
+    let folder = Folder::new();
+    let (db, project) = project_with(&folder, &["zeus"]);
+    // T-1 was cancelled after the tell, which nobody answered: its window was stopped.
+    let one = task(&db, project, 1, 3, "cancelled");
+    told(&db, project, one, None);
+    // T-2 failed after the tell, which nobody answered: its window was gone.
+    let two = task(&db, project, 2, 3, "failed");
+    told(&db, project, two, None);
+    // T-3 goes on, and its window never answered the tell: owed, and not given.
+    let three = task(&db, project, 3, 3, "working");
+    told(&db, project, three, None);
+    // T-4 was cancelled after its window answered the tell: owed, and given.
+    let four = task(&db, project, 4, 3, "cancelled");
+    told(&db, project, four, Some("delivered"));
+    // T-5 was accepted without the tell ever being answered: its window went on, so it is owed.
+    let five = task(&db, project, 5, 3, "accepted");
+    told(&db, project, five, None);
+    drop(db);
+
+    let metrics = measure(&folder.ledger(), &Options::default()).unwrap();
+    let p = metrics.plumbing;
+    assert_eq!(
+        [p.tells, p.tells_answered],
+        [3, 1],
+        "T-3, T-4 and T-5 are owed an answer; T-4 got one"
+    );
+    let tells: Vec<Check> = mechanics(&p, 5)
+        .into_iter()
+        .filter(|check| check.name.starts_with("every tell"))
+        .collect();
+    assert_eq!(
+        named(&tells),
+        [("every tell the chief sent was answered (1/3)", false)]
+    );
+}
+
+#[test]
+fn holds_the_plumbing_when_every_tell_on_a_cancelled_or_failed_task_went_unanswered() {
+    let folder = Folder::new();
+    let (db, project) = project_with(&folder, &["zeus"]);
+    let one = task(&db, project, 1, 3, "cancelled");
+    told(&db, project, one, None);
+    let two = task(&db, project, 2, 3, "failed");
+    told(&db, project, two, None);
+    drop(db);
+
+    let metrics = measure(&folder.ledger(), &Options::default()).unwrap();
+    let tells: Vec<Check> = mechanics(&metrics.plumbing, 2)
+        .into_iter()
+        .filter(|check| check.name.starts_with("every tell"))
+        .collect();
+    assert_eq!(
+        named(&tells),
+        [("every tell the chief sent was answered (0/0)", true)]
     );
 }

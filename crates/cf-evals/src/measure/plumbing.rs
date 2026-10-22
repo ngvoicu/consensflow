@@ -18,6 +18,15 @@ const OWED: &str = "(EXISTS (SELECT 1 FROM message a
                   OR NOT EXISTS (SELECT 1 FROM task t
                                  WHERE t.id = q.task_id AND t.state IN ('accepted', 'cancelled', 'failed')))";
 
+/// Whether a tell `q` (the chief's urgent question to a task's window) is owed an
+/// answer by the end of the run: it was answered, or its task was not later
+/// cancelled or failed, whose window was stopped or gone. A task accepted after the
+/// tell still owes it: its window went on, and the answer was the tell's point.
+const TELL_OWED: &str = "(EXISTS (SELECT 1 FROM message a
+                              WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'failed')
+                  OR NOT EXISTS (SELECT 1 FROM task t
+                                 WHERE t.id = q.task_id AND t.state IN ('cancelled', 'failed')))";
+
 /// How many rows `sql` counts (`COUNT(*)`), with its parameters.
 fn count(db: &Connection, sql: &str, params: impl Params) -> Result<i64> {
     Ok(db.query_row(sql, params, |row| row.get(0))?)
@@ -84,11 +93,15 @@ pub(super) fn plumbing(db: &Connection, chief: i64, human: i64) -> Result<Plumbi
         accepted: count(db, "SELECT COUNT(*) FROM task WHERE state = 'accepted'", [])?,
         // A tell the chief's own cancel took back is not one owed an answer; an answer a
         // cancel took back was still given (both daemons withdraw what is queued for a
-        // cancelled task alike: crates/cf-ledger/tests/cancelled.rs).
+        // cancelled task alike: crates/cf-ledger/tests/cancelled.rs). Nor is a tell on a
+        // task that was later cancelled or failed ([`TELL_OWED`]).
         tells: count(
             db,
-            "SELECT COUNT(*) FROM message
-             WHERE kind = 'question' AND urgent = 1 AND sender_id = ?1 AND state != 'cancelled'",
+            &format!(
+                "SELECT COUNT(*) FROM message q
+                 WHERE q.kind = 'question' AND q.urgent = 1 AND q.sender_id = ?1
+                   AND q.state != 'cancelled' AND {TELL_OWED}"
+            ),
             [chief],
         )?,
         tells_answered: count(

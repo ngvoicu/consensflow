@@ -296,7 +296,7 @@ fn finished_task_takes_no_answer(task: &TaskRow) -> LedgerError {
         "accepted" => (
             "task-accepted",
             format!(
-                "T-{number} is accepted, so it is finished and nobody waits for this answer: give what is still wanted as a new task"
+                "T-{number} is accepted, so it is finished and nobody waits for this answer: to give what is still wanted, add a task for the same window with cf task add --after T-{number} \"…\""
             ),
         ),
         _ => (
@@ -309,15 +309,27 @@ fn finished_task_takes_no_answer(task: &TaskRow) -> LedgerError {
     LedgerError::refused_with(code, words, 409)
 }
 
-/// Whether a question has an answer, on its way or still gated; one that was
-/// declined, or that failed to arrive, never counts: the question takes another.
+/// SQL that says the question called `question` (a table alias) has an answer
+/// that stands: one on its way, being delivered, delivered, read, or still held
+/// at the gate. One that was cancelled (declined, withdrawn, taken back with its
+/// task) or that failed to arrive is none: the question takes another. The one
+/// rule by which a second answer is refused (`answered`) and by which the
+/// chief's handoff lists what it has yet to answer (`chief_open_work`).
+pub(crate) fn has_standing_answer(question: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM message a WHERE a.reply_to = {question}.id AND a.kind = 'answer'
+                   AND a.state NOT IN ('cancelled', 'failed'))"
+    )
+}
+
+/// Whether a question has an answer that stands ([`has_standing_answer`]).
 fn answered(store: &Store, question_id: i64) -> Result<bool, LedgerError> {
     Ok(store
         .db
-        .prepare(
-            "SELECT 1 FROM message WHERE reply_to = ? AND kind = 'answer'
-               AND state NOT IN ('cancelled', 'failed')",
-        )?
+        .prepare(&format!(
+            "SELECT 1 FROM message q WHERE q.id = ? AND {}",
+            has_standing_answer("q")
+        ))?
         .exists([question_id])?)
 }
 

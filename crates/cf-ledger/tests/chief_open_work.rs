@@ -376,6 +376,10 @@ fn a_question_on_an_accepted_task_takes_no_answer() {
         words.contains("T-1 is accepted") && words.contains("finished"),
         "{words}"
     );
+    assert!(
+        words.contains("cf task add --after T-1"),
+        "the refusal names the command that reaches the same window: {words}"
+    );
     ledger.close().expect("the file is given up");
 }
 
