@@ -24,6 +24,7 @@ struct Scene {
     staff: Staff,
     schedule: Schedule,
     timeline: Timeline,
+    stalls: Stalls,
 }
 
 fn scene() -> Scene {
@@ -66,6 +67,7 @@ fn scene() -> Scene {
         staff,
         schedule,
         timeline,
+        stalls: Stalls::default(),
     }
 }
 
@@ -89,6 +91,7 @@ fn kept<'a>(scene: &'a Scene, breaks: &'a [Break], error: Option<String>) -> Kep
         unresolved: &[],
         filled: &[],
         timeline: &scene.timeline,
+        stalls: &scene.stalls,
         ending: "the project is done".to_owned(),
         error,
         log: json!([]),
@@ -231,7 +234,33 @@ fn a_run_whose_only_breaks_are_known_passes_with_them_and_any_other_break_fails_
             ["invariant 3 broke (A3, an ended notice comes with or before its result): 1"]
         );
     }
+    // Turn-end's A4: a result that holds its turn's progress is known; any other break
+    // of the fourth fails the run, beside it (one not the turn's final answer, whole, and
+    // one of no shape).
+    let progress = |key: &str| {
+        let mut found = Break::new(4, key, format!("{key} holds 1 line of its turn's progress"))
+            .with_shape("progress-lines");
+        found.at = STARTED + 60_000;
+        found
+    };
+    let found = [progress("4:m-6"), progress("4:m-9")];
+    let kept = self::kept(&scene, &found, None);
+    assert_eq!(kept.verdict(), "PASS with 2 known");
+    assert_eq!(kept.value()["invariants"][3]["known"], 2);
+    for other in [
+        Break::new(4, "4:m-22", "m-22 is not its turn's final answer, whole"),
+        Break::new(4, "4:m-22", "m-22 holds 1 line").with_shape("ended-note"),
+    ] {
+        let found = [progress("4:m-6"), other];
+        let failed = self::kept(&scene, &found, None);
+        assert_eq!(failed.verdict(), "FAIL");
+        assert_eq!(
+            failed.why(),
+            ["invariant 4 broke (A4, a result is the last turn's final answer): 1"]
+        );
+    }
     // Known breaks and something unjudged: no pass.
+    let found = [late("3:m-20", ENDED_NOTE), late("3:m-21", ENDED_NOTE)];
     let open = [Unjudged::new(4, "4:m-131", "not judged")];
     let unresolved = Kept {
         unresolved: &open,

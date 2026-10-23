@@ -24,6 +24,7 @@ use super::invariants::{Break, Filled, Unjudged, INVARIANTS};
 use super::known::{self, Known, KNOWN};
 use super::options::Options;
 use super::staff::{Found, LeftOut};
+use super::stalls::Stalls;
 use super::timeline::Timeline;
 use crate::clock;
 use crate::plan::Staff;
@@ -60,6 +61,9 @@ pub struct Kept<'a> {
     /// counted against nothing.
     pub filled: &'a [Filled],
     pub timeline: &'a Timeline,
+    /// What the run kept of a window that stalled, and of every window at an end the
+    /// project did not reach: evidence, which fails nothing.
+    pub stalls: &'a Stalls,
     /// How the run ended: `the project is done`, `time ran out`…
     pub ending: String,
     /// What stopped the run before its end, if anything did.
@@ -310,13 +314,14 @@ impl Kept<'_> {
                 "resolvedAt": super::invariants::iso(filled.at),
                 "broke": filled.broke,
             })).collect::<Vec<_>>(),
+            "stalls": self.stalls.to_value(self.timeline),
             "timeline": self.timeline.to_value(),
             "log": masked(&self.log, self.timeline),
         })
     }
 
     /// The report as Markdown: the verdict and why, the harnesses, the invariants,
-    /// the disruptions, every break with its evidence, and the timeline.
+    /// the disruptions, every break with its evidence, the stalls, and the timeline.
     pub fn markdown(&self) -> String {
         let mut text = format!(
             "# Long run of {}: {}\n\n",
@@ -453,6 +458,7 @@ impl Kept<'_> {
                 ));
             }
         }
+        text.push_str(&self.stalls.markdown(self.timeline));
         text.push_str("\n## Timeline\n\n");
         text.push_str(&self.timeline.markdown());
         text
