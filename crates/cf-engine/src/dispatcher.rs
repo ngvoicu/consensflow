@@ -1170,7 +1170,7 @@ impl Dispatcher {
             require_open(&now)?;
             let open = held.window.borrow().pane.is_some();
             if open && !this.is_out(&chief) && (when == SwitchWhen::Turn || note) {
-                return this.after_turn(project, &held, to, note);
+                return this.after_turn(&held, to, note);
             }
             this.perform_switch(&found, &chief, &held, to).await?;
             // One deleted while the old window was looked at or closed stopped the switch there.

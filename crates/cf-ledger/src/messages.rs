@@ -349,10 +349,18 @@ fn answered(store: &Store, question_id: i64) -> Result<bool, LedgerError> {
 /// asked answered it, so it has it. Still `queued`, it is `read`, its receipt
 /// naming the answer, read when the answer was written, which is when the one
 /// asked had it: answered as it waited, or put back in the queue by a paste that
-/// was not proved after it was answered. The answer's own `message.sent` is its
-/// event, as it is of a question withdrawn at the gate by its answer, and the
-/// clock is not read again. Any other question, or one in any other state, is
-/// left as it is.
+/// was not proved after it was answered. Any other question, or one in any other
+/// state, is left as it is.
+///
+/// - No event is logged of it: the row says it, its receipt `{"answered": id}`
+///   and its `delivered_at`, the answer's `created_at`; the answer's own
+///   `message.sent` is the event, as it is of a question withdrawn at the gate
+///   by its answer, and the clock is not read again (which kept Node's
+///   recordings of the answer in place).
+/// - A question answered while its paste is in flight (`delivering`) is the
+///   paste's: confirmed, it is `delivered`, typed in with its "Run in your
+///   shell: cf answer m-…" line, and `cf answer` then refuses it
+///   (`already-answered`). Retried, it is settled here.
 pub(super) fn settle_answered(store: &mut Store, question_id: i64) -> Result<(), LedgerError> {
     let question = known_message(store, question_id)?;
     if question.kind != "question" || question.state != "queued" {

@@ -42,7 +42,10 @@
 //! 30,000 characters, and under Pi's and OpenCode's bytes: so bytes are what
 //! is counted, and one number serves them all. No harness with a number cuts
 //! below 2,000 lines. A thread longer than this says nothing of its answers,
-//! which then come as text as well: a duplicate, never a loss.
+//! which then come as text as well: a duplicate, never a loss. So does a
+//! message `cf inbox read` printed past it (T-260): a long result or question
+//! read in the inbox stays queued and is typed in later, by design, since a
+//! read the model may not have seen whole is no proof that it has it.
 
 /// An output shorter than this, in bytes, is shown whole by every harness
 /// whose cut was found as a number: Codex's 10,000 tokens are the smallest

@@ -202,3 +202,33 @@ runs = ["ledger-receipt"]
 file = "crates/cf-ledger/src/messages.rs"
 find = '(question.state == "queued" && from_window)'
 replace = '(question.state == "queued" && from_window && false)'
+
+# --- round 2 (T-351, finding 5 of T-350's review): the switch's note ---
+# The note that asks the chief where things stand before a switch after its turn is written only
+# when `await_switch` (`crates/cf-engine/src/chief_switch.rs`) pastes it, with the chief at rest:
+# queued during the turn, a `cf inbox read` there received it, and the switch, which waits for an
+# answer after the note's paste, went at once. The case is the engine's
+# (`crates/cf-engine/tests/dispatcher/switching.rs`).
+
+[[plant]]
+name = "read not retyped: the switch's note is written while the chief is still in its turn"
+meant = "writes_the_note_that_asks_where_things_stand_only_when_it_pastes_it_with_the_chief_at_rest"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_switch.rs"
+find = """
+        if !idle {
+            return Ok(());
+        }
+        let Some(pending) = record.pending_switch.borrow().clone() else {"""
+replace = """
+        let unwritten = record
+            .pending_switch
+            .borrow()
+            .as_ref()
+            .is_some_and(|pending| pending.ask && pending.note.is_none());
+        if !idle && !unwritten {
+            return Ok(());
+        }
+        let Some(pending) = record.pending_switch.borrow().clone() else {"""

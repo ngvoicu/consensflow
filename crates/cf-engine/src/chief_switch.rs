@@ -32,11 +32,13 @@ pub struct SwitchTo {
     pub agent: String,
 }
 
-/// A switch waiting for the end of the chief's turn, and the note it sent
-/// first, if the human wanted one.
+/// A switch waiting for the end of the chief's turn: whether the human wanted
+/// the chief asked where things stand first, and the note that asks it, once
+/// [`Dispatcher::await_switch`] wrote it to paste it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingSwitch {
     pub(crate) to: SwitchTo,
+    pub(crate) ask: bool,
     pub(crate) note: Option<i64>,
 }
 
@@ -158,15 +160,18 @@ impl Dispatcher {
 
     /// A switch the human asked for after the chief's turn, with a note that
     /// first asks the chief where things stand when they want one: it waits
-    /// in the record ([`Dispatcher::await_switch`]).
+    /// in the record ([`Dispatcher::await_switch`]), which writes the note
+    /// only when it pastes it.
     pub(crate) fn after_turn(
         &self,
-        project: i64,
         record: &Record,
         to: SwitchTo,
-        note: bool,
+        ask: bool,
     ) -> Result<(), EngineError> {
-        // A switch asked again replaces the one waiting, with a note not yet sent.
+        // A switch asked again replaces the one waiting. Its note is written only
+        // as it is pasted, so there is most often none yet; one written that still
+        // waits for the window to be ready to take its paste names the old switch,
+        // and is cancelled.
         let replaced = record
             .pending_switch
             .borrow()
@@ -181,27 +186,34 @@ impl Dispatcher {
                     .cancel_message(replaced, "the human asked for the switch again")?;
             }
         }
-        let asked = if note {
-            let body = format!(
-                "The human is moving this project's chief to {} ({}) once you answer. Write down where things stand, for the chief after you: what you and the human decided, what you promised, what you were about to do, and what is unresolved. Do not start anything new.",
-                to.harness, to.agent
-            );
-            let sent = self.seams.ledger.borrow_mut().note(
-                project,
-                &NewNote {
-                    from: None,
-                    to: "chief".to_owned(),
-                    task: None,
-                    body,
-                },
-            )?;
-            Some(sent.id)
-        } else {
-            None
-        };
-        *record.pending_switch.borrow_mut() = Some(PendingSwitch { to, note: asked });
+        *record.pending_switch.borrow_mut() = Some(PendingSwitch {
+            to,
+            ask,
+            note: None,
+        });
         self.changed();
         Ok(())
+    }
+
+    /// The note that asks the chief where things stand before the switch to `to`.
+    fn ask_where_things_stand(
+        &self,
+        project: i64,
+        to: &SwitchTo,
+    ) -> Result<MessageView, EngineError> {
+        let body = format!(
+            "The human is moving this project's chief to {} ({}) once you answer. Write down where things stand, for the chief after you: what you and the human decided, what you promised, what you were about to do, and what is unresolved. Do not start anything new.",
+            to.harness, to.agent
+        );
+        Ok(self.seams.ledger.borrow_mut().note(
+            project,
+            &NewNote {
+                from: None,
+                to: "chief".to_owned(),
+                task: None,
+                body,
+            },
+        )?)
     }
 
     /// A switch the human asked for after the chief's turn: once the turn is
@@ -209,6 +221,16 @@ impl Dispatcher {
     /// when they asked for one), and has left no background agents pending,
     /// the chief goes. Until then nothing else is delivered to it, so its turn
     /// can end.
+    ///
+    /// The note that asks where things stand is written here, with the chief at
+    /// rest, and handed to its paste in the same step (T-351): queued during the
+    /// chief's turn, a `cf inbox read` there would have received it, and the
+    /// switch, which waits for an answer after the note's paste, would have gone
+    /// at once. So the note is not on the board while the turn goes on, and
+    /// shows from its paste. What is left: a paste that waits for the window to
+    /// be ready (it has not drawn, or holds words the human typed) leaves the
+    /// note queued meanwhile, and a turn the human starts in that time could
+    /// read it so.
     ///
     /// A switch closes the window, and the agents a turn left running end with
     /// it, so it waits for a turn that leaves none. That is the switch's own
@@ -231,6 +253,13 @@ impl Dispatcher {
         };
         let asked = match pending.note {
             Some(note) => self.seams.ledger.borrow().message(note)?,
+            None if pending.ask => {
+                let written = self.ask_where_things_stand(project.id, &pending.to)?;
+                if let Some(pending) = record.pending_switch.borrow_mut().as_mut() {
+                    pending.note = Some(written.id);
+                }
+                Some(written)
+            }
             None => None,
         };
         if let Some(asked) = asked {
@@ -278,11 +307,9 @@ impl Dispatcher {
         record: &Rc<Record>,
         to: SwitchTo,
     ) -> Result<(), EngineError> {
-        let asked = record
-            .pending_switch
-            .borrow_mut()
-            .take()
-            .and_then(|pending| pending.note);
+        let taken = record.pending_switch.borrow_mut().take();
+        let ask = taken.as_ref().is_some_and(|pending| pending.ask);
+        let asked = taken.and_then(|pending| pending.note);
         let mut cut = false;
         let pane = record.window.borrow().pane.clone();
         if let Some(pane) = pane {
@@ -307,7 +334,11 @@ impl Dispatcher {
                 // The old window would not close: the switch waits, as one
                 // asked for after a turn does, and the chief's next step
                 // tries it again.
-                *record.pending_switch.borrow_mut() = Some(PendingSwitch { to, note: asked });
+                *record.pending_switch.borrow_mut() = Some(PendingSwitch {
+                    to,
+                    ask,
+                    note: asked,
+                });
                 self.changed();
                 return Ok(());
             }

@@ -356,6 +356,18 @@ const DEPARTED: &[(&str, &str)] = &[
         "closes a window only once the paste its harness is taking is over, and that message goes again",
         "the human closes the project as the chief's harness takes a paste, which its record shows: the window closes once the harness has taken it, and the paste is confirmed (the name is Node's, which sent it again), where Node gave it back to its queue",
     ),
+    (
+        "first asks the chief where things stand, when the human wants that, and switches once it has answered",
+        "the note that asks the chief where things stand is written only when the engine pastes it, with the chief at rest, so no `cf inbox read` in the chief's turn can receive it and let the switch go without its answer (T-351): its `message.sent` comes in the pass after the switch was asked, where Node wrote the note when the switch was asked",
+    ),
+    (
+        "never gives the new chief the note that asked the old one where things stand",
+        "the note that asks the chief where things stand is written only when the engine pastes it, with the chief at rest, so no `cf inbox read` in the chief's turn can receive it and let the switch go without its answer (T-351): its `message.sent` comes in the pass after the switch was asked, where Node wrote the note when the switch was asked",
+    ),
+    (
+        "hands nothing to an old chief whose switch waited for its turn's end once its project is deleted, nor switches a project created meanwhile",
+        "the note that asks the chief where things stand is written only when the engine pastes it, with the chief at rest, so no `cf inbox read` in the chief's turn can receive it and let the switch go without its answer (T-351): its `message.sent` comes in the pass after the switch was asked, where Node wrote the note when the switch was asked",
+    ),
 ];
 
 /// The variable that asks for the departures to be recorded again, which `npm
