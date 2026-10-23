@@ -27,10 +27,11 @@
 //! `CF_TEST_TRUST_CURSOR` set it draws its cursor as those characters, not `❯`, as a
 //! Claude Code that changed its glyph would. With `CF_TEST_TRUST_GRANTS` set it asks
 //! instead as Claude Code 2.1.309 asks of a folder trusted by a folder above it whose
-//! own settings grant more (T-354): wherever the window's own folder is not among the
-//! folders it trusts, repository or not, its no "No, continue without these
-//! permissions", on which Enter, or Escape, goes on into the window with nothing
-//! written down, and a yes writes the folder itself down.
+//! own settings grant more (T-354): wherever the folder a yes records (the root of the
+//! repository the window's folder is in, or the folder itself out of one, as Claude Code
+//! records it, T-381) is not among the folders it trusts, its no "No, continue without
+//! these permissions", on which Enter, or Escape, goes on into the window with nothing
+//! written down, and a yes writes that folder down.
 
 use std::fs;
 use std::io::{self, Write};
@@ -207,10 +208,12 @@ pub fn ask(
         sleep(held);
         Ok(())
     };
-    // Of a trusted folder's grants: the folder itself, wherever it is not trusted.
+    // Of a trusted folder's grants: the repository's root, or the folder out of one,
+    // wherever it is not trusted.
     let grants = own_var("CF_TEST_TRUST_GRANTS").is_some();
     let asks = if grants {
-        Some(folder.clone()).filter(|folder| !trusted(config, folder))
+        Some(repository_of(&folder).unwrap_or_else(|| folder.clone()))
+            .filter(|root| !trusted(config, root))
     } else {
         repository_of(&folder).filter(|root| !trusted(config, root))
     };

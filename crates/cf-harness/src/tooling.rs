@@ -112,7 +112,7 @@ fn env(question: &Value) -> Result<Env, String> {
 /// Whether the window's last lines show the harness's question about trusting its
 /// folder, as the engine reads them, and the key it presses next toward a yes: null
 /// where they show none, the harness never asks one, or its choice cannot be placed;
-/// and whether it is the question of a trusted folder's grants, which is the human's.
+/// and whether it is the question of a trusted folder's grants.
 fn trust(question: &Value) -> Result<Value, String> {
     let screen: Vec<String> = question
         .get("screen")
@@ -129,11 +129,13 @@ fn trust(question: &Value) -> Result<Value, String> {
         Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin => (None, false),
     };
     let pressed = match key {
-        Some(Question::Toward(key)) => Some(if key == trust::ENTER { "enter" } else { "down" }),
-        Some(Question::Unplaced | Question::Grants) | None => None,
+        Some(Question::Toward(key) | Question::Grants(Some(key))) => {
+            Some(if key == trust::ENTER { "enter" } else { "down" })
+        }
+        Some(Question::Unplaced | Question::Grants(None)) | None => None,
     };
     let mut answer = json!({ "asks": key.is_some(), "key": pressed, "prompt": prompt });
-    answer["grants"] = json!(key == Some(Question::Grants));
+    answer["grants"] = json!(matches!(key, Some(Question::Grants(_))));
     // What a yes trusts, for a window opened in a project's folder `directory`.
     if let Some(directory) = optional(question, "directory") {
         let trust::Trusts { folder, inside } = trust::trusts(directory);

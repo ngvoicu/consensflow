@@ -49,8 +49,8 @@
 //! full-permission mode, as a prompt drawn otherwise. The window of a participant
 //! `CF_TEST_QUOTES_BEFORE_PROMPT` names draws a conversation that quotes the
 //! question's choices for 1.5 s before its first line, as a resumed window does,
-//! the `❯` on the first with `CF_TEST_QUOTES_THE_CURSOR`, and its input box above
-//! that line. With `CF_TEST_TRUST_IDLE_WHILE_ASKING` a window says it is idle while it
+//! the `❯` on the first with `CF_TEST_QUOTES_THE_CURSOR` (the question of a trusted
+//! folder's grants with `CF_TEST_QUOTES_THE_GRANTS`), and its input box above that line. With `CF_TEST_TRUST_IDLE_WHILE_ASKING` a window says it is idle while it
 //! asks, as a Claude Code that writes its status before its question would.
 //!
 //! It is the program of the suites that stands in a window, so it reads the
@@ -120,6 +120,7 @@ const QUOTES_THE_CHOICES: &str =
     " ⏺ The dialog offers:\r\n   - No, exit\r\n   - Yes, I trust this folder\r\n";
 const QUOTES_THE_DIALOG: &str =
     " ⏺ The dialog reads:\r\n ❯ No, exit\r\n   Yes, I trust this folder\r\n";
+const QUOTES_THE_GRANTS: &str = " ⏺ The dialog reads:\r\n ❯ No, continue without these permissions\r\n   Yes, I trust this folder\r\n";
 const QUOTED_BEFORE_PROMPT: std::time::Duration = std::time::Duration::from_millis(1_500);
 
 fn main() -> ExitCode {
@@ -250,7 +251,9 @@ fn run(
     // 2.1.307 took on a chief's conversation (`cargo xtask live folder-trust`).
     let quotes = named("CF_TEST_QUOTES_BEFORE_PROMPT");
     if quotes {
-        let quote = if own_var("CF_TEST_QUOTES_THE_CURSOR").is_some() {
+        let quote = if own_var("CF_TEST_QUOTES_THE_GRANTS").is_some() {
+            QUOTES_THE_GRANTS
+        } else if own_var("CF_TEST_QUOTES_THE_CURSOR").is_some() {
             QUOTES_THE_DIALOG
         } else {
             QUOTES_THE_CHOICES

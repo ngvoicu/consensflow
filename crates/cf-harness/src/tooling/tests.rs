@@ -331,7 +331,7 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
         ),
         json!({ "asks": true, "key": null, "grants": false, "prompt": false })
     );
-    // Asked of a trusted folder's grants (T-354): asked, the human's, and no key.
+    // Asked of a trusted folder's grants (T-354): asked, and its key toward a yes.
     assert_eq!(
         read(
             "claude-code",
@@ -342,7 +342,7 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
                 " Enter to confirm · Esc to cancel"
             ]
         ),
-        json!({ "asks": true, "key": null, "grants": true, "prompt": false })
+        json!({ "asks": true, "key": "down", "grants": true, "prompt": false })
     );
     let codex = [
         "  Trust this folder? Codex can read, edit, and run files here.",

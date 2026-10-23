@@ -15,8 +15,9 @@
 //! root, whose `.claude/settings.json` pre-approves a tool, or whose `.mcp.json`
 //! names a server with a header helper). Its no then reads "No, continue without
 //! these permissions" and goes on into the window without them; its yes lets them
-//! apply without asking, and writes the trust down for the folder itself. That
-//! question is the human's ([`Question::Grants`]).
+//! apply without asking, and writes the trust down for the root of the folder's
+//! repository, or the folder itself out of one, as the first question's yes does
+//! (T-381). It is answered as that question is ([`Question::Grants`]).
 
 use crate::contract::Question;
 use crate::shared::trust::{chosen_at, names, offers, shows, DOWN, ENTER};
@@ -49,7 +50,10 @@ const HINT: &str = "Enter to confirm";
 /// otherwise, or a redraw caught halfway), the question is there and its key unknown.
 pub(crate) fn toward_trust(screen: &[String]) -> Option<Question> {
     if let Some(drawn) = grants_drawn(screen) {
-        return toward_trust(&drawn).map(|_| Question::Grants);
+        return toward_trust(&drawn).map(|read| match read {
+            Question::Toward(key) => Question::Grants(Some(key)),
+            _ => Question::Grants(None),
+        });
     }
     if !names_choices(screen) {
         return None;
@@ -205,31 +209,41 @@ mod tests {
     }
 
     #[test]
-    fn the_question_of_a_trusted_folder_whose_settings_grant_more_is_the_humans_wherever_its_cursor_is(
+    fn the_question_of_a_trusted_folder_whose_settings_grant_more_is_read_with_its_key_toward_a_yes(
     ) {
-        // It opens on the no, which goes on into the window without the grants.
-        assert_eq!(toward_trust(&grants(true)), Some(Question::Grants));
-        assert_eq!(toward_trust(&grants(false)), Some(Question::Grants));
+        // It opens on the no, which goes on into the window without the grants: Down,
+        // then Enter on the yes, as the first question.
+        assert_eq!(
+            toward_trust(&grants(true)),
+            Some(Question::Grants(Some(DOWN)))
+        );
+        assert_eq!(
+            toward_trust(&grants(false)),
+            Some(Question::Grants(Some(ENTER)))
+        );
         assert!(!shows_prompt(&grants(true)) && !shows_prompt(&grants(false)));
         // A prompt's line above it, from before it was drawn, is no prompt.
         let mut below_a_prompt = lines("   ⏵⏵ bypass permissions on (shift+tab to cycle)");
         below_a_prompt.extend(grants(true));
         assert!(!shows_prompt(&below_a_prompt));
-        assert_eq!(toward_trust(&below_a_prompt), Some(Question::Grants));
-        // Its cursor drawn otherwise, or not yet drawn: still the human's.
+        assert_eq!(
+            toward_trust(&below_a_prompt),
+            Some(Question::Grants(Some(DOWN)))
+        );
+        // Its cursor drawn otherwise, or not yet drawn: asked, no key known.
         let otherwise: Vec<String> = grants(true)
             .iter()
             .map(|line| line.replace('❯', ">"))
             .collect();
-        assert_eq!(toward_trust(&otherwise), Some(Question::Grants));
+        assert_eq!(toward_trust(&otherwise), Some(Question::Grants(None)));
         let halfway: Vec<String> = grants(true)
             .iter()
             .map(|line| line.replace('❯', " "))
             .collect();
-        assert_eq!(toward_trust(&halfway), Some(Question::Grants));
+        assert_eq!(toward_trust(&halfway), Some(Question::Grants(None)));
         // A header helper of `.mcp.json`'s, as it names one.
         let helper = lines(" ⚠ This folder runs commands to mint HTTP headers (headersHelper), declared in .mcp.json\n These will apply without asking. Only proceed if you trust this configuration.\n\n ❯ No, continue without these permissions\n   Yes, I trust this folder\n\n Enter to confirm · Esc to cancel");
-        assert_eq!(toward_trust(&helper), Some(Question::Grants));
+        assert_eq!(toward_trust(&helper), Some(Question::Grants(Some(DOWN))));
     }
 
     #[test]

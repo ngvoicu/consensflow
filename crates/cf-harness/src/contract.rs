@@ -249,9 +249,11 @@ pub enum Question {
     /// The question asked of a folder whose trust is already accepted, by a folder
     /// above it, where the folder's own settings grant more than trusting it does
     /// (Claude Code 2.1.309: tools its `.claude/settings.json` pre-approves, folders it
-    /// adds, commands that mint the headers of `.mcp.json`'s servers). Its yes lets
-    /// them apply without asking, a grant beyond the folder's trust: the human's alone.
-    Grants,
+    /// adds, commands that mint the headers of `.mcp.json`'s servers), and the key a
+    /// person presses next toward its yes where its choice is placed. Its yes lets them
+    /// apply without asking, and records the folder [`Trusts`] names as trusted: it is
+    /// answered as the first question is, only where that folder is the project's.
+    Grants(Option<&'static [u8]>),
 }
 
 /// A window open on its harness.

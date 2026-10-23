@@ -44,9 +44,11 @@
 #
 # The question of a trusted folder's grants (T-354, Claude Code 2.1.309): the same dialog, asked
 # of a folder trusted by a folder above it whose own settings grant more, its no "No, continue
-# without these permissions". It is read by the other question's rules, its no's words aside, and
-# is the human's wherever the folder is: pressed nothing, told in words of its own once for the
-# windows that ask it together, and told of again once the window it was told of is past it or gone.
+# without these permissions". It is read by the other question's rules, its no's words aside. The
+# owner's decision of 2026-10-23: it is answered as the first question, yes once where the folder
+# its yes records (the repository's root, or the folder out of one; T-381) is the project's;
+# elsewhere it is pressed nothing, told in words of its own once for the windows that ask it
+# together, after 5 s, and told of again once the window it was told of is past it or gone.
 #
 # The cases are `crates/cf-e2e/tests/regressions/a_trust_question_after_git_init_stopped_every_launch.rs`
 # (a stand-in that asks as Claude Code 2.1.305 does, the shape the live suite
@@ -88,7 +90,10 @@ folder-trust-rig-quoted-tail = ["cargo", "test", "--offline", "-p", "cf-e2e", "-
 folder-trust-rig-unread-bound = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_whose_screen_the_host_never_shows"]
 folder-trust-rig-unread-grown = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_whose_screen_the_host_cannot_show_is_past_the_question"]
 folder-trust-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "trust::"]
-folder-trust-rig-grants = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked_of_its_trusted_folders_grants"]
+folder-trust-rig-grants = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked_of_grants_whose_yes"]
+folder-trust-rig-grants-own = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked_of_the_grants_of_the_projects_own_folder"]
+folder-trust-rig-grants-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_asked_of_its_trusted_folders_grants"]
+folder-trust-rig-grants-quoted = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_whose_conversation_quotes_the_grants_dialog"]
 folder-trust-rig-grants-again = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_no_to_a_trusted_folders_grants"]
 folder-trust-rig-grants-gone = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_that_goes_while_it_asks_of_its_folders_grants"]
 folder-trust-live-cases = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_folder_trust", "claude_must_ask"]
@@ -866,23 +871,23 @@ replace = "                let _ = &seen.moves;"
 
 [[plant]]
 name = "folder trust: the question of a trusted folder's grants reads as no question (T-354)"
-meant = "the_question_of_a_trusted_folder_whose_settings_grant_more_is_the_humans_wherever_its_cursor_is"
+meant = "the_question_of_a_trusted_folder_whose_settings_grant_more_is_read_with_its_key_toward_a_yes"
 runs = ["folder-trust-readers"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
-find = "        return toward_trust(&drawn).map(|_| Question::Grants);"
-replace = "        return toward_trust(&drawn).and(None);"
+find = "        return toward_trust(&drawn).map(|read| match read {"
+replace = "        return toward_trust(&drawn).and(None::<Question>).map(|read| match read {"
 
 [[plant]]
 name = "folder trust: the question of a trusted folder's grants is read as the other question, its key known (T-354)"
-meant = "the_question_of_a_trusted_folder_whose_settings_grant_more_is_the_humans_wherever_its_cursor_is"
+meant = "the_question_of_a_trusted_folder_whose_settings_grant_more_is_read_with_its_key_toward_a_yes"
 runs = ["folder-trust-readers"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
-find = "        return toward_trust(&drawn).map(|_| Question::Grants);"
-replace = "        return toward_trust(&drawn);"
+find = "            Question::Toward(key) => Question::Grants(Some(key)),"
+replace = "            Question::Toward(key) => Question::Toward(key),"
 
 [[plant]]
 name = "folder trust: a screen that names the grants' choices asks them, quoted or not (T-354)"
@@ -891,8 +896,8 @@ runs = ["folder-trust-readers"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
-find = "        return toward_trust(&drawn).map(|_| Question::Grants);"
-replace = "        return Some(Question::Grants);"
+find = "        return toward_trust(&drawn).map(|read| match read {"
+replace = "        return Some(Question::Grants(None)).or(toward_trust(&drawn)).map(|read| match read {"
 
 [[plant]]
 name = "folder trust: a quote of the grants' no makes the other question below it theirs (T-354)"
@@ -906,7 +911,7 @@ replace = "    if !(offers(screen, YES) && offers(screen, NO_GRANTS)) {"
 
 [[plant]]
 name = "folder trust: a prompt's line beside the grants' question, its cursor placed, reads as the prompt (T-354)"
-meant = "the_question_of_a_trusted_folder_whose_settings_grant_more_is_the_humans_wherever_its_cursor_is"
+meant = "the_question_of_a_trusted_folder_whose_settings_grant_more_is_read_with_its_key_toward_a_yes"
 runs = ["folder-trust-readers"]
 
 [[plant.edit]]
@@ -924,47 +929,29 @@ runs = ["folder-trust-tooling"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/tooling.rs"
-find = '    answer["grants"] = json!(key == Some(Question::Grants));'
+find = '    answer["grants"] = json!(matches!(key, Some(Question::Grants(_))));'
 replace = '    answer["grants"] = json!(false);'
 
 [[plant]]
-name = "folder trust: the live suite has no case of a trusted folder's grants (T-354)"
+name = "folder trust: the live suite has no case of grants whose yes would trust a repository outside the project (T-354, T-381)"
 meant = "claude_must_ask_where_nobody_answered_above_and_in_a_repository_nobody_answered_and_no_harness_ever_elsewhere"
 runs = ["folder-trust-live-cases"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_folder_trust.rs"
-find = "    harness == Harness::Claude && case == Case::Granted\n}"
-replace = "    harness == Harness::Claude && case == Case::Granted && false\n}"
-
-[[plant]]
-name = "folder trust: ConsensFlow answers the grants of the project's own folder (T-354)"
-meant = "a_worker_asked_of_its_trusted_folders_grants_is_held_and_the_human_told_and_nothing_pressed"
-runs = ["folder-trust-rig-grants"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = """
-                            Some(key)
-                        }
-                        _ => None,"""
-replace = '''
-                            Some(key)
-                        }
-                        Question::Grants if inside => Some(b"\x1b[B".as_slice()),
-                        _ => None,'''
+find = "    harness == Harness::Claude && matches!(case, Case::Granted | Case::GrantedInRepository)\n}"
+replace = "    harness == Harness::Claude && case == Case::Granted\n}"
 
 [[plant]]
 name = "folder trust: the grants are told as a question ConsensFlow could not answer (T-354)"
-meant = "a_worker_asked_of_its_trusted_folders_grants_is_held_and_the_human_told_and_nothing_pressed"
+meant = "a_worker_asked_of_grants_whose_yes_would_trust_a_repository_outside_the_project_is_held_and_the_human_told"
 runs = ["folder-trust-rig-grants"]
 builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "                    } else if asking >= TELL_LOOKS && question == Question::Grants {"
-replace = "                    } else if asking >= TELL_LOOKS && question == Question::Grants && false {"
+find = "                    } else if asking >= TELL_LOOKS && matches!(question, Question::Grants(_)) {"
+replace = "                    } else if asking >= TELL_LOOKS && matches!(question, Question::Grants(_)) && false {"
 
 [[plant]]
 name = "folder trust: a no to the grants in one window leaves the other that asks them untold (T-354)"
@@ -975,11 +962,102 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
 find = """
-        // A no to the grants is the window's alone, and the next window asks again.
+        // A no to the grants is the window's alone, and the next window asks again; so
+        // is a window that went while it asked.
         if grants {
             self.forget_grants_told(project, &folder);
         }"""
 replace = ""
+
+[[plant]]
+name = "folder trust: the grants of the project's own folder are not answered (T-354, the owner's decision of 2026-10-23)"
+meant = "a_worker_asked_of_the_grants_of_the_projects_own_folder_is_answered_yes_and_does_its_task"
+runs = ["folder-trust-rig-grants-own"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = '''
+                        Question::Grants(Some(key)) if inside && keys < MOST_KEYS => Some(key),'''
+replace = ""
+
+[[plant]]
+name = "folder trust: the grants are answered yes where the yes would trust a repository outside the project (T-354, T-381)"
+meant = "a_worker_asked_of_grants_whose_yes_would_trust_a_repository_outside_the_project_is_held_and_the_human_told"
+runs = ["folder-trust-rig-grants"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                        Question::Grants(Some(key)) if inside && keys < MOST_KEYS => Some(key),"
+replace = "                        Question::Grants(Some(key)) if keys < MOST_KEYS => Some(key),"
+
+[[plant]]
+name = "folder trust: each key toward the grants' yes is pressed twice (T-354)"
+meant = "a_worker_asked_of_the_grants_of_the_projects_own_folder_is_answered_yes_and_does_its_task"
+runs = ["folder-trust-rig-grants-own"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                        if press && self.press_toward_trust(pane, key).await {"
+replace = "                        if press && self.press_toward_trust(pane, key).await && self.press_toward_trust(pane, key).await {"
+
+[[plant]]
+name = "folder trust: the grants' yes in the project's folder is told in the first question's words (T-354)"
+meant = "a_worker_asked_of_the_grants_of_the_projects_own_folder_is_answered_yes_and_does_its_task"
+runs = ["folder-trust-rig-grants-own"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                                if matches!(question, Question::Grants(_)) {"
+replace = "                                if matches!(question, Question::Grants(_)) && false {"
+
+[[plant]]
+name = "folder trust: the grants held outside the project are told without the folder a yes would trust (T-381)"
+meant = "a_worker_asked_of_grants_whose_yes_would_trust_a_repository_outside_the_project_is_held_and_the_human_told"
+runs = ["folder-trust-rig-grants"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = '''format!("{folder} is outside the project's folder, so ConsensFlow does not answer it.")'''
+replace = '''"ConsensFlow could not answer it.".to_owned()'''
+
+[[plant]]
+name = "folder trust: the grants are told of at the first look, a quote of them too (T-381)"
+meant = "a_chief_whose_conversation_quotes_the_grants_dialog_cursor_and_all_is_told_of_no_question"
+runs = ["folder-trust-rig-grants-quoted"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                    } else if asking >= TELL_LOOKS && matches!(question, Question::Grants(_)) {"
+replace = "                    } else if matches!(question, Question::Grants(_)) {"
+
+[[plant]]
+name = "folder trust: the grants are told of at every look, not once for the windows that ask them (T-381)"
+meant = "a_no_to_a_trusted_folders_grants_in_one_window_and_the_other_window_asking_them_is_told_of_again"
+runs = ["folder-trust-rig-grants-again"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = '''
+        if !self
+            .trust
+            .told_grants
+            .borrow_mut()
+            .insert((project.id, folder.to_owned()))
+        {
+            return Ok(());
+        }'''
+replace = '''
+        self.trust
+            .told_grants
+            .borrow_mut()
+            .insert((project.id, folder.to_owned()));'''
 
 [[plant]]
 name = "folder trust: a window that goes while it asks of the grants leaves the next untold (T-354)"
@@ -990,11 +1068,37 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
 find = """
+        // A no to the grants is the window's alone, and the next window asks again; so
+        // is a window that went while it asked.
+        if grants {
+            self.forget_grants_told(project, &folder);
+        }"""
+replace = ""
+
+[[plant]]
+name = "folder trust: a window that goes while it asks of the grants returns past the forget (T-354)"
+meant = "a_window_that_goes_while_it_asks_of_its_folders_grants_leaves_the_next_that_asks_them_told_of"
+runs = ["folder-trust-rig-grants-gone"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = """
             if !self.shows(record, pane) {
-                if grants {
-                    self.forget_grants_told(project, &folder);
-                }
-                return Ok(());"""
+                break (false, false);
+            }"""
 replace = """
             if !self.shows(record, pane) {
-                return Ok(());"""
+                return Ok(());
+            }"""
+
+[[plant]]
+name = "folder trust: a chief at the grants' question is handed what came for it (T-381)"
+meant = "a_chief_asked_of_its_trusted_folders_grants_is_handed_nothing_till_the_human_answers"
+runs = ["folder-trust-rig-grants-chief"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "        return toward_trust(&drawn).map(|read| match read {"
+replace = "        return toward_trust(&drawn).and(None::<Question>).map(|read| match read {"

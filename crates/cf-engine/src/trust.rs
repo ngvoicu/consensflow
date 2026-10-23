@@ -34,9 +34,11 @@
 //! whose choice the reader cannot place is pressed nothing, and the human is told of
 //! it as of one outside the project's folder. The question asked again of a folder
 //! already trusted by a folder above it, whose own settings grant more than its trust
-//! ([`Question::Grants`]: a yes lets them apply without asking), is pressed nothing
-//! wherever the folder is, and the human is told of it in words of its own, once for
-//! the windows that ask it together. A launch that is to
+//! ([`Question::Grants`]: a yes lets them apply without asking), is answered as the
+//! first is (the owner's decision of 2026-10-23): yes, where the folder its yes records
+//! is the project's folder or below it; elsewhere, or where its choice cannot be
+//! placed, nothing is pressed and the human is told of it in words of its own, once
+//! for the windows that ask it together. A launch that is to
 //! say its role first never meets the question: only a harness that keeps the
 //! instructions its conversation began with is told its role so, and that is Codex,
 //! which never asks as ConsensFlow opens it.
@@ -214,11 +216,10 @@ impl Dispatcher {
         // window is past it, the next window that asks it is told of again.
         let mut grants = false;
         let (at_prompt, cleared) = loop {
+            // A window no longer the record's ends the watch as any other: what it was
+            // told of is forgotten below, and nothing else is done for it.
             if !self.shows(record, pane) {
-                if grants {
-                    self.forget_grants_told(project, &folder);
-                }
-                return Ok(());
+                break (false, false);
             }
             let length = self.record_length(window).await;
             if opened_with.is_none() {
@@ -250,6 +251,7 @@ impl Dispatcher {
                         Question::Toward(key) if (inside || accepted) && keys < MOST_KEYS => {
                             Some(key)
                         }
+                        Question::Grants(Some(key)) if inside && keys < MOST_KEYS => Some(key),
                         _ => None,
                     };
                     // A window inside the project's folder whose conversation quotes the
@@ -259,10 +261,17 @@ impl Dispatcher {
                     if let Some(key) = pressing {
                         if inside {
                             self.tell_trust_once(project, &folder, true, || {
-                                format!(
-                                    "@{}'s window asked whether to trust {folder}; ConsensFlow answered yes, as the project's folder is trusted by choosing it.",
-                                    participant.handle
-                                )
+                                if matches!(question, Question::Grants(_)) {
+                                    format!(
+                                        "@{}'s window asked whether to trust {folder} and let the settings of the project's folder {} apply without asking; ConsensFlow answered yes, as the project's folder is trusted by choosing it.",
+                                        participant.handle, project.directory
+                                    )
+                                } else {
+                                    format!(
+                                        "@{}'s window asked whether to trust {folder}; ConsensFlow answered yes, as the project's folder is trusted by choosing it.",
+                                        participant.handle
+                                    )
+                                }
                             })?;
                         }
                         let press = match pressed_on.as_mut() {
@@ -276,11 +285,11 @@ impl Dispatcher {
                             keys += 1;
                             pressed_on = Some((lines, 0));
                         }
-                    } else if asking >= TELL_LOOKS && question == Question::Grants {
-                        // Its yes grants more than the folder's trust: the human's,
-                        // wherever the folder is.
+                    } else if asking >= TELL_LOOKS && matches!(question, Question::Grants(_)) {
+                        // Its yes would record a folder outside the project's, or its
+                        // choice cannot be placed: the human's.
                         grants = true;
-                        self.tell_grants_once(project, &folder, participant)?;
+                        self.tell_grants_once(project, &folder, inside, participant)?;
                     } else if asking >= TELL_LOOKS {
                         // Once a project and folder: a conversation that quotes the
                         // question for longer (under load) is told as asking, and a
@@ -381,7 +390,8 @@ impl Dispatcher {
                     .remove(&(project.id, folder.clone(), false));
             }
         }
-        // A no to the grants is the window's alone, and the next window asks again.
+        // A no to the grants is the window's alone, and the next window asks again; so
+        // is a window that went while it asked.
         if grants {
             self.forget_grants_told(project, &folder);
         }
@@ -450,12 +460,15 @@ impl Dispatcher {
     }
 
     /// A note to the human about the question of `folder`'s grants that
-    /// `participant`'s window asks, the first time the project's windows ask it since
-    /// the last that did was past it.
+    /// `participant`'s window asks, which ConsensFlow does not answer: `folder`, which a
+    /// yes records, is outside the project's folder, or, `inside` it, the question's
+    /// choice could not be placed. The first time the project's windows ask it since the
+    /// last that did was past it.
     fn tell_grants_once(
         &self,
         project: &ProjectView,
         folder: &str,
+        inside: bool,
         participant: &ParticipantView,
     ) -> Result<(), EngineError> {
         if !self
@@ -474,8 +487,13 @@ impl Dispatcher {
                 to: "human".to_owned(),
                 task: None,
                 body: format!(
-                    "@{handle}'s window asks whether the settings of its folder {} may apply without asking: the folder is trusted already, by a folder above it, and its own settings grant more (tools they pre-approve, folders they add, or commands that mint the headers of MCP servers). ConsensFlow does not answer this one, as its yes is more than trusting the folder. Answer it in that window: its no continues without them, its yes lets them apply. What waits for @{handle} goes on by itself once you have.",
-                    project.directory
+                    "@{handle}'s window asks whether the settings of its folder {directory} may apply without asking. Claude Code takes the folder as trusted, by a folder above it or by a record of its own, but has none for {folder}, which its yes records as trusted (the root of the repository the folder is in, or the folder itself out of one), and the folder's own settings grant more than its trust: tools they pre-approve, folders they add, or commands that mint the headers of MCP servers. {why} Answer it in that window: its no continues without them, its yes trusts {folder} and lets them apply. What waits for @{handle} goes on by itself once you have.",
+                    directory = project.directory,
+                    why = if inside {
+                        "ConsensFlow could not answer it.".to_owned()
+                    } else {
+                        format!("{folder} is outside the project's folder, so ConsensFlow does not answer it.")
+                    },
                 ),
             },
         )?;

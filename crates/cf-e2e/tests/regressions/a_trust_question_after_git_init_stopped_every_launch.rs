@@ -1364,12 +1364,15 @@ fn a_window_whose_screen_the_host_cannot_show_is_past_the_question_once_its_reco
 }
 
 // The same dialog, asked of a folder trusted by a folder above it whose own settings
-// grant more than its trust (T-354's probe, Claude Code 2.1.309: a plain folder below
-// a trusted one, its `.claude/settings.json` pre-approving a tool). Its no reads "No,
+// grant more than its trust (T-354's probe, Claude Code 2.1.309: a plain folder below a
+// trusted one, its `.claude/settings.json` pre-approving a tool). Its no reads "No,
 // continue without these permissions" and goes on without them; its yes lets them apply
-// without asking. ConsensFlow read it as no question: a worker's launch failed as never
-// showing its first message, and what went into the window chose the no. It is the
-// human's: held, told, and nothing pressed, even in the project's own folder.
+// without asking, and records as trusted the root of the folder's repository, or the
+// folder out of one (T-381). ConsensFlow read it as no question: a worker's launch failed
+// as never showing its first message, and what went into the window chose the no. The
+// owner's decision of 2026-10-23: it is answered as the first question is, yes where the
+// folder its yes records is the project's folder or below it; elsewhere it is held, the
+// human told, and nothing pressed.
 
 /// The rig, the windows of the participant `who` asking of their folder's grants.
 fn asking_of_grants(who: &str) -> Config {
@@ -1379,13 +1382,25 @@ fn asking_of_grants(who: &str) -> Config {
         .var("CONSENSFLOW_LAUNCH_TIMEOUT_MS", "8000")
 }
 
-/// The notes to the human about the grants of a window's folder.
+/// The notes to the human that a window asks of its folder's grants: not those that
+/// quote a window's last lines, which may show the question's words.
 fn grants_notes(project: &Project) -> cf_e2e::Result<Vec<String>> {
     Ok(project
         .inbox("human")?
         .iter()
         .filter_map(|message| message["body"].as_str())
-        .filter(|body| body.contains("may apply without asking"))
+        .filter(|body| body.contains("'s window asks whether the settings of its folder"))
+        .map(str::to_owned)
+        .collect())
+}
+
+/// The notes to the human that ConsensFlow answered a window's question.
+fn answered_notes(project: &Project) -> cf_e2e::Result<Vec<String>> {
+    Ok(project
+        .inbox("human")?
+        .iter()
+        .filter_map(|message| message["body"].as_str())
+        .filter(|body| body.contains("answered yes"))
         .map(str::to_owned)
         .collect())
 }
@@ -1399,11 +1414,62 @@ fn handle_of(frame: &Value) -> String {
         .unwrap_or_default()
 }
 
+/// A project's folder below the root of a repository, `app` in the rig's workspace: a
+/// yes to the grants' question would trust the repository, outside the project's folder.
+fn below_a_repository(rig: &Rig) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    let root = rig.workspace().to_path_buf();
+    git_init(&root)?;
+    let folder = root.join("app");
+    std::fs::create_dir(&folder)?;
+    Ok(folder)
+}
+
 #[test]
-fn a_worker_asked_of_its_trusted_folders_grants_is_held_and_the_human_told_and_nothing_pressed(
+fn a_worker_asked_of_the_grants_of_the_projects_own_folder_is_answered_yes_and_does_its_task(
 ) -> Outcome {
+    // A plain folder: a yes records the folder itself, the project's.
     let rig = Rig::start(asking_of_grants("worker"))?;
     let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"].as_str().unwrap_or_default();
+    rig.tell(
+        project.id(),
+        &format!("DISPATCH --tier {tier} Reply with exactly: GRANTED_DONE"),
+    )?;
+    rig.wait_for("T-1 to be done", secs(60), || {
+        let state = project.task(1)?["state"].clone();
+        assert_ne!(state, "failed", "T-1 failed at the question");
+        Ok(state == "done")
+    })?;
+    assert_eq!(keys_given(&rig), ["down", "enter"], "not one yes");
+    let folder = real(rig.workspace());
+    assert!(
+        trusted(&rig)
+            .lines()
+            .any(|line| real(Path::new(line)) == folder),
+        "the yes trusted no folder: {}",
+        trusted(&rig)
+    );
+    let answered = answered_notes(&project)?;
+    assert_eq!(answered.len(), 1, "the human is told once: {answered:?}");
+    assert!(answered[0].contains("apply without asking"), "{answered:?}");
+    let held: Vec<String> = grants_notes(&project)?
+        .into_iter()
+        .filter(|note| !note.contains("answered yes"))
+        .collect();
+    assert_eq!(held, Vec::<String>::new(), "told as held");
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_worker_asked_of_grants_whose_yes_would_trust_a_repository_outside_the_project_is_held_and_the_human_told(
+) -> Outcome {
+    // Calliope's review (T-381): a yes records the repository's root, which here lies
+    // outside the project's folder.
+    let rig = Rig::start(asking_of_grants("worker"))?;
+    let folder = below_a_repository(&rig)?;
+    let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     let added = project.add_member("worker")?;
     let tier = added["member"]["tier"].as_str().unwrap_or_default();
     rig.tell(
@@ -1413,8 +1479,7 @@ fn a_worker_asked_of_its_trusted_folders_grants_is_held_and_the_human_told_and_n
     rig.wait_for("the human to be told of the grants", secs(60), || {
         Ok(grants_notes(&project)?.len() == 1)
     })?;
-    // Held past the 8 s its launch has, and nothing pressed, though the folder is the
-    // project's own.
+    // Held past the 8 s its launch has, and nothing pressed.
     sleep(Duration::from_secs(10));
     assert_eq!(
         keys_given(&rig),
@@ -1434,15 +1499,12 @@ fn a_worker_asked_of_its_trusted_folders_grants_is_held_and_the_human_told_and_n
     let window = workers(&rig, &project)[0].clone();
     let notes = grants_notes(&project)?;
     assert!(notes[0].contains(&handle_of(&window)), "{notes:?}");
-    let answered: Vec<String> = project
-        .inbox("human")?
-        .iter()
-        .filter_map(|message| message["body"].as_str())
-        .filter(|body| body.contains("answered yes"))
-        .map(str::to_owned)
-        .collect();
+    assert!(
+        notes[0].contains(&real(rig.workspace())) && notes[0].contains("outside"),
+        "the note does not name the repository's root outside the project: {notes:?}"
+    );
     assert_eq!(
-        answered,
+        answered_notes(&project)?,
         Vec::<String>::new(),
         "ConsensFlow said it answered"
     );
@@ -1462,16 +1524,22 @@ fn a_worker_asked_of_its_trusted_folders_grants_is_held_and_the_human_told_and_n
 #[test]
 fn a_no_to_a_trusted_folders_grants_in_one_window_and_the_other_window_asking_them_is_told_of_again(
 ) -> Outcome {
-    // Both of the worker's windows ask at once, and the human is told once. Their no in
-    // the first is that window's alone: the second still asks, and is told of again.
+    // Both of the worker's windows ask at once, and the human is told once, however
+    // long they ask. Their no in the first is that window's alone: the second still
+    // asks, and is told of again.
     let rig = Rig::start(asking_of_grants("worker"))?;
-    let project = Project::open(&rig, "chief", json!({}))?;
+    let folder = below_a_repository(&rig)?;
+    let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     two_tasks(&rig, &project, "SLEEP 3 ")?;
     rig.wait_for("both windows to ask, and the human told", secs(60), || {
         Ok(workers(&rig, &project).len() == 2 && grants_notes(&project)?.len() == 1)
     })?;
+    // Calliope's review (T-381): told once, held for a while.
+    sleep(Duration::from_secs(4));
+    let notes = grants_notes(&project)?;
+    assert_eq!(notes.len(), 1, "the human is told once: {notes:?}");
     let windows = workers(&rig, &project);
-    let (first, second) = if grants_notes(&project)?[0].contains(&handle_of(&windows[0])) {
+    let (first, second) = if notes[0].contains(&handle_of(&windows[0])) {
         (windows[0].clone(), windows[1].clone())
     } else {
         (windows[1].clone(), windows[0].clone())
@@ -1493,32 +1561,65 @@ fn a_no_to_a_trusted_folders_grants_in_one_window_and_the_other_window_asking_th
 }
 
 #[test]
-fn a_chief_asked_of_its_trusted_folders_grants_is_held_till_the_human_answers() -> Outcome {
-    // A chief at the question read as no question was at rest: what was pasted into it
-    // was swallowed, and its Enter chose the no.
-    let rig = Rig::start(asking_of_grants("chief"))?;
-    let project = Project::open(&rig, "chief", json!({}))?;
+fn a_chief_asked_of_its_trusted_folders_grants_is_handed_nothing_till_the_human_answers() -> Outcome
+{
+    // A chief at the question read as no question was at rest: what came for it was
+    // pasted into the question, and its Enter chose the no. It says it is idle while it
+    // asks, so that only ConsensFlow's gate holds what waits for it (Calliope, T-381).
+    let rig = Rig::start(asking_of_grants("chief").var("CF_TEST_TRUST_IDLE_WHILE_ASKING", "1"))?;
+    let folder = below_a_repository(&rig)?;
+    let project = Project::open(
+        &rig,
+        "chief",
+        json!({ "directory": folder, "staff": [{ "agent": "worker", "roles": ["worker"] }] }),
+    )?;
     rig.wait_for("the human to be told of the grants", secs(60), || {
         Ok(grants_notes(&project)?.len() == 1)
     })?;
+    assert!(grants_notes(&project)?[0].contains("@chief"));
     let chief = project.lane("chief")?;
     assert_eq!(
         chief["activity"]["reason"], "the window asks whether to trust its folder",
         "{chief}"
     );
-    assert!(grants_notes(&project)?[0].contains("@chief"));
-    assert_eq!(keys_given(&rig), Vec::<String>::new(), "a key went into it");
+    // A worker's result comes for the chief while it asks, and waits.
+    let tier = project.tiers()?.get("worker").cloned().unwrap_or_default();
     let window = chiefs(&rig, &project)[0].clone();
+    let added = rig.cf_in_window(
+        &window,
+        [
+            "task",
+            "add",
+            "--tier",
+            &tier,
+            "Reply with exactly: HELD_OK",
+        ],
+    )?;
+    assert_eq!(added.code, Some(0), "{added}");
+    rig.wait_for("T-1's result for the chief", secs(90), || {
+        Ok(result_for(&project, 1)?.is_some())
+    })?;
+    sleep(Duration::from_secs(6));
+    let gone = rig
+        .exits()
+        .iter()
+        .any(|exit| exit["id"] == window["id"] && exit["generation"] == window["generation"]);
+    assert!(
+        !gone,
+        "the chief's window was handed the result while it asked, and ended"
+    );
+    assert_eq!(keys_given(&rig), Vec::<String>::new(), "a key went into it");
     human_presses(&rig, &window, &[DOWN, ENTER])?;
-    // Past the question, it takes what it is told.
-    rig.tell(project.id(), "Reply with exactly: CHIEF_HEARD")?;
+    rig.wait_for("T-1's result to reach the chief", secs(60), || {
+        Ok(result_for(&project, 1)?.is_some_and(|result| result["state"] == "delivered"))
+    })?;
     assert_eq!(keys_given(&rig), ["down", "enter"]);
-    let folder = real(rig.workspace());
+    let root = real(rig.workspace());
     assert!(
         trusted(&rig)
             .lines()
-            .any(|line| real(Path::new(line)) == folder),
-        "the yes trusted no folder: {}",
+            .any(|line| real(Path::new(line)) == root),
+        "the yes trusted no repository: {}",
         trusted(&rig)
     );
     rig.close()?;
@@ -1531,7 +1632,8 @@ fn a_window_that_goes_while_it_asks_of_its_folders_grants_leaves_the_next_that_a
     // The worker's window that asks is ended before anyone answers it; the window
     // opened for the worker's next task asks again, and the human is told again.
     let rig = Rig::start(asking_of_grants("worker"))?;
-    let project = Project::open(&rig, "chief", json!({}))?;
+    let folder = below_a_repository(&rig)?;
+    let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     let added = project.add_member("worker")?;
     let tier = added["member"]["tier"]
         .as_str()
@@ -1570,4 +1672,12 @@ fn a_window_that_goes_while_it_asks_of_its_folders_grants_leaves_the_next_that_a
     );
     rig.close()?;
     Ok(())
+}
+
+#[test]
+fn a_chief_whose_conversation_quotes_the_grants_dialog_cursor_and_all_is_told_of_no_question(
+) -> Outcome {
+    // Calliope's review (T-381): the question of the grants is told of only once it has
+    // stayed 5 s, as the first question is, so a quote of it before the prompt is not.
+    chief_quoting_before_its_prompt(&[("CF_TEST_QUOTES_THE_GRANTS", "1")])
 }
