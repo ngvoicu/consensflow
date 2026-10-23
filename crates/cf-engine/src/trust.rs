@@ -32,7 +32,11 @@
 //! the host shows no screen for says nothing either way: a window that asked is held
 //! until one does, and the human is told once that lasts [`UNREAD_MS`]. A question
 //! whose choice the reader cannot place is pressed nothing, and the human is told of
-//! it as of one outside the project's folder. A launch that is to
+//! it as of one outside the project's folder. The question asked again of a folder
+//! already trusted by a folder above it, whose own settings grant more than its trust
+//! ([`Question::Grants`]: a yes lets them apply without asking), is pressed nothing
+//! wherever the folder is, and the human is told of it in words of its own, once for
+//! the windows that ask it together. A launch that is to
 //! say its role first never meets the question: only a harness that keeps the
 //! instructions its conversation began with is told its role so, and that is Codex,
 //! which never asks as ConsensFlow opens it.
@@ -107,10 +111,12 @@ pub(crate) enum Trusting {
 /// spoke of already, so that the windows that ask of one folder at once (every
 /// member of a project opened in it) are spoken of once, and the folders the
 /// human said yes to in a window, which the project's other windows that ask of
-/// them are answered for.
+/// them are answered for. The question of a folder's grants is spoken of apart
+/// (`told_grants`), until the window it was told of is past it.
 #[derive(Debug, Default)]
 pub(crate) struct TrustState {
     told: RefCell<HashSet<(i64, String, bool)>>,
+    told_grants: RefCell<HashSet<(i64, String)>>,
     accepted: RefCell<HashSet<(i64, String)>>,
 }
 
@@ -204,8 +210,14 @@ impl Dispatcher {
         // whose yes is carried to the project's other windows, the only ones a key of
         // ConsensFlow's can answer.
         let mut sure = false;
+        // Whether the human was told of the question of the folder's grants: once its
+        // window is past it, the next window that asks it is told of again.
+        let mut grants = false;
         let (at_prompt, cleared) = loop {
             if !self.shows(record, pane) {
+                if grants {
+                    self.forget_grants_told(project, &folder);
+                }
                 return Ok(());
             }
             let length = self.record_length(window).await;
@@ -264,6 +276,11 @@ impl Dispatcher {
                             keys += 1;
                             pressed_on = Some((lines, 0));
                         }
+                    } else if asking >= TELL_LOOKS && question == Question::Grants {
+                        // Its yes grants more than the folder's trust: the human's,
+                        // wherever the folder is.
+                        grants = true;
+                        self.tell_grants_once(project, &folder, participant)?;
                     } else if asking >= TELL_LOOKS {
                         // Once a project and folder: a conversation that quotes the
                         // question for longer (under load) is told as asking, and a
@@ -364,6 +381,10 @@ impl Dispatcher {
                     .remove(&(project.id, folder.clone(), false));
             }
         }
+        // A no to the grants is the window's alone, and the next window asks again.
+        if grants {
+            self.forget_grants_told(project, &folder);
+        }
         if !self.shows(record, pane) {
             return Ok(());
         }
@@ -426,6 +447,49 @@ impl Dispatcher {
         returning(self.seams.host.request("pane.input", body))
             .await
             .is_ok_and(|answer| answer.get("ok") == Some(&Value::Bool(true)))
+    }
+
+    /// A note to the human about the question of `folder`'s grants that
+    /// `participant`'s window asks, the first time the project's windows ask it since
+    /// the last that did was past it.
+    fn tell_grants_once(
+        &self,
+        project: &ProjectView,
+        folder: &str,
+        participant: &ParticipantView,
+    ) -> Result<(), EngineError> {
+        if !self
+            .trust
+            .told_grants
+            .borrow_mut()
+            .insert((project.id, folder.to_owned()))
+        {
+            return Ok(());
+        }
+        let handle = &participant.handle;
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: format!(
+                    "@{handle}'s window asks whether the settings of its folder {} may apply without asking: the folder is trusted already, by a folder above it, and its own settings grant more (tools they pre-approve, folders they add, or commands that mint the headers of MCP servers). ConsensFlow does not answer this one, as its yes is more than trusting the folder. Answer it in that window: its no continues without them, its yes lets them apply. What waits for @{handle} goes on by itself once you have.",
+                    project.directory
+                ),
+            },
+        )?;
+        self.changed();
+        Ok(())
+    }
+
+    /// That the human was told of the question of `folder`'s grants no longer: the
+    /// next window that asks it is told of again.
+    fn forget_grants_told(&self, project: &ProjectView, folder: &str) {
+        self.trust
+            .told_grants
+            .borrow_mut()
+            .remove(&(project.id, folder.to_owned()));
     }
 
     /// A note to the human about `folder`, the first time the project's windows

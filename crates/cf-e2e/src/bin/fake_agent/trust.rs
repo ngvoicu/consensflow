@@ -25,7 +25,12 @@
 //! writes still; and with `CF_TEST_RECORD_AWAY_MS` set a record a case moved aside
 //! comes back that long after the window starts ([`bring_the_record_back`]). With
 //! `CF_TEST_TRUST_CURSOR` set it draws its cursor as those characters, not `❯`, as a
-//! Claude Code that changed its glyph would.
+//! Claude Code that changed its glyph would. With `CF_TEST_TRUST_GRANTS` set it asks
+//! instead as Claude Code 2.1.309 asks of a folder trusted by a folder above it whose
+//! own settings grant more (T-354): wherever the window's own folder is not among the
+//! folders it trusts, repository or not, its no "No, continue without these
+//! permissions", on which Enter, or Escape, goes on into the window with nothing
+//! written down, and a yes writes the folder itself down.
 
 use std::fs;
 use std::io::{self, Write};
@@ -151,24 +156,33 @@ fn trusted(config: &Path, root: &Path) -> bool {
         .is_ok_and(|text| text.lines().any(|line| Path::new(line) == root))
 }
 
-/// The question, its cursor (`❯`, or `CF_TEST_TRUST_CURSOR`) on the yes where `yes`.
-fn draw(folder: &Path, yes: bool) -> io::Result<()> {
+/// The question's no, and what it says of the grants it would leave out, where it is
+/// asked of a trusted folder's grants (`CF_TEST_TRUST_GRANTS`).
+const NO_EXIT: &str = "No, exit";
+const NO_GRANTS: &str = "No, continue without these permissions";
+const GRANTS: &str = " \u{26a0} This folder pre-approves 1 tool permission in .claude/settings.json:\r\n   Bash(ls:*)\r\n These will apply without asking. Only proceed if you trust this configuration.\r\n\r\n";
+
+/// The question, its cursor (`❯`, or `CF_TEST_TRUST_CURSOR`) on the yes where `yes`,
+/// asked of a trusted folder's grants where `grants`.
+fn draw(folder: &Path, yes: bool, grants: bool) -> io::Result<()> {
     let cursor = own_var("CF_TEST_TRUST_CURSOR").unwrap_or_else(|| "❯".to_owned());
+    let no = if grants { NO_GRANTS } else { NO_EXIT };
     let (no_line, yes_line) = if yes {
         (
-            "   No, exit".to_owned(),
+            format!("   {no}"),
             format!(" {cursor} Yes, I trust this folder"),
         )
     } else {
         (
-            format!(" {cursor} No, exit"),
+            format!(" {cursor} {no}"),
             "   Yes, I trust this folder".to_owned(),
         )
     };
+    let granted = if grants { GRANTS } else { "" };
     let mut out = io::stdout().lock();
     write!(
         out,
-        "\u{1b}[2J\u{1b}[H Accessing workspace:\r\n {}\r\n\r\n Quick safety check: Is this a project you created or one you trust?\r\n Security guide\r\n\r\n{no_line}\r\n{yes_line}\r\n\r\n Enter to confirm · Esc to cancel\r\n",
+        "\u{1b}[2J\u{1b}[H Accessing workspace:\r\n {}\r\n\r\n Quick safety check: Is this a project you created or one you trust?\r\n{granted} Security guide\r\n\r\n{no_line}\r\n{yes_line}\r\n\r\n Enter to confirm · Esc to cancel\r\n",
         folder.display()
     )?;
     out.flush()
@@ -193,7 +207,13 @@ pub fn ask(
         sleep(held);
         Ok(())
     };
-    let asks = repository_of(&folder).filter(|root| !trusted(config, root));
+    // Of a trusted folder's grants: the folder itself, wherever it is not trusted.
+    let grants = own_var("CF_TEST_TRUST_GRANTS").is_some();
+    let asks = if grants {
+        Some(folder.clone()).filter(|folder| !trusted(config, folder))
+    } else {
+        repository_of(&folder).filter(|root| !trusted(config, root))
+    };
     let Some(root) = asks else {
         // One that asks nothing holds its first frame as long, before its prompt.
         if let Some(held) = first_frame {
@@ -203,7 +223,7 @@ pub fn ask(
     };
     opening(first_frame.unwrap_or(FIRST_FRAME))?;
     let mut yes = false;
-    draw(&folder, yes).map_err(failed)?;
+    draw(&folder, yes, grants).map_err(failed)?;
     let mut drops = own_var("CF_TEST_TRUST_DROPS_FIRST_KEY").is_some();
     let reads_late = millis("CF_TEST_TRUST_READS_LATE_MS");
     loop {
@@ -226,6 +246,11 @@ pub fn ask(
             continue;
         }
         let mut no = || -> Result<Answer, String> {
+            // The no to a trusted folder's grants goes on without them.
+            if grants {
+                say("\u{1b}[2J\u{1b}[H").map_err(failed)?;
+                return Ok(Answer::GoOn);
+            }
             if let Some(lingers) = millis("CF_TEST_TRUST_EXIT_MS") {
                 say("\u{1b}[2J\u{1b}[H fake agent: the folder is not trusted\r\n")
                     .map_err(failed)?;
@@ -281,7 +306,7 @@ pub fn ask(
         if !moved {
             continue;
         }
-        draw(&folder, yes).map_err(failed)?;
+        draw(&folder, yes, grants).map_err(failed)?;
     }
 }
 

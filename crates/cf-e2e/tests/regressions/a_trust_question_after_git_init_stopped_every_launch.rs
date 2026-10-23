@@ -1362,3 +1362,212 @@ fn a_window_whose_screen_the_host_cannot_show_is_past_the_question_once_its_reco
     rig.close()?;
     Ok(())
 }
+
+// The same dialog, asked of a folder trusted by a folder above it whose own settings
+// grant more than its trust (T-354's probe, Claude Code 2.1.309: a plain folder below
+// a trusted one, its `.claude/settings.json` pre-approving a tool). Its no reads "No,
+// continue without these permissions" and goes on without them; its yes lets them apply
+// without asking. ConsensFlow read it as no question: a worker's launch failed as never
+// showing its first message, and what went into the window chose the no. It is the
+// human's: held, told, and nothing pressed, even in the project's own folder.
+
+/// The rig, the windows of the participant `who` asking of their folder's grants.
+fn asking_of_grants(who: &str) -> Config {
+    config()
+        .var("CF_TEST_TRUST", who)
+        .var("CF_TEST_TRUST_GRANTS", "1")
+        .var("CONSENSFLOW_LAUNCH_TIMEOUT_MS", "8000")
+}
+
+/// The notes to the human about the grants of a window's folder.
+fn grants_notes(project: &Project) -> cf_e2e::Result<Vec<String>> {
+    Ok(project
+        .inbox("human")?
+        .iter()
+        .filter_map(|message| message["body"].as_str())
+        .filter(|body| body.contains("may apply without asking"))
+        .map(str::to_owned)
+        .collect())
+}
+
+/// The handle of the participant whose window `frame` is, as a note names it.
+fn handle_of(frame: &Value) -> String {
+    frame["id"]
+        .as_str()
+        .and_then(|id| id.split_once('-'))
+        .map(|(_, handle)| format!("@{handle}'s window"))
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_worker_asked_of_its_trusted_folders_grants_is_held_and_the_human_told_and_nothing_pressed(
+) -> Outcome {
+    let rig = Rig::start(asking_of_grants("worker"))?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"].as_str().unwrap_or_default();
+    rig.tell(
+        project.id(),
+        &format!("DISPATCH --tier {tier} Reply with exactly: GRANTS_DONE"),
+    )?;
+    rig.wait_for("the human to be told of the grants", secs(60), || {
+        Ok(grants_notes(&project)?.len() == 1)
+    })?;
+    // Held past the 8 s its launch has, and nothing pressed, though the folder is the
+    // project's own.
+    sleep(Duration::from_secs(10));
+    assert_eq!(
+        keys_given(&rig),
+        Vec::<String>::new(),
+        "a key went into the question"
+    );
+    let lane = project.lane("worker")?;
+    assert_eq!(
+        lane["activity"]["reason"], "the window asks whether to trust its folder",
+        "{lane}"
+    );
+    assert_ne!(
+        project.task(1)?["state"],
+        "failed",
+        "T-1 failed while it asked"
+    );
+    let window = workers(&rig, &project)[0].clone();
+    let notes = grants_notes(&project)?;
+    assert!(notes[0].contains(&handle_of(&window)), "{notes:?}");
+    let answered: Vec<String> = project
+        .inbox("human")?
+        .iter()
+        .filter_map(|message| message["body"].as_str())
+        .filter(|body| body.contains("answered yes"))
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(
+        answered,
+        Vec::<String>::new(),
+        "ConsensFlow said it answered"
+    );
+    // The human's no goes on without the grants, and the task with it.
+    human_presses(&rig, &window, &[ENTER])?;
+    rig.wait_for("T-1 to be done", secs(60), || {
+        let state = project.task(1)?["state"].clone();
+        assert_ne!(state, "failed", "T-1 failed after the no");
+        Ok(state == "done")
+    })?;
+    assert_eq!(keys_given(&rig), ["enter"]);
+    assert_eq!(trusted(&rig), "", "the no wrote a trust down");
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_no_to_a_trusted_folders_grants_in_one_window_and_the_other_window_asking_them_is_told_of_again(
+) -> Outcome {
+    // Both of the worker's windows ask at once, and the human is told once. Their no in
+    // the first is that window's alone: the second still asks, and is told of again.
+    let rig = Rig::start(asking_of_grants("worker"))?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    two_tasks(&rig, &project, "SLEEP 3 ")?;
+    rig.wait_for("both windows to ask, and the human told", secs(60), || {
+        Ok(workers(&rig, &project).len() == 2 && grants_notes(&project)?.len() == 1)
+    })?;
+    let windows = workers(&rig, &project);
+    let (first, second) = if grants_notes(&project)?[0].contains(&handle_of(&windows[0])) {
+        (windows[0].clone(), windows[1].clone())
+    } else {
+        (windows[1].clone(), windows[0].clone())
+    };
+    human_presses(&rig, &first, &[ENTER])?;
+    rig.wait_for("the human to be told of the other window", secs(60), || {
+        let notes = grants_notes(&project)?;
+        Ok(notes.len() == 2 && notes.iter().any(|note| note.contains(&handle_of(&second))))
+    })?;
+    assert_eq!(
+        keys_given(&rig),
+        ["enter"],
+        "a key went into the other window"
+    );
+    human_presses(&rig, &second, &[ENTER])?;
+    rig.wait_for("T-1 and T-2 to be done", secs(60), || both_done(&project))?;
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_chief_asked_of_its_trusted_folders_grants_is_held_till_the_human_answers() -> Outcome {
+    // A chief at the question read as no question was at rest: what was pasted into it
+    // was swallowed, and its Enter chose the no.
+    let rig = Rig::start(asking_of_grants("chief"))?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    rig.wait_for("the human to be told of the grants", secs(60), || {
+        Ok(grants_notes(&project)?.len() == 1)
+    })?;
+    let chief = project.lane("chief")?;
+    assert_eq!(
+        chief["activity"]["reason"], "the window asks whether to trust its folder",
+        "{chief}"
+    );
+    assert!(grants_notes(&project)?[0].contains("@chief"));
+    assert_eq!(keys_given(&rig), Vec::<String>::new(), "a key went into it");
+    let window = chiefs(&rig, &project)[0].clone();
+    human_presses(&rig, &window, &[DOWN, ENTER])?;
+    // Past the question, it takes what it is told.
+    rig.tell(project.id(), "Reply with exactly: CHIEF_HEARD")?;
+    assert_eq!(keys_given(&rig), ["down", "enter"]);
+    let folder = real(rig.workspace());
+    assert!(
+        trusted(&rig)
+            .lines()
+            .any(|line| real(Path::new(line)) == folder),
+        "the yes trusted no folder: {}",
+        trusted(&rig)
+    );
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_window_that_goes_while_it_asks_of_its_folders_grants_leaves_the_next_that_asks_them_told_of(
+) -> Outcome {
+    // The worker's window that asks is ended before anyone answers it; the window
+    // opened for the worker's next task asks again, and the human is told again.
+    let rig = Rig::start(asking_of_grants("worker"))?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    rig.tell(
+        project.id(),
+        &format!("DISPATCH --tier {tier} Reply with exactly: FIRST_DONE"),
+    )?;
+    rig.wait_for("the human to be told of the grants", secs(60), || {
+        Ok(grants_notes(&project)?.len() == 1)
+    })?;
+    let first = workers(&rig, &project)[0].clone();
+    let killed = rig.host(
+        "pane.kill",
+        json!({ "id": first["id"], "generation": first["generation"] }),
+    )?;
+    assert_eq!(killed["ok"], true, "{killed}");
+    rig.wait_for("the window to go", secs(30), || {
+        Ok(rig
+            .exits()
+            .iter()
+            .any(|exit| exit["id"] == first["id"] && exit["generation"] == first["generation"]))
+    })?;
+    rig.tell(
+        project.id(),
+        &format!("DISPATCH --tier {tier} Reply with exactly: SECOND_DONE"),
+    )?;
+    rig.wait_for("the human to be told of the next window", secs(90), || {
+        Ok(grants_notes(&project)?.len() == 2)
+    })?;
+    assert_eq!(
+        keys_given(&rig),
+        Vec::<String>::new(),
+        "a key went into a question"
+    );
+    rig.close()?;
+    Ok(())
+}

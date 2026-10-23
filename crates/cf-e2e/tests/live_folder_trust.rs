@@ -15,6 +15,14 @@
 //!   question opens on "No, exit"; Down, then Enter, says yes, which it writes down
 //!   for the repository's root (its question names the window's own folder), so a
 //!   window opened anywhere in it again does not ask.
+//! - Claude Code asks again, in the same dialog, of a folder trusted by a folder above
+//!   it whose own settings grant more than its trust (2.1.309, T-354: a plain folder
+//!   below a trusted one, its `.claude/settings.json` pre-approving a tool; so would a
+//!   server of its `.mcp.json` with a header helper, which a window shut out of the
+//!   owner's MCP servers never reads). Its no reads "No, continue without these
+//!   permissions" and goes on without them; its yes lets them apply without asking.
+//!   ConsensFlow answers it never: the engine must read it as the human's question,
+//!   press nothing, and the window must still ask after.
 //! - Codex opened alone (`codex --dangerously-bypass-approvals-and-sandbox`) asks in
 //!   the same folders before it starts a thread ("Trust this folder?", its `›` on
 //!   "Trust and continue", which Enter takes, a yes for the repository's root, which
@@ -27,7 +35,8 @@
 //! (Claude Code, Pi, OpenCode, Devin: Codex's is not), opened as the app opens one (its
 //! own command line for a new conversation; a Claude window shut out of the owner's MCP
 //! servers and browser, and not asked to trust its folder first), in folders of its own
-//! made fresh for the run, below the live folders: a plain folder; a new repository
+//! made fresh for the run, below the live folders: a plain folder, and a plain folder
+//! below it whose settings pre-approve a tool once it is answered; a new repository
 //! (`git init`), and the same again once answered; a repository, then a plain folder
 //! and a new repository below it once it is trusted; a plain folder of a repository
 //! nobody trusted; a linked worktree (`git worktree add`) of a repository nobody
@@ -129,6 +138,9 @@ const RESUMED: [(&str, usize, usize, usize); 2] = [
 enum Case {
     /// A plain folder.
     Fresh,
+    /// A plain folder below the answered plain one, its `.claude/settings.json`
+    /// pre-approving a tool.
+    Granted,
     /// A new repository.
     Repository,
     /// The same repository, opened again once answered.
@@ -148,8 +160,9 @@ enum Case {
 }
 
 impl Case {
-    const ALL: [Case; 9] = [
+    const ALL: [Case; 10] = [
         Case::Fresh,
+        Case::Granted,
         Case::Repository,
         Case::Again,
         Case::Parent,
@@ -163,6 +176,7 @@ impl Case {
     const fn name(self) -> &'static str {
         match self {
             Case::Fresh => "fresh",
+            Case::Granted => "plain below with pre-approved tools",
             Case::Repository => "repository",
             Case::Again => "repository again",
             Case::Parent => "parent",
@@ -179,6 +193,7 @@ impl Case {
     const fn folder(self) -> (&'static str, Option<&'static str>) {
         match self {
             Case::Fresh => ("fresh", None),
+            Case::Granted => ("fresh/granted", None),
             Case::Repository | Case::Again => ("repository", Some("repository")),
             Case::Parent => ("parent", Some("parent")),
             Case::Below => ("parent/below", None),
@@ -193,18 +208,26 @@ impl Case {
 }
 
 /// Whether `harness` must ask in `case`: Claude Code in a repository nobody
-/// answered; nobody else, ever.
+/// answered, and of a trusted folder's grants; nobody else, ever.
 fn must_ask(harness: Harness, case: Case) -> bool {
-    harness == Harness::Claude
-        && matches!(
-            case,
-            Case::Repository
-                | Case::Parent
-                | Case::RepositoryBelow
-                | Case::Untrusted
-                | Case::Worktree
-                | Case::Submodule
-        )
+    must_grant(harness, case)
+        || harness == Harness::Claude
+            && matches!(
+                case,
+                Case::Repository
+                    | Case::Parent
+                    | Case::RepositoryBelow
+                    | Case::Untrusted
+                    | Case::Worktree
+                    | Case::Submodule
+            )
+}
+
+/// Whether `harness` must ask in `case` of what its folder's settings grant, which is
+/// the human's to answer: Claude Code in a plain folder below a trusted one whose
+/// settings pre-approve a tool.
+fn must_grant(harness: Harness, case: Case) -> bool {
+    harness == Harness::Claude && case == Case::Granted
 }
 
 /// Whether a screen speaks of trust at all: the word, whatever reads it.
@@ -367,6 +390,18 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
         )?;
     }
     let directory = live_folder_in(&home, &name)?;
+    if case == Case::Granted {
+        let settings = directory.join(".claude");
+        cf_e2e::files::make_dir(&settings)?;
+        let granted = json!({ "permissions": { "allow": ["Bash(ls:*)"] } });
+        fs::write(settings.join("settings.json"), granted.to_string()).map_err(|source| {
+            Error::File {
+                action: "write",
+                path: settings.join("settings.json"),
+                source,
+            }
+        })?;
+    }
     if let (Some(repository), false) = (repository, case == Case::Again) {
         let at = live_folder_in(&home, &format!("{base}/{repository}"))?;
         let made = Run::new(Path::new("git"))
@@ -396,6 +431,8 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     let mut lines = vec![format!("drew: {drew}")];
     lines.extend(first.iter().map(|line| format!("  {line}")));
     let asked = engine_asks(harness, &first)?;
+    // The question of the folder's grants, which no key of the engine's answers.
+    let grants = asked && engine_read(harness, &first)?["grants"] == true;
     let mut keys = 0;
     let mut screen = first.clone();
     while let Some(key) = engine_key(harness, &screen)? {
@@ -411,7 +448,12 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     let answered = !engine_asks(harness, &screen)?;
     let unread = speaks_of_trust(&first) && !asked;
     let at_prompt = drew && !window.closed() && answered && engine_reads_prompt(harness, &screen)?;
-    if asked {
+    if grants {
+        lines.push(format!(
+            "the question of the folder's grants; {keys} keys; still asks after: {}",
+            !answered
+        ));
+    } else if asked {
         lines.push(format!("answered with {keys} keys; after them:"));
         lines.extend(screen.iter().map(|line| format!("  {line}")));
     }
@@ -423,9 +465,17 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     window.kill();
     sleep(Duration::from_secs(1));
     // Claude Code keeps the yes for the folder the engine says a yes trusts, and
-    // nothing else: what tells the engine whether a yes is the project's.
+    // nothing else: what tells the engine whether a yes is the project's. Where it asked
+    // of the folder's grants and nothing answered, it keeps nothing.
     let mut kept_where_said = true;
-    if asked && harness == Harness::Claude {
+    if must_grant(harness, case) {
+        let kept: Vec<String> = claude_trusted(install.home(), &under)
+            .into_iter()
+            .filter(|folder| !trusted_before.contains(folder))
+            .collect();
+        kept_where_said = kept.is_empty();
+        lines.push(format!("Claude Code kept a yes for {kept:?}"));
+    } else if asked && harness == Harness::Claude {
         let (folder, inside) = predicted(&directory)?;
         let kept: Vec<String> = claude_trusted(install.home(), &under)
             .into_iter()
@@ -436,10 +486,17 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
             "the engine says a yes trusts {folder} (the project's: {inside}); Claude Code kept it for {kept:?}"
         ));
     }
+    // A question of the folder's grants is the human's: read as such, pressed nothing,
+    // and still asked once the engine is done with it.
+    let held = if must_grant(harness, case) {
+        grants && keys == 0 && !answered
+    } else {
+        !grants && asked == must_ask(harness, case) && at_prompt
+    };
     Ok(Seen {
         asked,
         keys,
-        held: asked == must_ask(harness, case) && at_prompt && !unread && kept_where_said,
+        held: held && !unread && kept_where_said,
         lines,
     })
 }
@@ -472,7 +529,9 @@ fn windows(
             harness.name(),
             case.name(),
             seen.held,
-            if seen.asked {
+            if must_grant(harness, case) {
+                format!("asked of its grants; {} keys", seen.keys)
+            } else if seen.asked {
                 format!("asked; answered with {} keys", seen.keys)
             } else {
                 "did not ask".to_owned()
@@ -1015,6 +1074,7 @@ mod tests {
         assert_eq!(
             asking,
             [
+                "plain below with pre-approved tools",
                 "repository",
                 "parent",
                 "repository below",

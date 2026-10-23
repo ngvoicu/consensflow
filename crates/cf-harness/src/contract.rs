@@ -246,6 +246,12 @@ pub enum Question {
     /// The question, its choice drawn where the reader cannot place it (a cursor
     /// drawn otherwise, or a redraw caught halfway): no key is known.
     Unplaced,
+    /// The question asked of a folder whose trust is already accepted, by a folder
+    /// above it, where the folder's own settings grant more than trusting it does
+    /// (Claude Code 2.1.309: tools its `.claude/settings.json` pre-approves, folders it
+    /// adds, commands that mint the headers of `.mcp.json`'s servers). Its yes lets
+    /// them apply without asking, a grant beyond the folder's trust: the human's alone.
+    Grants,
 }
 
 /// A window open on its harness.

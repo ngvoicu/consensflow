@@ -7,6 +7,16 @@
 //! and goes on to its prompt, and to the first message it was opened with. Before
 //! 2.1.287 the yes came first, numbered: the choice is read by its words. Its prompt,
 //! once it is past the question, is told by the line under its input box.
+//!
+//! The same dialog asks again of a folder whose trust is already accepted, but by a
+//! folder above it rather than for the folder itself (or its repository's root),
+//! where the folder's own settings grant more than trusting it does (2.1.309, T-354:
+//! a plain folder below a trusted one, or a repository trusted at a folder below its
+//! root, whose `.claude/settings.json` pre-approves a tool, or whose `.mcp.json`
+//! names a server with a header helper). Its no then reads "No, continue without
+//! these permissions" and goes on into the window without them; its yes lets them
+//! apply without asking, and writes the trust down for the folder itself. That
+//! question is the human's ([`Question::Grants`]).
 
 use crate::contract::Question;
 use crate::shared::trust::{chosen_at, names, offers, shows, DOWN, ENTER};
@@ -17,6 +27,9 @@ const PROMPT: &str = "bypass permissions on";
 /// The choice that trusts the folder, and the one that ends the window.
 const YES: &str = "Yes, I trust this folder";
 const NO: &str = "No, exit";
+
+/// The no of the question asked of a trusted folder's grants: it goes on without them.
+const NO_GRANTS: &str = "No, continue without these permissions";
 
 /// The line the question draws below its choices (2.1.305), and no input box does.
 /// It is made of the key bindings, and reads otherwise while a Ctrl-C is pending
@@ -35,6 +48,9 @@ const HINT: &str = "Enter to confirm";
 /// choices, each on a line of its own (a list in a message): no question. Where there is no `❯` at all (a cursor drawn
 /// otherwise, or a redraw caught halfway), the question is there and its key unknown.
 pub(crate) fn toward_trust(screen: &[String]) -> Option<Question> {
+    if let Some(drawn) = grants_drawn(screen) {
+        return toward_trust(&drawn).map(|_| Question::Grants);
+    }
     if !names_choices(screen) {
         return None;
     }
@@ -46,6 +62,22 @@ pub(crate) fn toward_trust(screen: &[String]) -> Option<Question> {
         Some(_) => return None,
         None => Question::Unplaced,
     })
+}
+
+/// `screen` with the no of the question asked of a trusted folder's grants in the
+/// words of the other question's, where it names that question's choices and not the
+/// other's: it is drawn the same, and read by the same rules, its question the human's
+/// wherever its `❯` is. None where it names other choices.
+fn grants_drawn(screen: &[String]) -> Option<Vec<String>> {
+    if !(offers(screen, YES) && offers(screen, NO_GRANTS)) || offers(screen, NO) {
+        return None;
+    }
+    Some(
+        screen
+            .iter()
+            .map(|line| line.replace(NO_GRANTS, NO))
+            .collect(),
+    )
 }
 
 /// Whether `screen` names both of the question's choices, each on a line of its own:
@@ -60,6 +92,10 @@ pub(crate) fn names_choices(screen: &[String]) -> bool {
 /// permissions on", 2.1.305), and no question whose choice is placed: the question
 /// draws no such line, so one read with its choice unplaced beside it is quoted.
 pub(crate) fn shows_prompt(screen: &[String]) -> bool {
+    let placed = |drawn: Vec<String>| matches!(toward_trust(&drawn), Some(Question::Toward(_)));
+    if grants_drawn(screen).is_some_and(placed) {
+        return false;
+    }
     shows(screen, PROMPT) && !matches!(toward_trust(screen), Some(Question::Toward(_)))
 }
 
@@ -157,6 +193,78 @@ mod tests {
         let third = lines(" Quick safety check: Is this a project you created or one you trust?\n   No, exit\n ❯ Yes, and remember this\n   Yes, I trust this folder\n\n Enter to confirm · Esc to cancel");
         assert_eq!(toward_trust(&third), Some(Question::Unplaced));
         assert!(!shows_prompt(&third));
+    }
+
+    /// The question of a trusted folder whose settings grant more, its `❯` on the no
+    /// where `on_no`, as Claude Code 2.1.309 draws its last lines (T-354's probe: a
+    /// plain folder below a trusted one, its `.claude/settings.json` pre-approving a
+    /// tool).
+    fn grants(on_no: bool) -> Vec<String> {
+        let (no, yes) = if on_no { ("❯", " ") } else { (" ", "❯") };
+        lines(&format!(" ⚠ This folder pre-approves 1 tool permission in .claude/settings.json:\n   Bash(ls:*)\n These will apply without asking. Only proceed if you trust this configuration.\n\n Security guide\n\n {no} No, continue without these permissions\n {yes} Yes, I trust this folder\n\n Enter to confirm · Esc to cancel"))
+    }
+
+    #[test]
+    fn the_question_of_a_trusted_folder_whose_settings_grant_more_is_the_humans_wherever_its_cursor_is(
+    ) {
+        // It opens on the no, which goes on into the window without the grants.
+        assert_eq!(toward_trust(&grants(true)), Some(Question::Grants));
+        assert_eq!(toward_trust(&grants(false)), Some(Question::Grants));
+        assert!(!shows_prompt(&grants(true)) && !shows_prompt(&grants(false)));
+        // A prompt's line above it, from before it was drawn, is no prompt.
+        let mut below_a_prompt = lines("   ⏵⏵ bypass permissions on (shift+tab to cycle)");
+        below_a_prompt.extend(grants(true));
+        assert!(!shows_prompt(&below_a_prompt));
+        assert_eq!(toward_trust(&below_a_prompt), Some(Question::Grants));
+        // Its cursor drawn otherwise, or not yet drawn: still the human's.
+        let otherwise: Vec<String> = grants(true)
+            .iter()
+            .map(|line| line.replace('❯', ">"))
+            .collect();
+        assert_eq!(toward_trust(&otherwise), Some(Question::Grants));
+        let halfway: Vec<String> = grants(true)
+            .iter()
+            .map(|line| line.replace('❯', " "))
+            .collect();
+        assert_eq!(toward_trust(&halfway), Some(Question::Grants));
+        // A header helper of `.mcp.json`'s, as it names one.
+        let helper = lines(" ⚠ This folder runs commands to mint HTTP headers (headersHelper), declared in .mcp.json\n These will apply without asking. Only proceed if you trust this configuration.\n\n ❯ No, continue without these permissions\n   Yes, I trust this folder\n\n Enter to confirm · Esc to cancel");
+        assert_eq!(toward_trust(&helper), Some(Question::Grants));
+    }
+
+    #[test]
+    fn a_conversation_that_quotes_the_question_of_a_trusted_folders_grants_asks_nothing() {
+        // Its choices listed above the input box, the prompt's line below it.
+        let listed = lines(" ⏺ The dialog offers:\n   - No, continue without these permissions\n   - Yes, I trust this folder\n ❯ \n   ⏵⏵ bypass permissions on (shift+tab to cycle)");
+        assert_eq!(toward_trust(&listed), None);
+        assert!(shows_prompt(&listed));
+        // Its very words typed in the input box.
+        let typed = lines(" ⏺ The dialog offers:\n   - No, continue without these permissions\n   - Yes, I trust this folder\n ❯ No, continue without these permissions\n   ⏵⏵ bypass permissions on (shift+tab to cycle)");
+        assert_eq!(toward_trust(&typed), None);
+        assert!(shows_prompt(&typed));
+        // A past user turn's `❯` above more of the conversation, no hint below it.
+        let past = lines("   - No, continue without these permissions\n   - Yes, I trust this folder\n ❯ what does it mean?\n ⏺ It continues without them.");
+        assert_eq!(toward_trust(&past), None);
+        // Named among other words, or with one choice alone, it is no question.
+        let prose = lines(
+            " ⏺ It says No, continue without these permissions and Yes, I trust this folder.",
+        );
+        assert_eq!(toward_trust(&prose), None);
+        assert_eq!(
+            toward_trust(&lines(" ❯ No, continue without these permissions")),
+            None
+        );
+        // The other question below a conversation that lists this one's no: that one.
+        let below = lines("   - No, continue without these permissions\n Quick safety check\n ❯ No, exit\n   Yes, I trust this folder\n Enter to confirm · Esc to cancel");
+        assert_eq!(toward_trust(&below), Some(Question::Toward(DOWN)));
+    }
+
+    #[test]
+    #[ignore = "known failure (T-354's probe, Claude Code 2.1.309): a window opened in a trusted folder whose .mcp.json names a server it was never told of asks of it in a dialog of its own, read as no question; issue page claude-s-mcp-server-dialog-is-read-as-no-question in consensflow-sme"]
+    fn the_dialog_of_a_new_server_of_the_projects_mcp_json_is_a_question() {
+        // As Claude Code 2.1.309 draws its last lines, its cursor on the last choice.
+        let asked = lines(" New MCP server found in this project: probe\n\n MCP servers may execute code or access system resources. All tool calls require approval.\n\n   Use this MCP server\n   Use this and all future MCP servers in this project\n ❯ Continue without using this MCP server\n\n Enter to confirm · Esc to cancel");
+        assert!(toward_trust(&asked).is_some());
     }
 
     #[test]

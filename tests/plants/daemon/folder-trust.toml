@@ -42,6 +42,12 @@
 # Round 7 (Calliope's last re-check, T-325): the hint line counts only below the cursor's line,
 # and the note that a window's screen could not be read tells the page the board moved.
 #
+# The question of a trusted folder's grants (T-354, Claude Code 2.1.309): the same dialog, asked
+# of a folder trusted by a folder above it whose own settings grant more, its no "No, continue
+# without these permissions". It is read by the other question's rules, its no's words aside, and
+# is the human's wherever the folder is: pressed nothing, told in words of its own once for the
+# windows that ask it together, and told of again once the window it was told of is past it or gone.
+#
 # The cases are `crates/cf-e2e/tests/regressions/a_trust_question_after_git_init_stopped_every_launch.rs`
 # (a stand-in that asks as Claude Code 2.1.305 does, the shape the live suite
 # `cargo xtask live folder-trust` found) and the readers' own tests. The rig's cases build the
@@ -82,6 +88,10 @@ folder-trust-rig-quoted-tail = ["cargo", "test", "--offline", "-p", "cf-e2e", "-
 folder-trust-rig-unread-bound = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_whose_screen_the_host_never_shows"]
 folder-trust-rig-unread-grown = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_whose_screen_the_host_cannot_show_is_past_the_question"]
 folder-trust-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "trust::"]
+folder-trust-rig-grants = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked_of_its_trusted_folders_grants"]
+folder-trust-rig-grants-again = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_no_to_a_trusted_folders_grants"]
+folder-trust-rig-grants-gone = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_that_goes_while_it_asks_of_its_folders_grants"]
+folder-trust-live-cases = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_folder_trust", "claude_must_ask"]
 folder-trust-rig-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief"]
 
 [[plant]]
@@ -879,3 +889,138 @@ runs = ["folder-trust-rig-router-moves"]
 file = "crates/cf-e2e/src/rig/route.rs"
 find = "                seen.moves.push(jiff::Timestamp::now().as_millisecond());"
 replace = "                let _ = &seen.moves;"
+
+[[plant]]
+name = "folder trust: the question of a trusted folder's grants reads as no question (T-354)"
+meant = "the_question_of_a_trusted_folder_whose_settings_grant_more_is_the_humans_wherever_its_cursor_is"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "        return toward_trust(&drawn).map(|_| Question::Grants);"
+replace = "        return toward_trust(&drawn).and(None);"
+
+[[plant]]
+name = "folder trust: the question of a trusted folder's grants is read as the other question, its key known (T-354)"
+meant = "the_question_of_a_trusted_folder_whose_settings_grant_more_is_the_humans_wherever_its_cursor_is"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "        return toward_trust(&drawn).map(|_| Question::Grants);"
+replace = "        return toward_trust(&drawn);"
+
+[[plant]]
+name = "folder trust: a screen that names the grants' choices asks them, quoted or not (T-354)"
+meant = "a_conversation_that_quotes_the_question_of_a_trusted_folders_grants_asks_nothing"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "        return toward_trust(&drawn).map(|_| Question::Grants);"
+replace = "        return Some(Question::Grants);"
+
+[[plant]]
+name = "folder trust: a quote of the grants' no makes the other question below it theirs (T-354)"
+meant = "a_conversation_that_quotes_the_question_of_a_trusted_folders_grants_asks_nothing"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "    if !(offers(screen, YES) && offers(screen, NO_GRANTS)) || offers(screen, NO) {"
+replace = "    if !(offers(screen, YES) && offers(screen, NO_GRANTS)) {"
+
+[[plant]]
+name = "folder trust: a prompt's line beside the grants' question, its cursor placed, reads as the prompt (T-354)"
+meant = "the_question_of_a_trusted_folder_whose_settings_grant_more_is_the_humans_wherever_its_cursor_is"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = """
+    if grants_drawn(screen).is_some_and(placed) {
+        return false;
+    }"""
+replace = ""
+
+[[plant]]
+name = "folder trust: the live suite's reader says nothing of the grants (T-354)"
+meant = "the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about_its_folder"
+runs = ["folder-trust-tooling"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/tooling.rs"
+find = '    answer["grants"] = json!(key == Some(Question::Grants));'
+replace = '    answer["grants"] = json!(false);'
+
+[[plant]]
+name = "folder trust: the live suite has no case of a trusted folder's grants (T-354)"
+meant = "claude_must_ask_in_a_repository_nobody_answered_and_no_harness_ever_elsewhere"
+runs = ["folder-trust-live-cases"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_folder_trust.rs"
+find = "    harness == Harness::Claude && case == Case::Granted\n}"
+replace = "    harness == Harness::Claude && case == Case::Granted && false\n}"
+
+[[plant]]
+name = "folder trust: ConsensFlow answers the grants of the project's own folder (T-354)"
+meant = "a_worker_asked_of_its_trusted_folders_grants_is_held_and_the_human_told_and_nothing_pressed"
+runs = ["folder-trust-rig-grants"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = """
+                            Some(key)
+                        }
+                        _ => None,"""
+replace = '''
+                            Some(key)
+                        }
+                        Question::Grants if inside => Some(b"\x1b[B".as_slice()),
+                        _ => None,'''
+
+[[plant]]
+name = "folder trust: the grants are told as a question ConsensFlow could not answer (T-354)"
+meant = "a_worker_asked_of_its_trusted_folders_grants_is_held_and_the_human_told_and_nothing_pressed"
+runs = ["folder-trust-rig-grants"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                    } else if asking >= TELL_LOOKS && question == Question::Grants {"
+replace = "                    } else if asking >= TELL_LOOKS && question == Question::Grants && false {"
+
+[[plant]]
+name = "folder trust: a no to the grants in one window leaves the other that asks them untold (T-354)"
+meant = "a_no_to_a_trusted_folders_grants_in_one_window_and_the_other_window_asking_them_is_told_of_again"
+runs = ["folder-trust-rig-grants-again"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = """
+        // A no to the grants is the window's alone, and the next window asks again.
+        if grants {
+            self.forget_grants_told(project, &folder);
+        }"""
+replace = ""
+
+[[plant]]
+name = "folder trust: a window that goes while it asks of the grants leaves the next untold (T-354)"
+meant = "a_window_that_goes_while_it_asks_of_its_folders_grants_leaves_the_next_that_asks_them_told_of"
+runs = ["folder-trust-rig-grants-gone"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = """
+            if !self.shows(record, pane) {
+                if grants {
+                    self.forget_grants_told(project, &folder);
+                }
+                return Ok(());"""
+replace = """
+            if !self.shows(record, pane) {
+                return Ok(());"""

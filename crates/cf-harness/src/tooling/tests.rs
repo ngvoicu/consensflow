@@ -317,7 +317,7 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
     ];
     assert_eq!(
         read("claude-code", &claude),
-        json!({ "asks": true, "key": "down", "prompt": false })
+        json!({ "asks": true, "key": "down", "grants": false, "prompt": false })
     );
     // Its cursor drawn otherwise: asked, and no key known.
     assert_eq!(
@@ -329,7 +329,20 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
                 "   Yes, I trust this folder"
             ]
         ),
-        json!({ "asks": true, "key": null, "prompt": false })
+        json!({ "asks": true, "key": null, "grants": false, "prompt": false })
+    );
+    // Asked of a trusted folder's grants (T-354): asked, the human's, and no key.
+    assert_eq!(
+        read(
+            "claude-code",
+            &[
+                " These will apply without asking. Only proceed if you trust this configuration.",
+                " ❯ No, continue without these permissions",
+                "   Yes, I trust this folder",
+                " Enter to confirm · Esc to cancel"
+            ]
+        ),
+        json!({ "asks": true, "key": null, "grants": true, "prompt": false })
     );
     let codex = [
         "  Trust this folder? Codex can read, edit, and run files here.",
@@ -338,7 +351,7 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
     ];
     // A harness that never asks as ConsensFlow opens it reads none, whatever the
     // screen shows: Codex's own question is its window's opened alone.
-    let none = json!({ "asks": false, "key": null, "prompt": false });
+    let none = json!({ "asks": false, "key": null, "grants": false, "prompt": false });
     assert_eq!(read("codex", &codex), none);
     for kind in ["pi", "opencode", "devin"] {
         assert_eq!(read(kind, &claude), none, "{kind}");
@@ -363,7 +376,7 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
     ];
     assert_eq!(
         read("claude-code", &prompt),
-        json!({ "asks": false, "key": null, "prompt": true })
+        json!({ "asks": false, "key": null, "grants": false, "prompt": true })
     );
 }
 
