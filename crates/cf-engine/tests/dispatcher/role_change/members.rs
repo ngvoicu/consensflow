@@ -11,11 +11,12 @@
 
 use std::rc::Rc;
 
-use cf_engine::testing::Context;
+use cf_engine::testing::{Context, Restarted};
 use cf_harness::records::Role;
-use cf_ledger::{MessageView, NewTask, ProjectView};
+use cf_ledger::{MessageView, NewNote, NewTask, ProjectView};
 use serde_json::{json, Value};
 
+use super::launch::refusing_pastes;
 use super::{codex, recorded, replacements, REPLACES};
 
 /// The words the window gives the role when it has it.
@@ -489,4 +490,174 @@ fn the_answer_a_session_gave_its_task_before_its_role_was_said_is_the_result_and
         "and the host is asked to end what the turn left, as for any result"
     );
     assert_eq!(told_of_the_work(&context, &project).len(), 1);
+}
+
+/// A session at work on T-1 when the app quit, its role rewritten meanwhile, whose
+/// window the Resume cannot open (its harness's launch failed before any window), and a
+/// note the chief told it about T-1 before the Resume: the note is what the next launch
+/// is for, and the role goes ahead of it. Every window from then on refuses every
+/// paste, so the note that says the role fails. Exits are held, as the bridge host sends
+/// a window's exit after it answers its kill (the test host's own raises the exit inside
+/// its kill). The project, the engine started again, the session's handle, its id and
+/// the note.
+fn told_before_a_reopen_that_failed(
+    context: &Context,
+) -> (ProjectView, Restarted<'_>, String, i64, MessageView) {
+    let project = working_session(context);
+    let session = session_of(context, &project);
+    let member = context.id(project.id, &session);
+    quit_with_the_role_rewritten(context, &session);
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    context.host.hold_exits.set(true);
+    let reopening = session.clone();
+    context
+        .codex
+        .prepare
+        .replace(Some(Rc::new(move |launch: &Value| {
+            if launch["participant"]["handle"] == reopening.as_str() {
+                Err("no Codex".to_owned())
+            } else {
+                Ok(())
+            }
+        })));
+    let note = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project.id,
+            &NewNote {
+                from: Some("chief".to_owned()),
+                to: session.clone(),
+                task: Some(1),
+                body: "Use the grammar in the docs".to_owned(),
+            },
+        )
+        .unwrap();
+    after.resume_project(project.id).unwrap();
+    assert_eq!(
+        context.task(project.id, 1).task.state,
+        "working",
+        "with no window"
+    );
+    context.codex.prepare.replace(None);
+    refusing_pastes(context);
+    (project, after, session, member, note)
+}
+
+/// The launch is given up as one that cannot say the role. Its exit is settled at the
+/// close, before the note the role went ahead of goes, in the bridge host's order:
+/// T-1 is paused and never failed, the note kept for its resume, and the chief and the
+/// human told why, once each (T-47 P2-1: T-1 failed, the note "did not reach").
+#[test]
+fn a_session_whose_launch_cannot_say_its_role_ahead_of_a_note_told_it_pauses_its_task_and_keeps_the_note_for_its_resume(
+) {
+    let context = codex();
+    let (project, after, session, member, note) = told_before_a_reopen_that_failed(&context);
+    for _ in 0..6 {
+        after.pass().unwrap();
+    }
+
+    let launch = context.codex.prepared().last().cloned().expect("a launch");
+    assert_eq!(launch["participant"]["handle"], session.as_str());
+    assert_eq!(launch["message"], Value::Null, "the role goes in first");
+    // The reopen's note that says the role was withdrawn with it; the launch's own failed.
+    let notes = replacements(&context, member);
+    let states: Vec<(&str, i64)> = notes
+        .iter()
+        .map(|note| (note.state.as_str(), note.attempts))
+        .collect();
+    assert_eq!(states, [("cancelled", 0), ("failed", 3)]);
+    let window = context.host.last(&session).unwrap().pane;
+    assert!(
+        context.host.killed().contains(&window),
+        "its window is closed"
+    );
+    let why = "the note that says its role did not reach it";
+    let kept = context.message(note.id);
+    assert_eq!(
+        (kept.state.as_str(), kept.reason.as_deref()),
+        (
+            "queued",
+            Some(format!("kept for T-1's resume: {why}").as_str())
+        )
+    );
+    assert_eq!(context.task(project.id, 1).task.state, "paused");
+    let kept_words = format!("m-{}", note.id);
+    let to_chief: Vec<String> = context
+        .inbox(context.id(project.id, "chief"))
+        .into_iter()
+        .rev()
+        .map(|message| message.body)
+        .filter(|said| said.contains(&kept_words) || said.contains(why))
+        .collect();
+    assert_eq!(
+        to_chief,
+        [format!(
+            "T-1 is paused: @{session}'s window closed: {why}; the words told its window wait for the resume: {kept_words}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+        )]
+    );
+    let to_human: Vec<String> = context
+        .inbox(context.id(project.id, "human"))
+        .into_iter()
+        .map(|message| message.body)
+        .filter(|said| said.contains(&kept_words) || said.contains(why))
+        .collect();
+    assert_eq!(
+        to_human,
+        [format!(
+            "{kept_words}, a note from @chief on T-1, waits for T-1's resume to reach @{session}: {why}."
+        )]
+    );
+
+    // The host's exit, when it comes, settles nothing more.
+    let host = Rc::clone(&context.host);
+    context.run(async move { host.exited(window).await });
+    after.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "paused");
+    assert_eq!(context.message(note.id).state, "queued");
+}
+
+/// The same launch, whose window's kill the host refuses: no exit pauses T-1, and the
+/// note the role went ahead of goes, failing, T-1 with it, whoever is told hearing why
+/// (T-63, as for a window unfit for work).
+#[test]
+fn a_session_whose_launch_cannot_say_its_role_and_whose_kill_is_refused_has_the_note_told_it_fail_and_says_why(
+) {
+    let context = codex();
+    let (project, after, session, _member, note) = told_before_a_reopen_that_failed(&context);
+    context.host.refuse_kills.set(true);
+    for _ in 0..6 {
+        after.pass().unwrap();
+    }
+
+    let why = "the note that says its role did not reach it";
+    assert_eq!(context.message(note.id).state, "failed");
+    assert_eq!(context.task(project.id, 1).task.state, "failed");
+    let kept_words = format!("m-{}", note.id);
+    let to_chief: Vec<String> = context
+        .inbox(context.id(project.id, "chief"))
+        .into_iter()
+        .map(|message| message.body)
+        .filter(|said| said.contains(&kept_words))
+        .collect();
+    assert_eq!(
+        to_chief,
+        [format!(
+            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\""
+        )]
+    );
+    let to_human: Vec<String> = context
+        .inbox(context.id(project.id, "human"))
+        .into_iter()
+        .map(|message| message.body)
+        .filter(|said| said.contains(&kept_words))
+        .collect();
+    assert_eq!(
+        to_human,
+        [format!(
+            "{kept_words}, a note from @chief on T-1, did not reach @{session}: {why}."
+        )]
+    );
 }

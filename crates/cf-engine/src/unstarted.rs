@@ -25,7 +25,7 @@ use crate::deliveries::Delivering;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::Prelude;
-use crate::runtime::{begin, returning};
+use crate::runtime::returning;
 use crate::seams::EngineError;
 use crate::shown::Shown;
 
@@ -199,6 +199,11 @@ impl Dispatcher {
     /// as it was closed, and no look can tell before the close: the chief opens again at
     /// the backoff whatever waits for it, told the turn was cut where its record holds one
     /// (Sol and Astra on round 2: closed with nothing left queued, it stayed closed).
+    /// A member's exit is settled at the close, before its first message fails, so that
+    /// words told to its window wait for the resume of the task the exit paused, and
+    /// nothing more goes into the window given up; its kill is waited for only so long
+    /// ([`Dispatcher::close_own_within`]), and one refused or not answered in that time
+    /// leaves the message to fail as before.
     pub(crate) async fn give_up_unstarted(
         self: &Rc<Self>,
         record: &Rc<Record>,
@@ -223,13 +228,12 @@ impl Dispatcher {
         if participant.role == "chief" {
             self.close_own(record, &pane).await?;
         } else {
-            let this = Rc::clone(self);
-            drop(
-                begin(&*self.seams.spawn, async move {
-                    let _ = this.seams.host.kill(&pane).await;
-                })
-                .await,
-            );
+            // A member's exit is settled at the close, before its first message fails: the
+            // exit pauses its task, and words told to its window wait for the resume, as at
+            // an unfit window's close (T-47 P2-1). The launch is not held for a kill that
+            // never answers: one refused, or not answered in its time, leaves no exit to
+            // pause the task, and the message fails, whoever gave it told why (T-63).
+            self.close_own_within(record, &pane).await?;
         }
         let because = if first {
             format!("the window could not take its first message: {error}")

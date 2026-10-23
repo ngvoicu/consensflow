@@ -35,6 +35,8 @@ cf-transcript-pages = ["cargo", "test", "--offline", "-p", "cf", "--test", "tran
 daemon-own-steps = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task::tests::own_steps"]
 engine-dispatcher-unfit = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unfit::"]
 ledger-lib-pauses = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::pauses::"]
+engine-dispatcher-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::"]
+engine-role-change-members = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::members::"]
 
 # B4: a brief on its way when the chief's own step is done.
 
@@ -345,7 +347,7 @@ find = """        let closed = match &pane {
         }
         self.launch_failed(record, &project, &participant, Some(failing), &said)"""
 replace = """        let (this, held) = (Rc::clone(self), Rc::clone(record));
-        let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
+        let closing = crate::runtime::begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
         self.launch_failed(record, &project, &participant, Some(failing), &said)?;
         closing.await?;
         Ok(())"""
@@ -404,3 +406,95 @@ file = "crates/cf-ledger/src/tasks/editing.rs"
 find = '            "paused" | "queued" => tell,'
 replace = '''            "paused" => tell,
             "queued" => format!("tell its window once it has begun: cf tell T-{number} \"…\""),'''
+
+# T-77 (T-47 P2-1): the two give-up paths left with the old shape. A member's launch given up
+# with the role unsaid (`abandon_launch`, `crates/cf-engine/src/role_change/prelude.rs`) and a
+# member's window that never came up (`give_up_unstarted`, `crates/cf-engine/src/unstarted.rs`)
+# settle the window's exit at its close, before the message the launch was for fails: the exit
+# pauses the task, and words told to the window wait for its resume, the chief and the human
+# told why, as at an unfit window's close (T-46). The kill's answer is waited for no longer than
+# `KILL_ANSWER_WAIT` (`close_own_within`, `crates/cf-engine/src/windows.rs`), and a kill refused
+# or not answered in that time leaves the message to fail as before (T-63). The tests hold the
+# host's exits, as the bridge host sends one after it answers the kill (`resume.rs`,
+# `role_change/members.rs`).
+
+[[plant]]
+name = "review 306: a member's launch that cannot say its role fails its message before its exit"
+meant = "a_session_whose_launch_cannot_say_its_role_ahead_of_a_note_told_it_pauses_its_task_and_keeps_the_note_for_its_resume"
+runs = ["engine-role-change-members"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change/prelude.rs"
+find = '''        if let Some(pane) = &pane {
+            self.close_own_within(record, pane).await?;
+        }
+        self.launch_failed(record, project, participant, failing, &said)
+    }'''
+replace = '''        let _ = &pane;
+        let (this, held) = (Rc::clone(self), Rc::clone(record));
+        let closing =
+            crate::runtime::begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
+        self.launch_failed(record, project, participant, failing, &said)?;
+        closing.await?;
+        Ok(())
+    }'''
+
+[[plant]]
+name = "review 306: a member's window that never came up fails its message before its exit"
+meant = "a_member_whose_window_never_comes_up_with_a_note_told_it_as_its_first_message_pauses_its_task_and_keeps_the_note_for_its_resume"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = "            self.close_own_within(record, &pane).await?;"
+replace = '''            let this = Rc::clone(self);
+            drop(
+                crate::runtime::begin(&*self.seams.spawn, async move {
+                    let _ = this.seams.host.kill(&pane).await;
+                })
+                .await,
+            );'''
+
+[[plant]]
+name = "review 306: a member's launch given up waits for a kill that never answers"
+meant = "a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it_fail_after_the_wait"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        match select(closing, self.seams.time.sleep(KILL_ANSWER_WAIT)).await {"
+replace = "        match select(closing, std::future::pending::<()>()).await {"
+
+[[plant]]
+name = "review 306: a member's launch given up never waits for its kill's answer"
+meant = "a_member_whose_window_never_comes_up_with_a_note_told_it_as_its_first_message_pauses_its_task_and_keeps_the_note_for_its_resume"
+runs = ["engine-dispatcher-resume", "engine-role-change-members"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        match select(closing, self.seams.time.sleep(KILL_ANSWER_WAIT)).await {"
+replace = "        match select(closing, std::future::ready(())).await {"
+
+[[plant]]
+name = "review 306: a member's window that never came up whose kill is refused is left at work"
+meant = "a_member_whose_window_never_comes_up_and_whose_kill_is_refused_has_the_note_told_it_fail_and_says_why"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = "            self.close_own_within(record, &pane).await?;"
+replace = '''            if self.close_own_within(record, &pane).await? == Some(false) {
+                return Ok(());
+            }'''
+
+[[plant]]
+name = "review 306: a member's launch that cannot say its role whose kill is refused is left at work"
+meant = "a_session_whose_launch_cannot_say_its_role_and_whose_kill_is_refused_has_the_note_told_it_fail_and_says_why"
+runs = ["engine-role-change-members"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change/prelude.rs"
+find = "            self.close_own_within(record, pane).await?;"
+replace = '''            if self.close_own_within(record, pane).await? == Some(false) {
+                return Ok(());
+            }'''

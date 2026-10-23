@@ -44,7 +44,6 @@ use cf_ledger::{LedgerError, MessageView, ParticipantView, ProjectView};
 use crate::deliveries::Delivering;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
-use crate::runtime::begin;
 use crate::seams::EngineError;
 
 /// What a launch put ahead of its window's queue: the replacement of the role,
@@ -271,7 +270,10 @@ impl Dispatcher {
     /// A launch that was to say the role first and cannot: its window is closed
     /// and the launch settled as one that did not come up. What the window shows is
     /// asked first, for the screen goes with it. An exit that came while the host
-    /// answered settled the launch already.
+    /// answered settled the launch already. A member's exit is settled at the close,
+    /// before the message the role went ahead of fails, so that words told to its
+    /// window wait for the resume of the task the exit paused; a kill the host refuses,
+    /// or does not answer in its time, leaves the message to fail as before.
     pub(crate) async fn abandon_launch(
         self: &Rc<Self>,
         project: &ProjectView,
@@ -301,10 +303,15 @@ impl Dispatcher {
             }
             return self.launch_failed(record, project, participant, failing, &said);
         }
-        let (this, held) = (Rc::clone(self), Rc::clone(record));
-        let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
-        self.launch_failed(record, project, participant, failing, &said)?;
-        closing.await?;
-        Ok(())
+        // A member's exit is settled at the close, before the message the role went ahead
+        // of fails: the exit pauses its task, and words told to its window wait for the
+        // resume, as at an unfit window's close (T-47 P2-1). The prelude is out of the
+        // record already, or the exit would fail that message itself. A kill refused, or
+        // not answered in its time, leaves no exit to pause the task: the message fails,
+        // and whoever gave it hears why (T-63).
+        if let Some(pane) = &pane {
+            self.close_own_within(record, pane).await?;
+        }
+        self.launch_failed(record, project, participant, failing, &said)
     }
 }

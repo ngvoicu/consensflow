@@ -6,9 +6,9 @@
 
 use std::rc::Rc;
 
-use cf_engine::testing::{Context, FakeAdapter, Made, Restarted};
+use cf_engine::testing::{Context, FakeAdapter, Gate, Made, Restarted};
 use cf_engine::ActivityState;
-use cf_ledger::{MessageView, RESUME_WORDS};
+use cf_ledger::{MessageView, NewNote, RESUME_WORDS};
 use serde_json::{json, Value};
 
 use crate::chiefs::to_human;
@@ -1229,5 +1229,326 @@ fn a_member_opened_again_at_rest_whose_window_never_comes_up_is_closed_and_said(
         context.task(project.id, 1).task.state,
         "working",
         "not at work with no window"
+    );
+}
+
+/// A member at rest with its task in hand when the app quit, whose window the Resume
+/// cannot open (its harness's launch failed before any window), and a note the chief
+/// told it about T-1 before the Resume: T-1 is at work with no window, and the note is
+/// the first message of the window the next pass opens for it. Exits are held, as the
+/// bridge host sends a window's exit after it answers its kill (the test host's own
+/// raises the exit inside its kill). The staff, the engine started again, the member's
+/// handle and the note.
+fn told_before_a_reopen_that_failed(
+    context: &Context,
+) -> (Tiers<'_>, Restarted<'_>, String, MessageView) {
+    let tiers = Tiers::new(context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    let session = tiers.assignee(1);
+    context.adapter.with(&session, |agent| agent.settled = true);
+    let after = quit_and_start(context);
+    context.advance(1_000);
+    context.host.hold_exits.set(true);
+    let reopening = session.clone();
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |launch| {
+        if launch["participant"]["handle"] == reopening.as_str() {
+            Err("no harness".to_owned())
+        } else {
+            Ok(())
+        }
+    }));
+    let note = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project,
+            &NewNote {
+                from: Some("chief".to_owned()),
+                to: session.clone(),
+                task: Some(1),
+                body: "Use the grammar in the docs".to_owned(),
+            },
+        )
+        .unwrap();
+    after.resume_project(project).unwrap();
+    assert_eq!(tiers.task(1).task.state, "working", "with no window");
+    assert!(to_human(context, project).contains(&format!(
+        "@{session} could not start: the launch failed: no harness."
+    )));
+    assert_eq!(context.message(note.id).state, "queued");
+    *context.adapter.prepare.borrow_mut() = None;
+    (tiers, after, session, note)
+}
+
+/// The window opened for the note never comes up. Its exit is settled at the
+/// close, before the note goes, in the bridge host's order, which answers the kill
+/// before the exit comes (exits held here; the test host's own raises the exit inside
+/// its kill): T-1 is paused and never failed, the note kept for its resume, and the
+/// chief and the human told why, once each (T-47 P2-1: T-1 failed, the note "did not
+/// reach").
+#[test]
+fn a_member_whose_window_never_comes_up_with_a_note_told_it_as_its_first_message_pauses_its_task_and_keeps_the_note_for_its_resume(
+) {
+    let context = Context::new();
+    let (tiers, after, session, note) = told_before_a_reopen_that_failed(&context);
+    let project = tiers.project.id;
+    let opened = context.host.opened().len();
+    never_up(&context.adapter);
+    after.pass().unwrap();
+    assert_eq!(context.host.opened().len(), opened + 1, "one for the note");
+    assert_match(
+        launch_of(&context, &session)["message"].as_str().unwrap(),
+        &format!(
+            r"^\[ConsensFlow m-{} · T-1 · note from @chief\]\nUse the grammar in the docs$",
+            note.id
+        ),
+    );
+    let window = context.host.last(&session).unwrap().pane;
+    assert!(
+        context.host.killed().contains(&window),
+        "its window is closed, not left starting"
+    );
+    let why = format!("the window could not take its first message: {NEVER_NAMED}");
+    let kept = context.message(note.id);
+    assert_eq!(
+        (kept.state.as_str(), kept.reason.as_deref()),
+        (
+            "queued",
+            Some(format!("kept for T-1's resume: {why}").as_str())
+        )
+    );
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let kept_words = format!("m-{}", note.id);
+    let chief: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|said| said.contains(&kept_words) || said.contains(NEVER_NAMED))
+        .collect();
+    assert_eq!(
+        chief,
+        [format!(
+            "T-1 is paused: @{session}'s window closed: {why}; the words told its window wait for the resume: {kept_words}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+        )]
+    );
+    let human: Vec<String> = to_human(&context, project)
+        .into_iter()
+        .filter(|said| said.contains(&kept_words) || said.contains(NEVER_NAMED))
+        .collect();
+    assert_eq!(
+        human,
+        [format!(
+            "{kept_words}, a note from @chief on T-1, waits for T-1's resume to reach @{session}: {why}."
+        )]
+    );
+    assert!(
+        !to_human(&context, project)
+            .iter()
+            .any(|said| said.contains("did not reach")),
+        "{:?}",
+        to_human(&context, project)
+    );
+
+    // The host's exit, when it comes, settles nothing more.
+    let host = Rc::clone(&context.host);
+    context.run(async move { host.exited(window).await });
+    after.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert_eq!(context.message(note.id).state, "queued");
+    assert_eq!(
+        tiers
+            .notes("chief")
+            .iter()
+            .filter(|said| said.starts_with("T-1 is paused: "))
+            .count(),
+        1
+    );
+}
+
+/// The same window, whose kill the host never answers: the launch is not held for it.
+/// Past the kill's wait the note goes without the exit, as before the close settled it,
+/// and fails, T-1 with it, whoever is told hearing why; the window's exit, once the kill
+/// is answered, settles nothing more.
+#[test]
+fn a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it_fail_after_the_wait(
+) {
+    let context = Context::new();
+    let (tiers, after, session, note) = told_before_a_reopen_that_failed(&context);
+    let project = tiers.project.id;
+    let held = Gate::default();
+    let (host, handle, gate) = (Rc::clone(&context.host), session.clone(), held.clone());
+    *context.adapter.started.borrow_mut() = Some(Rc::new(move || {
+        let window = host.last(&handle).expect("its window").pane;
+        *host.hold_kill.borrow_mut() = Some((window.generation, gate.clone()));
+        Err(NEVER_NAMED.to_owned())
+    }));
+    after.pass().unwrap();
+    assert_eq!(
+        tiers.task(1).task.state,
+        "working",
+        "the kill is not answered"
+    );
+    assert_eq!(context.message(note.id).state, "delivering");
+
+    assert!(context.timers.fire_next(), "the kill's wait ends");
+    context.settle();
+    let why = format!("the window could not take its first message: {NEVER_NAMED}");
+    let failed = context.message(note.id);
+    assert_eq!(
+        (failed.state.as_str(), failed.reason.as_deref()),
+        ("failed", Some(why.as_str()))
+    );
+    assert_eq!(tiers.task(1).task.state, "failed");
+    let kept_words = format!("m-{}", note.id);
+    assert_eq!(
+        tiers
+            .notes("chief")
+            .into_iter()
+            .filter(|said| said.contains(&kept_words))
+            .collect::<Vec<_>>(),
+        [format!(
+            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\""
+        )]
+    );
+    assert_eq!(
+        to_human(&context, project)
+            .into_iter()
+            .filter(|said| said.contains(&kept_words))
+            .collect::<Vec<_>>(),
+        [format!(
+            "{kept_words}, a note from @chief on T-1, did not reach @{session}: {why}."
+        )]
+    );
+
+    // The kill is answered, and the window's exit comes: nothing more is settled.
+    let window = context.host.last(&session).unwrap().pane;
+    held.open();
+    context.settle();
+    let host = Rc::clone(&context.host);
+    context.run(async move { host.exited(window).await });
+    after.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "failed");
+    assert!(
+        !tiers
+            .notes("chief")
+            .iter()
+            .any(|said| said.starts_with("T-1 is paused")),
+        "{:?}",
+        tiers.notes("chief")
+    );
+}
+
+/// The same window, whose kill the host refuses: no exit pauses T-1, and the note goes,
+/// failing, T-1 with it, whoever is told hearing why (T-63, as for a window unfit for work).
+#[test]
+fn a_member_whose_window_never_comes_up_and_whose_kill_is_refused_has_the_note_told_it_fail_and_says_why(
+) {
+    let context = Context::new();
+    let (tiers, after, session, note) = told_before_a_reopen_that_failed(&context);
+    let project = tiers.project.id;
+    never_up(&context.adapter);
+    context.host.refuse_kills.set(true);
+    after.pass().unwrap();
+
+    let why = format!("the window could not take its first message: {NEVER_NAMED}");
+    assert_eq!(context.message(note.id).state, "failed");
+    assert_eq!(tiers.task(1).task.state, "failed");
+    let kept_words = format!("m-{}", note.id);
+    assert_eq!(
+        tiers
+            .notes("chief")
+            .into_iter()
+            .filter(|said| said.contains(&kept_words))
+            .collect::<Vec<_>>(),
+        [format!(
+            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\""
+        )]
+    );
+    assert_eq!(
+        to_human(&context, project)
+            .into_iter()
+            .filter(|said| said.contains(&kept_words))
+            .collect::<Vec<_>>(),
+        [format!(
+            "{kept_words}, a note from @chief on T-1, did not reach @{session}: {why}."
+        )]
+    );
+}
+
+/// A member at rest with its task in hand when the app quit, and a note the chief told
+/// it about T-1 waiting for it: the window the Resume brings back never comes up, and is
+/// given nothing. Its exit is settled at the close, in the bridge host's order (exits
+/// held), so T-1 is paused at once and the note waits for its resume, which gives it
+/// once. Before, T-1 stayed at work until the exit came, and the next pass pasted the
+/// note into the window being closed: the note read delivered, and its words were lost.
+#[test]
+fn a_member_opened_again_whose_window_never_comes_up_is_given_nothing_and_the_note_told_it_waits_for_its_resume(
+) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context.adapter.with(&session, |agent| agent.settled = true);
+    let after = quit_and_start(&context);
+    context.advance(1_000);
+    context.host.hold_exits.set(true);
+    let note = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project,
+            &NewNote {
+                from: Some("chief".to_owned()),
+                to: session.clone(),
+                task: Some(1),
+                body: "Use the grammar in the docs".to_owned(),
+            },
+        )
+        .unwrap();
+    never_up(&context.adapter);
+    after.resume_project(project).unwrap();
+    after.pass().unwrap();
+    assert_eq!(launch_of(&context, &session)["message"], Value::Null);
+    let window = context.host.last(&session).unwrap().pane;
+    assert!(context.host.killed().contains(&window));
+    assert_eq!(tiers.task(1).task.state, "paused");
+    after.pass().unwrap();
+    let waiting = context.message(note.id);
+    assert_eq!(
+        (waiting.state.as_str(), waiting.attempts),
+        ("queued", 0),
+        "nothing goes into the window given up"
+    );
+    assert!(given(&context, &session)
+        .iter()
+        .all(|words| !words.contains("Use the grammar in the docs")));
+
+    // The exit comes, and settles nothing more; the resume's window has the note, once.
+    let host = Rc::clone(&context.host);
+    context.run(async move { host.exited(window).await });
+    after.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    *context.adapter.started.borrow_mut() = None;
+    context.host.hold_exits.set(false);
+    context.resume_task(project, 1, "Carry on");
+    for _ in 0..4 {
+        after.pass().unwrap();
+    }
+    assert_eq!(context.message(note.id).state, "delivered");
+    assert_eq!(tiers.task(1).task.state, "working");
+    let given = given(&context, &session);
+    assert_eq!(
+        given
+            .iter()
+            .filter(|words| words.contains("Use the grammar in the docs"))
+            .count(),
+        1,
+        "{given:?}"
     );
 }

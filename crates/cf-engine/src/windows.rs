@@ -17,6 +17,7 @@ use cf_ledger::{
 use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
 use cf_proto::trace::WindowEvent;
+use futures_util::future::{select, Either};
 use serde_json::{json, Value};
 
 use crate::deliveries::Delivering;
@@ -25,7 +26,7 @@ use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
 use crate::role_change::{Compared, Prelude};
-use crate::runtime::{caught, returning};
+use crate::runtime::{begin, caught, returning};
 use crate::seams::{EngineError, SavedAgent};
 use crate::shown::Shown;
 use crate::specs::{ChiefSpecs, RoleText};
@@ -44,6 +45,10 @@ const DRAWN_QUIET_MS: f64 = 1_500.0;
 /// with each failure, up to the most.
 const RELAUNCH_MS: i64 = 5_000;
 const RELAUNCH_MAX_MS: i64 = 5 * 60_000;
+
+/// How long a member's launch given up waits for its window's kill to be answered
+/// before it settles without the exit ([`Dispatcher::close_own_within`]).
+const KILL_ANSWER_WAIT: Duration = Duration::from_secs(5);
 
 /// What a window is doing, as the board and the trace say it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1181,6 +1186,36 @@ impl Dispatcher {
         let went = self.kill_and_settle(record, pane).await;
         record.window.borrow_mut().own_exit = false;
         went
+    }
+
+    /// [`Dispatcher::close_own`], its kill's answer waited for no longer than
+    /// [`KILL_ANSWER_WAIT`]: none where the host gave none by then, and the close goes
+    /// on apart, its exit settled whenever it comes and what it fails with told to the
+    /// log, as the host's own exit's is. The pane host's kill is a request with no
+    /// deadline, and a member's launch given up is not held for one that never answers
+    /// (the chief's restart, 8bb0a465, left the kill unawaited for it).
+    pub(crate) async fn close_own_within(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        pane: &Pane,
+    ) -> Result<Option<bool>, EngineError> {
+        let (this, held, gone) = (Rc::clone(self), Rc::clone(record), pane.clone());
+        let closing = begin(&*self.seams.spawn, async move {
+            this.close_own(&held, &gone).await
+        })
+        .await;
+        match select(closing, self.seams.time.sleep(KILL_ANSWER_WAIT)).await {
+            Either::Left((went, _)) => went.map(Some),
+            Either::Right(((), closing)) => {
+                let this = Rc::clone(self);
+                self.seams.spawn.spawn(Box::pin(async move {
+                    if let Err(cause) = closing.await {
+                        this.write_down(&cause);
+                    }
+                }));
+                Ok(None)
+            }
+        }
     }
 
     async fn kill_and_settle(

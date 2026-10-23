@@ -1345,12 +1345,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change/prelude.rs"
-find = '''        let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;'''
-replace = '''        let closing = begin(&*self.seams.spawn, async move {
-            let _ = (&this, &held);
-            Ok::<bool, EngineError>(true)
-        })
-        .await;'''
+find = '''            self.close_own_within(record, pane).await?;'''
+replace = '''            let _ = pane;'''
 
 [[plant]]
 name = "codex role: a chief's window of a launch given up is left open"
