@@ -342,19 +342,5 @@ fn an_ender_ends_the_program_of_a_capture_that_is_still_running() {
 // What ending a capture ends with it: the tree of its program.
 mod tree;
 
-#[test]
-fn a_capture_dropped_while_its_program_runs_leaves_nothing_for_its_ender_to_end() {
-    let kept: Rc<RefCell<Option<Ender>>> = Rc::default();
-    let (run, env) = (long_running(), system_env());
-    runtime().block_on(async {
-        let handed = Rc::clone(&kept);
-        let capturing = capture(&run, None, &env, ROOMY, move |ender| {
-            *handed.borrow_mut() = Some(ender);
-        });
-        // Dropped at the end of the test's own wait: the program went with it.
-        let _ = tokio::time::timeout(Duration::from_millis(300), capturing).await;
-    });
-    let kept = kept.borrow();
-    let ender = kept.as_ref().expect("handed over before it was dropped");
-    assert!(!ender.running(), "it is no one's to end");
-}
+// And what its program starts as it is ended.
+mod keeps_starting;

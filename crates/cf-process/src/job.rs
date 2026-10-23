@@ -1,10 +1,19 @@
-//! What libuv gives every child it starts on Windows (`src/win/process.c`),
-//! given back here: the variables Windows needs that a child's environment
-//! lacks, taken from this process's, and a job object that ends the child
-//! when this process ends. Elsewhere a child is started as it is given.
+//! What a child on Windows is given that libuv gave it (`src/win/process.c`): the variables
+//! its environment lacks, taken from this process's. And its job: every program this process
+//! starts runs in a job of its own, made before it runs (it is started suspended, put in the
+//! job, and let run), so that nothing it starts, however soon, is outside it.
 //!
-//! A program held whole (`capture_whole`) runs in a job of its own instead,
-//! which nothing it starts can leave, ended with the capture.
+//! Ending the job ends every process in it at once, those a program starts as it is ended
+//! among them. `taskkill /T` does not: it reads the tree and ends what it read, and what the
+//! program starts while it walks lives on with a dead parent (zeewin, T-322: 21 to 50 of a
+//! loop's programs outlived every one of 26 stops, and about 1 in 20 of a lone child started
+//! near the stop). A job also ends when its handle closes, so no program of a daemon that
+//! died is left, nor anything it started.
+//!
+//! A program that ended of itself has finished its work: its job is *released*, which takes
+//! the end-on-close away, and what it left running is left, as Node's `execFile` leaves it.
+//! A program held whole (`capture_whole`) has whatever it left ended when it has ended, and
+//! waited for (`Job::end`), before its job is released.
 
 use cf_base::env::Env;
 
@@ -45,85 +54,48 @@ pub fn with_required(env: &Env, this: &Env) -> Env {
     )
 }
 
-/// Puts `process` in the job every child of this process is in, which
-/// ends them all when this process ends, as libuv's does: no child of a
-/// daemon that died is left running. On other systems, nothing.
+/// Starts `command` suspended on Windows, its window hidden, so that the program is put in
+/// its job before it runs (`Job::of` lets it run). Its creation flags are these alone.
+/// Elsewhere nothing: the group the program leads holds what it starts.
+#[cfg(windows)]
+pub(crate) fn start_in_job(command: &mut tokio::process::Command) {
+    use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+    command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+}
+
+/// Starts `command` suspended on Windows. Elsewhere nothing.
 #[cfg(not(windows))]
-pub(crate) fn adopt(_process: &tokio::process::Child) {}
+pub(crate) fn start_in_job(_command: &mut tokio::process::Command) {}
 
-/// Puts `process` in the job every child of this process is in, which
-/// ends them all when this process ends, as libuv's does: no child of a
-/// daemon that died is left running. A child the system will not put in it
-/// (this process's own job forbids it) runs outside it, as with libuv.
-#[cfg(windows)]
-pub(crate) fn adopt(process: &tokio::process::Child) {
-    use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
-    let (Some(job), Some(handle)) = (job(), process.raw_handle()) else {
-        return;
-    };
-    #[allow(unsafe_code)]
-    // SAFETY: both handles are open: the job's for this process's life, the
-    // child's while `process` is borrowed; the call writes no memory of ours.
-    unsafe {
-        AssignProcessToJobObject(job as _, handle as _);
-    }
-}
-
-/// The job, made the first time a child is started: none when the system
-/// would not make it.
-#[cfg(windows)]
-fn job() -> Option<usize> {
-    use std::sync::OnceLock;
-    use windows_sys::Win32::System::JobObjects::{
-        CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
-        JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
-    };
-    static JOB: OnceLock<Option<usize>> = OnceLock::new();
-    *JOB.get_or_init(|| {
-        #[allow(unsafe_code)]
-        // SAFETY: CreateJobObjectW takes no attributes and no name here and
-        // returns a handle or null; SetInformationJobObject reads `limits`,
-        // a whole struct of the size given, for as long as the call lasts.
-        unsafe {
-            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-            if job.is_null() {
-                return None;
-            }
-            let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_BREAKAWAY_OK
-                | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
-                | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION
-                | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            let size = u32::try_from(std::mem::size_of_val(&limits)).ok()?;
-            let set = SetInformationJobObject(
-                job,
-                JobObjectExtendedLimitInformation,
-                (&raw const limits).cast(),
-                size,
-            );
-            (set != 0).then_some(job as usize)
-        }
-    })
-}
-
-/// The job of a program held whole and of every process it starts, which none
-/// of them can leave: on Windows, a job of its own, every process of which is
-/// ended when it is dropped (and when this process ends, as its handle
-/// closes). On other systems nothing: the group the program leads holds what
-/// it starts.
+/// The job of a program this process started, and of every process it starts, which
+/// none of them can leave: on Windows, a job of its own, every process of which is
+/// ended when it is dropped (and when this process ends, as its handle closes) unless
+/// the program ended of itself (`release`). On other systems nothing: the group the
+/// program leads holds what it starts.
 pub(crate) struct Job {
+    /// None where the system would not make a job for the program, which runs outside
+    /// any of ours (as with libuv) and is ended by `taskkill`.
     #[cfg(windows)]
-    handle: usize,
+    handle: Option<usize>,
+    /// Held whole (`capture_whole`): waited for to be gone when the job is dropped.
+    #[cfg(windows)]
+    whole: bool,
+    /// Whether what the program left is let go of (`release`).
+    #[cfg(windows)]
+    released: std::cell::Cell<bool>,
 }
 
 #[cfg(not(windows))]
 impl Job {
     /// The job of `process`, which has just started.
     #[allow(clippy::unnecessary_wraps)] // As Windows has it.
-    pub(crate) fn of(_process: &tokio::process::Child) -> Result<Self, String> {
+    pub(crate) fn of(_process: &tokio::process::Child, _whole: bool) -> Result<Self, String> {
         Ok(Self {})
+    }
+
+    /// The job of a process this process did not start with one: there is none.
+    pub(crate) fn unheld() -> Self {
+        Self {}
     }
 
     /// Ends every process of the job: there is none.
@@ -131,21 +103,51 @@ impl Job {
     pub(crate) fn end(&self) -> Result<(), String> {
         Ok(())
     }
+
+    /// Lets go of what the program left: there is none to hold.
+    #[allow(clippy::unused_self)] // As Windows has it.
+    pub(crate) fn release(&self) {}
 }
 
 #[cfg(windows)]
 impl Job {
-    /// A job made for `process`, which was started suspended (`group::lead_whole`),
+    /// The job of a process this process did not start with one (`terminate` of a pid
+    /// only): none, and so ended by `taskkill`.
+    pub(crate) fn unheld() -> Self {
+        Self {
+            handle: None,
+            whole: false,
+            released: std::cell::Cell::new(false),
+        }
+    }
+
+    /// A job made for `process`, which was started suspended (`start_in_job`),
     /// `process` put in it, and then let run: what it starts is in it too, with no
     /// way out (no breakaway is allowed, silent or asked for), and a process of it
     /// that fails unhandled ends, as libuv's job has it, with no dialog of Windows'
     /// to wait on. Why it could not be made, or the process let run, if it could
-    /// not: a process already in a job is put in this one as a job inside that one
-    /// (Windows 8 on), and is refused by a job that allows none.
-    pub(crate) fn of(process: &tokio::process::Child) -> Result<Self, String> {
+    /// not. A process already in a job is put in this one as a job inside that one
+    /// (Windows 8 on) and is refused by a job that allows none: held whole, that is
+    /// a program that did not start; any other program then runs outside a job of
+    /// ours, as libuv's children do where their job is refused, and is ended by
+    /// `taskkill` instead.
+    pub(crate) fn of(process: &tokio::process::Child, whole: bool) -> Result<Self, String> {
+        let pid = process
+            .id()
+            .ok_or_else(|| "could not be let run: it has ended".to_owned())?;
+        let job = match Self::made_for(process, whole) {
+            Ok(job) => job,
+            Err(why) if whole => return Err(why),
+            Err(_) => Self::unheld(),
+        };
+        resume(pid)?;
+        Ok(job)
+    }
+
+    /// A job for `process`, which has been put in it and not yet let run.
+    fn made_for(process: &tokio::process::Child, whole: bool) -> Result<Self, String> {
         use windows_sys::Win32::System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            AssignProcessToJobObject, CreateJobObjectW,
             JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
         };
         let failed = |what: &str| format!("{what}: {}", std::io::Error::last_os_error());
@@ -155,40 +157,83 @@ impl Job {
         #[allow(unsafe_code)]
         // SAFETY: CreateJobObjectW takes no attributes and no name here and
         // returns a handle or null, closed by the drop of the job from then on;
-        // SetInformationJobObject reads `limits`, a whole struct of the size
-        // given, for as long as the call lasts; the process's handle is open while
-        // `process` is borrowed. None of them writes memory of ours.
+        // the process's handle is open while `process` is borrowed. Neither writes
+        // memory of ours.
         unsafe {
             let made = CreateJobObjectW(std::ptr::null(), std::ptr::null());
             if made.is_null() {
                 return Err(failed("could not make a job of its own"));
             }
             let job = Self {
-                handle: made as usize,
+                handle: Some(made as usize),
+                whole,
+                released: std::cell::Cell::new(false),
             };
-            let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-            limits.BasicLimitInformation.LimitFlags =
-                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            let size = u32::try_from(std::mem::size_of_val(&limits))
-                .map_err(|_| "could not make a job of its own".to_owned())?;
-            let limited = SetInformationJobObject(
-                made,
-                JobObjectExtendedLimitInformation,
-                (&raw const limits).cast(),
-                size,
-            );
-            if limited == 0 {
+            if !limit(
+                made as usize,
+                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            ) {
                 return Err(failed("could not make a job of its own"));
             }
             if AssignProcessToJobObject(made, handle as _) == 0 {
                 return Err(failed("could not be put in a job of its own"));
             }
-            let pid = process
-                .id()
-                .ok_or_else(|| "could not be let run: it has ended".to_owned())?;
-            resume(pid)?;
             Ok(job)
         }
+    }
+
+    /// Ends every process of the job at once and waits for none of them: what one of
+    /// them starts as it is ended is in the job, and ended with it. Whether there was a
+    /// job to end: where there is none, the program is ended otherwise.
+    pub(crate) fn terminate(&self) -> bool {
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+        let Some(handle) = self.handle else {
+            return false;
+        };
+        #[allow(unsafe_code)]
+        // SAFETY: the handle is the job's, open until the job is dropped; the call
+        // writes no memory of ours.
+        unsafe {
+            TerminateJobObject(handle as _, 1) != 0
+        }
+    }
+
+    /// The program ended of itself: what it left running is let go of, as the end-on-close
+    /// is taken away, and nothing is ended when the job is dropped.
+    pub(crate) fn release(&self) {
+        use windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
+        let Some(handle) = self.handle else {
+            return;
+        };
+        if self.released.replace(true) {
+            return;
+        }
+        limit(handle, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION);
+    }
+}
+
+/// Sets the job `handle`'s limits to `flags` and nothing else: whether the system took them.
+#[cfg(windows)]
+fn limit(handle: usize, flags: u32) -> bool {
+    use windows_sys::Win32::System::JobObjects::{
+        JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    };
+    #[allow(unsafe_code)]
+    // SAFETY: SetInformationJobObject reads `limits`, a whole struct of the size given,
+    // for as long as the call lasts; the handle is a job's, open.
+    unsafe {
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        limits.BasicLimitInformation.LimitFlags = flags;
+        let Ok(size) = u32::try_from(std::mem::size_of_val(&limits)) else {
+            return false;
+        };
+        SetInformationJobObject(
+            handle as _,
+            JobObjectExtendedLimitInformation,
+            (&raw const limits).cast(),
+            size,
+        ) != 0
     }
 }
 
@@ -419,26 +464,26 @@ impl Job {
     /// not waited for. A job whose processes cannot be listed whole is ended all the
     /// same, and has failed: none of them could be waited for.
     pub(crate) fn end(&self) -> Result<(), String> {
-        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+        let Some(handle) = self.handle else {
+            return Ok(());
+        };
         let listed = self.processes();
-        let held = Held::open(self.handle, listed.clone().unwrap_or_default());
-        #[allow(unsafe_code)]
-        // SAFETY: the handle is the job's, open until the job is dropped; the call
-        // writes no memory of ours.
-        unsafe {
-            TerminateJobObject(self.handle as _, 1);
-        }
+        let held = Held::open(handle, listed.clone().unwrap_or_default());
+        self.terminate();
         listed?;
         ended_within(JOB_ENDS_WITHIN, || held.left())
     }
 
     /// The ids of every process the job holds (`listed_whole`), or why not.
     fn processes(&self) -> Result<Vec<usize>, String> {
-        listed_whole(|room| self.list(room))
+        let Some(handle) = self.handle else {
+            return Ok(Vec::new());
+        };
+        listed_whole(|room| Self::list(handle, room))
     }
 
-    /// One ask of the job's list of processes, with room for `room` ids.
-    fn list(&self, room: usize) -> Listed {
+    /// One ask of the list of processes of the job `handle`, with room for `room` ids.
+    fn list(handle: usize, room: usize) -> Listed {
         use windows_sys::Win32::Foundation::ERROR_MORE_DATA;
         use windows_sys::Win32::System::JobObjects::{
             JobObjectBasicProcessIdList, QueryInformationJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST,
@@ -458,7 +503,7 @@ impl Job {
         // it as that struct once it has.
         let (asked, assigned, listed) = unsafe {
             let asked = QueryInformationJobObject(
-                self.handle as _,
+                handle as _,
                 JobObjectBasicProcessIdList,
                 words.as_mut_ptr().cast(),
                 size,
@@ -486,16 +531,23 @@ impl Job {
 
 #[cfg(windows)]
 impl Drop for Job {
-    /// Every process of the job is ended, and waited for as `end` waits (none is left
-    /// where the job was ended before), and its handle closed.
+    /// Every process of the job is ended, unless the program ended of itself (`release`):
+    /// by the close of its handle, which ends them as the job's end-on-close says, and held
+    /// whole they are waited for as `end` waits before that (none is left where the job was
+    /// ended before).
     fn drop(&mut self) {
         use windows_sys::Win32::Foundation::CloseHandle;
-        let _ = self.end();
+        let Some(handle) = self.handle else {
+            return;
+        };
+        if self.whole && !self.released.get() {
+            let _ = self.end();
+        }
         #[allow(unsafe_code)]
         // SAFETY: the handle is the job's, open until now, and closed once; the call
         // writes no memory of ours.
         unsafe {
-            CloseHandle(self.handle as _);
+            CloseHandle(handle as _);
         }
     }
 }
@@ -610,7 +662,9 @@ mod tests {
             );
             assert_ne!(set, 0);
             Job {
-                handle: made as usize,
+                handle: Some(made as usize),
+                whole: true,
+                released: std::cell::Cell::new(false),
             }
         };
         let ids = (0..count)
@@ -622,8 +676,9 @@ mod tests {
                     .unwrap();
                 #[allow(unsafe_code)]
                 // SAFETY: both handles are open; the call writes no memory of ours.
-                let put =
-                    unsafe { AssignProcessToJobObject(job.handle as _, child.as_raw_handle()) };
+                let put = unsafe {
+                    AssignProcessToJobObject(job.handle.unwrap() as _, child.as_raw_handle())
+                };
                 assert_ne!(put, 0, "{}", std::io::Error::last_os_error());
                 usize::try_from(child.id()).unwrap()
             })
@@ -643,7 +698,7 @@ mod tests {
         // Each is ended with the job: 300 ended at once take longer than a job's end waits
         // for them on zeewin (4 were left at 2 s, 2026-10-21), so they are waited for here,
         // a while longer, each by a handle opened before the end.
-        let held = Held::open(job.handle, listed);
+        let held = Held::open(job.handle.unwrap(), listed);
         let _ = job.end();
         assert_eq!(
             ended_within(std::time::Duration::from_secs(60), || held.left()),
@@ -660,7 +715,9 @@ mod tests {
         let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
         assert!(!event.is_null());
         let none = Job {
-            handle: event as usize,
+            handle: Some(event as usize),
+            whole: true,
+            released: std::cell::Cell::new(false),
         };
         let ended = none.end();
         std::mem::forget(none);
@@ -685,7 +742,7 @@ mod tests {
         // run. This process, in no job of the test's, is such a one.
         let (job, ids) = a_job_of(1);
         let this = usize::try_from(std::process::id()).unwrap();
-        let held = Held::open(job.handle, vec![ids[0], this]);
+        let held = Held::open(job.handle.unwrap(), vec![ids[0], this]);
         assert_eq!(
             held.0.iter().map(|(pid, _)| *pid).collect::<Vec<_>>(),
             [ids[0]],
@@ -771,9 +828,9 @@ mod tests {
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .kill_on_drop(true);
-            crate::group::lead_whole(&mut command);
+            crate::job::start_in_job(&mut command);
             let child = command.spawn().unwrap();
-            let job = Job::of(&child).unwrap();
+            let job = Job::of(&child, true).unwrap();
             let until = Instant::now() + Duration::from_secs(60);
             while ready().len() < HELPERS {
                 assert!(Instant::now() < until, "it started them: {:?}", ready());
