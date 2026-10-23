@@ -330,12 +330,15 @@ fn helper_starts_with_and_without_breakaway() {
     writeln!(pids, "{}", std::process::id()).unwrap();
     let ping = |address: &str, flags: u32| {
         std::process::Command::new(r"C:\Windows\System32\PING.EXE")
-            .args(["-n", "21", address])
+            .args(["-n", "121", address])
             .creation_flags(flags | CREATE_NO_WINDOW)
             .stdout(std::process::Stdio::null())
             .spawn()
     };
     // Each is marked by an address of its own, so that a ping a test left is told from the rest.
+    // Each pings for two minutes: one that is gone a few seconds after the end was ended by it,
+    // and not by running out (21 pings were 20 s, which a test that waited 10 s for the capture
+    // and 5 s more for the ping could outlast).
     let stays = ping("127.0.55.1", 0).unwrap();
     writeln!(pids, "{}", stays.id()).unwrap();
     writeln!(outcome, "stays").unwrap();

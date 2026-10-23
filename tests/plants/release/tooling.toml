@@ -3059,3 +3059,13 @@ file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
 find = '''    return (this.assertions.get(result) ?? []).some((line) => failed.includes(line))'''
 replace = '''    return (this.assertions.get(result) ?? []).length > 0'''
 
+[[plant]]
+name = "tooling (cf-process): on Windows what a program starts goes out of its job without asking"
+meant = "a_program_that_asks_to_break_away_may_and_the_one_that_does_not_ask_is_ended_with_its_job"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "    let mut limits = JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;"
+replace = "    let mut limits = JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;"
