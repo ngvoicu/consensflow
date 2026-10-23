@@ -23,6 +23,7 @@ use serde_json::json;
 use super::delivery::cancel_message;
 use super::messages;
 use super::receipt::reconcile;
+use super::told::{behind_held_words, told};
 use crate::model::LedgerError;
 use crate::store::Store;
 use crate::tasks::RESUME_WORDS;
@@ -67,6 +68,9 @@ pub(crate) fn carried(store: &Store, carrier: i64) -> Result<Vec<MessageView>, L
 ///   two of them say what one does;
 /// - what is not kept stays where it is: a tell, a row still held at the gate,
 ///   and a row in flight;
+/// - words told to the window behind older ones the human still holds stay
+///   too (`told`), and follow those in once they are passed on (`adopt`): a
+///   resume keeps the order they were told in (the second review, 2026-10-16);
 /// - what Node's window read at once with no proof it arrived, after the
 ///   task was last paused, was read by a door that was dead by then, and is
 ///   kept again first.
@@ -90,10 +94,11 @@ pub(crate) fn fold(
     let taken = ids(
         store,
         &format!(
-            "SELECT id FROM message WHERE {KEPT} AND id != ?3
-               AND (carried_by IS NULL
-                    OR carried_by IN (SELECT id FROM message WHERE state != 'delivering'))
-             ORDER BY id"
+            "SELECT m.id FROM message m WHERE {KEPT} AND m.id != ?3 AND NOT {}
+               AND (m.carried_by IS NULL
+                    OR m.carried_by IN (SELECT id FROM message WHERE state != 'delivering'))
+             ORDER BY m.id",
+            behind_held_words("m")
         ),
         params![task.id, recipient, carrier],
     )?;
@@ -158,30 +163,47 @@ fn requeue_unreceived_reads(
 ///   a newer carrier, or on its own. The log says which pastes began
 ///   (`delivery.begun`): the attempt a paste counted is given back when the window
 ///   went before it could land.
+/// - words told to the window wait behind older ones the human still holds
+///   (`told`), and join nothing ahead of them; the words told after a row that
+///   joins, that wait on their own and are held behind nothing now, follow it
+///   in, so the paste says them after it.
 pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {
     let adopted: Option<i64> = store
         .db
-        .prepare(
+        .prepare(&format!(
             "SELECT c.id FROM message m
              JOIN message c ON c.task_id = m.task_id AND c.recipient_id = m.recipient_id
              WHERE m.id = ?1 AND m.urgent = 0 AND m.state = 'queued' AND m.carried_by IS NULL
-               AND m.kind IN ('task', 'answer', 'note')
+               AND m.kind IN ('task', 'answer', 'note') AND NOT {}
                AND c.kind = 'task' AND c.carried_by IS NULL AND c.state IN ('queued', 'gated')
                AND c.id != m.id AND (m.kind != 'task' OR c.id > m.id)
                AND NOT EXISTS (SELECT 1 FROM event e
                                WHERE e.project_id = c.project_id AND e.kind = 'delivery.begun'
                                  AND json_extract(e.data, '$.message') = c.id)
              ORDER BY c.id DESC LIMIT 1",
-        )?
+            behind_held_words("m")
+        ))?
         .query_map([id], |row| row.get(0))?
         .next()
         .transpose()?;
-    if let Some(carrier) = adopted {
-        store.db.execute(
-            "UPDATE message SET carried_by = ?1 WHERE id = ?2 OR carried_by = ?2",
-            params![carrier, id],
-        )?;
-    }
+    let Some(carrier) = adopted else {
+        return Ok(());
+    };
+    store.db.execute(
+        "UPDATE message SET carried_by = ?1 WHERE id = ?2 OR carried_by = ?2",
+        params![carrier, id],
+    )?;
+    store.db.execute(
+        &format!(
+            "UPDATE message SET carried_by = ?1 WHERE id IN (
+               SELECT f.id FROM message f JOIN message m ON m.id = ?2
+               WHERE f.task_id = m.task_id AND f.recipient_id = m.recipient_id AND f.id > m.id
+                 AND f.state = 'queued' AND f.carried_by IS NULL AND {} AND NOT {})",
+            told("f"),
+            behind_held_words("f")
+        ),
+        params![carrier, id],
+    )?;
     Ok(())
 }
 
@@ -310,6 +332,12 @@ pub(crate) fn reconcile_released(store: &mut Store) -> Result<(), LedgerError> {
     })
 }
 
+/// Why a row a window kept went no further: [`transfer`] said it in the task's
+/// brief for its next window.
+pub(super) fn carried_into(number: i64) -> String {
+    format!("carried into T-{number}'s brief for its next window")
+}
+
 /// What a task takes on from a window that is gone: the words kept for it,
 /// as the section of the brief that follows the task's own, and the rows it
 /// still held at the gate that went with it.
@@ -384,11 +412,7 @@ pub(crate) fn transfer(
         "UPDATE message SET state = 'cancelled', reason = ?3
          WHERE task_id = ?1 AND recipient_id = ?2 AND urgent = 0
            AND kind IN ('task', 'answer', 'note') AND state IN ('queued', 'delivering')",
-        params![
-            task.id,
-            window.id,
-            format!("carried into T-{}'s brief for its next window", task.number)
-        ],
+        params![task.id, window.id, carried_into(task.number)],
     )?;
     let gated = ids(
         store,

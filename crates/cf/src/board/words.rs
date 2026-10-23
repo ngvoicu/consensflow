@@ -40,7 +40,9 @@ impl Shape {
 #[derive(Debug, Default, PartialEq)]
 pub struct Split {
     switches: Vec<&'static str>,
-    values: Vec<(&'static str, Option<String>)>,
+    /// Each valued flag given, with the word after it and how far from the end
+    /// of the words that word stands.
+    values: Vec<(&'static str, Option<(String, usize)>)>,
     /// The words that are no flag, in order.
     operands: Vec<String>,
     /// How many of the operands come before the command's text.
@@ -60,11 +62,27 @@ impl Split {
 
     /// The word after the last `flag`; none when it was not given, or ended the words.
     pub fn value(&self, flag: &str) -> Option<&str> {
+        self.last(flag).map(|(word, _)| word.as_str())
+    }
+
+    /// How many words from the end of the words split the word after the last
+    /// `flag` stands, 1 for the last: where the system's own spelling of it is
+    /// found among words those were the last of. None as for [`Split::value`].
+    pub fn value_back(&self, flag: &str) -> Option<usize> {
+        self.last(flag).map(|(_, back)| *back)
+    }
+
+    /// Whether the valued `flag` was given, with a word after it or not.
+    pub fn given(&self, flag: &str) -> bool {
+        self.values.iter().any(|(name, _)| *name == flag)
+    }
+
+    fn last(&self, flag: &str) -> Option<&(String, usize)> {
         self.values
             .iter()
             .rev()
             .find(|(name, _)| *name == flag)
-            .and_then(|(_, value)| value.as_deref())
+            .and_then(|(_, value)| value.as_ref())
     }
 
     /// Whether the words only ask for the command's usage: `--help` or `-h`
@@ -92,15 +110,20 @@ pub fn split(words: &[String], shape: Shape) -> Split {
         leading: shape.leading,
         ..Split::default()
     };
-    let mut rest = words.iter();
-    while let Some(word) = rest.next() {
+    let mut rest = words.iter().enumerate();
+    while let Some((_, word)) = rest.next() {
         if word == "--" && split.operands.len() <= shape.leading {
             split.literal = true;
-            split.operands.extend(rest.by_ref().cloned());
+            split
+                .operands
+                .extend(rest.by_ref().map(|(_, word)| word.clone()));
         } else if let Some(flag) = shape.switches.iter().find(|flag| **flag == word) {
             split.switches.push(flag);
         } else if let Some(flag) = shape.valued.iter().find(|flag| **flag == word) {
-            split.values.push((flag, rest.next().cloned()));
+            let value = rest
+                .next()
+                .map(|(at, value)| (value.clone(), words.len() - at));
+            split.values.push((flag, value));
         } else {
             split.operands.push(word.clone());
         }
@@ -215,6 +238,24 @@ mod tests {
             None,
             "the last --tier ended the words"
         );
+    }
+
+    #[test]
+    fn a_value_is_found_by_how_far_from_the_end_it_stands_and_a_flag_that_ended_the_words_was_given(
+    ) {
+        let twice = split(
+            &words(&["x", "--tier", "light", "--tier", "heavy", "y"]),
+            FLAGS,
+        );
+        assert_eq!(twice.value_back("--tier"), Some(2), "the last one's");
+        assert!(twice.given("--tier"));
+        let ended = split(&words(&["x", "--needs"]), FLAGS);
+        assert!(ended.given("--needs"));
+        assert_eq!(
+            (ended.value("--needs"), ended.value_back("--needs")),
+            (None, None)
+        );
+        assert!(!ended.given("--tier"));
     }
 
     #[test]

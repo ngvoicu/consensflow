@@ -143,6 +143,79 @@ pub(crate) fn join_pause_note(
     })
 }
 
+/// What a pause note says, after why its task stopped, of the words told to the
+/// task's window that are kept for its resume (`told.rs`): their ids.
+const KEPT: &str = "; the words told its window wait for the resume: ";
+
+/// What `because` says once told words `id`, kept for the resume as their paste
+/// failed (`why`, on one line, so a note of several tasks still reads back), are
+/// named in it: the why and the words, the why said once, and later words added
+/// to the first.
+fn with_kept(because: &str, id: i64, why: &str) -> String {
+    if because.contains(KEPT) {
+        format!("{because}, m-{id}")
+    } else {
+        let why = why.lines().collect::<Vec<_>>().join(" ");
+        format!("{because}: {why}{KEPT}m-{id}")
+    }
+}
+
+/// Told words `message`, kept for `task`'s resume as their paste failed (`why`):
+/// its requester hears why, and which words wait, once. In the note that says the
+/// task is paused, while that is queued (ConsensFlow paused the task as its window
+/// closed: a window given up as unfit for work); otherwise in a note of its own
+/// about the task (that note given already, or a pause of the human's, which
+/// writes none). Main told the human only, that the words "did not reach" the
+/// window; they reach it at the resume.
+pub(crate) fn tell_kept(
+    store: &mut Store,
+    task: &TaskRow,
+    message: &MessageView,
+    why: &str,
+) -> Result<(), LedgerError> {
+    let queued = store
+        .db
+        .prepare(
+            "SELECT id, body FROM message
+       WHERE project_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
+         AND state = 'queued' AND (task_id = ? OR task_id IS NULL) ORDER BY id DESC",
+        )?
+        .query_map(
+            params![task.project_id, task.requester_id, task.id],
+            |row| Ok((row.get::<_, i64>("id")?, row.get::<_, String>("body")?)),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (id, body) in queued {
+        let Some(mut paused) = read(&body) else {
+            continue;
+        };
+        let Some(named) = paused.iter_mut().find(|named| named.number == task.number) else {
+            continue;
+        };
+        named.because = with_kept(&named.because, message.id, why);
+        return set(store, id, task.project_id, &paused);
+    }
+    let requester = store.participant_row(task.requester_id)?.handle;
+    let body = format!(
+        "m-{0}, what @{1} told T-{2}'s window, waits for T-{2}'s resume: {why}.",
+        message.id,
+        message.sender.as_deref().unwrap_or("null"),
+        task.number
+    );
+    send(
+        store,
+        task.project_id,
+        &Sent {
+            to: &requester,
+            body: &body,
+            task: Some(task.number),
+            kind: "note",
+            ..Sent::default()
+        },
+    )?;
+    Ok(())
+}
+
 /// A task that no longer waits (it was resumed, called off, taken back to the
 /// board, or taken by a member) is told no more. What its requester was told
 /// of it and has not been given yet is withdrawn, if it was told of the task
@@ -252,6 +325,26 @@ mod tests {
                 paused(2, "y"),
                 paused(30, "@zeus's window closed"),
             ],
+        ] {
+            assert_eq!(read(&render(&tasks)), Some(tasks));
+        }
+    }
+
+    #[test]
+    fn the_words_kept_for_a_resume_are_named_after_the_why_said_once_and_read_back() {
+        let first = with_kept("@zeus's window closed", 2, "unfit\nfor work");
+        assert_eq!(
+            first,
+            "@zeus's window closed: unfit for work; the words told its window wait for the resume: m-2"
+        );
+        let second = with_kept(&first, 3, "unfit for work");
+        assert_eq!(
+            second,
+            "@zeus's window closed: unfit for work; the words told its window wait for the resume: m-2, m-3"
+        );
+        for tasks in [
+            vec![paused(1, &second)],
+            vec![paused(1, &first), paused(4, "@diana's window closed")],
         ] {
             assert_eq!(read(&render(&tasks)), Some(tasks));
         }

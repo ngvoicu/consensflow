@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use cf_base::js;
 use cf_harness::contract::{Admission, Held, Observed, PaneHost, Readiness};
-use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView, TaskView};
+use cf_ledger::{is_told, GivenUp, MessageView, NewNote, ParticipantView, ProjectView, TaskView};
 use cf_proto::trace::WindowEvent;
 
 use crate::delivery_text::{delivery_text, marker_of};
@@ -188,7 +188,10 @@ impl Dispatcher {
     /// running is no part of it ([`Dispatcher::end_turn_work`]). An answer to the
     /// note that says the worker its role is none of the task's
     /// ([`answers_to_the_task`]): where nothing else answers, there is no result,
-    /// and nothing the turn left running is ended.
+    /// and nothing the turn left running is ended. Nor while words told to the
+    /// window before it was up are still on their way to it (the brief was in
+    /// flight when they were told): they go in next, and the answer to them is
+    /// the result.
     pub(crate) fn collect(
         &self,
         project: &ProjectView,
@@ -224,6 +227,14 @@ impl Dispatcher {
             return Ok(None);
         }
         if !observed.settled {
+            return Ok(None);
+        }
+        let told = self
+            .seams
+            .ledger
+            .borrow()
+            .told_waiting(participant.id, thread.task.id)?;
+        if told {
             return Ok(None);
         }
         // The turn is over once its last message is complete (one that
@@ -299,36 +310,50 @@ impl Dispatcher {
     }
 
     /// A message that will not be delivered. A brief fails its task, and
-    /// whoever gave it hears why. Whoever waits on any other kind would wait
-    /// forever, so the human hears, once, what it was, for whom and why.
+    /// whoever gave it hears why; so do words told to the window while its
+    /// task waits on it (`is_told`): an answer the window gave without them is
+    /// no result. Whoever waits on any other kind would wait forever, so the
+    /// human hears, once, what it was, for whom and why. Words told to the window
+    /// that the ledger kept for their task's resume did not fail: its requester
+    /// hears why and which words wait (the ledger's `tell_kept`), and the human,
+    /// once, as of a failure, that they wait for the resume ([`Dispatcher::tell_kept`]).
+    /// What the ledger withdrew did not fail, and nobody hears of it. The ledger says
+    /// which it did ([`GivenUp`]): no state is read for it.
     fn fail_delivery(&self, message: &MessageView, because: &str) -> Result<(), EngineError> {
-        self.seams
+        let (_, given_up) = self
+            .seams
             .ledger
             .borrow_mut()
-            .fail_delivery(message.id, because)?;
+            .give_up_delivery(message.id, because)?;
+        match given_up {
+            GivenUp::Failed => {}
+            GivenUp::Kept => return self.tell_kept(message, because),
+            GivenUp::Withdrawn => return Ok(()),
+        }
         let project = self.known_project(message.project_id)?;
-        if let Some(number) = message.task_number.filter(|_| message.kind == "task") {
+        if let Some(number) = message.task_number {
             let task = self.seams.ledger.borrow().task(project.id, number)?;
-            if let Some(thread) = task.filter(|thread| thread.task.state == "failed") {
-                self.tell_requester(&project, &thread.task, because)?;
+            let failed = task.filter(|thread| {
+                thread.task.state == "failed"
+                    && (message.kind == "task" || is_told(message, thread.task.assignee.as_deref()))
+            });
+            if let Some(thread) = failed {
+                let because = if message.kind == "task" {
+                    because.to_owned()
+                } else {
+                    format!(
+                        "what @{} told its window, m-{}, did not reach it ({because})",
+                        message.sender.as_deref().unwrap_or("null"),
+                        message.id
+                    )
+                };
+                self.tell_requester(&project, &thread.task, &because)?;
                 // A task the human gave: that note was theirs.
                 if thread.task.requester == "human" {
                     return Ok(());
                 }
             }
         }
-        let kind = if message.kind == "answer" {
-            "an answer".to_owned()
-        } else {
-            format!("a {}", message.kind)
-        };
-        let from = message
-            .sender
-            .as_ref()
-            .map_or_else(|| "ConsensFlow".to_owned(), |sender| format!("@{sender}"));
-        let on = message
-            .task_number
-            .map_or_else(String::new, |number| format!(" on T-{number}"));
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
@@ -336,8 +361,40 @@ impl Dispatcher {
                 to: "human".to_owned(),
                 task: message.task_number,
                 body: format!(
-                    "m-{}, {kind} from {from}{on}, did not reach @{}: {because}.",
-                    message.id, message.recipient
+                    "m-{}, {}, did not reach @{}: {because}.",
+                    message.id,
+                    described(message),
+                    message.recipient
+                ),
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Words told to a window, kept for their task's resume as their paste failed
+    /// `because`: the human hears it once, as main told it of words that did not
+    /// reach the window, which these do at the resume. A task the human gave was
+    /// told of it already: that note was theirs.
+    fn tell_kept(&self, message: &MessageView, because: &str) -> Result<(), EngineError> {
+        let Some(number) = message.task_number else {
+            return Ok(());
+        };
+        let project = self.known_project(message.project_id)?;
+        let task = self.seams.ledger.borrow().task(project.id, number)?;
+        if task.is_some_and(|thread| thread.task.requester == "human") {
+            return Ok(());
+        }
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: Some(number),
+                body: format!(
+                    "m-{}, {}, waits for T-{number}'s resume to reach @{}: {because}.",
+                    message.id,
+                    described(message),
+                    message.recipient
                 ),
             },
         )?;
@@ -377,4 +434,22 @@ impl Dispatcher {
         )?;
         Ok(())
     }
+}
+
+/// What `message` is to the human: its kind, who wrote it, and its task
+/// (`an answer from @chief on T-1`).
+fn described(message: &MessageView) -> String {
+    let kind = if message.kind == "answer" {
+        "an answer".to_owned()
+    } else {
+        format!("a {}", message.kind)
+    };
+    let from = message
+        .sender
+        .as_ref()
+        .map_or_else(|| "ConsensFlow".to_owned(), |sender| format!("@{sender}"));
+    let on = message
+        .task_number
+        .map_or_else(String::new, |number| format!(" on T-{number}"));
+    format!("{kind} from {from}{on}")
 }

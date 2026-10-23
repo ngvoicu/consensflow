@@ -12,11 +12,12 @@ use serde_json::{json, Value};
 use super::again::tell_failed_answer;
 use super::carrying::{adopt, carried, release_carried};
 use super::receipt::reconcile;
+use super::told::{behind_held_words, fail_for, kept_for_resume, told};
 use super::{known_message, message_task, messages, require_message};
 use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
-use crate::tasks::release_ready;
+use crate::tasks::{release_ready, withdrawn_late};
 use crate::views::MESSAGE_SELECT;
 
 /// The participants something waits on: a message on its way to them, or a
@@ -50,7 +51,8 @@ pub(crate) fn with_work(store: &Store, project_id: i64) -> Result<Vec<i64>, Ledg
 /// message's paste, or that a door took for its harness, is not the head; and
 /// while a task message for the window waits for the human's approval, nothing
 /// else about its task goes, whoever wrote it and in whatever order they are
-/// approved: the words that came first are not passed over.
+/// approved: the words that came first are not passed over. Nor are older words
+/// told to the window (`told`) that the human still holds.
 pub(crate) fn next_delivery(
     store: &Store,
     participant_id: i64,
@@ -106,9 +108,11 @@ fn next_delivery_among(
              AND words.recipient_id = m.recipient_id AND words.kind = 'task'
              AND words.state = 'gated'
          ))
+         AND NOT {}
          AND (?3 IS NULL OR m.id = ?3)
        ORDER BY m.id LIMIT 1",
-            sql_list(&HELD_TASK_STATES)
+            sql_list(&HELD_TASK_STATES),
+            behind_held_words("m")
         ))?
         .query_map(params![participant_id, serial, only], |row| {
             row.get::<_, i64>(0)
@@ -118,10 +122,12 @@ fn next_delivery_among(
     next.map_or(Ok(None), |id| store.message(id))
 }
 
-/// The newest message pasted into a participant's window about a task, and
-/// proved by what the window's record showed: a task message or an answer
-/// that is `delivered` and rides in no other's paste. What the window wrote
-/// after its marker is the task's result.
+/// The message last pasted into a participant's window about a task, and
+/// proved by what the window's record showed: a task message, an answer or
+/// words told to the window (`told`) that is `delivered` and rides in no
+/// other's paste. What the window wrote after its marker is the task's result.
+/// The last is the last delivered, whatever their ids say: the human may pass
+/// on held words in another order than they were written.
 pub(crate) fn last_pasted(
     store: &Store,
     participant_id: i64,
@@ -131,8 +137,10 @@ pub(crate) fn last_pasted(
         store,
         &format!(
             "{MESSAGE_SELECT} WHERE m.task_id = ? AND m.recipient_id = ?
-         AND m.kind IN ('task', 'answer') AND m.state = 'delivered' AND m.carried_by IS NULL
-       ORDER BY m.id DESC LIMIT 1"
+         AND (m.kind IN ('task', 'answer') OR ({}))
+         AND m.state = 'delivered' AND m.carried_by IS NULL
+       ORDER BY m.delivered_at DESC, m.id DESC LIMIT 1",
+            told("m")
         ),
         params![task_id, participant_id],
     )?
@@ -350,7 +358,8 @@ pub(crate) fn cancel_message(
 /// under a carrier that cannot carry it any more (the Node daemon was pasting
 /// it on its own when it stopped, which `release_stranded` leaves to the
 /// delivery that settles it) is let go of that carrier first: carried, it
-/// would be skipped as one and never delivered.
+/// would be skipped as one and never delivered. A brief of the chief's own step
+/// done while it was on its way is not queued again (`withdrawn_late`).
 pub(crate) fn retry_delivery(
     store: &mut Store,
     message_id: i64,
@@ -360,6 +369,11 @@ pub(crate) fn retry_delivery(
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
         let message = require_message(store, message_id, "delivering")?;
+        if let Some(task) = message_task(store, message_id)? {
+            if withdrawn_late(store, &message, &task)? {
+                return known_message(store, message_id);
+            }
+        }
         store.db.execute(
             "UPDATE message SET state = 'queued', reason = ?, attempts = MAX(attempts - ?, 0)
          WHERE id = ?",
@@ -381,77 +395,50 @@ pub(crate) fn retry_delivery(
     })
 }
 
-/// A task message that arrived, and that its window then took back out of its
-/// conversation (Claude, stopped before a word of its answer, puts the message
-/// in its input box again and answers from what came before it), was not
-/// received after all. It is `queued` again, with `reason`: kept for the
-/// window as a task paused before its brief arrived keeps the brief, so the
-/// words that resume the task carry it. They do, whichever came first:
-/// - the resume not yet made: it takes the message with what is kept;
-/// - the resume made while the stop was being paid: the message joins it, as a
-///   delivery tried again does (`adopt`).
-///
-/// What its paste carried was in the window's conversation no longer than it
-/// was, so each row it carried is kept again too, and rides with it. The
-/// receipt it was given is no receipt: the carrier's will be. The task's state
-/// is not moved: it is paused, or queued behind the words that resume it.
-pub(crate) fn take_back(
-    store: &mut Store,
-    message_id: i64,
-    reason: &str,
-) -> Result<MessageView, LedgerError> {
-    model::require_text(reason, "reason", 1000)?;
-    store.write(|store| {
-        let message = require_message(store, message_id, "delivered")?;
-        let carried_by: Option<i64> = store.db.query_row(
-            "SELECT carried_by FROM message WHERE id = ?",
-            [message_id],
-            |row| row.get(0),
-        )?;
-        if message.kind != "task" || carried_by.is_some() {
-            return Err(LedgerError::refused_with(
-                "invalid-transition",
-                format!("message {message_id} is not a task message of its own"),
-                409,
-            ));
-        }
-        store.db.execute(
-            "UPDATE message SET state = 'queued', reason = ?, delivered_at = NULL, receipt = NULL
-         WHERE id = ?",
-            params![reason, message_id],
-        )?;
-        let kept: Vec<i64> = store
-            .db
-            .prepare(
-                "SELECT id FROM message WHERE carried_by = ? AND state = 'delivered' ORDER BY id",
-            )?
-            .query_map([message_id], |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        store.db.execute(
-            "UPDATE message SET state = 'queued', delivered_at = NULL, receipt = NULL
-         WHERE carried_by = ? AND state = 'delivered'",
-            [message_id],
-        )?;
-        store.log(
-            message.project_id,
-            "delivery.taken-back",
-            json!({ "message": message_id, "reason": reason, "kept": kept }),
-        )?;
-        adopt(store, message_id)?;
-        known_message(store, message_id)
-    })
-}
-
 /// A delivery given up: a task it carried, still queued, fails with it, and
-/// what it carried is its own again, for the reopening to take.
+/// what it carried is its own again, for the reopening to take. Words told to
+/// the window fail their task too (`told`), but while it is paused, when they
+/// are kept for its resume; and a brief of the chief's own step done while it
+/// was on its way is withdrawn (`withdrawn_late`). Neither is failed.
 pub(crate) fn fail_delivery(
     store: &mut Store,
     message_id: i64,
     reason: &str,
 ) -> Result<MessageView, LedgerError> {
+    give_up_delivery(store, message_id, reason).map(|(message, _)| message)
+}
+
+/// What a delivery given up came to ([`give_up_delivery`]), which only the ledger
+/// knows: whoever tells of it says what was done, never what a state suggests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GivenUp {
+    /// The message failed (`failed`), and so did what it fails with it.
+    Failed,
+    /// Words told to the window, kept for their paused task's resume
+    /// (`kept_for_resume`): they wait, `queued`, and did not fail.
+    Kept,
+    /// A brief of the chief's own step done while it was on its way
+    /// (`withdrawn_late`): cancelled, and no failure.
+    Withdrawn,
+}
+
+/// [`fail_delivery`], saying what it did ([`GivenUp`]).
+pub(crate) fn give_up_delivery(
+    store: &mut Store,
+    message_id: i64,
+    reason: &str,
+) -> Result<(MessageView, GivenUp), LedgerError> {
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
         let message = require_message(store, message_id, "delivering")?;
+        if let Some(task) = message_task(store, message_id)? {
+            if withdrawn_late(store, &message, &task)? {
+                return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+            }
+            if kept_for_resume(store, &message, &task, reason)? {
+                return Ok((known_message(store, message_id)?, GivenUp::Kept));
+            }
+        }
         store.db.execute(
             "UPDATE message SET state = 'failed', reason = ? WHERE id = ?",
             params![reason, message_id],
@@ -467,11 +454,12 @@ pub(crate) fn fail_delivery(
                 store.move_task(&task, "failed", json!({}))?;
                 release_ready(store, task.project_id)?;
             }
+            fail_for(store, &message, &task)?;
             if message.kind == "answer" {
                 tell_failed_answer(store, &message, &task, reason)?;
             }
         }
-        known_message(store, message_id)
+        Ok((known_message(store, message_id)?, GivenUp::Failed))
     })
 }
 

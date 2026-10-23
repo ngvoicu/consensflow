@@ -51,6 +51,8 @@ backticks and `$( )` as commands before ConsensFlow sees them:
     The brief, as long as it needs, `code` and all.
     BRIEF
 
+Write a long brief to a file with your file tool and pass it with `--file brief.md` instead: a shell can cut a long heredoc.
+
 A task's states: open (waits for a member) · queued (given, its window starting) ·
 working · waiting (a question is out) · paused · done (result in: your call) ·
 accepted · failed · cancelled.

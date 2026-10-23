@@ -350,9 +350,12 @@ dependencies = [
  "cf-process",
  "cf-proto",
  "form_urlencoded",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
+ "winapi-util",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

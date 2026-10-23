@@ -1,15 +1,17 @@
 //! Messages: notes, questions and their answers, delivered into a window one at
 //! a time and oldest first, except the human's, which wait in the app until
-//! read (`delivery`); what a window keeps, which rides in the paste of the
+//! read (`delivery`), or taken back out of a window that had them
+//! (`taken_back`); what a window keeps, which rides in the paste of the
 //! words that send it on (`carrying`); what makes a message received, and what
 //! that does to its task (`receipt`); the human's gate, which holds one agent's
 //! word to another until the human passes it on or declines it (`gate`); the
 //! one asked, told to answer again when an answer did not stand (`again`); and
 //! the note that tells a requester its tasks stalled, one for the tasks of a
 //! pass, which goes when they are resumed (`pauses`); the note that tells
-//! it a task is held for its member's quota, and that it goes on (`holds`); and
-//! the note that says a conversation its role again, which the ledger knows for
-//! one (`roles`).
+//! it a task is held for its member's quota, and that it goes on (`holds`); the
+//! note that says a conversation its role again, which the ledger knows for one
+//! (`roles`); and the words told to a task's window before the window has it,
+//! kept for it (`told`).
 
 mod again;
 mod carrying;
@@ -19,6 +21,8 @@ mod holds;
 mod pauses;
 mod receipt;
 mod roles;
+mod taken_back;
+mod told;
 
 use cf_proto::ledger::{MessageView, Question};
 use rusqlite::{params, OptionalExtension};
@@ -35,10 +39,11 @@ pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{
     adopt, fold, reconcile_released, release_carried, release_stranded, transfer,
 };
+pub use delivery::GivenUp;
 pub(crate) use delivery::{
     begin_delivery, cancel_message, confirm_delivery, confirm_delivery_telling, fail_delivery,
-    first_received, in_flight, last_pasted, next_delivery, next_delivery_of, retry_delivery,
-    take_back, with_work,
+    first_received, give_up_delivery, in_flight, last_pasted, next_delivery, next_delivery_of,
+    retry_delivery, with_work,
 };
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub(crate) use holds::{note_hold, tell_goes_on};
@@ -49,6 +54,9 @@ pub(crate) use receipt::{
     settle_claim,
 };
 pub(crate) use roles::{note_role, role_notes_to};
+pub(crate) use taken_back::take_back;
+pub use told::is_told;
+pub(crate) use told::{launch_called_off, tell_queued, told_unreceived, told_waiting, Dropped};
 
 /// A note: from a participant (ConsensFlow itself when none) to another,
 /// about one of the project's tasks or none.

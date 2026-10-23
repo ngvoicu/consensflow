@@ -1,9 +1,12 @@
 //! One task: reading it and its transcript; the order of the checks (the task
 //! before the verb) and the numbers read as JavaScript reads them. The verbs
-//! that move it are [`verbs`]. Where a test says what Node answered, it is what
-//! the real API answered the same request (the probe that printed those answers
-//! went with Node's API).
+//! that move it are [`verbs`], the chief's own step's [`own_steps`]; how deep a
+//! transcript reaches, [`depth`]. Where a
+//! test says what Node answered, it is what the real API answered the same
+//! request (the probe that printed those answers went with Node's API).
 
+mod depth;
+mod own_steps;
 mod verbs;
 
 use hyper::Method;

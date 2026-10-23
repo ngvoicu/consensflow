@@ -70,16 +70,17 @@ pub fn run(
 ) -> io::Result<u8> {
     // `--json` anywhere asks for the API's JSON; the words are the rest.
     let json = args.iter().any(|arg| arg == "--json");
-    let words: Vec<String> = args
+    let given: Vec<OsString> = args
         .iter()
         .filter(|arg| *arg != "--json")
-        .map(|arg| arg.to_string_lossy().into_owned())
+        .cloned()
         .collect();
-    if words.first().map(String::as_str) == Some("hook") {
-        return hook::run(words.get(1).map(String::as_str), env, input, out);
+    if given.first().is_some_and(|first| first == "hook") {
+        let harness = given.get(1).map(|arg| arg.to_string_lossy());
+        return hook::run(harness.as_deref(), env, input, out);
     }
     match Board::from_env(env) {
-        Some(board) => board::run(&words, json, &board, input, out, err),
+        Some(board) => board::run(&given, json, &board, input, out, err),
         // Tokenless: the human's own `cf`. The words as they came: a `--json`
         // among them is the verb's own, and `ui`, which `main` ran before this
         // (`native_ui`), is no verb here.
