@@ -9,6 +9,7 @@ use crate::long_run::invariants::Evidence;
 use crate::long_run::ledger::{Conversation, Event, Item, Message, Participant, Task};
 use crate::long_run::look::{Process, Reading, Stranger, Unread};
 use crate::long_run::record::Record;
+use crate::long_run::stalls::held::{Asked, When};
 
 /// The choice of `disruption` at a `how` moment, lacking nothing.
 fn choice(disruption: Disruption, how: &'static str) -> Choice {
@@ -312,6 +313,9 @@ fn going() -> Going {
         ending: String::new(),
         deadline: at(59, 0),
         final_unread: None,
+        stalls: Stalls::default(),
+        ledger: None,
+        prober: Box::new(Asked::default()),
         edge: Edge::default(),
     }
 }
@@ -461,6 +465,104 @@ fn a_notice_the_log_ties_to_no_result_is_said_unresolved_once_and_is_no_break() 
 }
 
 #[test]
+fn a_chief_held_working_past_the_idle_limit_is_told_and_its_screen_kept_in_the_report() {
+    // The Mac's run of 2026-10-19: the chief read working for good after the owner's
+    // /compact. The run tells it once, kept in its log and timeline, and keeps the
+    // chief's last screen; it fails nothing, and the console says none of it.
+    let mut said = Vec::new();
+    let mut run = going();
+    let mut floor = run.edge.floor(&mut said);
+    let held = |minute: u32, row: &str| Look {
+        at: at(minute, 0),
+        ledger: ledger("accepted"),
+        windows: Windows {
+            open: vec![crate::long_run::look::OpenWindow {
+                handle: "chief".to_owned(),
+                pane: "p1-chief".to_owned(),
+                generation: 1,
+                pid: Some(4242),
+                running: true,
+                hosted: true,
+                background: Vec::new(),
+                background_total: 0,
+                tree_unread: None,
+                tail: vec!["✻ Compacting conversation…".to_owned(), row.to_owned()],
+            }],
+            lanes: vec![crate::long_run::look::Lane {
+                handle: "chief".to_owned(),
+                state: "working".to_owned(),
+            }],
+            ..Windows::default()
+        },
+        ..Look::default()
+    };
+    for (minute, row) in [(1, "a"), (22, "b"), (30, "c")] {
+        run.hold(&mut floor, &Settings::default(), held(minute, row));
+    }
+    let log = floor.log().to_string();
+    drop(floor);
+    let stalls: Vec<&str> = run
+        .timeline
+        .moments
+        .iter()
+        .filter(|moment| moment.kind == "stall")
+        .map(|moment| moment.text.as_str())
+        .collect();
+    assert_eq!(
+        stalls,
+        ["@chief's window has read working for 21 min, since 2026-10-15T10:01:00.000Z: its screen, its processes and the ledger's last events are kept"]
+    );
+    assert!(
+        log.contains("@chief's window has read working for 21 min"),
+        "{log}"
+    );
+    let printed = String::from_utf8(said).unwrap();
+    assert!(printed.is_empty(), "{printed}");
+    assert!(run.keeper.breaks.is_empty());
+    assert_eq!(run.stalls.kept[0].screen[1], "c");
+    // What the system says of its window's processes, taken once, when it was found.
+    let held = &run.stalls.kept[0].held;
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(held[0].when, When::Found);
+    assert_eq!(held[0].at, at(22, 0));
+    let options = Options::of(&[]).unwrap();
+    let staff = crate::long_run::staff::staff_of(
+        &["claude".to_owned()],
+        &crate::long_run::staff::models_of(None).unwrap(),
+        "medium",
+    )
+    .unwrap();
+    let kept = Kept {
+        options: &options,
+        chief: ChiefKept {
+            harness: "claude".to_owned(),
+            model: "claude-opus-5-5".to_owned(),
+            effort: None,
+        },
+        found: &[],
+        left: &[],
+        staff: &staff,
+        daemon: "native (rust 3.0.5)".to_owned(),
+        home: None,
+        started: at(0, 0),
+        ended: at(30, 0),
+        schedule: &run.schedule,
+        breaks: &run.keeper.breaks,
+        unresolved: &run.keeper.unjudged,
+        filled: &run.keeper.filled,
+        timeline: &run.timeline,
+        stalls: &run.stalls,
+        ending: DONE.to_owned(),
+        error: None,
+        log: serde_json::Value::Null,
+    };
+    let value = kept.value();
+    assert_eq!(value["stalls"]["windows"][0]["handle"], "chief");
+    assert_eq!(value["stalls"]["windows"][0]["screen"][1], "c");
+    assert!(kept.markdown().contains("\n## Stalls\n"));
+}
+
+#[test]
 fn what_the_run_says_is_masked_whatever_says_it_its_own_names_shown() {
     // A wait for the chief that gave up says the chief's screen and how its window was
     // started (`Chief::gave_up`, on the run's floor): a password there is hidden before
@@ -563,6 +665,7 @@ fn a_findings_screen_and_words_stay_in_the_local_report_and_the_console_says_its
         unresolved: &run.keeper.unjudged,
         filled: &run.keeper.filled,
         timeline: &run.timeline,
+        stalls: &run.stalls,
         ending: DONE.to_owned(),
         error: Some(format!("the rig could not close: {secret}")),
         log,
@@ -627,7 +730,7 @@ fn what_the_close_left_of_the_runs_processes_is_a_break_of_the_last_look() {
         at(6, 20),
         Ok(ledger("accepted")),
         windows,
-        Some(&last),
+        records_of(Some(&last)),
         (&Settings::default(), "the project is done", at(30, 0)),
     );
     let look = after.look.as_ref().unwrap();
@@ -677,7 +780,7 @@ fn a_ledger_the_app_left_that_cannot_be_read_fails_the_run_and_no_earlier_copy_i
         at(6, 20),
         Err(crate::Error::Refused("file is not a database".to_owned())),
         windows,
-        Some(&last),
+        records_of(Some(&last)),
         (&Settings::default(), "the project is done", at(30, 0)),
     );
     assert!(after.look.is_none(), "no look on the earlier ledger");
@@ -846,7 +949,12 @@ fn what_the_app_wrote_as_it_closed_is_held_in_the_last_look() {
     ));
     // Taken ten seconds after the result: the closed ledger is all it will be, and
     // a result is judged however young.
-    let look = closed_look(at(3, 10), closed, Windows::default(), Some(&last));
+    let look = closed_look(
+        at(3, 10),
+        closed,
+        Windows::default(),
+        records_of(Some(&last)),
+    );
     let found = final_breaks(
         &look,
         &Settings::default(),
@@ -863,4 +971,37 @@ fn what_the_app_wrote_as_it_closed_is_held_in_the_last_look() {
     );
     // And the end, which the project of this ledger did not reach.
     assert!(found.iter().any(|found| found.key == "9:end"), "{found:?}");
+}
+
+/// The records of `last`, the last look, as far as it read them: what a closed look holds
+/// where the records were not read again.
+fn records_of(last: Option<&Look>) -> Records {
+    last.map(|look| (look.records.clone(), look.every_reading()))
+        .unwrap_or_default()
+}
+
+#[test]
+fn the_timeline_says_the_records_were_read_once_more_after_the_close_and_how_many_readings_failed()
+{
+    // Calliope's review of round b7: `finish` takes the records read after the close in
+    // place of the last look's; what it says shows that reading ran, and a failed one.
+    let reading = |failed: Option<&str>| Reading {
+        through: failed.is_none().then_some(at(6, 0)),
+        failed: failed.map(str::to_owned),
+    };
+    let readings: BTreeMap<i64, Reading> = [
+        (7, reading(None)),
+        (9, reading(Some("its record could not be read: denied"))),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        read_again(&readings),
+        "the records were read once more after the close: 2 conversations, 1 reading failed"
+    );
+    let one: BTreeMap<i64, Reading> = [(7, reading(None))].into_iter().collect();
+    assert_eq!(
+        read_again(&one),
+        "the records were read once more after the close: 1 conversation, 0 readings failed"
+    );
 }

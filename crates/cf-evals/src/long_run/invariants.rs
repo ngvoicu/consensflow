@@ -62,7 +62,7 @@ use super::look::Look;
 use super::mask::{mask, screen, Names};
 
 pub use end::end;
-pub use order::{ENDED_NOTE, LET_GO_NOTE};
+pub use order::{ENDED_NOTE, LET_GO_NOTE, PROGRESS_LINES};
 
 /// What each invariant is called in a report, and the field's shape it is made of.
 pub const INVARIANTS: [(u8, &str, &str); 10] = [
@@ -80,6 +80,9 @@ pub const INVARIANTS: [(u8, &str, &str); 10] = [
 
 /// The number of the invariant a disruption's effect is held to.
 pub const EFFECT: u8 = 10;
+
+/// The number of the end within the budget (`end`).
+pub const END: u8 = 9;
 
 /// How long the watch lets things be before they count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -151,6 +151,8 @@ struct Script {
     /// The state T-7 goes to when the worker's window is killed; none where it cannot be.
     killed_then: Option<&'static str>,
     killed: bool,
+    /// What the chief's lane reads.
+    chief_state: &'static str,
 }
 
 impl Script {
@@ -166,6 +168,7 @@ impl Script {
             paused_to: None,
             killed_then: None,
             killed: false,
+            chief_state: "idle",
         }
     }
 
@@ -194,7 +197,7 @@ impl Stagehand for Script {
         Ok(json!({
             "project": { "state": project },
             "lanes": [
-                { "participant": { "handle": "chief", "role": "chief" }, "activity": { "state": "idle" },
+                { "participant": { "handle": "chief", "role": "chief" }, "activity": { "state": self.chief_state },
                   "pane": chief, "tasks": [] },
                 { "participant": { "handle": "long-devin-1", "role": "worker" }, "activity": { "state": "working" },
                   "pane": worker, "tasks": tasks },
@@ -645,4 +648,35 @@ fn a_compact_whose_chief_wrote_no_new_compaction_failed() {
         &Target::Project,
     );
     assert!(matches!(outcome, Outcome::Played(_)), "{outcome:?}");
+    assert!(said(&outcome).ends_with("its record says it compacted, and it came to rest"));
+}
+
+#[test]
+fn a_compact_whose_chief_never_came_to_rest_after_it_failed() {
+    // The Mac's 2-hour run of 2026-10-19: the record said the chief compacted, and its
+    // window read working for good from the owner's /compact on, the project stalled.
+    // The play said so and failed nothing; the chief that never rests is its effect unseen.
+    let now = jiff::Timestamp::now().as_millisecond();
+    let mut watch = Looks {
+        last: Some(chief_look(&[boundary(now - 500)])),
+        then: Some(chief_look(&[boundary(now - 500), boundary(now + 60_000)])),
+    };
+    let mut stage = Script {
+        chief_state: "working",
+        ..Script::new(Resume::GoesOn)
+    };
+    let outcome = played(
+        &mut stage,
+        &mut watch,
+        Disruption::Compact,
+        &Target::Project,
+    );
+    let Outcome::Failed { said, evidence } = &outcome else {
+        panic!("{outcome:?}");
+    };
+    assert!(
+        said.ends_with("its record says it compacted, and it never came to rest within the wait: its window reads working"),
+        "{said}"
+    );
+    assert_eq!(evidence.screen, ["❯ "]);
 }

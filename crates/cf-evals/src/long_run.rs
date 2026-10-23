@@ -40,7 +40,9 @@
 //!   host's time), `tracker` and [`processes`] (the processes of the windows, and the
 //!   strangers, each said and left running: the run signals only what it started,
 //!   through the handle it holds) and `conduct` (the run, look by look).
-//! - [`timeline`] and [`report`]: what the run keeps, JSON and Markdown.
+//! - [`timeline`] and [`report`]: what the run keeps, JSON and Markdown; `stalls`: what
+//!   it keeps of a window that read working or starting too long, and of every window
+//!   at an end the project did not reach, with the ledger copied beside the report.
 //!
 //! **This spends real quota** on every harness of the staff, for hours, and is no
 //! part of any gate. The dry run on the stand-in agent spends nothing
@@ -63,6 +65,7 @@ pub mod report;
 mod setup;
 pub mod staff;
 mod stage;
+mod stalls;
 pub mod timeline;
 mod tracker;
 mod watcher;
