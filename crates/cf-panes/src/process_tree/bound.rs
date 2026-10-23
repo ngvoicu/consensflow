@@ -86,6 +86,16 @@ pub(super) trait System {
     /// Sends `signal` to every process of the group `group`: one that is gone is no
     /// error. Only [`Bound::signal_group`] calls it.
     fn send_group(&self, group: i32, signal: i32) -> io::Result<()>;
+
+    /// Whether the process `pid` carries `marker`, a pane's, in the environment it was
+    /// started with: what [`super::ProcessTree::possibly_left`] names by, which the bound
+    /// never asks.
+    fn carries(&self, pid: i32, marker: &str) -> bool;
+
+    /// Whether no process of any user has the number `pid` ([`native::nobody_holds`]): what
+    /// [`super::ProcessTree::possibly_left`] tells a session whose leader has gone by, which
+    /// the bound never asks.
+    fn nobody_holds(&self, pid: i32) -> bool;
 }
 
 /// The system itself.
@@ -109,6 +119,14 @@ impl System for Native {
 
     fn send_group(&self, group: i32, signal: i32) -> io::Result<()> {
         native::signal_group(group, signal)
+    }
+
+    fn carries(&self, pid: i32, marker: &str) -> bool {
+        native::has_marker(pid, marker)
+    }
+
+    fn nobody_holds(&self, pid: i32) -> bool {
+        native::nobody_holds(pid)
     }
 }
 

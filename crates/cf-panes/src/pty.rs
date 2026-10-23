@@ -94,6 +94,9 @@ pub struct StreamedPane {
     /// The window's exit, owed to the daemon until whoever reads `output` is done: the table
     /// is asked whether every one has been told ([`PaneTable::exits_told_within`]).
     pub owed: ExitOwed,
+    /// The window's tree, which its exit asks what may be the window's and was not ended
+    /// ([`turn::Tree::possibly_left`]): the pane may have left the table by then.
+    pub(crate) tree: turn::Tree,
 }
 
 /// The child environment carried by `pane.open`: inherit the parent, apply
@@ -634,7 +637,7 @@ impl PaneTable {
             size,
         )?;
         let flow = Arc::new(OutputFlow::new(backlog_bytes));
-        let (pid, screen, ended, terminal) = {
+        let (pid, screen, ended, terminal, tree) = {
             let mut panes = self.lock_panes()?;
             let pane = panes
                 .get_mut(&key)
@@ -645,6 +648,7 @@ impl PaneTable {
                 Arc::clone(&pane.screen),
                 Arc::clone(&pane.ended),
                 terminal_of(pane),
+                pane.tree(),
             )
         };
         // A window that fails here lets go of its output before it is ended: on Windows a
@@ -681,6 +685,7 @@ impl PaneTable {
             screen,
             ended,
             owed: self.exits.owe(),
+            tree,
         })
     }
 

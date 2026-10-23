@@ -117,6 +117,17 @@ pub struct BackgroundProcess {
     pub command: String,
 }
 
+/// A process that may be a window's and was not ended when the window closed: its number
+/// and the name the system gives its program, nothing of its command line or environment.
+/// Only the environment the window gave its program, read where the process runs, says it
+/// may be the window's, which is no proof (another program can hand that environment on to
+/// work that is none of the window's), so the host names it and never signals it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PossiblyLeft {
+    pub pid: u32,
+    pub program: String,
+}
+
 /// `pane.background`'s answer: what the window's tree has running that began
 /// after the window's last `pane.mark` and that the host can tell is the turn's
 /// work, `total` of it and the first `processes` of it by how long ago they began.
@@ -192,6 +203,17 @@ pub struct PaneExit {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub background: Vec<BackgroundProcess>,
+    /// What may be the window's and runs on, not ended, as the exit is told: on macOS, a
+    /// process that carries the window's marker, began after its program, and is in a
+    /// session whose leader has gone, which the close may not signal (a job a tool shell
+    /// detached, and what a server the window started hands its environment to). Empty
+    /// for a window with none, and for a host that does not say.
+    #[serde(
+        default,
+        deserialize_with = "or_none_said",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub possibly_left: Vec<PossiblyLeft>,
     /// The window's program, by its process number, where the host could not prove it
     /// gone when it sent this, though it had begun to end it and waited a while for the
     /// end (0 where its number was not known): it may still run. None where it has gone.
@@ -264,6 +286,7 @@ mod tests {
                 signal: None,
                 tail: None,
                 background: Vec::new(),
+                possibly_left: Vec::new(),
                 survivor: None,
             }
         );
@@ -315,6 +338,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!(unsaid.background, Vec::new());
+    }
+
+    #[test]
+    fn an_exit_names_what_may_be_the_windows_and_was_not_ended_and_an_older_host_names_nothing() {
+        let body = json!({
+            "id": "p1-zeus",
+            "generation": 4,
+            "possiblyLeft": [{ "pid": 4242, "program": "node" }],
+        });
+        let exit: PaneExit = serde_json::from_value(body.clone()).unwrap();
+        assert_eq!(
+            exit.possibly_left,
+            vec![PossiblyLeft {
+                pid: 4242,
+                program: "node".to_owned()
+            }]
+        );
+        assert_eq!(serde_json::to_value(&exit).unwrap(), body);
+        let older: PaneExit =
+            serde_json::from_value(json!({ "id": "p1-zeus", "generation": 4 })).unwrap();
+        assert_eq!(older.possibly_left, Vec::new());
+        // Not a list of processes: not said, and the exit stands.
+        let unsaid: PaneExit = serde_json::from_value(
+            json!({ "id": "p", "generation": 1, "possiblyLeft": [{ "pid": -1 }] }),
+        )
+        .unwrap();
+        assert_eq!(unsaid.possibly_left, Vec::new());
     }
 
     #[test]
@@ -474,6 +524,7 @@ mod tests {
                 signal: None,
                 tail: None,
                 background: Vec::new(),
+                possibly_left: Vec::new(),
                 survivor: None,
             }
         );

@@ -22,7 +22,7 @@ use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::panes::{
-    BackgroundProcess, EndRequest, MarkRequest, PaneExit, SnapshotRequest, TAIL_LINES,
+    BackgroundProcess, EndRequest, MarkRequest, PaneExit, PossiblyLeft, SnapshotRequest, TAIL_LINES,
 };
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
@@ -348,6 +348,7 @@ fn stream_to_page(
             ended,
             // Paid, with this thread's end, once the exit is told.
             owed: _owed,
+            tree,
         } = streamed;
         for message in stream {
             printed.note();
@@ -362,7 +363,14 @@ fn stream_to_page(
             // How it ended by itself, where that came after the output did; not the
             // host's own end of it.
             let status = status.or_else(|| (!handed.ended_by_host).then(|| ended.get()).flatten());
-            let exit = exit_body(&key, &screen, status, background, handed.survivor);
+            // What may be the window's and runs on, which no close or ending signals: named
+            // as the program is proven gone, which a close's ending of what is the window's
+            // does not change.
+            let left = Left {
+                background,
+                possibly: tree.possibly_left(),
+            };
+            let exit = exit_body(&key, &screen, status, left, handed.survivor);
             #[cfg(test)]
             if let Some(handed) = EXIT_HANDED
                 .lock()
@@ -379,6 +387,13 @@ fn stream_to_page(
     });
 }
 
+/// What a window left running, for its exit: the turn's work, which its close ended, and
+/// what may be the window's and was not ended.
+struct Left {
+    background: Vec<BackgroundProcess>,
+    possibly: Vec<PossiblyLeft>,
+}
+
 /// `pane.exit`'s body: the pane, how its program ended where that was read,
 /// the last lines its screen showed, what it left running, and the program
 /// where it could not be proven gone.
@@ -386,7 +401,7 @@ fn exit_body(
     key: &PaneKey,
     screen: &PaneScreen,
     ended: Option<Ended>,
-    background: Vec<BackgroundProcess>,
+    left: Left,
     survivor: Option<u32>,
 ) -> Value {
     let exit = PaneExit {
@@ -395,7 +410,8 @@ fn exit_body(
         exit_code: ended.as_ref().map(|ended| ended.code),
         signal: ended.and_then(|ended| ended.signal),
         tail: Some(screen.tail(TAIL_LINES)),
-        background,
+        background: left.background,
+        possibly_left: left.possibly,
         survivor,
     };
     serde_json::to_value(&exit).unwrap_or_else(|_| json!({"id":key.id,"generation":key.generation}))

@@ -65,6 +65,8 @@ mod bound;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) mod guard;
 #[cfg(test)]
+mod left_tests;
+#[cfg(test)]
 mod machine_tests;
 mod native;
 mod selection;
@@ -77,7 +79,7 @@ use std::time::{Duration, Instant};
 
 use crate::background::{report, Baseline, Member, ProcessKey};
 use bound::{Bound, Native, System, Table};
-use cf_proto::panes::Ending;
+use cf_proto::panes::{Ending, PossiblyLeft};
 use native::process;
 pub(crate) use selection::Lineage;
 
@@ -198,6 +200,45 @@ impl ProcessTree {
         self.bound.observe(&Table::of(&snapshot));
         let tree = self.select(&snapshot, &HashMap::new());
         Ok(self.members_in(&snapshot, &tree))
+    }
+
+    /// What may be the window's and runs on, not ended, for the exit to name: each
+    /// process that carries the window's marker, began at or after its program, is in a
+    /// session whose leader has gone (no process of any user has the session's number), and
+    /// that the bound refuses, so that no close or ending signals it. Its number and the
+    /// name the system gives its program, nothing more. A job a tool shell detached is one
+    /// (`(server &)` from Claude Code's or Pi's shell, which leads a session of its own and
+    /// returns); so is a job the user started through a server that the window started and
+    /// that hands its environment on (a `screen` or `tmux` server, an editor), which is why
+    /// this names and never signals (T-406, Astraeus's review T-411). Nothing looked at here
+    /// is seen ([`Bound::observe`] is not asked). None where the program was never read,
+    /// or the system's table cannot be.
+    pub fn possibly_left(&self) -> Vec<PossiblyLeft> {
+        self.possibly_left_by(&Native)
+    }
+
+    fn possibly_left_by(&self, system: &impl System) -> Vec<PossiblyLeft> {
+        let Some(root) = self.root else {
+            return Vec::new();
+        };
+        let Ok(snapshot) = system.processes() else {
+            return Vec::new();
+        };
+        let table = Table::of(&snapshot);
+        snapshot
+            .iter()
+            .filter(|p| p.identity.born >= root.born)
+            .filter(|p| {
+                p.session
+                    .is_some_and(|session| session > 1 && system.nobody_holds(session))
+            })
+            .filter(|p| !self.bound.allows(&table, p.identity))
+            .filter(|p| system.carries(p.identity.pid, &self.marker))
+            .map(|p| PossiblyLeft {
+                pid: p.identity.pid.unsigned_abs(),
+                program: p.name.clone(),
+            })
+            .collect()
     }
 
     /// The turn's work as `baseline` proves it, chosen once: what an ending of the

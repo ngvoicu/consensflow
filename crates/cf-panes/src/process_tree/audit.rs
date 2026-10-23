@@ -27,7 +27,7 @@ const SEAM_SENDERS: [&str; 3] = [".send(", ".send_group(", "native::signal"];
 
 /// Where a signal may be sent: the file (from `src/`), a piece of the line that sends it, and
 /// why it may.
-const SENDERS: [(&str, &str, &str); 13] = [
+const SENDERS: [(&str, &str, &str); 14] = [
     (
         "process_tree/bound.rs",
         "native::signal(to, signal)",
@@ -52,6 +52,11 @@ const SENDERS: [(&str, &str, &str); 13] = [
         "process_tree/native.rs",
         "libc::kill(identity.pid, signal)",
         "the system's own sender: it signals the process this tree discovered, which it checks first, and a test build asks the guard before it",
+    ),
+    (
+        "process_tree/native.rs",
+        "libc::kill(pid, 0)",
+        "signal 0 delivers nothing: whether any process holds a session's number",
     ),
     (
         "process_tree/native.rs",

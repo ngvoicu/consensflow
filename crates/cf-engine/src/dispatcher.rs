@@ -37,7 +37,7 @@ use cf_ledger::{
 use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
-use crate::background::quote;
+use crate::background::{possibly_left_words, quote};
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
 use crate::resume::Coming;
@@ -829,11 +829,14 @@ impl Dispatcher {
                 // the engine closed says why it did, where it was not the human's Close,
                 // and nothing of its end, which was the kill's (the host's exit can come
                 // while the kill is answered).
-                let besides = if left.is_empty() {
+                let mut besides = if left.is_empty() {
                     String::new()
                 } else {
                     format!(" with background work still running: {}", quote(left))
                 };
+                if let Some(words) = possibly_left_words(shown.possibly_left()) {
+                    besides.push_str(&format!("; {words}"));
+                }
                 let (own, with) = {
                     let window = record.window.borrow();
                     (window.own_exit, window.closed_with.clone())
@@ -850,7 +853,7 @@ impl Dispatcher {
                 };
                 self.stall(&project, &thread.task, &because)?;
             } else {
-                self.tell_left_running(&project, &participant, left)?;
+                self.tell_left_running(&project, &participant, left, shown.possibly_left())?;
             }
         }
         self.changed();

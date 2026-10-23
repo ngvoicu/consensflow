@@ -105,6 +105,11 @@ pub(super) struct Machine {
     processes: Vec<Process>,
     sent: RefCell<Vec<(i32, i32)>>,
     sent_to_groups: RefCell<Vec<(i32, i32)>>,
+    /// The processes that carry the window's marker, and the marker.
+    marked: Vec<i32>,
+    marker: String,
+    /// Numbers held by processes the table does not hold: another user's, or a zombie.
+    held: Vec<i32>,
 }
 
 impl Machine {
@@ -113,7 +118,23 @@ impl Machine {
             processes,
             sent: RefCell::default(),
             sent_to_groups: RefCell::default(),
+            marked: Vec::new(),
+            marker: String::new(),
+            held: Vec::new(),
         }
+    }
+
+    /// The machine, where the processes `pids` carry `marker` in their environment.
+    pub fn marking(mut self, marker: &str, pids: &[i32]) -> Self {
+        marker.clone_into(&mut self.marker);
+        self.marked = pids.to_vec();
+        self
+    }
+
+    /// The machine, where processes the table does not hold have the numbers `pids`.
+    pub fn holding(mut self, pids: &[i32]) -> Self {
+        self.held = pids.to_vec();
+        self
     }
 
     /// The numbers of the groups sent `signal` whole, each once, in order of number.
@@ -175,5 +196,18 @@ impl System for Machine {
     fn send_group(&self, group: i32, signal: i32) -> io::Result<()> {
         self.sent_to_groups.borrow_mut().push((group, signal));
         Ok(())
+    }
+
+    fn carries(&self, pid: i32, marker: &str) -> bool {
+        !marker.is_empty() && marker == self.marker && self.marked.contains(&pid)
+    }
+
+    fn nobody_holds(&self, pid: i32) -> bool {
+        pid > 1
+            && !self.held.contains(&pid)
+            && !self
+                .processes
+                .iter()
+                .any(|process| process.identity.pid == pid)
     }
 }

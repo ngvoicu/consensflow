@@ -11,7 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
-use cf_proto::panes::{BackgroundProcess, PaneExit};
+use cf_proto::panes::{BackgroundProcess, PaneExit, PossiblyLeft};
 use serde_json::{json, Map, Value};
 
 use super::executor::Gate;
@@ -76,6 +76,7 @@ struct ExitSays {
     signal: Option<String>,
     tail: Option<Vec<String>>,
     background: Vec<BackgroundProcess>,
+    possibly_left: Vec<PossiblyLeft>,
     survivor: Option<u32>,
 }
 
@@ -127,6 +128,19 @@ impl FakeHost {
             .map(|(command, pid)| BackgroundProcess {
                 pid: 1000 + pid,
                 command: (*command).to_owned(),
+            })
+            .collect();
+    }
+
+    /// What every exit from now on names as possibly its window's and not ended: these
+    /// programs, by numbers of their own.
+    pub fn exits_possibly_leaving(&self, programs: &[&str]) {
+        self.exit_says.borrow_mut().possibly_left = programs
+            .iter()
+            .zip(1u32..)
+            .map(|(program, pid)| PossiblyLeft {
+                pid: 4000 + pid,
+                program: (*program).to_owned(),
             })
             .collect();
     }
@@ -185,6 +199,7 @@ impl FakeHost {
             signal: says.signal,
             tail: says.tail,
             background: says.background,
+            possibly_left: says.possibly_left,
             survivor: says.survivor,
         };
         for engine in engines {

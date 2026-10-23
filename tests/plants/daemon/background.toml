@@ -84,6 +84,10 @@ panes-headless-ending = ["cargo", "test", "--offline", "-p", "cf-panes", "--test
 panes-headless-harness = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_mark_that_names_the_harness"]
 # A window whose program exits over what it left in its session (T-375).
 panes-headless-window-ends = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_window_ends_when_its_program_exits"]
+# A window closed over a server its tool shell detached, which its exit names and no signal
+# reaches; and the jobs it names none of (T-406). They signal nothing the report names.
+panes-headless-possibly-left = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_window_closed_names_a_server"]
+panes-headless-not-named = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_window_closed_does_not_name"]
 # The app's quit, which closes the windows within the grace they are given.
 app-test-quitting = ["cargo", "xtask", "app", "test", "quitting"]
 # The cases of the rig (`background_work` and `background_close` of crates/cf-e2e): the
@@ -399,8 +403,8 @@ runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '                self.tell_left_running(&project, &participant, left)?;'
-replace = '                self.tell_left_running(&project, &participant, &[])?;'
+find = '                self.tell_left_running(&project, &participant, left, shown.possibly_left())?;'
+replace = '                self.tell_left_running(&project, &participant, &[], shown.possibly_left())?;'
 
 [[plant]]
 name = "background: the pause note of a window that went leaves out the work it ended"
@@ -409,8 +413,8 @@ runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '                let besides = if left.is_empty() {'
-replace = '                let besides = if true {'
+find = '                let mut besides = if left.is_empty() {'
+replace = '                let mut besides = if true {'
 
 # What the daemon makes of the host's answer to an ending, and how long it waits for it.
 
@@ -942,17 +946,15 @@ runs = ["panes-headless-turn-marked"]
 file = "crates/cf-panes/src/pane_handlers.rs"
 find = '''
         tail: Some(screen.tail(TAIL_LINES)),
-        background,
-        survivor,
-    };'''
+        background: left.background,
+        possibly_left: left.possibly,'''
 replace = '''
         tail: Some(screen.tail(TAIL_LINES)),
         background: {
-            let _ = background;
+            drop(left.background);
             Vec::new()
         },
-        survivor,
-    };'''
+        possibly_left: left.possibly,'''
 
 [[plant]]
 name = "background: an ending over the wire says nothing of what it left"
@@ -1933,8 +1935,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '                self.tell_left_running(&project, &participant, left)?;'
-replace = '                self.tell_left_running(&project, &participant, &[])?;'
+find = '                self.tell_left_running(&project, &participant, left, shown.possibly_left())?;'
+replace = '                self.tell_left_running(&project, &participant, &[], shown.possibly_left())?;'
 
 [[plant]]
 name = "background rig: a window’s exit leaves out the work it left running"
@@ -1946,17 +1948,15 @@ builds = true
 file = "crates/cf-panes/src/pane_handlers.rs"
 find = '''
         tail: Some(screen.tail(TAIL_LINES)),
-        background,
-        survivor,
-    };'''
+        background: left.background,
+        possibly_left: left.possibly,'''
 replace = '''
         tail: Some(screen.tail(TAIL_LINES)),
         background: {
-            let _ = background;
+            drop(left.background);
             Vec::new()
         },
-        survivor,
-    };'''
+        possibly_left: left.possibly,'''
 
 [[plant]]
 name = "background rig: a paused task’s window is closed with it"
@@ -2487,3 +2487,99 @@ runs = ["panes-lib-job-pane"]
 file = "crates/cf-panes/src/job_object.rs"
 find = "        repair_cygwin_parents(&mut fresh, held, ps);"
 replace = "        let _ = (&mut fresh, held, ps);"
+
+# What a window's exit names as possibly the window's and not ended (T-406): a process that
+# carries the window's marker, began after its program, and is in a session whose leader has
+# gone, which the bound refuses. Named, never signalled: each plant takes one of its rules out,
+# and its runs on real processes signal nothing it names.
+
+[[plant]]
+name = "background possibly-left: a job that does not carry the window's marker is named"
+meant = "a_job_that_carries_another_marker_or_none_is_not_named"
+runs = ["panes-lib-tree", "panes-headless-not-named"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = "            .filter(|p| system.carries(p.identity.pid, &self.marker))"
+replace = "            .filter(|_| true)"
+
+[[plant]]
+name = "background possibly-left: a job that began before the window's program is named"
+meant = "a_marked_job_that_began_before_the_windows_program_is_not_named"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = "            .filter(|p| p.identity.born >= root.born)"
+replace = "            .filter(|p| p.identity.born >= (0, 0) || root.born == (0, 0))"
+
+[[plant]]
+name = "background possibly-left: a job in a session whose leader runs is named"
+meant = "a_marked_job_whose_sessions_number_a_process_holds_is_not_named"
+runs = ["panes-lib-tree", "panes-headless-not-named"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = "                    .is_some_and(|session| session > 1 && system.nobody_holds(session))"
+replace = "                    .is_some_and(|session| session > 1)"
+
+[[plant]]
+name = "background possibly-left: any answer but success to a signal 0 says nobody holds the number"
+meant = "nobody_holds_a_number_only_where_the_system_answers_that_no_process_has_it"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = "    io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)"
+replace = "    io::Error::last_os_error().raw_os_error().is_some()"
+
+[[plant]]
+name = "background possibly-left: what the bound allows, which the close ends, is named"
+meant = "what_the_bound_allows_is_not_named_the_close_ends_it"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = "            .filter(|p| !self.bound.allows(&table, p.identity))"
+replace = "            .filter(|p| !self.bound.allows(&table, p.identity) || p.identity.pid > 0)"
+
+[[plant]]
+name = "background possibly-left: the exit does not name what may be the window's"
+meant = "a_window_closed_names_a_server_its_agents_tool_shell_detached_and_leaves_it_running"
+runs = ["panes-headless-possibly-left"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "                possibly: tree.possibly_left(),"
+replace = "                possibly: { let _ = &tree; Vec::new() },"
+
+[[plant]]
+name = "background possibly-left: the note to whoever gave the task says nothing of what may be the window's"
+meant = "a_window_closed_with_a_process_that_may_be_its_own_names_it_to_whoever_gave_the_task"
+runs = ["engine-dispatcher-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                self.tell_left_running(&project, &participant, left, shown.possibly_left())?;"
+replace = "                self.tell_left_running(&project, &participant, left, &[])?;"
+
+[[plant]]
+name = "background possibly-left: the pause note says nothing of what may be the window's"
+meant = "a_window_that_goes_by_itself_names_in_its_pause_note_what_may_be_its_own_after_its_work"
+runs = ["engine-dispatcher-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                if let Some(words) = possibly_left_words(shown.possibly_left()) {"
+replace = "                if let Some(words) = possibly_left_words(&[]) {"
+
+[[plant]]
+name = "background possibly-left: the exit's list of what may be the window's is not read"
+meant = "an_exit_names_what_may_be_the_windows_and_was_not_ended_and_an_older_host_names_nothing"
+runs = ["proto-lib-panes"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/panes.rs"
+find = "    pub possibly_left: Vec<PossiblyLeft>,"
+replace = """    #[serde(skip_deserializing)]
+    pub possibly_left: Vec<PossiblyLeft>,"""

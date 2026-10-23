@@ -35,7 +35,7 @@ mod secret;
 #[cfg(test)]
 mod tests;
 
-use cf_proto::panes::{BackgroundProcess, PaneExit, SnapshotTail};
+use cf_proto::panes::{BackgroundProcess, PaneExit, PossiblyLeft, SnapshotTail};
 use serde_json::Value;
 
 use mask::mask;
@@ -61,6 +61,8 @@ pub struct Shown {
     signal: Option<String>,
     tail: Option<Vec<String>>,
     background: Vec<BackgroundProcess>,
+    /// What the host named as possibly the window's, which it did not end.
+    possibly_left: Vec<PossiblyLeft>,
     /// The window's program, where the host could not prove it gone (0 where its
     /// number was not known): it may still run.
     survivor: Option<u32>,
@@ -74,6 +76,7 @@ impl Shown {
             signal: exit.signal,
             tail: exit.tail,
             background: exit.background,
+            possibly_left: exit.possibly_left,
             survivor: exit.survivor,
         }
     }
@@ -94,6 +97,12 @@ impl Shown {
     /// processes its turns started, as the host listed them.
     pub(crate) fn left_running(&self) -> &[BackgroundProcess] {
         &self.background
+    }
+
+    /// What the host named, as the window closed, as possibly the window's and not ended:
+    /// it runs on, and nothing proved it the window's (`PaneExit::possibly_left`).
+    pub(crate) fn possibly_left(&self) -> &[PossiblyLeft] {
+        &self.possibly_left
     }
 
     /// A pane's snapshot, asked for its tail: the lines it answered. An answer

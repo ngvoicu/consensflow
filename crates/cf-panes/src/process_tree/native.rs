@@ -92,6 +92,23 @@ fn session_of(pid: i32) -> Option<i32> {
     (session > 0).then_some(session)
 }
 
+/// Whether no process of any user has the number `pid`: the system answers a signal 0 to it
+/// (which delivers nothing) with `ESRCH`, and only that. A number that is not a process's
+/// (1 or less) is held, as is one the system answers otherwise: a zombie holds its number (the
+/// signal succeeds), and so does a process of another user (`EPERM`), such as the root `login`
+/// that leads a terminal's session.
+pub(super) fn nobody_holds(pid: i32) -> bool {
+    if pid <= 1 {
+        return false;
+    }
+    // SAFETY: kill takes two integers and touches no memory of ours; signal 0 delivers
+    // nothing, it asks whether there is a process to deliver to.
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return false;
+    }
+    io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+
 /// The path of the program a process runs, as the system keeps it, whole whatever
 /// it holds: empty where the system will not say.
 pub(super) fn exe_of(pid: i32) -> String {

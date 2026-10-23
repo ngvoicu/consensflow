@@ -2751,23 +2751,94 @@ fn an_ending_asked_over_the_wire_ends_what_the_turn_left_and_the_window_stays_op
 const A_TOOL_SHELL_DETACHES_A_SERVER: &str = "/usr/bin/python3 -c 'import os; os.setsid(); \
      os.execv(\"/bin/sh\", [\"sh\", \"-c\", os.environ[\"TOOL\"]])'; printf started; read _";
 
-/// Opens a window of [`A_TOOL_SHELL_DETACHES_A_SERVER`] whose tool shell runs `server` in the
-/// background of a subshell, closes it with nothing having looked at it, and says whether the
-/// server outlived it: what `ps` says of it then, and none where it was ended. `program` is how
-/// the server's program path ends, once it runs it.
+/// A server of Python's, which shows its environment as a Node server does: it writes each
+/// signal it is sent and can catch to the file `$SIGNALS`, and its number to `$JOB`, and
+/// sleeps. With `LEADS=server` it leads a session of its own (`setsid`) first; with
+/// `LEADS=job` it leads one, starts the job in it, which writes its number, and sleeps beside
+/// it.
 #[cfg(target_os = "macos")]
-fn a_window_closed_over_a_server_its_tool_shell_detached(
-    server: &str,
+const SERVER: &str = r#"import os, signal, time
+def said(number, _):
+    with open(os.environ["SIGNALS"], "a") as file:
+        file.write("%d\n" % number)
+for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signal.SIGUSR1, signal.SIGUSR2, signal.SIGCONT):
+    signal.signal(number, said)
+if os.environ.get("LEADS"):
+    os.setsid()
+    if os.environ["LEADS"] == "job" and os.fork() != 0:
+        while True:
+            time.sleep(1)
+with open(os.environ["JOB"] + ".part", "w") as file:
+    file.write(str(os.getpid()))
+os.rename(os.environ["JOB"] + ".part", os.environ["JOB"])
+while True:
+    time.sleep(1)
+"#;
+
+/// The command of a tool shell that detaches [`SERVER`].
+#[cfg(target_os = "macos")]
+const DETACHES_THE_SERVER: &str = "(/usr/bin/python3 -c \"$PROG\" &)";
+
+/// What became of a job a window's tool shell detached, the window having been closed with
+/// nothing having looked at it.
+#[cfg(target_os = "macos")]
+struct Closed {
+    /// The window's program.
+    window: i32,
+    job: i32,
+    /// The session the job was in, and whether a process held its number, before the close.
+    session: i32,
+    leader_ran: bool,
+    /// The window's `pane.exit`.
+    exit: Value,
+    /// What `ps` said of the job once the host had ended (empty where it had gone), and
+    /// the signals it wrote that it was sent.
+    after: String,
+    signals: String,
+}
+
+#[cfg(target_os = "macos")]
+impl Closed {
+    /// The numbers the exit names as possibly the window's and not ended.
+    fn possibly_left(&self) -> Vec<i64> {
+        self.exit["possiblyLeft"]
+            .as_array()
+            .map(|left| {
+                left.iter()
+                    .filter_map(|process| process["pid"].as_i64())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// Opens a window of [`A_TOOL_SHELL_DETACHES_A_SERVER`] whose tool shell runs `tool`, with
+/// `env` besides, closes it with nothing having looked at it (`pane.kill`), and lets the host
+/// end. `program` is how the job's program path ends, once it runs it. The job is left
+/// running, for the test to end.
+#[cfg(target_os = "macos")]
+fn a_window_closed_over_a_job_its_tool_shell_detached(
+    tool: &str,
+    env: Value,
     program: &str,
-) -> Option<String> {
+) -> Closed {
+    static MADE: AtomicU64 = AtomicU64::new(0);
     let mut outsider = Sentinel::start();
     let mut helper = Headless::spawn();
     let mut events = Vec::new();
-    let job_file = std::env::temp_dir()
-        .join(format!("cf-headless-tool-job-{}-{program}", std::process::id()).replace("/", ""));
-    let _ = std::fs::remove_file(&job_file);
+    let file = |what: &str| {
+        std::env::temp_dir().join(format!(
+            "cf-headless-tool-{what}-{}-{}",
+            std::process::id(),
+            MADE.fetch_add(1, Ordering::Relaxed)
+        ))
+    };
+    let (job_file, signals_file) = (file("job"), file("signals"));
     let mut body = open_body(A_TOOL_SHELL_DETACHES_A_SERVER, 4096);
-    body["env"] = json!({"JOB": job_file, "TOOL": format!("({server} & echo $! > \"$JOB\")")});
+    body["env"] = json!({"JOB": job_file, "SIGNALS": signals_file, "TOOL": tool, "PROG": SERVER});
+    for (name, value) in env.as_object().into_iter().flatten() {
+        body["env"][name] = value.clone();
+    }
     let opened = helper.request("pane.open", body, &mut events);
     assert_eq!(opened["ok"], true, "{opened}");
     let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
@@ -2776,20 +2847,9 @@ fn a_window_closed_over_a_server_its_tool_shell_detached(
     output_until(&helper, &mut events, &pane_id, generation, b"started");
     let job = detached_job(&job_file);
     wait_until_it_runs(job, program);
-
-    // The shape: the server is in the session of a tool shell that has gone, which is not the
-    // window's, and the system names no process of the window as the one that started it.
     // SAFETY: getsid takes a number and reads no memory of ours.
     let session = unsafe { libc::getsid(job) };
-    assert!(
-        session > 1 && session != window && session != job,
-        "{session}"
-    );
-    assert!(!process_exists(session), "the tool shell has gone");
-    assert_ne!(
-        recorded_parent(job),
-        recorded_identifiers(window).map(|(own, _)| own)
-    );
+    let leader_ran = process_exists(session);
 
     assert_eq!(
         helper.request(
@@ -2799,55 +2859,155 @@ fn a_window_closed_over_a_server_its_tool_shell_detached(
         ),
         json!({"ok":true})
     );
-    exit_of(&helper, &mut events, &opened);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while process_exists(job) && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(10));
-    }
-    let survived = process_exists(job).then(|| ps_line(job));
-    if survived.is_some() {
-        kill_process(job);
-    }
-    let _ = std::fs::remove_file(&job_file);
-    assert!(outsider.runs(), "a process outside the window");
+    let exit = exit_of(&helper, &mut events, &opened);
+    // The host ends once every close of it has: nothing of it signals after this.
     helper.close_input_and_wait();
-    survived
+    let after = ps_line(job);
+    let signals = std::fs::read_to_string(&signals_file).unwrap_or_default();
+    let _ = std::fs::remove_file(&job_file);
+    let _ = std::fs::remove_file(&signals_file);
+    assert!(outsider.runs(), "a process outside the window");
+    Closed {
+        window,
+        job,
+        session,
+        leader_ran,
+        exit,
+        after,
+        signals,
+    }
 }
 
-/// A server an agent's tool shell detached is ended with the window, though no look saw it
-/// run: it is in the session of a tool shell that has gone (not the window's), the system
-/// names init or the subshell that has gone as the process that started it, and only the
-/// marker it carries says it is the window's, which alone the bound refuses. The server is a
-/// Python that sleeps, which shows its environment as a Node server does.
+/// A server an agent's tool shell detached, which no look saw run, is named in the window's
+/// exit as possibly the window's, and is left running: no signal reaches it. It is in the
+/// session of a tool shell that has gone (not the window's), the system names init or the
+/// subshell that has gone as the process that started it, and only the marker it carries ties
+/// it to the window, which proves nothing (T-406: a server the window started can hand that
+/// environment on to the user's own work, Astraeus's review T-411), so the bound refuses it as
+/// it did. Before the exit named it, the window closed over it saying nothing.
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "known failure: issues/a-tool-shells-detached-job-outlives-its-window.md (T-406)"]
-fn a_window_closed_ends_a_server_its_agents_tool_shell_detached_though_no_look_saw_it() {
+fn a_window_closed_names_a_server_its_agents_tool_shell_detached_and_leaves_it_running() {
     let _pty_guard = serial_headless_test();
-    assert_eq!(
-        a_window_closed_over_a_server_its_tool_shell_detached(
-            "/usr/bin/python3 -c 'import time; time.sleep(1000)'",
-            "/Python",
-        ),
-        None,
-        "the server the window's tool shell detached survived the window"
+    let closed = a_window_closed_over_a_job_its_tool_shell_detached(
+        DETACHES_THE_SERVER,
+        json!({}),
+        "/Python",
     );
+    let job = closed.job;
+    let alive = process_exists(job);
+    kill_process(job);
+
+    // The shape: the tool shell has gone, its session is not the window's, and the system
+    // names no process of the window as the one that started the server.
+    assert!(
+        closed.session > 1 && closed.session != closed.window && closed.session != job,
+        "{}",
+        closed.session
+    );
+    assert!(!closed.leader_ran, "the tool shell has gone");
+    assert_eq!(
+        closed.possibly_left(),
+        [i64::from(job)],
+        "the exit names the server: {}",
+        closed.exit
+    );
+    assert!(
+        closed.exit["possiblyLeft"][0]["program"]
+            .as_str()
+            .is_some_and(|program| !program.is_empty()),
+        "{}",
+        closed.exit
+    );
+    assert!(alive, "the server runs on");
+    assert!(
+        closed
+            .after
+            .split_whitespace()
+            .nth(3)
+            .is_some_and(|state| state.starts_with('S')),
+        "the server sleeps, neither stopped nor a zombie: {}",
+        closed.after
+    );
+    assert_eq!(closed.signals, "", "no signal reached the server");
 }
 
-/// [`a_window_closed_ends_a_server_its_agents_tool_shell_detached_though_no_look_saw_it`], with
-/// `/bin/sleep` for the server, as the issue has it: a system binary shows its environment to
-/// nobody, so nothing the system keeps of it once its tool shell has gone (its user, its
-/// session and group, whose leader has gone, when it began, init for its parent) ties it to the
-/// window.
+/// A server a tool shell detached that leads a session of its own (`setsid`) is not named:
+/// its session's leader runs, itself.
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "known failure: issues/a-tool-shells-detached-job-outlives-its-window.md (T-406)"]
-fn a_window_closed_ends_a_sleep_its_agents_tool_shell_detached_though_no_look_saw_it() {
+fn a_window_closed_does_not_name_a_marked_server_that_leads_its_own_session() {
     let _pty_guard = serial_headless_test();
+    let closed = a_window_closed_over_a_job_its_tool_shell_detached(
+        DETACHES_THE_SERVER,
+        json!({"LEADS": "server"}),
+        "/Python",
+    );
+    kill_process(closed.job);
+    assert_eq!(closed.session, closed.job, "it leads its session");
+    assert_eq!(closed.possibly_left(), Vec::<i64>::new(), "{}", closed.exit);
+    assert!(!closed.after.is_empty(), "left running, as before");
+}
+
+/// A job in a session whose leader still runs is not named, nor the leader: a server that led
+/// a session of its own and started the job in it.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_closed_does_not_name_a_marked_job_whose_session_leader_runs() {
+    let _pty_guard = serial_headless_test();
+    let closed = a_window_closed_over_a_job_its_tool_shell_detached(
+        DETACHES_THE_SERVER,
+        json!({"LEADS": "job"}),
+        "/Python",
+    );
+    kill_process(closed.job);
+    let leader_runs = process_exists(closed.session);
+    if leader_runs {
+        kill_process(closed.session);
+    }
+    assert!(closed.leader_ran && closed.session != closed.job);
+    assert!(leader_runs, "its leader ran on past the close");
+    assert_eq!(closed.possibly_left(), Vec::<i64>::new(), "{}", closed.exit);
+}
+
+/// A job in a session whose leader has gone that carries another window's marker is not
+/// named: it began in this window's tool shell, which handed it another environment, as a
+/// job another window's server hands on would carry that window's.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_closed_does_not_name_a_leaderless_job_that_carries_another_windows_marker() {
+    let _pty_guard = serial_headless_test();
+    let closed = a_window_closed_over_a_job_its_tool_shell_detached(
+        "(CF_PANE_PROCESS_OWNER=00000000000000000000000000000000 /usr/bin/python3 -c \"$PROG\" &)",
+        json!({}),
+        "/Python",
+    );
+    kill_process(closed.job);
+    assert!(!closed.leader_ran, "its session's leader has gone");
+    assert_eq!(closed.possibly_left(), Vec::<i64>::new(), "{}", closed.exit);
+}
+
+/// [`a_window_closed_names_a_server_its_agents_tool_shell_detached_and_leaves_it_running`],
+/// with `/bin/sleep` for the server, as the issue has it: a system binary shows its
+/// environment to nobody, so nothing the system keeps of it once its tool shell has gone (its
+/// user, its session and group, whose leader has gone, when it began, init for its parent)
+/// ties it to the window, and it is not even named.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "written-down limit: /bin/sleep shows no environment, so not even its window's marker ties it to the window (issues/a-tool-shells-detached-job-outlives-its-window.md, T-406)"]
+fn a_window_closed_names_a_sleep_its_agents_tool_shell_detached() {
+    let _pty_guard = serial_headless_test();
+    let closed = a_window_closed_over_a_job_its_tool_shell_detached(
+        "(/bin/sleep 1000 & echo $! > \"$JOB\")",
+        json!({}),
+        "/sleep",
+    );
+    kill_process(closed.job);
     assert_eq!(
-        a_window_closed_over_a_server_its_tool_shell_detached("/bin/sleep 1000", "/sleep"),
-        None,
-        "the sleep the window's tool shell detached survived the window"
+        closed.possibly_left(),
+        [i64::from(closed.job)],
+        "{}",
+        closed.exit
     );
 }
 
