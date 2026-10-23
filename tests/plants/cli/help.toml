@@ -284,16 +284,30 @@ runs = ["board-usage", "help"]
 file = "crates/cf/src/board/usage.rs"
 find = '''
         if kept {
-            lines.push(line);
+            chosen.push(line);
         }
     }
-    lines.join("\n")'''
+    chosen.join("\n")'''
 replace = '''
         if kept && !line.starts_with(&" ".repeat(CONTINUED)) {
-            lines.push(line);
+            chosen.push(line);
         }
     }
-    lines.join("\n")'''
+    chosen.join("\n")'''
+
+[[plant]]
+name = "help: the task usage keeps every line that goes on, whatever command it goes on from"
+meant = "the_task_usage_holds_no_line_of_a_command_that_is_no_task_command"
+runs = ["board-usage"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.rs"
+find = "    commands_kept(usage().lines(), is_task_command)"
+replace = '''    usage()
+        .lines()
+        .filter(|line| is_task_command(line) || line.starts_with(&" ".repeat(CONTINUED)))
+        .collect::<Vec<_>>()
+        .join("\n")'''
 
 [[plant]]
 name = "help: a verb of cf outside a window takes -h for no word that asks"

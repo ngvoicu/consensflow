@@ -42,6 +42,15 @@ prints: `(open, blocked or queued)` became `(open, queued, or paused)`, since a 
 before any window had it is editable too (the same number of characters, so the role text's
 documented sizes did not move).
 
+## The task usage without the lines of other commands
+
+`board.json` holds the task usage twice (`cf task --help` and `cf task help`, the cases `task
+usage` and `task usage on help`). Node's, and the Rust `cf`'s after it, printed under `cf task
+resume` four lines that go on from `cf tell`, `cf ask` and `cf history`, whose own lines it
+had left out (board task T-355, 3.0.6). Both cases lost those four lines, by hand and in
+nothing else; the four prints of the whole usage keep them, where they stand under their
+commands.
+
 ## Two cases changed by hand after Node
 
 In `cli.darwin.json` and `cli.win32.json`, the cases `unknown command: -h`
