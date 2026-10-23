@@ -1109,7 +1109,10 @@ replace = '''    utf16_len(&words_of(message, &[]).0) <= INLINE_LIMIT'''
 
 [[plant]]
 name = "codex role: a turn of a member's record answers a replacement by the words that open it"
-meant = "a_note_about_the_task_that_quotes_the_opening_of_a_replacement_does_not_suppress_the_workers_answer"
+# A note about the task is told words since 3.0.6 (B3), the last thing pasted, so the case
+# that quotes the opening in one no longer meets the reading this plants; the human's typed
+# words do (the merge of main, T-340).
+meant = "words_the_human_types_that_quote_the_opening_of_a_replacement_do_not_suppress_the_workers_answer"
 runs = ["engine-role-change"]
 
 [[plant.edit]]
