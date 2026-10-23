@@ -32,7 +32,7 @@ use super::{register_pane_handlers, EXIT_HANDED};
 use crate::arbiter::{EnterTiming, InputArbiter};
 use crate::input_queue::InputQueue;
 use crate::output_hub::{OutputHub, PaneOutputMessage};
-use crate::pty::conpty_test::powershell;
+use crate::pty::conpty_test::{powershell, system as conpty_system};
 use crate::pty::{serial_pty_test, PaneTable};
 
 /// A program that says its number, lets go of its console (`FreeConsole`), says it has
@@ -146,6 +146,15 @@ impl Daemon {
                 Ok(_) => {}
                 Err(error)
                     if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+                // The host's end of the socket closed: Windows may say so as a reset.
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
+                    ) =>
+                {
+                    return None
+                }
                 Err(error) => panic!("the bridge: {error}"),
             }
         }
@@ -174,41 +183,80 @@ impl Daemon {
     }
 }
 
+/// The pane host as the app has it, its handlers on a bridge over loopback, and the
+/// daemon at the bridge's other end.
+struct Host {
+    panes: Arc<PaneTable>,
+    inputs: Arc<InputQueue>,
+    bridge: cf_bridge::ConnectedBridge,
+    daemon: Daemon,
+    /// What the panes print: the id of the pane, and its bytes.
+    printed: mpsc::Receiver<(String, Vec<u8>)>,
+}
+
+impl Host {
+    /// A host whose bridge keeps its output past the end of its input where
+    /// `keeps_output` (the headless pane host's).
+    fn start(keeps_output: bool) -> Self {
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let output = Arc::new(OutputHub::new());
+        let (printed, seen) = mpsc::channel::<(String, Vec<u8>)>();
+        output.register_sink(Arc::new(move |message: PaneOutputMessage| {
+            let id = serde_json::to_value(&message)
+                .ok()
+                .and_then(|message| message["id"].as_str().map(str::to_owned))
+                .unwrap_or_default();
+            printed.send((id, message.bytes)).is_ok()
+        }));
+        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+        if keeps_output {
+            builder.keep_output_after_eof();
+        }
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            arbiter,
+            output,
+            Arc::clone(&inputs),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a port");
+        let mut daemon_end =
+            TcpStream::connect(listener.local_addr().expect("its address")).expect("connect");
+        let (host_end, _) = listener.accept().expect("accept");
+        daemon_end
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("the bridge's handle");
+        let bridge = builder
+            .connect(host_end.try_clone().expect("the host's end"), host_end)
+            .expect("connect the bridge");
+        let daemon = Daemon {
+            frames: BufReader::new(daemon_end.try_clone().expect("the daemon's end")),
+            stream: daemon_end,
+            line: String::new(),
+            asked: 0,
+        };
+        Self {
+            panes,
+            inputs,
+            bridge,
+            daemon,
+            printed: seen,
+        }
+    }
+}
+
 #[test]
 fn a_program_whose_console_host_died_is_ended_and_gone_before_the_daemon_hears_its_window_closed() {
     let _pty_guard = serial_pty_test();
-    let panes = Arc::new(PaneTable::new());
-    let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
-    let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
-    let output = Arc::new(OutputHub::new());
-    let (printed, seen) = mpsc::channel::<Vec<u8>>();
-    output.register_sink(Arc::new(move |message: PaneOutputMessage| {
-        printed.send(message.bytes).is_ok()
-    }));
-    let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
-    register_pane_handlers(
-        &mut builder,
-        Arc::clone(&panes),
-        arbiter,
-        output,
-        Arc::clone(&inputs),
-    );
-    let listener = TcpListener::bind("127.0.0.1:0").expect("a port");
-    let mut daemon_end =
-        TcpStream::connect(listener.local_addr().expect("its address")).expect("connect");
-    let (host_end, _) = listener.accept().expect("accept");
-    daemon_end
-        .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
-        .expect("the bridge's handle");
-    let connected = builder
-        .connect(host_end.try_clone().expect("the host's end"), host_end)
-        .expect("connect the bridge");
-    let mut daemon = Daemon {
-        frames: BufReader::new(daemon_end.try_clone().expect("the daemon's end")),
-        stream: daemon_end,
-        line: String::new(),
-        asked: 0,
-    };
+    let Host {
+        inputs,
+        bridge: connected,
+        mut daemon,
+        printed: seen,
+        ..
+    } = Host::start(false);
     let mut events = Vec::new();
 
     let freed =
@@ -250,7 +298,7 @@ fn a_program_whose_console_host_died_is_ended_and_gone_before_the_daemon_hears_i
             "the program never let go of its console: {:?}",
             String::from_utf8_lossy(&said)
         );
-        if let Ok(bytes) = seen.recv_timeout(Duration::from_millis(100)) {
+        if let Ok((_, bytes)) = seen.recv_timeout(Duration::from_millis(100)) {
             if bytes.windows(4).any(|query| query == b"\x1b[6n") {
                 let answered = daemon.ask(
                     "pane.reply",
@@ -306,4 +354,152 @@ fn a_program_whose_console_host_died_is_ended_and_gone_before_the_daemon_hears_i
     inputs.close_and_drain();
     drop(daemon);
     connected.bridge.wait_closed().expect("the bridge closes");
+}
+
+/// Windows still open when the daemon ends the host's input are ended with the host, which
+/// tells the exit of each, with the program it left running, before it closes its own
+/// output: the daemon's end of the bridge reads to its end what the host said as it stopped
+/// (`headless::shut_down`, the headless host's end).
+#[test]
+fn a_host_shut_down_with_windows_open_tells_the_exit_of_each_before_it_closes_its_output() {
+    let _pty_guard = serial_pty_test();
+    let Host {
+        panes,
+        inputs,
+        bridge: connected,
+        mut daemon,
+        printed,
+    } = Host::start(true);
+    let mut events = Vec::new();
+    let shell = conpty_system(r"WindowsPowerShell\v1.0\powershell.exe");
+
+    // Two windows, each of which starts a ping in the turn the host is told of, and says so.
+    let windows = [("shut-down-1", "1006"), ("shut-down-2", "1007")];
+    for (id, seconds) in windows {
+        let opened = daemon.ask(
+            "pane.open",
+            json!({
+                "id": id, "generation": 1,
+                "cwd": std::env::temp_dir(),
+                "argv": powershell(&format!(
+                    "Write-Output 'READY#'; [Console]::In.ReadLine() | Out-Null; \
+                     Start-Process -WindowStyle Hidden -FilePath '{shell}' -ArgumentList '-NoProfile','-Command','ping -n {seconds} 127.0.0.1'; \
+                     Write-Output 'STARTED#'; Start-Sleep 1000"
+                )),
+                "size": {"rows": 24, "cols": 80},
+            }),
+            &mut events,
+        );
+        assert_eq!(opened["ok"], true, "{opened}");
+    }
+    let mut said: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut hear = |daemon: &mut Daemon, events: &mut Vec<Value>, word: &str| {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let heard = |said: &HashMap<String, Vec<u8>>, id: &str| {
+                said.get(id)
+                    .is_some_and(|bytes| bytes.windows(word.len()).any(|at| at == word.as_bytes()))
+            };
+            if windows.iter().all(|(id, _)| heard(&said, id)) {
+                return;
+            }
+            assert!(Instant::now() < deadline, "no {word}: {said:?}");
+            if let Ok((id, bytes)) = printed.recv_timeout(Duration::from_millis(100)) {
+                // A console that asks where the cursor is holds what a program prints until
+                // it is told (the pane host's do not ask: `pty::conpty`).
+                if bytes.windows(4).any(|query| query == b"\x1b[6n") {
+                    let answered = daemon.ask(
+                        "pane.reply",
+                        json!({"id":id,"generation":1,"bytes":b"\x1b[1;1R".to_vec()}),
+                        events,
+                    );
+                    assert_eq!(answered["ok"], true, "{answered}");
+                }
+                said.entry(id).or_default().extend(bytes);
+            }
+        }
+    };
+    hear(&mut daemon, &mut events, "READY#");
+    for (id, _) in windows {
+        let pane = json!({"id":id,"generation":1});
+        let marked = daemon.ask("pane.mark", pane.clone(), &mut events);
+        assert_eq!(marked["ok"], true, "{marked}");
+        let typed = daemon.ask(
+            "pane.input",
+            json!({"id":id,"generation":1,"bytes":[13]}),
+            &mut events,
+        );
+        assert_eq!(typed["ok"], true, "{typed}");
+    }
+    hear(&mut daemon, &mut events, "STARTED#");
+    for (id, seconds) in windows {
+        let pane = json!({"id":id,"generation":1});
+        let until = Instant::now() + Duration::from_secs(60);
+        loop {
+            let left = daemon.ask("pane.background", pane.clone(), &mut events);
+            let named = left["processes"].as_array().is_some_and(|work| {
+                work.iter().any(|process| {
+                    process["command"].as_str().is_some_and(|command| {
+                        command.to_lowercase().contains(&format!("-n {seconds}"))
+                    })
+                })
+            });
+            if named {
+                break;
+            }
+            assert!(
+                Instant::now() < until,
+                "the ping of {id} was never listed: {left}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    // The daemon ends the host's input, and reads what the host says until its output ends.
+    daemon
+        .stream
+        .shutdown(std::net::Shutdown::Write)
+        .expect("end the host's input");
+    let shutting = {
+        let (bridge, panes, inputs) = (
+            connected.bridge.clone(),
+            Arc::clone(&panes),
+            Arc::clone(&inputs),
+        );
+        std::thread::spawn(move || crate::headless::shut_down(&bridge, &panes, &inputs))
+    };
+    let until = Instant::now() + Duration::from_secs(60);
+    while let Some(frame) = daemon.next(until) {
+        events.push(frame);
+    }
+    assert!(
+        Instant::now() < until,
+        "the host's output never ended: {events:?}"
+    );
+    shutting
+        .join()
+        .expect("the shut down ends")
+        .expect("the host shuts down");
+
+    for (id, seconds) in windows {
+        let exits: Vec<&Value> = events
+            .iter()
+            .filter(|event| event["op"] == "pane.exit" && event["body"]["id"] == id)
+            .map(|event| &event["body"])
+            .collect();
+        assert_eq!(exits.len(), 1, "{id} has one exit: {exits:?}");
+        let named = exits[0]["background"].as_array().is_some_and(|work| {
+            work.iter().any(|process| {
+                process["command"].as_str().is_some_and(|command| {
+                    command.to_lowercase().contains(&format!("-n {seconds}"))
+                })
+            })
+        });
+        assert!(
+            named,
+            "the ping of {id} is named in its exit: {:?}",
+            exits[0]
+        );
+        assert!(exits[0].get("survivor").is_none(), "{:?}", exits[0]);
+    }
 }

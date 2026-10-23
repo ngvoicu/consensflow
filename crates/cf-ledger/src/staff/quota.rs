@@ -9,22 +9,25 @@ use crate::model::{self, quoted, LedgerError};
 use crate::store::Store;
 use crate::views::participant_view;
 
-/// A member that ran out of quota takes no work until `until`; when it was
-/// marked is its `outSince`. One already out stays out until the later of
-/// the two resets, and keeps the time it was first marked: what its other
-/// windows run into after that is still news for each of them.
+/// A member that ran out of quota takes no work until `until`, kept and logged
+/// as a store keeps a time ([`time::canonical`]); when it was marked is its
+/// `outSince`. One already out stays out until the later of the two resets,
+/// and keeps the time it was first marked: what its other windows run into
+/// after that is still news for each of them.
 pub(crate) fn mark_out(
     store: &mut Store,
     participant_id: i64,
     until: &str,
     reason: &str,
 ) -> Result<ParticipantView, LedgerError> {
-    let Some(reset) = time::parse(until) else {
+    // Kept as a store keeps a time, however it was written.
+    let (Some(reset), Some(until)) = (time::parse(until), time::canonical(until)) else {
         return Err(LedgerError::refused(
             "invalid-time",
             format!("not a time: {}", quoted(until)),
         ));
     };
+    let until = until.as_str();
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
         let member = store.participant_row(participant_id)?;

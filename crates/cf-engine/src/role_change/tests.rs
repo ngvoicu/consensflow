@@ -171,8 +171,8 @@ fn the_staff_a_replacement_holds_whole_is_as_large_as_the_docs_say() {
             .last()
             .unwrap_or(0)
     };
-    assert_eq!(rows_whole(true), 41, "docs: whole to 41 rows with specs on");
-    assert_eq!(rows_whole(false), 69, "docs: whole to 69 rows without");
+    assert_eq!(rows_whole(true), 37, "docs: whole to 37 rows with specs on");
+    assert_eq!(rows_whole(false), 65, "docs: whole to 65 rows without");
 }
 
 /// How many units of a Windows command line a word takes, as the pane host
@@ -254,12 +254,12 @@ fn the_command_line_of_a_windows_launch_is_the_size_the_docs_say() {
     const LIMIT: usize = 32_766;
 
     let word = |rows| on_a_windows_line(rows, true, FRAMING);
-    assert_eq!(word(1), 14_250, "docs: 14,250 units at 1 row");
-    assert_eq!(word(25), 15_441, "docs: 15,441 units at 25 rows");
-    assert_eq!(word(45), 16_441, "docs: 16,441 units at 45 rows");
+    assert_eq!(word(1), 14_463, "docs: 14,463 units at 1 row");
+    assert_eq!(word(25), 15_654, "docs: 15,654 units at 25 rows");
+    assert_eq!(word(45), 16_654, "docs: 16,654 units at 45 rows");
     assert_eq!(
         on_a_windows_line(25, false, FRAMING),
-        14_019,
+        14_232,
         "docs: 1,422 fewer without specs"
     );
 
@@ -272,16 +272,16 @@ fn the_command_line_of_a_windows_launch_is_the_size_the_docs_say() {
             .last()
             .unwrap_or(0)
     };
-    assert_eq!(rows_held(true, FRAMING), 358, "docs: 358 rows");
+    assert_eq!(rows_held(true, FRAMING), 354, "docs: 354 rows");
     assert_eq!(
         rows_held(true, FRAMING + CODEX_OWN + 200),
-        305,
-        "docs: 305 rows with Codex's own instructions"
+        301,
+        "docs: 301 rows with Codex's own instructions"
     );
     assert_eq!(
         rows_held(false, FRAMING),
-        386,
-        "docs: 386 rows without specs"
+        382,
+        "docs: 382 rows without specs"
     );
 }
 
@@ -294,6 +294,7 @@ fn said_by(role: Role, text: &str, complete: bool) -> Item {
         complete,
         at: None,
         commentary: false,
+        compaction: false,
     }
 }
 

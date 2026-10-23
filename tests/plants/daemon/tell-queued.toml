@@ -405,25 +405,21 @@ runs = ["rig-stand-in-codex-workers"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_codex/servers.rs"
 find = '''
-    if let Err(failed) = fs::write(format!("{file}.pid"), std::process::id().to_string()) {
-        return refuse(&failed.to_string());
-    }
-    thread::sleep(Duration::from_secs(seconds));'''
+    let writing = format!("{file}.pid.writing");
+    fs::write(&writing, std::process::id().to_string())?;
+    fs::rename(writing, format!("{file}.pid"))'''
 replace = '''
-    let pid = format!("{file}.pid");
-    let written = fs::write(&pid, "").and_then(|()| {
-        thread::sleep(Duration::from_millis(500));
-        fs::write(&pid, std::process::id().to_string())
-    });
-    if let Err(failed) = written {
-        return refuse(&failed.to_string());
-    }
-    thread::sleep(Duration::from_secs(seconds));'''
+    let mut made = fs::File::create(format!("{file}.pid"))?;
+    thread::sleep(Duration::from_millis(500));
+    made.write_all(std::process::id().to_string().as_bytes())'''
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/rig/stand_in_codex.rs"
-find = '''        let pid = until_pid(&worker(number)).ok_or(format!("worker {number} never ran"))?;'''
-replace = '''        assert!(until_there(&beside(&worker(number), "pid")), "worker {number} runs");
+find = '''
+        let pid = pid_in(&beside(&worker(number), "pid"))
+            .map_err(|failed| format!("worker {number} does not run: {failed}"))?;'''
+replace = '''
+        assert!(until_there(&beside(&worker(number), "pid")), "worker {number} runs");
         let pid: u32 = files::read_string(&beside(&worker(number), "pid"))?
             .trim()
             .parse()?;'''

@@ -19,9 +19,11 @@ runs = ["ledger-receipt"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
 find = '''
-    require_free(store, &session, Giving::Task)?;
-    bring_back(store, session)'''
-replace = "    bring_back(store, session)"
+    if !behind {
+        require_free(store, &session, Giving::Task)?;
+    }
+'''
+replace = ""
 
 [[plant]]
 name = "session: a task named for a session is given to it whatever it has"

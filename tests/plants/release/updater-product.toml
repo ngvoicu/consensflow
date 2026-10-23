@@ -6,13 +6,30 @@
 # taken out (the installed app takes a bundle with no `cf`, and one whose seal is
 # broken), and the update's own work taken out (no repair of the terminal
 # command, a repair of another home's, a daemon that is not the cf the log
-# names). They need the smoke's builds to have been made once
-# (`npm run smoke:updater`): the installed flip app and the update it kept, the
-# installed bridge app (whose terminal command is the old shape, the one thing
-# the repair at the app's start has to work on), and the bridge's source it
-# exported, which the check of an update is planted in, as the installed app is
-# the one that judges an update. They are built into a folder of their own, so
-# what a run kept is not replaced by a plant's.
+# names).
+#
+# They need the smoke's builds to have been made once, at the paths below, in
+# app/src-tauri/target/updater-smoke of the checkout: the installed flip app, the
+# update, the installed bridge app (whose terminal command is the old shape, the one
+# thing the repair at the app's start has to work on), and the bridge's source, which
+# the check of an update is planted in, as the installed app is the one that judges
+# an update. Three commands make them (the smoke's default cache is outside the
+# checkout, so that what it builds there is built with its own Cargo configuration;
+# `--build-only` builds, says where, and runs nothing):
+#
+#   cargo xtask smoke-updater --build-only --from bridge --cache app/src-tauri/target/updater-smoke
+#   cargo xtask smoke-updater --build-only --from flip --to-app app/src-tauri/target/updater-smoke/update/ConsensFlow.app
+#   /usr/bin/ditto <the "installed flip app" the second says> app/src-tauri/target/updater-smoke/flip/ConsensFlow.app
+#
+# The first builds the bridge and the update in the checkout's folder: the bridge's
+# Cargo configuration holds no `xtask` alias, so reading the checkout's as well does
+# no harm there. The flip release cannot be built in the checkout (its configuration
+# holds the alias, which both would write, doubled: its `prepare-sidecar` is `cargo
+# xtask stage`), nor can it be asked for in the first command, which builds the flip
+# before the bridge when no `--from` is given. So the second builds it in the smoke's
+# default cache, taking the update the first built, and the third copies it in. They
+# are built into a folder of their own, so what a run kept is not replaced by a
+# plant's.
 
 [run]
 smoke-flip-update = ["cargo", "xtask", "smoke-updater", "--from-app", "app/src-tauri/target/updater-smoke/flip/ConsensFlow.app", "--from-release", "flip", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "the update installs and restarts", "--timeout", "60000"]
@@ -99,7 +116,7 @@ meant = "without-cf"
 runs = ["smoke-bridge-refused"]
 builds = true
 prepare = [
-  ["cargo", "xtask", "smoke-updater", "--export-bridge"],
+  ["cargo", "xtask", "smoke-updater", "--export-bridge", "--cache", "app/src-tauri/target/updater-smoke"],
 ]
 requires = ["app/src-tauri/target/updater-smoke/update/ConsensFlow.app"]
 
@@ -118,7 +135,7 @@ meant = "tampered"
 runs = ["smoke-bridge-refused"]
 builds = true
 prepare = [
-  ["cargo", "xtask", "smoke-updater", "--export-bridge"],
+  ["cargo", "xtask", "smoke-updater", "--export-bridge", "--cache", "app/src-tauri/target/updater-smoke"],
 ]
 requires = ["app/src-tauri/target/updater-smoke/update/ConsensFlow.app"]
 

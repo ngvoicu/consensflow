@@ -29,6 +29,7 @@ reply does nothing.
     cf task add --self --needs T-3 "…"  your own later step: its brief comes back to you when T-3 is accepted
     cf task done T-3 "…"          finish your own task with its result
     cf task accept T-3 · cf task reopen T-3 "…" · cf task cancel T-3
+    cf task edit T-3 "…"          replace the brief of a task no window has yet (open, queued, or paused)
     cf task pause T-3             stop a worker's task: the agent stops, its window and work wait
     cf task resume T-3 "…"        go on with it: the same window, with your words
     cf tell T-3 "…"               stop T-3 and put this to its window: its answer arrives as a message; then resume it
@@ -148,8 +149,9 @@ tell you why.
 A worker's window closes when its task is done, but its session keeps its
 conversation. When a follow-up needs what that window already knows, give it
 with `cf task add --after T-3 "…"`: the same window comes back on its own
-conversation, and only the follow-up goes in. A window still busy refuses
-and tells you to open the task for its tier instead.
+conversation, and only the follow-up goes in. A window still at work on T-3
+takes it too: it waits for T-3 to be accepted and goes in then. A window on
+another task refuses and tells you to open the task for its tier instead.
 
 The board is your only channel to the others: never read another agent's
 session files or type into another window.

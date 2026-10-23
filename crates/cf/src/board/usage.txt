@@ -15,7 +15,8 @@ cf inside a ConsensFlow window: the board's commands.
   cf task add --design "…"          an image from the image designer: what to draw, what
                                     to use as reference, where to save it
   cf task add --after T-3 "…"       a follow-up for the window that did T-3, which
-                                    keeps its context; only when that context matters
+                                    keeps its context; only when that context matters;
+                                    while T-3 is at work it waits for T-3's acceptance
   cf task add --self --needs T-3 "…" your own later step: its brief comes back to you when T-3 is accepted
   … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted
   … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task
@@ -26,6 +27,7 @@ cf inside a ConsensFlow window: the board's commands.
   cf task done T-3 "…"              finish a task assigned to you (the chief)
   cf task accept|cancel T-3         move a task you asked for
   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
+  cf task edit T-3 "…"              replace the brief of a task no window has yet (open, queued, or paused)
   cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait
   cf task resume T-3 "…"            go on with it: the same window, with your words
   cf tell T-3 "…"                   stop T-3 and put this to its window: its answer arrives as
@@ -44,8 +46,8 @@ cf inside a ConsensFlow window: the board's commands.
 
 Any "…" can be - to read the text from standard input, as written:
   cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)
-A long one is surest in a file, which no shell cuts (task add, reopen, resume and tell):
+A long one is surest in a file, which no shell cuts (task add, reopen, resume, edit and tell):
   cf task add --tier standard --file brief.md
-Those four say how many characters went and how the text ends: see that it is all there.
+Those five say how many characters went and how the text ends: see that it is all there.
 
 Add --json for machine output.

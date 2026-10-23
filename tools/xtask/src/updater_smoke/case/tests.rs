@@ -15,6 +15,19 @@ fn refusal<T: std::fmt::Debug>(result: Result<T>) -> String {
     result.unwrap_err().to_string()
 }
 
+/// How long a wait that is meant to run out is given: its running out is what it shows.
+const BRIEFLY: Duration = Duration::from_millis(300);
+
+/// What `ask` says of the case when its waits run out `BRIEFLY`, and the waits the case had after.
+/// A case's own are a second each and two in all, which the refusals of one test can use up: a
+/// wait that has to come is given its own time (`patient`), not what they left.
+fn briefly<T>(kase: &mut Case, patient: Waits, ask: impl FnOnce(&Case) -> Result<T>) -> Result<T> {
+    kase.waits = Waits::new(BRIEFLY);
+    let answer = ask(kase);
+    kase.waits = patient;
+    answer
+}
+
 /// The checkout, and the key a run is made with where the Tauri CLI can make one.
 fn run_key(folder: &Path) -> Option<(PathBuf, Key)> {
     let root = Context::new(&Env::default()).unwrap().root;
@@ -320,6 +333,8 @@ done"
     let mut sleepers = Sleepers(Vec::new());
     // Two windows, as the stand-ins of two chiefs: the install is blocked, and nothing of the page's changed.
     let mut kase = machine(&inputs, &say, &report("ready", "[1,2]"));
+    let patient = Waits::new(Duration::from_secs(120));
+    kase.waits = patient;
     let app = kase.start_app("3.0.0-alpha.83", &[]).unwrap();
     reports(&app);
     let first = Booted {
@@ -331,7 +346,9 @@ done"
             command: String::new(),
         },
     };
-    let said = refusal(blocked_evidence(&kase, &app, &first));
+    let said = refusal(briefly(&mut kase, patient, |kase| {
+        blocked_evidence(kase, &app, &first)
+    }));
     assert!(
         said.starts_with("two stand-in chief processes did not happen within "),
         "{said}"
@@ -348,8 +365,10 @@ done"
     assert_eq!(sorted, expected);
     // A third is not two, and a chief that is gone is not alive.
     let third = sleepers.start(&kase, Some("pi"));
-    assert!(refusal(blocked_evidence(&kase, &app, &first))
-        .contains("two stand-in chief processes did not happen"));
+    assert!(refusal(briefly(&mut kase, patient, |kase| {
+        blocked_evidence(kase, &app, &first)
+    }))
+    .contains("two stand-in chief processes did not happen"));
     crate::updater_smoke::processes::kill(third);
     fs::remove_file(kase.sandbox.pids.join(format!("pi-{third}.pid"))).unwrap();
     // The page tells the install to go on, and the windows close.
@@ -373,7 +392,9 @@ done"
         got.data("line").and_then(|line| line.as_str()),
         Some("continue-updater")
     );
-    let said = refusal(release_panes(&kase, &app, &chiefs));
+    let said = refusal(briefly(&mut kase, patient, |kase| {
+        release_panes(kase, &app, &chiefs)
+    }));
     assert!(
         said.starts_with("two stand-in chiefs close did not happen within "),
         "{said}"

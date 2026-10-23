@@ -73,9 +73,7 @@ replace = "const POLL_WAIT: Duration = Duration::from_secs(21);"
 
 [[plant]]
 name = "players: cf asks for a transcript of ten items whatever it was asked for"
-meant = "every_run_of_cf_against_the_api_prints_what_it_printed_against_node"
-# The one recorded run that asks for other than ten, `cf-board-001`'s `--last 2`, is in a
-# trace that departs from Node's (at its `--last 0`): the board's own test holds it.
+meant = "a_transcript_is_asked_for_as_many_items_as_the_chief_wants"
 runs = ["daemon-api", "cf-lib-board"]
 
 [[plant.edit]]

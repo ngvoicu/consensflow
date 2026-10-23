@@ -251,9 +251,10 @@ fn assistant(record: &Value) -> Projected {
     let status = record.get("apiErrorStatus").and_then(Value::as_f64);
     let text = claude_text(content);
     let refused = record.get("isApiErrorMessage") == Some(&Value::Bool(true));
-    // Claude Code 2.1.296 to 2.1.302 write it with the next message (T-442's
-    // record; `quit-before-a-word-resumed.jsonl`). A refusal for quota may say
-    // the same words, and is the API's.
+    // Claude Code writes it with the next message of a turn it was cut in
+    // (T-442's record, 2.1.296; `quit-before-a-word-resumed.jsonl`), and still
+    // does in 2.1.305, the newest seen (2026-10-21). A refusal for quota may
+    // say the same words, and is the API's.
     let closes_a_cut_turn = !refused
         && in_message("model").and_then(Value::as_str) == Some("<synthetic>")
         && text == CUT_TURN_CLOSED;
@@ -310,12 +311,18 @@ fn system(record: &Value, session: &str) -> Projected {
         // candidate/tool/queue/hook guards establish readiness. The exact
         // installed call sites and native fixture are documented beside
         // tests/engine/fixtures/completion/claude-code/v263-tool-loop.jsonl.
+        // 2.1.305, the newest seen, still writes it from the interactive
+        // session's paths, and holds it back while swarm tasks or detached tool
+        // calls run.
         // Later versions (2.1.296) write its counts of the background agents and
         // workflows still running when there are any (and none when there are
         // none): the turn is over all the same, and the counts are its word.
         Some("turn_duration") => {
             root_duration(record).map_or(Projected::Other, |agents| boundary(record, Some(agents)))
         }
+        // The Stop hook's summary ends a turn too: Claude Code 2.1.305, the
+        // newest seen, holds `turn_duration` back while swarm tasks or
+        // detached tool calls run (see `claude::install::settings`).
         Some("stop_hook_summary")
             if record.get("preventedContinuation") == Some(&Value::Bool(false)) =>
         {

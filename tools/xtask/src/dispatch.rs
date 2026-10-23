@@ -18,8 +18,8 @@ use cf_base::env::Env;
 use crate::context::{self, Context};
 use crate::process;
 use crate::{
-    app, bench, candidate, check, clippy_windows, departures, evals, live, plants, portable,
-    scrub_transcript, sidecar, smoke, specmint, suites, windows,
+    app, bench, candidate, check, ci_times, clippy_windows, departures, evals, live, plants,
+    portable, release, scrub_transcript, sidecar, smoke, specmint, suites, windows,
 };
 
 /// A command of xtask.
@@ -98,7 +98,9 @@ pub fn commands() -> Vec<&'static Command> {
         plants::COMMANDS,
         smoke::COMMANDS,
         candidate::COMMANDS,
+        release::COMMANDS,
         check::COMMANDS,
+        ci_times::COMMANDS,
     ]
     .into_iter()
     .flatten()

@@ -160,6 +160,11 @@ pub struct HistoryItem {
     pub text: String,
     pub complete: bool,
     pub at: Option<String>,
+    /// The summary a compaction wrote in the user's place: a `user` item that
+    /// is the harness's own words, not the human's. Said only when true: an
+    /// item copied before the mark (migration 0020) is a plain `user` one.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub compaction: bool,
 }
 
 /// An earlier conversation of the chief, with its copied items in order.
@@ -168,6 +173,166 @@ pub struct ChiefConversation {
     #[serde(flatten)]
     pub conversation: ConversationView,
     pub items: Vec<HistoryItem>,
+}
+
+/// What ended a participant's conversation, as far as the ledger's log says.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "by", rename_all = "lowercase")]
+pub enum ConversationEnd {
+    /// The human's Switch chief, to the harness and agent the chief runs on after it.
+    Switch {
+        harness: String,
+        agent: Option<String>,
+    },
+    /// The window went to another conversation (`/clear`, `/new`, `/resume`):
+    /// one of the participant's own earlier ones (`resumed`), or one the ledger
+    /// had not seen, which is any of the three.
+    Window { resumed: bool },
+    /// A window opened on a fresh conversation in its place.
+    Fresh,
+}
+
+/// A participant's conversation as the history viewer heads it: the agent it
+/// ran on and what ended it where the ledger knows them, and how many of its
+/// items are tools' outputs, counted so far and no further (`more_tools`: that
+/// many, or more).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParticipantConversation {
+    #[serde(flatten)]
+    pub conversation: ConversationView,
+    pub agent: Option<String>,
+    pub ended_by: Option<ConversationEnd>,
+    pub tools: usize,
+    pub more_tools: bool,
+}
+
+/// Where an entry stands in a participant's history, in the order the viewer
+/// reads it: its conversation, and the row the ledger keeps its item in, which
+/// never changes, so that items stand in the order they were first copied
+/// whatever is copied again; row 0 is the conversation's heading, before its
+/// items. A search that stopped inside a long item says how many of its parts
+/// it went through (`part`, none where it went through the item whole).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryKey {
+    pub conversation: i64,
+    pub row: i64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub part: usize,
+}
+
+fn is_zero(part: &usize) -> bool {
+    *part == 0
+}
+
+/// Where a read of a participant's history begins, and which way it goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryFrom {
+    /// The most recent items, newest first.
+    Newest,
+    /// The items before this one, newest first.
+    Before(HistoryKey),
+    /// The items after this one, oldest first.
+    After(HistoryKey),
+}
+
+/// The part of a long text that is shown: how many characters come before
+/// it, the size of the whole text, in bytes, and which copy of its item it is
+/// of (as a [`TextPart`]'s `revision`), so that the whole of it read later is
+/// known to be of another where the item was copied again changed meanwhile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct TextCut {
+    pub from: usize,
+    pub bytes: usize,
+    pub revision: i64,
+}
+
+/// An item as a read of the history gives it: where it stands, and its text
+/// whole, or the part of it that is shown (`cut`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistoryRow {
+    pub key: HistoryKey,
+    pub item: HistoryItem,
+    pub cut: Option<TextCut>,
+}
+
+/// What a read of the history takes, in the order it goes: an item, or the
+/// heading of a conversation that shows none (its key's row is 0), which a
+/// page shows in its place.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HistoryEntry {
+    Heading(HistoryKey),
+    Item(HistoryRow),
+}
+
+impl HistoryEntry {
+    /// Where the entry stands.
+    pub fn key(&self) -> HistoryKey {
+        match self {
+            Self::Heading(key) => *key,
+            Self::Item(row) => row.key,
+        }
+    }
+}
+
+/// How much of the history a read went through: the conversations it came
+/// to, the rows it read, the lookups of parts of a long item's text it made
+/// (`parts`), the bytes of text it read of them, the bytes of the
+/// conversations' fields, the items' ids as a page shows them and their times,
+/// and the data of the events the headings read (`fields`), and the steps
+/// SQLite's machine took for it all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Scanned {
+    pub conversations: usize,
+    pub rows: usize,
+    pub parts: usize,
+    pub bytes: usize,
+    pub fields: usize,
+    pub steps: usize,
+}
+
+/// One read of a participant's history: the conversations it took an entry
+/// of, headed, in the order it went; its entries, in that order; where the
+/// next read that way goes on (none: there is no more that way); whether the
+/// read stopped at the most a read goes through; how much it went through,
+/// and what that was charged of the most it may go through (`charged`, in
+/// bytes), which what a page reads besides is charged against too.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistoryRead {
+    pub participant: i64,
+    pub conversations: Vec<ParticipantConversation>,
+    pub entries: Vec<HistoryEntry>,
+    pub resume: Option<HistoryKey>,
+    pub bounded: bool,
+    pub scanned: Scanned,
+    pub charged: usize,
+}
+
+/// A part of an item's text: from which character, where the next part
+/// begins (none: this is its last), and which copy of the item it is of
+/// (`revision`: the copy writes the item again changed as the next), so that a
+/// reader of every part knows they are of one copy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TextPart {
+    pub text: String,
+    pub from: usize,
+    pub next: Option<usize>,
+    pub revision: i64,
+}
+
+/// A message as far as a delivery's line names it, read no further than its
+/// opening: the project, who it was to and from, what it was and on which
+/// task, and the first bytes of its body (`opening`, cut at a character),
+/// where its first words are.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageOpening {
+    pub id: i64,
+    pub project_id: i64,
+    pub recipient_id: i64,
+    pub sender: Option<String>,
+    pub kind: String,
+    pub task_number: Option<i64>,
+    pub opening: String,
 }
 
 /// One item a task's windows wrote, and the conversation it is from.
@@ -179,6 +344,9 @@ pub struct TranscriptItem {
     pub text: String,
     pub complete: bool,
     pub at: Option<String>,
+    /// A compaction's summary, as in [`HistoryItem`]: said only when true.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub compaction: bool,
 }
 
 /// What a task's windows wrote: how many items in all, and the last ones asked for.
@@ -567,11 +735,65 @@ mod tests {
                 text: "hello".into(),
                 complete: true,
                 at: None,
+                compaction: false,
             }],
         };
         assert_eq!(
             serde_json::to_string(&conversation).unwrap(),
             r#"{"id":4,"participantId":2,"harness":"codex","nativeSession":"s-1","startedAt":"2026-09-19T10:00:01.000Z","endedAt":"2026-09-19T10:00:02.000Z","items":[{"id":"i-1","role":"user","text":"hello","complete":true,"at":null}]}"#
+        );
+    }
+
+    #[test]
+    fn says_a_compaction_s_summary_only_where_an_item_is_one_and_what_ended_a_conversation_by_its_kind(
+    ) {
+        let item = |compaction| HistoryItem {
+            id: "s-1".into(),
+            role: "user".into(),
+            text: "This session is being continued".into(),
+            complete: true,
+            at: None,
+            compaction,
+        };
+        assert_eq!(
+            serde_json::to_string(&item(true)).unwrap(),
+            r#"{"id":"s-1","role":"user","text":"This session is being continued","complete":true,"at":null,"compaction":true}"#
+        );
+        assert!(!serde_json::to_string(&item(false))
+            .unwrap()
+            .contains("compaction"));
+        let ends = [
+            ConversationEnd::Switch {
+                harness: "codex".into(),
+                agent: Some("maia".into()),
+            },
+            ConversationEnd::Window { resumed: true },
+            ConversationEnd::Fresh,
+        ];
+        assert_eq!(
+            serde_json::to_string(&ends).unwrap(),
+            r#"[{"by":"switch","harness":"codex","agent":"maia"},{"by":"window","resumed":true},{"by":"fresh"}]"#
+        );
+    }
+
+    #[test]
+    fn a_place_says_the_part_a_search_stopped_at_inside_an_item_and_no_part_elsewhere() {
+        let inside = HistoryKey {
+            conversation: 4,
+            row: 90,
+            part: 3,
+        };
+        let said = serde_json::to_string(&inside).unwrap();
+        assert_eq!(said, r#"{"conversation":4,"row":90,"part":3}"#);
+        assert_eq!(serde_json::from_str::<HistoryKey>(&said).unwrap(), inside);
+        let whole = HistoryKey { part: 0, ..inside };
+        assert_eq!(
+            serde_json::to_string(&whole).unwrap(),
+            r#"{"conversation":4,"row":90}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<HistoryKey>(r#"{"conversation":4,"row":90}"#).unwrap(),
+            whole
         );
     }
 }

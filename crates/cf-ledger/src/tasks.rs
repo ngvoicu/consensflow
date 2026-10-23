@@ -3,8 +3,10 @@
 //! assigned by the daemon, or taken back to the board (`giving`); paused, held
 //! and resumed (`pausing`); finished with a result and accepted, sent back,
 //! cancelled, failed, and deleted from the board by the human (`finishing`),
-//! the chief's own step by its word (`own_steps`); and read with their threads.
+//! the chief's own step by its word (`own_steps`); their briefs replaced before
+//! a window has them (`editing`); and read with their threads.
 
+mod editing;
 mod finishing;
 mod giving;
 mod own_steps;
@@ -17,9 +19,10 @@ use crate::model::LedgerError;
 use crate::store::Store;
 use crate::views::{message_view, task_view, TaskRow, MESSAGE_SELECT, TASK_SELECT};
 
+pub(crate) use editing::edit_task;
 pub(crate) use finishing::{
-    accept_task, call_off, cancel_task, delete_tasks, fail_task, record_result, release_ready,
-    reopen_task,
+    accept_task, call_off, cancel_task, delete_tasks, fail_task, note_stranded_waits,
+    record_result, release_ready, reopen_task, tell_stranded_waiters, Ending,
 };
 pub use giving::NewTask;
 pub(crate) use giving::{assign_task, check_release, create_task, release_task};

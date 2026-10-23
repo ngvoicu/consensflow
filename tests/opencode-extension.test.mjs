@@ -48,9 +48,14 @@ async function fixture(t, useEnvironment = false, boardUrl = null, question = nu
   const previous = process.env.CF_OPENCODE_SESSION_BRIDGE
   const board = { url: process.env.CONSENSFLOW_URL, token: process.env.CONSENSFLOW_TOKEN }
   if (useEnvironment) process.env.CF_OPENCODE_SESSION_BRIDGE = JSON.stringify(configuration)
+  // No board given is no board, in any shell: a member's window has its own in
+  // its environment, and the plugin would put the fixture's question there.
   if (boardUrl !== null) {
     process.env.CONSENSFLOW_URL = boardUrl
     process.env.CONSENSFLOW_TOKEN = 'window-token'
+  } else {
+    delete process.env.CONSENSFLOW_URL
+    delete process.env.CONSENSFLOW_TOKEN
   }
   try {
     await tui(
@@ -444,6 +449,35 @@ test('OpenCode: a question of another session, or outside a window, is left to t
   outside.emit('question.v2.asked', ASKED)
   await new Promise((resolve) => setTimeout(resolve, 100))
   assert.deepEqual(board.state.posted, [])
+})
+
+test('OpenCode: outside a window means no board in any shell: the board a member window names is not asked', async (t) => {
+  const live = await fakeBoard(t)
+  // Answered at once, so a plugin that does ask it ends its wait and the test its run.
+  live.state.answer = { id: 50, from: 'chief', body: 'Colour: blue', choices: [['blue']] }
+  const saved = {}
+  for (const [name, value] of [
+    ['CONSENSFLOW_URL', live.url],
+    ['CONSENSFLOW_TOKEN', 'member-window-token'],
+    ['CONSENSFLOW_PARTICIPANT', 'worker-in-a-window'],
+    ['CONSENSFLOW_PROJECT', '8'],
+  ]) {
+    saved[name] = process.env[name]
+    process.env[name] = value
+  }
+  try {
+    const outside = await fixture(t)
+    for (const type of ['question.asked', 'question.v2.asked']) outside.emit(type, ASKED)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    assert.deepEqual(live.state.posted, [], 'the board of the shell the tests run in got nothing')
+    assert.equal(process.env.CONSENSFLOW_URL, live.url, 'and the shell is left as it was')
+    assert.equal(process.env.CONSENSFLOW_TOKEN, 'member-window-token')
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  }
 })
 
 /** The pending question, answered by the board with the choice `blue`: until the board is told what came of it. */

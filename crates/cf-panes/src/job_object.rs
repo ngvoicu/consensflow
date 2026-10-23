@@ -7,8 +7,16 @@
 //! agent detached from a shell that ended (`Start-Process`, `start`) is in the job
 //! still, with no parent, which the window's close ends and an ending of the turn does
 //! not: a job with no parent is no proof of whose work it is
-//! ([`crate::background`]). What the job does not hold is what a service starts for
-//! it (`schtasks`, a WMI `Win32_Process.Create`): that is no child of the pane's.
+//! ([`crate::background`]). What the job does not hold, and a close does not end:
+//! - what another program starts for the harness: a service (`schtasks`, a WMI
+//!   `Win32_Process.Create`), the shell or COM activating a program, UAC starting one
+//!   elevated; none of it is a child of the pane's;
+//! - a process started with `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` naming a parent
+//!   outside the job, which takes its jobs from that parent;
+//! - what is no Windows process of the job at all: a WSL distribution's, a container
+//!   daemon's;
+//! - the console host, which is the pane host's, and ends when the pane's pseudoconsole
+//!   is closed.
 //!
 //! The job is also the list of what the harness started: its processes are what a
 //! pane's tree has ([`JobObject::members`]). Each is held open as it is looked at,
@@ -27,9 +35,9 @@
 //! turn's is. The whole of it is held to [`BUDGET`], inside what the daemon waits for
 //! ([`cf_proto::panes::ENDING_BOUND`]).
 //!
-//! The harness joins right after it starts (the PTY library starts it
-//! unsuspended); a child it starts in that first instant would escape, which a
-//! harness still loading its runtime does not do.
+//! The harness is in the job from its first instruction: it is started with the job
+//! in its attributes ([`crate::pty`]'s `conpty`), so nothing it starts itself, however
+//! soon, is outside it.
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::mem::{offset_of, size_of, size_of_val};
@@ -45,7 +53,7 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_MORE_DATA, FILETIME, HANDLE, UNICODE_STRING, WAIT_OBJECT_0,
 };
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, JobObjectBasicProcessIdList,
+    CreateJobObjectW, IsProcessInJob, JobObjectBasicProcessIdList,
     JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
     TerminateJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
@@ -53,7 +61,7 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
     WaitForSingleObject, PROCESS_BASIC_INFORMATION, PROCESS_NAME_WIN32,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
 };
 
 use crate::background::{report, started_by, steady, Baseline, Member, ProcessKey};
@@ -110,21 +118,10 @@ impl JobObject {
         Ok(job)
     }
 
-    pub fn assign(&self, pid: u32) -> io::Result<()> {
-        // SAFETY: the rights asked are the two AssignProcessToJobObject needs.
-        let process = unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid) };
-        if process.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: both handles are open; the process handle is closed after.
-        let assigned = unsafe { AssignProcessToJobObject(self.handle, process) };
-        let error = io::Error::last_os_error();
-        // SAFETY: `process` was opened above, is not null, and is closed only here.
-        unsafe { CloseHandle(process) };
-        if assigned == 0 {
-            return Err(error);
-        }
-        Ok(())
+    /// The job's handle, which a program is started in (`pty::conpty`): open for as long
+    /// as the job is.
+    pub fn handle(&self) -> HANDLE {
+        self.handle
     }
 
     pub fn terminate(&self) -> io::Result<()> {

@@ -42,7 +42,9 @@ const GET: Shape = Shape {
 };
 
 /// The commands that move a task, which stands first among their words.
-const MOVES: [&str; 6] = ["done", "accept", "cancel", "reopen", "pause", "resume"];
+const MOVES: [&str; 7] = [
+    "done", "accept", "cancel", "reopen", "edit", "pause", "resume",
+];
 
 /// `cf task` with `words`, the last of those `given` spells as the system gave them.
 pub fn command(
@@ -87,7 +89,7 @@ pub fn command(
             input,
         ),
         other => Err(Failure::Usage(format!(
-            "unknown task command {}: use add, list, get, done, accept, reopen, cancel, pause or resume",
+            "unknown task command {}: use add, list, get, done, accept, reopen, edit, cancel, pause or resume",
             quoted(other.unwrap_or_default())
         ))),
     }
@@ -97,7 +99,7 @@ pub fn command(
 fn shape_of(verb: &str) -> Shape {
     match verb {
         "get" => GET,
-        "reopen" | "resume" => BRIEFED,
+        "reopen" | "resume" | "edit" => BRIEFED,
         _ => Shape::TEXT,
     }
 }
@@ -262,12 +264,33 @@ fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
     Ok(Said::new(answer.into_value(), text))
 }
 
-/// `cf task get T-n`: the task with its whole thread, and said of each answer
-/// in it still waiting to be pasted that it was written whole; or, with
-/// `--transcript`, what its window did, which says of no answer that it was
-/// written: the thread is not what was asked for there (its text does not
-/// print it, and what its JSON carries of it is along the way). What is wrong
-/// with the command is said before the board is asked anything.
+/// The brief `cf task get` prints under the header, or nothing. A window that was
+/// given the task holds its brief in its own task message in the thread
+/// (`delivery_body` wrote it there), so it is not printed twice. A task no window
+/// holds (open, blocked, or taken back to the board, whose brief may have grown
+/// since its old message) gets its body here, as the board keeps it. A brief the
+/// board withholds at the human's gate reads `""` and prints nothing.
+fn brief_under_head<'a>(task: &'a Value, messages: &[Value]) -> Option<&'a str> {
+    let brief = match task.get("body").and_then(Value::as_str) {
+        Some(brief) if !brief.is_empty() => brief,
+        _ => return None,
+    };
+    let window = task.get("assignee").and_then(Value::as_str);
+    let carried = window.is_some_and(|window| {
+        messages.iter().any(|message| {
+            message.get("kind").and_then(Value::as_str) == Some("task")
+                && message.get("recipient").and_then(Value::as_str) == Some(window)
+        })
+    });
+    (!carried).then_some(brief)
+}
+
+/// `cf task get T-n`: the task with its brief (`brief_under_head`) and its whole
+/// thread, and said of each answer in it still waiting to be pasted that it was
+/// written whole; or, with `--transcript`, what its window did, which says of no
+/// answer that it was written: the thread is not what was asked for there (its
+/// text does not print it, and what its JSON carries of it is along the way).
+/// What is wrong with the command is said before the board is asked anything.
 fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
     let words = split(rest, GET);
     let asked = if words.on("--transcript") {
@@ -291,7 +314,12 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
             })
             .collect::<Vec<_>>()
             .join("\n\n");
-        let text = format!("{}\n\n{thread}", task_head(&task));
+        let body = match brief_under_head(&task, messages) {
+            Some(brief) if thread.is_empty() => brief.to_owned(),
+            Some(brief) => format!("{brief}\n\n{thread}"),
+            None => thread,
+        };
+        let text = format!("{}\n\n{body}", task_head(&task));
         let answers = waiting_answers(messages);
         return Ok(Said::new(task, text).having_written("task", answers));
     };
@@ -307,16 +335,17 @@ fn moved(
     board: &Board,
     input: &mut dyn Read,
 ) -> Result<Said, Failure> {
-    let briefed = matches!(action, "reopen" | "resume");
+    let briefed = matches!(action, "reopen" | "resume" | "edit");
     let words = split(rest, shape_of(action));
     let text = if briefed {
         brief::brief_of(&words, given, input)?
     } else {
         text_of(words.text, input)?
     };
-    if matches!(action, "done" | "reopen" | "resume") && js::trim(&text).is_empty() {
+    if matches!(action, "done" | "reopen" | "edit" | "resume") && js::trim(&text).is_empty() {
         let what = match action {
             "done" => "your result",
+            "edit" => "the new brief",
             "resume" => "what to do now",
             _ => "the follow-up",
         };
@@ -354,6 +383,10 @@ fn moved(
         // The chief's own step is accepted with its words: nothing comes back to decide.
         "done" if task.get("state").and_then(Value::as_str) == Some("accepted") => format!(
             "T-{number} is done and accepted: it was your own step, so nothing waits for your decision, and what needed it goes on."
+        ),
+        "edit" => format!(
+            "T-{number} has your new brief; no window had the old one, and the ledger keeps it. {}",
+            task_line(&task)
         ),
         _ => format!("{}{dropped}", task_line(&task)),
     };
@@ -473,6 +506,136 @@ mod tests {
         );
         let (posted, _) = added(&["--tier", "light", "Write it"], &answer);
         assert_eq!(posted, Some(json!({ "tier": "light", "body": "Write it" })));
+    }
+
+    /// What `cf task edit words…` posted and printed, the board answering with `answer`.
+    fn edited(
+        words: &[&str],
+        input: &str,
+        answer: &Value,
+    ) -> (Vec<(String, Option<Value>)>, String) {
+        let api = scripted(vec![reply(200, answer.clone())]);
+        let words: Vec<String> = [&["edit"], words]
+            .concat()
+            .iter()
+            .map(|word| (*word).to_owned())
+            .collect();
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let said = command(
+            &words,
+            &given,
+            &Board::new(Some(&api.url), "tok"),
+            &mut input.as_bytes(),
+        )
+        .unwrap();
+        let posted = api
+            .received()
+            .into_iter()
+            .map(|got| (got.path.clone(), got.json()))
+            .collect();
+        (posted, said.text)
+    }
+
+    #[test]
+    fn a_new_brief_is_posted_to_the_task_and_said_to_be_the_tasks_now() {
+        let answer = json!({ "task": card(2, "open", Some("zeus-pale")) });
+        let (posted, said) = edited(&["T-2", "Parse the new way"], "", &answer);
+        assert_eq!(
+            posted,
+            [(
+                "/api/tasks/2/edit".to_owned(),
+                Some(json!({ "body": "Parse the new way" }))
+            )]
+        );
+        // A new brief is words that give a window work: the reply says how they end (B6).
+        assert_eq!(
+            said,
+            "T-2 has your new brief; no window had the old one, and the ledger keeps it. T-2 [open] @zeus-pale ← @chief: Task 2\nSent: 17 characters, ending \"Parse the new way\"."
+        );
+        // Or on the standard input, as a heredoc gives it: its last newline is its own.
+        let (posted, _) = edited(&["T-2", "-"], "Parse\nthe new way\n", &answer);
+        assert_eq!(posted[0].1, Some(json!({ "body": "Parse\nthe new way" })));
+    }
+
+    /// The merge of main's `cf task edit` with B6 (T-340): a new brief is read from a
+    /// file as every brief is, where a text-only `edit` posted `--file brief.md` as
+    /// the brief itself.
+    #[test]
+    fn a_new_brief_is_read_from_a_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("brief.md");
+        std::fs::write(&file, "Parse\nthe new way\n").unwrap();
+        let answer = json!({ "task": card(2, "open", Some("zeus-pale")) });
+        let name = file.to_str().unwrap();
+        let (posted, said) = edited(&["T-2", "--file", name], "", &answer);
+        assert_eq!(
+            posted,
+            [(
+                "/api/tasks/2/edit".to_owned(),
+                Some(json!({ "body": "Parse\nthe new way" }))
+            )]
+        );
+        assert!(
+            said.ends_with("\nSent: 17 characters, ending \"Parse the new way\"."),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn a_new_brief_is_asked_for_before_the_board_is_asked_anything() {
+        let api = scripted(vec![]);
+        let words = ["edit".to_owned(), "T-2".to_owned()];
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let said = command(
+            &words,
+            &given,
+            &Board::new(Some(&api.url), "tok"),
+            &mut std::io::empty(),
+        );
+        assert!(
+            matches!(&said, Err(Failure::Usage(usage)) if usage == "cf task edit T-2 \"the new brief\""),
+            "a usage line was expected"
+        );
+        assert!(api.received().is_empty());
+    }
+
+    #[test]
+    fn a_transcript_is_asked_for_as_many_items_as_the_chief_wants() {
+        let task = json!({ "task": card(3, "working", Some("zeus-pale")) });
+        let transcript = json!({ "items": [], "total": 0 });
+        let api = scripted(vec![reply(200, task), reply(200, transcript)]);
+        let words = [
+            "get".to_owned(),
+            "T-3".to_owned(),
+            "--transcript".to_owned(),
+            "--last".to_owned(),
+            "30".to_owned(),
+        ];
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        command(
+            &words,
+            &given,
+            &Board::new(Some(&api.url), "tok"),
+            &mut std::io::empty(),
+        )
+        .unwrap();
+        let paths: Vec<String> = api.received().into_iter().map(|got| got.path).collect();
+        assert_eq!(paths, ["/api/tasks/3", "/api/tasks/3/transcript?last=30"]);
+    }
+
+    #[test]
+    fn a_follow_up_behind_a_window_at_work_says_what_it_waits_for() {
+        let answer = json!({
+            "task": { "number": 5, "state": "open", "assignee": "zeus-pale", "requester": "chief",
+                "title": "Tests", "blockedBy": [3], "pool": null, "tier": null },
+            "message": null, "gated": false,
+        });
+        let (posted, said) = added(&["--after", "T-3", "Tests"], &answer);
+        assert_eq!(posted, Some(json!({ "after": 3, "body": "Tests" })));
+        assert_eq!(
+            said,
+            "T-5 continues in @zeus-pale, the window that did T-3; its result arrives in your inbox. It waits until T-3 is accepted.\nSent: 5 characters, ending \"Tests\"."
+        );
     }
 
     #[test]

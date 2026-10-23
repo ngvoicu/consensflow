@@ -173,9 +173,11 @@ fn a_note_that_rode_in_the_words_that_resume_a_task_goes_in_with_them_after_the_
         .into_iter()
         .find(|message| message.body == "Resumed: Carry on")
         .unwrap();
-    // 3.0.4 stops there, and the upgrade runs migration 0019 on what it left.
+    // 3.0.4 stops there, and the upgrade runs migration 0019 on what it left (and
+    // the viewer's 0020).
     context.edit_ledger(|file| {
         let db = rusqlite::Connection::open(file).unwrap();
+        cf_ledger::testing::undo_migration_0020(&db).unwrap();
         db.execute_batch("PRAGMA user_version = 18").unwrap();
     });
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
@@ -301,6 +303,52 @@ fn confirms_a_message_whose_header_the_copy_of_its_window_already_shows() {
         SUITES,
         "confirms a message whose header the copy of its window already shows",
     );
+}
+
+#[test]
+fn confirms_a_message_by_the_whole_id_the_harness_gave_the_item_that_shows_it_however_long() {
+    // The reviewers' sequence: an item's id of 300 characters, which the copy
+    // once cut where it kept it, so that the receipt named an id the harness
+    // never gave. The copy keeps it whole, and the receipt names it.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| agent.arrive = false);
+    let note = context.note(project.id, "zeus", "chief", "Shown");
+    context.pass().unwrap();
+    let mut shown = context
+        .adapter
+        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    let long = "r".repeat(300);
+    shown.id = std::sync::Arc::from(long.as_str());
+    let conversation = context
+        .ledger
+        .borrow()
+        .current_conversation(chief)
+        .unwrap()
+        .unwrap();
+    let written = serde_json::to_value(&shown).unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .copy_transcript(conversation.id, &[written], 0)
+        .unwrap();
+    let marker = format!("m-{}", note.id);
+    assert_eq!(
+        context
+            .ledger
+            .borrow()
+            .copied_item_with(chief, &marker)
+            .unwrap(),
+        Some(long.clone())
+    );
+
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    context.make().settle_after_restart().unwrap();
+    let settled = context.message(note.id);
+    assert_eq!(settled.state, "delivered");
+    assert_eq!(settled.receipt, json!({ "item": long }));
 }
 
 #[test]

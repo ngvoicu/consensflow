@@ -929,6 +929,13 @@ const TRANSCRIPT_ROLE = {
 }
 
 /**
+ * What a copied item is, as the drawer and the history viewer label it: by its
+ * role, and the summary a compaction wrote in the user's place as one.
+ */
+export const itemLabel = (item) =>
+  item.compaction ? 'Compaction summary' : (TRANSCRIPT_ROLE[item.role] ?? item.role)
+
+/**
  * One task: its story (each request, question, answer and result, in the
  * order they came), what its window wrote (ConsensFlow's own copy of the
  * conversation, kept after the window is gone), and what the human may do
@@ -1063,11 +1070,12 @@ export class TaskDrawer {
     for (const item of items) {
       const entry = element('li', 'transcript-item')
       entry.dataset.role = item.role
+      if (item.compaction) entry.dataset.compaction = 'true'
       entry.append(
         element(
           'div',
           'transcript-head',
-          `${TRANSCRIPT_ROLE[item.role] ?? item.role}${item.complete ? '' : ' · still writing'}`,
+          `${itemLabel(item)}${item.complete ? '' : ' · still writing'}`,
         ),
         element('pre', 'transcript-body', item.text),
       )

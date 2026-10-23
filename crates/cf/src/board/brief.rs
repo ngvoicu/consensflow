@@ -1,5 +1,5 @@
 //! The words of the commands that give a window work (`cf task add`, `cf task
-//! reopen`, `cf task resume`, `cf tell`): written out, read from standard input
+//! reopen`, `cf task resume`, `cf task edit`, `cf tell`): written out, read from standard input
 //! (`-`), or read from a file (`--file <path>`), which no shell cuts. The field
 //! report of 2026-10-15 (B6): a chief's heredoc lost its closing word, bash
 //! warned, and a brief went to the board cut at about 8.1k characters, which

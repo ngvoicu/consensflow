@@ -1,5 +1,5 @@
 //! One task: `GET /api/tasks/<n>`, its `/transcript`, and the `POST`s that move
-//! it (`done`, `accept`, `reopen`, `cancel`, `pause`, `resume`, `tell`). It
+//! it (`done`, `accept`, `reopen`, `edit`, `cancel`, `pause`, `resume`, `tell`). It
 //! reads the task first, so an unknown one is 404 before anything else is
 //! asked; and it takes the task as it was then, awaiting the body after: who
 //! may do what is decided on the task as it was read, and the ledger decides on
@@ -10,8 +10,9 @@
 //! received when `cf` says it wrote it whole (`POST /api/answers/read`), not
 //! when the thread was served. What the human has not passed on is not for an
 //! agent to read: the thread leaves out a gated message, and the brief is
-//! not given while it waits at the gate. The transcript is read a page at a
-//! time and searched as well (`pages`).
+//! not given to a caller who may not move the task while it waits at the gate.
+//! The chief, and whoever else gave the task, wrote the brief: they read it.
+//! The transcript is read a page at a time and searched as well (`pages`).
 
 mod pages;
 
@@ -65,10 +66,11 @@ pub(super) async fn handle(
     let get = request.method == Method::GET;
     if action.is_none() && get {
         // The thread as far as the human has let it go: a gated message waits
-        // unseen, and so does the brief while it is one of them.
+        // unseen, and so does the brief while it is one of them, but for those
+        // who wrote it.
         let held_back = brief_waits_at_the_gate(&task);
         task.messages.retain(|message| message.state != "gated");
-        if held_back {
+        if held_back && !may_move(caller, &task) {
             task.task.body.clear();
         }
         return Ok(Answer::ok(json!({ "task": value(&task)? })));
@@ -107,7 +109,8 @@ pub(super) async fn handle(
 /// received by it. A window that received the brief has it, and a later task
 /// message held at the gate (the words of a resume) does not take it back.
 /// The brief is `TaskView.body`: the human and the board read it from the
-/// ledger, and an agent does not until it has passed.
+/// ledger, and so do the chief and whoever gave the task, who wrote it; an
+/// agent who did not does not until it has passed.
 fn brief_waits_at_the_gate(task: &TaskThread) -> bool {
     let Some(window) = task.task.assignee.as_deref() else {
         return false;
@@ -311,6 +314,7 @@ fn moved(
                 .collect();
             ledger.cancel_task(project, number, by)?
         }
+        TaskAction::Edit => ledger.edit_task(project, number, by, words)?,
         TaskAction::Pause => ledger.pause_task(project, number, Some(by), None)?,
         TaskAction::Resume => ledger.resume_task(project, number, Some(by), words)?.task,
         // `reopen`; and what Node's last branch took any other word for, which
@@ -339,6 +343,7 @@ fn word(action: TaskAction) -> &'static str {
         TaskAction::Done => "done",
         TaskAction::Accept => "accept",
         TaskAction::Reopen => "reopen",
+        TaskAction::Edit => "edit",
         TaskAction::Cancel => "cancel",
         TaskAction::Pause => "pause",
         TaskAction::Resume => "resume",

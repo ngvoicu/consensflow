@@ -123,8 +123,8 @@ runs = ["cf-brief-file"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "        \"reopen\" | \"resume\" => BRIEFED,"
-replace = "        \"never\" => BRIEFED,"
+find = "        \"reopen\" | \"resume\" | \"edit\" => BRIEFED,"
+replace = "        \"edit\" => BRIEFED,"
 
 [[plant]]
 name = "briefs: a file's Windows line ending is taken for the text's"
@@ -194,9 +194,9 @@ runs = ["cf-board-goldens-306"]
 [[plant.edit]]
 file = "crates/cf/src/board/usage.txt"
 find = '''
-A long one is surest in a file, which no shell cuts (task add, reopen, resume and tell):
+A long one is surest in a file, which no shell cuts (task add, reopen, resume, edit and tell):
   cf task add --tier standard --file brief.md
-Those four say how many characters went and how the text ends: see that it is all there.'''
+Those five say how many characters went and how the text ends: see that it is all there.'''
 replace = ""
 
 [[plant]]

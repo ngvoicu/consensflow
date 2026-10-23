@@ -373,3 +373,34 @@ runs = ["ledger-told-kept", "engine-queued-tells", "engine-dispatcher-unfit"]
 file = "crates/cf-ledger/src/messages/delivery.rs"
 find = "                return Ok((known_message(store, message_id)?, GivenUp::Kept));"
 replace = "                return Ok((known_message(store, message_id)?, GivenUp::Failed));"
+
+# The merge of main 045881f9 (T-340): main's `cf task edit` takes its brief as every brief is
+# taken (B6), from a file too, where a text-only `edit` posted `--file brief.md` as the brief;
+# and the refusal of an edit to a queued task whose brief has begun says to tell its window,
+# which keeps the words for it (B3), where main said to wait until it had begun.
+
+[[plant]]
+name = "review 306: cf task edit posts --file and its name as the new brief"
+meant = "a_new_brief_is_read_from_a_file"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '        "reopen" | "resume" | "edit" => BRIEFED,'
+replace = '        "reopen" | "resume" => BRIEFED,'
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '    let briefed = matches!(action, "reopen" | "resume" | "edit");'
+replace = '    let briefed = matches!(action, "reopen" | "resume");'
+
+[[plant]]
+name = "review 306: an edit refused for a queued task says to wait for its window"
+meant = "a_task_a_window_was_given_is_not_edited_and_the_refusal_says_what_to_do_instead"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '            "paused" | "queued" => tell,'
+replace = '''            "paused" => tell,
+            "queued" => format!("tell its window once it has begun: cf tell T-{number} \"…\""),'''

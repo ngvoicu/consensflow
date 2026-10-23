@@ -277,3 +277,40 @@ fn a_wake_up_call_the_chiefs_switch_and_the_projects_state_are_told_once_from_th
         ]
     );
 }
+
+#[test]
+fn a_wake_up_call_held_back_while_work_was_on_its_way_is_told_with_the_tasks_that_held_it() {
+    let event = |id: i64, second: u32, kind: &str, data: serde_json::Value| Event {
+        id,
+        at: format!("2026-10-11T10:00:{second:02}.000Z"),
+        kind: kind.to_owned(),
+        data,
+    };
+    let mut look = look(1_791_712_810_000, Vec::new());
+    look.ledger.events = vec![
+        event(1, 1, "project.created", json!({ "name": "ledgerline" })),
+        event(
+            2,
+            5,
+            "project.wake_up_skipped",
+            json!({ "tasks": [21, 22, 50] }),
+        ),
+        event(3, 9, "project.wake_up", json!({ "message": 15 })),
+    ];
+    let mut timeline = Timeline::new(1_791_712_800_000);
+    timeline.changes(None, &look);
+    let said: Vec<&str> = timeline
+        .moments
+        .iter()
+        .filter(|moment| moment.kind == "project")
+        .map(|moment| moment.text.as_str())
+        .collect();
+    assert_eq!(
+        said,
+        [
+            "a wake-up call was held back while work was on its way (T-21, T-22, T-50)",
+            "a wake-up call nudged the chief (m-15)",
+        ],
+        "a report tells a call held back from one that never fired"
+    );
+}
