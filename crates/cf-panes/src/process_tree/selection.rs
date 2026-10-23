@@ -15,11 +15,13 @@ use crate::background::{steady, Member, ProcessKey};
 /// later process takes), and the members the daemon is told it by. What an ending of the
 /// turn goes on to end is these and what they started, found by the identifier of the
 /// process that started it, which names a parent that has gone as it does one that
-/// runs: for a while. The system usually keeps it for the children of a process that
-/// has run a moment, and often names launchd as the parent of those of one that has run
-/// for seconds once it has ended (seen on Darwin 25.5, by a shell given the request to
-/// end at different ages), so what such a process started as it ended is then no process
-/// of the lineage, and is left running, not named. What the chain of processes proved
+/// runs, for what had exec'd by then. The system records the parent's identifier when a
+/// process is forked and again at each exec (T-384), and keeps it when that parent ends:
+/// what a process had started and had exec'd by then names it, and what it started as it
+/// ended, which execs after, names launchd (seen on Darwin 25.5, by a shell given the
+/// request to end at different ages; which of the two is named is told by when the job
+/// exec'd, not by how long the shell had run), so such a process is then no process of
+/// the lineage, and is left running, not named. What the chain of processes proved
 /// the turn's and the bound refused (nothing shows it is the window's) is none of these,
 /// and is kept apart: it is not signalled, and an ending names it as left, unverified,
 /// where it still runs.
@@ -94,10 +96,12 @@ impl ProcessTree {
     /// descendant of those, by the parent each was started by. A system binary
     /// (`sleep`, `bash`, `tail`) shows no environment to anyone, so it carries no
     /// marker to be found by, and one whose parent has gone is found by the parent it
-    /// was started by only where the system still names it (an earlier look found it
-    /// naming launchd once launchd had taken the job, a `sleep` that `sh` left behind;
-    /// a later one, on Darwin 25.5 (macOS 26.5), found it naming the process that
-    /// started it for as long as it was watched, which `members` says). What the
+    /// was started by only where the system still names it (it names the starter if the
+    /// job had exec'd before the starter ended, and launchd if it exec'd after, T-384: an
+    /// earlier look found a `sleep` that `sh` left behind naming launchd, a later one, on
+    /// Darwin 25.5 (macOS 26.5), found it naming the process that started it for as long as
+    /// it was watched, which `members` says; which is told by when the job exec'd, not by
+    /// how long its starter had run). What the
     /// session holds is found whichever the system does: a process stays in the
     /// session its parent started it in, and a parent that goes changes nothing of it.
     /// The session is the pane's while its number is nobody else's: when the pane's

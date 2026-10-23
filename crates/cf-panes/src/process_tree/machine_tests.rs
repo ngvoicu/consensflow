@@ -116,8 +116,8 @@ fn a_close_signals_the_windows_by_its_parents_and_its_session_and_none_of_what_t
 fn a_close_ends_what_a_program_that_exited_left_in_its_session_though_init_is_now_its_parent() {
     // T-375: a window's program exits over a job that holds its terminal, which no look
     // saw (the window was never marked), and the system names init as the process that
-    // started the job (as it does on a loaded Mac). The program has gone and nothing holds
-    // its number: the session is the window's.
+    // started the job (as it does for a job that execs after its starter has gone). The
+    // program has gone and nothing holds its number: the session is the window's.
     let table = a_window_among_strangers();
     let tree = tree_of(&table);
     // The job, and the strangers around it: everything but the program and its shells.

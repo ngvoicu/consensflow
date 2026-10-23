@@ -10,9 +10,13 @@ use super::{Identity, Process, OWNER_ENV};
 
 // XNU proc_info_private.h declares this 56-byte structure as an API. A process's own unique
 // ID is its alone, and a reused PID cannot match it. The parent's is the identifier of the
-// process that started it only until that process has ended: on a loaded Mac it becomes
-// init's (1) within a millisecond of the parent's being reaped (T-375), so it is no proof
-// of who started a process whose starter has gone (`super::bound`).
+// process that was its parent when it was forked, and again at each exec (T-384), and the
+// system keeps it when that process ends: a job that has exec'd by then names its starter
+// for good, one that execs after the starter has gone names init's (1). Load does not change
+// it; it makes the starter's exit beat the job's exec more often (T-375). So it is no proof
+// of who started a process whose starter has gone (`super::bound`; held by
+// `the_identifier_recorded_for_the_process_that_started_a_job_is_its_parent_at_its_last_exec`
+// in tests/headless.rs).
 #[repr(C)]
 #[derive(Default)]
 struct NativeIdentity {

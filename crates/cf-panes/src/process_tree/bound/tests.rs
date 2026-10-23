@@ -299,16 +299,21 @@ fn a_session_whose_leader_has_gone_is_the_windows_while_nobody_has_its_number() 
     let detached = identity_of(&processes, DETACHED);
 
     // The program has gone and was reaped, and nothing holds its number. What it started
-    // and left in its session is named by the system as started by init (`1`: on a loaded
-    // Mac the job is given init's identifier, not the one of the process that started it,
-    // T-375), and no look saw it. The session is the kernel's own: it is still the window's.
+    // and left in its session is named by the system as started by init (`1`: a job that
+    // execs after its starter has gone is given init's identifier, not the starter's, which
+    // load makes happen more often, T-375, T-384), and no look saw it. The session is the
+    // kernel's own: it is still the window's.
     let later: Vec<Process> = processes
         .iter()
         .filter(|process| process.identity.pid != PROGRAM)
         .cloned()
         .collect();
     assert_eq!(identity_of(&later, DETACHED), detached);
-    assert_eq!(later[3].parent, 1, "the job's parent is init's identifier");
+    let job = later
+        .iter()
+        .find(|process| process.identity.pid == DETACHED)
+        .expect("the detached job");
+    assert_eq!(job.parent, 1, "the job's parent is init's identifier");
     assert!(allows(&bound, &later, detached));
     assert!(signal(&bound, &machine, &later, detached, libc::SIGTERM));
     assert_eq!(machine.sent(libc::SIGTERM), [DETACHED]);

@@ -1104,22 +1104,14 @@ fn helper_is_inert_when_stdin_is_not_a_pipe() {
 }
 
 fn process_exists(pid: i32) -> bool {
-    unsafe extern "C" {
-        fn kill(pid: i32, signal: i32) -> i32;
-    }
-
     // SAFETY: signal zero checks existence without delivering a signal.
-    (unsafe { kill(pid, 0) } == 0) || std::io::Error::last_os_error().raw_os_error() == Some(1)
+    (unsafe { libc::kill(pid, 0) } == 0)
+        || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 fn kill_process_group(process_group_id: i32) {
-    unsafe extern "C" {
-        fn kill(pid: i32, signal: i32) -> i32;
-    }
-
-    const SIGKILL: i32 = 9;
     // SAFETY: the PTY child is its process-group leader and this is test-only cleanup.
-    let _ = unsafe { kill(-process_group_id, SIGKILL) };
+    let _ = unsafe { libc::kill(-process_group_id, libc::SIGKILL) };
 }
 
 /// A window opens at the identity the daemon reserved for it, and only there:
@@ -1283,10 +1275,11 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
 /// What a window's program left running in its session, which the process that started it
 /// left too, is ended with the window when the program exits: nothing says whose it is but
 /// the session, which the program led. The case above has that child started by the program
-/// itself, which the system names as the process that started it, until a loaded Mac names
-/// init (T-375: that is the flake of the case above, which no test could make happen
-/// whenever it liked); here the process that started the child has gone before the program
-/// does, as a server that detaches itself does, and no load is needed.
+/// itself, which the system names as the process that started it if the child had exec'd
+/// before the program exited and as init if it exec'd after (T-384; under load a process just
+/// forked waits for a processor, which is the flake of the case above, and no test could make
+/// it happen whenever it liked); here the process that started the child has gone before the
+/// program does, as a server that detaches itself does, and no load is needed.
 #[cfg(target_os = "macos")]
 #[test]
 fn a_window_ends_when_its_program_exits_while_a_job_its_starter_left_holds_its_terminal() {
@@ -1381,11 +1374,10 @@ fn ps_line(pid: i32) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-/// The identifier the system records for the process that started `pid` (`proc_pidinfo`'s
-/// unique-identifier flavor): that of the process, which the system is meant to keep after it
-/// has gone, or `1`, which is init's.
+/// The identifiers the system records for `pid` (`proc_pidinfo`'s unique-identifier flavor): its
+/// own, and the one of the process that started it.
 #[cfg(target_os = "macos")]
-fn recorded_parent(pid: i32) -> Option<u64> {
+fn recorded_identifiers(pid: i32) -> Option<(u64, u64)> {
     #[repr(C)]
     #[derive(Default)]
     struct UniqueIdentifiers {
@@ -1412,19 +1404,129 @@ fn recorded_parent(pid: i32) -> Option<u64> {
             size,
         )
     };
-    (read == size).then_some(found.parent)
+    (read == size).then_some((found.unique, found.parent))
+}
+
+/// The identifier the system records for the process that started `pid`: that of the process
+/// that was its parent at its fork or its last exec, which the system keeps after that process
+/// has gone, or `1`, which is init's.
+#[cfg(target_os = "macos")]
+fn recorded_parent(pid: i32) -> Option<u64> {
+    recorded_identifiers(pid).map(|(_, parent)| parent)
+}
+
+/// Waits until the program `pid` runs is `program` (its path ends with it): a process just forked
+/// runs its parent's program until it execs.
+#[cfg(target_os = "macos")]
+fn wait_until_it_runs(pid: i32, program: &str) {
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut path = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        // SAFETY: the buffer is `path`, writable for the size passed with it, and proc_pidpath
+        // writes no more than that.
+        let written =
+            unsafe { libc::proc_pidpath(pid, path.as_mut_ptr().cast(), path.len() as u32) };
+        let written = usize::try_from(written).unwrap_or(0);
+        if String::from_utf8_lossy(&path[..written]).ends_with(program) {
+            return;
+        }
+        assert!(
+            Instant::now() < until,
+            "the process {pid} never ran {program}"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// The line a background job's starter says: the job's number.
+#[cfg(target_os = "macos")]
+fn the_job_its_starter_names(starter: &mut Child) -> i32 {
+    let mut line = String::new();
+    BufReader::new(starter.stdout.as_mut().expect("the starter's output"))
+        .read_line(&mut line)
+        .expect("the job's number");
+    line.trim().parse().expect("a number")
+}
+
+/// What the system records as the process that started a job is the process that was its parent
+/// at its fork and again at each exec (found by T-384's probes, which this keeps; T-375 took it
+/// for the age of the parent, and for load). A job that has exec'd by the time its starter ends
+/// keeps naming the starter, through its end and its being reaped. One that execs after names
+/// init (`1`), however long the starter ran. Load only makes the starter's exit beat the job's
+/// exec more often, a process just forked waiting for a processor. The bound and the selection
+/// rest on it (`process_tree/bound.rs`, `process_tree/selection.rs`): a job whose starter has
+/// gone is the window's by its session, not by whom the system says started it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_identifier_recorded_for_the_process_that_started_a_job_is_its_parent_at_its_last_exec() {
+    let sh = |script: &str, argument: &str| {
+        Command::new("/bin/sh")
+            .args(["-c", script, argument])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start the starter")
+    };
+
+    // A job that has exec'd before its starter ends.
+    let mut starter = sh("/bin/sleep 30 & echo $!; read _; exit 0", "");
+    let job = the_job_its_starter_names(&mut starter);
+    wait_until_it_runs(job, "/sleep");
+    let (starter_id, _) = recorded_identifiers(starter.id() as i32).expect("the starter's own");
+    assert_eq!(recorded_parent(job), Some(starter_id), "while it runs");
+    drop(starter.stdin.take());
+    starter.wait().expect("the starter ends, and is reaped");
+    assert_eq!(
+        recorded_parent(job),
+        Some(starter_id),
+        "after its end and its being reaped"
+    );
+    kill_process(job);
+
+    // A job forked in the same way that execs only after its starter has ended and been reaped.
+    let fifo = std::env::temp_dir().join(format!("cf-panes-recorded-{}", std::process::id()));
+    let _ = std::fs::remove_file(&fifo);
+    let path = std::ffi::CString::new(fifo.to_str().expect("a path")).expect("a path");
+    // SAFETY: the path is a NUL-ended string that lives through the call.
+    let made = unsafe { libc::mkfifo(path.as_ptr(), 0o600) };
+    assert_eq!(made, 0, "make a fifo");
+    let mut starter = sh(
+        "( read x < \"$0\"; exec /bin/sleep 30 ) & echo $!; read _; exit 0",
+        fifo.to_str().expect("a path"),
+    );
+    let job = the_job_its_starter_names(&mut starter);
+    let (starter_id, _) = recorded_identifiers(starter.id() as i32).expect("the starter's own");
+    assert_eq!(recorded_parent(job), Some(starter_id), "forked, not exec'd");
+    drop(starter.stdin.take());
+    starter.wait().expect("the starter ends, and is reaped");
+    assert_eq!(
+        recorded_parent(job),
+        Some(starter_id),
+        "forked, not exec'd, its starter gone"
+    );
+    // Opened for both, so that it does not wait for the job's reading of it.
+    let mut go = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&fifo)
+        .expect("open the fifo");
+    go.write_all(b"go\n").expect("tell the job to exec");
+    wait_until_it_runs(job, "/sleep");
+    assert_eq!(
+        recorded_parent(job),
+        Some(1),
+        "exec'd after its starter had gone: init's"
+    );
+    kill_process(job);
+    let _ = std::fs::remove_file(&fifo);
 }
 
 #[cfg(target_os = "macos")]
 fn kill_process(pid: i32) {
-    unsafe extern "C" {
-        fn kill(pid: i32, signal: i32) -> i32;
-    }
-
-    const SIGKILL: i32 = 9;
     // SAFETY: the number is a process this test started and found alive; this is test-only
     // cleanup of a process that outlived its window.
-    let _ = unsafe { kill(pid, SIGKILL) };
+    let _ = unsafe { libc::kill(pid, libc::SIGKILL) };
 }
 
 /// The flake of `a_window_ends_when_its_program_exits_while_a_background_child_holds_its_terminal`
@@ -1440,7 +1542,8 @@ fn kill_process(pid: i32) {
 /// process that started it, and ends it. A child that is `S` at both, with init for its
 /// parent and `1` recorded, is alive and was never signalled: the pane host's bound refused it
 /// (the bound lets through what the system says the window's program started, and the system
-/// had named init); one that is `Z` was signalled and not reaped; one that is gone by the
+/// had named init, the child having exec'd after the shell had gone); one that is `Z` was
+/// signalled and not reaped; one that is gone by the
 /// second look was ended late. Before the bound let through the session of a program that had
 /// gone, 11 of 300 windows left their child (all `S`, init's, `1`), and none of 600 after.
 #[cfg(target_os = "macos")]
