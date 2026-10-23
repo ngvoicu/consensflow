@@ -19,9 +19,21 @@
 //! pane's program leads its session (it is the pane's program, by its unique identifier
 //! and not its number, it runs, and it is its own session's leader) every process in that
 //! session is the window's, whoever started it and whether or not the process that
-//! started it is still there: a job an agent detached from its shell is one. A session
-//! whose leader has gone allows nothing, and nor does one whose number another process
-//! has now: a number is given again once its process is gone.
+//! started it is still there: a job an agent detached from its shell is one. So it is once
+//! the program has gone, for as long as nobody has its number: the session keeps the name
+//! of its leader while it has a member, and what the system says of who started a job
+//! cannot be relied on after that (below). A session whose number another process has
+//! now allows nothing, nor does one the program was not the leader of: a number is given
+//! again once its process and its session are gone.
+//!
+//! **What the system says of who started a process is no proof once that process has
+//! ended.** It records the process that started a job by an identifier that is meant to
+//! outlive it, and on a loaded Mac the job is given init's instead (T-375: of 300 windows
+//! opened beside computing threads, 11 left a job whose recorded parent was init's when the
+//! host looked, and ended nothing of it: `under_load_…` in `tests/headless.rs`). A job the
+//! program left that no look saw (a window never marked, or a job begun after the last look)
+//! is then under no process that is known, and its session is all that says it is the
+//! window's.
 //!
 //! Each look at the tree ([`Bound::observe`]) records what the window's is by these
 //! rules, told by the identifier the system gives each process, which no later process
@@ -123,15 +135,19 @@ impl<'a> Table<'a> {
 pub(super) struct Bound {
     /// The pane's program, which the tree starts at: none where it could not be read.
     program: Option<Identity>,
+    /// The session the program was in when the tree attached to it: its own number if it led
+    /// one, as the pty makes a pane's program do.
+    session: Option<i32>,
     /// The identifiers of what the latest look saw to be the window's, and runs still.
     seen: Arc<Mutex<HashSet<u64>>>,
 }
 
 impl Bound {
-    /// The bound of a tree whose program is `program`.
-    pub fn new(program: Option<Identity>) -> Self {
+    /// The bound of a tree whose program is `program`, in the session `session`.
+    pub fn new(program: Option<Identity>, session: Option<i32>) -> Self {
         Self {
             program,
+            session,
             seen: Arc::default(),
         }
     }
@@ -223,14 +239,24 @@ impl Bound {
         failure.map_or(Ok(()), Err)
     }
 
-    /// The session the pane's program leads, while it does: the program runs, with the
-    /// identity it was attached with, and its session is its own number. None where it
-    /// has gone, where another process has its number now (another identifier), and where
-    /// it is no session's leader.
+    /// The session the pane's program leads, or led: its own number, while the program runs
+    /// with the identity it was attached with and leads it; and once the program has gone,
+    /// while no process has that number (the session is named for its leader and keeps the
+    /// name while it has a member). None where another process has the number now (another
+    /// identifier), and where the program was no session's leader.
     fn led_session(&self, table: &Table<'_>) -> Option<i32> {
         let program = self.program?;
-        let process = table.by_identifier.get(&program.unique)?;
-        (process.identity == program && process.session == Some(program.pid)).then_some(program.pid)
+        let leads = match table.by_identifier.get(&program.unique) {
+            Some(process) => process.identity == program && process.session == Some(program.pid),
+            None => {
+                self.session == Some(program.pid)
+                    && !table
+                        .processes
+                        .iter()
+                        .any(|process| process.identity.pid == program.pid)
+            }
+        };
+        leads.then_some(program.pid)
     }
 
     /// Whether the pane's program runs, with the identity it was attached with, and leads

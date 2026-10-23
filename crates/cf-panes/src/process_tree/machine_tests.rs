@@ -14,7 +14,7 @@ fn tree_of(table: &[Process]) -> ProcessTree {
     let mut tree = ProcessTree::new();
     tree.root = Some(identity_of(table, PROGRAM));
     tree.session = Some(PROGRAM);
-    tree.bound = Bound::new(tree.root);
+    tree.bound = Bound::new(tree.root, tree.session);
     tree
 }
 
@@ -113,6 +113,37 @@ fn a_close_signals_the_windows_by_its_parents_and_its_session_and_none_of_what_t
 }
 
 #[test]
+fn a_close_ends_what_a_program_that_exited_left_in_its_session_though_init_is_now_its_parent() {
+    // T-375: a window's program exits over a job that holds its terminal, which no look
+    // saw (the window was never marked), and the system names init as the process that
+    // started the job (as it does on a loaded Mac). The program has gone and nothing holds
+    // its number: the session is the window's.
+    let table = a_window_among_strangers();
+    let tree = tree_of(&table);
+    // The job, and the strangers around it: everything but the program and its shells.
+    let after = Machine::new(table[4..].to_vec());
+    assert_eq!(
+        after.processes().expect("the table")[0].identity.pid,
+        DETACHED
+    );
+
+    let asked = tree.ask_by(&after, Subject::Whole, None).expect("asked");
+    assert_eq!(after.sent(libc::SIGTERM), [DETACHED]);
+    assert_eq!(after.sent(libc::SIGHUP), [DETACHED]);
+    assert!(!asked.failed());
+    let forced = tree.force_by(&after, Subject::Whole, &[]);
+
+    assert!(forced.failure.is_none(), "{:?}", forced.failure);
+    assert_eq!(after.sent(libc::SIGSTOP), [DETACHED]);
+    assert_eq!(
+        after.sent(libc::SIGKILL),
+        [PROGRAM, DETACHED],
+        "the job and none of the strangers; the program too: a force of the whole window \
+         signals the root it owns, which the real signal finds gone and sends nothing to"
+    );
+}
+
+#[test]
 fn a_job_seen_under_the_program_is_ended_by_a_close_though_its_parent_has_gone_since() {
     let machine = Machine::new(a_window_among_strangers());
     let table = machine.processes().expect("the table");
@@ -157,7 +188,11 @@ fn a_turn_whose_work_the_bound_refuses() -> (ProcessTree, Baseline, Machine) {
             ..listed(DETACHED, 1400, 1)
         },
     ];
-    let tree = tree_of(&before);
+    let mut tree = tree_of(&before);
+    // The selection says the session is the pane's; the bound, which shares nothing with it,
+    // was told the program led none (a selection gone wrong about the session), and so
+    // refuses what the selection chose in it.
+    tree.bound = Bound::new(tree.root, None);
     // The mark is made of what the selection finds, which no look of the bound has seen.
     let mut baseline = Baseline::default();
     baseline.mark(

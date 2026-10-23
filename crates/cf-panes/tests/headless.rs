@@ -1192,33 +1192,34 @@ fn a_pane_open_answers_the_process_id_of_the_windows_program() {
     helper.close_input_and_wait();
 }
 
-/// A window whose program exits while something it started still holds its
-/// terminal (a dev server deaf to the hangup) ends all the same, and what it
-/// left running ends with it. The program is its terminal's controlling
-/// process, and macOS revokes the terminal when it exits, so the output ends
-/// and `pane.exit` follows; Linux keeps the terminal open for the child, and
-/// would need an exit watcher as ConPTY does. The program exits on a line typed
-/// to it once the window is open: the host knows a program by what it read of it
-/// when the window opened, and on a loaded runner one that exits at once can be
-/// gone before that (then what it started is no window's, and is left running).
+/// The program of a window that exits on a line typed to it once the window is open, over a
+/// background child that deaf to the hangup holds its terminal (a dev server). It says the
+/// child's number.
 #[cfg(target_os = "macos")]
-#[test]
-fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_terminal() {
-    let _pty_guard = serial_headless_test();
-    let mut helper = Headless::spawn();
-    let mut events = Vec::new();
-    let opened = helper.request(
-        "pane.open",
-        open_body(
-            "trap '' HUP; /bin/sleep 1000 & printf 'CHILD %s END' \"$!\"; read _; exit 0",
-            1024,
-        ),
-        &mut events,
-    );
+const EXITS_OVER_A_BACKGROUND_CHILD: &str =
+    "trap '' HUP; /bin/sleep 1000 & printf 'CHILD %s END' \"$!\"; read _; exit 0";
+
+/// [`EXITS_OVER_A_BACKGROUND_CHILD`], with the child started by a subshell that ends at once, as a
+/// server that detaches itself is: the process that started the child has gone before the
+/// program does, and the window's program is not the one that did.
+#[cfg(target_os = "macos")]
+const EXITS_OVER_A_JOB_ITS_STARTER_LEFT: &str =
+    "trap '' HUP; (/bin/sleep 1000 & printf 'CHILD %s END' \"$!\"); read _; exit 0";
+
+/// Opens a window of `script` (one of the programs above), types the line that ends its
+/// program and waits for `pane.exit`: the background child's number, and when `pane.exit`
+/// came.
+#[cfg(target_os = "macos")]
+fn a_program_exits_over_a_background_child(
+    helper: &mut Headless,
+    events: &mut Vec<Value>,
+    script: &str,
+) -> (i32, Instant) {
+    let opened = helper.request("pane.open", open_body(script, 1024), events);
     assert_eq!(opened["ok"], true, "{opened}");
     let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
     let generation = opened["generation"].as_u64().expect("opened generation");
-    let printed = output_until(&helper, &mut events, &pane_id, generation, b" END");
+    let printed = output_until(helper, events, &pane_id, generation, b" END");
     let child = String::from_utf8_lossy(&printed)
         .trim_start_matches("CHILD ")
         .trim_end_matches(" END")
@@ -1228,7 +1229,7 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
         helper.request(
             "pane.input",
             json!({"id":pane_id,"generation":generation,"bytes":[10]}),
-            &mut events,
+            events,
         ),
         json!({"ok":true})
     );
@@ -1244,6 +1245,30 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
             Err(_) => panic!("no pane.exit while the background child holds the terminal"),
         }
     }
+    (child, Instant::now())
+}
+
+/// A window whose program exits while something it started still holds its
+/// terminal (a dev server deaf to the hangup) ends all the same, and what it
+/// left running ends with it. The program is its terminal's controlling
+/// process, and macOS revokes the terminal when it exits, so the output ends
+/// and `pane.exit` follows; Linux keeps the terminal open for the child, and
+/// would need an exit watcher as ConPTY does. The program exits on a line typed
+/// to it once the window is open: the host knows a program by what it read of it
+/// when the window opened, and on a loaded runner one that exits at once can be
+/// gone before that (then what it started is no window's, and is left running).
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_terminal() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let (child, _) = a_program_exits_over_a_background_child(
+        &mut helper,
+        &mut events,
+        EXITS_OVER_A_BACKGROUND_CHILD,
+    );
+
     let gone = Instant::now() + Duration::from_secs(2);
     while process_exists(child) && Instant::now() < gone {
         thread::sleep(Duration::from_millis(10));
@@ -1253,6 +1278,216 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
         "what the window left running survived it"
     );
     helper.close_input_and_wait();
+}
+
+/// What a window's program left running in its session, which the process that started it
+/// left too, is ended with the window when the program exits: nothing says whose it is but
+/// the session, which the program led. The case above has that child started by the program
+/// itself, which the system names as the process that started it, until a loaded Mac names
+/// init (T-375: that is the flake of the case above, which no test could make happen
+/// whenever it liked); here the process that started the child has gone before the program
+/// does, as a server that detaches itself does, and no load is needed.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_ends_when_its_program_exits_while_a_job_its_starter_left_holds_its_terminal() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let (child, _) = a_program_exits_over_a_background_child(
+        &mut helper,
+        &mut events,
+        EXITS_OVER_A_JOB_ITS_STARTER_LEFT,
+    );
+
+    let gone = Instant::now() + Duration::from_secs(5);
+    while process_exists(child) && Instant::now() < gone {
+        thread::sleep(Duration::from_millis(10));
+    }
+    let survived = process_exists(child).then(|| ps_line(child));
+    if survived.is_some() {
+        kill_process(child);
+    }
+    assert_eq!(survived, None, "what the window left running survived it");
+    helper.close_input_and_wait();
+}
+
+/// How many windows [`under_load_a_window_whose_program_exits_ends_the_background_child_it_left`]
+/// plays, if `CF_PANES_LOAD_ROUNDS` does not say.
+#[cfg(target_os = "macos")]
+const LOAD_ROUNDS: usize = 300;
+
+/// The value of `name` as a number, or `default`.
+#[cfg(target_os = "macos")]
+fn size_from_the_environment(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|given| given.parse().ok())
+        .unwrap_or(default)
+}
+
+/// Threads that compute until they are dropped: the load of a loaded runner or of a Mac with
+/// several builds on it, bounded by the test's own life.
+#[cfg(target_os = "macos")]
+struct Burners {
+    stop: Arc<AtomicBool>,
+    threads: Vec<thread::JoinHandle<()>>,
+}
+
+#[cfg(target_os = "macos")]
+impl Burners {
+    fn start(count: usize) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let threads = (0..count)
+            .map(|_| {
+                let stop = Arc::clone(&stop);
+                thread::spawn(move || {
+                    let mut x = 1u64;
+                    while !stop.load(Ordering::Relaxed) {
+                        for _ in 0..10_000 {
+                            x = std::hint::black_box(
+                                x.wrapping_mul(6364136223846793005).wrapping_add(1),
+                            );
+                        }
+                    }
+                })
+            })
+            .collect();
+        Self { stop, threads }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for Burners {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        for thread in self.threads.drain(..) {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// What `ps` says of `pid`, on one line: its parent, group, state and age.
+#[cfg(target_os = "macos")]
+fn ps_line(pid: i32) -> String {
+    let output = Command::new("/bin/ps")
+        .args([
+            "-o",
+            "pid=,ppid=,pgid=,stat=,etime=",
+            "-p",
+            &pid.to_string(),
+        ])
+        .output()
+        .expect("run ps");
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+/// The identifier the system records for the process that started `pid` (`proc_pidinfo`'s
+/// unique-identifier flavor): that of the process, which the system is meant to keep after it
+/// has gone, or `1`, which is init's.
+#[cfg(target_os = "macos")]
+fn recorded_parent(pid: i32) -> Option<u64> {
+    #[repr(C)]
+    #[derive(Default)]
+    struct UniqueIdentifiers {
+        uuid: [u8; 16],
+        unique: u64,
+        parent: u64,
+        version: i32,
+        parent_version: i32,
+        reserved: [u64; 2],
+    }
+
+    /// `PROC_PIDUNIQIDENTIFIERINFO`.
+    const FLAVOR: i32 = 17;
+    let mut found = UniqueIdentifiers::default();
+    let size = std::mem::size_of_val(&found) as i32;
+    // SAFETY: the buffer is `found`, writable for the `size` bytes passed with it, and
+    // proc_pidinfo writes no more than that.
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            FLAVOR,
+            0,
+            (&mut found as *mut UniqueIdentifiers).cast(),
+            size,
+        )
+    };
+    (read == size).then_some(found.parent)
+}
+
+#[cfg(target_os = "macos")]
+fn kill_process(pid: i32) {
+    unsafe extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+
+    const SIGKILL: i32 = 9;
+    // SAFETY: the number is a process this test started and found alive; this is test-only
+    // cleanup of a process that outlived its window.
+    let _ = unsafe { kill(pid, SIGKILL) };
+}
+
+/// The flake of `a_window_ends_when_its_program_exits_while_a_background_child_holds_its_terminal`
+/// (T-282 saw it once at a load average of 33 to 40), reproduced and kept (T-375): opt-in, because
+/// it plays hundreds of windows beside threads that compute on every core, and it needs a Mac.
+/// `cargo test -p cf-panes --test headless -- --ignored under_load`, with
+/// `CF_PANES_LOAD_ROUNDS` windows (300) and `CF_PANES_LOAD_BURNERS` computing threads (four for
+/// each core).
+///
+/// A window ends and its background child must be gone two seconds after `pane.exit`, as the
+/// case above asks. For a window that does not meet it the test writes what `ps` says of the
+/// child at that moment and ten seconds later, and the identifier the system records for the
+/// process that started it, and ends it. A child that is `S` at both, with init for its
+/// parent and `1` recorded, is alive and was never signalled: the pane host's bound refused it
+/// (the bound lets through what the system says the window's program started, and the system
+/// had named init); one that is `Z` was signalled and not reaped; one that is gone by the
+/// second look was ended late. Before the bound let through the session of a program that had
+/// gone, 11 of 300 windows left their child (all `S`, init's, `1`), and none of 600 after.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "opt-in load reproduction of T-375: hundreds of windows beside computing threads; cargo test -p cf-panes --test headless -- --ignored under_load"]
+fn under_load_a_window_whose_program_exits_ends_the_background_child_it_left() {
+    let _pty_guard = serial_headless_test();
+    let cores = thread::available_parallelism().map_or(4, std::num::NonZero::get);
+    let _burners = Burners::start(size_from_the_environment(
+        "CF_PANES_LOAD_BURNERS",
+        4 * cores,
+    ));
+    let rounds = size_from_the_environment("CF_PANES_LOAD_ROUNDS", LOAD_ROUNDS);
+    let mut failures = Vec::new();
+    for round in 1..=rounds {
+        let mut helper = Headless::spawn();
+        let mut events = Vec::new();
+        let (child, exited) = a_program_exits_over_a_background_child(
+            &mut helper,
+            &mut events,
+            EXITS_OVER_A_BACKGROUND_CHILD,
+        );
+        let gone = exited + Duration::from_secs(2);
+        while process_exists(child) && Instant::now() < gone {
+            thread::sleep(Duration::from_millis(10));
+        }
+        if process_exists(child) {
+            let at_two_seconds = ps_line(child);
+            let later = Instant::now() + Duration::from_secs(10);
+            while process_exists(child) && Instant::now() < later {
+                thread::sleep(Duration::from_millis(100));
+            }
+            failures.push(format!(
+                "round {round}: child {child} at 2 s: [{at_two_seconds}], recorded parent {:?}, \
+                 at 12 s: [{}]",
+                recorded_parent(child),
+                ps_line(child)
+            ));
+            kill_process(child);
+        }
+        helper.close_input_and_wait();
+    }
+    eprintln!(
+        "{} of {rounds} windows left their background child running 2 s after they ended",
+        failures.len()
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// A program that lets go of its terminal and opens it again: it takes the terminal

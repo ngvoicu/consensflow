@@ -29,7 +29,8 @@
 //! every signal the tree sends, to a process or to the pane's group, is sent by [`bound`],
 //! after a check of its own that shares nothing with the selection. A process that is not
 //! the pane's program, nor under it by the process that started each, nor in the session
-//! the program leads while it runs, nor seen so at a look before, is not signalled and is
+//! the program leads (while it runs, and once it has gone for as long as nobody has its
+//! number), nor seen so at a look before, is not signalled and is
 //! not named as ended; so a close ends no job that only the marker its environment
 //! carries says is the window's, which no look saw under the window's program, and leaves
 //! it running. What the bound refuses of what an ending chose (the turn's work, proved by a
@@ -181,7 +182,7 @@ impl ProcessTree {
         let root = process(pid);
         self.root = root.as_ref().map(|p| p.identity);
         self.session = root.and_then(|p| p.session);
-        self.bound = Bound::new(self.root);
+        self.bound = Bound::new(self.root, self.session);
     }
 
     /// The processes of the tree now, each with the command line it was

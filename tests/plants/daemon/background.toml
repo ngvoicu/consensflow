@@ -78,6 +78,8 @@ panes-lib-guarded = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "a
 panes-headless-turn-marked = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_turn_marked"]
 panes-headless-ending = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "an_ending"]
 panes-headless-harness = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_mark_that_names_the_harness"]
+# A window whose program exits over what it left in its session (T-375).
+panes-headless-window-ends = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_window_ends_when_its_program_exits"]
 # The app's quit, which closes the windows within the grace they are given.
 app-test-quitting = ["cargo", "xtask", "app", "test", "quitting"]
 # The cases of the rig (`background_work` and `background_close` of crates/cf-e2e): the
@@ -1119,19 +1121,72 @@ find = '''
 replace = '''
                 || known(at.parent)'''
 
+# The session the program led, once the program has gone: the window’s while nobody has its
+# number (the session keeps the name of its leader while it has a member), because what the
+# system says of who started a job is no proof after that process has ended (T-375). A plant
+# of the session that takes a permission away ends less, and is run on real processes too.
+
 [[plant]]
-name = "background bound: a session is the window’s though its leader has gone"
-meant = "a_session_whose_leader_has_gone_allows_nothing"
+name = "background bound: a session whose leader has gone is none of the window’s"
+meant = "a_session_whose_leader_has_gone_is_the_windows_while_nobody_has_its_number"
 runs = ["panes-lib-tree"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree/bound.rs"
 find = '''
-        let process = table.by_identifier.get(&program.unique)?;
-        (process.identity == program && process.session == Some(program.pid)).then_some(program.pid)'''
+            None => {
+                self.session == Some(program.pid)
+                    && !table
+                        .processes
+                        .iter()
+                        .any(|process| process.identity.pid == program.pid)
+            }'''
 replace = '''
-        let _ = table;
-        Some(program.pid)'''
+            None => false,'''
+
+[[plant]]
+name = "background bound: what a window’s program left, which its starter left too, is not the window’s once the program has exited"
+meant = "a_window_ends_when_its_program_exits_while_a_job_its_starter_left_holds_its_terminal"
+runs = ["panes-headless-window-ends"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/bound.rs"
+find = '''
+            None => {
+                self.session == Some(program.pid)
+                    && !table
+                        .processes
+                        .iter()
+                        .any(|process| process.identity.pid == program.pid)
+            }'''
+replace = '''
+            None => false,'''
+
+[[plant]]
+name = "background bound: the tree does not tell the bound the session its program led"
+meant = "a_window_ends_when_its_program_exits_while_a_job_its_starter_left_holds_its_terminal"
+runs = ["panes-headless-window-ends"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '        self.bound = Bound::new(self.root, self.session);'
+replace = '        self.bound = Bound::new(self.root, None);'
+
+[[plant]]
+name = "background bound: a session whose leader has gone is the window’s though its number is another process’s"
+meant = "a_session_whose_number_another_process_has_allows_nothing"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/bound.rs"
+find = '''
+                self.session == Some(program.pid)
+                    && !table
+                        .processes
+                        .iter()
+                        .any(|process| process.identity.pid == program.pid)'''
+replace = '''
+                self.session == Some(program.pid)'''
 
 [[plant]]
 name = "background bound: a session is told by the number of its leader and not by the leader"
@@ -1141,14 +1196,31 @@ runs = ["panes-lib-tree"]
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree/bound.rs"
 find = '''
-        let process = table.by_identifier.get(&program.unique)?;
-        (process.identity == program && process.session == Some(program.pid)).then_some(program.pid)'''
+        let leads = match table.by_identifier.get(&program.unique) {
+            Some(process) => process.identity == program && process.session == Some(program.pid),'''
 replace = '''
-        let process = table
+        let leads = match table
             .processes
             .iter()
-            .find(|process| process.identity.pid == program.pid)?;
-        (process.session == Some(program.pid)).then_some(program.pid)'''
+            .find(|process| process.identity.pid == program.pid)
+        {
+            Some(process) => process.session == Some(program.pid),'''
+
+[[plant]]
+name = "background bound: a program that led no session leaves its number to the window once it has gone"
+meant = "a_program_that_led_no_session_leaves_the_window_none_of_its_number_once_it_has_gone"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/bound.rs"
+find = '''
+            None => {
+                self.session == Some(program.pid)
+                    && !table'''
+replace = '''
+            None => {
+                true
+                    && !table'''
 
 [[plant]]
 name = "background bound: a program that leads no session lets through the one it is in"
@@ -1158,9 +1230,9 @@ runs = ["panes-lib-tree"]
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree/bound.rs"
 find = '''
-        (process.identity == program && process.session == Some(program.pid)).then_some(program.pid)'''
+            Some(process) => process.identity == program && process.session == Some(program.pid),'''
 replace = '''
-        process.session'''
+            Some(process) => process.identity == program,'''
 
 [[plant]]
 name = "background bound: a group is signalled whole whoever leads it"
