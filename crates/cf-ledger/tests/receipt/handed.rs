@@ -5,9 +5,10 @@
 //! (Sol's review of 2026-10-16, round 7: a delivery begun before the Close was
 //! read whole after it, though it never went in).
 
-use cf_ledger::{Claim, HandOver};
+use cf_ledger::{Claim, GivenUp, HandOver};
 
 use crate::fixture::{world, World};
+use crate::queued_tells::{queued, tell};
 
 /// T-1 given to zeus and at work, paused by the chief, a note of the chief's kept
 /// for its window meanwhile, and the words that resume it, which carry the note,
@@ -80,7 +81,10 @@ fn a_hand_over_whose_message_or_a_row_of_its_paste_was_withdrawn_since_it_began_
 }
 
 /// One that goes back to its queue was handed nothing: it is handed again, or not
-/// at all.
+/// at all. Tried again; or told words whose paste failed while their task was
+/// paused, kept for its resume (main's `kept_for_resume`; Calliope's review of the
+/// merge, T-408: they kept their mark, and a reader of the closed project read
+/// them whole).
 #[test]
 fn a_hand_over_sent_back_to_its_queue_is_handed_no_more() {
     let mut w = world();
@@ -92,6 +96,29 @@ fn a_hand_over_sent_back_to_its_queue_is_handed_no_more() {
         .expect("tried again");
 
     assert!(w.ledger.handed_over(w.project).unwrap().is_empty());
+
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    w.begin(brief);
+    let told = tell(&mut w, task, "Use the v2 grammar").id;
+    w.confirm(brief);
+    w.begin(told);
+    assert_eq!(w.ledger.admit(told, &[]).unwrap(), HandOver::Admitted);
+    w.ledger
+        .pause_task(w.project, task, Some("human"), None)
+        .expect("the human pauses");
+
+    let (_, given_up) = w
+        .ledger
+        .give_up_delivery(told, "refused by the window")
+        .expect("settled");
+
+    assert_eq!(given_up, GivenUp::Kept);
+    assert_eq!(w.message(told).state, "queued");
+    assert!(
+        !w.ledger.handed_over(w.project).unwrap().contains(&told),
+        "kept for the resume, and handed nothing"
+    );
 }
 
 /// What a paste carried is its own again once its carrier is given up, and handed

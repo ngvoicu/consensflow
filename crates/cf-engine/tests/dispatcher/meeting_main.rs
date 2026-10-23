@@ -8,6 +8,7 @@
 //! on them included (B3).
 
 use cf_engine::testing::Context;
+use cf_harness::records::Role;
 use cf_ledger::NewTask;
 use serde_json::json;
 
@@ -105,11 +106,12 @@ fn a_brief_of_the_chiefs_own_step_finished_while_its_enter_looked_is_withheld_an
 /// answer is no result until they are in (`cf task done` refused, 409): after the
 /// Resume they are pasted once into an emptied box; or the human sent them from the
 /// box while the project was closed, and they arrived. Either way the window's
-/// answer after them is the task's result.
+/// answer after them is the task's result; and where the human sent them, its
+/// `cf task done` is taken once they are in (Calliope's review of the merge, T-408).
 #[test]
 fn words_told_whose_enter_was_withheld_by_a_close_wait_and_the_answer_is_the_result_once_they_are_in(
 ) {
-    for sent_by_hand in [false, true] {
+    for (sent_by_hand, done_by_hand) in [(false, false), (true, false), (true, true)] {
         let context = Context::new();
         let (tiers, session, told) = told_on_its_way(&context);
         let project = tiers.project.id;
@@ -129,7 +131,17 @@ fn words_told_whose_enter_was_withheld_by_a_close_wait_and_the_answer_is_the_res
         context.pass().unwrap();
         assert_eq!(enters(&context), 0, "no key that sends");
         assert_eq!(context.message(told).state, "queued", "given back");
-        if sent_by_hand {
+        if done_by_hand {
+            // The human sends them and the window has not answered yet: only its
+            // `cf task done` gives the result.
+            let given = context
+                .adapter
+                .item(Role::User, &pasted(&context, &pane, told));
+            context
+                .adapter
+                .with("zeus", |agent| agent.items.push(given));
+            context.pass().unwrap();
+        } else if sent_by_hand {
             human_sends(&context, "zeus", &pasted(&context, &pane, told));
             context.pass().unwrap();
         }
@@ -147,8 +159,29 @@ fn words_told_whose_enter_was_withheld_by_a_close_wait_and_the_answer_is_the_res
                 "{refused:?}"
             );
         }
+        if done_by_hand {
+            // Refused while the words the human sent are not yet read as in.
+            let refused = context
+                .ledger
+                .borrow_mut()
+                .record_result(project, 1, "Parser done, on the v2 grammar")
+                .expect_err("words on their way");
+            assert!(
+                format!("{refused:?}").contains("words-on-their-way"),
+                "{refused:?}"
+            );
+        }
         for _ in 0..6 {
             context.pass().unwrap();
+        }
+        if done_by_hand {
+            assert_eq!(context.message(told).state, "delivered");
+            let taken = context
+                .ledger
+                .borrow_mut()
+                .record_result(project, 1, "Parser done, on the v2 grammar")
+                .expect("taken once the words the human sent are in");
+            assert_eq!(taken.task.state, "done");
         }
         let pasted_words = context
             .recorder
@@ -182,7 +215,7 @@ fn words_told_whose_enter_was_withheld_by_a_close_wait_and_the_answer_is_the_res
             }
         }
         let thread = context.task(project, 1);
-        assert_eq!(thread.task.state, "done", "{sent_by_hand}");
+        assert_eq!(thread.task.state, "done", "{sent_by_hand} {done_by_hand}");
         let result = thread
             .messages
             .iter()
