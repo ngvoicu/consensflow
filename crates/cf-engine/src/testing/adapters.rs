@@ -112,7 +112,7 @@ impl Records for FakeRecords {
             wrapped.before().await;
             let reading = early.unwrap_or_else(|| record_of(fake, session));
             let written = match &reading {
-                Reading::Unknown(_) => json!({ "unknown": true }),
+                Reading::Unknown(_) | Reading::Missing(_) => json!({ "unknown": true }),
                 Reading::Known(record) => json!({ "items": record.items }),
             };
             fake.recorder.answered(at, written);

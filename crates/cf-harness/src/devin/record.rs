@@ -67,7 +67,12 @@ impl Look for Reader {
             self.store = None;
             self.wires = Wires::default();
             self.answer = None;
-            Arc::new(Reading::unreadable(&reason))
+            // A session the store has no row of yet is no failure to read it.
+            Arc::new(if reason == MISSING_SESSION {
+                Reading::Missing(format!("unreadable: {reason}"))
+            } else {
+                Reading::unreadable(&reason)
+            })
         })
     }
 }

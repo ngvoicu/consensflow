@@ -26,10 +26,15 @@
 //!   since the last look that read the window is not known. Its rest begins again at
 //!   the next look that reads the window at rest, and nothing is pressed or pasted
 //!   again on it: a look whose record could not be read, or a snapshot for the Enter
-//!   that failed or came late. Before a
+//!   that failed or came late, or a host that says it is writing a paste still. Each
+//!   is said in the daemon's log, at most once a minute for a message
+//!   ([`UNREAD_TOLD_MS`]). Before a
 //!   paste goes again, the window is read once more: the pane host must answer at
-//!   once that nothing is going in, and the record read after it must still not show
-//!   it (one that does confirms it). Turn-end's rule for processes is the same
+//!   once that nothing is going in, and that it wrote no paste into the window for a
+//!   whole arrival window (one it held while it was slow is written when it catches
+//!   up, and the record has had only that long to show it: its rest counts from
+//!   then); and the record read after it must still not show it (one that does
+//!   confirms it). Turn-end's rule for processes is the same
 //!   (unreadable is unknown, and holds).
 //!
 //! So a paste the window did not drop goes once: a turn that holds it ends, Devin
@@ -56,7 +61,14 @@
 //! whole arrival window after the hand-over and within seconds of its end, the paste
 //! would go again while Devin had it queued. The one Enter is pressed whatever the
 //! window shows (a quiet dialog may take it), and the screen is looked at apart from
-//! the press, so a human's typing in between can meet it.
+//! the press, so a human's typing in between can meet it. A paste whose window can
+//! no longer be read waits with no bound: while every look fails or its pane host
+//! does not answer in time, no Enter is pressed, it is never pasted again, and no
+//! attempt is counted. What ends that is a look that reads the window again (then
+//! the arrival window of rest, or the half hour, as ever), the window's exit, the
+//! message leaving its way (its task cancelled, the window taken back), or the
+//! daemon's restart, which gives a message whose record cannot be read back to its
+//! queue (`in_flight`).
 //!
 //! What a hand-over is and how it fails are `deliveries`'; the wait is the part of
 //! the record's delivery part this owns.
@@ -69,6 +81,7 @@ use cf_harness::records::{Reading, Role};
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
+use crate::deliveries::Unread;
 use crate::delivery_text::is_paste_of;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -87,6 +100,10 @@ const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
 /// a pane host answers a snapshot at once, so one that took longer stalled, and what
 /// it says is as old as the stall.
 const SLOW_READ_MS: i64 = 5_000;
+/// Why a snapshot came to nothing.
+const NO_ANSWER: &str = "its pane host did not answer in time";
+/// How often at most the log says a message's window could not be read.
+const UNREAD_TOLD_MS: i64 = 60_000;
 /// How long after it was last found free (`Delivering::free_since`) a paste the
 /// record never showed is pasted again at the window's next rest, however its rest
 /// was cut by turns.
@@ -215,7 +232,7 @@ impl Dispatcher {
             .as_deref()
             .is_some_and(Reading::read_failed)
         {
-            self.unknown(record);
+            self.unknown(record, "its record could not be read");
             return Ok(());
         }
         let now = self.now();
@@ -359,7 +376,7 @@ impl Dispatcher {
         // A host that cannot say what the window does now says nothing of the paste.
         let Some(snapshot) = self.snapshot_now(&pane).await else {
             self.entered_again(record, message, false);
-            self.unknown(record);
+            self.unknown(record, NO_ANSWER);
             return Ok(());
         };
         let snapshot = Some(snapshot);
@@ -392,10 +409,47 @@ impl Dispatcher {
     /// known: a read of it failed, or came too late to say what it says. The rest the
     /// record has had to show it begins again at the next look that reads the window
     /// at rest.
-    pub(crate) fn unknown(&self, record: &Record) {
-        if let Some(delivering) = record.delivery.borrow_mut().delivering.as_mut() {
+    /// The daemon's log says so, `why` the read came to nothing, at most once in
+    /// [`UNREAD_TOLD_MS`] for a message: which window, which message, and how many
+    /// reads came to nothing in how long. Never what the window shows.
+    pub(crate) fn unknown(&self, record: &Record, why: &str) {
+        let now = self.now();
+        let told = {
+            let mut part = record.delivery.borrow_mut();
+            let Some(delivering) = part.delivering.as_mut() else {
+                return;
+            };
             delivering.rested_since = None;
-        }
+            let message = delivering.message;
+            let unread = part
+                .unread
+                .take()
+                .filter(|unread| unread.message == message)
+                .unwrap_or(Unread {
+                    message,
+                    first: now,
+                    reads: 0,
+                    told: None,
+                });
+            let unread = part.unread.insert(Unread {
+                reads: unread.reads + 1,
+                ..unread
+            });
+            if unread.told.is_some_and(|told| now - told < UNREAD_TOLD_MS) {
+                return;
+            }
+            unread.told = Some(now);
+            (message, unread.reads, (now - unread.first) / 1000)
+        };
+        let (message, reads, secs) = told;
+        let window = record.window.borrow().pane.as_ref().map_or_else(
+            || "a window".to_owned(),
+            |pane| format!("the window {}", pane.id),
+        );
+        self.seams.log.warn(&format!(
+            "{window} could not be read ({why}): m-{message} waits, its rest begun again; \
+             {reads} reads of it came to nothing in {secs} s"
+        ));
     }
 
     /// The pane host's word on the window now: none where it failed, or came too late
@@ -430,16 +484,32 @@ impl Dispatcher {
         let (Some(window), Some(pane)) = (window, pane) else {
             return Ok(true);
         };
-        let free = self
-            .snapshot_now(&pane)
-            .await
-            .is_some_and(|snapshot| !js::truthy(snapshot.get("pasteInFlight")));
-        if !free {
-            self.unknown(record);
+        let Some(snapshot) = self.snapshot_now(&pane).await else {
+            self.unknown(record, NO_ANSWER);
+            return Ok(false);
+        };
+        if js::truthy(snapshot.get("pasteInFlight")) {
+            self.unknown(record, "its pane host is writing a paste into it still");
+            return Ok(false);
+        }
+        // A paste the host held while it was slow, written only now: the record has
+        // its whole time from then.
+        let pasted = snapshot.get("pasteQuietMs").and_then(Value::as_f64);
+        if let Some(pasted) = pasted.filter(|&pasted| pasted < self.seams.limits.arrival_ms as f64)
+        {
+            let written = self.now() - pasted as i64;
+            if let Some(delivering) = record.delivery.borrow_mut().delivering.as_mut() {
+                delivering.rested_since = Some(written);
+            }
+            self.seams.log.warn(&format!(
+                "the window {} was written a paste {} ms ago, as m-{message} was to go again: \
+                 its record has its whole time from then",
+                pane.id, pasted as i64
+            ));
             return Ok(false);
         }
         let Ok(looked) = returning(window.observe()).await else {
-            self.unknown(record);
+            self.unknown(record, "a look at it failed");
             return Ok(false);
         };
         let on_its_way = record
@@ -452,7 +522,7 @@ impl Dispatcher {
             return Ok(false);
         }
         if looked.reading.as_deref().is_some_and(Reading::read_failed) {
-            self.unknown(record);
+            self.unknown(record, "its record could not be read");
             return Ok(false);
         }
         if self.confirm_arrival(record, &looked)? {

@@ -48,7 +48,7 @@ pub(super) fn asked<'a, T: 'a>(mut work: Work<'a, T>) -> Work<'a, T> {
 /// What a scripted reading says; the scripted readers say nothing else.
 pub(super) fn said(reading: &Reading) -> &str {
     match reading {
-        Reading::Unknown(reason) => reason,
+        Reading::Unknown(reason) | Reading::Missing(reason) => reason,
         Reading::Known(_) => panic!("a known reading, where a scripted one was read"),
     }
 }

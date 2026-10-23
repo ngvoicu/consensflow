@@ -433,7 +433,7 @@ impl Observed {
     pub fn items(&self) -> &[Item] {
         match self.reading.as_deref() {
             Some(Reading::Known(record)) => &record.items,
-            Some(Reading::Unknown(_)) | None => &[],
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => &[],
         }
     }
 

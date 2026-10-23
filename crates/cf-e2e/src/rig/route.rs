@@ -142,6 +142,8 @@ pub(super) struct Catch {
 #[derive(Debug, Default)]
 pub(super) struct Stall {
     armed: Option<(String, Duration)>,
+    /// The words of the paste it holds the frames since, while it does.
+    holding_for: Option<String>,
     /// Whether it holds the frames now.
     holding: bool,
     /// Whether it held a paste and let it go.
@@ -160,6 +162,7 @@ impl Stall {
             daemon.send(line);
         }
         self.holding = false;
+        self.holding_for = None;
         self.over = true;
     }
 }
@@ -200,7 +203,8 @@ impl Shared {
     }
 
     /// The pane host stalls at the daemon's next paste that holds `words`, for
-    /// `lasting`; one set before and not yet begun is replaced.
+    /// `lasting`, or until the daemon pastes those words again; one set before and not
+    /// yet begun is replaced.
     pub fn stall_at_paste(&self, words: &str, lasting: Duration) {
         let mut stall = self.stall();
         stall.armed = Some((words.to_owned(), lasting));
@@ -228,15 +232,24 @@ impl Shared {
                     .as_str()
                     .is_some_and(|body| body.contains(words))
         };
-        if let Some((_, lasting)) = stall.armed.take_if(|(words, _)| holds(words)) {
+        // A second paste of the same words while it holds is what a daemon that took
+        // the first for lost does: the stall has held what it was for, and ends.
+        if stall.holding && stall.holding_for.as_deref().is_some_and(holds) {
+            stall.to_host.push(line.to_owned());
+            stall.release(host, daemon);
+            return true;
+        }
+        if let Some((words, lasting)) = stall.armed.take_if(|(words, _)| holds(words)) {
             stall.holding = true;
+            stall.holding_for = Some(words);
             let (held, host, daemon) = (Arc::clone(&self.stall), host.clone(), daemon.clone());
             let until = Instant::now() + lasting;
             thread::spawn(move || {
                 thread::sleep(until.saturating_duration_since(Instant::now()));
-                held.lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .release(&host, &daemon);
+                let mut held = held.lock().unwrap_or_else(PoisonError::into_inner);
+                if held.holding {
+                    held.release(&host, &daemon);
+                }
             });
         }
         if stall.holding {
@@ -652,6 +665,30 @@ mod tests {
         assert_eq!(
             host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
             after
+        );
+    }
+
+    #[test]
+    fn a_stall_ends_at_a_second_paste_of_its_words_which_it_holds_with_the_rest() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, _daemon_lines) = sinks();
+        shared.stall_at_paste("m-9", Duration::from_secs(600));
+        let paste = |id: &str| {
+            json!({ "v": 1, "id": id, "kind": "req", "op": "pane.write_paste",
+                    "body": { "id": "p1-chief", "generation": 5, "body": "m-9" } })
+            .to_string()
+        };
+        shared.route_daemon(&paste("d-1"), &host, &daemon);
+        assert!(host_lines.recv_timeout(Duration::from_millis(200)).is_err());
+        shared.route_daemon(&paste("d-2"), &host, &daemon);
+        assert!(shared.stall_over());
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            paste("d-1")
+        );
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            paste("d-2")
         );
     }
 

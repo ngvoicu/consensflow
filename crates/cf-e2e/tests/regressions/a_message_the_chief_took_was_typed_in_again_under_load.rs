@@ -35,8 +35,9 @@ use crate::{config, secs, Outcome};
 
 /// How long the pane host answers nothing: past the paste's 30 s deadline, two of the
 /// Enter's snapshots at their 30 s deadlines and the daemon's minute of the window's rest
-/// after them, so that a daemon that pastes again without asking the host once more
-/// does so inside it.
+/// after them (about 165 s), so that a daemon that pastes again without asking the host
+/// once more does so inside it. Such a second paste ends the stall at once, so a case
+/// that goes red does not wait out the rest (a plant's run is given five minutes).
 const STALL: Duration = Duration::from_secs(200);
 
 /// Words only the paste of a result to the chief holds: what it decides with.
@@ -102,6 +103,20 @@ fn a_result_handed_to_a_claude_chief_while_its_pane_host_answers_nothing_is_past
     wait_for_the_chief(&rig, &project)?;
     sleep(secs(10));
     let events = rig.events();
+    // And the stall left its trace in the daemon's log: which window could not be
+    // read for which message, and that a pass went on without its step.
+    let log = rig.log();
+    let window = format!("p{}-chief", project.id());
+    assert!(
+        log.contains(&format!("the window {window} could not be read (its pane host did not answer in time): m-{id} waits")),
+        "{log}"
+    );
+    assert!(
+        log.contains(&format!(
+            "a pass went on after 5 s without the steps of @chief (m-{id} on its way)"
+        )),
+        "{log}"
+    );
     assert_eq!(
         of_message(&events, "delivery.begun", id).len(),
         1,

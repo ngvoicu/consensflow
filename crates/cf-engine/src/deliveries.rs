@@ -49,10 +49,24 @@ pub(crate) struct Delivering {
     pub(crate) entered_again: bool,
 }
 
+/// The reads of a window that came to nothing while a message was on its way
+/// (`arrival`'s `unknown`), as its log line counts them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Unread {
+    pub(crate) message: i64,
+    /// When the first came to nothing.
+    pub(crate) first: i64,
+    pub(crate) reads: u32,
+    /// When the log last said so.
+    pub(crate) told: Option<i64>,
+}
+
 /// The record's delivery part.
 #[derive(Debug, Default)]
 pub(crate) struct DeliveryPart {
     pub(crate) delivering: Option<Delivering>,
+    /// The reads that came to nothing for the message on its way, or the last.
+    pub(crate) unread: Option<Unread>,
     /// A message waits for what the human typed and has not sent.
     pub(crate) unsent: bool,
     /// The message a window not ready for a paste holds, told to the trace once.

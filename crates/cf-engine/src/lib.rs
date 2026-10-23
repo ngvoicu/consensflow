@@ -33,6 +33,7 @@ pub mod seams;
 mod shown;
 mod specs;
 mod stalls;
+pub mod steps;
 mod stops;
 mod taken_back;
 mod transcripts;

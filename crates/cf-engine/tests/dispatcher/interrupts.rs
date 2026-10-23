@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use cf_engine::dispatcher::STEP_WAIT;
+use cf_engine::steps::STEP_WAIT;
 use cf_engine::testing::Context;
 use cf_engine::ActivityState;
 use cf_harness::contract::{Interrupt, Pane};

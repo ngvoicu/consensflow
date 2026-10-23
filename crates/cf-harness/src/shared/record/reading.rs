@@ -15,12 +15,15 @@ use crate::shared::quota::Quota;
 /// the reason (`{unknown: true, reason}`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Reading {
+    /// The look could not read the record (it failed, or never answered): what
+    /// the record holds is not known.
     Unknown(String),
+    /// The record is not there: a conversation its harness has written nothing of
+    /// yet. It was read, and holds nothing. Said as an unknown one is, its reason
+    /// as written.
+    Missing(String),
     Known(Record),
 }
-
-/// How the reading of a record that is not there begins ([`Reading::missing`]).
-const MISSING: &str = "unreadable: no ";
 
 impl Reading {
     /// `unreadable`: a failure to read, said after `unreadable: `.
@@ -28,24 +31,30 @@ impl Reading {
         Reading::Unknown(format!("unreadable: {reason}"))
     }
 
-    /// The reading of a record that is not there (`no <what>`): a conversation its
-    /// harness has written nothing of yet. It is unknown, but it was read.
+    /// The reading of a record that is not there, said `unreadable: no <what>`.
     pub(crate) fn missing(what: &str) -> Self {
-        Reading::Unknown(format!("{MISSING}{what}"))
+        Reading::Missing(format!("unreadable: no {what}"))
     }
 
-    /// Whether the look could not read the record at all: it failed, or never
-    /// answered, so what the record holds is not known. A record that is not
-    /// there ([`Reading::missing`]) was read: it holds nothing yet.
+    /// Whether the look could not read the record at all, so what it holds is not
+    /// known. A record that is not there ([`Reading::Missing`]) was read.
     pub fn read_failed(&self) -> bool {
-        matches!(self, Reading::Unknown(reason) if !reason.starts_with(MISSING))
+        matches!(self, Reading::Unknown(_))
+    }
+
+    /// Why the record was not read, where it was not.
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            Reading::Unknown(reason) | Reading::Missing(reason) => Some(reason),
+            Reading::Known(_) => None,
+        }
     }
 }
 
 impl Serialize for Reading {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Reading::Unknown(reason) => {
+            Reading::Unknown(reason) | Reading::Missing(reason) => {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("unknown", &true)?;
                 map.serialize_entry("reason", reason)?;
@@ -272,6 +281,9 @@ mod tests {
         );
         assert!(!missing.read_failed());
         assert!(Reading::unreadable("the records thread ended").read_failed());
+        // A failure whose words begin as a missing record's do is a failure still:
+        // SQLite's own, in OpenCode's store.
+        assert!(Reading::unreadable("no such column: id").read_failed());
         assert!(Reading::Unknown("missing session id".to_owned()).read_failed());
         assert!(!Reading::Known(Record::new()).read_failed());
     }

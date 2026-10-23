@@ -65,7 +65,7 @@ use serde_json::Value;
 use super::channel;
 use super::install;
 use super::paths;
-use super::record;
+
 use super::wire::selected_session;
 use super::wire_log::{Said, WireLog, PROMPT_GAP_MS};
 use crate::contract::{
@@ -300,9 +300,7 @@ impl Adapter for DevinAdapter {
                 Reading::Known(record) => {
                     Some(record.items.iter().any(|item| item.role == Role::User))
                 }
-                Reading::Unknown(reason) if reason.ends_with(record::MISSING_SESSION) => {
-                    Some(false)
-                }
+                Reading::Missing(_) => Some(false),
                 Reading::Unknown(_) => None,
             }
         })

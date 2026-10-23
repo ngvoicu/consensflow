@@ -125,7 +125,7 @@ fn settlement_of(records: &[Value]) -> Settlement {
     stage.write(records);
     match &*stage.reader.look(&Options::default(), 0) {
         Reading::Known(record) => record.settlement,
-        Reading::Unknown(reason) => panic!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
     }
 }
 
@@ -153,7 +153,7 @@ fn looks(batches: &[&[Value]]) -> Vec<String> {
 /// harness's commentary (none of Node's was).
 fn show(reading: &Reading) -> String {
     let record = match reading {
-        Reading::Unknown(reason) => return format!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => return format!("unknown: {reason}"),
         Reading::Known(record) => record,
     };
     let items: Vec<Value> = record

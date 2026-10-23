@@ -31,7 +31,10 @@ impl Rig {
     /// both ways, wait in the rig, and go on in the order they came once it has lasted,
     /// as with a host that answered nothing for that long and gave its window nothing
     /// (the Mac under a load of 100, 2026-10-22). The daemon's requests meanwhile meet
-    /// their deadlines. A stall set before and not yet begun is replaced.
+    /// their deadlines. A second paste of the same words ends it early, held with the
+    /// rest: a daemon that took the first for lost has done what the stall was for,
+    /// and the case need not wait out the rest. A stall set before and not yet begun
+    /// is replaced.
     pub fn stall_host_at_paste(&self, words: &str, lasting: Duration) {
         self.shared.stall_at_paste(words, lasting);
     }

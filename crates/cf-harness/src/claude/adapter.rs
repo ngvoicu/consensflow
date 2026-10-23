@@ -425,7 +425,7 @@ impl Window for ClaudeWindow {
                     record.quota.clone(),
                     record.agents_pending,
                 ),
-                Reading::Unknown(_) => (true, false, false, None, false),
+                Reading::Unknown(_) | Reading::Missing(_) => (true, false, false, None, false),
             };
             let observed = |settled, waiting, took_back| Observed {
                 reading: Some(Arc::clone(&reading)),

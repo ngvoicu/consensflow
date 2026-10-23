@@ -417,3 +417,228 @@ fn writes_down_a_step_that_fails_after_its_pass_went_on() {
         ["the ledger could not be read"]
     );
 }
+
+#[test]
+fn pastes_nothing_again_that_the_pane_host_wrote_only_as_the_window_is_read_once_more() {
+    let context = Context::new();
+    let pasted = counting(&context);
+    let (project, note) = on_its_way(&context);
+    context.advance(ARRIVAL_MS + 1_000);
+    // The host was slow: as the window is read once more, it catches up, writes the
+    // paste it held, and answers at once that nothing is going in. The record shows
+    // the paste a look later.
+    let (host, asked) = (Rc::downgrade(&context.host), Rc::new(Cell::new(0)));
+    *context.host.on_request.borrow_mut() = Some(Rc::new(move |op: &str, _: &Value| {
+        if let (true, Some(host)) = (op == "pane.snapshot", host.upgrade()) {
+            asked.set(asked.get() + 1);
+            host.set_snapshot(if asked.get() == 1 {
+                json!({ "ok": true, "pasteQuietMs": 0 })
+            } else {
+                json!({ "ok": true })
+            });
+        }
+    }));
+    context.pass().unwrap();
+    assert_eq!(where_is(&context, &note), ("delivering".to_owned(), 1));
+    assert_eq!(
+        pasted.get(),
+        1,
+        "not pasted again behind the one just written"
+    );
+    assert!(
+        context
+            .log
+            .warnings
+            .borrow()
+            .iter()
+            .any(|line| line.contains("was written a paste 0 ms ago")),
+        "{:?}",
+        context.log.warnings.borrow()
+    );
+
+    // Its record has a whole arrival window from the write, and a paste it never
+    // shows goes again once that is past.
+    context.advance(ARRIVAL_MS - 1_000);
+    context.pass().unwrap();
+    assert_eq!(where_is(&context, &note), ("delivering".to_owned(), 1));
+    context.advance(2_000);
+    context.pass().unwrap();
+    assert_eq!(where_is(&context, &note), ("delivering".to_owned(), 2));
+    assert_eq!(
+        why_retried(&context, project),
+        "the harness record never showed it in the 30 s its window was at rest since it could be read again"
+    );
+}
+
+#[test]
+fn confirms_a_paste_the_pane_host_wrote_only_as_the_window_is_read_once_more_when_the_record_shows_it_a_look_later(
+) {
+    let context = Context::new();
+    let pasted = counting(&context);
+    let (_, note) = on_its_way(&context);
+    context.advance(ARRIVAL_MS + 1_000);
+    let (host, once) = (Rc::downgrade(&context.host), Rc::new(Cell::new(true)));
+    *context.host.on_request.borrow_mut() = Some(Rc::new(move |op: &str, _: &Value| {
+        if let (true, Some(host)) = (op == "pane.snapshot" && once.replace(false), host.upgrade()) {
+            host.set_snapshot(json!({ "ok": true, "pasteQuietMs": 0 }));
+        }
+    }));
+    context.pass().unwrap();
+    shows(&context, "chief", &context.message(note.id));
+    context.pass().unwrap();
+    assert_eq!(where_is(&context, &note), ("delivered".to_owned(), 1));
+    assert_eq!(pasted.get(), 1, "the window was given it once");
+}
+
+/// The lines the daemon's log was given that `words` begin.
+fn logged(context: &Context, words: &str) -> Vec<String> {
+    context
+        .log
+        .warnings
+        .borrow()
+        .iter()
+        .filter(|line| line.starts_with(words))
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn says_in_the_log_at_most_once_a_minute_which_window_could_not_be_read_for_which_message() {
+    let context = Context::new();
+    let (_, note) = on_its_way(&context);
+    // Every look for three minutes, one every 20 s, cannot read the record.
+    context.adapter.with("chief", |agent| {
+        agent.unreadable = Some(UNREADABLE.to_owned());
+    });
+    context.pass().unwrap();
+    for _ in 0..9 {
+        context.advance(20_000);
+        context.pass().unwrap();
+    }
+    let id = note.id;
+    let line = |reads: u32, secs: u32| {
+        format!("the window p1-chief could not be read (its record could not be read): m-{id} waits, its rest begun again; {reads} reads of it came to nothing in {secs} s")
+    };
+    assert_eq!(
+        logged(&context, "the window p1-chief could not be read"),
+        [line(1, 0), line(4, 60), line(7, 120), line(10, 180)]
+    );
+    // And the pane host's silence is said in its own words.
+    context
+        .adapter
+        .with("chief", |agent| agent.unreadable = None);
+    context
+        .host
+        .set_snapshot(json!({ "ok": false, "error": "deadline" }));
+    for _ in 0..2 {
+        context.advance(ARRIVAL_MS + 1_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        logged(&context, "the window p1-chief could not be read").last(),
+        Some(&format!("the window p1-chief could not be read (its pane host did not answer in time): m-{id} waits, its rest begun again; 11 reads of it came to nothing in 242 s"))
+    );
+}
+
+#[test]
+fn says_in_the_log_which_window_a_pass_went_on_without_and_how_long_its_step_took() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let (zeus, diana) = (tiers.assignee(1), tiers.assignee(2));
+    // Each hold is for one look of the window's: a hold let go picks its calls still.
+    let held = |handle: &str| {
+        let launch = context.adapter.agent(handle).launch;
+        context.adapter.observe_holds.hold(looks_at(launch))
+    };
+    let zeus_look = held("zeus");
+    context.pass().unwrap();
+    assert_eq!(
+        logged(&context, "a pass went on"),
+        [format!(
+            "a pass went on after 5 s without the steps of @{zeus}"
+        )]
+    );
+    // A pass that goes on without another step within the minute says nothing.
+    context.advance(20_000);
+    let chief_look = held("chief");
+    context.pass().unwrap();
+    assert_eq!(logged(&context, "a pass went on").len(), 1);
+    zeus_look.open();
+    context.settle();
+    assert_eq!(
+        logged(&context, "the step of"),
+        [format!(
+            "the step of @{zeus} ended 20 s after its pass began"
+        )]
+    );
+    // A minute on, the next says it, and how many it did not.
+    context.advance(41_000);
+    let diana_look = held("diana");
+    context.pass().unwrap();
+    assert_eq!(
+        logged(&context, "a pass went on").last(),
+        Some(&format!(
+            "a pass went on after 5 s without the steps of @{diana} (1 passes more went on without some since the last line)"
+        ))
+    );
+    chief_look.open();
+    diana_look.open();
+    context.settle();
+}
+
+#[test]
+fn writes_down_every_step_that_fails_after_its_pass_ended_at_the_first() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    // zeus's look waits; the chief's step fails, and the pass with it.
+    let launch = context.adapter.agent("zeus").launch;
+    let release = context
+        .adapter
+        .observe_holds
+        .hold_instead(looks_at(launch), "the record could not be read".to_owned());
+    let failing = Rc::new(Cell::new(true));
+    let fails = Rc::clone(&failing);
+    context.ledger.borrow_mut().watch(Box::new(move |made, _| {
+        if made == "next_delivery" && fails.replace(false) {
+            return Err(cf_ledger::LedgerError::refused(
+                "ledger-failed",
+                "the ledger could not be read",
+            ));
+        }
+        Ok(())
+    }));
+    assert!(context.pass().is_err(), "the chief's step failed it");
+    assert!(!failing.get());
+    // zeus's look fails after the pass ended, and its step fails too: the trace of
+    // what its window does now cannot be told.
+    let launch_failing = Rc::new(Cell::new(true));
+    let fails = Rc::clone(&launch_failing);
+    context.ledger.borrow_mut().watch(Box::new(move |made, _| {
+        if made == "projects" && fails.replace(false) {
+            return Err(cf_ledger::LedgerError::refused(
+                "ledger-failed",
+                "the ledger could not be read again",
+            ));
+        }
+        Ok(())
+    }));
+    release.open();
+    context.settle();
+    assert!(
+        context
+            .log
+            .failures
+            .borrow()
+            .iter()
+            .any(|cause| cause == "the ledger could not be read again"),
+        "{:?}",
+        context.log.failures.borrow()
+    );
+}

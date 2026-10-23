@@ -138,7 +138,7 @@ fn look(reader: &mut Box<dyn Look + Send>) -> Arc<Reading> {
 /// what they say of the turn.
 fn show(reading: &Reading) -> String {
     let record = match reading {
-        Reading::Unknown(reason) => return format!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => return format!("unknown: {reason}"),
         Reading::Known(record) => record,
     };
     let items: Vec<Value> = record
