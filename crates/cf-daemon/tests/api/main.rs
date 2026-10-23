@@ -32,6 +32,7 @@
 mod checks;
 mod frames;
 mod names;
+mod nested_cargo;
 mod player;
 mod relay;
 mod rig;
