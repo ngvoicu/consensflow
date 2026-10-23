@@ -1248,8 +1248,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver.rs"
-find = "        if let Some(entity) = entity(&plant.meant) {"
-replace = "        if let Some(entity) = None::<&str> {"
+find = "    if let Some(entity) = entity(&plant.meant) {"
+replace = "    if let Some(entity) = None::<&str> {"
 
 # Every run of a plant is tried until one catches it, each that told nothing said for itself.
 
@@ -1595,8 +1595,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver.rs"
-find = "            .find_map(|run| super::runs::refused(&run.command, context));"
-replace = "            .find_map(|run| super::runs::refused(&run.command, context).filter(|_| false));"
+find = "        .find_map(|run| super::runs::refused(&run.command, context));"
+replace = "        .find_map(|run| super::runs::refused(&run.command, context).filter(|_| false));"
 
 # Every file of a plant is put back, whatever came of another, and again at its end.
 
@@ -1651,8 +1651,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver.rs"
-find = "        // What it needs first may be of its own system, and what it plants of that one.\n        if !plant.runs_on(HERE) {"
-replace = "        // What it needs first may be of its own system, and what it plants of that one.\n        if false && !plant.runs_on(HERE) {"
+find = "    // What it needs first may be of its own system, and what it plants of that one.\n    if !plant.runs_on(HERE) {"
+replace = "    // What it needs first may be of its own system, and what it plants of that one.\n    if false && !plant.runs_on(HERE) {"
 
 [[plant]]
 name = "tooling: a plant skipped for another system is counted as one not caught"
