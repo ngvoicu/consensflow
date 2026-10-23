@@ -54,7 +54,8 @@
 //! `live_agent` a catalog agent answering as its model, `live_asks` Claude
 //! stopping for a removal it should, `live_input_box` what clears its input
 //! box, `live_terminal` Devin's terminal on Windows, `live_door` a member's
-//! question received once at the door of its harness, `live_stops` the stops
+//! question received once at the door of its harness, `live_harnesses` the Admin
+//! page's look at the machine's CLIs and its update of a managed Pi, `live_stops` the stops
 //! the daemon presses, `live_codex_resume` and `live_codex_interrupt` Codex's
 //! thread and its interrupted question, `live_resume_cut` and
 //! `live_restart_cut` a window and a chief that a quit cut, `live_devin_resume` a

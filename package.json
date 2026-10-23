@@ -63,6 +63,7 @@
     "live:specs": "cargo xtask live specs",
     "live:commands-at-rest": "cargo xtask live commands-at-rest",
     "live:folder-trust": "cargo xtask live folder-trust",
+    "live:harnesses": "cargo xtask live harnesses",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },
