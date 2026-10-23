@@ -36,8 +36,12 @@
 //! ([`cf_proto::panes::ENDING_BOUND`]).
 //!
 //! A program of Git Bash's own kind that a script started (`sleep`, `grep`) names a parent that
-//! has gone, a forked copy of the shell: the parent `ps -W` of Git Bash says it has is given
-//! instead ([`repair_cygwin_parents`], [`crate::cygwin`]), so that the chain up from it to the
+//! has gone, a forked copy of the shell (it goes a few milliseconds after the program has
+//! begun, T-375: on zeewin 13 ms, and 64 ms beside five computing threads for each core; a
+//! look before that finds a parent that is a process of the job, a chain whole without the
+//! repair, and `ps` is asked for none): the parent
+//! `ps -W` of Git Bash says it has is given instead ([`repair_cygwin_parents`],
+//! [`crate::cygwin`]), so that the chain up from it to the
 //! shell the harness started is whole and a stop ends it with the script. That is not a matter
 //! of the job: the program is a member of it (whatever a job holds, its descendants too), and
 //! it is the parent it names that is no process. The harness being in the job from its first

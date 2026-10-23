@@ -568,7 +568,10 @@ mod windows {
         table.write(&key, b"\r").expect("go on");
         read_until(&table, &key, &output, "STARTED#");
 
-        // The pane's job as Windows names the parents: the sleep is a member, with none.
+        // The pane's job as Windows names the parents: the sleep is a member, with none. The
+        // forked copy of the script's shell that started it is there for some milliseconds
+        // after the sleep is, and a look in them finds a parent that is a process (T-375):
+        // the look is every few milliseconds, and waits for the parent to be gone.
         let job = {
             let panes = table.lock_panes().expect("the panes");
             Arc::clone(&panes.get(&key).expect("the pane").job)
@@ -577,14 +580,17 @@ mod windows {
         let deadline = Instant::now() + Duration::from_secs(60);
         let sleep = loop {
             let members = job.members_with(&|_| None).expect("what the job holds");
-            if let Some(sleep) = members.iter().find(|member| is_sleep(member)) {
+            if let Some(sleep) = members
+                .iter()
+                .find(|member| is_sleep(member) && member.parent.is_none())
+            {
                 break sleep.clone();
             }
             assert!(
                 Instant::now() < deadline,
-                "the script's sleep never began: {members:?}"
+                "the script's sleep never began, or its starter never went: {members:?}"
             );
-            std::thread::sleep(Duration::from_millis(250));
+            std::thread::sleep(Duration::from_millis(5));
         };
         assert_eq!(
             sleep.parent, None,
