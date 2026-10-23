@@ -565,6 +565,7 @@ fn a_findings_screen_and_words_stay_in_the_local_report_and_the_console_says_its
         timeline: &run.timeline,
         ending: DONE.to_owned(),
         error: Some(format!("the rig could not close: {secret}")),
+        login: None,
         log,
     };
     let folder = tempfile::tempdir().unwrap();

@@ -139,6 +139,12 @@ fn a_bare_chief_has_no_card_to_be_switched_from_so_the_scenario_that_switches_is
 #[test]
 fn a_number_of_runs_or_minutes_that_is_no_number_is_the_humans_mistake() {
     assert_eq!(of("--repeat 3").unwrap().repeat, 3);
+    // The login a command's plays run on must last every repeat at its limit.
+    assert_eq!(
+        of("--repeat 3 --timeout-min 40").unwrap().planned(),
+        Duration::from_secs(120 * 60)
+    );
+    assert_eq!(of("").unwrap().planned(), Duration::from_secs(40 * 60));
     assert_eq!(
         of("--timeout-min 0.5").unwrap().timeout,
         Duration::from_secs(30)

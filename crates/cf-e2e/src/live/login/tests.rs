@@ -85,7 +85,14 @@ fn a_login_that_ends_within_the_two_hours_is_refused_and_one_that_lasts_longer_i
     let said = oauth(&near, at(NOW), LEFT).unwrap_err().to_string();
     assert!(said.contains("expires in 1 h 59 min"), "{said}");
     assert!(said.contains("at least 2 h more"), "{said}");
-    assert!(said.contains("Use Claude Code yourself"), "{said}");
+    // Using Claude Code now does not refresh a token with two hours left: it is refreshed when
+    // five minutes of it are left, so the run is told to wait for that, or to be shorter.
+    assert!(
+        said.contains("only when five minutes of it are left"),
+        "{said}"
+    );
+    assert!(said.contains("make the run shorter"), "{said}");
+    assert!(!said.contains("yourself"), "{said}");
     assert!(!said_anywhere(&said), "{said}");
     assert!(oauth(&machine_text(LEFT + Duration::from_secs(60)), at(NOW), LEFT).is_ok());
     // One that has ended already.
@@ -93,6 +100,39 @@ fn a_login_that_ends_within_the_two_hours_is_refused_and_one_that_lasts_longer_i
         .unwrap_err()
         .to_string();
     assert!(ended.contains("has expired"), "{ended}");
+}
+
+#[test]
+fn a_run_that_states_its_own_length_is_refused_a_login_that_would_end_before_it_does() {
+    let home = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    // A login with five hours left: a live suite (two hours) takes it, a six-hour eval does not.
+    let text = machine_text(hours(5));
+    let suite = login(&text, home.path(), parent.path());
+    assert!(suite.folder_at(at(NOW)).is_ok());
+    let mut eval = login(&text, home.path(), parent.path());
+    eval.left = hours(6);
+    let said = eval.folder_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("expires in 5 h"), "{said}");
+    assert!(said.contains("at least 6 h more"), "{said}");
+    assert!(!said_anywhere(&said), "{said}");
+    // One that fits the run's length is taken, and no folder was made for the refused one.
+    let mut fits = login(&text, home.path(), parent.path());
+    fits.left = hours(4);
+    assert!(fits.folder_at(at(NOW)).is_ok());
+    assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 2);
+}
+
+#[test]
+fn a_login_made_for_the_machine_asks_two_hours_and_one_made_lasting_asks_what_it_is_told() {
+    let source = Source::File(PathBuf::from("/nowhere/login.json"));
+    let made = Login::new(source, PathBuf::from("/home/me"), PathBuf::from("/tmp"));
+    assert_eq!(made.left, LEFT);
+    // On this machine, if it has a login to copy at all.
+    if let Some(eval) = Login::of_machine_lasting(hours(7)) {
+        assert_eq!(eval.left, hours(7));
+        assert_eq!(Login::of_machine().unwrap().left, LEFT);
+    }
 }
 
 #[test]
@@ -407,7 +447,8 @@ fn a_prompt_typed_in_a_folder_of_the_run_and_a_conversation_kept_of_it_are_found
 }
 
 #[test]
-fn the_evals_write_in_the_persons_config_and_their_folders_are_not_a_live_runs() {
+fn the_evals_workspace_is_a_runs_folder_too_and_what_a_run_of_theirs_left_in_the_persons_config_is_found_out(
+) {
     let person = Person::new();
     let before = person.owner.look();
     person.append(
@@ -421,16 +462,33 @@ fn the_evals_write_in_the_persons_config_and_their_folders_are_not_a_live_runs()
             .join(".claude/projects/-Users-me--consensflow-candidate-evals-workspace"),
     )
     .unwrap();
-    assert!(person.owner.changes_since(&before).is_empty());
-    assert!(!is_run_folder(
+    person.write(
+        ".claude.json",
+        &json!({
+            "projects": { "/Users/me/.consensflow-candidate/evals/workspace": { "hasTrustDialogAccepted": true } },
+        })
+        .to_string(),
+    );
+    assert_eq!(
+        person.owner.changes_since(&before),
+        [
+            "~/.claude.json gained the project /Users/me/.consensflow-candidate/evals/workspace",
+            "~/.claude/projects gained -Users-me--consensflow-candidate-evals-workspace",
+            "~/.claude/history.jsonl gained 1 prompt(s) typed in a folder of the run",
+        ]
+    );
+    assert!(is_run_folder(
         "/Users/me/.consensflow-candidate/evals/workspace"
     ));
     assert!(is_run_folder("/Users/me/.consensflow-candidate/live/paste"));
     assert!(is_run_folder("/var/T/consensflow-integration-AB/workspace"));
-    assert!(!is_run_name(
+    assert!(is_run_name(
         "-Users-me--consensflow-candidate-evals-workspace"
     ));
     assert!(is_run_name("-Users-me--consensflow-candidate-live-paste"));
+    // The person's own folders are none of a run's.
+    assert!(!is_run_folder("/Users/me/work"));
+    assert!(!is_run_name("-Users-me-work"));
 }
 
 #[test]
@@ -539,4 +597,132 @@ fn where_the_login_is_read_from_is_said_without_what_it_holds() {
         Source::File(PathBuf::from("/home/me/.claude/.credentials.json")).described(),
         "/home/me/.claude/.credentials.json"
     );
+}
+
+/// Every file below `folder`, as paths relative to it, sorted.
+fn files_below(folder: &Path) -> Vec<String> {
+    fn walk(folder: &Path, at: &Path, found: &mut Vec<String>) {
+        for entry in std::fs::read_dir(at).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(folder, &path, found);
+            } else {
+                found.push(
+                    path.strip_prefix(folder)
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+    let mut found = Vec::new();
+    if folder.exists() {
+        walk(folder, folder, &mut found);
+    }
+    found.sort();
+    found
+}
+
+/// A made folder with what a run's Claude Code leaves in it besides the login.
+fn after_a_run(login: &Login) -> PathBuf {
+    let folder = login.folder_at(at(NOW)).unwrap();
+    for (name, text) in [
+        ("projects/-Users-me-work/s1.jsonl", "{\"type\":\"user\"}\n"),
+        ("projects/-Users-me-work/memory/MEMORY.md", "- a note\n"),
+        ("sessions/4242.json", "{\"pid\":4242}"),
+        ("sessions/4242.0123abcd.key", "a secret of a socket"),
+        ("shell-snapshots/snapshot.sh", "export X=1\n"),
+        ("settings.json", "{}"),
+    ] {
+        let file = folder.join(name);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, text).unwrap();
+    }
+    folder
+}
+
+#[test]
+fn a_kept_home_is_given_the_conversations_and_the_sessions_and_never_the_login() {
+    let home = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let login = login(&machine_text(hours(5)), home.path(), parent.path());
+    let folder = after_a_run(&login);
+    // The login and the rest of the folder are there to be left out.
+    assert!(folder.join(".credentials.json").is_file());
+    assert!(folder.join(".claude.json").is_file());
+
+    let kept = tempfile::tempdir().unwrap();
+    let into = kept.path().join("home").join(".claude");
+    login.keep_records(&into).unwrap();
+    assert_eq!(
+        files_below(&into),
+        [
+            "projects/-Users-me-work/memory/MEMORY.md",
+            "projects/-Users-me-work/s1.jsonl",
+            "sessions/4242.json",
+        ],
+        "the conversations and the sessions, but for a socket's secret"
+    );
+    for file in files_below(kept.path()) {
+        let text = std::fs::read_to_string(kept.path().join(&file)).unwrap();
+        assert!(!said_anywhere(&text), "{file}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(into.join("projects/-Users-me-work/s1.jsonl")).unwrap(),
+        "{\"type\":\"user\"}\n"
+    );
+
+    // Asked again after the run went on, it is the same copy, grown.
+    std::fs::write(
+        folder.join("projects/-Users-me-work/s1.jsonl"),
+        "{\"type\":\"user\"}\n{\"type\":\"assistant\"}\n",
+    )
+    .unwrap();
+    std::fs::write(folder.join("projects/-Users-me-work/s2.jsonl"), "{}\n").unwrap();
+    login.keep_records(&into).unwrap();
+    assert_eq!(files_below(&into).len(), 4);
+    assert_eq!(
+        std::fs::read_to_string(into.join("projects/-Users-me-work/s1.jsonl"))
+            .unwrap()
+            .lines()
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn a_run_with_no_folder_or_a_folder_with_no_records_has_nothing_to_keep() {
+    let home = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let kept = tempfile::tempdir().unwrap();
+    let into = kept.path().join("home").join(".claude");
+    // The folder was never asked for.
+    let login = login(&machine_text(hours(5)), home.path(), parent.path());
+    login.keep_records(&into).unwrap();
+    assert!(files_below(kept.path()).is_empty());
+    // One that holds the login alone.
+    login.folder_at(at(NOW)).unwrap();
+    login.keep_records(&into).unwrap();
+    assert!(files_below(kept.path()).is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_in_the_folder_is_not_followed_out_of_it() {
+    let home = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let login = login(&machine_text(hours(5)), home.path(), parent.path());
+    let folder = after_a_run(&login);
+    // A link to the login, in a place that is kept.
+    std::os::unix::fs::symlink(
+        folder.join(".credentials.json"),
+        folder.join("projects/-Users-me-work/link.jsonl"),
+    )
+    .unwrap();
+    let kept = tempfile::tempdir().unwrap();
+    login.keep_records(kept.path()).unwrap();
+    assert!(!files_below(kept.path())
+        .iter()
+        .any(|file| file.ends_with("link.jsonl")));
 }

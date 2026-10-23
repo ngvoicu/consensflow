@@ -1,7 +1,10 @@
 //! The folder a chief works in: the scenario's fixture in a fresh workspace, which
 //! Claude trusts, with nothing it remembered from the last run. Its `memory/` in
-//! `~/.claude/projects/<the folder's name>` is read by every later session in that
-//! folder, so a run's chief would learn from the last run's: it is cleared first.
+//! `<Claude's config folder>/projects/<the folder's name>` is read by every later
+//! session in that folder, so a run's chief would learn from the last run's: it is
+//! cleared first. The config folder is the run's own (a throwaway, shared by the runs of
+//! one `--repeat`: [`super::login`]), never the user's `~/.claude`, where nothing is
+//! cleared or written.
 //! A scenario with a change of the owner's not committed has the workspace made a
 //! git repository of the fixture, and the change made after the commit.
 
@@ -22,9 +25,10 @@ pub fn fixture(name: &str) -> PathBuf {
     checkout::path("evals/fixtures").join(name)
 }
 
-/// The folder where Claude Code keeps what it remembers of `workspace`.
-fn claude_memory(home: &Path, workspace: &Path) -> PathBuf {
-    home.join(".claude")
+/// The folder where Claude Code, whose config folder is `config`, keeps what it remembers of
+/// `workspace`.
+fn claude_memory(config: &Path, workspace: &Path) -> PathBuf {
+    config
         .join("projects")
         .join(project_name(&workspace.to_string_lossy()))
         .join("memory")
@@ -34,7 +38,11 @@ fn claude_memory(home: &Path, workspace: &Path) -> PathBuf {
 /// owner's uncommitted change if it has one.
 pub fn fresh(machine: &Machine, scenario: &Scenario) -> Result<PathBuf> {
     let workspace = machine.workspace();
-    renew(&machine.home, &workspace, &fixture(scenario.fixture))?;
+    renew(
+        machine.claude_config()?.as_deref(),
+        &workspace,
+        &fixture(scenario.fixture),
+    )?;
     if let Some(change) = &scenario.uncommitted {
         let git = Run::new(live::command("git")?).inheriting_env();
         uncommitted(&git, &workspace, change)?;
@@ -110,13 +118,15 @@ fn uncommitted(git: &Run, workspace: &Path, change: &Uncommitted) -> Result {
     Ok(())
 }
 
-/// `workspace` made again from the folder `from`, and what Claude Code (whose home
-/// is `home`) remembered about it forgotten.
-fn renew(home: &Path, workspace: &Path, from: &Path) -> Result {
+/// `workspace` made again from the folder `from`, and what Claude Code (whose config folder
+/// is `config`, where the run has a Claude Code) remembered about it forgotten.
+fn renew(config: Option<&Path>, workspace: &Path, from: &Path) -> Result {
     // A folder that is not there is already gone.
     let _ = fs::remove_dir_all(workspace);
     files::make_dir(workspace)?;
-    let _ = fs::remove_dir_all(claude_memory(home, workspace));
+    if let Some(config) = config {
+        let _ = fs::remove_dir_all(claude_memory(config, workspace));
+    }
     copy_tree(from, workspace)
 }
 
@@ -156,7 +166,7 @@ mod tests {
         write(&fixture, "docs/guide.md", "guide");
         write(&workspace, "site/notes.md", "left by the last run");
         write(&workspace, "site/index.html", "changed");
-        renew(&home, &workspace, &fixture).unwrap();
+        renew(Some(&home), &workspace, &fixture).unwrap();
         assert_eq!(
             files::read_string(&workspace.join("site/index.html")).unwrap(),
             "home"
@@ -168,7 +178,7 @@ mod tests {
         assert!(!workspace.join("site/notes.md").exists());
         // Made where there was nothing too.
         let fresh = root.path().join("another");
-        renew(&home, &fresh, &fixture).unwrap();
+        renew(Some(&home), &fresh, &fixture).unwrap();
         assert!(fresh.join("docs/guide.md").is_file());
     }
 
@@ -186,27 +196,89 @@ mod tests {
         write(&memory, "MEMORY.md", "# what it learned");
         let conversation = memory.parent().unwrap().join("s-1.jsonl");
         write(memory.parent().unwrap(), "s-1.jsonl", "{}\n");
-        let other = home.join(".claude/projects/-Users-me-work/memory/MEMORY.md");
-        write(
-            &home,
-            ".claude/projects/-Users-me-work/memory/MEMORY.md",
-            "theirs",
-        );
-        renew(&home, &workspace, &fixture).unwrap();
+        let other = home.join("projects/-Users-me-work/memory/MEMORY.md");
+        write(&home, "projects/-Users-me-work/memory/MEMORY.md", "theirs");
+        renew(Some(&home), &workspace, &fixture).unwrap();
         assert!(!memory.exists(), "the memory of the workspace is cleared");
         assert!(conversation.exists(), "its conversations are the person's");
         assert!(other.exists(), "so is what it remembered of another folder");
+    }
+
+    /// A config folder that is the folder at `path`.
+    #[derive(Debug)]
+    struct At(PathBuf);
+
+    impl cf_e2e::rig::ClaudeConfig for At {
+        fn folder(&self) -> cf_e2e::Result<PathBuf> {
+            Ok(self.0.clone())
+        }
+
+        fn described(&self) -> String {
+            "the test".to_owned()
+        }
+
+        fn finish(&self) -> cf_e2e::Result {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_fresh_workspace_clears_the_memory_in_the_runs_throwaway_and_nothing_in_the_users_claude() {
+        let root = tempfile::tempdir().unwrap();
+        let (home, throwaway) = (root.path().join("home"), root.path().join("throwaway"));
+        let machine = Machine {
+            home: home.clone(),
+            installs: vec![cf_e2e::live::Installed::at(
+                live::Harness::Claude,
+                "/bin/claude",
+                &home,
+            )],
+            node: None,
+            login: Some(std::sync::Arc::new(super::super::login::Throwaway::over(
+                At(throwaway.clone()),
+            ))),
+        };
+        let scenario = crate::scenarios::by_id("six-decisions").unwrap();
+        let workspace = machine.workspace();
+        // What the run's Claude remembered of the workspace in a play before, and what the user's
+        // own Claude remembers of it from the evals that ran on it.
+        let theirs = claude_memory(&home.join(".claude"), &workspace);
+        write(&theirs, "MEMORY.md", "the user's");
+        let ours = claude_memory(&throwaway, &workspace);
+        write(&ours, "MEMORY.md", "the last play's");
+        assert_eq!(fresh(&machine, &scenario).unwrap(), workspace);
+        assert!(!ours.exists(), "the play before's memory is cleared");
+        assert!(
+            theirs.join("MEMORY.md").is_file(),
+            "the user's is not touched"
+        );
+    }
+
+    #[test]
+    fn a_run_with_no_claude_code_clears_nothing_of_any_config_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let (config, fixture, workspace) = (
+            root.path().join("config"),
+            root.path().join("fixture"),
+            root.path().join("workspace"),
+        );
+        write(&fixture, "a.txt", "a");
+        let memory = claude_memory(&config, &workspace);
+        write(&memory, "MEMORY.md", "# what it learned");
+        renew(None, &workspace, &fixture).unwrap();
+        assert!(memory.join("MEMORY.md").is_file());
+        assert!(workspace.join("a.txt").is_file());
     }
 
     #[test]
     fn claude_names_the_folder_of_a_workspace_by_its_path_with_a_dash_for_each_mark() {
         assert_eq!(
             claude_memory(
-                Path::new("/Users/x"),
+                Path::new("/tmp/consensflow-live-claude-1-a"),
                 Path::new("/Users/x/.consensflow-candidate/evals/workspace")
             ),
             Path::new(
-                "/Users/x/.claude/projects/-Users-x--consensflow-candidate-evals-workspace/memory"
+                "/tmp/consensflow-live-claude-1-a/projects/-Users-x--consensflow-candidate-evals-workspace/memory"
             )
         );
     }
@@ -244,7 +316,7 @@ mod tests {
             "un scor între 0 și 100.\r\n",
         );
         write(&fixture, "site/index.html", "home\r\n");
-        renew(&home, &workspace, &fixture).unwrap();
+        renew(Some(&home), &workspace, &fixture).unwrap();
         uncommitted(&plain_git(), &workspace, &CHANGE).unwrap();
         assert_eq!(
             files::read_string(&workspace.join("site/evaluare.html")).unwrap(),
@@ -279,7 +351,7 @@ mod tests {
         write(&fixture, "site/evaluare.html", "un scor între 0 și 100.\n");
         write(&fixture, "site/index.html", "home\n");
         write(&fixture, "README.md", "readme\n");
-        renew(&home, &workspace, &fixture).unwrap();
+        renew(Some(&home), &workspace, &fixture).unwrap();
         // The person's git, as hostile as it gets: hooks that refuse every commit
         // (`--no-verify` does not stop a prepare-commit-msg), in their hook folder and
         // in a template folder; an excludes file and a template's exclude that hide the
@@ -366,7 +438,7 @@ mod tests {
             root.path().join("workspace"),
         );
         write(&fixture, "site/evaluare.html", "un scor între 0 și 10.");
-        renew(&home, &workspace, &fixture).unwrap();
+        renew(Some(&home), &workspace, &fixture).unwrap();
         let failed = uncommitted(&plain_git(), &workspace, &CHANGE)
             .unwrap_err()
             .to_string();
@@ -377,7 +449,7 @@ mod tests {
     fn a_fixture_that_is_not_there_is_an_error_that_names_it() {
         let root = tempfile::tempdir().unwrap();
         let failed = renew(
-            root.path(),
+            Some(root.path()),
             &root.path().join("workspace"),
             &root.path().join("none"),
         )

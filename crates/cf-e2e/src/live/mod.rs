@@ -61,7 +61,11 @@
 //! says it loudly if the copy was refreshed all the same, and fails if the person's
 //! `settings.json` changed, or `~/.claude.json`, `history.jsonl` or `projects` gained
 //! anything of the run's folders. Windows and a machine with no login to copy are as
-//! they were. `--keep` never keeps the folder: it holds a login.
+//! they were. `--keep` never keeps the folder, which holds a login: it copies the
+//! conversations and sessions Claude Code kept there into the kept home first
+//! ([`login::Login`], `<kept home>/home/.claude`: the rig's root, where `--keep` says the home stays). The evals (`cf-evals`) are held to the same: their
+//! Claude windows run on a throwaway folder of this kind, and a run states how long it takes,
+//! so the login must last that much more.
 //!
 //! What a run is asked to do is in variables that `cargo xtask live` sets from
 //! its flags ([`option`], [`list`], and the shared [`KEEP`], [`HARNESS`],

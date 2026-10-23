@@ -64,6 +64,9 @@ pub struct Kept<'a> {
     pub ending: String,
     /// What stopped the run before its end, if anything did.
     pub error: Option<String>,
+    /// What the run did to the owner's Claude setup, or to the copy of the login its Claude Code
+    /// windows ran on (refreshed: the owner's may be stale), if it did anything.
+    pub login: Option<String>,
     pub log: Value,
 }
 
@@ -155,6 +158,14 @@ impl Kept<'_> {
                 "time ran out: the run did not reach its end within its budget of {} min",
                 self.options.budget.as_secs() / 60
             ));
+        }
+        if let Some(login) = &self.login {
+            why.push(if words {
+                format!("the owner's Claude setup or login was not left as it was: {login}")
+            } else {
+                "the owner's Claude setup or login was not left as it was (what changed is in the report)"
+                    .to_owned()
+            });
         }
         if let Some(error) = self.error() {
             why.push(if words {
@@ -267,6 +278,7 @@ impl Kept<'_> {
             "seconds": (self.ended - self.started).max(0) / 1000,
             "ending": self.ending,
             "error": self.error(),
+            "login": self.login,
             "daemon": self.daemon,
             "home": self.home,
             "ask": options.ask.name(),

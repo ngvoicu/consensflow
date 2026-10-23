@@ -29,11 +29,15 @@
 //!
 //! **The refresh hazard.** A refresh token is used once: if the copy refreshes the
 //! access token, the person's Keychain item holds a refresh token that no longer
-//! works, and they are logged out the next time theirs needs it. So a run starts
-//! only on a login whose access token lasts at least [`LEFT`] more, which no run is
-//! longer than (Claude Code refreshes only near the end of it), and says it if the
-//! copy changed all the same: the folder's `.credentials.json` is compared with
-//! what was copied, and the Keychain with the items it had.
+//! works, and they are logged out the next time theirs needs it. Claude Code
+//! refreshes a token when five minutes of it are left (`now + 300000 >= expiresAt`,
+//! 2.1.309), so a run that is not longer than the token has left never does. A run
+//! starts only on a login whose access token lasts at least as long as the run is
+//! to take, with a margin: [`LEFT`] for the live suites (all shorter), or the
+//! length a run states for itself ([`Login::of_machine_lasting`]: an eval states its
+//! own, hours long). It says it if the copy changed all the same: the folder's
+//! `.credentials.json` is compared with what was copied, and the Keychain with the
+//! items it had. Nothing refreshes it by hand, here or anywhere.
 //!
 //! **What the run is held to** ([`ClaudeConfig::finish`], when its rig ends): the
 //! person's `~/.claude/settings.json` is as it was; `~/.claude.json` has no project
@@ -41,7 +45,15 @@
 //! prompt typed in one; `~/.claude/projects` has no conversation of one. (Not the
 //! whole of `~/.claude.json`: the person's own Claude Code sessions write the rest
 //! of it all day.) A run that fails any of them fails, with the Claude Code of the
-//! person's windows named as the other possible writer.
+//! person's windows named as the other possible writer. The run's folders are the
+//! live suites' (`~/.consensflow-candidate/live/…`), the rigs' homes, and the evals'
+//! workspace (`~/.consensflow-candidate/evals/…`).
+//!
+//! **What a kept home keeps.** The folder goes with the run, because it holds a login.
+//! A rig whose home is kept (`--keep`, or a case that reads the home after it ended)
+//! asks the folder to copy what Claude Code kept there into the home first
+//! ([`ClaudeConfig::keep_records`]): its conversations (`projects/`) and its sessions
+//! (`sessions/`, but for the `.key` files of its peers' sockets), never the login.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -63,11 +75,12 @@ use crate::{files, Error, Result};
 /// names it keeps another config folder's under (`Claude Code-credentials-<8 hex>`).
 const SERVICE: &str = "Claude Code-credentials";
 
-/// How long the login's access token must last for a run to start on a copy of it.
-/// Claude Code refreshes a token only near its end (minutes), so a run shorter than
-/// this never refreshes it; the longest live runs (the approval run, a long eval) take
-/// well under it, with the margin the person's own use of Claude Code needs to
-/// refresh it first.
+/// How long the login's access token must last for a live suite to start on a copy
+/// of it. Claude Code refreshes a token when five minutes of it are left, so a run
+/// shorter than this never refreshes it; the longest live suite (the approval run)
+/// takes well under it, with the margin the person's own use of Claude Code needs to
+/// refresh it first. A run that is longer, or that knows its length, asks for what it
+/// needs ([`Login::of_machine_lasting`]): an eval is hours long.
 pub const LEFT: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// What the folder of a run starts with in `.claude.json`: the first-run dialogs
@@ -196,10 +209,12 @@ fn oauth(text: &str, now: i64, left: Duration) -> Result<Value> {
             format!("expires in {}", span(remaining))
         };
         return Err(Error::Daemon(format!(
-            "Claude Code's login {state}, and a live run needs it to last at least {} more: a run's \
+            "Claude Code's login {state}, and this run needs it to last at least {} more: a run's \
              Claude Code refreshes a token that is about to end, and the refresh would leave the login \
              that this machine keeps unusable (the owner is logged out the next time theirs needs it). \
-             Use Claude Code yourself for a moment, so that it refreshes the token, and run again",
+             Claude Code refreshes a token only when five minutes of it are left, so using it now does \
+             not help: run again after the owner's own Claude Code has refreshed it, or make the run \
+             shorter",
             span(left)
         )));
     }
@@ -258,16 +273,20 @@ fn gained(before: &BTreeSet<String>, now: &BTreeSet<String>) -> Vec<String> {
         .collect()
 }
 
-/// Whether `path` is a folder a live run worked in: a live folder of the candidate
-/// (`~/.consensflow-candidate/live/…`), or in the home of a rig. (Not the candidate's other
-/// folders: the evals run on the person's own config, and write theirs there.)
+/// Whether `path` is a folder a run worked in: a live folder of the candidate
+/// (`~/.consensflow-candidate/live/…`), the evals' (`~/.consensflow-candidate/evals/…`: the
+/// workspace of every eval), or in the home of a rig.
 fn is_run_folder(path: &str) -> bool {
-    path.contains("/.consensflow-candidate/live/") || path.contains("consensflow-integration-")
+    path.contains("/.consensflow-candidate/live/")
+        || path.contains("/.consensflow-candidate/evals/")
+        || path.contains("consensflow-integration-")
 }
 
 /// Whether `name` is the name Claude Code gives (in `~/.claude/projects`) to a folder of a run.
 fn is_run_name(name: &str) -> bool {
-    name.contains("-consensflow-candidate-live-") || name.contains("consensflow-integration-")
+    name.contains("-consensflow-candidate-live-")
+        || name.contains("-consensflow-candidate-evals-")
+        || name.contains("consensflow-integration-")
 }
 
 /// The hash of `bytes`, as hexadecimal.
@@ -426,16 +445,27 @@ pub struct Login {
     owner: Owner,
     /// Where the folder is made.
     parent: PathBuf,
+    /// How long the access token must last more for the folder to be made.
+    left: Duration,
     made: Mutex<Option<Made>>,
 }
 
 impl Login {
-    /// The login of this machine's Claude Code, for a run on it; none on Windows, where a
-    /// run is on the person's own config.
+    /// The login of this machine's Claude Code, for a live suite on it ([`LEFT`]); none on
+    /// Windows, where a run is on the person's own config.
     pub fn of_machine() -> Option<Self> {
+        Self::of_machine_lasting(LEFT)
+    }
+
+    /// The login of this machine's Claude Code, for a run that takes `left` at the most, margin
+    /// included: the folder is made only if the access token lasts that much more (an eval, hours
+    /// long, states its own length; the live suites' is [`LEFT`]). None on Windows.
+    pub fn of_machine_lasting(left: Duration) -> Option<Self> {
         let source = Source::of_machine()?;
         let home = own_var("HOME").filter(|home| !home.is_empty())?;
-        Some(Self::new(source, PathBuf::from(home), std::env::temp_dir()))
+        let mut login = Self::new(source, PathBuf::from(home), std::env::temp_dir());
+        login.left = left;
+        Some(login)
     }
 
     fn new(source: Source, owner_home: PathBuf, parent: PathBuf) -> Self {
@@ -443,6 +473,7 @@ impl Login {
             source,
             owner: Owner { home: owner_home },
             parent,
+            left: LEFT,
             made: Mutex::new(None),
         }
     }
@@ -453,7 +484,7 @@ impl Login {
         if let Some(made) = made.as_ref() {
             return Ok(made.folder.path().to_path_buf());
         }
-        let oauth = oauth(&self.source.read()?, now, LEFT)?;
+        let oauth = oauth(&self.source.read()?, now, self.left)?;
         sweep(&self.parent);
         let folder = tempfile::Builder::new()
             .prefix(&format!("{PREFIX}{}-", std::process::id()))
@@ -514,6 +545,41 @@ fn private(path: &Path, text: &str) -> io::Result<()> {
     fs::write(path, text)
 }
 
+/// What Claude Code keeps in its config folder that a kept home keeps of a run: the conversations
+/// and the sessions. (Not the login, nor `.claude.json` and what else is in the folder.)
+const RECORDS: [&str; 2] = ["projects", "sessions"];
+
+/// Copies the folders of [`RECORDS`] that `from` has into `into`, where `into` has them already
+/// as they were copied before (a run's rig that ended and was started again on its home).
+fn copy_records(from: &Path, into: &Path) -> Result {
+    for name in RECORDS {
+        copy_tree(&from.join(name), &into.join(name))?;
+    }
+    Ok(())
+}
+
+/// The folder `from` copied into `to` with the files and folders in it; none of it where there is
+/// none. A link is not followed, and a `.key` (the secret of a session's socket, of no use once its
+/// process is gone) is not copied.
+fn copy_tree(from: &Path, to: &Path) -> Result {
+    let Ok(entries) = fs::read_dir(from) else {
+        return Ok(());
+    };
+    files::make_dir(to)?;
+    for entry in entries.flatten() {
+        let (source, name) = (entry.path(), entry.file_name());
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() {
+            copy_tree(&source, &to.join(&name))?;
+        } else if kind.is_file() && source.extension().is_none_or(|ext| ext != "key") {
+            files::copy(&source, &to.join(&name))?;
+        }
+    }
+    Ok(())
+}
+
 /// Takes away the folders of runs that were killed before they could (`PREFIX`, the id of
 /// the process, and a random word), in `parent`: a folder whose process is gone is nobody's,
 /// and holds a login. A process that is there keeps its own.
@@ -553,6 +619,14 @@ impl ClaudeConfig for Login {
 
     fn described(&self) -> String {
         self.source.described()
+    }
+
+    fn keep_records(&self, into: &Path) -> Result {
+        let made = self.made.lock().unwrap_or_else(PoisonError::into_inner);
+        match made.as_ref() {
+            Some(made) => copy_records(made.folder.path(), into),
+            None => Ok(()),
+        }
     }
 
     fn finish(&self) -> Result {

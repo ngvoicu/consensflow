@@ -194,6 +194,11 @@ impl Options {
             .then_some(self.effort.as_str())
     }
 
+    /// The longest the plays of this command can take: every repeat at its time limit.
+    pub fn planned(&self) -> Duration {
+        self.timeout * self.repeat
+    }
+
     /// Whether a harness has a window in this run, as the chief or on the staff.
     pub fn in_run(&self, name: &str) -> bool {
         self.crew().in_run(name)

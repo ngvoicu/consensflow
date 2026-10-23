@@ -3,9 +3,68 @@
 
 use std::path::Path;
 
+use cf_e2e::rig::ClaudeConfig;
+
 use super::super::options::Options;
 use super::*;
 use crate::plan::chief_environment;
+
+/// The config folder of a run, which is made nowhere: a path.
+#[derive(Debug)]
+struct Folder;
+
+impl ClaudeConfig for Folder {
+    fn folder(&self) -> Support<PathBuf> {
+        Ok(PathBuf::from("/tmp/consensflow-live-claude-1-run"))
+    }
+
+    fn described(&self) -> String {
+        "the test".to_owned()
+    }
+
+    fn finish(&self) -> Support {
+        Ok(())
+    }
+}
+
+/// A config folder whose run touched the owner's settings.
+#[derive(Debug)]
+struct Touches;
+
+impl ClaudeConfig for Touches {
+    fn folder(&self) -> Support<PathBuf> {
+        Ok(PathBuf::from("/tmp/consensflow-live-claude-1-touched"))
+    }
+
+    fn described(&self) -> String {
+        "the test".to_owned()
+    }
+
+    fn finish(&self) -> Support {
+        Err(cf_e2e::Error::Daemon(
+            "\n!!!\nTHE RUN CHANGED THE OWNER'S CLAUDE SETUP:\n  - ~/.claude/settings.json is not as it was\n!!!".to_owned(),
+        ))
+    }
+}
+
+/// `machine` as a run with a throwaway login is on: Claude Code's windows run on its folder.
+fn with_login(mut machine: Machine) -> Machine {
+    let login = Arc::new(Throwaway::over(Folder));
+    machine.installs = machine
+        .installs
+        .iter()
+        .map(|install| {
+            installed(
+                install.harness(),
+                install.command().to_path_buf(),
+                &machine.home,
+                Some(&login),
+            )
+        })
+        .collect();
+    machine.login = Some(login);
+    machine
+}
 
 fn options(line: &str) -> Options {
     let words: Vec<String> = line.split_whitespace().map(str::to_owned).collect();
@@ -21,6 +80,7 @@ fn machine(programs: &[(Harness, &str)], node: Option<&str>) -> Machine {
             .map(|(harness, program)| Installed::at(*harness, *program, "/home/u"))
             .collect(),
         node: node.map(PathBuf::from),
+        login: None,
     }
 }
 
@@ -111,7 +171,102 @@ fn a_harness_reads_its_login_from_the_users_home_and_codex_from_its_own_folder()
 }
 
 #[test]
-fn the_rig_a_run_is_on_has_the_users_own_home_the_wrappers_first_and_no_claude_config_folder() {
+fn only_claude_code_runs_on_the_throwaway_login_of_a_run() {
+    let login = Arc::new(Throwaway::over(Folder));
+    let home = Path::new("/home/u");
+    for harness in [Harness::Claude, Harness::Codex, Harness::Pi] {
+        let install = installed(harness, PathBuf::from("/bin/x"), home, Some(&login));
+        assert_eq!(
+            install.claude_config().is_some(),
+            harness == Harness::Claude,
+            "{harness:?}"
+        );
+        assert!(installed(harness, PathBuf::from("/bin/x"), home, None)
+            .claude_config()
+            .is_none());
+    }
+}
+
+#[test]
+fn a_run_with_a_throwaway_login_hands_its_folder_to_the_rig_and_clears_no_variable() {
+    let machine = with_login(machine(
+        &[(Harness::Claude, "/home/u/.local/bin/claude")],
+        None,
+    ));
+    let chief = chief_environment("claude", None).unwrap();
+    let config = machine.rig(
+        &options("").crew(),
+        &chief,
+        Path::new("/home/u/.consensflow-candidate/evals/bin/claude"),
+    );
+    let said = format!("{config:?}");
+    // The rig asks the folder for the windows and the daemon; a variable the run clears is not
+    // there at all, and would undo it.
+    assert!(said.contains("claude_config: Some(Throwaway"), "{said}");
+    assert!(!said.contains("CLAUDE_CONFIG_DIR"), "{said}");
+    assert!(said.contains(r#"("HOME", "/home/u")"#), "{said}");
+}
+
+#[test]
+fn the_claude_config_folder_of_a_run_is_its_throwaway_the_users_own_without_one_and_none_without_claude(
+) {
+    let claude = [(Harness::Claude, "/home/u/.local/bin/claude")];
+    let with = with_login(machine(&claude, None));
+    assert_eq!(
+        with.claude_config().unwrap(),
+        Some(PathBuf::from("/tmp/consensflow-live-claude-1-run"))
+    );
+    // A run on the stand-ins, or on Windows: Claude Code is as it was.
+    assert_eq!(
+        machine(&claude, None).claude_config().unwrap(),
+        Some(PathBuf::from("/home/u/.claude"))
+    );
+    // A run with no Claude Code: nothing of the user's `.claude` is the run's to clear.
+    let codex = [(Harness::Codex, "/home/u/.local/bin/codex")];
+    assert_eq!(machine(&codex, None).claude_config().unwrap(), None);
+    assert_eq!(
+        with_login(machine(&codex, None)).claude_config().unwrap(),
+        None
+    );
+}
+
+#[test]
+fn a_runs_claude_records_are_in_its_throwaway_or_in_the_users_claude_when_it_has_none() {
+    let claude = [(Harness::Claude, "/home/u/.local/bin/claude")];
+    assert_eq!(
+        with_login(machine(&claude, None)).claude_records().unwrap(),
+        PathBuf::from("/tmp/consensflow-live-claude-1-run")
+    );
+    assert_eq!(
+        machine(&claude, None).claude_records().unwrap(),
+        PathBuf::from("/home/u/.claude")
+    );
+    // Without Claude Code there is nothing to read in them.
+    let codex = [(Harness::Codex, "/home/u/.local/bin/codex")];
+    assert_eq!(
+        with_login(machine(&codex, None)).claude_records().unwrap(),
+        PathBuf::from("/home/u/.claude")
+    );
+}
+
+#[test]
+fn what_a_run_did_to_the_owners_claude_is_what_its_login_found() {
+    let claude = [(Harness::Claude, "/home/u/.local/bin/claude")];
+    assert_eq!(machine(&claude, None).login_findings(), None);
+    assert_eq!(with_login(machine(&claude, None)).login_findings(), None);
+    let mut touched = with_login(machine(&claude, None));
+    let login = Arc::new(Throwaway::over(Touches));
+    login.finish().unwrap();
+    touched.login = Some(login);
+    assert_eq!(
+        touched.login_findings().as_deref(),
+        Some("~/.claude/settings.json is not as it was")
+    );
+}
+
+#[test]
+fn the_rig_a_run_without_a_login_is_on_has_the_users_own_home_the_wrappers_first_and_no_claude_config_folder(
+) {
     let machine = machine(&[(Harness::Claude, "/home/u/.local/bin/claude")], None);
     let options = options("--arm nocard");
     let chief = chief_environment("claude", None).unwrap();

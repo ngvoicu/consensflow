@@ -2,9 +2,9 @@
 //! live run keeps one ([`cf_e2e::live::login::Login`]): the rig is asked for it when it
 //! starts and what the run came to when it ends, which this counts and answers as the case says.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use cf_e2e::rig::ClaudeConfig;
 use cf_e2e::Error;
@@ -16,6 +16,9 @@ pub struct Kept {
     asked_for: AtomicUsize,
     asked_what_it_came_to: AtomicUsize,
     verdict: Option<&'static str>,
+    /// What the rig asked of it after the windows were gone, in order: where it was to keep the
+    /// run's records, and that it was asked what the run came to.
+    asked: Mutex<Vec<String>>,
 }
 
 impl Kept {
@@ -27,12 +30,21 @@ impl Kept {
             asked_for: AtomicUsize::new(0),
             asked_what_it_came_to: AtomicUsize::new(0),
             verdict,
+            asked: Mutex::new(Vec::new()),
         })
     }
 
     /// How many times the rig asked for the folder.
     pub fn asked_for(&self) -> usize {
         self.asked_for.load(Ordering::SeqCst)
+    }
+
+    /// What the rig asked of it once the windows were gone: `keep <where>` and `finish`, in order.
+    pub fn asked(&self) -> Vec<String> {
+        self.asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// How many times the rig asked what the run came to.
@@ -56,7 +68,19 @@ impl ClaudeConfig for Kept {
         "the test".to_owned()
     }
 
+    fn keep_records(&self, into: &Path) -> cf_e2e::Result {
+        self.asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(format!("keep {}", into.display()));
+        Ok(())
+    }
+
     fn finish(&self) -> cf_e2e::Result {
+        self.asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push("finish".to_owned());
         self.asked_what_it_came_to.fetch_add(1, Ordering::SeqCst);
         match self.verdict {
             Some(said) => Err(Error::Daemon(said.to_owned())),

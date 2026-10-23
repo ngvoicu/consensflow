@@ -310,6 +310,16 @@ pub trait ClaudeConfig: std::fmt::Debug + Send + Sync {
     /// Where the login in the folder is copied from, as a run says it.
     fn described(&self) -> String;
 
+    /// Copies what the run's Claude Code kept in the folder (its conversations and
+    /// its sessions, never the login) into `into`, the `.claude` of the home the rig made
+    /// (`<root>/home/.claude`, beside `CONSENSFLOW_HOME`), which is where a kept home has them: asked when a rig whose home is kept ends, the
+    /// windows gone, before [`ClaudeConfig::finish`]; the folder itself goes with the
+    /// run. Copying again over a copy made before is the same copy, grown. A folder
+    /// that holds no login of the person's has nothing to take out of it.
+    fn keep_records(&self, _into: &Path) -> Result {
+        Ok(())
+    }
+
     /// What the run came to in the folder and in the person's own setup, asked
     /// when a rig that used the folder ends, the windows gone: an error says what
     /// the run did that it was not to, and fails the case that ends the rig.
@@ -689,7 +699,14 @@ impl Rig {
         match &self.claude_config {
             Some(claude_config) if !self.claude_config_finished => {
                 self.claude_config_finished = true;
-                claude_config.finish()
+                // The home is kept: what Claude Code kept of the run goes in it, where it
+                // has always been (the folder holds a login, and goes with the run).
+                let kept = if self.keep_root {
+                    claude_config.keep_records(&self.root.join("home").join(".claude"))
+                } else {
+                    Ok(())
+                };
+                claude_config.finish().and(kept)
             }
             _ => Ok(()),
         }

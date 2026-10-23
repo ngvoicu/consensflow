@@ -266,6 +266,7 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
     let scenario = options.ask.scenario(options.quiet);
     let opened = setup::open(&options, &cast, &scenario, &mut floor, edge.masker())?;
     let daemon = opened.daemon.clone();
+    let login = opened.login;
     let mut stage = Stage::new(opened.rig, opened.config, opened.project, opened.claude);
     if let Some(span) = options.drop_reading {
         stage.watcher.drop_readings(span);
@@ -330,6 +331,9 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
         timeline: &run.timeline,
         ending: run.ending.clone(),
         error,
+        // The app has closed: what the run did to the owner's Claude setup, or to the copy of
+        // the login, is known, and a run of hours keeps its report either way.
+        login: login.and_then(|login| login.findings()),
         log: floor.log(),
     };
     let name = file_name(started, &options.chief, &cast.names);
