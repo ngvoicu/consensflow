@@ -117,14 +117,24 @@ replace = '''
             .any(|task| OVER.contains('''
 
 [[plant]]
-name = "board: cf task list takes a failed task for one to look at"
+name = "board: cf task list takes a failed task for one that is over"
 meant = "a_session_with_one_task_left_to_look_at_stays_listed_whatever_the_rest_say"
 runs = ["board-task-list"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = 'const OVER: [&str; 3] = ["accepted", "cancelled", "failed"];'
-replace = 'const OVER: [&str; 3] = ["accepted", "cancelled", "cancelled"];'
+find = 'const OVER: [&str; 2] = ["accepted", "cancelled"];'
+replace = 'const OVER: [&str; 3] = ["accepted", "cancelled", "failed"];'
+
+[[plant]]
+name = "board: cf task list takes a cancelled task for one to look at"
+meant = "a_session_with_one_task_left_to_look_at_stays_listed_whatever_the_rest_say"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = 'const OVER: [&str; 2] = ["accepted", "cancelled"];'
+replace = 'const OVER: [&str; 2] = ["accepted", "accepted"];'
 
 [[plant]]
 name = "board: cf task list takes a task done and not yet decided for one that is over"
@@ -133,7 +143,7 @@ runs = ["board-task-list"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = 'const OVER: [&str; 3] = ["accepted", "cancelled", "failed"];'
+find = 'const OVER: [&str; 2] = ["accepted", "cancelled"];'
 replace = 'const OVER: [&str; 3] = ["accepted", "cancelled", "done"];'
 
 [[plant]]

@@ -190,8 +190,9 @@ fn waits_for_a_member(task: &Value) -> bool {
 }
 
 /// The states of a task that is over: nothing is left to do on it, by its
-/// member or by the chief (the ledger's `FINISHED_TASK_STATES`).
-const OVER: [&str; 3] = ["accepted", "cancelled", "failed"];
+/// member or by the chief. A failed task is not over: the chief reopens it,
+/// cancels it or adds it again.
+const OVER: [&str; 2] = ["accepted", "cancelled"];
 
 /// The flags of `cf task list`.
 const LIST: Shape = Shape {
@@ -500,13 +501,14 @@ mod tests {
                 lane("chief", "chief", &[card(1, "accepted", Some("chief"))]),
                 lane("zeus", "worker", &[card(2, "accepted", Some("zeus")), card(9, "working", Some("zeus"))]),
                 lane("hera", "reviewer", &[card(3, "accepted", Some("hera"))]),
-                lane("athena", "worker", &[card(4, "cancelled", Some("athena")), card(5, "failed", Some("athena"))]),
+                lane("athena", "worker", &[card(4, "cancelled", Some("athena")), card(5, "accepted", Some("athena"))]),
                 lane("ares", "tester", &[card(6, "done", Some("ares"))]),
                 lane("eos", "designer", &[]),
                 lane("apollo", "worker", &[card(7, "queued", Some("apollo"))]),
                 lane("hermes", "worker", &[card(8, "paused", Some("hermes"))]),
                 lane("demeter", "worker", &[card(11, "waiting", Some("demeter"))]),
                 lane("hades", "advisor", &[card(12, "open", Some("hades"))]),
+                lane("hebe", "worker", &[card(13, "failed", Some("hebe"))]),
             ],
         })
     }
@@ -555,7 +557,7 @@ T-9 [working] @zeus ← @chief: Task 9
 T-3 [accepted] @hera ← @chief: Task 3
 @athena (worker)
 T-4 [cancelled] @athena ← @chief: Task 4
-T-5 [failed] @athena ← @chief: Task 5
+T-5 [accepted] @athena ← @chief: Task 5
 @ares (tester)
 T-6 [done] @ares ← @chief: Task 6
 @apollo (worker)
@@ -565,7 +567,9 @@ T-8 [paused] @hermes ← @chief: Task 8
 @demeter (worker)
 T-11 [waiting] @demeter ← @chief: Task 11
 @hades (advisor)
-T-12 [open] @hades ← @chief: Task 12";
+T-12 [open] @hades ← @chief: Task 12
+@hebe (worker)
+T-13 [failed] @hebe ← @chief: Task 13";
 
     /// The same without Hera and Athena, whose tasks are all over, and with their line.
     const WITHOUT_THE_IDLE: &str = "Waiting for a member
@@ -585,6 +589,8 @@ T-8 [paused] @hermes ← @chief: Task 8
 T-11 [waiting] @demeter ← @chief: Task 11
 @hades (advisor)
 T-12 [open] @hades ← @chief: Task 12
+@hebe (worker)
+T-13 [failed] @hebe ← @chief: Task 13
 and 2 idle sessions (`cf task list --all`)";
 
     #[test]
@@ -609,7 +615,7 @@ and 2 idle sessions (`cf task list --all`)";
             ("done", true),
             ("accepted", false),
             ("cancelled", false),
-            ("failed", false),
+            ("failed", true),
         ] {
             let lanes = json!([lane(
                 "zeus",
@@ -649,7 +655,7 @@ and 2 idle sessions (`cf task list --all`)";
         };
         assert_eq!(
             handles("lanes"),
-            ["chief", "zeus", "ares", "eos", "apollo", "hermes", "demeter", "hades"]
+            ["chief", "zeus", "ares", "eos", "apollo", "hermes", "demeter", "hades", "hebe"]
         );
         // Whole lanes, as the board gave them.
         assert_eq!(handles("idle"), ["hera", "athena"]);
@@ -677,7 +683,7 @@ and 2 idle sessions (`cf task list --all`)";
         );
         let lanes = json!([
             lane("hera", "reviewer", &[card(3, "accepted", Some("hera"))]),
-            lane("athena", "worker", &[card(4, "failed", Some("athena"))]),
+            lane("athena", "worker", &[card(4, "cancelled", Some("athena"))]),
         ]);
         assert_eq!(
             listed(&[], &lanes),
