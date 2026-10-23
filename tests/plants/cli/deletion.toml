@@ -167,7 +167,7 @@ runs = ["runnable"]
 [[plant.edit]]
 file = "crates/cf-process/src/runnable.rs"
 find = '''
-        [script] if is_bare_node(script.before) => (None, script.text),
+        [script] if is_bare_node(script.before) => (None, Some(script.text)),
 '''
 replace = ""
 

@@ -2045,6 +2045,40 @@ file = "crates/cf-process/src/job.rs"
 find = "            if AssignProcessToJobObject(made, handle as _) == 0 {\n                return Err(failed(\"could not be put in a job of its own\"));\n            }"
 replace = "            let _ = (AssignProcessToJobObject as usize, handle);"
 
+# A shim that names a native program alone (opencode-ai 1.19.4's: its package ships a program
+# where it shipped a script) starts that program; one that names a program that is not there, or
+# is not one, is cmd.exe's (T-353, found by `live finish opencode` on zeewin: no window opened).
+
+[[plant]]
+name = "tooling (cf-process): a shim that names a native program alone is not read"
+meant = "an_npm_shim_that_names_a_native_program_alone_runs_that_program"
+runs = ["cf-process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "        [program] if program.before.trim().is_empty() => (Some(program.text), None),"
+replace = "        [program] if program.before.trim().is_empty() && false => (Some(program.text), None),"
+
+[[plant]]
+name = "tooling (cf-process): a shim that names a program alone that is not there is read"
+meant = "a_shim_that_names_a_program_alone_that_is_not_there_or_is_not_one_stays_for_cmd_exe"
+runs = ["cf-process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "        && program.is_file()\n}"
+replace = "        && true\n}"
+
+[[plant]]
+name = "tooling (cf-process): a shim that names a script alone is read as a program"
+meant = "a_shim_that_names_a_program_alone_that_is_not_there_or_is_not_one_stays_for_cmd_exe"
+runs = ["cf-process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "        .is_some_and(|extension| extension.eq_ignore_ascii_case(\"exe\"))"
+replace = "        .is_some()"
+
 # A meant name stands for every test registered of it, whatever came of each.
 
 [[plant]]
