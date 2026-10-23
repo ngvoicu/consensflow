@@ -533,7 +533,7 @@ async fn a_result_named_in_a_read_is_left_queued_for_the_decision_that_ends_it()
     assert_eq!(
         scene.message(result.id).state,
         "queued",
-        "a read is no decision: the paste still reminds the chief that one is due"
+        "a thread's read is no decision: the paste still reminds the chief that one is due (a read in the inbox is another matter: T-260)"
     );
     assert_eq!(scene.logged("message.read"), 0);
     assert_eq!(scene.kicks.get(), 0);
