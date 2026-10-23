@@ -4,13 +4,13 @@
 //! broker, and nothing left behind once the window ends. The native `cf` runs
 //! here; the broker's own tests are its crate's.
 
-use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_e2e::http::server::{Answer, Response, Server};
+use cf_e2e::ports;
 use cf_e2e::process::{is_alive, Run, Signal, Spawned};
 use cf_e2e::{cf, files, serial, wire, Error, Result};
 use regex::Regex;
@@ -48,11 +48,6 @@ struct Supervised {
     log: PathBuf,
 }
 
-/// A port nobody listens on.
-fn free_port() -> std::io::Result<u16> {
-    Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
-}
-
 impl Supervised {
     /// The supervisor as a Codex window runs it: `cf codex-session <codex>
     /// <args>`, with the session bridge the channel configured, in a window's
@@ -72,7 +67,7 @@ impl Supervised {
                 source,
             })?;
         let program = codex.map_or_else(|| PathBuf::from(FAKE_CODEX), |named| named(root.path()));
-        let port = free_port().map_err(|source| Error::File {
+        let port = ports::free().map_err(|source| Error::File {
             action: "find a port on",
             path: PathBuf::from("127.0.0.1"),
             source,

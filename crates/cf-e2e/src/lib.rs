@@ -36,6 +36,8 @@
 //!   waits, and the variables `cargo xtask live` sets from its flags.
 //! - [`rollout`] reads a Codex thread's rollout, what it began with and was told,
 //!   in the rig's Codex home and the machine's.
+//! - [`ports`] names a port on loopback for a program to listen on, one that no
+//!   program listens on once the case has let go of it.
 //! - [`serial`] has the cases that start a daemon take turns; [`pattern`] builds
 //!   the patterns the support reads text by; [`png`] reads the structure of a PNG
 //!   file, to say that an image a harness saved is a whole one.
@@ -98,6 +100,7 @@ pub mod http;
 pub mod live;
 pub mod pattern;
 pub mod png;
+pub mod ports;
 pub mod process;
 pub mod rig;
 pub mod rollout;
