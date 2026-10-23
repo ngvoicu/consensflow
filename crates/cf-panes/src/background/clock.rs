@@ -31,10 +31,18 @@
 //! µs (300 processes); the wall clock drifted 9 ppm behind the continuous one (0.55 ms a
 //! minute), and moved at most 24 µs between readings 100 ms apart.
 //!
-//! Limit. A wall clock set forward by more than the margin and set back again within one
-//! reading's gap ([`SAMPLE`], [`MAX_GAP`] at most), the call made between the two settings
-//! and its command started after the second, falls between readings: no reading shows the
-//! clock as it was when the call was stamped.
+//! A read of the clocks is a reading only where its two reads of each monotonic clock lie
+//! within [`READ_BOUND`] (`Reading::of`): one put off between them would pair a wall time with
+//! a monotonic time far from it. A pane whose first read is no reading has its clock from its
+//! first reading on, and nothing begun before that is proved older.
+//!
+//! Limit. A wall clock set forward by more than the margin and set back again within one gap
+//! between readings ([`SAMPLE`], [`MAX_GAP`] at most), a monitor's call stamped between the two
+//! settings and its command started after the second, falls between readings: no reading
+//! shows the clock as it was when the call was stamped, and the command's own two starts
+//! agree with the clock after it (Astraeus on eb9f25ef). Only the call's own monotonic time
+//! would prove more, and Claude Code's record of a call carries the wall clock's alone.
+//! Written down as a known limit, not fixed: the chief's decision, 2026-10-23, T-346.
 
 #[cfg(target_os = "macos")]
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -57,6 +65,11 @@ const SLEW_PPM: i64 = 1_000;
 /// two readings: well below the engine's margin (`turn_end`'s `CALL_MARGIN_MS`, 1 s).
 const BUDGET: i64 = 500_000;
 
+/// How far apart the two reads of a monotonic clock around a wall clock's read may lie for
+/// a reading to be made of them. Measured on a Mac (T-349): 20,000 reads at a time lay at
+/// most 1 µs apart idle, and at most 14 µs with every core busy.
+const READ_BOUND: i64 = 1_000;
+
 /// How far a process's own two starts may disagree with the readings around it.
 const PROCESS_NOISE: i64 = 5_000;
 
@@ -73,7 +86,32 @@ pub(crate) struct Reading {
     pub continuous: i64,
 }
 
+/// The clocks as read: the wall clock between two reads of the awake and the continuous
+/// ones, each in microseconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Read {
+    pub wall: i64,
+    pub awake: (i64, i64),
+    pub continuous: (i64, i64),
+}
+
 impl Reading {
+    /// The reading `read` makes: the monotonic clocks at the middle of their two reads. None
+    /// where those lie more than [`READ_BOUND`] apart, on either clock (Astraeus on
+    /// eb9f25ef: a read put off between its wall and monotonic reads pairs times far apart),
+    /// and so where a sleep fell between them, which the continuous clock counts.
+    pub fn of(read: Read) -> Option<Self> {
+        let apart = |(from, to): (i64, i64)| (0..=READ_BOUND).contains(&(to - from));
+        if !apart(read.awake) || !apart(read.continuous) {
+            return None;
+        }
+        Some(Self {
+            wall: read.wall,
+            awake: read.awake.0 + (read.awake.1 - read.awake.0) / 2,
+            continuous: read.continuous.0 + (read.continuous.1 - read.continuous.0) / 2,
+        })
+    }
+
     /// How far the wall clock is ahead of the continuous one.
     fn ahead(self) -> i64 {
         self.wall - self.continuous
@@ -97,27 +135,39 @@ impl Reading {
 #[derive(Debug, Clone)]
 pub(crate) struct PaneClock {
     kept: Vec<Reading>,
-    last: Reading,
+    last: Option<Reading>,
     peak: i64,
     fall: i64,
     unknown: bool,
 }
 
 impl PaneClock {
-    /// A pane opens: the clocks read now are its first reading.
-    pub fn new(first: Reading) -> Self {
-        Self {
-            kept: vec![first],
-            last: first,
-            peak: first.steady(),
+    /// A pane opens: the clocks read now are its first reading, where they made one. A
+    /// pane with none has its clock from its first reading on, and no process begun before
+    /// that is proved older.
+    pub fn new(first: Option<Reading>) -> Self {
+        let mut clock = Self {
+            kept: Vec::new(),
+            last: None,
+            peak: i64::MIN,
             fall: 0,
             unknown: false,
-        }
+        };
+        clock.observe(first);
+        clock
     }
 
-    /// The clocks read again.
-    pub fn observe(&mut self, now: Reading) {
-        let before = self.last;
+    /// The clocks read again: none where they made no reading, which leaves a gap.
+    pub fn observe(&mut self, now: Option<Reading>) {
+        let Some(now) = now else {
+            return;
+        };
+        let Some(before) = self.last else {
+            self.kept.push(now);
+            self.last = Some(now);
+            self.peak = now.steady();
+            return;
+        };
         if now.awake < before.awake || now.awake - before.awake > MAX_GAP {
             self.unknown = true;
         }
@@ -132,7 +182,7 @@ impl PaneClock {
             }
             self.kept.push(now);
         }
-        self.last = now;
+        self.last = Some(now);
     }
 
     /// Whether the process that began at `wall` by the wall clock and at `awake` by the
@@ -142,10 +192,10 @@ impl PaneClock {
             return false;
         }
         // A process begun before the first reading or after the latest has none around it.
-        let Some(first) = self.kept.first() else {
+        let (Some(first), Some(last)) = (self.kept.first(), self.last.as_ref()) else {
             return false;
         };
-        let readings = self.kept.iter().chain(std::iter::once(&self.last));
+        let readings = self.kept.iter().chain(std::iter::once(last));
         let mut around = None;
         let mut previous: Option<&Reading> = None;
         for reading in readings {
@@ -176,14 +226,14 @@ impl PaneClock {
 /// own, for each pane's clock that is still kept, and once more at each look.
 #[cfg(target_os = "macos")]
 pub(crate) struct Watch {
-    clocks: fn() -> Reading,
+    clocks: fn() -> Read,
     panes: Mutex<Vec<Weak<Mutex<PaneClock>>>>,
 }
 
 #[cfg(target_os = "macos")]
 impl Watch {
     /// A watch reading `clocks`, its thread started: it ends with the last hold of it.
-    pub fn start(clocks: fn() -> Reading) -> Arc<Self> {
+    pub fn start(clocks: fn() -> Read) -> Arc<Self> {
         let watch = Arc::new(Self {
             clocks,
             panes: Mutex::new(Vec::new()),
@@ -204,7 +254,7 @@ impl Watch {
 
     /// A pane opens: its clock, read from now on.
     pub fn open(&self) -> Arc<Mutex<PaneClock>> {
-        let clock = Arc::new(Mutex::new(PaneClock::new((self.clocks)())));
+        let clock = Arc::new(Mutex::new(PaneClock::new(self.reading())));
         self.panes
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -216,7 +266,7 @@ impl Watch {
     /// so a pane's readings come in their order.
     pub fn now(&self, clock: &Mutex<PaneClock>) -> PaneClock {
         let mut clock = clock.lock().unwrap_or_else(PoisonError::into_inner);
-        clock.observe((self.clocks)());
+        clock.observe(self.reading());
         clock.clone()
     }
 
@@ -225,9 +275,16 @@ impl Watch {
     #[cfg(test)]
     pub fn set(&self, clock: &Mutex<PaneClock>, by: i64) {
         let mut clock = clock.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut reading = (self.clocks)();
-        reading.wall += by;
+        let mut reading = self.reading();
+        if let Some(reading) = reading.as_mut() {
+            reading.wall += by;
+        }
         clock.observe(reading);
+    }
+
+    /// The clocks read ([`Reading::of`]): a read put off is made again, three times at most.
+    fn reading(&self) -> Option<Reading> {
+        (0..3).find_map(|_| Reading::of((self.clocks)()))
     }
 
     /// Every pane's clock read, and those no pane holds let go of.
@@ -238,7 +295,7 @@ impl Watch {
                 clock
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
-                    .observe((self.clocks)());
+                    .observe(self.reading());
                 true
             }
             None => false,

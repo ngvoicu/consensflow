@@ -110,8 +110,11 @@ pub(crate) enum Looked {
     Readable,
     /// It ended (reaped or not), or is no process now.
     Ended,
-    /// Another user's, or one the system will not say anything of.
+    /// Another user's, as its owner says.
     Unreadable,
+    /// One of ours that changed while it was read, or one no read said the owner of: the
+    /// look is made again ([`LOOKS`]).
+    Changed,
 }
 
 /// What a tree is asked to end, or ended.
@@ -255,7 +258,7 @@ impl ProcessTree {
                     }
                     match system.looked(child) {
                         Looked::Unreadable => return Ok(Readable::Unreadable),
-                        Looked::Readable => born = true,
+                        Looked::Readable | Looked::Changed => born = true,
                         Looked::Ended => {}
                     }
                 }

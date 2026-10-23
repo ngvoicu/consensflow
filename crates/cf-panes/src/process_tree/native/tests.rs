@@ -72,15 +72,20 @@ fn a_process_is_read_while_it_runs_ended_once_it_exits_and_unreadable_where_anot
 fn a_processs_two_starts_agree_with_the_clocks_read_around_it() {
     // T-334: the noise the pane's clock allows a process (`background::clock`'s
     // `PROCESS_NOISE`, 5 ms) is far above what a Mac shows (±4 µs over 300 processes).
+    let reading = || loop {
+        if let Some(reading) = crate::background::Reading::of(clocks()) {
+            break reading;
+        }
+    };
     let mut worst = 0;
     for _ in 0..50 {
-        let before = clocks();
+        let before = reading();
         let mut child = std::process::Command::new("/bin/sleep")
             .arg("5")
             .spawn()
             .expect("sleep starts");
         let pid = child.id();
-        let after = clocks();
+        let after = reading();
         let started = process(i32::try_from(pid).unwrap()).expect("its start");
         let wall =
             i64::try_from(started.identity.born.0 * 1_000_000 + started.identity.born.1).unwrap();
@@ -96,4 +101,65 @@ fn a_processs_two_starts_agree_with_the_clocks_read_around_it() {
         worst = worst.max((ahead - expected).abs());
     }
     assert!(worst < 1_000, "{worst} µs");
+}
+
+#[test]
+fn the_clocks_are_read_well_within_the_bound_on_their_reads() {
+    // T-349: how far apart a read's two monotonic reads lie, which `Reading::of` bounds.
+    let mut widths: Vec<i64> = (0..20_000)
+        .map(|_| {
+            let read = clocks();
+            (read.awake.1 - read.awake.0).max(read.continuous.1 - read.continuous.0)
+        })
+        .collect();
+    widths.sort_unstable();
+    let at = |share: f64| widths[((widths.len() - 1) as f64 * share) as usize];
+    println!(
+        "a read's monotonic reads apart, µs: p50 {} p99 {} p99.9 {} max {}",
+        at(0.5),
+        at(0.99),
+        at(0.999),
+        at(1.0)
+    );
+    assert!(at(0.99) < 1_000, "most reads within a millisecond");
+}
+
+#[test]
+fn a_process_is_another_users_only_where_its_owner_says_so() {
+    // Astraeus on eb9f25ef: a child of ours that passed the first read and ended before the
+    // whole read was said another user's.
+    let mine = 501;
+    assert_eq!(
+        looked_of(Ok(mine), mine, || false, || true),
+        Looked::Ended,
+        "ours, ended between the two reads"
+    );
+    assert_eq!(
+        looked_of(Ok(0), mine, || false, || false),
+        Looked::Unreadable,
+        "root's"
+    );
+    assert_eq!(
+        looked_of(Ok(mine), mine, || true, || false),
+        Looked::Readable
+    );
+    assert_eq!(
+        looked_of(Ok(mine), mine, || false, || false),
+        Looked::Changed,
+        "ours, read differently the second time"
+    );
+    assert_eq!(
+        looked_of(Err(Some(libc::ESRCH)), mine, || true, || true),
+        Looked::Ended
+    );
+    assert_eq!(
+        looked_of(Err(Some(libc::EPERM)), mine, || true, || false),
+        Looked::Unreadable,
+        "the system will not read it to us"
+    );
+    assert_eq!(
+        looked_of(Err(Some(libc::EIO)), mine, || true, || false),
+        Looked::Changed,
+        "no read said whose it is"
+    );
 }

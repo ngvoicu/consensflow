@@ -1364,8 +1364,8 @@ runs = ["tem-panes-process-tree"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree.rs"
-find = '                        Looked::Readable => born = true,'
-replace = '                        Looked::Readable => return Ok(Readable::Unreadable),'
+find = '                        Looked::Readable | Looked::Changed => born = true,'
+replace = '                        Looked::Readable | Looked::Changed => return Ok(Readable::Unreadable),'
 
 [[plant]]
 name = "turn-end-min host: a process that ended while a look read the tree hides it, as 136a7158 did"
@@ -1404,8 +1404,8 @@ runs = ["tem-panes-native"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree/native.rs"
-find = '            Some(libc::ESRCH) => Looked::Ended,'
-replace = '            Some(libc::ESRCH) => Looked::Unreadable,'
+find = '        Err(Some(libc::ESRCH)) => Looked::Ended,'
+replace = '        Err(Some(libc::ESRCH)) => Looked::Unreadable,'
 
 # Round 7, the timestamp proof (T-301, the chief's answer m-3260: a worker's first turn,
 # which no rest comes before).
@@ -1555,14 +1555,14 @@ find = '        .map(|at| at - CALL_MARGIN_MS)'
 replace = '        .map(|at| at - CALL_MARGIN_MS * 0)'
 
 [[plant]]
-name = "turn-end-min live monitor-wait: every call is measured against the first command that began"
+name = "turn-end-min live monitor-wait: a call is measured against the first command that began, whatever it holds"
 meant = "each_monitors_command_is_measured_against_its_own_call"
 runs = ["tem-e2e-monitor-wait"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_monitor_wait.rs"
-find = '                .get(at)'
-replace = '                .get(at.min(0))'
+find = '        .filter(|(line, _)| line.contains(marker))'
+replace = '        .filter(|(line, _)| !line.is_empty())'
 
 [[plant]]
 name = "turn-end-min host: a clock that fell back is trusted"
@@ -1705,3 +1705,66 @@ find = '''            Some(CommandsSeen::Unsettled) => {
                 ", and its window's processes kept changing while ConsensFlow read them: it looks again."'''
 replace = '''            Some(CommandsSeen::Unsettled) => {
                 ", and a process of its window runs that ConsensFlow cannot read (another user's): it looks again."'''
+
+# Round 9 (T-349: Astraeus's T-346 on eb9f25ef).
+
+[[plant]]
+name = "turn-end-min host: a read put off is a reading"
+meant = "a_reading_whose_monotonic_reads_lie_far_apart_is_none"
+runs = ["tem-panes-clock"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/clock.rs"
+find = '        let apart = |(from, to): (i64, i64)| (0..=READ_BOUND).contains(&(to - from));'
+replace = '        let apart = |(from, to): (i64, i64)| (0..=i64::MAX).contains(&(to - from));'
+
+[[plant]]
+name = "turn-end-min host: a read across a sleep is a reading"
+meant = "a_read_is_a_reading_only_where_its_monotonic_reads_lie_within_the_bound"
+runs = ["tem-panes-clock"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/clock.rs"
+find = '        if !apart(read.awake) || !apart(read.continuous) {'
+replace = '        if !apart(read.awake) {'
+
+[[plant]]
+name = "turn-end-min host: a child of ours that ended between two reads is said another user's"
+meant = "a_process_is_another_users_only_where_its_owner_says_so"
+runs = ["tem-panes-native"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = '        Ok(_) if gone() => Looked::Ended,'
+replace = '        Ok(_) if gone() => Looked::Unreadable,'
+
+[[plant]]
+name = "turn-end-min host: another user's process is taken for one of ours that changed"
+meant = "a_process_is_another_users_only_where_its_owner_says_so"
+runs = ["tem-panes-native"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = '        Ok(owner) if owner != mine => Looked::Unreadable,'
+replace = '        Ok(owner) if owner != mine => Looked::Changed,'
+
+[[plant]]
+name = "turn-end-min host: a process that changed while read hides the tree"
+meant = "a_process_that_changed_while_a_look_read_it_is_looked_at_again_and_is_no_other_users"
+runs = ["tem-panes-process-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '                        Looked::Readable | Looked::Changed => born = true,'
+replace = '''                        Looked::Readable => born = true,
+                        Looked::Changed => return Ok(Readable::Unreadable),'''
+
+[[plant]]
+name = "turn-end-min live monitor-wait: a marker two calls hold is measured"
+meant = "each_monitors_command_is_measured_against_its_own_call"
+runs = ["tem-e2e-monitor-wait"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_monitor_wait.rs"
+find = '    let [call] = called.as_slice() else {'
+replace = '    let Some(call) = called.first() else {'

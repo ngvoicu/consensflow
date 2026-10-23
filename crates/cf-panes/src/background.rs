@@ -90,10 +90,12 @@ use cf_proto::panes::{
     Background, BackgroundProcess, Ending, Servers, BACKGROUND_PROCESSES, COMMAND_CHARS,
 };
 
-#[cfg(target_os = "macos")]
-pub(crate) use clock::Watch;
+#[cfg(test)]
+pub(crate) use clock::Reading;
 #[cfg(any(target_os = "macos", test))]
-pub(crate) use clock::{began_before, PaneClock, Reading};
+pub(crate) use clock::{began_before, PaneClock};
+#[cfg(target_os = "macos")]
+pub(crate) use clock::{Read, Watch};
 pub(crate) use harness::Kept;
 
 /// How many of a window's rests are kept ([`Baseline::rest`]): a rest asked of in a look is

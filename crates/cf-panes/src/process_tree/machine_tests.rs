@@ -565,3 +565,17 @@ fn a_tree_that_kept_changing_while_it_was_read_is_told_apart_from_one_another_us
         "no process of another user's"
     );
 }
+
+#[test]
+fn a_process_that_changed_while_a_look_read_it_is_looked_at_again_and_is_no_other_users() {
+    // Astraeus on eb9f25ef: a child of ours that ended between a look's two reads of it was
+    // taken for another user's.
+    let readable = Machine::new(a_window_among_strangers());
+    let table = readable.processes().expect("the table");
+    let tree = tree_of(&table);
+    let changed = Machine::new(a_window_among_strangers()).with_changed(SHELL, 4_000_096);
+    assert!(matches!(
+        tree.readable_members_by(&changed).expect("a look"),
+        Readable::All(_)
+    ));
+}

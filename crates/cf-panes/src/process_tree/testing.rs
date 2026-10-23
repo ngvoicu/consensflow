@@ -114,6 +114,9 @@ pub(super) struct Machine {
     /// Processes born after its table was read, named by their parent once: the next look
     /// finds them in it.
     born: RefCell<Vec<(i32, i32)>>,
+    /// Processes of ours that changed while a look read them, named by their parent once:
+    /// the next look does not find them.
+    changed: RefCell<Vec<(i32, i32)>>,
     /// A process that starts a child at every listing of its children, none of which a
     /// later table has: a tree that changes at every look. Its number, and how many it
     /// started.
@@ -129,6 +132,7 @@ impl Machine {
             unreadable: Vec::new(),
             zombies: Vec::new(),
             born: RefCell::default(),
+            changed: RefCell::default(),
             churning: None,
             sent: RefCell::default(),
             sent_to_groups: RefCell::default(),
@@ -150,6 +154,13 @@ impl Machine {
     /// The machine, with a process `pid` that `parent` started while a look read its table.
     pub fn with_born(self, parent: i32, pid: i32) -> Self {
         self.born.borrow_mut().push((parent, pid));
+        self
+    }
+
+    /// The machine, with a process `pid` that `parent` started and that changed while a look
+    /// read it (it ended between the look's two reads of it).
+    pub fn with_changed(self, parent: i32, pid: i32) -> Self {
+        self.changed.borrow_mut().push((parent, pid));
         self
     }
 
@@ -227,6 +238,7 @@ impl System for Machine {
                     .iter()
                     .chain(&self.zombies)
                     .chain(self.born.borrow().iter())
+                    .chain(self.changed.borrow().iter())
                     .filter(|(parent, _)| *parent == pid)
                     .map(|(_, child)| *child),
             )
@@ -240,6 +252,14 @@ impl System for Machine {
     }
 
     fn looked(&self, pid: i32) -> Looked {
+        {
+            let mut changed = self.changed.borrow_mut();
+            let before = changed.len();
+            changed.retain(|(_, child)| *child != pid);
+            if changed.len() < before {
+                return Looked::Changed;
+            }
+        }
         let born = {
             let mut born = self.born.borrow_mut();
             let before = born.len();

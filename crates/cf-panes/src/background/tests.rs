@@ -658,9 +658,9 @@ fn clock_from(opened: i64, seconds: i64, off: impl Fn(i64) -> i64) -> PaneClock 
         awake: 1_000_000 + t,
         continuous: 3_000_000 + t,
     };
-    let mut clock = PaneClock::new(reading(0));
+    let mut clock = PaneClock::new(Some(reading(0)));
     for tick in 1..=seconds * 10 {
-        clock.observe(reading(tick * 100_000));
+        clock.observe(Some(reading(tick * 100_000)));
     }
     clock
 }

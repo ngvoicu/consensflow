@@ -65,8 +65,9 @@
 //!   nothing counts it; at the first message's expiry, a look that leaves out what began
 //!   before the monitor's call, less the margin, finds no command (T-301: what the engine
 //!   asks where no rest proves a monitor)
-//! - `call-margin` each of the thirteen monitors' commands began no earlier than its own
-//!   call less the margin, and the run says how long after it, monitor by monitor
+//! - `call-margin` each of the thirteen monitors' commands, bound to its own call by a marker
+//!   its command holds (`: cf-mark-…;`, or a `sleep` of its own length), began no earlier
+//!   than that call less the margin, and the run says how long after it, monitor by monitor
 //!
 //! Every look at the window's commands but the first message's plain count leaves out what
 //! began before the first monitor's call, less the margin, as the engine's do in a worker's
@@ -133,7 +134,7 @@ const RUN_OVER: &str = "RUN-OVER";
 
 /// What the agent is asked first: T-442's shape, with a monitor that expires within the
 /// run.
-const ARM: &str = "Do exactly this, using your tools. 1) Use the Bash tool with run_in_background set to true to run: for i in 1 2 3; do echo tick $i; sleep 5; done; echo finished . 2) Use ToolSearch to load the Monitor tool (select:Monitor), then use Monitor to watch that run: its command is tail -f on the background command's output file piped through grep --line-buffered tick, with timeout_ms 40000 and description 'ticks'. 3) End your turn at once, saying only WAITING. Then, each time a notification wakes you: if it is a monitor event with a tick line, reply only NOTED; if it says the background command completed, reply only REPORT-READY; if it says the monitor expired, reply only ALL-DONE.";
+const ARM: &str = "Do exactly this, using your tools. 1) Use the Bash tool with run_in_background set to true to run: for i in 1 2 3; do echo tick $i; sleep 5; done; echo finished . 2) Use ToolSearch to load the Monitor tool (select:Monitor), then use Monitor to watch that run: its command is : cf-mark-ticks; then tail -f on the background command's output file piped through grep --line-buffered tick, with timeout_ms 40000 and description 'ticks'. 3) End your turn at once, saying only WAITING. Then, each time a notification wakes you: if it is a monitor event with a tick line, reply only NOTED; if it says the background command completed, reply only REPORT-READY; if it says the monitor expired, reply only ALL-DONE.";
 
 /// Claude's `hooks` setting of the window: a PostToolUse command hook on every tool, which
 /// prints an empty answer, as an owner's hook of any kind runs (Calliope on c593fd49).
@@ -151,17 +152,17 @@ const STOP: &str = "Do exactly this, using your tools. 1) Use the Bash tool with
 
 /// What it is asked third: T-442's own shape, a monitor that watches the run itself and is
 /// over when the run's command exits, which Claude Code says by the monitor's status.
-const EXITS: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: for i in 1 2 3; do echo tick $i; sleep 2; done , with timeout_ms 120000 and description 'run'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor or its command completed or ended, reply only RUN-OVER; otherwise reply only NOTED.";
+const EXITS: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: : cf-mark-run; for i in 1 2 3; do echo tick $i; sleep 2; done , with timeout_ms 120000 and description 'run'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor or its command completed or ended, reply only RUN-OVER; otherwise reply only NOTED.";
 
 /// What it is asked fourth: ten monitors of no output whose time runs out, five of them on a
 /// command that `exec`s, so that the run measures when Claude Code's notices of their
 /// expiry come and when their commands are gone.
-const TEN: &str = "Do exactly this, using your tools. 1) Use Monitor five times, one after another, each to watch the command: exec sleep 600 , with timeout_ms 20000, and the descriptions exp-1, exp-2, exp-3, exp-4 and exp-5. 2) Use Monitor five times more, each to watch the command: sleep 600 , with timeout_ms 20000, and the descriptions exp-6, exp-7, exp-8, exp-9 and exp-10. 3) End your turn at once, saying only ARMED. Then, each time a notification wakes you, reply only NOTED.";
+const TEN: &str = "Do exactly this, using your tools. 1) Use Monitor five times, one after another, each with timeout_ms 20000: description exp-1 watching the command exec sleep 601 , exp-2 watching exec sleep 602 , exp-3 watching exec sleep 603 , exp-4 watching exec sleep 604 , and exp-5 watching exec sleep 605 . 2) Use Monitor five times more, each with timeout_ms 20000: description exp-6 watching the command sleep 606 , exp-7 watching sleep 607 , exp-8 watching sleep 608 , exp-9 watching sleep 609 , and exp-10 watching sleep 610 . 3) End your turn at once, saying only ARMED. Then, each time a notification wakes you, reply only NOTED.";
 
 /// What it is asked last: a monitor on a command that writes more than Claude Code lets
 /// through (2.1.306: ten events, then one each two seconds), which it stops after half a
 /// minute of holding events back, with its own notice and no status (`FIn` of its bundle).
-const NOISY: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: while true; do echo tick; sleep 0.1; done , with timeout_ms 300000 and description 'noisy'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor stopped, reply only QUIETED; otherwise reply only NOTED.";
+const NOISY: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: : cf-mark-noisy; while true; do echo tick; sleep 0.1; done , with timeout_ms 300000 and description 'noisy'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor stopped, reply only QUIETED; otherwise reply only NOTED.";
 
 /// How long the agent has for the whole of the first message's work (the command runs
 /// for 15 seconds and the monitor expires after 40), and for the second's; how often the
@@ -173,13 +174,23 @@ const LOOK: Duration = Duration::from_millis(500);
 /// it (`cf-engine`'s `turn_end::CALL_MARGIN_MS`).
 const CALL_MARGIN_MS: i64 = 1_000;
 
-/// The monitors' commands whose starts the run reads against their calls: what each
-/// command line holds, and how the descriptions of its message's monitors begin.
-const MEASURED: [(&str, &str); 4] = [
-    ("tail -f", "ticks"),
-    ("sleep 2;", "run"),
-    ("sleep 600", "exp-"),
-    ("sleep 0.1", "noisy"),
+/// The monitors' commands whose starts the run reads against their calls: the marker each
+/// command holds, which its call's input and its process's command line both hold, and no
+/// other's (Astraeus on eb9f25ef: a start is bound to its own call, not to a place).
+const MEASURED: [&str; 13] = [
+    "cf-mark-ticks",
+    "cf-mark-run",
+    "sleep 601",
+    "sleep 602",
+    "sleep 603",
+    "sleep 604",
+    "sleep 605",
+    "sleep 606",
+    "sleep 607",
+    "sleep 608",
+    "sleep 609",
+    "sleep 610",
+    "cf-mark-noisy",
 ];
 
 /// One look at the window: its record as the daemon reads it, the last words of its
@@ -384,39 +395,37 @@ fn calls(raw: &[Value]) -> Vec<(String, String, i64)> {
         .collect()
 }
 
-/// Each monitor whose description begins with `called`, by its description, and how long
-/// after its own call its command began, in milliseconds: the calls in the order they were
-/// made, and the commands `starts` holds whose command line holds `command` in the order
-/// they began, paired one to one (Astraeus on 02a6cd4f: not the earliest of each). None for
-/// a call no command was seen for.
-fn began_after_each_call(
-    raw: &[Value],
-    starts: &Starts,
-    command: &str,
-    called: &str,
-) -> Vec<(String, Option<i64>)> {
-    let mut made: Vec<(i64, String)> = calls(raw)
-        .into_iter()
-        .filter(|(_, description, _)| description.starts_with(called))
-        .map(|(_, description, at)| (at, description))
-        .collect();
-    made.sort();
-    let mut began: Vec<u64> = starts
-        .values()
-        .filter(|(line, _)| line.contains(command))
-        .map(|(_, began)| *began)
-        .collect();
-    began.sort_unstable();
-    made.into_iter()
-        .enumerate()
-        .map(|(at, (call, description))| {
-            let after = began
-                .get(at)
-                .and_then(|began| i64::try_from(began / 1_000).ok())
-                .map(|began| began - call);
-            (description, after)
+/// How long after its own call the command that holds `marker` began, in milliseconds: the
+/// one Monitor call of `raw` whose command holds it, and the first of the commands `starts`
+/// holds whose command line holds it. None where no call, or more than one, or no command
+/// holds it.
+fn began_after_its_call(raw: &[Value], starts: &Starts, marker: &str) -> Option<i64> {
+    let called: Vec<i64> = raw
+        .iter()
+        .flat_map(|record| {
+            let at = written_at(record);
+            record["message"]["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|part| part["type"] == "tool_use" && part["name"] == "Monitor")
+                .filter(|part| {
+                    part["input"]["command"]
+                        .as_str()
+                        .is_some_and(|command| command.contains(marker))
+                })
+                .filter_map(move |_| at)
         })
-        .collect()
+        .collect();
+    let [call] = called.as_slice() else {
+        return None;
+    };
+    let began = starts
+        .values()
+        .filter(|(line, _)| line.contains(marker))
+        .map(|(_, began)| *began)
+        .min()?;
+    Some(i64::try_from(began / 1_000).ok()? - call)
 }
 
 /// Every expiry of a monitor that `raw` holds the call, the start and the notice of.
@@ -1004,9 +1013,9 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         "a monitor Claude Code stopped for too much output, with a notice no status or time tells from its command's output, stays counted, and noticed: what runs in the window decides",
     ));
     // When each monitor's command began, against its own call.
-    let began: Vec<(String, Option<i64>)> = MEASURED
+    let began: Vec<(&str, Option<i64>)> = MEASURED
         .iter()
-        .flat_map(|(command, called)| began_after_each_call(&raw, &starts, command, called))
+        .map(|marker| (*marker, began_after_its_call(&raw, &starts, marker)))
         .collect();
     log.block(
         "each monitor's command, against its own call (ms after it)",
@@ -1027,11 +1036,10 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     checks.push(Check::new(
         "claude",
         "call-margin",
-        began.len() >= 13
-            && began
-                .iter()
-                .all(|(_, after)| after.is_some_and(|after| after >= -CALL_MARGIN_MS)),
-        "each of the thirteen monitors' commands began no earlier than its own call, less the margin",
+        began
+            .iter()
+            .all(|(_, after)| after.is_some_and(|after| after >= -CALL_MARGIN_MS)),
+        "each of the thirteen monitors' commands, bound to its call by its marker, began no earlier than its own call, less the margin",
     ));
     if let Some(file) = live::option("fixture") {
         let lines = fixture(&raw, &session, &folders(&window));
@@ -1211,29 +1219,24 @@ fn a_look_leaves_out_what_began_before_the_first_call_less_the_margin_and_a_star
     ]
     .into_iter()
     .collect();
-    assert_eq!(
-        began_after_each_call(&raw, &starts, "tail -f", "ticks"),
-        [("ticks".to_owned(), Some(35))]
-    );
-    assert_eq!(
-        began_after_each_call(&raw, &starts, "sleep 600", "ticks"),
-        [("ticks".to_owned(), None)]
-    );
-    assert_eq!(began_after_each_call(&raw, &starts, "tail -f", "exp-"), []);
+    assert_eq!(began_after_its_call(&raw, &starts, "tail -f"), Some(35));
+    assert_eq!(began_after_its_call(&raw, &starts, "sleep 601"), None);
 }
 
 #[test]
 fn each_monitors_command_is_measured_against_its_own_call() {
-    // Astraeus on 02a6cd4f: A's command began 10 ms after A's call, B's 2 s before B's own;
-    // the earliest of the starts against the earliest of the calls read +10 ms.
-    let call = |id: &str, description: &str, at: &str| {
+    // Astraeus on 02a6cd4f, and on eb9f25ef: A's call is stamped 0 s and A begins at 5.010 s;
+    // B's call is stamped 5.030 s, and after the clock is set back B begins at 3.020 s, 2,010
+    // ms before its own call. The earliest of each read +10 ms; sorted and paired by place,
+    // A read +3,020 ms and B -20 ms. Each is bound to its own call by its marker.
+    let call = |id: &str, command: &str, at: &str| {
         json!({ "type": "assistant", "timestamp": at, "message": { "content": [
-            { "type": "tool_use", "id": id, "name": "Monitor", "input": { "description": description } }
+            { "type": "tool_use", "id": id, "name": "Monitor", "input": { "command": command, "description": id } }
         ] } })
     };
     let raw = [
-        call("a", "exp-1", "2026-10-23T12:00:00.000Z"),
-        call("b", "exp-2", "2026-10-23T12:00:05.000Z"),
+        call("a", "exec sleep 601", "2026-10-23T12:00:00.000Z"),
+        call("b", "exec sleep 602", "2026-10-23T12:00:05.030Z"),
     ];
     let at = |text: &str| written_at(&json!({ "timestamp": text })).unwrap();
     let micros = |ms: i64| u64::try_from(ms).unwrap() * 1_000;
@@ -1241,32 +1244,31 @@ fn each_monitors_command_is_measured_against_its_own_call() {
         (
             41,
             (
-                "sleep 600".to_owned(),
-                micros(at("2026-10-23T12:00:00.010Z")),
+                "sleep 601".to_owned(),
+                micros(at("2026-10-23T12:00:05.010Z")),
             ),
         ),
         (
             42,
             (
-                "sleep 600".to_owned(),
-                micros(at("2026-10-23T12:00:03.000Z")),
+                "sleep 602".to_owned(),
+                micros(at("2026-10-23T12:00:03.020Z")),
             ),
         ),
     ]
     .into_iter()
     .collect();
     assert_eq!(
-        began_after_each_call(&raw, &starts, "sleep 600", "exp-"),
-        [
-            ("exp-1".to_owned(), Some(10)),
-            ("exp-2".to_owned(), Some(-2_000))
-        ],
-        "B began before its call"
+        began_after_its_call(&raw, &starts, "sleep 601"),
+        Some(5_010)
     );
-    // A call no command was seen for.
-    let one: Starts = starts.into_iter().take(1).collect();
     assert_eq!(
-        began_after_each_call(&raw, &one, "sleep 600", "exp-"),
-        [("exp-1".to_owned(), Some(10)), ("exp-2".to_owned(), None)]
+        began_after_its_call(&raw, &starts, "sleep 602"),
+        Some(-2_010),
+        "B began before its own call"
     );
+    // A command no process was seen for, and a marker two calls hold.
+    let one: Starts = starts.into_iter().take(1).collect();
+    assert_eq!(began_after_its_call(&raw, &one, "sleep 602"), None);
+    assert_eq!(began_after_its_call(&raw, &one, "sleep 60"), None);
 }

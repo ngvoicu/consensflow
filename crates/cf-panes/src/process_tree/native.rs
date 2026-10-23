@@ -189,9 +189,8 @@ pub(super) fn processes() -> io::Result<Vec<Process>> {
     Err(io::Error::other("could not snapshot pane processes"))
 }
 
-/// What the system says of the process `pid` now: one of ours that runs and a look reads
-/// ([`process`]), one that ended (`proc_pidinfo` answers ESRCH for a zombie as for none of
-/// that number: probed on Darwin 27), or one it will not say (another user's).
+/// What the system says of the process `pid` now ([`looked_of`]): `proc_pidinfo` answers
+/// ESRCH for a zombie as for none of that number (probed on Darwin 27).
 pub(super) fn looked(pid: i32) -> Looked {
     // SAFETY: proc_pidinfo writes a fixed-size native struct into this buffer.
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
@@ -207,16 +206,58 @@ pub(super) fn looked(pid: i32) -> Looked {
             size as i32,
         )
     };
-    if read != size as i32 {
-        return match io::Error::last_os_error().raw_os_error() {
-            Some(libc::ESRCH) => Looked::Ended,
-            _ => Looked::Unreadable,
-        };
-    }
-    if process(pid).is_some() {
-        Looked::Readable
+    let owner = if read == size as i32 {
+        Ok(info.pbi_uid)
     } else {
-        Looked::Unreadable
+        Err(io::Error::last_os_error().raw_os_error())
+    };
+    // SAFETY: getuid takes no arguments, reads no memory of ours and cannot fail.
+    let mine = unsafe { libc::getuid() };
+    looked_of(owner, mine, || process(pid).is_some(), || gone(pid))
+}
+
+/// Whether no process has the number `pid` now, or one that ended (`proc_pidinfo` answers
+/// ESRCH).
+fn gone(pid: i32) -> bool {
+    // SAFETY: proc_pidinfo writes a fixed-size native struct into this buffer.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of_val(&info);
+    // SAFETY: the buffer is `info`, writable for the `size` bytes passed with it, and
+    // proc_pidinfo writes no more than that.
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&mut info as *mut libc::proc_bsdinfo).cast(),
+            size as i32,
+        )
+    };
+    read != size as i32 && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+
+/// What the reads of a process say of it: its owner as its first read says (`owner`, or the
+/// error that read failed with), the user this host runs as (`mine`), whether a whole read
+/// of it then reads one of ours (`read`), and whether it is gone after (`gone`). It is
+/// another user's only where its owner says so, or the system refuses to read it to us
+/// (EPERM, which it answers for a process not ours, as launchd: probed on Darwin 27; ours
+/// it always reads) (Astraeus on eb9f25ef); one that ended is ended; one of ours a whole
+/// read did not read, or whose read failed otherwise, changed while it was read, and is
+/// looked at again.
+pub(super) fn looked_of(
+    owner: Result<u32, Option<i32>>,
+    mine: u32,
+    read: impl FnOnce() -> bool,
+    gone: impl FnOnce() -> bool,
+) -> Looked {
+    match owner {
+        Err(Some(libc::ESRCH)) => Looked::Ended,
+        Err(Some(libc::EPERM)) => Looked::Unreadable,
+        Err(_) => Looked::Changed,
+        Ok(owner) if owner != mine => Looked::Unreadable,
+        Ok(_) if read() => Looked::Readable,
+        Ok(_) if gone() => Looked::Ended,
+        Ok(_) => Looked::Changed,
     }
 }
 
@@ -366,9 +407,9 @@ fn micros(ticks: u64) -> i64 {
         .unwrap_or(i64::MAX)
 }
 
-/// The clocks now (`background::clock::Reading`), each in microseconds: the wall clock read
-/// between two reads of the awake and continuous ones, which each stand at the middle.
-pub(crate) fn clocks() -> crate::background::Reading {
+/// The clocks now (`background::clock::Read`), each in microseconds: the wall clock read
+/// between two reads of the awake and continuous ones.
+pub(crate) fn clocks() -> crate::background::Read {
     // SAFETY: the mach clocks take no arguments and touch no memory of ours.
     let (awake, continuous) = unsafe { (mach_absolute_time(), mach_continuous_time()) };
     let mut now = libc::timespec {
@@ -379,10 +420,10 @@ pub(crate) fn clocks() -> crate::background::Reading {
     unsafe { libc::clock_gettime(libc::CLOCK_REALTIME, &mut now) };
     // SAFETY: as above.
     let (awake_after, continuous_after) = unsafe { (mach_absolute_time(), mach_continuous_time()) };
-    crate::background::Reading {
+    crate::background::Read {
         wall: now.tv_sec * 1_000_000 + now.tv_nsec / 1_000,
-        awake: micros(awake / 2 + awake_after / 2),
-        continuous: micros(continuous / 2 + continuous_after / 2),
+        awake: (micros(awake), micros(awake_after)),
+        continuous: (micros(continuous), micros(continuous_after)),
     }
 }
 
