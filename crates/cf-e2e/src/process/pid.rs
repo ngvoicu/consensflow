@@ -13,8 +13,8 @@ use std::io;
 
 use super::Run;
 
-/// A signal a case sends. Windows has no `Interrupt`, and its `Terminate` is a
-/// kill.
+/// A signal a case sends. Windows has no `Interrupt`, `Stop` or `Continue`, and
+/// its `Terminate` is a kill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
     /// SIGTERM: the polite end, which a window's supervisor answers by ending
@@ -24,6 +24,11 @@ pub enum Signal {
     Interrupt,
     /// SIGKILL: the end nothing answers to.
     Kill,
+    /// SIGSTOP: the program is stopped where it is, and runs no more until it is
+    /// continued. What is sent to it meanwhile waits in its pipes.
+    Stop,
+    /// SIGCONT: a program that was stopped goes on.
+    Continue,
 }
 
 /// Sends `signal` to the process `pid`.
@@ -35,8 +40,24 @@ pub fn signal(pid: u32, signal: Signal) -> io::Result<()> {
         Signal::Terminate => Sent::SIGTERM,
         Signal::Interrupt => Sent::SIGINT,
         Signal::Kill => Sent::SIGKILL,
+        Signal::Stop => Sent::SIGSTOP,
+        Signal::Continue => Sent::SIGCONT,
     };
     kill(as_pid(pid)?, sent).map_err(io::Error::from)
+}
+
+/// Stops the process `pid` where it is and lets it go on after `span`: what a machine
+/// too loaded to run it does for a moment. A request made of it meanwhile is answered
+/// when it goes on, as late as the stop was long. It is stopped when this returns.
+#[cfg(unix)]
+pub fn stall(pid: u32, span: std::time::Duration) -> io::Result<()> {
+    signal(pid, Signal::Stop)?;
+    std::thread::spawn(move || {
+        std::thread::sleep(span);
+        // A process that is gone by then is the end of its case, not a failure of this.
+        let _ = signal(pid, Signal::Continue);
+    });
+    Ok(())
 }
 
 /// Whether the process `pid` is there to be signalled: the answer of `kill`
@@ -87,10 +108,10 @@ fn as_pid(pid: u32) -> io::Result<nix::unistd::Pid> {
 /// is what ends a process there.
 #[cfg(windows)]
 pub fn signal(pid: u32, signal: Signal) -> io::Result<()> {
-    if signal == Signal::Interrupt {
+    if matches!(signal, Signal::Interrupt | Signal::Stop | Signal::Continue) {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
-            "Windows has no SIGINT to send",
+            format!("Windows has no {signal:?} to send"),
         ));
     }
     let ran = Run::new("taskkill")
