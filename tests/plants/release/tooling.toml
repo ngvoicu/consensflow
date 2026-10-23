@@ -2539,8 +2539,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/job.rs"
-find = "    command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);"
-replace = "    command.creation_flags(CREATE_NO_WINDOW | (CREATE_SUSPENDED & 0));"
+find = "        CREATE_NO_WINDOW | CREATE_SUSPENDED\n    } else {"
+replace = "        CREATE_NO_WINDOW | (CREATE_SUSPENDED & 0)\n    } else {"
 
 [[plant]]
 name = "tooling (cf-process): a program held whole is never let run"
@@ -3069,3 +3069,97 @@ platforms = ["windows"]
 file = "crates/cf-process/src/job.rs"
 find = "    let mut limits = JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;"
 replace = "    let mut limits = JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;"
+
+# T-404: the programs the Codex window's supervisor starts are started through `start_owned`, which on
+# Windows puts each in a job of its own (the TUI keeps the console of its window, and a program that
+# asks to break away may). Ending one ends the job, everything it started with it; ending by its id
+# alone (`taskkill /T`) leaves what it started as it is ended (zeewin, T-322) and what lost its parent.
+# The rig plants for these are in `tests/plants/cli/rig.toml`.
+
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program is ended with a walk of its tree, not its job"
+meant = "an_owned_program_that_is_starting_programs_is_ended_with_everything_it_started"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "            end(pid, how, Reach::Process, true, &self.job);"
+replace = "            end(pid, how, Reach::Process, true, &Job::unheld());"
+
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program runs outside the job it was made"
+meant = "an_owned_program_that_is_starting_programs_is_ended_with_everything_it_started"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "            if AssignProcessToJobObject(made, handle as _) == 0 {\n                return Err(failed(\"could not be put in a job of its own\"));\n            }"
+replace = "            let _ = (AssignProcessToJobObject as usize, handle);"
+
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program that ended of itself has what it left ended with its job, when it was waited for"
+meant = "a_program_that_exits_of_itself_leaves_what_it_started_running"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "        let status = self.child.wait().await?;\n        self.job.release();"
+replace = "        let status = self.child.wait().await?;"
+
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program that ended of itself has what it left ended with its job, when it was looked at"
+meant = "a_program_that_exits_of_itself_leaves_what_it_started_running"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "        if status.is_some() {\n            self.job.release();\n        }"
+replace = ""
+
+[[plant]]
+name = "tooling (cf-process): an owned program is forced to end when it is asked to"
+meant = "an_owned_program_is_ended_with_the_signal_asked_for_and_never_once_waited_for"
+runs = ["cf-process-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "            end(pid, how, Reach::Process, true, &self.job);"
+replace = "            end(pid, Ending::Forced, Reach::Process, true, &self.job);"
+
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program is given the hidden window of a program that has no console"
+meant = "a_program_given_its_callers_console_is_started_suspended_and_with_its_window"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "    } else {\n        CREATE_SUSPENDED\n    }"
+replace = "    } else {\n        CREATE_NO_WINDOW | CREATE_SUSPENDED\n    }"
+
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program is let run before it is put in its job"
+meant = "an_owned_program_that_is_starting_programs_is_ended_with_everything_it_started"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "    job::start_suspended(command);\n"
+replace = ""
+
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program is refused the breakaway it asks for"
+meant = "an_owned_program_that_asks_to_break_away_may_and_the_one_that_does_not_ask_is_ended_with_its_job"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "    match Job::of(&child, false) {"
+replace = "    match Job::of(&child, true) {"

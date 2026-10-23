@@ -38,6 +38,23 @@ fn a_task_done_with_the_command_listed_gone_and_the_chief_told_it_was_ended_pass
     );
 }
 
+/// Found by T-404's live runs of Codex on zeewin (`cargo xtask live finish codex`: 4 of 12 runs of
+/// this branch, 3 of 11 of c117716d). Codex runs a command in a PowerShell whose command line holds
+/// the command's text and which ends in 0.7 s, so a look of the host (every 1.5 s) finds it about
+/// one run in three. It is the turn's own work, ended by itself before the turn is, and the command
+/// it ran is gone with it: the host had nothing to end, and the chief nothing to be told.
+#[test]
+#[ignore = "known failure (issues/live-finish-asks-a-note-of-a-process-that-ended-in-the-turn.md): a process the host listed at one look and that ended of itself before the turn did, with nothing escaped, is judged work the host left and did not report"]
+fn a_command_the_host_listed_once_that_ended_before_the_turn_did_needs_no_note() {
+    let mut left = good();
+    left.listed = vec![proc(
+        48468,
+        r#""C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ping -n 4711 127.0.0.1 }""#,
+    )];
+    left.notes.clear();
+    assert_eq!(judge(&left), Ok(()));
+}
+
 #[test]
 fn a_command_the_harness_ended_with_its_tool_call_leaves_nothing_to_end_and_passes() {
     let mut left = good();

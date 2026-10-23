@@ -27,9 +27,10 @@ pub(crate) enum Reach {
 /// on Unix with the signal `how` names; on Windows, which has no signals,
 /// with its whole tree killed (`taskkill /T /F`) whatever `how` asks. On
 /// Windows the call returns once `taskkill` has. A process started through
-/// this crate is ended by its owner (`Child::terminate`, `Ender::force`), which
-/// holds the job it runs in: `taskkill` ends what it has read of a tree, and
-/// leaves what the tree starts meanwhile (zeewin, T-322).
+/// this crate is ended by its owner (`Child::terminate`, `Ender::force`,
+/// `Owned::end`), which holds the job it runs in: `taskkill` ends what it has
+/// read of a tree, and leaves what the tree starts meanwhile (zeewin, T-322)
+/// and what has lost its parent.
 pub fn terminate(pid: u32, how: Ending) {
     end(pid, how, Reach::Process, true, &Job::unheld());
 }
@@ -199,44 +200,5 @@ mod tests {
         // `taskkill` goes on without anyone waiting for it: the child ends.
         assert!(child.wait().is_ok());
         assert!(started.elapsed() < Duration::from_secs(20));
-    }
-
-    /// The shape of the Codex supervisor's ends (`cf-codex-session`): a child it started itself, with
-    /// `kill_on_drop`, ended by its pid alone. No job holds it, so `taskkill /T` reads the tree and
-    /// ends what it read, and what the program starts while it walks lives on (zeewin, T-322: 21 to 50
-    /// of a loop's programs outlived every stop). The fix is the child's job, which the supervisor does
-    /// not have until it starts its children through this crate.
-    #[test]
-    #[ignore = "known failure (T-353): a process ended by its pid alone, as the Codex supervisor ends its children, loses what it starts while taskkill walks its tree"]
-    #[allow(clippy::disallowed_methods)] // The test starts what it ends.
-    fn a_process_ended_by_its_pid_alone_takes_what_it_starts_meanwhile_with_it() {
-        use crate::testing::{keeps_starting_programs, left_running, pids_so_far, Recorded};
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("pids");
-        let _left = Recorded(&file);
-        let run = keeps_starting_programs(dir.path());
-        let mut child = tokio::process::Command::from(run.command())
-            .kill_on_drop(true)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .unwrap();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let left = runtime.block_on(async {
-            while pids_so_far(&file).len() < 4 {
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-            terminate(child.id().unwrap(), Ending::Forced);
-            let _ = child.wait().await;
-            left_running(&file, Duration::from_secs(5)).await
-        });
-        assert!(
-            left.is_empty(),
-            "{} processes it started are still running: {left:?}",
-            left.len()
-        );
     }
 }

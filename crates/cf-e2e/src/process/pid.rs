@@ -114,6 +114,59 @@ pub fn is_alive(pid: u32) -> bool {
         .is_ok_and(|ran| ran.stdout.contains(&format!("\"{pid}\"")))
 }
 
+/// The ones of `pids` that are there.
+#[cfg(unix)]
+pub fn alive_among(pids: &[u32]) -> Vec<u32> {
+    pids.iter().copied().filter(|&pid| is_alive(pid)).collect()
+}
+
+/// The ones of `pids` that are there, by one look at the system's processes rather than
+/// one for each (`tasklist` says a process's id second in each line, in quotes). All of
+/// them where the system will not say: a case that asks for what is gone must not take
+/// silence for it.
+#[cfg(windows)]
+pub fn alive_among(pids: &[u32]) -> Vec<u32> {
+    let Ok(ran) = Run::new("tasklist").args(["/NH", "/FO", "CSV"]).run() else {
+        return pids.to_vec();
+    };
+    let there: std::collections::HashSet<u32> = ran
+        .stdout
+        .lines()
+        .filter_map(|line| line.split("\",\"").nth(1)?.parse().ok())
+        .collect();
+    // The system's idle process is always listed: a list without it was not read.
+    if !there.contains(&0) {
+        return pids.to_vec();
+    }
+    pids.iter()
+        .copied()
+        .filter(|pid| there.contains(pid))
+        .collect()
+}
+
+/// Ends every one of `pids` that is there, each by itself and none of what it started:
+/// a case's guard against what it started and a failed case would leave running.
+#[cfg(unix)]
+pub fn end_all(pids: &[u32]) {
+    for &pid in pids {
+        let _ = signal(pid, Signal::Kill);
+    }
+}
+
+/// Ends every one of `pids` that is there, each by itself and none of what it started,
+/// by one `taskkill`.
+#[cfg(windows)]
+pub fn end_all(pids: &[u32]) {
+    if pids.is_empty() {
+        return;
+    }
+    let mut taskkill = Run::new("taskkill").arg("/F");
+    for pid in pids {
+        taskkill = taskkill.args(["/PID", &pid.to_string()]);
+    }
+    let _ = taskkill.run();
+}
+
 /// How long the PowerShell that says when a process began is given: well past what
 /// it takes on a loaded runner.
 #[cfg(windows)]

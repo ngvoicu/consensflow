@@ -1,7 +1,9 @@
 //! What a child on Windows is given that libuv gave it (`src/win/process.c`): the variables
 //! its environment lacks, taken from this process's. And its job: every program this process
 //! starts runs in a job of its own, made before it runs (it is started suspended, put in the
-//! job, and let run), so that nothing it starts, however soon, is outside it.
+//! job, and let run), so that nothing it starts, however soon, is outside it. A program the
+//! caller starts with a command of its own (`start_owned`: the Codex window's TUI, which is given
+//! the console of its window) is started suspended alone, and keeps that console.
 //!
 //! Ending the job ends every process in it at once, those a program starts as it is ended
 //! among them. `taskkill /T` does not: it reads the tree and ends what it read, and what the
@@ -64,18 +66,43 @@ pub fn with_required(env: &Env, this: &Env) -> Env {
     )
 }
 
+/// The creation flags of a program that is put in its job before it runs: suspended, and
+/// `hidden`, with no window. A program given the console its caller runs in is not hidden:
+/// `CREATE_NO_WINDOW` takes the console from it ("the console handle for the application
+/// is not set").
+#[cfg(windows)]
+fn creation_flags(hidden: bool) -> u32 {
+    use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+    if hidden {
+        CREATE_NO_WINDOW | CREATE_SUSPENDED
+    } else {
+        CREATE_SUSPENDED
+    }
+}
+
 /// Starts `command` suspended on Windows, its window hidden, so that the program is put in
 /// its job before it runs (`Job::of` lets it run). Its creation flags are these alone.
 /// Elsewhere nothing: the group the program leads holds what it starts.
 #[cfg(windows)]
 pub(crate) fn start_in_job(command: &mut tokio::process::Command) {
-    use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
-    command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+    command.creation_flags(creation_flags(true));
+}
+
+/// Starts `command` suspended on Windows, its console and its window left to it (`Owned`'s:
+/// a program the caller gives its own terminal). Its creation flags are `CREATE_SUSPENDED`
+/// alone. Elsewhere nothing.
+#[cfg(windows)]
+pub(crate) fn start_suspended(command: &mut tokio::process::Command) {
+    command.creation_flags(creation_flags(false));
 }
 
 /// Starts `command` suspended on Windows. Elsewhere nothing.
 #[cfg(not(windows))]
 pub(crate) fn start_in_job(_command: &mut tokio::process::Command) {}
+
+/// Starts `command` suspended on Windows. Elsewhere nothing.
+#[cfg(not(windows))]
+pub(crate) fn start_suspended(_command: &mut tokio::process::Command) {}
 
 /// The job of a program this process started, and of every process it starts, which
 /// none of them can leave: on Windows, a job of its own, every process of which is
@@ -594,6 +621,14 @@ mod tests {
             assert_eq!(started.text("SYSTEMROOT"), None);
         }
         assert_eq!(started.text("OTHER"), None, "nothing else comes along");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_program_given_its_callers_console_is_started_suspended_and_with_its_window() {
+        use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+        assert_eq!(creation_flags(true), CREATE_NO_WINDOW | CREATE_SUSPENDED);
+        assert_eq!(creation_flags(false), CREATE_SUSPENDED);
     }
 
     #[test]

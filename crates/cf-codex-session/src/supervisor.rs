@@ -7,6 +7,11 @@
 //! (15 seconds at most). The broker connects to it, and the TUI to the broker
 //! with the launch's token in its environment, never on its command line. The
 //! window ends when the TUI does, and the exit code is the TUI's.
+//!
+//! Each program is started through cf-process's `start_owned`, which on Windows runs it in a job of
+//! its own: ending it ends everything it started, what it starts as it is ended included (its id
+//! alone, ended with `taskkill /T`, leaves those; zeewin, T-322). A program that ended of itself has
+//! its job released, and what it left is left.
 
 use std::cell::RefCell;
 use std::ffi::OsString;
@@ -20,10 +25,10 @@ use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
 use cf_board::door::{board_of, DOOR_WAIT};
-use cf_process::{runnable, terminate, Ending};
+use cf_process::{runnable, start_owned, Ending, Owned};
 use cf_proto::codex::{Bridge, InvalidBridge, BRIDGE_VARIABLE};
 use tokio::io::AsyncReadExt;
-use tokio::process::{Child, ChildStderr, Command};
+use tokio::process::{ChildStderr, Command};
 use tokio::task::JoinHandle;
 
 use crate::arguments::{self, consensflow_shell_environment, MissingValue, Split, BYPASS};
@@ -120,8 +125,8 @@ async fn supervise_with(env: &Env, args: &[OsString], setup: Setup) -> Result<i3
 /// The processes of one window, and its broker.
 #[derive(Default)]
 struct Session {
-    backend: Option<Child>,
-    tui: Option<Child>,
+    backend: Option<Owned>,
+    tui: Option<Owned>,
     broker: Option<Broker>,
 }
 
@@ -178,10 +183,9 @@ impl Session {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        let mut backend = command
-            .spawn()
+        let mut backend = start_owned(&mut command)
             .map_err(|cause| SessionError::Server(format!("{program}: {cause}")))?;
-        let stderr = backend.stderr.take();
+        let stderr = backend.take_stderr();
         self.backend = Some(backend);
         let tail = Rc::clone(tail);
         Ok(tokio::task::spawn_local(async move {
@@ -253,9 +257,8 @@ impl Session {
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
-        let tui = command
-            .spawn()
-            .map_err(|cause| SessionError::Tui { program, cause })?;
+        let tui =
+            start_owned(&mut command).map_err(|cause| SessionError::Tui { program, cause })?;
         self.tui = Some(tui);
         Ok(())
     }
@@ -304,7 +307,8 @@ fn remove_folder(folder: &Path) -> io::Result<()> {
 /// starts (what a failure to start names); or why it cannot start (a Codex
 /// that is an npm shim, with no Node to run it on). An OpenAI API key in this
 /// environment never reaches Codex, which has its own login; and a program
-/// still running when its handle is dropped is killed, not orphaned.
+/// still running when its handle is dropped is killed, not orphaned (and everything it started
+/// with it, on Windows).
 fn command(plan: &Plan<'_>, args: &[OsString]) -> Result<(Command, String), String> {
     let run = runnable(plan.executable, args, plan.env)?;
     let program = run.program.display().to_string();
@@ -314,14 +318,14 @@ fn command(plan: &Plan<'_>, args: &[OsString]) -> Result<(Command, String), Stri
 }
 
 /// Asks `child` to end, if it has not been waited for.
-fn end(child: Option<&Child>, how: Ending) {
-    if let Some(pid) = child.and_then(Child::id) {
-        terminate(pid, how);
+fn end(child: Option<&Owned>, how: Ending) {
+    if let Some(child) = child {
+        child.end(how);
     }
 }
 
 /// How `child` ended; never, when there is none.
-async fn exit_of(child: &mut Option<Child>) -> io::Result<ExitStatus> {
+async fn exit_of(child: &mut Option<Owned>) -> io::Result<ExitStatus> {
     match child {
         Some(child) => child.wait().await,
         None => pending().await,

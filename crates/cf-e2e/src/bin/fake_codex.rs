@@ -10,7 +10,8 @@
 //! rollout of it, as Codex's does: a thread has one only once it has had a turn.
 //! Each run writes what it was given, and what it saw, to `CF_TEST_CODEX_LOG`.
 //! `CF_TEST_CODEX_BACKEND` says how the server goes: `fail` at once, `die` once a
-//! thread starts; with `CF_TEST_CODEX_QUESTION` it asks its client a question when
+//! thread starts, `spawns` starts programs (`children`) for as long as it lives once a
+//! thread starts, `orphans` starts one whose parent has gone; with `CF_TEST_CODEX_QUESTION` it asks its client a question when
 //! a thread starts; while the file `CF_TEST_CODEX_RESUME_HANGS` names is there, it
 //! never answers a resume, and `CF_TEST_CODEX_RESUME_MS` answers one that many
 //! milliseconds late. `CF_TEST_CODEX_TUI=wait` has the TUI wait for its window to
@@ -34,6 +35,8 @@
 mod agent;
 #[path = "fake_codex/arguments.rs"]
 mod arguments;
+#[path = "fake_codex/children.rs"]
+mod children;
 #[path = "fake_codex/probes.rs"]
 mod probes;
 #[path = "fake_codex/servers.rs"]
@@ -69,6 +72,7 @@ fn main() -> ExitCode {
     match args.first().map(String::as_str) {
         Some(servers::SERVER) => servers::serve(&args[1..]),
         Some(servers::WORKER) => servers::work(&args[1..]),
+        Some(children::LAUNCHER) => children::launch(),
         Some("queue") => probes::queue_help(),
         _ if args.iter().any(|arg| arg == "app-server") => {
             if args.iter().any(|arg| arg == "--listen") {
@@ -132,6 +136,8 @@ fn server(args: &[String]) -> ExitCode {
     }
     let behavior = Behavior {
         die: how == "die",
+        spawns: how == "spawns",
+        orphans: how == "orphans",
         asks: own_var("CF_TEST_CODEX_QUESTION").is_some_and(|asks| !asks.is_empty()),
     };
     let agent = match Agent::start(developer_instructions(args)) {
@@ -150,6 +156,10 @@ fn server(args: &[String]) -> ExitCode {
 struct Behavior {
     /// It ends.
     die: bool,
+    /// It keeps starting programs.
+    spawns: bool,
+    /// It starts a program that has no parent left.
+    orphans: bool,
     /// It asks its client a question.
     asks: bool,
 }
@@ -248,6 +258,12 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &
         let start = request["method"] == "thread/start";
         if start {
             record(json!({ "run": "server", "started": request["params"] }));
+            if behavior.spawns {
+                children::keep_starting();
+            }
+            if behavior.orphans {
+                children::lose_a_parent();
+            }
         }
         if request["method"] == "thread/resume" && resume_hangs() {
             record(json!({ "run": "server", "unanswered": request["params"]["threadId"] }));

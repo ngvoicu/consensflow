@@ -139,3 +139,43 @@ builds = true
 file = "crates/cf-codex-session/src/supervisor.rs"
 find = "    match std::fs::remove_dir_all(folder) {"
 replace = "    match Ok::<(), io::Error>(()) {"
+
+# T-404: on Windows the window's supervisor ended the Codex server by its id alone (`taskkill /T`):
+# what the server started as it was ended lived on (zeewin, T-322), and what had lost its parent was
+# never found. The server and the TUI are programs of their own jobs now, and ending one ends the job.
+
+[[plant]]
+name = "rig (Windows: zeewin): a Codex window's server is ended with a walk of its tree, not its job, and loses what it starts as it is ended"
+meant = "ends_every_program_codexs_server_started_when_its_tui_ends_what_it_starts_as_it_is_ended_included"
+runs = ["rig-codex-session"]
+platforms = ["windows"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "            end(pid, how, Reach::Process, true, &self.job);"
+replace = "            end(pid, how, Reach::Process, true, &Job::unheld());"
+
+[[plant]]
+name = "rig (Windows: zeewin): a Codex window's server is ended with a walk of its tree, and loses what has lost its parent"
+meant = "ends_a_program_codexs_server_started_that_has_lost_its_parent_when_its_tui_ends"
+runs = ["rig-codex-session"]
+platforms = ["windows"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "            end(pid, how, Reach::Process, true, &self.job);"
+replace = "            end(pid, how, Reach::Process, true, &Job::unheld());"
+
+[[plant]]
+name = "rig (Windows: zeewin): a Codex window's server runs outside the job it was made"
+meant = "ends_a_program_codexs_server_started_that_has_lost_its_parent_when_its_tui_ends"
+runs = ["rig-codex-session"]
+platforms = ["windows"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "            if AssignProcessToJobObject(made, handle as _) == 0 {\n                return Err(failed(\"could not be put in a job of its own\"));\n            }"
+replace = "            let _ = (AssignProcessToJobObject as usize, handle);"
