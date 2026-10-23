@@ -256,9 +256,9 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
         leaving,
         [r#"function Exit-Run([int]$code) { Write-Output "`n== exit $code"; exit $code }"#]
     );
-    // And it is what the lock, the unpacking and the sweep leave by (the bootstrap), and
-    // a step and the command (the run script).
-    assert_eq!(boot.matches("Exit-Run ").count(), 3, "{boot}");
+    // And it is what the lock, a machine with no tar of its own, the unpacking and the
+    // sweep leave by (the bootstrap), and a step and the command (the run script).
+    assert_eq!(boot.matches("Exit-Run ").count(), 4, "{boot}");
     assert_eq!(run.matches("Exit-Run ").count(), 2, "{run}");
     assert!(
         boot.contains("if ($failed.Count) { Exit-Run 1 }\n"),
@@ -470,7 +470,7 @@ fn a_run_names_the_tarball_it_unpacks_by_its_own_name_and_no_other_name_goes_in_
             "{text}"
         );
         assert_eq!(text.matches(".tgz'").count(), 1, "{text}");
-        assert!(text.contains("tar.exe -xmzf $tarball -C $dir\n"), "{text}");
+        assert!(text.contains("& $tar -xmzf $tarball -C $dir\n"), "{text}");
     }
 }
 
@@ -502,7 +502,7 @@ fn a_run_removes_its_own_tarball_whichever_way_it_ends_and_the_lock_only_if_it_h
     // Held from the line that writes the records, and from none before it.
     assert!(at("Set-Content -Path $running") < at("Set-Content -Path $owner"));
     assert!(at("Set-Content -Path $owner") < at("$held = $true\n"));
-    assert!(at("$held = $true\n") < at("tar.exe -xmzf"));
+    assert!(at("$held = $true\n") < at("& $tar -xmzf"));
     assert_eq!(text.matches("$held = $true").count(), 1, "{text}");
 }
 
@@ -529,7 +529,7 @@ fn the_lock_is_a_file_opened_for_the_run_alone_before_anything_else_is_done_in_t
     // Before the folder is touched by the run: the record, the owner, the unpack.
     assert!(at(open.trim_end()) < at("Exit-Run 75"));
     assert!(at("Exit-Run 75") < at("Set-Content -Path $running"));
-    assert!(at("Exit-Run 75") < at("tar.exe -xmzf"));
+    assert!(at("Exit-Run 75") < at("& $tar -xmzf"));
     assert!(at("New-Item -ItemType Directory") < at(open.trim_end()));
     // Closed when the run ends however it ends, a refusal too; the file stays in the folder.
     let finally = &text[at("} finally {\n")..];

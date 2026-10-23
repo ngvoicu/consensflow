@@ -100,6 +100,27 @@ fn start(
     packed: &Path,
     gate: Option<(&Path, &Path)>,
 ) -> Child {
+    let before = match gate {
+        Some((ready, go)) => format!(
+            "New-Item -ItemType File '{}' | Out-Null\nwhile (-not (Test-Path '{}')) {{ }}\n",
+            ready.display(),
+            go.display()
+        ),
+        None => String::new(),
+    };
+    start_after(scratch, env, profile, id, packed, &before)
+}
+
+/// A run of the bootstrap named `id` on `profile`, with `packed` as its tarball, after the
+/// PowerShell `before`.
+fn start_after(
+    scratch: &Path,
+    env: &Env,
+    profile: &Path,
+    id: &str,
+    packed: &Path,
+    before: &str,
+) -> Child {
     fs::copy(packed, profile.join(upload_name(SHARED, id))).unwrap();
     let sent = remote_script(&Script {
         id,
@@ -109,16 +130,8 @@ fn start(
         command: "",
         env: &[],
     });
-    let text = match gate {
-        Some((ready, go)) => format!(
-            "New-Item -ItemType File '{}' | Out-Null\nwhile (-not (Test-Path '{}')) {{ }}\n{sent}",
-            ready.display(),
-            go.display()
-        ),
-        None => sent,
-    };
     let file = scratch.join(format!("run-{id}.ps1"));
-    fs::write(&file, text).unwrap();
+    fs::write(&file, format!("{before}{sent}")).unwrap();
     let start = Invocation::new("powershell", scratch)
         .args([
             "-NoProfile",
@@ -130,6 +143,34 @@ fn start(
         .arg(&file)
         .var("USERPROFILE", profile);
     process::spawn(&start, env, Stdio::null(), false).unwrap()
+}
+
+/// `env` with `name` set to `value`, whatever the case of the name it had there (Windows
+/// keeps `Path`, and reads every name in any case).
+fn with_var(env: &Env, name: &str, value: impl Into<std::ffi::OsString>) -> Env {
+    let value = value.into();
+    Env::from_vars(
+        env.iter()
+            .filter(|(given, _)| !given.eq_ignore_ascii_case(name))
+            .map(|(given, was)| (given.to_owned(), was.to_owned()))
+            .chain([(name.into(), value)]),
+    )
+}
+
+/// Git for Windows' folder of the programs its bash runs (`usr\bin`), which holds a GNU tar:
+/// the folder CI's Git Bash puts first on the PATH.
+fn gits_usr_bin(env: &Env) -> PathBuf {
+    let ran = process::capture(&Invocation::new("git", ".").arg("--exec-path"), env).unwrap();
+    assert_eq!(ran.code, 0, "git --exec-path: {}", ran.stderr);
+    // `<Git>/mingw64/libexec/git-core`.
+    let exec = PathBuf::from(ran.stdout.trim());
+    let usr_bin = exec.ancestors().nth(3).unwrap().join("usr").join("bin");
+    assert!(
+        usr_bin.join("tar.exe").is_file(),
+        "no tar.exe in {}: the case would prove nothing",
+        usr_bin.display()
+    );
+    usr_bin
 }
 
 /// A PowerShell that does nothing for a minute: a live process of the kind a run is.
@@ -640,4 +681,64 @@ fn a_stop_of_a_run_that_has_already_ended_says_nothing_and_takes_its_records_awa
     stop(&case, id);
     assert!(!case.copy().join(OWNER).exists());
     assert!(!case.copy().join(RUNNING).exists());
+}
+
+#[test]
+fn a_run_started_with_gits_programs_first_on_the_path_unpacks_the_tree_with_windows_own_tar() {
+    // As CI's Windows steps start it, from Git Bash: Git's usr\bin, and its GNU tar, before
+    // System32 (CI run 39896583469: every such run ended 2 before it said a tree).
+    let mut case = Case::new();
+    let first = gits_usr_bin(&case.env);
+    let path = case.env.search_path().unwrap_or_default().to_owned();
+    let mut gits_first = std::env::join_paths([first]).unwrap();
+    gits_first.push(";");
+    gits_first.push(path);
+    case.env = with_var(&case.env, "PATH", gits_first);
+    let ran = Came::of(case.run(
+        "0000b009-00000009",
+        &[("keep.txt", b"kept")],
+        None,
+        "cmd /c exit 0",
+    ));
+    assert_eq!(ran.status, Some(0), "{}", ran.said);
+    assert!(ran.said.contains("== tree "), "{}", ran.said);
+    assert_eq!(
+        fs::read_to_string(case.copy().join("keep.txt")).unwrap(),
+        "kept"
+    );
+    assert!(tarballs_in(&case.profile).is_empty());
+}
+
+#[test]
+fn a_run_on_a_machine_without_windows_own_tar_ends_saying_so_before_it_unpacks_anything() {
+    // The system's folder named elsewhere, where there is no tar, by the script itself (a
+    // PowerShell started with another SystemRoot does not start): the run ends with its exit
+    // line, says why, and takes its tarball away.
+    let case = Case::new();
+    let elsewhere = case.scratch.path().join("no-system");
+    fs::create_dir_all(elsewhere.join("System32")).unwrap();
+    let id = "0000b00a-0000000a";
+    let context = checkout(case.scratch.path(), &case.env, &[("keep.txt", b"kept")]);
+    let made = tree::identity(&context, &tree::files(&context).unwrap()).unwrap();
+    let packed = tarball(case.scratch.path(), &context, &made, "cmd /c exit 0", id);
+    let ran = Came::of(start_after(
+        case.scratch.path(),
+        &case.env,
+        &case.profile,
+        id,
+        &packed,
+        &format!("$env:SystemRoot = '{}'\n", elsewhere.display()),
+    ));
+    assert_eq!(ran.status, Some(1), "{}", ran.said);
+    assert!(
+        ran.said.contains(&format!(
+            "Windows' own tar is not there ({}\\System32\\tar.exe), so the tree cannot be unpacked.",
+            elsewhere.display()
+        )),
+        "{}",
+        ran.said
+    );
+    assert!(!ran.said.contains("== tree "), "{}", ran.said);
+    assert!(!case.copy().join("keep.txt").exists());
+    assert!(tarballs_in(&case.profile).is_empty());
 }

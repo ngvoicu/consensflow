@@ -147,8 +147,9 @@ pub const BUILD_STEPS: [&str; 6] = [
 /// What the machine's shell reads of a command line: cmd.exe's 8191 characters,
 /// less what ssh puts before the script (`powershell -NoProfile -NonInteractive
 /// -EncodedCommand `) and a margin. Only the bootstrap is on the line, and it is the
-/// same for every run but for the folder's name and the run's: about 5,600 of it, which
-/// leaves more than 2,000, so that what a run is asked for (steps, variables, command)
+/// same for every run but for the folder's name and the run's: 6,300 of it in the usual
+/// folder (5,748 before Windows' own tar was named by its path), which leaves 1,700, so
+/// that what a run is asked for (steps, variables, command)
 /// has no limit but the shell's own on the program it starts.
 pub const ENCODED_LIMIT: usize = 8000;
 
@@ -297,7 +298,16 @@ pub struct Script<'a> {
 /// killed, the connection lost, an upload cut short) is taken away by the sweep of the
 /// next run that holds the lock.
 ///
-/// The unpack is `tar.exe -xmzf`: each file is given the time of the unpack (`-m`,
+/// The unpack is Windows' own tar (bsdtar), `System32\tar.exe`, named by its path, and a
+/// machine without it ends the run saying so: a bare `tar.exe` is the first on the PATH,
+/// and a PATH with Git's `usr\bin` before System32 (CI's Git Bash puts it there) gives
+/// Git's GNU tar, which takes `C:\…` for a host to reach and ends 2 before anything is
+/// unpacked (CI run 39896583469, six cases of the lock). The other programs the scripts
+/// call by name, `cmd`, `git` and `taskkill`, are none of Git's `usr\bin` (Git 2.55 on
+/// zeewin, 2026-10-23: it holds `tar`, `find`, `sort`, `timeout`, `hostname`, `whoami`,
+/// `ssh`, `scp` and `gzip`), and `git` is wanted wherever it is found.
+///
+/// The unpack is `-xmzf`: each file is given the time of the unpack (`-m`,
 /// which GNU tar and bsdtar both take), not the one the tarball keeps of it, which
 /// is the time it was changed on the machine that packed it. Cargo builds what is
 /// newer than its last build, so a checkout switched to a branch whose file was
@@ -530,7 +540,9 @@ if (-not $lock -or $other) { Write-Output "A run is still going on this machine$
 Set-Content -Path $running -Value $PID
 Set-Content -Path $owner -Value @('«id»', $PID)
 $held = $true
-tar.exe -xmzf $tarball -C $dir
+$tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) { Write-Output "Windows' own tar is not there ($tar), so the tree cannot be unpacked."; Exit-Run 1 }
+& $tar -xmzf $tarball -C $dir
 if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
 . ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '«sweep»'))))
 if ($failed.Count) { Exit-Run 1 }
