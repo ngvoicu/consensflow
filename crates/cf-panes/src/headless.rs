@@ -103,6 +103,16 @@ pub fn shut_down(bridge: &Bridge, panes: &PaneTable, inputs: &InputQueue) -> Res
     bridge.wait_closed().map_err(|error| error.to_string())
 }
 
+/// The variable that has the headless host take the human's keys (`pane.typed`)
+/// where it is `1`: the rig sets it, to type into a window as the app's page does.
+/// The bundled host is started without it, and takes no keys as the human's.
+pub const HUMAN_KEYS: &str = "CONSENSFLOW_TEST_HUMAN_KEYS";
+
+/// Whether the host takes the human's keys, [`HUMAN_KEYS`] being `value`.
+fn takes_human_keys(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|value| value == "1")
+}
+
 /// The headless pane helper, running the WINDOW's handlers.
 ///
 /// `consensflow-bridge` used to carry its own copy of the pane operations, and
@@ -114,10 +124,11 @@ pub fn shut_down(bridge: &Bridge, panes: &PaneTable, inputs: &InputQueue) -> Res
 /// stdout instead of a webview.
 ///
 /// Serves until the peer closes the transport, then ends what it opened and tells how
-/// each ended ([`shut_down`]).
+/// each ended ([`shut_down`]). `human_keys` is what [`HUMAN_KEYS`] is in the
+/// environment, if anything.
 // Its errors go to its stderr: the helper's own log, which the integration rig reads.
 #[allow(clippy::print_stderr)]
-pub fn run_headless() -> Result<(), String> {
+pub fn run_headless(human_keys: Option<&std::ffi::OsStr>) -> Result<(), String> {
     let panes = Arc::new(PaneTable::new());
     let output = Arc::new(OutputHub::new());
     let arbiter = Arc::new(InputArbiter::new(ENTER));
@@ -133,7 +144,9 @@ pub fn run_headless() -> Result<(), String> {
         Arc::clone(&output),
         Arc::clone(&inputs),
     );
-    register_typed(&mut builder, Arc::clone(&inputs));
+    if takes_human_keys(human_keys) {
+        register_typed(&mut builder, Arc::clone(&inputs));
+    }
     builder.on_error(|error| eprintln!("consensflow-bridge: {error}"));
 
     let bridge = builder

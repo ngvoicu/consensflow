@@ -1,6 +1,7 @@
 #![deny(clippy::undocumented_unsafe_blocks)]
 
-use cf_panes::headless::run_headless;
+use cf_base::env::Env;
+use cf_panes::headless::{run_headless, HUMAN_KEYS};
 
 // Its errors go to its stderr: the helper's own log, which the integration rig reads.
 #[allow(clippy::print_stderr)]
@@ -8,7 +9,8 @@ fn main() {
     if !stdin_is_pipe() {
         return;
     }
-    if let Err(error) = run_headless() {
+    let env = Env::from_process();
+    if let Err(error) = run_headless(env.os(HUMAN_KEYS)) {
         eprintln!("consensflow-bridge: {error}");
         std::process::exit(1);
     }

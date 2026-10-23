@@ -10,7 +10,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 
 use crate::background::Baseline;
 use crate::ended::{Ended, EndedSlot};
-use crate::screen::PaneScreen;
+use crate::screen::{Drawn, PaneScreen};
 
 mod close;
 #[cfg(test)]
@@ -770,7 +770,7 @@ impl PaneTable {
     }
 
     /// The last `max` lines of a pane's screen as it is drawn ([`PaneScreen::bottom`]).
-    pub fn bottom(&self, key: &PaneKey, max: usize) -> Result<Vec<String>, PaneError> {
+    pub fn bottom(&self, key: &PaneKey, max: usize) -> Result<Drawn, PaneError> {
         let screen = Arc::clone(
             &self
                 .lock_panes()?

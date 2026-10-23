@@ -151,7 +151,11 @@ fn input_box(question: &Value) -> Result<Value, String> {
         .filter_map(|line| line.as_str().map(str::to_owned))
         .collect();
     Ok(
-        match input_box::read(harness(text(question, "kind")?)?, &screen) {
+        match input_box::read(
+            harness(text(question, "kind")?)?,
+            &screen,
+            input_box::Cursor::of(question.get("cursor")),
+        ) {
             Some(InputBox::Empty) => json!("empty"),
             Some(InputBox::Holds) => json!("holds"),
             None => Value::Null,

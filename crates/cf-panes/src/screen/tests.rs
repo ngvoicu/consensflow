@@ -224,16 +224,72 @@ fn the_bottom_keeps_rules_and_an_empty_prompt_and_ends_at_the_last_drawn_line() 
     // blank rows under the last line drawn.
     let screen = after(8, 20, "answer\r\n\r\n────\r\n❯ \r\n────\r\n  ⏵⏵ bypass");
     assert_eq!(
-        screen.bottom(10),
+        screen.bottom(10).lines,
         ["answer", "", "────", "❯", "────", "  ⏵⏵ bypass"]
     );
-    assert_eq!(screen.bottom(3), ["❯", "────", "  ⏵⏵ bypass"]);
+    assert_eq!(screen.bottom(3).lines, ["❯", "────", "  ⏵⏵ bypass"]);
     assert_eq!(
         screen.tail(10),
         ["answer", "  ⏵⏵ bypass"],
         "the tail has no box"
     );
-    assert_eq!(Screen::new(24, 80).bottom(5), Vec::<String>::new());
+    assert_eq!(Screen::new(24, 80).bottom(5).lines, Vec::<String>::new());
+}
+
+#[test]
+fn the_bottom_says_where_the_cursor_is_among_its_lines_and_whether_it_shows() {
+    // A box with a faint suggestion, the cursor put back to the prompt's column, as
+    // Claude Code draws its empty box in a new conversation; and then hidden.
+    let mut screen = after(
+        8,
+        30,
+        "────\r\n❯ Try \"fix lint errors\"\r\n────\r\n  ⏵⏵ bypass\x1b[2;3H",
+    );
+    let cursor = |screen: &Screen| screen.bottom(10).cursor;
+    assert_eq!(
+        cursor(&screen),
+        Some(Cursor {
+            line: 1,
+            col: 2,
+            shown: true,
+            plain_after: 18,
+        })
+    );
+    screen.feed(b"\x1b[?25l");
+    assert_eq!(
+        cursor(&screen),
+        Some(Cursor {
+            line: 1,
+            col: 2,
+            shown: false,
+            plain_after: 18,
+        })
+    );
+    // Of the lines kept, by its place among them; none where it is on none of them.
+    screen.feed(b"\x1b[?25h");
+    assert_eq!(
+        screen.bottom(3).cursor,
+        Some(Cursor {
+            line: 0,
+            col: 2,
+            shown: true,
+            plain_after: 18,
+        })
+    );
+    assert_eq!(screen.bottom(2).cursor, None);
+    screen.feed(b"\x1b[8;1H");
+    assert_eq!(cursor(&screen), None, "below the last line drawn");
+    // A wide character before it counts once, and a wrapped row joins its line.
+    let wide = after(4, 6, "日本語ab\x1b[2;2H");
+    assert_eq!(
+        wide.bottom(4).cursor,
+        Some(Cursor {
+            line: 0,
+            col: 4,
+            shown: true,
+            plain_after: 1,
+        })
+    );
 }
 
 #[test]
@@ -314,5 +370,46 @@ fn a_shared_screen_is_fed_resized_and_read_from_any_thread() {
     assert_eq!(
         screen.tail(3),
         ["from a thread".chars().take(4).collect::<String>()]
+    );
+}
+
+#[test]
+fn the_cursor_says_how_much_after_it_is_drawn_plain_and_a_hint_drawn_faint_or_grey_is_not() {
+    let plain_after = |printed: &str| {
+        after(4, 40, printed)
+            .bottom(4)
+            .cursor
+            .map(|cursor| cursor.plain_after)
+    };
+    // Devin's hint, in grey by its parts, the cursor put back to the box's start.
+    assert_eq!(
+        plain_after("❭ \x1b[38;2;124;124;124mAsk Devin\x1b[0m\x1b[1;3H"),
+        Some(0)
+    );
+    // A faint suggestion; a colour by number; one of the sixteen.
+    assert_eq!(
+        plain_after("❯ \x1b[2mTry \"fix\"\x1b[22m\x1b[1;3H"),
+        Some(0)
+    );
+    assert_eq!(
+        plain_after("❯ \x1b[38;5;245mhint\x1b[39m\x1b[1;3H"),
+        Some(0)
+    );
+    assert_eq!(plain_after("❯ \x1b[90mhint\x1b[m\x1b[1;3H"), Some(0));
+    // Words typed, the cursor moved back to their start (Home): plain.
+    assert_eq!(plain_after("❯ probe words\x1b[1;3H"), Some(10));
+    // A background colour styles no text; a reset ends the style; text written over
+    // a hint takes the pen it is written with.
+    assert_eq!(plain_after("❯ \x1b[48;5;236mwords\x1b[1;3H"), Some(5));
+    assert_eq!(plain_after("❯ \x1b[2mhint\x1b[0m typed\x1b[1;3H"), Some(5));
+    assert_eq!(
+        plain_after("❯ \x1b[2mhint\x1b[0m\x1b[1;3Hab\x1b[1;3H"),
+        Some(2)
+    );
+    // Characters moved by a delete, and cells erased, keep what they were drawn as.
+    assert_eq!(plain_after("❯ ab\x1b[2mhint\x1b[1;3H\x1b[2P"), Some(0));
+    assert_eq!(
+        plain_after("❯ \x1b[2mhint\x1b[0mab\x1b[1;3H\x1b[K"),
+        Some(0)
     );
 }

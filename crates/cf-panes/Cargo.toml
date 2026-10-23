@@ -22,6 +22,8 @@ test-support = []
 cf-panes = { path = ".", features = ["test-support"] }
 
 [dependencies]
+# The environment, read once in the bridge's main (`Env`).
+cf-base.workspace = true
 cf-bridge.workspace = true
 cf-proto.workspace = true
 futures-channel.workspace = true

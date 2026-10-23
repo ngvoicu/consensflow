@@ -319,8 +319,14 @@ pub fn register_pane_handlers(
         // The screen's last lines as drawn, for an adapter that reads its
         // harness's input box.
         if let Some(lines) = request.bottom {
-            if let Ok(bottom) = snapshot_panes.bottom(&key, lines.min(BOTTOM_LINES)) {
-                answer["bottom"] = json!(bottom);
+            if let Ok(drawn) = snapshot_panes.bottom(&key, lines.min(BOTTOM_LINES)) {
+                answer["bottom"] = json!(drawn.lines);
+                answer["cursor"] = drawn.cursor.map_or(Value::Null, |cursor| {
+                    json!({
+                        "line": cursor.line, "col": cursor.col, "shown": cursor.shown,
+                        "plainAfter": cursor.plain_after,
+                    })
+                });
             }
         }
         Ok(answer)
@@ -331,7 +337,8 @@ pub fn register_pane_handlers(
 /// which has no page: its peer types as the window's page does
 /// (`pane_input_enqueue`), and the keys are counted for what they leave unsent.
 /// The window never takes it: there, the bridge's peer is the daemon, whose
-/// keys are never the human's.
+/// keys are never the human's; nor does the headless host, but where the rig
+/// asks for it (`headless::HUMAN_KEYS`).
 pub(crate) fn register_typed(builder: &mut BridgeBuilder, inputs: Arc<InputQueue>) {
     builder.on("pane.typed", move |_bridge, body| {
         let request: BytesRequest = parse_body(body)?;

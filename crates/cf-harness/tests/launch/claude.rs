@@ -761,14 +761,18 @@ fn a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dial
     const RULE: &str = "────────────────────────────────────────";
     let home = Home::new();
     let typed_in_box = RefCell::new("❯ ".to_owned());
-    let quiet = Cell::new(5_000_u64);
+    // The human's last key 2 s ago, and the window has printed since.
+    let quiet = Cell::new(2_000_u64);
+    let printed = Cell::new(1_000_u64);
+    let cursor = RefCell::new(Value::Null);
     let host = AnsweringHost::new(|op| {
         Ok(match op {
             "pane.snapshot" => json!({
                 "ok": true, "pasteInFlight": false, "unsent": true,
-                "typed": 4, "typedQuietMs": quiet.get(),
+                "typed": 4, "typedQuietMs": quiet.get(), "outputQuietMs": printed.get(),
                 "bottom": ["⏺ 4", "", RULE, typed_in_box.borrow().clone(), RULE,
                     "  ⏵⏵ bypass permissions on (shift+tab to cycle)"],
+                "cursor": cursor.borrow().clone(),
             }),
             "pane.write_paste" => json!({ "ok": true }),
             _ => json!({ "ok": false, "error": "unexpected" }),
@@ -803,10 +807,28 @@ fn a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dial
             json!({ "id": "s1-zeus", "generation": 7, "body": "hello", "readEmpty": 4 })
         )
     );
-    // A key a moment ago may not be drawn yet.
+    // A key a moment ago may not be drawn yet; nor one the window has printed nothing
+    // since (T-330), unless it is 5 s past: a key that changes nothing draws nothing.
     quiet.set(200);
     assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
+    // Drawn since, but a moment ago: the window may draw more of it.
+    printed.set(100);
+    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
+    quiet.set(2_000);
+    printed.set(2_500);
+    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
+    quiet.set(4_999);
+    printed.set(9_000);
+    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
     quiet.set(5_000);
+    assert_eq!(ready(), Ok(Readiness::Ready));
+    printed.set(1_000);
+    // The suggestion in a conversation with nothing said yet, the cursor at the box's
+    // start and nothing after it drawn plain: an empty box (T-330).
+    *typed_in_box.borrow_mut() = "❯ Try \"how do I log an error?\"".to_owned();
+    *cursor.borrow_mut() = json!({ "line": 3, "col": 2, "shown": true, "plainAfter": 0 });
+    assert_eq!(ready(), Ok(Readiness::Ready));
+    *cursor.borrow_mut() = Value::Null;
     for held in [
         "❯ half a thought",
         "❯ Try \"how do I log an error?\"",

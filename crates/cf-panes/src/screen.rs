@@ -20,6 +20,27 @@ use std::sync::{Mutex, PoisonError};
 use grid::Grid;
 use parser::Parser;
 
+/// The last lines of a screen as drawn ([`Screen::bottom`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Drawn {
+    pub lines: Vec<String>,
+    /// The cursor, where it is on one of `lines`.
+    pub cursor: Option<Cursor>,
+}
+
+/// Where the cursor is in [`Drawn`]'s lines: the line, by its place among them,
+/// how many characters of it are before the cursor, whether it is shown, and how
+/// many characters of the line from the cursor on are drawn plain, not styled
+/// (a colour other than the terminal's own, or faint), blanks left out: words
+/// typed after it, and not a harness's faint hint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cursor {
+    pub line: usize,
+    pub col: usize,
+    pub shown: bool,
+    pub plain_after: usize,
+}
+
 /// One screen, fed the bytes a program prints.
 #[derive(Debug)]
 pub struct Screen {
@@ -68,16 +89,28 @@ impl Screen {
     /// The last `max` lines of the screen as it is drawn, the oldest first,
     /// from its last line with anything on it: its rules, its empty lines
     /// and a prompt with nothing typed at it too, which [`Screen::tail`]
-    /// leaves out. A harness's input box is read here.
-    pub fn bottom(&self, max: usize) -> Vec<String> {
+    /// leaves out; and the cursor, where it is on one of them. A harness's
+    /// input box is read here.
+    pub fn bottom(&self, max: usize) -> Drawn {
         let mut lines = self.grid.lines();
         let drawn = lines
             .iter()
             .rposition(|line| !line.is_empty())
             .map_or(0, |last| last + 1);
         lines.truncate(drawn);
-        lines.drain(..lines.len().saturating_sub(max));
-        lines
+        let first = lines.len().saturating_sub(max);
+        lines.drain(..first);
+        let (line, col, shown, plain_after) = self.grid.cursor();
+        let cursor = line
+            .checked_sub(first)
+            .filter(|line| *line < lines.len())
+            .map(|line| Cursor {
+                line,
+                col,
+                shown,
+                plain_after,
+            });
+        Drawn { lines, cursor }
     }
 }
 
@@ -113,7 +146,7 @@ impl PaneScreen {
     }
 
     /// The last `max` lines of the screen as it is drawn ([`Screen::bottom`]).
-    pub fn bottom(&self, max: usize) -> Vec<String> {
+    pub fn bottom(&self, max: usize) -> Drawn {
         self.locked().bottom(max)
     }
 

@@ -148,14 +148,16 @@ fn a_window_whose_input_box_shows_its_hint_takes_the_paste_over_keys_left_in_its
     home.selects("mild-coin");
     let typed_in_box =
         RefCell::new("❭ Ask Devin to build features, fix bugs, or work on your code".to_owned());
-    let quiet = Cell::new(5_000_u64);
+    let quiet = Cell::new(2_000_u64);
+    let cursor = RefCell::new(Value::Null);
     let host = AnsweringHost::new(|op| {
         Ok(match op {
             "pane.snapshot" => json!({
                 "ok": true, "pasteInFlight": false, "unsent": true,
-                "typed": 9, "typedQuietMs": quiet.get(),
+                "typed": 9, "typedQuietMs": quiet.get(), "outputQuietMs": 1_000,
                 "bottom": ["❭ /model", "", format!("{RULE} (bypass permissions on) ─"),
                     typed_in_box.borrow().clone(), RULE, "SWE-2 Medium"],
+                "cursor": cursor.borrow().clone(),
             }),
             _ => json!({ "ok": true }),
         })
@@ -175,8 +177,16 @@ fn a_window_whose_input_box_shows_its_hint_takes_the_paste_over_keys_left_in_its
     );
     quiet.set(200);
     assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
-    quiet.set(5_000);
+    quiet.set(2_000);
+    // A hint in other words, which a Devin update may give it: the cursor at the box's
+    // start and nothing after it drawn plain says it is one (T-330).
+    *typed_in_box.borrow_mut() = "❭ Ask Devin anything about your code".to_owned();
+    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
+    *cursor.borrow_mut() = json!({ "line": 3, "col": 2, "shown": true, "plainAfter": 0 });
+    assert_eq!(ready(), Ok(Readiness::Ready));
+    // Words typed and the cursor moved back to their start (Home) are drawn plain.
     *typed_in_box.borrow_mut() = "❭ probe words".to_owned();
+    *cursor.borrow_mut() = json!({ "line": 3, "col": 2, "shown": true, "plainAfter": 10 });
     assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
 }
 

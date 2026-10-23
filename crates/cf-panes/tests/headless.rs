@@ -408,6 +408,50 @@ fn a_claim_after_unsent_typing_is_admitted_and_writes_nothing() {
     helper.close_input_and_wait();
 }
 
+/// The human's keys over the bridge (`pane.typed`) are the rig's: a host started
+/// with `CONSENSFLOW_TEST_HUMAN_KEYS=1` takes them and counts what they leave
+/// unsent; the bundled host, started without it (or with any other value), knows
+/// no such request, and nothing is written (T-330).
+#[test]
+fn only_a_host_the_rig_starts_takes_the_humans_keys_over_the_bridge() {
+    let _pty_guard = serial_headless_test();
+    for (env, takes) in [
+        (&[][..], false),
+        (&[("CONSENSFLOW_TEST_HUMAN_KEYS", "0")][..], false),
+        (&[("CONSENSFLOW_TEST_HUMAN_KEYS", "1")][..], true),
+    ] {
+        let mut helper = Headless::spawn_with_env(env);
+        let mut events = Vec::new();
+        let opened = helper.request(
+            "pane.open",
+            open_body("/bin/stty raw -echo; printf ready; /bin/sleep 30", 1024),
+            &mut events,
+        );
+        let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+        let generation = opened["generation"].as_u64().expect("opened generation");
+        let _ = output_until(&helper, &mut events, &pane_id, generation, b"ready");
+        let typed = helper.request(
+            "pane.typed",
+            json!({"id":pane_id,"generation":generation,"bytes":[120]}),
+            &mut events,
+        );
+        let snapshot = helper.request(
+            "pane.snapshot",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events,
+        );
+        assert_eq!(typed["ok"] == true, takes, "{env:?}: {typed}");
+        assert_eq!(snapshot["unsent"], takes, "{env:?}: {snapshot}");
+        assert_eq!(snapshot["typed"], u64::from(takes), "{env:?}: {snapshot}");
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events,
+        );
+        helper.close_input_and_wait();
+    }
+}
+
 #[test]
 fn stdio_protocol_opens_pastes_lists_and_kills_a_raw_recorder() {
     let _pty_guard = serial_headless_test();

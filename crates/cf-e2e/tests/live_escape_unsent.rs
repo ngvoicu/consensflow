@@ -58,12 +58,13 @@
 //! cargo xtask live escape-unsent devin codex          the ones named, in that order
 //! ```
 //!
-//! It runs on macOS (and Linux, but for Claude Code): its copies of a login are
-//! files of mode 600, and Claude's login is read from the Keychain.
-#![cfg(unix)]
+//! Claude Code runs in it on macOS alone: its login is read from the Keychain, and a
+//! live Claude window starts through a wrapper that is a shell script. The others run
+//! on Windows too (`windows-from-tree.sh … cargo xtask live escape-unsent devin`):
+//! there, the throwaway folder is the user's own in the temporary folder, as Windows
+//! gives it, with no mode of its own.
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -113,6 +114,12 @@ const STILL: Duration = Duration::from_millis(1500);
 const SETTLE: Duration = Duration::from_secs(15);
 const LOOK: Duration = Duration::from_millis(100);
 
+/// How many of the last bytes a window printed the log shows after each step.
+const RAW_TAIL: usize = 800;
+
+/// The most a key is waited for to be drawn, as the run measures it.
+const DRAW_WAIT: Duration = Duration::from_secs(5);
+
 /// The lines of the screen as drawn the run reads: the whole of a 40-row window.
 const BOTTOM: usize = 40;
 
@@ -125,6 +132,10 @@ const LOGIN_LEFT: Duration = Duration::from_secs(2 * 60 * 60);
 const ANSWERED: &str = "PICKERLEFTOK";
 
 const ESCAPE: &[u8] = b"\x1b";
+/// Home: the cursor to the start of what is typed, which stays.
+const HOME: &[u8] = b"\x1b[H";
+/// End: the cursor back to the end of what is typed.
+const END: &[u8] = b"\x1b[F";
 const ENTER: &[u8] = b"\r";
 const CTRL_U: &[u8] = b"\x15";
 
@@ -132,6 +143,7 @@ const CTRL_U: &[u8] = b"\x15";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Step {
     Typed,
+    Home,
     Escape,
     EscapeTwice,
     CtrlU,
@@ -140,8 +152,9 @@ enum Step {
 }
 
 impl Step {
-    const ALL: [Step; 6] = [
+    const ALL: [Step; 7] = [
         Step::Typed,
+        Step::Home,
         Step::Escape,
         Step::EscapeTwice,
         Step::CtrlU,
@@ -152,6 +165,7 @@ impl Step {
     const fn name(self) -> &'static str {
         match self {
             Step::Typed => "typed",
+            Step::Home => "home",
             Step::Escape => "escape",
             Step::EscapeTwice => "escape-twice",
             Step::CtrlU => "ctrl-u",
@@ -163,7 +177,7 @@ impl Step {
     /// The words the step's keys leave where they may still be on the screen.
     const fn words(self) -> &'static str {
         match self {
-            Step::Typed | Step::Escape | Step::EscapeTwice | Step::CtrlU => WORDS,
+            Step::Typed | Step::Home | Step::Escape | Step::EscapeTwice | Step::CtrlU => WORDS,
             Step::Dialog | Step::DialogEscape => FILTER,
         }
     }
@@ -196,14 +210,19 @@ struct Read {
     typed: u64,
     /// What the adapter reads of the input box: `empty`, `holds`, or none.
     reader: Option<String>,
+    /// The longest a key of the step took to be drawn, in milliseconds: none where
+    /// one was not drawn within [`DRAW_WAIT`].
+    drew_ms: Option<u64>,
     lines: Vec<String>,
+    /// Where the pane host says the cursor is ([`Pane::snapshot`]'s `cursor`).
+    cursor: Value,
 }
 
 impl Read {
     /// The step's outcome, as ids: `escape: words-shown held holds`.
     fn said(&self) -> String {
         format!(
-            "{}: {} {} {}",
+            "{}: {} {} {} {}",
             self.step.name(),
             if self.shown {
                 "words-shown"
@@ -212,6 +231,8 @@ impl Read {
             },
             if self.held { "held" } else { "clear" },
             self.reader.as_deref().unwrap_or("unread"),
+            self.drew_ms
+                .map_or_else(|| "undrawn".to_owned(), |ms| format!("drawn-in-{ms}ms")),
         )
     }
 }
@@ -243,13 +264,36 @@ impl Pane<'_> {
         self.rig().types(&self.named(), keys)
     }
 
-    /// Types `text` one character at a time.
-    fn types_text(&self, text: &str) -> Result {
+    /// Types `text` one character at a time: the longest one took to be drawn.
+    fn types_text(&self, text: &str) -> Result<Option<u64>> {
+        let mut longest = Some(0);
         for character in text.chars() {
             self.types(character.to_string().as_bytes())?;
+            longest = longest.zip(self.drawn()?).map(|(was, now)| was.max(now));
             sleep(KEY_GAP);
         }
-        Ok(())
+        Ok(longest)
+    }
+
+    /// How long after now the window prints something, its last key typed before
+    /// now: in milliseconds, none where it prints nothing within [`DRAW_WAIT`].
+    fn drawn(&self) -> Result<Option<u64>> {
+        let since = Instant::now();
+        while since.elapsed() < DRAW_WAIT {
+            let snapshot = self.snapshot()?;
+            let printed = snapshot["outputQuietMs"].as_u64();
+            let typed = snapshot["typedQuietMs"].as_u64();
+            if printed
+                .zip(typed)
+                .is_some_and(|(printed, typed)| printed < typed)
+            {
+                return Ok(Some(
+                    u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX),
+                ));
+            }
+            sleep(Duration::from_millis(10));
+        }
+        Ok(None)
     }
 
     /// The pane host's snapshot, with the screen's last lines as drawn.
@@ -286,15 +330,17 @@ impl Pane<'_> {
     }
 }
 
-/// What the adapter of `harness` reads of the input box in `lines`.
-fn reader(harness: Harness, lines: &[String]) -> Result<Option<String>> {
-    let read =
-        ask::question(&json!({ "op": "input_box", "kind": harness.kind(), "screen": lines }))?;
+/// What the adapter of `harness` reads of the input box in `lines`, the cursor where
+/// `cursor` says.
+fn reader(harness: Harness, lines: &[String], cursor: &Value) -> Result<Option<String>> {
+    let read = ask::question(
+        &json!({ "op": "input_box", "kind": harness.kind(), "screen": lines, "cursor": cursor }),
+    )?;
     Ok(read.as_str().map(str::to_owned))
 }
 
 /// Reads what `step` left in `pane`, a window of `harness`.
-fn read(pane: &Pane, harness: Harness, step: Step) -> Result<Read> {
+fn read(pane: &Pane, harness: Harness, step: Step, drew_ms: Option<u64>) -> Result<Read> {
     pane.settle();
     let snapshot = pane.snapshot()?;
     let lines: Vec<String> = snapshot["bottom"]
@@ -306,39 +352,64 @@ fn read(pane: &Pane, harness: Harness, step: Step) -> Result<Read> {
         shown: lines.iter().any(|line| line.contains(step.words())),
         held: snapshot["unsent"] == true,
         typed: snapshot["typed"].as_u64().unwrap_or_default(),
-        reader: reader(harness, &lines)?,
+        reader: reader(harness, &lines, &snapshot["cursor"])?,
+        drew_ms,
         lines,
+        cursor: snapshot["cursor"].clone(),
     })
 }
 
 /// Presses `step`'s keys into `pane`, a window of `harness`, and reads what they
 /// left.
 fn step(pane: &Pane, harness: Harness, step: Step, before: Option<&Read>) -> Result<Read> {
-    match step {
+    let drew = match step {
         Step::Typed => pane.types_text(WORDS)?,
-        Step::Escape => pane.types(ESCAPE)?,
+        Step::Home => {
+            pane.types(HOME)?;
+            pane.drawn()?
+        }
+        Step::Escape => {
+            pane.types(ESCAPE)?;
+            pane.drawn()?
+        }
         Step::EscapeTwice => {
             pane.types(ESCAPE)?;
             sleep(DOUBLE_PRESS);
             pane.types(ESCAPE)?;
+            pane.drawn()?
         }
-        Step::CtrlU => pane.types(CTRL_U)?,
+        // End first: Ctrl+U clears what is before the cursor, which Home moved.
+        Step::CtrlU => {
+            pane.types(END)?;
+            pane.types(CTRL_U)?;
+            pane.drawn()?
+        }
         Step::Dialog => {
-            pane.types_text(picker(harness))?;
+            let command = pane.types_text(picker(harness))?;
             sleep(KEYED);
             pane.types(ENTER)?;
+            let opened = pane.drawn()?;
             pane.settle();
-            pane.types_text(FILTER)?;
+            let filter = pane.types_text(FILTER)?;
+            command
+                .zip(opened)
+                .zip(filter)
+                .map(|((command, opened), filter)| command.max(opened).max(filter))
         }
         Step::DialogEscape => {
             pane.types(ESCAPE)?;
+            let mut drew = pane.drawn()?;
             // A picker whose first Escape clears its filter takes a second to close.
-            if read(pane, harness, step)?.shown && before.is_some_and(|read| read.shown) {
+            if read(pane, harness, step, drew)?.shown && before.is_some_and(|read| read.shown) {
                 pane.types(ESCAPE)?;
+                drew = drew
+                    .zip(pane.drawn()?)
+                    .map(|(first, second)| first.max(second));
             }
+            drew
         }
-    }
-    read(pane, harness, step)
+    };
+    read(pane, harness, step, drew)
 }
 
 /// The run's checks of one window's steps `reads`.
@@ -432,12 +503,10 @@ impl Throwaway {
     fn holding(file: &'static str, login: Vec<u8>) -> Result<Self> {
         let failed = |what: &str, cause: std::io::Error| Error::Daemon(format!("{what}: {cause}"));
         let folder = TempDir::new().map_err(|cause| failed("a throwaway folder", cause))?;
-        fs::set_permissions(folder.path(), fs::Permissions::from_mode(0o700))
-            .map_err(|cause| failed("a throwaway folder", cause))?;
+        owners_alone(folder.path(), 0o700).map_err(|cause| failed("a throwaway folder", cause))?;
         let path = folder.path().join(file);
         fs::write(&path, &login).map_err(|cause| failed("the login's copy", cause))?;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-            .map_err(|cause| failed("the login's copy", cause))?;
+        owners_alone(&path, 0o600).map_err(|cause| failed("the login's copy", cause))?;
         Ok(Self {
             folder,
             file,
@@ -471,6 +540,19 @@ impl Throwaway {
             },
         )
     }
+}
+
+/// `path` given the mode `mode`, its owner's alone, on Unix; on Windows a folder in
+/// the user's temporary folder is the user's already.
+#[cfg(unix)]
+fn owners_alone(path: &Path, mode: u32) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+}
+
+#[cfg(not(unix))]
+fn owners_alone(_path: &Path, _mode: u32) -> std::io::Result<()> {
+    Ok(())
 }
 
 /// The owner's Claude login, from the Keychain item of the user's account (the item
@@ -676,7 +758,19 @@ fn probe(
     let mut reads: Vec<Read> = Vec::new();
     for each in Step::ALL {
         let read = step(&pane, harness, each, reads.last())?;
-        log.block(&format!("{name} {}", read.said()), &read.lines.join("\n"));
+        // The cursor, and the last bytes the window printed as they came: what tells
+        // faint text from typed text, which the screen's text cannot (the log stays
+        // on the machine).
+        let printed = rig.printed(pane.id());
+        let last = String::from_utf8_lossy(&printed[printed.len().saturating_sub(RAW_TAIL)..]);
+        log.block(
+            &format!("{name} {}", read.said()),
+            &format!(
+                "{}\ncursor: {}\nbytes: {last:?}",
+                read.lines.join("\n"),
+                read.cursor
+            ),
+        );
         reads.push(read);
     }
     let mut checks = checks_of(harness, &reads);
@@ -710,6 +804,11 @@ fn keys_left_in_a_dialog_with_escape_hold_no_delivery_to_a_window_whose_box_is_e
         .collect::<Result<_>>()?;
     let home = live::machine::home()?;
     let claude = harnesses.contains(&Harness::Claude);
+    if claude && !cfg!(target_os = "macos") {
+        return Err(Error::Daemon(
+            "Claude Code runs live here on macOS alone: its login is the Keychain's".to_owned(),
+        ));
+    }
     let owners_before = claude.then(|| owners_claude(&home));
     let claude_config = claude
         .then(|| {

@@ -49,7 +49,9 @@
 //! full-permission mode, as a prompt drawn otherwise.
 //!
 //! The window of a participant `CF_TEST_INPUT_BOX` names draws Claude Code's input
-//! box, and opens its model picker for `/model` (`input_box`).
+//! box, and opens its model picker for `/model` (`input_box`); one `CF_TEST_SUGGESTION`
+//! names shows a suggestion in its empty box, and one `CF_TEST_SLOW_DRAW` names draws
+//! its box seconds late.
 //!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
@@ -198,6 +200,8 @@ fn run(
     // Claude Code's question about a folder it was never told to trust comes first.
     let asking = named("CF_TEST_TRUST");
     let draws_box = named("CF_TEST_INPUT_BOX");
+    let suggests = named("CF_TEST_SUGGESTION");
+    let draws_slowly = named("CF_TEST_SLOW_DRAW");
     if asking {
         trust::bring_the_record_back(records.transcript());
     }
@@ -291,7 +295,7 @@ fn run(
     }
 
     // Claude Code's input box and its model picker, drawn as it draws them.
-    let mut input_box = draws_box.then(input_box::InputBox::default);
+    let mut input_box = draws_box.then(|| input_box::InputBox::new(suggests, draws_slowly));
 
     // Raw input, like a real TUI: a bracketed paste is text, Enter outside one
     // submits, and an Escape that nothing follows is the key.
@@ -309,7 +313,8 @@ fn run(
                 }
                 // A real TUI draws what was pasted, and a paste's Enter waits for that.
                 Event::Pasted(characters) => {
-                    let _ = say(&format!("[pasted, {characters} characters]\n"));
+                    let below = input_box.as_mut().map_or("", input_box::InputBox::below);
+                    let _ = say(&format!("{below}[pasted, {characters} characters]\n"));
                 }
                 Event::Escape => {
                     if !input_box
