@@ -7,8 +7,9 @@
 //! Each Claude Code agent named opens as the app opens it: the row the launcher
 //! runs for it (`cf agent list`, its model and effort as the catalog has them),
 //! in a window of the pane host of a rig, on real Claude Code with no MCP
-//! servers, connectors or browser (`--strict-mcp-config --no-chrome`) and
-//! without `CLAUDE_CONFIG_DIR`, in a folder of its own under the user's home. It
+//! servers, connectors or browser (`--strict-mcp-config --no-chrome`) and on a
+//! config folder of the run's own with a copy of the machine's login
+//! ([`cf_e2e::live::login`]), in a folder of its own under the user's home. It
 //! is asked for a sum its message does not hold, so the answer on the screen
 //! means the window took the message; Claude Code's own record of the session
 //! must then name the agent's model as the one that answered, and no other.

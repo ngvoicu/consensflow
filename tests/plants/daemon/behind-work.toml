@@ -1,0 +1,600 @@
+# A follow-up queued behind a window's own work, and a brief edited before a window has it (T-110,
+# 3.0.6; the chief of 2026-10-21, running this project on 3.0.5).
+#
+# `cf task add --after T-3` was refused while T-3's window was still on T-3. Now the follow-up is
+# taken, waits on the board with T-3 among what it needs, and goes into that window once T-3 is
+# accepted; two behind one window go in order, a task that fails tells the chief once of what waits
+# for it, and a cancel of a task a follow-up waits for is refused (T-74). And `cf task edit T-n`
+# replaces the brief of a task no window has (open, blocked, queued or paused, but not yet delivered), keeping
+# the old brief in the log; a task a window has is refused and told what to do instead. One plant
+# takes one fix out, and a test of it fails. The rig's cases build the native `cf` and the daemon
+# from the sources as planted, so their plants say `builds`.
+#
+# Every name holds `behind work` or `brief edit`, so `npm run plants:daemon -- "behind work"` runs
+# the first and `-- "brief edit"` the second.
+
+[run]
+ledger-behind-work = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "behind_work"]
+ledger-edited-brief = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "edited_brief"]
+rig-regression-behind-work = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_follow_up_could_not_be_queued_behind_its_windows_own_work"]
+rig-regression-brief-edit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_brief_could_not_be_edited_once_added"]
+daemon-lib-routes-tasks = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::tasks"]
+daemon-lib-routes-table = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::tests::"]
+cf-help = ["cargo", "test", "--offline", "-p", "cf", "--test", "help"]
+engine-text-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles"]
+
+# A follow-up of a task at work.
+
+[[plant]]
+name = "behind work: a follow-up of a task still at work is refused, as 3.0.5 refused it"
+meant = "a_follow_up_of_a_task_at_work_waits_for_it_and_goes_to_its_window_once_it_is_accepted"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "    if !behind {\n        require_free(store, &session, Giving::Task)?;\n    }\n"
+replace = "    require_free(store, &session, Giving::Task)?;\n"
+
+[[plant]]
+name = "behind work: the API refuses a follow-up of a task at work"
+meant = "a_follow_up_of_a_task_still_at_work_waits_for_it_and_is_not_queued_for_the_window"
+runs = ["daemon-lib-routes-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "    if !behind {\n        require_free(store, &session, Giving::Task)?;\n    }\n"
+replace = "    require_free(store, &session, Giving::Task)?;\n"
+
+[[plant]]
+name = "behind work: the chief's follow-up of a task at work is refused, in the field's shape"
+meant = "a_follow_up_added_while_its_window_is_at_work_waits_for_the_task_and_goes_into_the_same_window"
+runs = ["rig-regression-behind-work"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "    if !behind {\n        require_free(store, &session, Giving::Task)?;\n    }\n"
+replace = "    require_free(store, &session, Giving::Task)?;\n"
+
+[[plant]]
+name = "behind work: the follow-up does not wait for the task, and is queued for the window at once"
+meant = "a_follow_up_of_a_task_at_work_waits_for_it_and_goes_to_its_window_once_it_is_accepted"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = "            Some(after) if !needed.contains(&after) => [needed.as_slice(), &[after]].concat(),\n"
+replace = ""
+
+[[plant]]
+name = "behind work: the follow-up does not wait for the task, in the field's shape"
+meant = "a_follow_up_added_while_its_window_is_at_work_waits_for_the_task_and_goes_into_the_same_window"
+runs = ["rig-regression-behind-work"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = "            Some(after) if !needed.contains(&after) => [needed.as_slice(), &[after]].concat(),\n"
+replace = ""
+
+[[plant]]
+name = "behind work: the task a follow-up follows is a need twice when the chief names it too"
+meant = "a_follow_up_that_needs_other_tasks_too_waits_for_all_of_them"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = "            Some(after) if !needed.contains(&after) => [needed.as_slice(), &[after]].concat(),\n"
+replace = "            Some(after) => [needed.as_slice(), &[after]].concat(),\n"
+
+[[plant]]
+name = "behind work: a follow-up of a task paused under an ended session brings the session back"
+meant = "every_departed_trace_is_there_and_still_departs"
+runs = ["ledger-replay"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "    let behind = session.left_at.is_none() && (at_work || others_wait);\n"
+replace = "    let behind = at_work || others_wait;\n"
+
+[[plant]]
+name = "behind work: two follow-ups of one window go to it together"
+meant = "two_follow_ups_of_one_window_at_work_go_to_it_in_order"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if assignee.member_id.is_some() && has_task_in_hand(store, assignee.id)? {\n"
+replace = "        if assignee.member_id.is_some() && false {\n"
+
+[[plant]]
+name = "behind work: the second of two follow-ups is not given to the window with the result of the first"
+meant = "two_follow_ups_of_one_window_at_work_go_to_it_in_order"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        store.move_task(&task, \"done\", json!({ \"result\": message_id }))?;\n        release_ready(store, project_id)?;\n"
+replace = "        store.move_task(&task, \"done\", json!({ \"result\": message_id }))?;\n"
+
+# A task that fails, or is cancelled, with a follow-up waiting for it.
+
+[[plant]]
+name = "behind work: the chief is not told of a follow-up that waits for a task that failed"
+meant = "a_task_that_fails_leaves_its_follow_up_waiting_and_the_chief_is_told_once"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        for waiting in waiters(store, &task)? {\n"
+replace = "        for waiting in Vec::<i64>::new() {\n"
+
+[[plant]]
+name = "behind work: the chief is told twice of a follow-up that waits for a task that failed"
+meant = "a_task_that_fails_leaves_its_follow_up_waiting_and_the_chief_is_told_once"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        for waiting in waiters(store, &task)? {\n"
+replace = "        for waiting in waiters(store, &task)?.into_iter().chain(waiters(store, &task)?) {\n"
+
+[[plant]]
+name = "behind work: a task that fails frees its follow-up, which goes to the window though the task never finished"
+meant = "a_task_that_fails_leaves_its_follow_up_waiting_and_the_chief_is_told_once"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "         AND NOT EXISTS (SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id\n                         WHERE n.task_id = t.id AND d.state != 'accepted')\n"
+replace = "         AND NOT EXISTS (SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id\n                         WHERE n.task_id = t.id AND d.state NOT IN ('accepted', 'failed'))\n"
+
+[[plant]]
+name = "behind work: a task a follow-up waits for is cancelled, and the follow-up stays blocked for good"
+meant = "a_task_with_a_follow_up_waiting_is_not_cancelled_until_the_follow_up_is"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    require_unawaited(store, &task, ending)?;\n"
+replace = ""
+
+# A brief edited.
+
+[[plant]]
+name = "brief edit: the window that gets a queued task is given the old brief"
+meant = "a_task_queued_for_its_window_and_not_yet_pasted_is_edited_in_the_message_that_carries_it"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "               AND state IN ('queued', 'gated')\",\n"
+replace = "               AND state IN ('gated')\",\n"
+
+[[plant]]
+name = "brief edit: the human is shown the old brief at the gate"
+meant = "a_task_held_at_the_humans_gate_is_edited_in_the_message_the_human_will_pass_on"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "               AND state IN ('queued', 'gated')\",\n"
+replace = "               AND state IN ('queued')\",\n"
+
+[[plant]]
+name = "brief edit: the task keeps its old title"
+meant = "the_brief_of_a_task_open_for_a_member_is_replaced_and_the_old_one_stays_in_the_log"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "            params![body, title_of(body), at, task.id],\n"
+replace = "            params![body, task.title, at, task.id],\n"
+
+[[plant]]
+name = "brief edit: the old brief is not kept"
+meant = "the_brief_of_a_task_open_for_a_member_is_replaced_and_the_old_one_stays_in_the_log"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "            \"task.edited\",\n"
+replace = "            \"task.edit\",\n"
+
+[[plant]]
+name = "brief edit: the log keeps the new brief, not the one it replaced"
+meant = "the_brief_of_a_task_open_for_a_member_is_replaced_and_the_old_one_stays_in_the_log"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "            json!({ \"task\": number, \"by\": by, \"from\": task.body }),\n"
+replace = "            json!({ \"task\": number, \"by\": by, \"from\": body }),\n"
+
+[[plant]]
+name = "brief edit: a task a window has is edited"
+meant = "a_task_a_window_was_given_is_not_edited_and_the_refusal_says_what_to_do_instead"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "        require_not_given(store, &task)?;\n"
+replace = ""
+
+[[plant]]
+name = "brief edit: a task whose brief is being pasted is edited"
+meant = "a_task_a_window_was_given_is_not_edited_and_the_refusal_says_what_to_do_instead"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "    if begun {\n"
+replace = "    if begun && false {\n"
+
+[[plant]]
+name = "brief edit: a task taken back from a window that had its brief is edited"
+meant = "a_task_taken_back_from_a_window_that_had_its_brief_is_not_edited"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "               AND state IN ('delivering', 'delivered', 'read')\",\n"
+replace = "               AND state IN ('delivering')\",\n"
+
+[[plant]]
+name = "brief edit: a task that is over is edited"
+meant = "a_task_that_is_over_is_not_edited"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "        \"open\" | \"queued\" | \"paused\" => {}\n"
+replace = "        \"open\" | \"queued\" | \"paused\" | \"cancelled\" => {}\n"
+
+[[plant]]
+name = "brief edit: the refusal does not say what the window has"
+meant = "a_task_a_window_was_given_is_not_edited_and_the_refusal_says_what_to_do_instead"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "cannot edit T-{}: it was given to {window}, which has the brief; {instead}"
+replace = "cannot edit T-{}: it was given to {window}; {instead}"
+
+[[plant]]
+name = "brief edit: the daemon has no word edit on a task route"
+meant = "a_task_route_is_the_task_and_the_word_after_it_whatever_the_method"
+runs = ["daemon-lib-routes-table"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/mod.rs"
+find = "            \"edit\" => Self::Edit,\n"
+replace = ""
+
+[[plant]]
+name = "brief edit: the daemon's edit reopens the task"
+meant = "the_chief_replaces_the_brief_of_a_task_no_window_has_and_is_refused_for_one_that_does"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "        TaskAction::Edit => ledger.edit_task(project, number, by, words)?,\n"
+replace = ""
+
+[[plant]]
+name = "brief edit: the new brief is not kept for the task, in the field's shape (the chief's `cf`, the daemon and the ledger)"
+meant = "a_blocked_task_edited_starts_with_the_new_brief_and_a_task_at_work_is_refused"
+runs = ["rig-regression-brief-edit"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "            params![body, title_of(body), at, task.id],\n"
+replace = "            params![task.body, title_of(body), at, task.id],\n"
+
+[[plant]]
+name = "brief edit: a task at work is edited, in the field's shape"
+meant = "a_blocked_task_edited_starts_with_the_new_brief_and_a_task_at_work_is_refused"
+runs = ["rig-regression-brief-edit"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "        require_not_given(store, &task)?;\n"
+replace = ""
+
+[[plant]]
+name = "brief edit: `cf task edit` is no verb"
+meant = "a_new_brief_is_posted_to_the_task_and_said_to_be_the_tasks_now"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "const MOVES: [&str; 7] = [\n    \"done\", \"accept\", \"cancel\", \"reopen\", \"edit\", \"pause\", \"resume\",\n];\n"
+replace = "const MOVES: [&str; 6] = [\"done\", \"accept\", \"cancel\", \"reopen\", \"pause\", \"resume\"];\n"
+
+[[plant]]
+name = "brief edit: `cf task edit` accepts no brief"
+meant = "a_new_brief_is_asked_for_before_the_board_is_asked_anything"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "    if matches!(action, \"done\" | \"reopen\" | \"edit\" | \"resume\") && js::trim(&text).is_empty() {\n"
+replace = "    if matches!(action, \"done\" | \"reopen\" | \"resume\") && js::trim(&text).is_empty() {\n"
+
+[[plant]]
+name = "brief edit: the usage of `cf` does not list `cf task edit`"
+meant = "every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing"
+runs = ["cf-help"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = "  cf task edit T-3 \"…\"              replace the brief of a task no window has yet (open, queued, or paused)\n"
+replace = ""
+
+[[plant]]
+name = "brief edit: the chief is not told of `cf task edit`"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = "    cf task edit T-3 \"…\"          replace the brief of a task no window has yet (open, queued, or paused)\n"
+replace = ""
+
+[[plant]]
+name = "behind work: the chief is told that a window at work refuses a follow-up, as 3.0.5 did"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = "conversation, and only the follow-up goes in. A window still at work on T-3\ntakes it too: it waits for T-3 to be accepted and goes in then. A window on\nanother task refuses and tells you to open the task for its tier instead.\n"
+replace = "conversation, and only the follow-up goes in. A window still busy refuses\nand tells you to open the task for its tier instead.\n"
+
+[[plant]]
+name = "brief edit: a task paused before any window had it is refused as if a window had it"
+meant = "a_task_paused_before_any_window_had_it_is_edited_and_goes_on_with_the_new_brief"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "        \"open\" | \"queued\" | \"paused\" => {}\n"
+replace = "        \"open\" | \"queued\" => {}\n"
+
+[[plant]]
+name = "brief edit: a paused task a window began is edited"
+meant = "a_task_a_window_was_given_is_not_edited_and_the_refusal_says_what_to_do_instead"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "            \"paused\" => tell,\n"
+replace = "            \"paused\" => format!(\"resume it\"),\n"
+
+# The merge with T-125 and T-152 (wt/board-fixes): a removal, a decline and a failure with a follow-up behind a task.
+
+[[plant]]
+name = "behind work: the removal of a member does not tell the chief of the follow-up behind its task"
+meant = "a_member_removed_with_a_task_a_follow_up_waits_behind_tells_the_chief_once_it_will_never_start"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "            tell_stranded_waiters(store, project_id, task)?;\n"
+replace = ""
+
+[[plant]]
+name = "behind work: the decline of a brief a follow-up waits for says to let the task finish"
+meant = "a_decline_of_the_brief_of_a_task_a_follow_up_waits_for_is_refused_in_the_declines_words"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        Ending::Declined => format!(\"pass T-{number} on\"),\n"
+replace = "        Ending::Declined => format!(\"let T-{number} finish\"),\n"
+
+[[plant]]
+name = "behind work: a follow-up of a task that fails again is told to the chief the first time only"
+meant = "a_follow_up_that_waits_for_a_task_failing_twice_is_told_to_the_chief_each_time"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        for waiting in waiters(store, &task)? {\n"
+replace = "        let mut fresh = Vec::new();\n        for each in waiters(store, &task)? {\n            let told = store.db.prepare(\"SELECT 1 FROM message m JOIN task t ON t.id = m.task_id WHERE t.project_id = ? AND t.number = ? AND m.kind = 'note'\")?.exists(params![project_id, each])?;\n            if !told {\n                fresh.push(each);\n            }\n        }\n        for waiting in fresh {\n"
+
+# Round 2 (T-158): Calliope's review of the merge (T-154).
+
+[[plant]]
+name = "behind work: a removal leaves the follow-ups bound to the sessions it closes"
+meant = "a_member_removed_with_follow_ups_bound_to_its_session_cancels_them_and_nothing_is_queued_for_the_left_session"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "           AND t.state IN ('open', 'queued', 'working', 'waiting')\n"
+replace = "           AND t.state IN ('queued', 'working', 'waiting')\n"
+
+[[plant]]
+name = "behind work: a removal leaves the follow-up behind a paused task bound to the window that goes"
+meant = "a_follow_up_behind_a_task_paused_in_a_removed_members_window_is_cancelled_and_the_task_goes_to_another_member"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "           AND t.state IN ('open', 'queued', 'working', 'waiting')\n"
+replace = "           AND t.state IN ('queued', 'working', 'waiting')\n"
+
+[[plant]]
+name = "behind work: a release queues a follow-up for a session that left"
+meant = "a_follow_up_bound_to_a_session_that_left_in_an_older_build_is_cancelled_when_it_would_go_and_the_chief_is_told"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if a_members_window(&assignee) && assignee.left_at.is_some() {\n"
+replace = "        if false && a_members_window(&assignee) && assignee.left_at.is_some() {\n"
+
+[[plant]]
+name = "behind work: a release brings back a session whose member left the staff"
+meant = "a_follow_up_bound_to_a_session_that_left_in_an_older_build_is_cancelled_when_it_would_go_and_the_chief_is_told"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            if can_continue(store, &assignee)? {\n"
+replace = "            if true {\n"
+
+[[plant]]
+name = "behind work: a release cancels a follow-up bound to a session the human deleted"
+meant = "a_follow_up_bound_to_a_session_the_human_deleted_brings_it_back_as_any_follow_up_does"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            if can_continue(store, &assignee)? {\n"
+replace = "            if false {\n"
+
+[[plant]]
+name = "behind work: a follow-up added with the result in overtakes the ones already waiting"
+meant = "a_follow_up_added_after_the_result_but_before_the_acceptance_lines_up_behind_the_ones_waiting"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "        previous.state == \"done\" && others_wait_for(store, &previous, session.id, before)?;\n"
+replace = "        false && others_wait_for(store, &previous, session.id, before)?;\n"
+
+[[plant]]
+name = "behind work: a follow-up put before the ones waiting for a task with its result in waits behind them"
+meant = "a_follow_up_put_before_the_ones_waiting_for_a_task_with_its_result_in_goes_to_the_window_now"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "    Ok(waiting.iter().any(|number| !before.contains(number)))\n"
+replace = "    Ok(!waiting.is_empty())\n"
+
+[[plant]]
+name = "behind work: an edit gives every queued task message the new brief again"
+meant = "a_task_held_for_quota_and_resumed_by_the_daemon_is_edited_in_its_brief_alone"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "            let renewed = if row == old {\n"
+replace = "            let renewed = if true {\n"
+
+[[plant]]
+name = "behind work: an edit leaves the brief of a resume that carries it as it was"
+meant = "a_task_paused_and_resumed_by_the_chief_is_edited_in_the_brief_its_words_follow"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "                row.strip_prefix(old.as_str())\n"
+replace = "                None::<&str>\n"
+
+[[plant]]
+name = "behind work: a release names no follow-up still bound to the window that lost the task"
+meant = "a_task_taken_back_from_a_window_names_the_follow_ups_still_bound_to_it_to_its_requester"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = "               WHERE n.needs_id = ? AND t.state IN ('open', 'paused') AND t.assignee_id = ?\n"
+replace = "               WHERE n.needs_id = ? AND t.state IN ('nothing') AND t.assignee_id = ?\n"
+
+[[plant]]
+name = "behind work: a follow-up of a task nobody has taken is told its session has ended"
+meant = "a_follow_up_of_a_task_nobody_has_taken_yet_is_told_to_wait_for_it_with_needs"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "    if previous.assignee_id.is_none() {\n        return Err(LedgerError::refused_with(\n            \"no-window-yet\",\n"
+replace = "    if previous.assignee_id.is_none() {\n        return Err(LedgerError::refused_with(\n            \"session-ended\",\n"
+
+[[plant]]
+name = "brief edit: the usage says a task paused before any window had it is not editable"
+meant = "every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing"
+runs = ["cf-help"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = "(open, queued, or paused)"
+replace = "(open, blocked or queued)"
+
+[[plant]]
+name = "brief edit: the chief's role text says a task paused before any window had it is not editable"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = "replace the brief of a task no window has yet (open, queued, or paused)"
+replace = "replace the brief of a task no window has yet (open, blocked or queued)"
+
+# Round 3 (T-170): Calliope's check of round 2 (T-159).
+
+[[plant]]
+name = "behind work: a release queues a task for a member's lane that left"
+meant = "a_task_given_to_a_member_by_name_whose_member_left_in_an_older_build_is_cancelled_when_it_would_go"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if a_members_window(&assignee) && assignee.left_at.is_some() {\n"
+replace = "        if assignee.member_id.is_some() && assignee.left_at.is_some() {\n"
+
+[[plant]]
+name = "behind work: the note of a task cancelled for a lane that left says its conversation was lost"
+meant = "a_task_given_to_a_member_by_name_whose_member_left_in_an_older_build_is_cancelled_when_it_would_go"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        None => true,\n    };\n    let why = if member_left {\n"
+replace = "        None => false,\n    };\n    let why = if member_left {\n"
+
+[[plant]]
+name = "behind work: the note of a task cancelled for a lost conversation says its member left"
+meant = "a_follow_up_bound_to_a_session_whose_conversation_was_lost_is_cancelled_with_words_that_say_so"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    let why = if member_left {\n"
+replace = "    let why = if member_left || true {\n"
+
+[[plant]]
+name = "behind work: a follow-up of a task given to a member by name is told its session has ended"
+meant = "a_follow_up_of_a_task_given_to_a_member_by_name_is_told_it_has_no_window_of_its_own"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "        .filter(|lane| lane.member_id.is_none() && lane.left_at.is_none())\n"
+replace = "        .filter(|lane| lane.member_id.is_some() && lane.left_at.is_none())\n"
+
+[[plant]]
+name = "behind work: a removal after the acceptance leaves the follow-up waiting for the window bound to it"
+meant = "a_member_removed_after_the_acceptance_cancels_the_follow_up_in_its_window_and_the_one_waiting_for_it"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "           AND t.state IN ('open', 'queued', 'working', 'waiting')\n"
+replace = "           AND t.state IN ('queued', 'working', 'waiting')\n"
+
+[[plant]]
+name = "behind work: a removal does not tell the chief of a task that waits for a follow-up it cancelled"
+meant = "a_task_for_a_tier_that_waits_for_a_follow_up_a_removal_cancels_is_told_to_the_chief"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "        for (task, _) in &open {\n            tell_stranded_waiters(store, project_id, task)?;\n"
+replace = "        for (task, _) in open.iter().filter(|(task, _)| task.state != \"open\") {\n            tell_stranded_waiters(store, project_id, task)?;\n"

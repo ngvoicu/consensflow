@@ -324,18 +324,18 @@ find = "      if (cause?.refused || lost >= retries.length) throw cause"
 replace = "      throw cause"
 
 [[plant]]
-name = "gate: the brief is given to an agent while it waits at the gate"
-meant = "a_brief_that_waits_at_the_gate_is_in_no_agents_view_of_the_task"
+name = "gate: the brief is given to a window that did not give the task while it waits at the gate"
+meant = "a_brief_that_waits_at_the_gate_is_in_no_view_of_the_task_of_a_window_that_did_not_give_it"
 runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
 find = '''
-        if held_back {
+        if held_back && !may_move(caller, &task) {
             task.task.body.clear();
         }'''
 replace = '''
-        if held_back && false {
+        if held_back && !may_move(caller, &task) && false {
             task.task.body.clear();
         }'''
 

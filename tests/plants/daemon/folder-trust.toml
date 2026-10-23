@@ -59,7 +59,7 @@ folder-trust-rig-unread-worker = ["cargo", "test", "--offline", "-p", "cf-e2e", 
 folder-trust-rig-unread-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_opened_again_at_rest_whose_screen_goes_unread"]
 folder-trust-rig-quoted-cursor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_whose_conversation_quotes_the_dialog"]
 folder-trust-rig-cursor-again = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_question_whose_cursor_is_drawn_otherwise_is_told_of_again"]
-folder-trust-live-sweep = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_folder_trust", "a_record_of_the_resumed_part"]
+folder-trust-live-sweep = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_folder_trust", "what_a_window_of_the_resumed_part_wrote"]
 folder-trust-readers = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "trust::"]
 folder-trust-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--features", "test-support", "--lib", "tooling::tests::the_key_toward"]
 folder-trust-rig-claude = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked"]
@@ -817,34 +817,8 @@ replace = '''
                     .contains(&(project.id, folder.clone(), false));'''
 
 [[plant]]
-name = "folder trust: the live suite takes away any record named after a resumed folder (round 6, T-299)"
-meant = "a_record_of_the_resumed_part_is_known_by_its_folders_name_and_no_other"
-runs = ["folder-trust-live-sweep"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_folder_trust.rs"
-find = '''
-    name.contains(&format!("-{FOLDER}-"))
-        && name'''
-replace = '''
-    true
-        && name'''
-
-[[plant]]
-name = "folder trust: the live suite takes away a resumed folder with words after its number (round 6, T-299)"
-meant = "a_record_of_the_resumed_part_is_known_by_its_folders_name_and_no_other"
-runs = ["folder-trust-live-sweep"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_folder_trust.rs"
-find = '''
-                !number.is_empty() && number.chars().all(|at| at.is_ascii_digit())'''
-replace = '''
-                !number.is_empty()'''
-
-[[plant]]
 name = "folder trust: the live suite leaves what a window wrote when it goes (round 6, T-299)"
-meant = "a_record_of_the_resumed_part_is_known_by_its_folders_name_and_no_other"
+meant = "what_a_window_of_the_resumed_part_wrote_goes_with_it"
 runs = ["folder-trust-live-sweep"]
 
 [[plant.edit]]
@@ -955,7 +929,7 @@ replace = '    answer["grants"] = json!(false);'
 
 [[plant]]
 name = "folder trust: the live suite has no case of a trusted folder's grants (T-354)"
-meant = "claude_must_ask_in_a_repository_nobody_answered_and_no_harness_ever_elsewhere"
+meant = "claude_must_ask_where_nobody_answered_above_and_in_a_repository_nobody_answered_and_no_harness_ever_elsewhere"
 runs = ["folder-trust-live-cases"]
 
 [[plant.edit]]

@@ -515,6 +515,72 @@ replace = '''
 '''
 
 [[plant]]
+name = "updater app: the app is left to quit by the end of its input before the kill reaches it"
+meant = "every_process_the_app_has_been_is_ended_with_what_is_under_it"
+runs = ["smoke-app"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/app.rs"
+find = '''
+        for pid in pids {
+            kill_group(pid);
+'''
+replace = '''
+        self.close_input();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        for pid in pids {
+            kill_group(pid);
+'''
+
+[[plant]]
+name = "updater feed: a feed goes on taking clients after it was closed"
+meant = "serves_the_feed_and_the_archive_when_offered_and_not_found_when_not"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/feed.rs"
+find = '''
+        thread::spawn(move || accept(&listener, &config, &offer, &over, &say))
+'''
+replace = '''
+        let (again, config_again, offer_again) = (
+            listener.try_clone().unwrap(),
+            Arc::clone(&config),
+            Arc::clone(&offer),
+        );
+        thread::spawn(move || {
+            accept(
+                &again,
+                &config_again,
+                &offer_again,
+                &AtomicBool::new(false),
+                &Say::channel().0,
+            )
+        });
+        thread::spawn(move || accept(&listener, &config, &offer, &over, &say))
+'''
+
+[[plant]]
+name = "updater feed: the test takes any silence at a feed's address for a feed that answers no one"
+meant = "a_feed_that_is_up_answers_and_a_port_nothing_holds_does_not"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/testing.rs"
+find = "map_or(true, |answer| answer.is_empty())"
+replace = "map_or(true, |_| true)"
+
+[[plant]]
+name = "updater case: the panes are taken for closed while their chiefs run"
+meant = "two_windows_open_and_the_install_refused_for_them_is_what_the_ready_snapshot_shows"
+runs = ["smoke-case"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/case.rs"
+find = "Ok(chiefs.iter().all(|pid| gone(*pid)).then_some(()))"
+replace = "Ok(Some(()))"
+
+[[plant]]
 name = "updater evidence: a bundle of another app is taken"
 meant = "refuses_another_app_two_versions_in_one_plist_a_bundle_with_no_cf_and_half_of_node"
 runs = ["smoke-kit"]

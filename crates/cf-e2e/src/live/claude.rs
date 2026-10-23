@@ -6,8 +6,10 @@
 //! test reads both as the daemon does, and watches the status as it changes
 //! ([`Status`]), because what a test shows is when it read what.
 //!
-//! The config folder is `~/.claude` on the machine; a test is given it, never
-//! the `CLAUDE_CONFIG_DIR` of the shell it runs in.
+//! The config folder is the one the run's Claude windows run on (a folder of the
+//! run's own, with a copy of the machine's login: [`super::login`]); a test is
+//! given it, never the `CLAUDE_CONFIG_DIR` of the shell it runs in, and never the
+//! person's own `~/.claude`.
 
 #[cfg(test)]
 mod tests;

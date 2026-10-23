@@ -11,7 +11,10 @@
 //!
 //! - Claude Code asks in a git repository it was never told to trust, whatever the
 //!   folders above it, and in a git repository below a trusted one; not in a plain
-//!   folder below a trusted one, nor in a plain folder of a trusted repository. Its
+//!   folder below a trusted one, nor in a plain folder of a trusted repository. (A
+//!   plain folder with nothing trusted above it asks as well: the owner's own config
+//!   trusts their home, so on it none ever did, and the run's config, which trusts
+//!   nothing, shows it, 2026-10-22.) Its
 //!   question opens on "No, exit"; Down, then Enter, says yes, which it writes down
 //!   for the repository's root (its question names the window's own folder), so a
 //!   window opened anywhere in it again does not ask.
@@ -61,16 +64,17 @@
 //! new repository nobody trusted; its question answered as the engine answers it, its
 //! screen must show neither the question nor its prompt for less than the 12 s the engine
 //! waits before it counts the window past the question. Its conversations are written
-//! where the owner's Claude Code keeps its own (about 540 MB): a window given a config
-//! folder of its own opens on Claude Code's onboarding, its login kept for its own
-//! config folder, and never shows the question. They are taken away as each window ends,
-//! and an earlier run's at the start, by a folder name only this part gives.
+//! where the rig's Claude Code keeps its own, in the run's config folder (about 540 MB),
+//! and taken away as each window ends; the rest goes with the rig.
 //!
 //! The run writes what it measured and its checks to `report.txt` beside its folders
 //! (it says where), besides its error output.
 //!
-//! What Claude Code writes of a yes is taken back with `claude purge` at the end;
-//! the run says which folders it could not have it forget. Codex writes nothing here.
+//! Claude Code's windows run on a config folder of the run's own, with a copy of the
+//! machine's login ([`cf_e2e::live::login`]): what it writes of a yes is in that
+//! folder, which goes with each rig, and nothing of it reaches the owner's `~/.claude`.
+//! A fresh folder has trusted nothing, so the questions are the run's own. Codex writes
+//! nothing here.
 //!
 //! ```text
 //! cargo xtask live folder-trust                       every harness, both parts
@@ -83,7 +87,6 @@ use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use cf_e2e::live::cleanup::forget_in_claude;
 use cf_e2e::live::machine::live_folder_in;
 use cf_e2e::live::members::{member, member_as, named, stand_in_chief, Members, Plan};
 use cf_e2e::live::report::{self, Check};
@@ -106,6 +109,10 @@ const FOLDER: &str = "asks-probe";
 /// How long a window has to draw, and to draw what follows a key.
 const DRAWS: Duration = Duration::from_secs(60);
 
+/// How long the daemon and the pane host have to end when a rig is closed: a real
+/// harness's window takes longer than the stand-ins'.
+const CLOSES: Duration = Duration::from_secs(30);
+
 /// How many keys a question is given before it counts as not answered: the engine's own.
 const MOST_KEYS: usize = 6;
 
@@ -115,9 +122,7 @@ const TAIL: usize = 12;
 /// The parts of the run.
 const PARTS: [&str; 3] = ["windows", "projects", "resumed"];
 
-/// The folders the resumed part opens its windows in end with this and a number: a
-/// name no other run gives its folders, by which Claude Code's records of them are
-/// found and taken away, an earlier run's too.
+/// The folders the resumed part opens its windows in end with this and a number.
 const RESUMED_FOLDER: &str = "trust-resumed";
 
 /// How long the engine lets a window that asked show neither the question nor its
@@ -207,14 +212,16 @@ impl Case {
     }
 }
 
-/// Whether `harness` must ask in `case`: Claude Code in a repository nobody
+/// Whether `harness` must ask in `case`: Claude Code in a folder nobody answered above
+/// (a plain one too: the config of the run trusts nothing), in a repository nobody
 /// answered, and of a trusted folder's grants; nobody else, ever.
 fn must_ask(harness: Harness, case: Case) -> bool {
     must_grant(harness, case)
         || harness == Harness::Claude
             && matches!(
                 case,
-                Case::Repository
+                Case::Fresh
+                    | Case::Repository
                     | Case::Parent
                     | Case::RepositoryBelow
                     | Case::Untrusted
@@ -283,10 +290,34 @@ fn predicted(directory: &Path) -> Result<(String, bool)> {
     ))
 }
 
-/// The folders Claude Code keeps a yes for in its own record of them (`.claude.json`
-/// in `home`), read and never written: below `under` alone.
-fn claude_trusted(home: &Path, under: &str) -> Vec<String> {
-    let record: serde_json::Value = fs::read_to_string(home.join(".claude.json"))
+/// Where Claude Code keeps its own record of folders: `.claude.json` in the config folder
+/// the rig gave its windows, and in the user's home where it gave none.
+fn claude_record(rig: &Rig, install: &Installed) -> PathBuf {
+    match rig
+        .var("CLAUDE_CONFIG_DIR")
+        .filter(|config| !config.is_empty())
+    {
+        Some(config) => Path::new(config).join(".claude.json"),
+        None => install.home().join(".claude.json"),
+    }
+}
+
+/// Claude Code's config folder: the one the rig gave its windows, and `~/.claude` where
+/// it gave none.
+fn claude_config(rig: &Rig, install: &Installed) -> PathBuf {
+    match rig
+        .var("CLAUDE_CONFIG_DIR")
+        .filter(|config| !config.is_empty())
+    {
+        Some(config) => PathBuf::from(config),
+        None => install.home().join(".claude"),
+    }
+}
+
+/// The folders Claude Code keeps a yes for in its own record of them (`record`, its
+/// `.claude.json`), read and never written: below `under` alone.
+fn claude_trusted(record: &Path, under: &str) -> Vec<String> {
+    let record: serde_json::Value = fs::read_to_string(record)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
@@ -422,7 +453,8 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     let under = live_folder_in(&home, FOLDER)?
         .to_string_lossy()
         .into_owned();
-    let trusted_before = claude_trusted(install.home(), &under);
+    let record = claude_record(rig, install);
+    let trusted_before = claude_trusted(&record, &under);
     let window = Open::new(rig, install, &name, &id)
         .without_trust()
         .open(log)?;
@@ -469,7 +501,7 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     // of the folder's grants and nothing answered, it keeps nothing.
     let mut kept_where_said = true;
     if must_grant(harness, case) {
-        let kept: Vec<String> = claude_trusted(install.home(), &under)
+        let kept: Vec<String> = claude_trusted(&record, &under)
             .into_iter()
             .filter(|folder| !trusted_before.contains(folder))
             .collect();
@@ -477,7 +509,7 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
         lines.push(format!("Claude Code kept a yes for {kept:?}"));
     } else if asked && harness == Harness::Claude {
         let (folder, inside) = predicted(&directory)?;
-        let kept: Vec<String> = claude_trusted(install.home(), &under)
+        let kept: Vec<String> = claude_trusted(&record, &under)
             .into_iter()
             .filter(|folder| !trusted_before.contains(folder))
             .collect();
@@ -501,18 +533,11 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     })
 }
 
-/// The windows part for `install`: each case, in folders of the run's own, which are
-/// added to `folders`.
-fn windows(
-    install: &Installed,
-    stamp: &str,
-    log: &Log,
-    folders: &mut Vec<String>,
-) -> Result<Vec<Check>> {
+/// The windows part for `install`: each case, in folders of the run's own.
+fn windows(install: &Installed, stamp: &str, log: &Log) -> Result<Vec<Check>> {
     let harness = install.harness();
     let rig = Rig::start(live::rig(std::slice::from_ref(install), FAKE_AGENT))?;
     let base = format!("{FOLDER}/{stamp}/{}", harness.name());
-    let home = PathBuf::from(rig.var("HOME").unwrap_or_default());
     let mut checks = Vec::new();
     for case in Case::ALL {
         let seen = look(&rig, install, &base, case, log)?;
@@ -538,16 +563,8 @@ fn windows(
             },
         ));
     }
-    let made = Case::ALL.into_iter().map(|case| case.folder().0).chain([
-        "untrusted",
-        "worktree-main",
-        "superproject",
-        "submodule-source",
-    ]);
-    for folder in made {
-        let path = live_folder_in(&home, &format!("{base}/{folder}"))?;
-        folders.push(path.to_string_lossy().into_owned());
-    }
+    // The rig is closed, not dropped: what the run did in the owner's setup fails it.
+    rig.close_within(CLOSES)?;
     Ok(checks)
 }
 
@@ -563,34 +580,8 @@ fn claude_project_folder(config: &Path, workspace: &Path) -> PathBuf {
     config.join("projects").join(named)
 }
 
-/// Whether `name`, a folder of Claude Code's records (`<config>/projects`), is one the
-/// resumed part wrote: named after a folder of the run's that ends with
-/// [`RESUMED_FOLDER`] and a number.
-fn is_resumed_record(name: &str) -> bool {
-    name.contains(&format!("-{FOLDER}-"))
-        && name
-            .rsplit_once(&format!("-{RESUMED_FOLDER}-"))
-            .is_some_and(|(_, number)| {
-                !number.is_empty() && number.chars().all(|at| at.is_ascii_digit())
-            })
-}
-
-/// Takes away the records the resumed part wrote in Claude Code's config folder
-/// `config` (the owner's own: the rig's Claude windows read it) and an earlier run left,
-/// one stopped before it took them away: how many.
-fn forget_resumed_records(config: &Path) -> usize {
-    let Ok(entries) = fs::read_dir(config.join("projects")) else {
-        return 0;
-    };
-    entries
-        .filter_map(std::result::Result::ok)
-        .filter(|entry| is_resumed_record(&entry.file_name().to_string_lossy()))
-        .filter(|entry| fs::remove_dir_all(entry.path()).is_ok())
-        .count()
-}
-
-/// A folder of records the run wrote in the owner's Claude config folder, taken away
-/// when this goes, however the run goes on from there.
+/// A folder of records the run wrote in the rig's Claude config folder, taken away when
+/// this goes, however the run goes on from there: a chief's conversation is 540 MB.
 struct Written(PathBuf);
 
 impl Drop for Written {
@@ -723,24 +714,17 @@ fn write_conversation(
 /// nor its prompt as the engine reads them is measured: the engine lets [`GONE`] pass so
 /// before it counts a window that asked as past the question, and a yes is the human's
 /// only once at the prompt.
-fn resumed(
-    install: &Installed,
-    stamp: &str,
-    log: &Log,
-    report: &Path,
-    folders: &mut Vec<String>,
-) -> Result<Vec<Check>> {
+fn resumed(install: &Installed, stamp: &str, log: &Log, report: &Path) -> Result<Vec<Check>> {
     let rig = Rig::start(live::rig(std::slice::from_ref(install), FAKE_AGENT))?;
     let home = PathBuf::from(rig.var("HOME").unwrap_or_default());
     let mut checks = Vec::new();
     for (index, (what, before, after, printed)) in RESUMED.into_iter().enumerate() {
         let name = format!("{FOLDER}/{stamp}/claude/{RESUMED_FOLDER}-{index}");
         let workspace = live_folder_in(&home, &name)?;
-        folders.push(workspace.to_string_lossy().into_owned());
         git(&workspace, &["init", "-q"])?;
         let session = uuid::Uuid::new_v4().to_string();
         let real = fs::canonicalize(&workspace).unwrap_or_else(|_| workspace.clone());
-        let records = claude_project_folder(&install.home().join(".claude"), &real);
+        let records = claude_project_folder(&claude_config(&rig, install), &real);
         cf_e2e::files::make_dir(&records)?;
         // Taken away at the end of this window's turn of the loop, or as the run unwinds.
         let _written = Written(records.clone());
@@ -851,6 +835,8 @@ fn resumed(
             ),
         ));
     }
+    // The rig is closed, not dropped: what the run did in the owner's setup fails it.
+    rig.close_within(CLOSES)?;
     Ok(checks)
 }
 
@@ -904,17 +890,10 @@ fn done_task(members: &Members, number: i64, words: &[String], brief: &str) -> R
 }
 
 /// The projects part for `harness` as `role`: a project in a new repository nobody
-/// trusted (a follow-up's is made one after the first task), whose folder is added
-/// to `folders`. The chief must come up idle, a worker's tasks be done, a follow-up's
+/// trusted (a follow-up's is made one after the first task). The chief must come up idle, a worker's tasks be done, a follow-up's
 /// window be opened again on its conversation, and the notes speak of a yes once
 /// for Claude Code and never for a harness that does not ask.
-fn project(
-    harness: Harness,
-    role: &str,
-    stamp: &str,
-    log: &Log,
-    folders: &mut Vec<String>,
-) -> Check {
+fn project(harness: Harness, role: &str, stamp: &str, log: &Log) -> Check {
     let who = format!("{} {role}", harness.name());
     let folder = format!("{FOLDER}-project/{stamp}-{}-{role}", harness.name());
     let plan = match role {
@@ -926,7 +905,6 @@ fn project(
     };
     let scoped = log.scoped(&who);
     let came = Members::open(&plan, Path::new(FAKE_AGENT), &scoped).and_then(|mut members| {
-        folders.push(members.folder().to_string_lossy().into_owned());
         let done = if role == "chief" {
             true
         } else {
@@ -1007,54 +985,20 @@ fn which_harness_asks_to_trust_a_folder_and_consensflow_answers_it_in_the_projec
     let report = report_file(&stamp)?;
     log.say(format!("the run's report: {}", report.display()));
     let mut checks = Vec::new();
-    let mut claude = None;
-    // Every harness named is found before any window opens: one found missing after Claude's
-    // windows ended the run before Claude forgot their folders (T-156's first live run).
-    let installs = harnesses
-        .into_iter()
-        .map(|harness| log.found(harness))
-        .collect::<Result<Vec<_>>>()?;
-    // What an earlier run of the resumed part left in the owner's Claude config folder.
-    if let Some(claude) = installs
-        .iter()
-        .find(|install| install.harness() == Harness::Claude)
-    {
-        let left = forget_resumed_records(&claude.home().join(".claude"));
-        if left > 0 {
-            log.say(format!("took away the records an earlier run left: {left}"));
-        }
-    }
-    for install in installs {
-        let harness = install.harness();
-        let mut folders = Vec::new();
+    for harness in harnesses {
+        let install = log.found(harness)?;
         // Codex's bare window is not the app's: its question is no window ConsensFlow opens.
         if parts.contains(&"windows") && harness != Harness::Codex {
-            checks.extend(windows(&install, &stamp, &log, &mut folders)?);
+            checks.extend(windows(&install, &stamp, &log)?);
         }
         if parts.contains(&"projects") && matches!(harness, Harness::Claude | Harness::Codex) {
             for role in ROLES {
-                checks.push(project(harness, role, &stamp, &log, &mut folders));
+                checks.push(project(harness, role, &stamp, &log));
             }
         }
         if parts.contains(&"resumed") && harness == Harness::Claude {
-            checks.extend(resumed(&install, &stamp, &log, &report, &mut folders)?);
+            checks.extend(resumed(&install, &stamp, &log, &report)?);
         }
-        if harness == Harness::Claude {
-            claude = Some((install, folders));
-        }
-    }
-    // Claude Code forgets the run's folders, and the trust it wrote down for them.
-    if let Some((claude, folders)) = claude {
-        let forgot = forget_in_claude(claude.command(), claude.home(), &folders);
-        let kept: Vec<&String> = folders
-            .iter()
-            .filter(|folder| !forgot.contains(folder))
-            .collect();
-        log.say(format!(
-            "Claude Code forgot {} of the run's {} folders; not: {kept:?}",
-            forgot.len(),
-            folders.len()
-        ));
     }
     to_report(&report, &report::table(&checks))?;
     report::conclude(&log, "which harness asks, and what came of it", &checks)
@@ -1065,7 +1009,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn claude_must_ask_in_a_repository_nobody_answered_and_no_harness_ever_elsewhere() {
+    fn claude_must_ask_where_nobody_answered_above_and_in_a_repository_nobody_answered_and_no_harness_ever_elsewhere(
+    ) {
         let asking: Vec<&str> = Case::ALL
             .into_iter()
             .filter(|case| must_ask(Harness::Claude, *case))
@@ -1074,6 +1019,7 @@ mod tests {
         assert_eq!(
             asking,
             [
+                "fresh",
                 "plain below with pre-approved tools",
                 "repository",
                 "parent",
@@ -1109,31 +1055,12 @@ mod tests {
     }
 
     #[test]
-    fn a_record_of_the_resumed_part_is_known_by_its_folders_name_and_no_other() {
-        assert!(is_resumed_record(
-            "-Users-x--consensflow-candidate-live-asks-probe-1792625986-claude-trust-resumed-1"
-        ));
-        for other in [
-            "-Users-x-Projects-consensflow",
-            "-Users-x--consensflow-candidate-live-asks-probe-1792625986-claude-repository",
-            "-Users-x--consensflow-candidate-live-asks-probe-1-claude-trust-resumed-1-sub",
-            "-Users-x-notes-trust-resumed-1",
-        ] {
-            assert!(!is_resumed_record(other), "{other}");
-        }
+    fn what_a_window_of_the_resumed_part_wrote_goes_with_it() {
+        // However its turn of the loop ends.
         let config = tempfile::tempdir().unwrap();
-        let projects = config.path().join("projects");
-        let left =
-            projects.join("-h--consensflow-candidate-live-asks-probe-7-claude-trust-resumed-0");
-        let kept = projects.join("-h-Projects-app");
-        fs::create_dir_all(&left).unwrap();
-        fs::create_dir_all(&kept).unwrap();
-        fs::write(left.join("s.jsonl"), "{}").unwrap();
-        assert_eq!(forget_resumed_records(config.path()), 1);
-        assert!(!left.exists() && kept.exists());
-        // What a window wrote goes with it, however its turn of the loop ends.
-        let written = projects.join("written");
+        let written = config.path().join("projects").join("written");
         fs::create_dir_all(&written).unwrap();
+        fs::write(written.join("s.jsonl"), "{}").unwrap();
         drop(Written(written.clone()));
         assert!(!written.exists());
     }

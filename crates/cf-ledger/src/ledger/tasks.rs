@@ -153,6 +153,18 @@ impl Ledger {
         tasks::reopen_task(&mut self.store, project_id, number, by, body)
     }
 
+    /// The brief of a task not yet given to a window is replaced; the old one
+    /// is kept in the log.
+    pub fn edit_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: &str,
+        body: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::edit_task(&mut self.store, project_id, number, by, body)
+    }
+
     /// A task is called off, its requester told.
     pub fn cancel_task(
         &mut self,
