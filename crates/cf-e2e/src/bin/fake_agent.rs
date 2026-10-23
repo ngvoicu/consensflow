@@ -7,7 +7,10 @@
 //! The window of the participant `CF_TEST_NO_LOGIN` names has no login: it
 //! prints that and stays, doing nothing else (`CF_TEST_NO_LOGIN_EXITS`: and
 //! ends with the code 3). A key pressed in a turn (the Escape that stops it) is
-//! ignored: this window is never stopped.
+//! ignored: this window is never stopped. The windows of the member
+//! `CF_TEST_SLOW_START` names (`worker 8000`) come up that many milliseconds
+//! late, as a harness does on a loaded machine: nothing of one shows, its
+//! status or the message it was launched with, until then.
 //!
 //! With `CF_TEST_MCP_SERVER` set, every window starts a server of its harness,
 //! in the group of its program (`background`): as it opens, before any turn, or,
@@ -192,6 +195,10 @@ fn run(
         let _ = io::copy(&mut io::stdin().lock(), &mut io::sink());
         leave(&status_file, 0);
     }
+    thread::sleep(slow_start(
+        own_var("CF_TEST_SLOW_START").as_deref(),
+        &participant,
+    ));
 
     // Claude Code's question about a folder it was never told to trust comes first.
     let asking = named("CF_TEST_TRUST");
@@ -327,6 +334,15 @@ fn wait_of(text: Option<&str>) -> Duration {
 /// Waits as long as the variable `name` says.
 fn wait_as_told(name: &str) {
     thread::sleep(wait_of(own_var(name).as_deref()));
+}
+
+/// How late the window of `participant` comes up: the milliseconds `said`
+/// gives its member's windows (`<member> <milliseconds>`), and no time for any
+/// other's.
+fn slow_start(said: Option<&str>, participant: &str) -> Duration {
+    said.and_then(|said| said.split_once(' '))
+        .filter(|(member, _)| is_session_of(participant, member))
+        .map_or(Duration::ZERO, |(_, wait)| wait_of(Some(wait)))
 }
 
 /// How long the message `text` stays in the hooks of its prompt: a line
@@ -747,6 +763,30 @@ mod tests {
         // A conversation the window is resumed on has what was said in it.
         let resumed = Records::new(config.path(), "s", 8).unwrap();
         assert!(resumed.said());
+    }
+
+    #[test]
+    fn a_slow_start_is_for_the_windows_of_the_member_it_names_alone() {
+        let said = Some("worker 8000");
+        assert_eq!(
+            slow_start(said, "worker-amber-pine"),
+            Duration::from_millis(8000)
+        );
+        assert_eq!(slow_start(said, "worker"), Duration::from_millis(8000));
+        for participant in ["chief", "workers-amber", "reviewer-amber-pine"] {
+            assert_eq!(
+                slow_start(said, participant),
+                Duration::ZERO,
+                "{participant}"
+            );
+        }
+        for said in [None, Some(""), Some("worker"), Some("worker soon")] {
+            assert_eq!(
+                slow_start(said, "worker-amber-pine"),
+                Duration::ZERO,
+                "{said:?}"
+            );
+        }
     }
 
     #[test]

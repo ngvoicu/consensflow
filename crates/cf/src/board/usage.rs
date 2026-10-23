@@ -79,12 +79,13 @@ mod tests {
             "  cf note \"…\" [--human]             something they should know; nothing waits on it"
         );
         let tell = of(&["tell"]);
-        assert_eq!(tell.lines().count(), 2);
+        assert_eq!(tell.lines().count(), 3);
         assert!(tell
             .lines()
-            .nth(1)
-            .is_some_and(|line| line.starts_with(&" ".repeat(CONTINUED))));
+            .skip(1)
+            .all(|line| line.starts_with(&" ".repeat(CONTINUED))));
         assert!(tell.contains("then cf task resume T-3"));
+        assert!(tell.ends_with("(queued: kept for its window, to go in after its brief)"));
     }
 
     #[test]

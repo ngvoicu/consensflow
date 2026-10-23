@@ -60,8 +60,8 @@ pub struct Finished {
 impl Dispatcher {
     /// `by` (the chief's handle, or the human's) finishes T-`number` of `project`: what its
     /// worker said last is its result (see above). Refused for a task that is not working,
-    /// that no member's open window works on, or whose worker wrote no complete answer
-    /// after its latest message.
+    /// that no member's open window works on, whose worker wrote no complete answer
+    /// after its latest message, or whose window has words told to it on their way.
     pub async fn finish_task(
         self: &Rc<Self>,
         project: i64,
@@ -171,6 +171,23 @@ impl Dispatcher {
         let run = answers_to_the_task(&items[start + 1..], &replacements)
             .and_then(|answers| answers.complete_run)
             .ok_or_else(none)?;
+        // Words told to the window that have not reached it yet go in when it is next at
+        // rest, and the answer to them is the result: finishing now would take an answer
+        // that came before them (Calliope's L1 on the merge with field-306, T-370).
+        let told = self
+            .seams
+            .ledger
+            .borrow()
+            .told_waiting(participant.id, thread.task.id)?;
+        if told {
+            return Err(refused(
+                "words-on-their-way",
+                format!(
+                    "cannot finish T-{number}: words told to @{} are on their way to its window, and its answer to them is the result; finish it once it has answered them, or cancel it",
+                    participant.handle
+                ),
+            ));
+        }
         let pending = observed.pending();
         let body = with_leftovers(
             words_of(&run),

@@ -370,8 +370,8 @@ runs = ["ledger-edited-brief"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = "            \"paused\" => tell,\n"
-replace = "            \"paused\" => format!(\"resume it\"),\n"
+find = "            \"paused\" | \"queued\" => tell,\n"
+replace = "            \"paused\" => format!(\"resume it\"),\n            \"queued\" => tell,\n"
 
 # The merge with T-125 and T-152 (wt/board-fixes): a removal, a decline and a failure with a follow-up behind a task.
 

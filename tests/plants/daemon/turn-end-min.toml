@@ -27,6 +27,8 @@
 tem-panes-process-tree = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::machine_tests"]
 tem-panes-native = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::native::tests"]
 tem-panes-clock = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::clock::"]
+tem-engine-queued-tells = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "queued_tells::"]
+tem-engine-own-steps = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "own_steps::"]
 tem-panes-headless-commands = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_look_at_the_commands_over_the_wire"]
 tem-e2e-mcp = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::mcp_server::"]
 tem-e2e-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::"]
@@ -1768,3 +1770,62 @@ runs = ["tem-e2e-monitor-wait"]
 file = "crates/cf-e2e/tests/live_monitor_wait.rs"
 find = '    let [call] = called.as_slice() else {'
 replace = '    let Some(call) = called.first() else {'
+
+# The merge with field-306 (T-397: Calliope's landing rules L1-L3, T-370).
+
+[[plant]]
+name = "turn-end-min engine: a held answer is told while told words are on their way"
+meant = "an_answer_that_leaves_work_running_while_told_words_wait_is_no_hold_and_its_requester_is_told_nothing"
+runs = ["tem-engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = """
+        if told {
+            return Ok(Turn::Open);
+        }"""
+replace = """
+        if told && observed.pending().total() == 0 {
+            return Ok(Turn::Open);
+        }"""
+
+[[plant]]
+name = "turn-end-min engine: Finish takes the answer to the brief over words on their way"
+meant = "finish_is_refused_while_told_words_are_on_their_way_and_says_so_to_the_chief"
+runs = ["tem-engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = """
+        if told {
+            return Err(refused("""
+replace = """
+        if told && false {
+            return Err(refused("""
+
+[[plant]]
+name = "turn-end-min engine: a turn's answer starts at the brief, not at the latest paste"
+meant = "words_told_while_the_brief_is_on_its_way_go_in_next_and_the_answer_after_them_is_the_result"
+runs = ["tem-engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = """
+        let receipt = latest.receipt.get("item").and_then(Value::as_str);"""
+replace = """
+        let receipt = latest.receipt.get("item").and_then(Value::as_str).filter(|_| false);
+        let latest = &thread.messages[0];"""
+
+[[plant]]
+name = "turn-end-min engine: Finish takes the chief's own step"
+meant = "finish_refuses_the_chiefs_own_step_and_its_own_done_still_accepts_it_at_once"
+runs = ["tem-engine-own-steps"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = """
+                !matches!(participant.role.as_str(), "chief" | "human")
+                    && Some(&participant.handle) == thread.task.assignee.as_ref()"""
+replace = """
+                participant.role != "human"
+                    && Some(&participant.handle) == thread.task.assignee.as_ref()"""

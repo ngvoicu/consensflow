@@ -12,21 +12,29 @@
 //! agent to read: the thread leaves out a gated message, and the brief is
 //! not given to a caller who may not move the task while it waits at the gate.
 //! The chief, and whoever else gave the task, wrote the brief: they read it.
+//! The transcript is read a page at a time and searched as well (`pages`).
+
+mod pages;
 
 use cf_base::js;
-use cf_ledger::{NewQuestion, TaskThread};
+use cf_ledger::{NewQuestion, TaskThread, TaskView};
 use hyper::Method;
 use serde_json::{json, Map, Value};
 
 use super::{Answer, Caller, Context, Failure, Request, TaskAction};
 use crate::api::views::{value, MessageSummary, TaskSummary};
+use pages::Asked;
 
-/// A task in one of these states has a window a `tell` reaches (a queued one
-/// has none yet).
+/// A task in one of these states has a window a `tell` reaches and stops.
 const WINDOWED: [&str; 3] = ["working", "waiting", "paused"];
 
-/// The most items of a transcript one request may ask for.
-const MOST_ITEMS: f64 = 50.0;
+/// A task in this state has no window yet: a `tell` keeps its words for the one
+/// coming up.
+const QUEUED: &str = "queued";
+
+/// The most items of a transcript one request may ask for: a page's.
+#[allow(clippy::cast_precision_loss)]
+const MOST_ITEMS: f64 = pages::PER_PAGE as f64;
 
 /// How many it gives when it is asked for none that is a number.
 const DEFAULT_ITEMS: f64 = 10.0;
@@ -123,8 +131,8 @@ fn brief_waits_at_the_gate(task: &TaskThread) -> bool {
     held
 }
 
-/// What the task's window did so far, from ConsensFlow's own copy: the last
-/// items, for whoever gave the task.
+/// What the task's window did so far, from ConsensFlow's own copy, for whoever
+/// gave the task: the last items, or a page of them, searched or not (`pages`).
 fn transcript(
     context: &Context,
     caller: &Caller,
@@ -141,12 +149,16 @@ fn transcript(
             ),
         ));
     }
+    let (project, number) = (caller.project.id, task.task.number);
+    if let Some(asked) = Asked::of(request.param("page"), request.param("find")) {
+        let whole = context.ledger.borrow().transcript(project, number, None)?;
+        return Ok(Answer::ok(asked.answer(whole)?));
+    }
     let last = items_of(request.param("last"));
-    let transcript =
-        context
-            .ledger
-            .borrow()
-            .transcript(caller.project.id, task.task.number, Some(last))?;
+    let transcript = context
+        .ledger
+        .borrow()
+        .transcript(project, number, Some(last))?;
     Ok(Answer::ok(value(&transcript)?))
 }
 
@@ -199,7 +211,13 @@ fn done(
 /// `POST /api/tasks/<n>/tell`: stop the task and put this to its window. The
 /// agent is interrupted as for any pause, reads the question once idle, and
 /// its answer comes back as a message; the chief resumes the task with its
-/// words. An urgent question pauses its task itself, in the same step.
+/// words. An urgent question pauses its task itself, in the same step. A task
+/// still queued, its window not up yet, is not stopped: the words are kept for
+/// the window, and go in after its brief (`Ledger::tell_queued`). Which of the
+/// two it is, is read again once the words are in: the task may have gone on
+/// while they came (its brief arrived, its resume queued it again). A task that
+/// went where no tell reaches is told as it was read, and the ledger refuses it
+/// in its own words.
 fn tell(
     context: &Context,
     caller: &Caller,
@@ -207,34 +225,49 @@ fn tell(
     words: Option<&str>,
 ) -> Result<Answer, Failure> {
     let number = task.task.number;
-    let window = match &task.task.assignee {
-        Some(assignee) if WINDOWED.contains(&task.task.state.as_str()) => assignee,
+    let fresh = context.ledger.borrow().task(caller.project.id, number)?;
+    let telling = fresh
+        .as_ref()
+        .map(|thread| &thread.task)
+        .filter(|now| reaches(now))
+        .unwrap_or(&task.task);
+    let state = telling.state.as_str();
+    let window = match &telling.assignee {
+        Some(assignee) if reaches(telling) => assignee,
         _ => {
             return Err(Failure::refuse(
                 409,
                 "no-window",
-                format!(
-                    "T-{number} has no window to tell: it is {}",
-                    task.task.state
-                ),
+                format!("T-{number} has no window to tell: it is {state}"),
             ))
         }
     };
-    let told = context.ledger.borrow_mut().ask(
-        caller.project.id,
-        &NewQuestion {
-            from: Some(caller.participant.handle.clone()),
-            to: window.clone(),
-            // Whatever is no text is no words: the ledger refuses it as it
-            // refuses a blank one, once the task is paused for it.
-            body: words.map(str::to_owned),
-            task: Some(number),
-            questions: None,
-            urgent: true,
-        },
-    )?;
+    let told = if state == QUEUED {
+        // Whatever is no text is no words: the ledger refuses it as it refuses
+        // a blank one.
+        context.ledger.borrow_mut().tell_queued(
+            caller.project.id,
+            number,
+            &caller.participant.handle,
+            words.unwrap_or_default(),
+        )?
+    } else {
+        context.ledger.borrow_mut().ask(
+            caller.project.id,
+            &NewQuestion {
+                from: Some(caller.participant.handle.clone()),
+                to: window.clone(),
+                // Whatever is no text is no words: the ledger refuses it as it
+                // refuses a blank one, once the task is paused for it.
+                body: words.map(str::to_owned),
+                task: Some(number),
+                questions: None,
+                urgent: true,
+            },
+        )?
+    };
     (context.kick)();
-    // The task as it is now, paused.
+    // The task as it is now: paused, or still queued with the words kept.
     let now = context
         .ledger
         .borrow()
@@ -269,8 +302,17 @@ async fn finish(context: &Context, caller: &Caller, task: &TaskThread) -> Result
     })))
 }
 
+/// Whether a tell reaches the task's window: one that has it, which it stops,
+/// or one coming up, which it keeps the words for.
+fn reaches(task: &TaskView) -> bool {
+    task.assignee.is_some() && (WINDOWED.contains(&task.state.as_str()) || task.state == QUEUED)
+}
+
 /// The moves of a task a coordinator makes with the ledger's own words: accept
-/// its result, cancel it, pause it, resume it, give it back.
+/// its result, cancel it, pause it, resume it, give it back. A cancel says
+/// which of the words the caller told the task's window went with it, the
+/// window never having had them (`dropped`, when any did): the ledger tells
+/// everyone else who told it some.
 fn moved(
     context: &Context,
     caller: &Caller,
@@ -281,9 +323,19 @@ fn moved(
     let (project, number) = (caller.project.id, task.task.number);
     let by = caller.participant.handle.as_str();
     let mut ledger = context.ledger.borrow_mut();
+    let mut dropped = Vec::new();
     let moved = match action {
         TaskAction::Accept => ledger.accept_task(project, number, by)?,
-        TaskAction::Cancel => ledger.cancel_task(project, number, by)?,
+        TaskAction::Cancel => {
+            // Read in the same borrow as the cancel: nothing is pasted between.
+            dropped = ledger
+                .told_unreceived(project, number)?
+                .into_iter()
+                .filter(|told| told.sender.as_deref() == Some(by))
+                .map(|told| told.id)
+                .collect();
+            ledger.cancel_task(project, number, by)?
+        }
         TaskAction::Edit => ledger.edit_task(project, number, by, words)?,
         TaskAction::Pause => ledger.pause_task(project, number, Some(by), None)?,
         TaskAction::Resume => ledger.resume_task(project, number, Some(by), words)?.task,
@@ -293,9 +345,12 @@ fn moved(
     };
     drop(ledger);
     (context.kick)();
-    Ok(Answer::ok(
-        json!({ "task": value(&TaskSummary::from(&moved))? }),
-    ))
+    let mut answer = Map::new();
+    answer.insert("task".to_owned(), value(&TaskSummary::from(&moved))?);
+    if !dropped.is_empty() {
+        answer.insert("dropped".to_owned(), json!(dropped));
+    }
+    Ok(Answer::ok(Value::Object(answer)))
 }
 
 /// Whether the window may do what only the chief or the one who gave the task

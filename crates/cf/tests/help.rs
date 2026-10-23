@@ -100,6 +100,7 @@ const BOARD: [(&[&str], &str); 19] = [
         concat!(
             "  cf task get T-3                   one task and its whole thread\n",
             "  cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)\n",
+            "                                    --page 2 for older ones, 50 a page; --find \"…\" for those that say it\n",
         ),
     ),
     (
@@ -142,6 +143,7 @@ const BOARD: [(&[&str], &str); 19] = [
         concat!(
             "  cf tell T-3 \"…\"                   stop T-3 and put this to its window: its answer arrives as\n",
             "                                    a message; then cf task resume T-3 \"…\"\n",
+            "                                    (queued: kept for its window, to go in after its brief)\n",
         ),
     ),
     (

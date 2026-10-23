@@ -160,7 +160,7 @@ fn what_is_removed_is_removed_without_a_question_and_said_and_what_is_not_ends_t
         "{text}"
     );
     let run = bootstrap();
-    let after_unpack = run.split_once("tar.exe -xmzf").unwrap().1;
+    let after_unpack = run.split_once("& $tar -xmzf").unwrap().1;
     assert!(
         after_unpack.contains(
             "\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '.windows-sweep.ps1'))))\nif ($failed.Count) { Exit-Run 1 }\n"

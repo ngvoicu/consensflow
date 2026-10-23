@@ -20,7 +20,9 @@ if (-not $lock -or $other) { Write-Output "A run is still going on this machine$
 Set-Content -Path $running -Value $PID
 Set-Content -Path $owner -Value @('0000abcd-12345678', $PID)
 $held = $true
-tar.exe -xmzf $tarball -C $dir
+$tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) { Write-Output "Windows' own tar is not there ($tar), so the tree cannot be unpacked."; Exit-Run 1 }
+& $tar -xmzf $tarball -C $dir
 if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
 . ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '.windows-sweep.ps1'))))
 if ($failed.Count) { Exit-Run 1 }

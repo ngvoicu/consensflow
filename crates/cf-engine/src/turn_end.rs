@@ -220,6 +220,18 @@ impl Dispatcher {
         if !observed.settled {
             return Ok(Turn::Open);
         }
+        // Words told to the window before it was up are on their way to it (the brief was
+        // in flight when they were told): they go in next, and the answer to them is the
+        // result. This answer is neither the result nor a hold, and the requester is told
+        // nothing of it (field-306's B3; Calliope's L1 on the merge, T-370).
+        let told = self
+            .seams
+            .ledger
+            .borrow()
+            .told_waiting(participant.id, thread.task.id)?;
+        if told {
+            return Ok(Turn::Open);
+        }
         let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
         let Some(answers) = answers_to_the_task(&items[start + 1..], &replacements)
             .filter(|answers| answers.last.is_some_and(|last| last.complete))

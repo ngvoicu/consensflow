@@ -131,7 +131,7 @@
 //! ```
 //!
 //! The machine needs an OpenSSH server, Node, Rust, git and Windows' own
-//! `tar.exe`; the folder is `%USERPROFILE%\consensflow-build` unless `--dir`
+//! `tar.exe` (System32's, which the script names by its path); the folder is `%USERPROFILE%\consensflow-build` unless `--dir`
 //! names another under it. Run one at a time: a live run's windows are the
 //! machine's.
 //!
