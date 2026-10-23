@@ -23,6 +23,7 @@ mod edited_brief;
 mod fixture;
 mod gate;
 mod legacy;
+mod open_questions;
 mod pause_notes;
 mod questions;
 mod sessions;

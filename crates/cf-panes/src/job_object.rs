@@ -7,8 +7,16 @@
 //! agent detached from a shell that ended (`Start-Process`, `start`) is in the job
 //! still, with no parent, which the window's close ends and an ending of the turn does
 //! not: a job with no parent is no proof of whose work it is
-//! ([`crate::background`]). What the job does not hold is what a service starts for
-//! it (`schtasks`, a WMI `Win32_Process.Create`): that is no child of the pane's.
+//! ([`crate::background`]). What the job does not hold, and a close does not end:
+//! - what another program starts for the harness: a service (`schtasks`, a WMI
+//!   `Win32_Process.Create`), the shell or COM activating a program, UAC starting one
+//!   elevated; none of it is a child of the pane's;
+//! - a process started with `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` naming a parent
+//!   outside the job, which takes its jobs from that parent;
+//! - what is no Windows process of the job at all: a WSL distribution's, a container
+//!   daemon's;
+//! - the console host, which is the pane host's, and ends when the pane's pseudoconsole
+//!   is closed.
 //!
 //! The job is also the list of what the harness started: its processes are what a
 //! pane's tree has ([`JobObject::members`]). Each is held open as it is looked at,
@@ -30,17 +38,20 @@
 //! A program of Git Bash's own kind that a script started (`sleep`, `grep`) names a parent that
 //! has gone, a forked copy of the shell: the parent `ps -W` of Git Bash says it has is given
 //! instead ([`repair_cygwin_parents`], [`crate::cygwin`]), so that the chain up from it to the
-//! shell the harness started is whole and a stop ends it with the script.
+//! shell the harness started is whole and a stop ends it with the script. That is not a matter
+//! of the job: the program is a member of it (whatever a job holds, its descendants too), and
+//! it is the parent it names that is no process. The harness being in the job from its first
+//! instruction changes none of it (a real pane, with the job in its attributes, has the same
+//! sleep with the same dead parent: `pty`'s `ending_tests`).
 //!
-//! The harness joins right after it starts (the PTY library starts it
-//! unsuspended); a child it starts in that first instant would escape, which a
-//! harness still loading its runtime does not do.
+//! The harness is in the job from its first instruction: it is started with the job
+//! in its attributes ([`crate::pty`]'s `conpty`), so nothing it starts itself, however
+//! soon, is outside it.
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::mem::{offset_of, size_of, size_of_val};
 use std::path::{Path, PathBuf};
 use std::ptr;
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -52,7 +63,7 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_MORE_DATA, FILETIME, HANDLE, UNICODE_STRING, WAIT_OBJECT_0,
 };
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, JobObjectBasicProcessIdList,
+    CreateJobObjectW, IsProcessInJob, JobObjectBasicProcessIdList,
     JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
     TerminateJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
@@ -60,7 +71,7 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
     WaitForSingleObject, PROCESS_BASIC_INFORMATION, PROCESS_NAME_WIN32,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
 };
 
 use crate::background::{report, started_by, steady, Baseline, Member, ProcessKey};
@@ -82,12 +93,11 @@ const BUDGET: Duration = Duration::from_secs(15);
 
 const _: () = assert!(BUDGET.as_secs() < ENDING_BOUND.as_secs());
 
-/// What says `ps -W` of a folder: [`ps_w`] but in a test, which counts what it is asked.
-type Ps = Arc<dyn Fn(&Path) -> Option<String> + Send + Sync>;
+/// What says `ps -W` of a folder ([`ps_w`]; a test gives its own, which counts what it is asked).
+pub(crate) type Ps<'a> = &'a dyn Fn(&Path) -> Option<String>;
 
 pub(crate) struct JobObject {
     handle: HANDLE,
-    ps: Ps,
 }
 
 // SAFETY: a job handle is a kernel handle, usable from any thread.
@@ -103,10 +113,7 @@ impl JobObject {
         if handle.is_null() {
             return Err(io::Error::last_os_error());
         }
-        let job = Self {
-            handle,
-            ps: Arc::new(ps_w),
-        };
+        let job = Self { handle };
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         // SAFETY: the structure is the one the information class names, at its size.
@@ -124,21 +131,10 @@ impl JobObject {
         Ok(job)
     }
 
-    pub fn assign(&self, pid: u32) -> io::Result<()> {
-        // SAFETY: the rights asked are the two AssignProcessToJobObject needs.
-        let process = unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid) };
-        if process.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: both handles are open; the process handle is closed after.
-        let assigned = unsafe { AssignProcessToJobObject(self.handle, process) };
-        let error = io::Error::last_os_error();
-        // SAFETY: `process` was opened above, is not null, and is closed only here.
-        unsafe { CloseHandle(process) };
-        if assigned == 0 {
-            return Err(error);
-        }
-        Ok(())
+    /// The job's handle, which a program is started in (`pty::conpty`): open for as long
+    /// as the job is.
+    pub fn handle(&self) -> HANDLE {
+        self.handle
     }
 
     pub fn terminate(&self) -> io::Result<()> {
@@ -155,7 +151,13 @@ impl JobObject {
     /// that ended between the list and the look at it, or that cannot be looked at,
     /// is left out.
     pub fn members(&self) -> io::Result<Vec<Member>> {
-        Ok(members_of(self.hold_new(&HashMap::new())?.iter()))
+        self.members_with(&ps_w)
+    }
+
+    /// [`JobObject::members`], with `ps` saying what `ps -W` says: a look at the job as
+    /// Windows names the parents is `&|_| None`.
+    pub(crate) fn members_with(&self, ps: Ps) -> io::Result<Vec<Member>> {
+        Ok(members_of(self.hold_new(&HashMap::new(), ps)?.iter()))
     }
 
     /// Ends what `baseline` proves the turn's work, each process by itself and
@@ -245,20 +247,25 @@ impl JobObject {
     /// parents of Git Bash's programs are mended for what is new alone ([`repair_cygwin_parents`]),
     /// so an ending asks `ps -W` once for a process and not at every look it makes again
     /// (T-194, P3-2: an ending looks up to eighteen times, a slow `ps` waits 3 s).
-    fn hold_new(&self, held: &HashMap<u32, Held>) -> io::Result<Vec<Held>> {
+    fn hold_new(&self, held: &HashMap<u32, Held>, ps: Ps) -> io::Result<Vec<Held>> {
         let mut fresh: Vec<Held> = self
             .process_ids()?
             .into_iter()
             .filter(|pid| !held.contains_key(pid))
             .filter_map(|pid| self.hold_one(pid))
             .collect();
-        repair_cygwin_parents(&mut fresh, held, &*self.ps);
+        repair_cygwin_parents(&mut fresh, held, ps);
         Ok(fresh)
     }
 
     /// Holds what the job has now that `held` has not.
     fn hold_into(&self, held: &mut HashMap<u32, Held>) -> io::Result<()> {
-        for now in self.hold_new(held)? {
+        self.hold_into_with(held, &ps_w)
+    }
+
+    /// [`JobObject::hold_into`], `ps` saying what `ps -W` says.
+    fn hold_into_with(&self, held: &mut HashMap<u32, Held>, ps: Ps) -> io::Result<()> {
+        for now in self.hold_new(held, ps)? {
             held.entry(now.member.key.pid).or_insert(now);
         }
         Ok(())
@@ -392,11 +399,7 @@ impl Held {
 /// process of `fresh` is such and a `ps` is in the folder of its program with the Cygwin layer
 /// it runs on (Git Bash's); a process it says nothing of, or whose parent is no member, keeps
 /// the parent it named.
-fn repair_cygwin_parents(
-    fresh: &mut [Held],
-    held: &HashMap<u32, Held>,
-    ps: &dyn Fn(&Path) -> Option<String>,
-) {
+fn repair_cygwin_parents(fresh: &mut [Held], held: &HashMap<u32, Held>, ps: Ps) {
     let members: HashSet<u32> = fresh
         .iter()
         .map(|one| one.member.key.pid)

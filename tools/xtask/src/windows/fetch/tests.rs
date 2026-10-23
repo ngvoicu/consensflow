@@ -21,12 +21,13 @@ struct Rig {
     context: Context,
 }
 
-/// An ssh that counts what it is asked: the first time it says how a run ended, if the case has a
-/// run (`CF_RUN` is its status), and every other time it lists what the machine holds
+/// An ssh that counts what it is asked: the first time it says which tree it unpacked (the one
+/// the tarball holds the identity of) and how a run ended, if the case has a run (`CF_RUN` is its
+/// status), and every other time it lists what the machine holds
 /// (`CF_LISTING`), ending with `CF_LIST_STATUS`.
 const SSH: &str = r#"n=$(cat "$CF_COUNT" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$CF_COUNT"
 printf 'ssh\t%s\n' "$n" >> "$CF_LOG"
-if [ "$n" -eq 1 ] && [ -n "$CF_RUN" ]; then echo out; echo "== exit $CF_RUN"; exit 0; fi
+if [ "$n" -eq 1 ] && [ -n "$CF_RUN" ]; then echo out; echo "== tree $(tar -xzOf "$CF_TARBALL" .windows-tree)"; echo "== exit $CF_RUN"; exit 0; fi
 cat "$CF_LISTING"
 exit "${CF_LIST_STATUS:-0}""#;
 
@@ -464,7 +465,11 @@ fn a_run_that_ended_there_with_a_status_brings_its_reports_back_and_answers_the_
     // The command's own status stands, and what it left is here.
     assert_eq!(ended.unwrap(), Outcome::Exited(7));
     assert_eq!(rig.here("long/run.md").as_deref(), Some("report"));
-    assert_eq!(String::from_utf8(out).unwrap(), "out\n== exit 7\n");
+    let out = String::from_utf8(out).unwrap();
+    assert!(
+        out.starts_with("out\n== tree ") && out.ends_with("\n== exit 7\n"),
+        "{out}"
+    );
     assert_eq!(
         String::from_utf8(err).unwrap(),
         "windows: brought back 1 of the machine's reports into evals/reports: long/run.md\n"
@@ -473,7 +478,10 @@ fn a_run_that_ended_there_with_a_status_brings_its_reports_back_and_answers_the_
     let log = rig.log();
     assert_eq!(log.len(), 4, "{log:?}");
     assert!(
-        log[0].starts_with("scp\t") && log[0].ends_with("\tzeewin:consensflow-build.tgz"),
+        // The tarball goes under the run's own name.
+        log[0].starts_with("scp\t")
+            && log[0].contains("\tzeewin:consensflow-build.")
+            && log[0].ends_with(".tgz"),
         "{log:?}"
     );
     assert_eq!(&log[1..3], ["ssh\t1", "ssh\t2"]);

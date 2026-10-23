@@ -229,3 +229,58 @@ fn an_answer_that_rides_in_a_paste_is_closed_to_the_door_and_comes_with_it() {
     let begun = w.deliver(words.id);
     assert_eq!(ids(&begun.carried), [answer]);
 }
+
+#[test]
+fn an_acceptance_shuts_the_door_of_a_question_still_open_at_it_as_a_pause_does() {
+    let mut w = world();
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.expect("a brief").id);
+    w.deliver(brief);
+    let zeus = w.id("zeus");
+    let question = w.ask_with_options("zeus", task);
+    assert_eq!(
+        w.ledger.claim_answer(question.id, zeus).unwrap(),
+        Claim::Waiting,
+        "nobody has answered, and the door waits"
+    );
+
+    // The window's turn ended with its result while its question was open at the
+    // door (the member's own `cf task done`), and the chief accepted the task.
+    w.ledger
+        .record_result(w.project, task, "Done")
+        .expect("its result");
+    w.ledger
+        .accept_task(w.project, task, "chief")
+        .expect("accepted");
+    assert_eq!(w.state(task), "accepted");
+    assert_eq!(
+        w.ledger.claim_answer(question.id, zeus).unwrap(),
+        Claim::Closed,
+        "the door is told at once, not after the minutes its poll waits"
+    );
+}
+
+#[test]
+fn an_acceptance_leaves_the_door_of_a_question_on_another_task_open() {
+    let mut w = world();
+    let first = w.give("zeus", "Parser");
+    let (one, brief) = (first.task.number, first.message.expect("a brief").id);
+    w.deliver(brief);
+    let diana = w.id("diana");
+    let second = w.give("diana", "Lexer");
+    let (two, brief) = (second.task.number, second.message.expect("a brief").id);
+    w.deliver(brief);
+    let door = w.ask_with_options("diana", two);
+
+    w.ledger
+        .record_result(w.project, one, "Done")
+        .expect("its result");
+    w.ledger
+        .accept_task(w.project, one, "chief")
+        .expect("accepted");
+    assert_eq!(
+        w.ledger.claim_answer(door.id, diana).unwrap(),
+        Claim::Waiting,
+        "a question of another window, on a task still at work, waits as before"
+    );
+}

@@ -108,6 +108,9 @@ pub fn open(file: &Path, wal: bool) -> Result<Connection> {
 /// [`open`] at the schema `migrations` make.
 fn open_at(file: &Path, wal: bool, migrations: &[String]) -> Result<Connection> {
     let db = Connection::open(file)?;
+    // A file made to be read, in a folder that goes: no commit of it waits for the
+    // disk (each of a test's inserts was a flush on Windows' runner).
+    db.execute_batch("PRAGMA synchronous = OFF")?;
     if wal {
         db.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))?;
     }
