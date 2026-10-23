@@ -87,6 +87,9 @@ pub struct FakeAgent {
     /// asked), it holds nothing (`Some(false)`: Codex's thread before its first
     /// turn), or the record cannot tell (none).
     pub resumable: Option<bool>,
+    /// Its record cannot be read at a look (`Reading::Unknown`), as when the reader's
+    /// read of the transcript fails.
+    pub unread: bool,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -403,6 +406,12 @@ impl FakeAdapter {
         });
     }
 
+    /// The agent's record cannot be read from now on (`unread`), or can again: its
+    /// window is as it was.
+    pub fn unread(&self, handle: &str, unread: bool) {
+        self.with(handle, |agent| agent.unread = unread);
+    }
+
     /// The agent is at work on a turn it stops, at once and writing nothing,
     /// when the engine presses the interrupt keys into its window.
     pub fn busy_until_interrupted(&self, handle: &str) {
@@ -638,6 +647,7 @@ impl Asked {
             took_back: false,
             cannot_tell_a_cut: false,
             resumable: Some(true),
+            unread: false,
         };
         if let Some(message) = launch
             .message

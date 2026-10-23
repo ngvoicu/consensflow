@@ -2,7 +2,7 @@
 //! up, and a record of the signals the tree would have sent. What the tests prove of
 //! what the tree signals they prove on it, with no signal sent to any process.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::io;
 
 use super::bound::System;
@@ -100,6 +100,9 @@ pub(super) fn identity_of(table: &[Process], pid: i32) -> Identity {
         .expect("a process of the table")
 }
 
+/// The numbers above which the children a churning process starts are.
+const CHURNED: i32 = 5_000_000;
+
 /// A made-up machine: the processes it has, and the signals sent to them and to groups.
 pub(super) struct Machine {
     processes: Vec<Process>,
@@ -111,6 +114,10 @@ pub(super) struct Machine {
     /// Processes born after its table was read, named by their parent once: the next look
     /// finds them in it.
     born: RefCell<Vec<(i32, i32)>>,
+    /// A process that starts a child at every listing of its children, none of which a
+    /// later table has: a tree that changes at every look. Its number, and how many it
+    /// started.
+    churning: Option<(i32, Cell<i32>)>,
     sent: RefCell<Vec<(i32, i32)>>,
     sent_to_groups: RefCell<Vec<(i32, i32)>>,
 }
@@ -122,6 +129,7 @@ impl Machine {
             unreadable: Vec::new(),
             zombies: Vec::new(),
             born: RefCell::default(),
+            churning: None,
             sent: RefCell::default(),
             sent_to_groups: RefCell::default(),
         }
@@ -142,6 +150,13 @@ impl Machine {
     /// The machine, with a process `pid` that `parent` started while a look read its table.
     pub fn with_born(self, parent: i32, pid: i32) -> Self {
         self.born.borrow_mut().push((parent, pid));
+        self
+    }
+
+    /// The machine, where `parent` starts a child at every look, which the table read
+    /// before it never has.
+    pub fn with_churning(mut self, parent: i32) -> Self {
+        self.churning = Some((parent, Cell::new(0)));
         self
     }
 
@@ -215,6 +230,12 @@ impl System for Machine {
                     .filter(|(parent, _)| *parent == pid)
                     .map(|(_, child)| *child),
             )
+            .chain(self.churning.as_ref().and_then(|(parent, started)| {
+                (*parent == pid).then(|| {
+                    started.set(started.get() + 1);
+                    CHURNED + started.get()
+                })
+            }))
             .collect())
     }
 
@@ -226,6 +247,7 @@ impl System for Machine {
             born.len() < before
         };
         if born
+            || (self.churning.is_some() && pid > CHURNED)
             || self
                 .processes
                 .iter()

@@ -53,7 +53,7 @@ use std::sync::Arc;
 
 use cf_base::js;
 use cf_harness::contract::Observed;
-use cf_harness::records::{End, Item, Monitor, Pending, Role, Source};
+use cf_harness::records::{End, Item, Monitor, Pending, Reading, Role, Source};
 use cf_ledger::{NewNote, ParticipantView, ProjectView, TaskThread};
 use serde_json::Value;
 
@@ -347,10 +347,12 @@ impl Dispatcher {
     /// Limits. The rest proof takes a record read at a look as no older than the rest taken
     /// before it: a record read late by more than a pass would let a monitor's call written
     /// after the rest pass for one written before (Calliope on 136a7158). The time proof
-    /// reads a record's time and a process's start by the wall clock, which can step
-    /// (Astraeus on c593fd49): one set back by more than the margin between a monitor's call
-    /// and its command's start takes the command for what began before, and the monitor for
-    /// over while it runs. A rest, where one proves the monitors, is named alone.
+    /// reads a record's time and a process's start by the wall clock, which can step: the
+    /// host leaves a process out by it only where it watched the wall clock keep its order
+    /// since the window opened, and the process's own two starts agree with what it watched
+    /// (Astraeus on 02a6cd4f; cf-panes' `background::clock`, which says the limit left: a
+    /// clock set forward and back again between two of its readings, a call stamped in
+    /// between). A rest, where one proves the monitors, is named alone.
     pub(crate) async fn watch_monitors(
         &self,
         participant: &ParticipantView,
@@ -358,6 +360,18 @@ impl Dispatcher {
         observed: &Observed,
     ) -> Watching {
         let pane = self.pane(participant.id);
+        // A record that could not be read says no monitor, though they run on: their
+        // bindings and the rests stay as they were, and nothing is decided (Astraeus on
+        // 02a6cd4f: a monitor bound again to a rest its own command ran at).
+        if !matches!(observed.reading.as_deref(), Some(Reading::Known(_))) {
+            let mut held = record.held.borrow_mut();
+            held.noticed = 0;
+            held.seen = None;
+            held.wait_ms = 0;
+            held.next_look_ms = 0;
+            held.running_looks = 0;
+            return Watching::Undecided;
+        }
         let monitors = observed.monitors();
         let take_rest = {
             let mut held = record.held.borrow_mut();
@@ -583,6 +597,10 @@ fn monitors_said(handle: &str, held: &Held) -> String {
             }
             Some(CommandsSeen::Unreadable) => {
                 ", and a process of its window runs that ConsensFlow cannot read (another user's): it looks again."
+                    .to_owned()
+            }
+            Some(CommandsSeen::Unsettled) => {
+                ", and its window's processes kept changing while ConsensFlow read them: it looks again."
                     .to_owned()
             }
             Some(CommandsSeen::Unanswered) => {

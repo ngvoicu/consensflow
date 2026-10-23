@@ -246,6 +246,9 @@ pub enum CommandsSeen {
     /// The host answered that a process of the window cannot be read (another user's):
     /// a later look may read them all.
     Unreadable,
+    /// The host answered that the window's processes kept changing while it read them:
+    /// a later look may read them whole.
+    Unsettled,
     /// The host did not answer, or answered what is no answer.
     Unanswered,
 }

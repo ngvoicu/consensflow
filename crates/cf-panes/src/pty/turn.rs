@@ -51,21 +51,35 @@ struct Tree {
     job: Arc<crate::job_object::JobObject>,
 }
 
+/// What a look that must read all of a pane's tree found ([`Tree::readable_members`]).
+// Only a Mac reads a tree whole: a Windows job is asked of no commands.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+enum Read {
+    /// Every process of it, each read.
+    All(Vec<Member>),
+    /// A process of it the system will not say what it is (another user's).
+    Unreadable,
+    /// It could not be read whole: it kept changing as it was read.
+    Unsettled,
+}
+
 impl Tree {
     /// [`Tree::members`], where every process the window's program and each of them
-    /// started can be read: none where one cannot, or where the platform cannot say
-    /// (`ProcessTree::readable_members`; a Windows job is asked of no commands).
-    fn readable_members(&self) -> io::Result<Option<Vec<Member>>> {
+    /// started can be read ([`Read`]; `ProcessTree::readable_members`): unreadable where the
+    /// platform cannot say (a Windows job is asked of no commands).
+    fn readable_members(&self) -> io::Result<Read> {
         #[cfg(target_os = "macos")]
         {
+            use crate::process_tree::Readable;
             Ok(match self.tree.readable_members()? {
-                crate::process_tree::Readable::All(members) => Some(members),
-                crate::process_tree::Readable::Hidden => None,
+                Readable::All(members) => Read::All(members),
+                Readable::Unreadable => Read::Unreadable,
+                Readable::Unsettled => Read::Unsettled,
             })
         }
         #[cfg(not(target_os = "macos"))]
         {
-            Ok(None)
+            Ok(Read::Unreadable)
         }
     }
 
@@ -135,6 +149,25 @@ fn looked_at(baseline: &Baseline, tree: &Tree) -> io::Result<Background> {
 
 /// [`looked_at`], and what it finds is looked for again [`SETTLE`] later: what is still
 /// there. What a close and the exit of a window's program say the window left running.
+/// The host's watch of the clocks, which every pane's clock is read by
+/// (`background::clock`), started with the first pane.
+#[cfg(target_os = "macos")]
+pub(super) fn watch() -> &'static std::sync::Arc<crate::background::Watch> {
+    static WATCH: std::sync::OnceLock<std::sync::Arc<crate::background::Watch>> =
+        std::sync::OnceLock::new();
+    WATCH.get_or_init(|| crate::background::Watch::start(crate::process_tree::clocks))
+}
+
+/// What a look at a pane's commands proves of `member`'s start: that it began before the
+/// time the look names, by the pane's clock as it reads now (`seen`), which watched the wall
+/// clock keep its order.
+#[cfg(target_os = "macos")]
+fn proved_before(seen: Option<&(i64, crate::background::PaneClock)>, member: &Member) -> bool {
+    seen.is_some_and(|(after, clock)| {
+        crate::background::began_before(clock, *after, crate::process_tree::awake_start)(member)
+    })
+}
+
 fn steadily_looked_at(baseline: &Baseline, tree: &Tree) -> io::Result<Background> {
     if !baseline.is_marked() {
         return Ok(Background::default());
@@ -230,16 +263,54 @@ impl PaneTable {
         if !baseline.tells_commands() {
             return Ok(CommandsAnswer::default());
         }
+        // The pane's clock read now, where a look names a time: only a Mac tells commands.
+        #[cfg(target_os = "macos")]
+        let seen = match after {
+            Some(after) => {
+                let clock = self
+                    .lock_panes()?
+                    .get(key)
+                    .map(|pane| std::sync::Arc::clone(&pane.clock))
+                    .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+                Some((after, watch().now(&clock)))
+            }
+            None => None,
+        };
+        #[cfg(target_os = "macos")]
+        let before = |member: &Member| proved_before(seen.as_ref(), member);
+        // Elsewhere no start is read against a call.
+        #[cfg(not(target_os = "macos"))]
+        let before = {
+            let _ = after;
+            |_: &Member| false
+        };
         Ok(match tree.readable_members()? {
-            Some(members) => CommandsAnswer {
-                commands: baseline.commands(&members, since, after),
-                unreadable: false,
+            Read::All(members) => CommandsAnswer {
+                commands: baseline.commands(&members, since, &before),
+                ..CommandsAnswer::default()
             },
-            None => CommandsAnswer {
-                commands: None,
+            Read::Unreadable => CommandsAnswer {
                 unreadable: true,
+                ..CommandsAnswer::default()
+            },
+            Read::Unsettled => CommandsAnswer {
+                unsettled: true,
+                ..CommandsAnswer::default()
             },
         })
+    }
+
+    /// The wall clock as the pane's clock reads it next is `by` microseconds off: a test's
+    /// clock set back or forward.
+    #[cfg(all(test, target_os = "macos"))]
+    pub(crate) fn set_clock(&self, key: &PaneKey, by: i64) -> Result<(), PaneError> {
+        let clock = self
+            .lock_panes()?
+            .get(key)
+            .map(|pane| std::sync::Arc::clone(&pane.clock))
+            .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+        watch().set(&clock, by);
+        Ok(())
     }
 
     /// The pane is at rest, the daemon says: its tree now is kept, under the number

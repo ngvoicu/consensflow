@@ -161,8 +161,9 @@ impl BackgroundWork for BridgeHost {
 
 /// What `pane.commands`' answer says (none where no answer came): so many commands run,
 /// the host cannot tell them (`commands: null`), a process of the window cannot be read
-/// (`null` and `unreadable`), or nothing that is an answer (an older host's, which knows
-/// no such request, among it).
+/// (`null` and `unreadable`), the window's processes kept changing as it read them (`null`
+/// and `unsettled`), or nothing that is an answer (an older host's, which knows no such
+/// request, among it).
 fn commands_seen(answer: Option<&Value>) -> CommandsSeen {
     let Some(answer) = answer.filter(|answer| answer.get("commands").is_some()) else {
         return CommandsSeen::Unanswered;
@@ -175,7 +176,13 @@ fn commands_seen(answer: Option<&Value>) -> CommandsSeen {
         Ok(CommandsAnswer {
             commands: None,
             unreadable: true,
+            ..
         }) => CommandsSeen::Unreadable,
+        Ok(CommandsAnswer {
+            commands: None,
+            unsettled: true,
+            ..
+        }) => CommandsSeen::Unsettled,
         Ok(CommandsAnswer { commands: None, .. }) => CommandsSeen::Untold,
         Err(_) => CommandsSeen::Unanswered,
     }

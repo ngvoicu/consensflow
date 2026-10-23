@@ -65,8 +65,8 @@
 //!   nothing counts it; at the first message's expiry, a look that leaves out what began
 //!   before the monitor's call, less the margin, finds no command (T-301: what the engine
 //!   asks where no rest proves a monitor)
-//! - `call-margin` each monitor's command began no earlier than the earliest call of its
-//!   message's monitors less the margin, and the run says how long after it
+//! - `call-margin` each of the thirteen monitors' commands began no earlier than its own
+//!   call less the margin, and the run says how long after it, monitor by monitor
 //!
 //! Every look at the window's commands but the first message's plain count leaves out what
 //! began before the first monitor's call, less the margin, as the engine's do in a worker's
@@ -384,26 +384,39 @@ fn calls(raw: &[Value]) -> Vec<(String, String, i64)> {
         .collect()
 }
 
-/// How long after the earliest call of the monitors whose descriptions begin with `called`
-/// the first of the commands `starts` holds whose command line holds `command` began, in
-/// milliseconds: none where either is missing.
-fn began_after_the_call(
+/// Each monitor whose description begins with `called`, by its description, and how long
+/// after its own call its command began, in milliseconds: the calls in the order they were
+/// made, and the commands `starts` holds whose command line holds `command` in the order
+/// they began, paired one to one (Astraeus on 02a6cd4f: not the earliest of each). None for
+/// a call no command was seen for.
+fn began_after_each_call(
     raw: &[Value],
     starts: &Starts,
     command: &str,
     called: &str,
-) -> Option<i64> {
-    let call = calls(raw)
+) -> Vec<(String, Option<i64>)> {
+    let mut made: Vec<(i64, String)> = calls(raw)
         .into_iter()
         .filter(|(_, description, _)| description.starts_with(called))
-        .map(|(_, _, at)| at)
-        .min()?;
-    let began = starts
+        .map(|(_, description, at)| (at, description))
+        .collect();
+    made.sort();
+    let mut began: Vec<u64> = starts
         .values()
         .filter(|(line, _)| line.contains(command))
         .map(|(_, began)| *began)
-        .min()?;
-    Some(i64::try_from(began / 1_000).ok()? - call)
+        .collect();
+    began.sort_unstable();
+    made.into_iter()
+        .enumerate()
+        .map(|(at, (call, description))| {
+            let after = began
+                .get(at)
+                .and_then(|began| i64::try_from(began / 1_000).ok())
+                .map(|began| began - call);
+            (description, after)
+        })
+        .collect()
 }
 
 /// Every expiry of a monitor that `raw` holds the call, the start and the notice of.
@@ -990,24 +1003,22 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
                 .any(|look| look.settled && says(&look.last, QUIETED) && look.jobs == 12 && look.noticed == 12),
         "a monitor Claude Code stopped for too much output, with a notice no status or time tells from its command's output, stays counted, and noticed: what runs in the window decides",
     ));
-    // When each message's monitors' commands began, against the earliest of their calls.
-    let began: Vec<(&str, Option<i64>)> = MEASURED
+    // When each monitor's command began, against its own call.
+    let began: Vec<(String, Option<i64>)> = MEASURED
         .iter()
-        .map(|(command, called)| {
-            (
-                *called,
-                began_after_the_call(&raw, &starts, command, called),
-            )
-        })
+        .flat_map(|(command, called)| began_after_each_call(&raw, &starts, command, called))
         .collect();
     log.block(
-        "the monitors' commands, against the earliest call of their message's monitors (ms after it)",
+        "each monitor's command, against its own call (ms after it)",
         &began
             .iter()
             .map(|(called, after)| {
                 format!(
                     "{called}: {}",
-                    after.map_or_else(|| "not measured".to_owned(), |ms| format!("began {ms} after"))
+                    after.map_or_else(
+                        || "not measured".to_owned(),
+                        |ms| format!("began {ms} after")
+                    )
                 )
             })
             .collect::<Vec<_>>()
@@ -1016,10 +1027,11 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     checks.push(Check::new(
         "claude",
         "call-margin",
-        began
-            .iter()
-            .all(|(_, after)| after.is_some_and(|after| after >= -CALL_MARGIN_MS)),
-        "each monitor's command began no earlier than the earliest call of its message's monitors, less the margin",
+        began.len() >= 13
+            && began
+                .iter()
+                .all(|(_, after)| after.is_some_and(|after| after >= -CALL_MARGIN_MS)),
+        "each of the thirteen monitors' commands began no earlier than its own call, less the margin",
     ));
     if let Some(file) = live::option("fixture") {
         let lines = fixture(&raw, &session, &folders(&window));
@@ -1200,12 +1212,61 @@ fn a_look_leaves_out_what_began_before_the_first_call_less_the_margin_and_a_star
     .into_iter()
     .collect();
     assert_eq!(
-        began_after_the_call(&raw, &starts, "tail -f", "ticks"),
-        Some(35)
+        began_after_each_call(&raw, &starts, "tail -f", "ticks"),
+        [("ticks".to_owned(), Some(35))]
     );
     assert_eq!(
-        began_after_the_call(&raw, &starts, "sleep 600", "ticks"),
-        None
+        began_after_each_call(&raw, &starts, "sleep 600", "ticks"),
+        [("ticks".to_owned(), None)]
     );
-    assert_eq!(began_after_the_call(&raw, &starts, "tail -f", "exp-"), None);
+    assert_eq!(began_after_each_call(&raw, &starts, "tail -f", "exp-"), []);
+}
+
+#[test]
+fn each_monitors_command_is_measured_against_its_own_call() {
+    // Astraeus on 02a6cd4f: A's command began 10 ms after A's call, B's 2 s before B's own;
+    // the earliest of the starts against the earliest of the calls read +10 ms.
+    let call = |id: &str, description: &str, at: &str| {
+        json!({ "type": "assistant", "timestamp": at, "message": { "content": [
+            { "type": "tool_use", "id": id, "name": "Monitor", "input": { "description": description } }
+        ] } })
+    };
+    let raw = [
+        call("a", "exp-1", "2026-10-23T12:00:00.000Z"),
+        call("b", "exp-2", "2026-10-23T12:00:05.000Z"),
+    ];
+    let at = |text: &str| written_at(&json!({ "timestamp": text })).unwrap();
+    let micros = |ms: i64| u64::try_from(ms).unwrap() * 1_000;
+    let starts: Starts = [
+        (
+            41,
+            (
+                "sleep 600".to_owned(),
+                micros(at("2026-10-23T12:00:00.010Z")),
+            ),
+        ),
+        (
+            42,
+            (
+                "sleep 600".to_owned(),
+                micros(at("2026-10-23T12:00:03.000Z")),
+            ),
+        ),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        began_after_each_call(&raw, &starts, "sleep 600", "exp-"),
+        [
+            ("exp-1".to_owned(), Some(10)),
+            ("exp-2".to_owned(), Some(-2_000))
+        ],
+        "B began before its call"
+    );
+    // A call no command was seen for.
+    let one: Starts = starts.into_iter().take(1).collect();
+    assert_eq!(
+        began_after_each_call(&raw, &one, "sleep 600", "exp-"),
+        [("exp-1".to_owned(), Some(10)), ("exp-2".to_owned(), None)]
+    );
 }

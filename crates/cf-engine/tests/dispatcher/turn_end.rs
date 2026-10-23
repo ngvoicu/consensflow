@@ -1557,3 +1557,56 @@ fn a_look_names_the_earliest_call_of_its_monitors_and_none_where_a_call_has_no_t
         assert_eq!(context.background.looked_after(), vec![after], "{second:?}");
     }
 }
+
+#[test]
+fn a_monitor_keeps_its_rest_while_its_windows_record_cannot_be_read() {
+    // Astraeus on 02a6cd4f: a reading that failed for a pass said no monitor, the monitor's
+    // binding went, and the reading that came back bound it to the latest rest proved,
+    // taken while its own command ran: the look left the command out.
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_run(Some(1));
+    let ticks = monitor("ticks", Source::Command, None);
+    context
+        .adapter
+        .answer_leaving_monitors("zeus", "Watching", pending(1, 0), vec![ticks]);
+    // At rest with the monitor: a rest is taken, and proved the pass after, its command in it.
+    passes(&context, 3);
+    assert_eq!(context.background.rests(), 1);
+    // A pass reads no record, then the record comes back, the monitor's notice in it.
+    context.adapter.unread("zeus", true);
+    context.pass().unwrap();
+    context.adapter.unread("zeus", false);
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "Watching",
+        pending(1, 1),
+        vec![monitor("ticks", Source::Command, Some(End::Expired))],
+    );
+    passes(&context, 3);
+    assert_eq!(tiers.task(1).task.state, "working", "its command runs");
+    let since = context.background.looked_since();
+    assert!(!since.is_empty(), "a look");
+    assert_eq!(since, vec![None; since.len()], "no rest its command ran at");
+}
+
+#[test]
+fn where_the_windows_processes_kept_changing_the_note_names_no_other_users_process() {
+    // Astraeus on 02a6cd4f: a look that ran out of tries as children were born was said to
+    // meet another user's process.
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_unsettled();
+    ticks_ran_out(&context, "Watching");
+    passes(&context, 2);
+    let told = told_last(&tiers);
+    assert!(
+        told.contains("is over once no command of @zeus's harness runs in its window, and its window's processes kept changing while ConsensFlow read them: it looks again."),
+        "{told}"
+    );
+    assert!(!told.contains("another user"), "{told}");
+    context.background.commands_run(Some(0));
+    context.advance(1_000);
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+}

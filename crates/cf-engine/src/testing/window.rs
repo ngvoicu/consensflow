@@ -271,6 +271,11 @@ impl Window for FakeWindow {
 /// What a look at `agent`'s window finds, its launch on `session`.
 fn looked(agent: &FakeAgent, session: &str) -> Observed {
     let reading = |items: Vec<Item>| {
+        if agent.unread {
+            return Some(Arc::new(Reading::Unknown(
+                "the transcript could not be read".to_owned(),
+            )));
+        }
         Some(Arc::new(Reading::Known(Record {
             items,
             in_flight: false,

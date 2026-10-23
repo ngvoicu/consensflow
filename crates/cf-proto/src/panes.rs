@@ -140,8 +140,9 @@ pub struct Background {
 /// `null` too where a process of the window cannot be read (another user's, as a command
 /// that `exec`s `sudo` becomes), which may be a command: the answer says so then
 /// ([`CommandsAnswer`]). What ran at the rest the request
-/// names (`since`, a number `pane.rest` answered) is left out, and what began before the
-/// time it names (`after`): a server or helper that left the window's group.
+/// names (`since`, a number `pane.rest` answered) is left out, and what the host proves
+/// began before the time it names (`after`; the host's clock watch): a server or helper
+/// that left the window's group.
 pub type Commands = Option<Background>;
 
 /// A `pane.commands` request: the pane, the rest whose processes are no command (`since`),
@@ -159,14 +160,18 @@ pub struct CommandsRequest {
 }
 
 /// `pane.commands`' answer: the commands ([`Commands`]), and, where they are `null`
-/// because a process of the window cannot be read, `unreadable` (Calliope on 136a7158: on a
-/// platform that tells them, that is no "cannot tell", and a later look may read them all).
+/// because a process of the window cannot be read (another user's), `unreadable`, or
+/// because the window's processes kept changing while the host read them, `unsettled`
+/// (Calliope on 136a7158, Astraeus on 02a6cd4f: on a platform that tells them, neither is a
+/// "cannot tell", and a later look may read them all).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandsAnswer {
     pub commands: Commands,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unreadable: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unsettled: bool,
 }
 
 /// A `pane.rest` request: the pane, and the rests the daemon still names (`keep`), which

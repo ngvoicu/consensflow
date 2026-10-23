@@ -639,6 +639,16 @@ time.sleep(60)
             "none, while the server runs on"
         );
         assert_eq!(total(None), Some(1), "the server");
+        // Astraeus on 02a6cd4f: the clock set back two seconds. No start is read against
+        // the call from then on: the server counts, the safe way.
+        table
+            .set_clock(&pane.key, -2_000_000)
+            .expect("the pane's clock set back");
+        assert_eq!(
+            total(Some(called)),
+            Some(1),
+            "a clock set back proves no start older"
+        );
         table.kill(&pane.key).expect("close the pane");
         kill(pid["alone"]);
     }

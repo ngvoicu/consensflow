@@ -76,6 +76,11 @@ impl FakeBackground {
         self.commands.set(Some(CommandsSeen::Unreadable));
     }
 
+    /// A look at a window's commands is answered that its processes kept changing.
+    pub fn commands_unsettled(&self) {
+        self.commands.set(Some(CommandsSeen::Unsettled));
+    }
+
     /// The earlier rests each rest asked the host to keep, in order.
     pub fn kept(&self) -> Vec<Vec<u64>> {
         self.rests

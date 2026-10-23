@@ -252,6 +252,9 @@ struct Pane {
     job: Arc<crate::job_object::JobObject>,
     /// The processes the pane's tree had when its turn began (`pane.mark`).
     baseline: Baseline,
+    /// What the host saw of the wall clock since the pane opened (`background::clock`).
+    #[cfg(target_os = "macos")]
+    clock: Arc<Mutex<crate::background::PaneClock>>,
     output_flow: Option<Arc<OutputFlow>>,
     active_writes: Arc<AtomicU64>,
     alive: bool,
@@ -525,6 +528,9 @@ impl PaneTable {
             command.env_remove(name);
         }
         advertise_terminal(&mut command, env, drop_env);
+        // The clock is watched from before the program starts.
+        #[cfg(target_os = "macos")]
+        let clock = turn::watch().open();
         #[cfg(target_os = "macos")]
         let mut process_tree = crate::process_tree::ProcessTree::new();
         #[cfg(target_os = "macos")]
@@ -575,6 +581,8 @@ impl PaneTable {
                 #[cfg(windows)]
                 job,
                 baseline: Baseline::default(),
+                #[cfg(target_os = "macos")]
+                clock,
                 output_flow: None,
                 active_writes: Arc::new(AtomicU64::new(0)),
                 alive: true,

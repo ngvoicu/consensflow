@@ -26,6 +26,7 @@
 [run]
 tem-panes-process-tree = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::machine_tests"]
 tem-panes-native = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::native::tests"]
+tem-panes-clock = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::clock::"]
 tem-panes-headless-commands = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_look_at_the_commands_over_the_wire"]
 tem-e2e-mcp = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::mcp_server::"]
 tem-e2e-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::"]
@@ -1050,7 +1051,7 @@ runs = ["tem-panes-process-tree"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree.rs"
-find = '                        Looked::Unreadable => return Ok(Readable::Hidden),'
+find = '                        Looked::Unreadable => return Ok(Readable::Unreadable),'
 replace = '                        Looked::Unreadable => {}'
 
 [[plant]]
@@ -1060,8 +1061,8 @@ runs = ["tem-panes-commands"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/turn.rs"
-find = '                crate::process_tree::Readable::Hidden => None,'
-replace = '                crate::process_tree::Readable::Hidden => Some(self.tree.members()?),'
+find = '                Readable::Unreadable => Read::Unreadable,'
+replace = '                Readable::Unreadable => Read::All(self.tree.members()?),'
 
 [[plant]]
 name = "turn-end-min host: what ran at the rest a look names is a command"
@@ -1327,9 +1328,13 @@ runs = ["tem-daemon-host"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/host.rs"
-find = '''            unreadable: true,
+find = '''
+            unreadable: true,
+            ..
         }) => CommandsSeen::Unreadable,'''
-replace = '''            unreadable: true,
+replace = '''
+            unreadable: true,
+            ..
         }) => CommandsSeen::Untold,'''
 
 [[plant]]
@@ -1349,14 +1354,8 @@ runs = ["tem-panes-commands"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/turn.rs"
-find = '''            None => CommandsAnswer {
-                commands: None,
-                unreadable: true,
-            },'''
-replace = '''            None => CommandsAnswer {
-                commands: None,
-                unreadable: false,
-            },'''
+find = '                unreadable: true,'
+replace = '                unreadable: false,'
 
 [[plant]]
 name = "turn-end-min host: a process born while a look read the tree hides it, as 136a7158 did"
@@ -1366,7 +1365,7 @@ runs = ["tem-panes-process-tree"]
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree.rs"
 find = '                        Looked::Readable => born = true,'
-replace = '                        Looked::Readable => return Ok(Readable::Hidden),'
+replace = '                        Looked::Readable => return Ok(Readable::Unreadable),'
 
 [[plant]]
 name = "turn-end-min host: a process that ended while a look read the tree hides it, as 136a7158 did"
@@ -1376,7 +1375,7 @@ runs = ["tem-panes-process-tree"]
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree.rs"
 find = '                        Looked::Ended => {}'
-replace = '                        Looked::Ended => return Ok(Readable::Hidden),'
+replace = '                        Looked::Ended => return Ok(Readable::Unreadable),'
 
 [[plant]]
 name = "turn-end-min engine: the first look that finds a command running is told"
@@ -1418,8 +1417,8 @@ runs = ["tem-panes-commands"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background/harness.rs"
-find = '            after.is_none_or(|after| member.key.began == 0 || member.key.began >= after)'
-replace = '            after.is_none_or(|after| member.key.began == 0 || after == 0)'
+find = '        .filter(|member| !before(member))'
+replace = '        .filter(|member| !before(member) || member.key.began > 0)'
 
 [[plant]]
 name = "turn-end-min host: a process whose start was not read is left out"
@@ -1427,9 +1426,13 @@ meant = "a_process_that_began_before_the_monitors_were_called_is_no_command"
 runs = ["tem-panes-background"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/background/harness.rs"
-find = '            after.is_none_or(|after| member.key.began == 0 || member.key.began >= after)'
-replace = '            after.is_none_or(|after| member.key.began >= after)'
+file = "crates/cf-panes/src/background/clock.rs"
+find = '''
+            && awake(member.key.pid)
+                .is_some_and('''
+replace = '''
+            && awake(member.key.pid)
+                .is_none_or('''
 
 [[plant]]
 name = "turn-end-min host: the time a look names is read as microseconds"
@@ -1437,9 +1440,9 @@ meant = "a_process_that_began_before_the_monitors_were_called_is_no_command"
 runs = ["tem-panes-background"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/background.rs"
-find = '            .map(|after| after.saturating_mul(1_000));'
-replace = '            .map(|after| after.saturating_mul(1));'
+file = "crates/cf-panes/src/background/clock.rs"
+find = '                .is_some_and(|start| clock.began_before(wall, start, after.saturating_mul(1_000)))'
+replace = '                .is_some_and(|start| clock.began_before(wall, start, after.saturating_mul(1)))'
 
 [[plant]]
 name = "turn-end-min host: pane.commands drops the time it is asked with"
@@ -1552,15 +1555,153 @@ find = '        .map(|at| at - CALL_MARGIN_MS)'
 replace = '        .map(|at| at - CALL_MARGIN_MS * 0)'
 
 [[plant]]
-name = "turn-end-min live monitor-wait: a message's commands are read from the last that began"
-meant = "a_look_leaves_out_what_began_before_the_first_call_less_the_margin_and_a_start_is_read_against_its_call"
+name = "turn-end-min live monitor-wait: every call is measured against the first command that began"
+meant = "each_monitors_command_is_measured_against_its_own_call"
 runs = ["tem-e2e-monitor-wait"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_monitor_wait.rs"
+find = '                .get(at)'
+replace = '                .get(at.min(0))'
+
+[[plant]]
+name = "turn-end-min host: a clock that fell back is trusted"
+meant = "after_the_clock_is_set_back_between_a_call_and_its_command_nothing_is_proved_older"
+runs = ["tem-panes-clock"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/clock.rs"
+find = '        if self.unknown || self.fall > BUDGET || wall >= after {'
+replace = '        if self.unknown || wall >= after {'
+
+[[plant]]
+name = "turn-end-min host: a clock that fell back is trusted, as 02a6cd4f did, on a real pane"
+meant = "what_began_before_the_monitors_call_is_no_command_and_what_began_after_it_is"
+runs = ["tem-panes-commands"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/clock.rs"
+find = '        if self.unknown || self.fall > BUDGET || wall >= after {'
+replace = '        if self.unknown || wall >= after {'
+
+[[plant]]
+name = "turn-end-min host: a clock is read against the reading before alone"
+meant = "steps_back_too_small_to_see_alone_are_seen_together"
+runs = ["tem-panes-clock"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/clock.rs"
+find = '        self.peak = self.peak.max(now.steady());'
+replace = '        self.peak = before.steady().max(now.steady());'
+
+[[plant]]
+name = "turn-end-min host: a slew is taken for a step"
+meant = "a_clock_slewed_as_fast_as_macos_slews_keeps_its_order"
+runs = ["tem-panes-clock"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/clock.rs"
+find = '        self.ahead() + self.continuous * SLEW_PPM / 1_000_000'
+replace = '        self.ahead() + self.continuous * SLEW_PPM / 1_000_000_000_000'
+
+[[plant]]
+name = "turn-end-min host: a gap in the clock's readings is trusted"
+meant = "a_gap_in_the_readings_leaves_the_clock_unknown"
+runs = ["tem-panes-clock"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/clock.rs"
+find = '            self.unknown = true;'
+replace = '            self.unknown = false;'
+
+[[plant]]
+name = "turn-end-min host: a process's own two starts are not read against the clock"
+meant = "a_process_whose_two_starts_disagree_with_the_readings_around_it_is_counted"
+runs = ["tem-panes-clock"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/clock.rs"
+find = '        ahead >= before.ahead().min(after_it.ahead()) - PROCESS_NOISE'
+replace = '        ahead >= before.ahead().min(after_it.ahead()) - PROCESS_NOISE * 1_000'
+
+[[plant]]
+name = "turn-end-min host: a process begun across a sleep is put on the clock"
+meant = "a_sleep_keeps_the_clock_but_a_process_begun_across_it_is_counted"
+runs = ["tem-panes-clock"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/clock.rs"
+find = '        if (after_it.slept() - before.slept()).abs() > KEPT {'
+replace = '        if (after_it.slept() - before.slept()).abs() > KEPT * 1_000_000 {'
+
+[[plant]]
+name = "turn-end-min host: the pane's clock is not asked"
+meant = "a_command_begun_after_its_call_while_the_clock_was_set_back_is_counted"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/clock.rs"
+find = '                .is_some_and(|start| clock.began_before(wall, start, after.saturating_mul(1_000)))'
+replace = '                .is_some_and(|start| start > 0 && wall < after.saturating_mul(1_000))'
+
+[[plant]]
+name = "turn-end-min host: a process's awake start is read wrong"
+meant = "a_processs_two_starts_agree_with_the_clocks_read_around_it"
+runs = ["tem-panes-native"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = '    (read == 0 && info.ri_proc_start_abstime != 0).then(|| micros(info.ri_proc_start_abstime))'
+replace = '    (read == 0 && info.ri_proc_start_abstime != 0).then(|| micros(info.ri_proc_start_abstime) - 3_000)'
+
+[[plant]]
+name = "turn-end-min engine: a record that could not be read lets the monitors go"
+meant = "a_monitor_keeps_its_rest_while_its_windows_record_cannot_be_read"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '        if !matches!(observed.reading.as_deref(), Some(Reading::Known(_))) {'
+replace = '        if !matches!(observed.reading.as_deref(), Some(Reading::Known(_))) && false {'
+
+[[plant]]
+name = "turn-end-min host: a tree that kept changing is said another user's"
+meant = "a_tree_that_kept_changing_while_it_was_read_is_told_apart_from_one_another_user_holds"
+runs = ["tem-panes-process-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
 find = '''
-        .map(|(_, began)| *began)
-        .min()?;'''
+        Ok(Readable::Unsettled)
+    }'''
 replace = '''
-        .map(|(_, began)| *began)
-        .max()?;'''
+        Ok(Readable::Unreadable)
+    }'''
+
+[[plant]]
+name = "turn-end-min daemon: a tree that kept changing is taken for a host that cannot tell"
+meant = "a_look_at_a_windows_commands_is_asked_with_the_rest_it_names_and_its_answer_read"
+runs = ["tem-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '''
+            unsettled: true,
+            ..
+        }) => CommandsSeen::Unsettled,'''
+replace = '''
+            unsettled: true,
+            ..
+        }) => CommandsSeen::Untold,'''
+
+[[plant]]
+name = "turn-end-min engine: a tree that kept changing is said another user's"
+meant = "where_the_windows_processes_kept_changing_the_note_names_no_other_users_process"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''            Some(CommandsSeen::Unsettled) => {
+                ", and its window's processes kept changing while ConsensFlow read them: it looks again."'''
+replace = '''            Some(CommandsSeen::Unsettled) => {
+                ", and a process of its window runs that ConsensFlow cannot read (another user's): it looks again."'''

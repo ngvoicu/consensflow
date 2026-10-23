@@ -126,32 +126,27 @@ fn descends_from_a_server(
 /// What ran when the window was last at rest before the monitors asked of began
 /// (`rest`, [`super::Baseline::rest`]) is none of them: a server or a helper that left
 /// the window's group (`setsid`) and runs for good is no command (Astraeus on 472b1d96),
-/// and no command a monitor asked of runs began before it. Nor is what began before
-/// `after` (microseconds since the epoch, as a Mac keeps a process's start): the daemon
-/// names the earliest call of the monitors it asks of, less a margin, where no rest
-/// proves them, as none does in a worker's first turn (its message is on Claude Code's
-/// command line, and Claude Code starts its servers as it takes it): a monitor's command
-/// begins after its call (the chief on T-301). A process whose start was not read (none
-/// is kept as 0) began at no time known, and is counted. Hooks and the status line begin
-/// and end in a moment, and need none of it.
+/// and no command a monitor asked of runs began before it. Nor is what `before` proves
+/// began before the monitors' calls: the daemon names the earliest of them, less a margin,
+/// where no rest proves them, as none does in a worker's first turn (its message is on
+/// Claude Code's command line, and Claude Code starts its servers as it takes it): a
+/// monitor's command begins after its call (the chief on T-301), and the pane's clock says
+/// whether a start can be read against the call (`super::clock`). Hooks and the status
+/// line begin and end in a moment, and need none of it.
 ///
 /// Limits. A process another left when it ended, which keeps the group of the process
 /// that started it and does not lead one (a job a command's shell started and left), is
 /// none of them: the command it was started by has ended, which ended its monitor by its
-/// status. And a start is the wall clock's, as a record's time is: a clock set back between
-/// a monitor's call and its command's start by more than the margin takes the command for
-/// what began before (`cf-engine`'s `turn_end`).
+/// status.
 pub(super) fn commands(
     kept: Kept,
     tree: &[Member],
     rest: &HashSet<ProcessKey>,
-    after: Option<u64>,
+    before: &dyn Fn(&Member) -> bool,
 ) -> Vec<Member> {
     tree.iter()
         .filter(|member| !rest.contains(&member.key))
-        .filter(|member| {
-            after.is_none_or(|after| member.key.began == 0 || member.key.began >= after)
-        })
+        .filter(|member| !before(member))
         .filter(|member| member.group != Some(kept.group))
         .filter(|member| match member.parent {
             Some(parent) => i32::try_from(parent.pid) == Ok(kept.group),

@@ -66,3 +66,34 @@ fn a_process_is_read_while_it_runs_ended_once_it_exits_and_unreadable_where_anot
     // launchd is root's.
     assert_eq!(looked(1), Looked::Unreadable);
 }
+
+#[allow(clippy::disallowed_methods)] // A test's own programs.
+#[test]
+fn a_processs_two_starts_agree_with_the_clocks_read_around_it() {
+    // T-334: the noise the pane's clock allows a process (`background::clock`'s
+    // `PROCESS_NOISE`, 5 ms) is far above what a Mac shows (±4 µs over 300 processes).
+    let mut worst = 0;
+    for _ in 0..50 {
+        let before = clocks();
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("5")
+            .spawn()
+            .expect("sleep starts");
+        let pid = child.id();
+        let after = clocks();
+        let started = process(i32::try_from(pid).unwrap()).expect("its start");
+        let wall =
+            i64::try_from(started.identity.born.0 * 1_000_000 + started.identity.born.1).unwrap();
+        let awake = awake_start(pid).expect("its awake start");
+        child.kill().expect("sleep is killed");
+        child.wait().expect("sleep is reaped");
+        assert!(
+            before.awake <= awake && awake <= after.awake,
+            "read between"
+        );
+        let ahead = wall - (awake + (before.continuous - before.awake));
+        let expected = before.wall - before.continuous;
+        worst = worst.max((ahead - expected).abs());
+    }
+    assert!(worst < 1_000, "{worst} µs");
+}

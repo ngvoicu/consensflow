@@ -562,6 +562,7 @@ async fn a_look_at_a_windows_commands_is_asked_with_the_rest_it_names_and_its_an
                 json!({ "ok": true, "commands": { "total": 3, "processes": [] } }),
                 json!({ "ok": true, "commands": null }),
                 json!({ "ok": true, "commands": null, "unreadable": true }),
+                json!({ "ok": true, "commands": null, "unsettled": true }),
                 json!({ "ok": true }),
                 json!({ "ok": true, "commands": "three" }),
             ]));
@@ -588,6 +589,10 @@ async fn a_look_at_a_windows_commands_is_asked_with_the_rest_it_names_and_its_an
             assert_eq!(
                 host.commands(&at, None, None).await,
                 CommandsSeen::Unreadable
+            );
+            assert_eq!(
+                host.commands(&at, None, None).await,
+                CommandsSeen::Unsettled
             );
             assert_eq!(
                 host.commands(&at, None, None).await,

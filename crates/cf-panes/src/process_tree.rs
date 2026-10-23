@@ -78,6 +78,7 @@ use crate::background::{report, Baseline, Member, ProcessKey};
 use bound::{Bound, Native, System, Table};
 use cf_proto::panes::Ending;
 use native::process;
+pub(crate) use native::{awake_start, clocks};
 pub(crate) use selection::Lineage;
 
 pub(crate) const OWNER_ENV: &str = "CF_PANE_PROCESS_OWNER";
@@ -95,8 +96,11 @@ const LOOKS: usize = 3;
 pub(crate) enum Readable {
     /// Every process of the tree, each read.
     All(Vec<Member>),
-    /// A process of the tree the system will not say what it is, or no program.
-    Hidden,
+    /// A process of the tree the system will not say what it is (another user's).
+    Unreadable,
+    /// The tree could not be read whole: a child was born since the table at every one of
+    /// [`LOOKS`] looks, or it has no program (Astraeus on 02a6cd4f: no other user's).
+    Unsettled,
 }
 
 /// What the system says of a process another named (`bound::System::looked`).
@@ -237,7 +241,7 @@ impl ProcessTree {
 
     fn readable_members_by(&self, system: &impl System) -> io::Result<Readable> {
         let Some(root) = self.root else {
-            return Ok(Readable::Hidden);
+            return Ok(Readable::Unsettled);
         };
         for _ in 0..LOOKS {
             let snapshot = system.processes()?;
@@ -250,7 +254,7 @@ impl ProcessTree {
                         continue;
                     }
                     match system.looked(child) {
-                        Looked::Unreadable => return Ok(Readable::Hidden),
+                        Looked::Unreadable => return Ok(Readable::Unreadable),
                         Looked::Readable => born = true,
                         Looked::Ended => {}
                     }
@@ -260,7 +264,7 @@ impl ProcessTree {
                 return Ok(Readable::All(self.members_in(&snapshot, &tree)));
             }
         }
-        Ok(Readable::Hidden)
+        Ok(Readable::Unsettled)
     }
 
     /// The turn's work as `baseline` proves it, chosen once: what an ending of the

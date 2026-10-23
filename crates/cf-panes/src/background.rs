@@ -77,6 +77,8 @@
 //! parent each process names, which is the process that started it only while that
 //! one is there); the rest is here.
 
+#[cfg(any(target_os = "macos", test))]
+mod clock;
 mod harness;
 mod work;
 
@@ -88,6 +90,10 @@ use cf_proto::panes::{
     Background, BackgroundProcess, Ending, Servers, BACKGROUND_PROCESSES, COMMAND_CHARS,
 };
 
+#[cfg(target_os = "macos")]
+pub(crate) use clock::Watch;
+#[cfg(any(target_os = "macos", test))]
+pub(crate) use clock::{began_before, PaneClock, Reading};
 pub(crate) use harness::Kept;
 
 /// How many of a window's rests are kept ([`Baseline::rest`]): a rest asked of in a look is
@@ -205,26 +211,22 @@ impl Baseline {
     }
 
     /// The commands of the window's harness that run in `tree` now ([`harness::commands`]),
-    /// less what ran at the rest `since` where it is one kept, and what began before `after`
-    /// (milliseconds since the epoch): none where the host cannot tell them
-    /// (`cf_proto::panes::Commands`). A rest no longer kept, or never kept, leaves nothing
-    /// out. A start is read against `after` where the host tells commands, on a Mac, whose
-    /// starts are kept in microseconds since the epoch ([`ProcessKey`]).
+    /// less what ran at the rest `since` where it is one kept, and what `before` proves began
+    /// before the monitors were called (the pane's clock: [`clock`]): none where the host
+    /// cannot tell them (`cf_proto::panes::Commands`). A rest no longer kept, or never kept,
+    /// leaves nothing out.
     pub fn commands(
         &self,
         tree: &[Member],
         since: Option<u64>,
-        after: Option<i64>,
+        before: &dyn Fn(&Member) -> bool,
     ) -> Option<Background> {
         let kept = self.commands_kept()?;
         let empty = HashSet::new();
         let rest = since
             .and_then(|since| self.rests.iter().find(|(number, _)| *number == since))
             .map_or(&empty, |(_, rest)| rest);
-        let after = after
-            .and_then(|after| u64::try_from(after).ok())
-            .map(|after| after.saturating_mul(1_000));
-        Some(listed(harness::commands(kept, tree, rest, after)))
+        Some(listed(harness::commands(kept, tree, rest, before)))
     }
 
     /// Whether a turn was ever said to begin: where it was not, the tree is

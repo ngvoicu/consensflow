@@ -334,3 +334,72 @@ pub(super) fn command_line(bytes: &[u8]) -> Option<String> {
 
 #[cfg(test)]
 mod tests;
+
+/// The mach time base (`mach_timebase_info_data_t`): a tick is `numer / denom` ns.
+#[repr(C)]
+struct TimeBase {
+    numer: u32,
+    denom: u32,
+}
+
+unsafe extern "C" {
+    /// The awake clock (libSystem), which stops while the machine sleeps and no setting
+    /// of the time of day moves, in ticks.
+    fn mach_absolute_time() -> u64;
+    /// The continuous clock (libSystem): the awake clock and the time the machine slept,
+    /// in ticks.
+    fn mach_continuous_time() -> u64;
+    /// The time base the two clocks tick in.
+    fn mach_timebase_info(base: *mut TimeBase) -> libc::c_int;
+}
+
+/// Microseconds of `ticks` of the mach time base.
+fn micros(ticks: u64) -> i64 {
+    static BASE: std::sync::OnceLock<(u64, u64)> = std::sync::OnceLock::new();
+    let (numer, denom) = *BASE.get_or_init(|| {
+        let mut base = TimeBase { numer: 0, denom: 0 };
+        // SAFETY: mach_timebase_info writes the two numbers of `base`, which it is given.
+        unsafe { mach_timebase_info(&mut base) };
+        (u64::from(base.numer.max(1)), u64::from(base.denom.max(1)))
+    });
+    i64::try_from(u128::from(ticks) * u128::from(numer) / u128::from(denom) / 1_000)
+        .unwrap_or(i64::MAX)
+}
+
+/// The clocks now (`background::clock::Reading`), each in microseconds: the wall clock read
+/// between two reads of the awake and continuous ones, which each stand at the middle.
+pub(crate) fn clocks() -> crate::background::Reading {
+    // SAFETY: the mach clocks take no arguments and touch no memory of ours.
+    let (awake, continuous) = unsafe { (mach_absolute_time(), mach_continuous_time()) };
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: clock_gettime writes the timespec it is given.
+    unsafe { libc::clock_gettime(libc::CLOCK_REALTIME, &mut now) };
+    // SAFETY: as above.
+    let (awake_after, continuous_after) = unsafe { (mach_absolute_time(), mach_continuous_time()) };
+    crate::background::Reading {
+        wall: now.tv_sec * 1_000_000 + now.tv_nsec / 1_000,
+        awake: micros(awake / 2 + awake_after / 2),
+        continuous: micros(continuous / 2 + continuous_after / 2),
+    }
+}
+
+/// When the process `pid` began by the awake clock (`proc_pid_rusage`'s
+/// `ri_proc_start_abstime`), in microseconds: none where the system will not say.
+pub(crate) fn awake_start(pid: u32) -> Option<i64> {
+    let pid = i32::try_from(pid).ok()?;
+    // SAFETY: rusage_info_v2 is plain numbers, for which all zeroes is a value.
+    let mut info: libc::rusage_info_v2 = unsafe { std::mem::zeroed() };
+    // SAFETY: proc_pid_rusage writes a rusage_info_v2 for RUSAGE_INFO_V2 into the buffer,
+    // which is one.
+    let read = unsafe {
+        libc::proc_pid_rusage(
+            pid,
+            libc::RUSAGE_INFO_V2,
+            (&mut info as *mut libc::rusage_info_v2).cast(),
+        )
+    };
+    (read == 0 && info.ri_proc_start_abstime != 0).then(|| micros(info.ri_proc_start_abstime))
+}

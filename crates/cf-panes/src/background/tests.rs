@@ -525,7 +525,7 @@ fn in_group(member: Member, group: i32) -> Member {
 /// The numbers of the commands `baseline` tells in `tree`, or none where it cannot.
 fn commands(baseline: &Baseline, tree: &[Member]) -> Option<Vec<u32>> {
     baseline
-        .commands(tree, None, None)
+        .commands(tree, None, &|_| false)
         .map(|found| found.processes.iter().map(|process| process.pid).collect())
 }
 
@@ -624,7 +624,7 @@ fn what_ran_at_the_rest_a_look_names_is_no_command_and_what_began_after_it_is() 
 /// [`commands`], less what ran at the rest `since`.
 fn commands_since(baseline: &Baseline, tree: &[Member], since: Option<u64>) -> Option<Vec<u32>> {
     baseline
-        .commands(tree, since, None)
+        .commands(tree, since, &|_| false)
         .map(|found| found.processes.iter().map(|process| process.pid).collect())
 }
 
@@ -649,6 +649,52 @@ fn a_rest_a_monitor_names_is_kept_however_many_rests_come_after_it() {
     );
 }
 
+/// A pane opened at `opened` (microseconds since the epoch) whose clock was read every
+/// 100 ms for `seconds`, its wall clock `off(t)` ahead of where it was, `t` microseconds
+/// after the open; and the awake start of a process begun `t` after the open.
+fn clock_from(opened: i64, seconds: i64, off: impl Fn(i64) -> i64) -> PaneClock {
+    let reading = |t: i64| Reading {
+        wall: opened + t + off(t),
+        awake: 1_000_000 + t,
+        continuous: 3_000_000 + t,
+    };
+    let mut clock = PaneClock::new(reading(0));
+    for tick in 1..=seconds * 10 {
+        clock.observe(reading(tick * 100_000));
+    }
+    clock
+}
+
+/// `member`, begun `t` microseconds after a pane opened at `opened`, its wall clock `off`
+/// ahead then.
+fn begun(member: Member, opened: i64, t: i64, off: i64) -> Member {
+    Member {
+        key: ProcessKey {
+            pid: member.key.pid,
+            began: u64::try_from(opened + t + off).unwrap(),
+        },
+        ..member
+    }
+}
+
+/// The numbers of the commands `baseline` tells in `tree`, less what `clock` proves began
+/// before `after` (milliseconds), the awake start of each by `awake` (microseconds after the
+/// open, as [`clock_from`] has them).
+fn commands_after(
+    baseline: &Baseline,
+    tree: &[Member],
+    clock: &PaneClock,
+    after: i64,
+    awake: &HashMap<u32, i64>,
+) -> Option<Vec<u32>> {
+    let before = began_before(clock, after, |pid| awake.get(&pid).map(|t| 1_000_000 + t));
+    baseline.commands(tree, None, &before).map(|found| {
+        let mut pids: Vec<u32> = found.processes.iter().map(|process| process.pid).collect();
+        pids.sort_unstable();
+        pids
+    })
+}
+
 #[test]
 fn a_process_that_began_before_the_monitors_were_called_is_no_command() {
     // The chief on T-301: a worker's first turn has no rest before it (its message is on
@@ -656,39 +702,77 @@ fn a_process_that_began_before_the_monitors_were_called_is_no_command() {
     // the group at launch began before the call; one begun after it may be a command, and
     // counts; one whose start was not read counts, the safe way.
     let baseline = marked(&[], Kept::of(Servers::InGroup, Some(10)), None);
-    let began = |member: Member, at: u64| Member {
-        key: ProcessKey {
-            pid: member.key.pid,
-            began: at,
-        },
-        ..member
-    };
-    // The call's record says 1_000_000 ms since the epoch.
-    let call_ms: i64 = 1_000_000;
-    let call_us: u64 = 1_000_000_000;
+    // The pane opened ten seconds before the call, whose record says 1_000_000_000 ms.
+    let call_ms: i64 = 1_000_000_000;
+    let opened = call_ms * 1_000 - 10_000_000;
+    let clock = clock_from(opened, 20, |_| 0);
     let tree = [
         in_group(program(), 10),
-        began(
+        begun(
             in_group(member(11, "python3 server.py", "Python", of(10)), 11),
-            call_us - 5_000_000,
+            opened,
+            5_000_000,
+            0,
         ),
-        began(
+        begun(
             in_group(member(41, "sleep 300", "sleep", of(10)), 41),
-            call_us + 40_000,
+            opened,
+            10_040_000,
+            0,
         ),
-        began(
+        begun(
             in_group(member(42, "python3 late.py", "Python", of(10)), 42),
-            call_us + 900_000,
+            opened,
+            10_900_000,
+            0,
         ),
-        began(in_group(member(43, "unread", "", of(10)), 43), 0),
+        in_group(member(43, "unread", "", of(10)), 43),
     ];
-    let pids = |after: Option<i64>| {
-        baseline.commands(&tree, None, after).map(|found| {
-            let mut pids: Vec<u32> = found.processes.iter().map(|process| process.pid).collect();
-            pids.sort_unstable();
-            pids
-        })
-    };
-    assert_eq!(pids(None), Some(vec![11, 41, 42, 43]));
-    assert_eq!(pids(Some(call_ms)), Some(vec![41, 42, 43]));
+    let awake: HashMap<u32, i64> = [(11, 5_000_000), (41, 10_040_000), (42, 10_900_000)].into();
+    assert_eq!(
+        commands(&baseline, &tree),
+        Some(vec![43, 11, 41, 42]),
+        "oldest first: the one whose start was not read, then by start"
+    );
+    assert_eq!(
+        commands_after(&baseline, &tree, &clock, call_ms, &awake),
+        Some(vec![41, 42, 43])
+    );
+    // A server whose awake start was not read is counted.
+    assert_eq!(
+        commands_after(&baseline, &tree, &clock, call_ms, &HashMap::new()),
+        Some(vec![11, 41, 42, 43])
+    );
+}
+
+#[test]
+fn a_command_begun_after_its_call_while_the_clock_was_set_back_is_counted() {
+    // Astraeus on 02a6cd4f: the call is stamped 12:00:10.000; before its command starts
+    // the clock is set back two seconds, and the command begins at 12:00:08.020 by it. A
+    // look that names the call less the margin left the command out, and the task ended.
+    let baseline = marked(&[], Kept::of(Servers::InGroup, Some(10)), None);
+    let call_ms: i64 = 1_792_670_410_000;
+    let opened = call_ms * 1_000 - 10_000_000;
+    let clock = clock_from(opened, 20, |t| if t > 10_010_000 { -2_000_000 } else { 0 });
+    let tree = [
+        in_group(program(), 10),
+        begun(
+            in_group(member(11, "python3 server.py", "Python", of(10)), 11),
+            opened,
+            1_000_000,
+            0,
+        ),
+        begun(
+            in_group(member(41, "sleep 600", "sleep", of(10)), 41),
+            opened,
+            10_020_000,
+            -2_000_000,
+        ),
+    ];
+    let awake: HashMap<u32, i64> = [(11, 1_000_000), (41, 10_020_000)].into();
+    assert_eq!(
+        commands_after(&baseline, &tree, &clock, call_ms - 1_000, &awake),
+        Some(vec![11, 41]),
+        "the command runs, and the server cannot be told from one"
+    );
 }
