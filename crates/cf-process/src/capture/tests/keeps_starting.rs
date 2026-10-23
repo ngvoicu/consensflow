@@ -13,7 +13,8 @@ use std::pin::pin;
 use super::tree::tree_env;
 use super::*;
 use crate::testing::{
-    keeps_starting_programs, left_running, pids_so_far, Recorded, KEEPS_STARTING, STARTS_WITHIN,
+    keeps_starting_programs, keeps_starting_programs_for_long, left_running, pids_so_far, Recorded,
+    KEEPS_STARTING, STARTS_WITHIN,
 };
 
 /// How many pids the program has written (its own, and the programs it started) when the
@@ -117,13 +118,14 @@ fn a_capture_dropped_ends_a_program_that_is_starting_programs_and_everything_it_
 fn a_capture_out_of_time_ends_a_program_that_is_starting_programs_and_everything_it_started() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("pids");
-    let (run, env) = (keeps_starting_programs(dir.path()), tree_env());
+    let (run, env) = (keeps_starting_programs_for_long(dir.path()), tree_env());
     let runtime = runtime();
     let _left = Recorded(&file);
-    // Out of time well after the program has begun, while it is still starting programs;
-    // what they print is read, and is no more than the limit.
+    // Out of time well after the program has begun (five seconds: far more than it needs on a
+    // slow runner to have started some), while it is still starting programs (it goes on for
+    // nine); what they print is read, and is no more than the limit.
     let limits = Limits {
-        timeout: Duration::from_millis(1500),
+        timeout: Duration::from_secs(5),
         max_buffer: 1024 * 1024,
     };
     let failed = runtime

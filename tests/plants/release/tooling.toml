@@ -1932,8 +1932,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/job.rs"
-find = "                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,\n            ) {"
-replace = "                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,\n            ) {"
+find = "    let mut limits = JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;"
+replace = "    let mut limits = JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;"
 
 # Windows: every program cf-process starts runs in a job of its own, which an end, a drop and a
 # time running out end whole (what a program starts as it is ended included: `taskkill /T` ends what
@@ -1971,8 +1971,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/job.rs"
-find = "                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,\n            ) {"
-replace = "                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE & 0),\n            ) {"
+find = "        limits |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;"
+replace = "        limits |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE & 0;"
 
 [[plant]]
 name = "tooling (cf-process): on Windows a capture out of time ends its program with a walk of the tree"
@@ -2004,8 +2004,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/job.rs"
-find = "                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,\n            ) {"
-replace = "                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE & 0),\n            ) {"
+find = "        limits |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;"
+replace = "        limits |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE & 0;"
 
 [[plant.edit]]
 file = "crates/cf-process/src/child.rs"
@@ -2020,8 +2020,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/job.rs"
-find = "        limit(handle, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION);\n    }"
-replace = "        let _ = (handle, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION);\n    }"
+find = "        limit(handle, limits_of(self.whole, false));\n    }"
+replace = "        let _ = (handle, limits_of(self.whole, false));\n    }"
 
 [[plant]]
 name = "tooling (cf-process): on Windows a child that exited of itself has what it left running ended with its job"
@@ -2031,8 +2031,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/job.rs"
-find = "        limit(handle, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION);\n    }"
-replace = "        let _ = (handle, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION);\n    }"
+find = "        limit(handle, limits_of(self.whole, false));\n    }"
+replace = "        let _ = (handle, limits_of(self.whole, false));\n    }"
 
 [[plant]]
 name = "tooling (cf-process): on Windows a program is let run outside the job it was made"
@@ -2044,6 +2044,60 @@ platforms = ["windows"]
 file = "crates/cf-process/src/job.rs"
 find = "            if AssignProcessToJobObject(made, handle as _) == 0 {\n                return Err(failed(\"could not be put in a job of its own\"));\n            }"
 replace = "            let _ = (AssignProcessToJobObject as usize, handle);"
+
+# Breakaway (T-363): a program that asks to start a process outside its job may, one that does
+# not stays in the job, a program held whole may not (Codex's `update` asks, to detach its daemon);
+# and a program held whole that says too much or runs out of its time has every process of its job
+# gone when the capture returns (the plants' runner puts the sources back then).
+
+[[plant]]
+name = "tooling (cf-process): on Windows a program held whole is allowed to break away"
+meant = "a_program_held_whole_is_refused_the_breakaway_and_all_it_starts_is_ended"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "    if !whole {\n        limits |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;\n    }\n"
+replace = "    limits |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;\n"
+
+[[plant]]
+name = "tooling (cf-process): on Windows a program is refused the breakaway it asks for"
+meant = "a_program_that_asks_to_break_away_may_and_the_one_that_does_not_ask_is_ended_with_its_job"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "        limits |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;"
+replace = "        limits |= JOB_OBJECT_LIMIT_BREAKAWAY_OK & 0;"
+
+[[plant]]
+name = "tooling (cf-process): on Windows a program held whole that says too much is not waited for while its job ends"
+meant = "a_program_held_whole_that_says_too_much_has_every_process_of_its_job_ended_when_the_capture_returns"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = "            let job_ended = group.job().end();\n"
+replace = "            let job_ended = Ok(());\n"
+
+[[plant]]
+name = "tooling (cf-process): on Windows an opener handed over is put in a job that ends with the handing over"
+meant = "a_program_still_running_is_let_go_and_runs_on_to_its_end"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/hand_over.rs"
+find = "    lead(&mut command);\n"
+replace = "    lead(&mut command);\n    crate::job::start_in_job(&mut command);\n"
+
+[[plant.edit]]
+file = "crates/cf-process/src/hand_over.rs"
+find = "    match tokio::time::timeout(within, child.wait()).await {"
+replace = "    let _job = crate::job::Job::of(&child, false)?;\n    match tokio::time::timeout(within, child.wait()).await {"
 
 # A shim that names a native program alone (opencode-ai 1.19.4's: its package ships a program
 # where it shipped a script) starts that program; one that names a program that is not there, or
@@ -2818,8 +2872,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture.rs"
-find = '''            let left = group.job().end().and(group.unpinned());'''
-replace = '''            let left = group.job().end();'''
+find = '''            let left = job_ended.and(group.unpinned());'''
+replace = '''            let left = job_ended;'''
 
 [[plant]]
 name = "tooling (cf-process): the sweep keeps nothing of what it could not hold"

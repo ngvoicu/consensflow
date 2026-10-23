@@ -344,3 +344,11 @@ mod tree;
 
 // And what its program starts as it is ended.
 mod keeps_starting;
+
+// What a program on Windows may start outside its job.
+#[cfg(windows)]
+mod breakaway;
+
+// What a program held whole has gone when its capture returns.
+#[cfg(windows)]
+mod whole_end;

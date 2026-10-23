@@ -414,11 +414,15 @@ async fn held_end(
         Held::Overflowed | Held::OutOfTime => {
             drop(reading);
             drop((stdout, stderr));
+            // On Windows its job is ended first, each process of it held before it is and
+            // waited for after (`Job::end`): ended by the group's ask, the job lists none of
+            // those that are still ending, and what is waited for after is nothing (T-363).
+            // Elsewhere there is no job, and the group is asked.
+            let job_ended = group.job().end();
             group.end(Ending::Asked);
-            // Forced before it is reaped on Unix, its session and descendants with it;
-            // on Windows its job is what is left.
+            // Forced before it is reaped on Unix, its session and descendants with it.
             let status = forced(child, group).await;
-            let left = group.job().end().and(group.unpinned());
+            let left = job_ended.and(group.unpinned());
             (status, matches!(held, Held::OutOfTime), left)
         }
     }

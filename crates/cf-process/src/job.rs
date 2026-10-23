@@ -14,6 +14,16 @@
 //! the end-on-close away, and what it left running is left, as Node's `execFile` leaves it.
 //! A program held whole (`capture_whole`) has whatever it left ended when it has ended, and
 //! waited for (`Job::end`), before its job is released.
+//!
+//! Breakaway: a program that *asks* to start a process outside its job
+//! (`CREATE_BREAKAWAY_FROM_JOB`) may, and the process it starts is then out of the job: ended
+//! with nothing of it. It is `JOB_OBJECT_LIMIT_BREAKAWAY_OK`, never the silent kind
+//! (`SILENT_BREAKAWAY_OK`, which the removed process-wide job had, and which let every
+//! child of every program out of it). Codex asks: `codex update`, with the managed daemon
+//! running, starts it detached with the flag, and where the job refuses, the update fails
+//! ("this Windows launcher prevents background processes from outliving it", T-363). libuv
+//! never asks, so npm's and Node's children stay in the job. Nothing may leave the job of a
+//! program held whole, the plants' runner's: the flag is refused there.
 
 use cf_base::env::Env;
 
@@ -122,11 +132,11 @@ impl Job {
     }
 
     /// A job made for `process`, which was started suspended (`start_in_job`),
-    /// `process` put in it, and then let run: what it starts is in it too, with no
-    /// way out (no breakaway is allowed, silent or asked for), and a process of it
-    /// that fails unhandled ends, as libuv's job has it, with no dialog of Windows'
-    /// to wait on. Why it could not be made, or the process let run, if it could
-    /// not. A process already in a job is put in this one as a job inside that one
+    /// `process` put in it, and then let run: what it starts is in it too, with no way
+    /// out but the one it asks for (a program held whole has none: the module's doc has
+    /// the breakaway), and a process of it that fails unhandled ends, as libuv's job has it,
+    /// with no dialog of Windows' to wait on. Why it could not be made, or the process let
+    /// run, if it could not. A process already in a job is put in this one as a job inside that one
     /// (Windows 8 on) and is refused by a job that allows none: held whole, that is
     /// a program that did not start; any other program then runs outside a job of
     /// ours, as libuv's children do where their job is refused, and is ended by
@@ -146,10 +156,7 @@ impl Job {
 
     /// A job for `process`, which has been put in it and not yet let run.
     fn made_for(process: &tokio::process::Child, whole: bool) -> Result<Self, String> {
-        use windows_sys::Win32::System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW,
-            JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        };
+        use windows_sys::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
         let failed = |what: &str| format!("{what}: {}", std::io::Error::last_os_error());
         let handle = process
             .raw_handle()
@@ -169,10 +176,7 @@ impl Job {
                 whole,
                 released: std::cell::Cell::new(false),
             };
-            if !limit(
-                made as usize,
-                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-            ) {
+            if !limit(made as usize, limits_of(whole, true)) {
                 return Err(failed("could not make a job of its own"));
             }
             if AssignProcessToJobObject(made, handle as _) == 0 {
@@ -201,15 +205,33 @@ impl Job {
     /// The program ended of itself: what it left running is let go of, as the end-on-close
     /// is taken away, and nothing is ended when the job is dropped.
     pub(crate) fn release(&self) {
-        use windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
         let Some(handle) = self.handle else {
             return;
         };
         if self.released.replace(true) {
             return;
         }
-        limit(handle, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION);
+        limit(handle, limits_of(self.whole, false));
     }
+}
+
+/// What a job limits: a process of it that fails unhandled ends (no dialog of Windows' to
+/// wait on); one that asks to start a process outside it may, unless the job holds a program
+/// whole; and, where `ends_on_close`, every process of it ends when its last handle closes.
+#[cfg(windows)]
+fn limits_of(whole: bool, ends_on_close: bool) -> u32 {
+    use windows_sys::Win32::System::JobObjects::{
+        JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    let mut limits = JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
+    if ends_on_close {
+        limits |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    }
+    if !whole {
+        limits |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+    }
+    limits
 }
 
 /// Sets the job `handle`'s limits to `flags` and nothing else: whether the system took them.

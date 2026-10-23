@@ -108,6 +108,17 @@ const STARTED_RUN_FOR: u32 = 20;
 /// started. Every one is left its streams, as Windows gives a child every handle it may
 /// inherit. It goes on for [`KEEPS_STARTING_FOR`] at most, and then waits to be ended.
 pub(crate) fn keeps_starting_programs(folder: &Path) -> Run {
+    keeps_starting_every(folder, Duration::from_millis(5))
+}
+
+/// As [`keeps_starting_programs`], one every 40 ms: all [`KEEPS_STARTING`] take about nine
+/// seconds, which a capture out of time in five (a slow runner's margin) still finds starting
+/// them.
+pub(crate) fn keeps_starting_programs_for_long(folder: &Path) -> Run {
+    keeps_starting_every(folder, Duration::from_millis(40))
+}
+
+fn keeps_starting_every(folder: &Path, pace: Duration) -> Run {
     Run {
         program: std::env::current_exe().unwrap(),
         args: [
@@ -117,7 +128,10 @@ pub(crate) fn keeps_starting_programs(folder: &Path) -> Run {
         ]
         .into_iter()
         .map(Into::into)
-        .chain([folder.as_os_str().to_owned()])
+        .chain([
+            pace.as_millis().to_string().into(),
+            folder.as_os_str().to_owned(),
+        ])
         .collect(),
         verbatim: false,
     }
@@ -130,7 +144,14 @@ pub(crate) fn keeps_starting_programs(folder: &Path) -> Run {
 #[allow(clippy::disallowed_methods, clippy::zombie_processes)]
 fn helper_keeps_starting_programs() {
     use std::io::Write;
-    let folder = PathBuf::from(std::env::args().next_back().unwrap());
+    let words: Vec<String> = std::env::args().collect();
+    let [.., pace, folder] = &words[..] else {
+        panic!("no pace and folder");
+    };
+    let (pace, folder) = (
+        Duration::from_millis(pace.parse().unwrap()),
+        PathBuf::from(folder),
+    );
     let mut pids = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -159,7 +180,7 @@ fn helper_keeps_starting_programs() {
         let started = started.unwrap();
         writeln!(pids, "{}", started.id()).unwrap();
         pids.flush().unwrap();
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(pace);
     }
     std::thread::sleep(KEEPS_STARTING_FOR + Duration::from_secs(20));
 }
@@ -262,4 +283,180 @@ pub(crate) fn leaves_a_writer(pids: &Path, marked: &Path, after: u32) -> Run {
         .to_vec(),
         verbatim: false,
     };
+}
+
+/// A program that starts two programs and writes what came of each, to `folder/pids` (its
+/// own pid, then the first's, then the second's if it started) and to `folder/outcome` (one
+/// word each): a ping that asks for nothing (`stays`), and a ping started as a program asks
+/// that wants its child outside its job (`CREATE_BREAKAWAY_FROM_JOB`): `breaks` where it
+/// started, `refused` and the system's code where the job would not have it. It then waits
+/// for a half minute at most, to be ended. Windows only: a job is.
+#[cfg(windows)]
+pub(crate) fn starts_with_and_without_breakaway(folder: &Path) -> Run {
+    Run {
+        program: std::env::current_exe().unwrap(),
+        args: [
+            "--exact",
+            "testing::helper_starts_with_and_without_breakaway",
+            "--ignored",
+        ]
+        .into_iter()
+        .map(Into::into)
+        .chain([folder.as_os_str().to_owned()])
+        .collect(),
+        verbatim: false,
+    }
+}
+
+/// The program [`starts_with_and_without_breakaway`] runs, and no test of its own.
+#[cfg(windows)]
+#[test]
+#[ignore = "a program the breakaway tests start"]
+// The helper starts what the test ends, and waits for none of it.
+#[allow(clippy::disallowed_methods, clippy::zombie_processes)]
+fn helper_starts_with_and_without_breakaway() {
+    use std::io::Write;
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW};
+    let folder = PathBuf::from(std::env::args().next_back().unwrap());
+    let open = |name: &str| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(folder.join(name))
+            .unwrap()
+    };
+    let (mut pids, mut outcome) = (open("pids"), open("outcome"));
+    writeln!(pids, "{}", std::process::id()).unwrap();
+    let ping = |address: &str, flags: u32| {
+        std::process::Command::new(r"C:\Windows\System32\PING.EXE")
+            .args(["-n", "21", address])
+            .creation_flags(flags | CREATE_NO_WINDOW)
+            .stdout(std::process::Stdio::null())
+            .spawn()
+    };
+    // Each is marked by an address of its own, so that a ping a test left is told from the rest.
+    let stays = ping("127.0.55.1", 0).unwrap();
+    writeln!(pids, "{}", stays.id()).unwrap();
+    writeln!(outcome, "stays").unwrap();
+    match ping("127.0.55.2", CREATE_BREAKAWAY_FROM_JOB) {
+        Ok(breaks) => {
+            writeln!(pids, "{}", breaks.id()).unwrap();
+            writeln!(outcome, "breaks").unwrap();
+        }
+        Err(refused) => writeln!(outcome, "refused {:?}", refused.raw_os_error()).unwrap(),
+    }
+    pids.flush().unwrap();
+    outcome.flush().unwrap();
+    std::thread::sleep(Duration::from_secs(30));
+}
+
+/// How many programs [`starts_holders_and_says_too_much`] has hold a file.
+#[cfg(windows)]
+pub(crate) const HOLDERS: usize = 8;
+
+/// A program that starts [`HOLDERS`] programs that each hold a file of their own open (`held-0`
+/// and the rest, in `folder`, shared with no one) and 1000 threads, waits until all of them are
+/// there, and says far more than a capture holds it to: the capture has it out of its limit,
+/// and ends it. Every pid is written to `folder/pids`. Windows only: it asks what a job's end
+/// is waited for.
+#[cfg(windows)]
+pub(crate) fn starts_holders_and_says_too_much(folder: &Path) -> Run {
+    Run {
+        program: std::env::current_exe().unwrap(),
+        args: [
+            "--exact",
+            "testing::helper_starts_holders_and_says_too_much",
+            "--ignored",
+        ]
+        .into_iter()
+        .map(Into::into)
+        .chain([folder.as_os_str().to_owned()])
+        .collect(),
+        verbatim: false,
+    }
+}
+
+/// The program [`starts_holders_and_says_too_much`] runs, and no test of its own.
+#[cfg(windows)]
+#[test]
+#[ignore = "a program the tests of a job's end start"]
+// The helper starts what the test ends, and waits for none of it.
+#[allow(clippy::disallowed_methods, clippy::zombie_processes)]
+fn helper_starts_holders_and_says_too_much() {
+    use std::io::Write;
+    let folder = PathBuf::from(std::env::args().next_back().unwrap());
+    let mut pids = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(folder.join("pids"))
+        .unwrap();
+    writeln!(pids, "{}", std::process::id()).unwrap();
+    for index in 0..HOLDERS {
+        let holder = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "testing::helper_holds_a_file_and_many_threads",
+                "--ignored",
+            ])
+            .arg(&folder)
+            .arg(index.to_string())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        writeln!(pids, "{}", holder.id()).unwrap();
+    }
+    pids.flush().unwrap();
+    let until = Instant::now() + STARTS_WITHIN;
+    while Instant::now() < until {
+        let ready = std::fs::read_dir(&folder)
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .is_ok_and(|entry| entry.path().extension().is_some_and(|ext| ext == "ready"))
+            })
+            .count();
+        if ready >= HOLDERS {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Far more than a limit of a kilobyte, written to the stream itself: a `println!` of a test
+    // is kept by the harness unless it is asked not to.
+    let mut stdout = std::io::stdout();
+    stdout.write_all("x".repeat(8 * 1024).as_bytes()).unwrap();
+    stdout.flush().unwrap();
+    std::thread::sleep(Duration::from_secs(60));
+}
+
+/// A program that [`starts_holders_and_says_too_much`] starts, and no test of its own: a file
+/// of `folder` it holds open shared with no one, 1000 threads, a file that says it is there,
+/// and a minute's wait. It is a minute at most from being ended by the test.
+#[cfg(windows)]
+#[test]
+#[ignore = "a program the tests of a job's end start"]
+fn helper_holds_a_file_and_many_threads() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let words: Vec<String> = std::env::args().collect();
+    let [.., folder, index] = &words[..] else {
+        panic!("no folder and index");
+    };
+    let held = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .share_mode(0)
+        .open(Path::new(folder).join(format!("held-{index}")))
+        .unwrap();
+    for _ in 0..1000 {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(|| std::thread::sleep(Duration::from_secs(60)))
+            .unwrap();
+    }
+    let ready = Path::new(folder).join(format!("{}.ready", std::process::id()));
+    std::fs::write(ready, "").unwrap();
+    std::thread::sleep(Duration::from_secs(60));
+    drop(held);
 }
