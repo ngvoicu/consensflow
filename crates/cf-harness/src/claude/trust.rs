@@ -18,9 +18,27 @@
 //! apply without asking, and writes the trust down for the root of the folder's
 //! repository, or the folder itself out of one, as the first question's yes does
 //! (T-381). It is answered as that question is ([`Question::Grants`]).
+//!
+//! Once the folder is trusted, a window whose folder's `.mcp.json` (or a folder
+//! above's) names a server it was never told to use, nor to leave out, asks of it in
+//! a dialog of its own (2.1.309, T-383): "New MCP server found in this project:",
+//! the server's name, and three choices, "Use this MCP server", "Use this and all
+//! future MCP servers in this project" and "Continue without using this MCP server",
+//! its `❯` on the last; Up and Down move it, and wrap. The first keeps the server's
+//! name in `enabledMcpjsonServers` of the folder's `.claude/settings.local.json` and
+//! starts it; the second keeps `enableAllProjectMcpServers` there too; the last, or
+//! Escape, keeps it in `disabledMcpjsonServers`. Two servers or more are asked of
+//! together: "N new MCP servers found in this project", a box a line for each,
+//! ticked, the `❯` on the first, then "Enable selected", on which Enter uses the
+//! ticked ones; Enter on a box unticks it, and Down stops at the last line. It is
+//! not asked where a window is shut out of the project's servers
+//! (`--strict-mcp-config`), nor where full-permission mode was accepted in the
+//! person's own settings (`skipDangerousModePermissionPrompt` in their
+//! `settings.json`, not a `--settings` file's): it then uses them without asking
+//! ([`Question::Servers`]).
 
 use crate::contract::Question;
-use crate::shared::trust::{chosen_at, names, offers, shows, DOWN, ENTER};
+use crate::shared::trust::{chosen_at, names, offers, shows, DOWN, ENTER, UP};
 
 /// What Claude's prompt shows as ConsensFlow opens it, in full-permission mode.
 const PROMPT: &str = "bypass permissions on";
@@ -31,6 +49,20 @@ const NO: &str = "No, exit";
 
 /// The no of the question asked of a trusted folder's grants: it goes on without them.
 const NO_GRANTS: &str = "No, continue without these permissions";
+
+/// The choices of the dialog of a new server of `.mcp.json`: the one that uses it,
+/// the one that uses every server the project will name, and the one that goes on
+/// without it, on which it opens.
+const SERVER_YES: &str = "Use this MCP server";
+const SERVER_ALL: &str = "Use this and all future MCP servers in this project";
+const SERVER_NO: &str = "Continue without using this MCP server";
+
+/// The choice of the dialog of two new servers or more that uses the ticked ones, the
+/// line it draws below them, and the ticks of its boxes.
+const SERVERS_YES: &str = "Enable selected";
+const SERVERS_HINT: &str = "Esc to reject all";
+const TICKED: &str = "[✔]";
+const UNTICKED: &str = "[ ]";
 
 /// The line the question draws below its choices (2.1.305), and no input box does.
 /// It is made of the key bindings, and reads otherwise while a Ctrl-C is pending
@@ -56,7 +88,7 @@ pub(crate) fn toward_trust(screen: &[String]) -> Option<Question> {
         });
     }
     if !names_choices(screen) {
-        return None;
+        return toward_servers(screen);
     }
     Some(match chosen_at(screen, '❯') {
         Some((at, _)) if shows(&screen[at + 1..], PROMPT) => return None,
@@ -66,6 +98,39 @@ pub(crate) fn toward_trust(screen: &[String]) -> Option<Question> {
         Some(_) => return None,
         None => Question::Unplaced,
     })
+}
+
+/// The dialog of a new server of `.mcp.json` (or of two or more), where `screen`
+/// shows it, read by the rules of the question about the folder: its choices each a
+/// line of its own, a `❯` with the prompt's line below it the input box. The key
+/// toward using the servers: Up while the `❯` is below "Use this MCP server" (Up
+/// moves it there whether or not a later Claude Code wraps), Enter on it; for two or
+/// more, Down while it is on a box, Enter on "Enable selected", and none where a box
+/// is unticked, which is the human's choice.
+fn toward_servers(screen: &[String]) -> Option<Question> {
+    let one = offers(screen, SERVER_YES) && offers(screen, SERVER_NO);
+    let more = offers(screen, SERVERS_YES) && shows(screen, SERVERS_HINT);
+    if !(one || more) {
+        return None;
+    }
+    let boxed = |choice: &str| choice.starts_with(TICKED) || choice.starts_with(UNTICKED);
+    Some(Question::Servers(match chosen_at(screen, '❯') {
+        Some((at, _)) if shows(&screen[at + 1..], PROMPT) => return None,
+        Some((_, choice)) if one && names(choice, SERVER_YES) => Some(ENTER),
+        Some((_, choice)) if one && (names(choice, SERVER_ALL) || names(choice, SERVER_NO)) => {
+            Some(UP)
+        }
+        Some(_) if more && shows(screen, UNTICKED) => None,
+        Some((_, choice)) if more && names(choice, SERVERS_YES) => Some(ENTER),
+        Some((_, choice)) if more && boxed(choice) => Some(DOWN),
+        Some((at, _))
+            if shows(&screen[at + 1..], HINT) || shows(&screen[at + 1..], SERVERS_HINT) =>
+        {
+            None
+        }
+        Some(_) => return None,
+        None => None,
+    }))
 }
 
 /// `screen` with the no of the question asked of a trusted folder's grants in the
@@ -100,7 +165,11 @@ pub(crate) fn shows_prompt(screen: &[String]) -> bool {
     if grants_drawn(screen).is_some_and(placed) {
         return false;
     }
-    shows(screen, PROMPT) && !matches!(toward_trust(screen), Some(Question::Toward(_)))
+    shows(screen, PROMPT)
+        && !matches!(
+            toward_trust(screen),
+            Some(Question::Toward(_) | Question::Servers(Some(_)))
+        )
 }
 
 #[cfg(test)]
@@ -273,12 +342,131 @@ mod tests {
         assert_eq!(toward_trust(&below), Some(Question::Toward(DOWN)));
     }
 
+    /// The dialog of a new server of `.mcp.json`, its `❯` on the choice `on` (0 to 2),
+    /// as Claude Code 2.1.309 draws its last lines (T-354's probe).
+    fn server(on: usize) -> Vec<String> {
+        let choices = [SERVER_YES, SERVER_ALL, SERVER_NO];
+        let drawn: Vec<String> = choices
+            .iter()
+            .enumerate()
+            .map(|(at, choice)| format!(" {} {choice}", if at == on { '❯' } else { ' ' }))
+            .collect();
+        lines(&format!(" New MCP server found in this project: probe\n\n MCP servers may execute code or access system resources. All tool calls require approval.\n\n{}\n\n Enter to confirm · Esc to cancel", drawn.join("\n")))
+    }
+
     #[test]
-    #[ignore = "known failure (T-354's probe, Claude Code 2.1.309): a window opened in a trusted folder whose .mcp.json names a server it was never told of asks of it in a dialog of its own, read as no question; issue page claude-s-mcp-server-dialog-is-read-as-no-question in consensflow-sme"]
     fn the_dialog_of_a_new_server_of_the_projects_mcp_json_is_a_question() {
-        // As Claude Code 2.1.309 draws its last lines, its cursor on the last choice.
+        // T-354's known failure: as Claude Code 2.1.309 draws its last lines, its cursor
+        // on the last choice, on which it opens.
         let asked = lines(" New MCP server found in this project: probe\n\n MCP servers may execute code or access system resources. All tool calls require approval.\n\n   Use this MCP server\n   Use this and all future MCP servers in this project\n ❯ Continue without using this MCP server\n\n Enter to confirm · Esc to cancel");
-        assert!(toward_trust(&asked).is_some());
+        assert_eq!(toward_trust(&asked), Some(Question::Servers(Some(UP))));
+        assert_eq!(asked, server(2));
+        assert!(!shows_prompt(&asked));
+    }
+
+    #[test]
+    fn the_dialog_of_a_new_server_is_answered_up_to_using_it_then_enter() {
+        // Up from the last choice, and from the one that uses every future server too,
+        // whether or not the list wraps; Enter on the one that uses this server alone.
+        assert_eq!(toward_trust(&server(2)), Some(Question::Servers(Some(UP))));
+        assert_eq!(toward_trust(&server(1)), Some(Question::Servers(Some(UP))));
+        assert_eq!(
+            toward_trust(&server(0)),
+            Some(Question::Servers(Some(ENTER)))
+        );
+        for on in 0..3 {
+            assert!(!shows_prompt(&server(on)), "{on}");
+            assert!(!names_choices(&server(on)), "{on}");
+        }
+        // A prompt's line above it, from before it was drawn, is no prompt.
+        let mut below_a_prompt = lines("   ⏵⏵ bypass permissions on (shift+tab to cycle)");
+        below_a_prompt.extend(server(2));
+        assert_eq!(
+            toward_trust(&below_a_prompt),
+            Some(Question::Servers(Some(UP)))
+        );
+        assert!(!shows_prompt(&below_a_prompt));
+        // Its cursor drawn otherwise, or not yet drawn: asked, no key known.
+        let otherwise: Vec<String> = server(2)
+            .iter()
+            .map(|line| line.replace('❯', ">"))
+            .collect();
+        assert_eq!(toward_trust(&otherwise), Some(Question::Servers(None)));
+        let halfway: Vec<String> = server(2)
+            .iter()
+            .map(|line| line.replace('❯', " "))
+            .collect();
+        assert_eq!(toward_trust(&halfway), Some(Question::Servers(None)));
+        // A choice the reader does not know, the dialog's hint below it.
+        let mut third = server(5);
+        third.insert(5, " ❯ Use this MCP server for this session only".to_owned());
+        assert_eq!(toward_trust(&third), Some(Question::Servers(None)));
+    }
+
+    /// The dialog of two new servers, its `❯` on the line `on` (0 and 1 the boxes, 2
+    /// "Enable selected"), the second box ticked where `ticked`, as Claude Code 2.1.309
+    /// draws it (T-383's probe).
+    fn servers(on: usize, ticked: bool) -> Vec<String> {
+        let second = if ticked { TICKED } else { UNTICKED };
+        let choices = [
+            format!("{TICKED} probe"),
+            format!("{second} probe2"),
+            SERVERS_YES.to_owned(),
+        ];
+        let drawn: Vec<String> = choices
+            .iter()
+            .enumerate()
+            .map(|(at, choice)| format!(" {} {choice}", if at == on { '❯' } else { ' ' }))
+            .collect();
+        lines(&format!(" 2 new MCP servers found in this project\n Select any you wish to enable.\n\n MCP servers may execute code or access system resources. All tool calls require approval.\n\n{}\n\n Space to select · Esc to reject all", drawn.join("\n")))
+    }
+
+    #[test]
+    fn the_dialog_of_new_servers_is_answered_down_to_enable_selected_then_enter() {
+        assert_eq!(
+            toward_trust(&servers(0, true)),
+            Some(Question::Servers(Some(DOWN)))
+        );
+        assert_eq!(
+            toward_trust(&servers(1, true)),
+            Some(Question::Servers(Some(DOWN)))
+        );
+        assert_eq!(
+            toward_trust(&servers(2, true)),
+            Some(Question::Servers(Some(ENTER)))
+        );
+        assert!(!shows_prompt(&servers(0, true)));
+        // A box unticked is the human's choice: asked, no key.
+        for on in 0..3 {
+            assert_eq!(
+                toward_trust(&servers(on, false)),
+                Some(Question::Servers(None)),
+                "{on}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_conversation_that_quotes_the_dialog_of_a_new_server_asks_nothing() {
+        // Its choices listed above the input box, the prompt's line below it.
+        let listed = lines(" ⏺ The dialog offers:\n   - Use this MCP server\n   - Use this and all future MCP servers in this project\n   - Continue without using this MCP server\n ❯ \n   ⏵⏵ bypass permissions on (shift+tab to cycle)");
+        assert_eq!(toward_trust(&listed), None);
+        assert!(shows_prompt(&listed));
+        // Its very words typed in the input box.
+        let typed = lines("   - Use this MCP server\n   - Continue without using this MCP server\n ❯ Use this MCP server\n   ⏵⏵ bypass permissions on (shift+tab to cycle)");
+        assert_eq!(toward_trust(&typed), None);
+        assert!(shows_prompt(&typed));
+        // A past user turn's `❯` above more of the conversation, no hint below it.
+        let past = lines("   - Use this MCP server\n   - Continue without using this MCP server\n ❯ which one?\n ⏺ The first.");
+        assert_eq!(toward_trust(&past), None);
+        // Named among other words, or one choice alone, it is no question.
+        let prose = lines(" ⏺ Pick Use this MCP server or Continue without using this MCP server.");
+        assert_eq!(toward_trust(&prose), None);
+        assert_eq!(toward_trust(&lines(" ❯ Use this MCP server")), None);
+        // The two servers' dialog quoted above the input box.
+        let quoted = lines("   - Enable selected\n   Space to select · Esc to reject all\n ❯ \n   ⏵⏵ bypass permissions on (shift+tab to cycle)");
+        assert_eq!(toward_trust(&quoted), None);
+        assert!(shows_prompt(&quoted));
     }
 
     #[test]

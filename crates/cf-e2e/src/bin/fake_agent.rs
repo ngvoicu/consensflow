@@ -241,6 +241,8 @@ fn run(
     if let trust::Answer::Exit = answer {
         leave(&status_file, 0);
     }
+    // Then, in a trusted folder, the dialog of a server of its `.mcp.json`.
+    trust::ask_server(Path::new(&config), asking, &mut keys)?;
     if asking {
         if let Some(said) = own_var("CF_TEST_SAYS_FIRST") {
             say(&format!("{said}\n")).map_err(|failed| failed.to_string())?;

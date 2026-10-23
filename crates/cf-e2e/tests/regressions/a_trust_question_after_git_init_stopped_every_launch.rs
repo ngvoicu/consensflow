@@ -1681,3 +1681,306 @@ fn a_chief_whose_conversation_quotes_the_grants_dialog_cursor_and_all_is_told_of
     // stayed 5 s, as the first question is, so a quote of it before the prompt is not.
     chief_quoting_before_its_prompt(&[("CF_TEST_QUOTES_THE_GRANTS", "1")])
 }
+
+// Claude Code's dialog of a server of the project's `.mcp.json` it was never told to use
+// (T-354's probe; T-383's, Claude Code 2.1.309): "New MCP server found in this project",
+// asked once the folder is trusted, its `❯` on "Continue without using this MCP server".
+// ConsensFlow read it as no question: a worker sat on it till its launch failed, and what
+// went into a chief's window answered it. The owner's decision of 2026-10-23: in the
+// project's own folder ConsensFlow uses the server; elsewhere the window is held, the
+// human told, and nothing pressed.
+
+/// The key toward using the server, from the choice the dialog opens on.
+const UP: &[u8] = b"\x1b[A";
+
+/// The rig, the windows of the participant `who` asking of the server `probe` of their
+/// folder's `.mcp.json`, once past any question about the folder.
+fn asking_of_a_server(who: &str) -> Config {
+    config()
+        .var("CF_TEST_TRUST", who)
+        .var("CF_TEST_TRUST_SERVER", "probe")
+        .var("CONSENSFLOW_LAUNCH_TIMEOUT_MS", "8000")
+}
+
+/// The notes to the human that a window asks of a new server.
+fn servers_notes(project: &Project) -> cf_e2e::Result<Vec<String>> {
+    Ok(project
+        .inbox("human")?
+        .iter()
+        .filter_map(|message| message["body"].as_str())
+        .filter(|body| body.contains("'s window asks whether to use a new MCP server"))
+        .map(str::to_owned)
+        .collect())
+}
+
+/// The notes to the human that ConsensFlow used a window's new server.
+fn used_notes(project: &Project) -> cf_e2e::Result<Vec<String>> {
+    Ok(project
+        .inbox("human")?
+        .iter()
+        .filter_map(|message| message["body"].as_str())
+        .filter(|body| body.contains("ConsensFlow said to use it"))
+        .map(str::to_owned)
+        .collect())
+}
+
+/// What the local settings of `folder` say of the project's servers.
+fn local_settings(folder: &Path) -> Value {
+    files::read_string(&folder.join(".claude").join("settings.local.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+/// The stand-in told to trust `folder`, as a yes the human gave before.
+fn trusted_before(rig: &Rig, folder: &Path) -> Outcome {
+    let config = rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default();
+    std::fs::write(
+        Path::new(config).join("trusted-folders"),
+        format!("{}\n", real(folder)),
+    )?;
+    Ok(())
+}
+
+/// A worker given one task that asks of the server, in the project's folder `folder`.
+fn a_worker_asking_of_a_server<'a>(
+    rig: &'a Rig,
+    folder: &Path,
+) -> Result<(Project<'a>, String), Box<dyn std::error::Error>> {
+    let project = Project::open(rig, "chief", json!({ "directory": folder }))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    rig.tell(
+        project.id(),
+        &format!("DISPATCH --tier {tier} Reply with exactly: SERVER_DONE"),
+    )?;
+    Ok((project, tier))
+}
+
+#[test]
+fn a_worker_asked_of_a_new_server_of_the_projects_mcp_json_has_it_used_once_and_does_its_tasks(
+) -> Outcome {
+    // A plain folder, trusted: the dialog comes alone, and the folder is the project's.
+    let rig = Rig::start(asking_of_a_server("worker"))?;
+    let (project, tier) = a_worker_asking_of_a_server(&rig, rig.workspace())?;
+    rig.wait_for("T-1 to be done", secs(60), || {
+        let state = project.task(1)?["state"].clone();
+        assert_ne!(state, "failed", "T-1 failed at the dialog");
+        Ok(state == "done")
+    })?;
+    // Up twice to "Use this MCP server", and Enter: the server alone, not every future one.
+    assert_eq!(keys_given(&rig), ["up", "up", "enter"], "not one use");
+    let settings = local_settings(rig.workspace());
+    assert_eq!(
+        settings["enabledMcpjsonServers"],
+        json!(["probe"]),
+        "{settings}"
+    );
+    assert_eq!(
+        settings["enableAllProjectMcpServers"],
+        Value::Null,
+        "{settings}"
+    );
+    let used = used_notes(&project)?;
+    assert_eq!(used.len(), 1, "the human is told once: {used:?}");
+    assert!(
+        used[0].contains(&real(rig.workspace())) && used[0].contains("settings.local.json"),
+        "{used:?}"
+    );
+    assert_eq!(
+        servers_notes(&project)?,
+        Vec::<String>::new(),
+        "told as held"
+    );
+    // The next window does not ask again, and nobody is told again.
+    a_task(&rig, &project, &tier, 2, "AGAIN_DONE")?;
+    assert_eq!(keys_given(&rig), ["up", "up", "enter"]);
+    assert_eq!(used_notes(&project)?.len(), 1);
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_worker_asked_to_trust_the_projects_new_repository_then_of_its_server_has_both_answered_each_with_its_own_keys(
+) -> Outcome {
+    // T-383's probe: in a new repository Claude Code asks of the folder first, then of
+    // the server. Each window drops the first key of each, so the two take seven keys
+    // between them, more than one question is given.
+    let rig = Rig::start(
+        asking_of_a_server("worker")
+            .var("CF_TEST_TRUST_DROPS_FIRST_KEY", "1")
+            .var("CF_TEST_TRUST_SERVER_DROPS_FIRST_KEY", "1"),
+    )?;
+    git_init(rig.workspace())?;
+    let (project, _) = a_worker_asking_of_a_server(&rig, rig.workspace())?;
+    rig.wait_for("T-1 to be done", secs(90), || {
+        let state = project.task(1)?["state"].clone();
+        assert_ne!(state, "failed", "T-1 failed at a question");
+        Ok(state == "done")
+    })?;
+    assert_eq!(
+        keys_given(&rig),
+        ["dropped", "down", "enter", "dropped", "up", "up", "enter"]
+    );
+    assert_eq!(
+        local_settings(rig.workspace())["enabledMcpjsonServers"],
+        json!(["probe"])
+    );
+    assert_eq!(
+        answered_notes(&project)?.len(),
+        1,
+        "the folder's yes told once"
+    );
+    assert_eq!(used_notes(&project)?.len(), 1, "the server's use told once");
+    assert_eq!(
+        servers_notes(&project)?,
+        Vec::<String>::new(),
+        "told as held"
+    );
+    rig.close()?;
+    Ok(())
+}
+
+/// A worker asking of the server in the project's folder `folder`, which ConsensFlow
+/// must not answer: held past its launch's time, nothing pressed, the human told once in
+/// words that hold `why`; then the human's yes, and the task done.
+fn a_worker_held_at_the_server(rig: &Rig, folder: &Path, why: &str) -> Outcome {
+    let (project, _) = a_worker_asking_of_a_server(rig, folder)?;
+    rig.wait_for("the human to be told of the server", secs(60), || {
+        Ok(servers_notes(&project)?.len() == 1)
+    })?;
+    // Held past the 8 s its launch has, and nothing pressed.
+    sleep(Duration::from_secs(10));
+    assert_eq!(
+        keys_given(rig),
+        Vec::<String>::new(),
+        "a key went into the dialog"
+    );
+    let lane = project.lane("worker")?;
+    assert_eq!(
+        lane["activity"]["reason"], "the window asks whether to trust its folder",
+        "{lane}"
+    );
+    assert_ne!(
+        project.task(1)?["state"],
+        "failed",
+        "T-1 failed while it asked"
+    );
+    let notes = servers_notes(&project)?;
+    assert_eq!(notes.len(), 1, "the human is told once: {notes:?}");
+    let window = workers(rig, &project)[0].clone();
+    assert!(notes[0].contains(&handle_of(&window)), "{notes:?}");
+    assert!(
+        notes[0].contains(why),
+        "the note does not say why: {notes:?}"
+    );
+    assert_eq!(
+        used_notes(&project)?,
+        Vec::<String>::new(),
+        "ConsensFlow said it used it"
+    );
+    // The human's yes, by hand, and the task goes on.
+    human_presses(rig, &window, &[UP, UP, ENTER])?;
+    rig.wait_for("T-1 to be done", secs(60), || {
+        let state = project.task(1)?["state"].clone();
+        assert_ne!(state, "failed", "T-1 failed after the human's yes");
+        Ok(state == "done")
+    })?;
+    assert_eq!(keys_given(rig), ["up", "up", "enter"]);
+    assert_eq!(
+        local_settings(folder)["enabledMcpjsonServers"],
+        json!(["probe"])
+    );
+    Ok(())
+}
+
+#[test]
+fn a_worker_asked_of_a_new_server_in_a_project_inside_a_repository_outside_it_is_held_and_the_human_told(
+) -> Outcome {
+    // The repository's root, outside the project's folder, was trusted before: the dialog
+    // comes alone, and the folder a yes to the first question records is not the project's.
+    let rig = Rig::start(asking_of_a_server("worker"))?;
+    let folder = below_a_repository(&rig)?;
+    trusted_before(&rig, rig.workspace())?;
+    a_worker_held_at_the_server(
+        &rig,
+        &folder,
+        &format!("{}, which is outside it", real(rig.workspace())),
+    )?;
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_worker_asked_of_a_new_server_where_a_folder_above_the_project_has_servers_is_held_and_the_human_told(
+) -> Outcome {
+    // A plain folder whose parent has a `.mcp.json` of its own, whose servers Claude Code
+    // asks of in the same dialog.
+    let rig = Rig::start(asking_of_a_server("worker"))?;
+    let folder = rig.workspace().join("app");
+    std::fs::create_dir(&folder)?;
+    std::fs::write(rig.workspace().join(".mcp.json"), r#"{"mcpServers":{}}"#)?;
+    a_worker_held_at_the_server(
+        &rig,
+        &folder,
+        &format!("{}, above the project's folder", real(rig.workspace())),
+    )?;
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_chief_asked_of_a_new_server_it_may_not_use_is_handed_nothing_till_the_human_answers() -> Outcome
+{
+    // A chief at the dialog read as no question was at rest: what came for it was pasted
+    // into the dialog, and its Enter chose the choice its cursor was on.
+    let rig = Rig::start(asking_of_a_server("chief").var("CF_TEST_TRUST_IDLE_WHILE_ASKING", "1"))?;
+    let folder = below_a_repository(&rig)?;
+    trusted_before(&rig, rig.workspace())?;
+    let project = Project::open(
+        &rig,
+        "chief",
+        json!({ "directory": folder, "staff": [{ "agent": "worker", "roles": ["worker"] }] }),
+    )?;
+    rig.wait_for("the human to be told of the server", secs(60), || {
+        Ok(servers_notes(&project)?.len() == 1)
+    })?;
+    assert!(servers_notes(&project)?[0].contains("@chief"));
+    let tier = project.tiers()?.get("worker").cloned().unwrap_or_default();
+    let window = chiefs(&rig, &project)[0].clone();
+    let added = rig.cf_in_window(
+        &window,
+        [
+            "task",
+            "add",
+            "--tier",
+            &tier,
+            "Reply with exactly: HELD_OK",
+        ],
+    )?;
+    assert_eq!(added.code, Some(0), "{added}");
+    rig.wait_for("T-1's result for the chief", secs(90), || {
+        Ok(result_for(&project, 1)?.is_some())
+    })?;
+    sleep(Duration::from_secs(6));
+    assert_ne!(
+        result_for(&project, 1)?.map(|result| result["state"].clone()),
+        Some(json!("delivered")),
+        "the result was handed to the chief while it asked"
+    );
+    assert_eq!(keys_given(&rig), Vec::<String>::new(), "a key went into it");
+    human_presses(&rig, &window, &[UP, UP, ENTER])?;
+    rig.wait_for("T-1's result to reach the chief", secs(60), || {
+        Ok(result_for(&project, 1)?.is_some_and(|result| result["state"] == "delivered"))
+    })?;
+    assert_eq!(keys_given(&rig), ["up", "up", "enter"]);
+    assert_eq!(
+        local_settings(&folder)["enabledMcpjsonServers"],
+        json!(["probe"])
+    );
+    rig.close()?;
+    Ok(())
+}

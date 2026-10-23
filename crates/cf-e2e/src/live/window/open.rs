@@ -157,6 +157,7 @@ pub struct Open<'a> {
     resume: Option<String>,
     member: Option<Member>,
     claude_alone: Option<Value>,
+    projects_servers: bool,
 }
 
 impl<'a> Open<'a> {
@@ -176,6 +177,7 @@ impl<'a> Open<'a> {
             resume: None,
             member: None,
             claude_alone: None,
+            projects_servers: false,
         }
     }
 
@@ -186,6 +188,19 @@ impl<'a> Open<'a> {
     #[must_use]
     pub fn claude_alone_with_hooks(mut self, hooks: Value) -> Self {
         self.claude_alone = Some(hooks);
+        self
+    }
+
+    /// A Claude window that reads the MCP servers of its folder's `.mcp.json` (and of
+    /// the folders above it), as the app's windows do: without `--strict-mcp-config`,
+    /// which shuts them out and every dialog about them with them. It still reaches no
+    /// server of the owner's (the run's config folder has none), no connector of their
+    /// account (`ENABLE_CLAUDEAI_MCP_SERVERS=false`) and no browser (`--no-chrome`).
+    #[must_use]
+    pub fn with_the_projects_servers(mut self) -> Self {
+        self.projects_servers = true;
+        self.env
+            .push(("ENABLE_CLAUDEAI_MCP_SERVERS".to_owned(), "false".to_owned()));
         self
     }
 
@@ -334,8 +349,14 @@ impl<'a> Open<'a> {
         } else {
             &[]
         };
+        let projects_servers = self.projects_servers;
+        let isolation = || {
+            ISOLATION
+                .iter()
+                .filter(move |word| !(projects_servers && **word == "--strict-mcp-config"))
+        };
         let trust = if claude && self.trusting {
-            let shut_out = ISOLATION.iter().chain(alone).map(|word| (*word).to_owned());
+            let shut_out = isolation().chain(alone).map(|word| (*word).to_owned());
             let argv: Vec<String> = std::iter::once(executable.clone())
                 .chain(shut_out)
                 .collect();
@@ -352,7 +373,7 @@ impl<'a> Open<'a> {
                 Some(hooks) => argv.extend(with_hooks(&settings, hooks)?),
                 None => argv.extend(settings),
             }
-            argv.extend(ISOLATION.iter().chain(alone).map(|word| (*word).to_owned()));
+            argv.extend(isolation().chain(alone).map(|word| (*word).to_owned()));
         }
         argv.extend(start.args);
         let argv = ask::program(&argv, &env).map_err(|failed| {

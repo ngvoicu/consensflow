@@ -31,7 +31,17 @@
 //! repository the window's folder is in, or the folder itself out of one, as Claude Code
 //! records it, T-381) is not among the folders it trusts, its no "No, continue without
 //! these permissions", on which Enter, or Escape, goes on into the window with nothing
-//! written down, and a yes writes that folder down.
+//! written down, and a yes writes that folder down. With `CF_TEST_TRUST_SERVER` set to
+//! a server's name, once past that question (or where it asks none), it asks as Claude
+//! Code 2.1.309 asks of a server of the project's `.mcp.json` it was never told to use
+//! (T-383), wherever the `.claude/settings.local.json` of the window's folder names it
+//! neither used nor left out: "New MCP server found in this project:" and its name, its
+//! `❯` on the last of three choices, Up and Down moving it round as Claude Code's does;
+//! Enter on "Use this MCP server" writes its name in `enabledMcpjsonServers` there (and
+//! on the second choice `enableAllProjectMcpServers` too), Enter on "Continue without
+//! using this MCP server", or Escape, writes it in `disabledMcpjsonServers`, and either
+//! goes on into the window. Its keys are written down as the question's are; with
+//! `CF_TEST_TRUST_SERVER_DROPS_FIRST_KEY` set it ignores the first key it is given.
 
 use std::fs;
 use std::io::{self, Write};
@@ -187,6 +197,124 @@ fn draw(folder: &Path, yes: bool, grants: bool) -> io::Result<()> {
         folder.display()
     )?;
     out.flush()
+}
+
+/// The choices of the dialog of a new server, on the last of which it opens.
+const SERVER_CHOICES: [&str; 3] = [
+    "Use this MCP server",
+    "Use this and all future MCP servers in this project",
+    "Continue without using this MCP server",
+];
+
+/// The local settings of the window's `folder`, where Claude Code keeps what it was
+/// told of the project's servers.
+fn local_settings(folder: &Path) -> PathBuf {
+    folder.join(".claude").join("settings.local.json")
+}
+
+/// The dialog of the new server `name`, its cursor on the choice `on`.
+fn draw_server(name: &str, on: usize) -> io::Result<()> {
+    let choices: Vec<String> = SERVER_CHOICES
+        .iter()
+        .enumerate()
+        .map(|(at, choice)| format!(" {} {choice}", if at == on { '❯' } else { ' ' }))
+        .collect();
+    let mut out = io::stdout().lock();
+    write!(
+        out,
+        "\u{1b}[2J\u{1b}[H New MCP server found in this project: {name}\r\n\r\n MCP servers may execute code or access system resources. All tool calls require approval.\r\n\r\n{}\r\n\r\n Enter to confirm · Esc to cancel\r\n",
+        choices.join("\r\n")
+    )?;
+    out.flush()
+}
+
+/// Asks of the server `CF_TEST_TRUST_SERVER` names, where the window `wanted` opened
+/// in a folder whose local settings name it neither used nor left out, and reads the
+/// answer from its terminal: whatever it is, the window goes on.
+pub fn ask_server(
+    config: &Path,
+    wanted: bool,
+    terminal: &mut terminal::Keys,
+) -> Result<(), String> {
+    let failed = |cause: io::Error| cause.to_string();
+    let Some(name) = own_var("CF_TEST_TRUST_SERVER").filter(|_| wanted) else {
+        return Ok(());
+    };
+    let folder = std::env::current_dir().map_err(failed)?;
+    let file = local_settings(&folder);
+    let mut settings: serde_json::Value = fs::read_to_string(&file)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let named = |list: &str| {
+        settings[list]
+            .as_array()
+            .is_some_and(|names| names.iter().any(|named| named == name.as_str()))
+    };
+    if named("enabledMcpjsonServers")
+        || named("disabledMcpjsonServers")
+        || settings["enableAllProjectMcpServers"] == true
+    {
+        return Ok(());
+    }
+    say("fake agent: reading the project's servers\r\n").map_err(failed)?;
+    sleep(FIRST_FRAME);
+    let mut on = 2;
+    draw_server(&name, on).map_err(failed)?;
+    let mut drops = own_var("CF_TEST_TRUST_SERVER_DROPS_FIRST_KEY").is_some();
+    let chosen = 'asked: loop {
+        let Some(given) = terminal.chunk() else {
+            return Ok(());
+        };
+        let given = String::from_utf8_lossy(&given)
+            .replace("\u{1b}[200~", "")
+            .replace("\u{1b}[201~", "");
+        if drops && !given.is_empty() {
+            drops = false;
+            append(config, KEYS, "dropped").map_err(failed)?;
+            continue;
+        }
+        let mut moved = false;
+        for key in keys_in(&given) {
+            match key {
+                Key::Down => {
+                    append(config, KEYS, "down").map_err(failed)?;
+                    on = (on + 1) % SERVER_CHOICES.len();
+                    moved = true;
+                }
+                Key::Up => {
+                    append(config, KEYS, "up").map_err(failed)?;
+                    on = (on + SERVER_CHOICES.len() - 1) % SERVER_CHOICES.len();
+                    moved = true;
+                }
+                Key::Enter => {
+                    append(config, KEYS, "enter").map_err(failed)?;
+                    break 'asked on;
+                }
+                Key::Escape => {
+                    append(config, KEYS, "escape").map_err(failed)?;
+                    break 'asked 2;
+                }
+            }
+        }
+        if moved {
+            draw_server(&name, on).map_err(failed)?;
+        }
+    };
+    let list = if chosen == 2 {
+        "disabledMcpjsonServers"
+    } else {
+        "enabledMcpjsonServers"
+    };
+    let mut names = settings[list].as_array().cloned().unwrap_or_default();
+    names.push(serde_json::json!(name));
+    settings[list] = serde_json::json!(names);
+    if chosen == 1 {
+        settings["enableAllProjectMcpServers"] = serde_json::json!(true);
+    }
+    fs::create_dir_all(file.parent().unwrap_or(&folder)).map_err(failed)?;
+    fs::write(&file, settings.to_string()).map_err(failed)?;
+    say("\u{1b}[2J\u{1b}[H").map_err(failed)
 }
 
 /// Asks the question where the window `wanted` (it is the participant `CF_TEST_TRUST`

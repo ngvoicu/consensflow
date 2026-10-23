@@ -17,6 +17,7 @@ pub(crate) use crate::contract::Trusts;
 
 /// The keys a person answers a harness's question with.
 pub(crate) const DOWN: &[u8] = b"\x1b[B";
+pub(crate) const UP: &[u8] = b"\x1b[A";
 pub(crate) const ENTER: &[u8] = b"\r";
 
 /// What a yes to the question trusts, for a window opened in the project's folder
@@ -31,6 +32,9 @@ pub(crate) const ENTER: &[u8] = b"\r";
 /// ([`root_of`]). Out of a repository, it asks only where no folder above is
 /// trusted, and a yes trusts the folder itself. The yes is the project's where that
 /// folder is the project's folder or one below it, both as the system names them.
+/// Claude Code 2.1.309 reads the `.mcp.json` of the window's folder and of every
+/// folder above it, up to the root, as the project's servers, and asks of them in
+/// one dialog (T-383): the nearest folder above the project's that has one is named.
 pub(crate) fn trusts(directory: &str) -> Trusts {
     let project = real_path(directory).unwrap_or_else(|_| directory.to_owned());
     let folder = Path::new(&project)
@@ -38,7 +42,16 @@ pub(crate) fn trusts(directory: &str) -> Trusts {
         .find_map(root_of)
         .map_or_else(|| project.clone(), |root| plain(&root));
     let inside = Path::new(&folder).starts_with(&project);
-    Trusts { folder, inside }
+    let servers_above = Path::new(&project)
+        .ancestors()
+        .skip(1)
+        .find(|above| above.join(".mcp.json").is_file())
+        .map(|above| above.to_string_lossy().into_owned());
+    Trusts {
+        folder,
+        inside,
+        servers_above,
+    }
 }
 
 /// The root of the repository whose `.git` is in `folder`, where it has one: the
@@ -134,6 +147,7 @@ mod tests {
         let trusted = |folder: &str, inside: bool| Trusts {
             folder: folder.to_owned(),
             inside,
+            servers_above: None,
         };
         assert_eq!(trusts(&deep), trusted(&repository, false));
         assert_eq!(trusts(&repository), trusted(&repository, true));
@@ -161,7 +175,8 @@ mod tests {
                 trusts(folder),
                 Trusts {
                     folder: main.clone(),
-                    inside: false
+                    inside: false,
+                    servers_above: None,
                 },
                 "{folder}"
             );
@@ -179,7 +194,8 @@ mod tests {
             trusts(&sub),
             Trusts {
                 folder: sub.clone(),
-                inside: true
+                inside: true,
+                servers_above: None,
             }
         );
     }
@@ -206,9 +222,29 @@ mod tests {
             trusts(&through),
             Trusts {
                 folder: repository,
-                inside: false
+                inside: false,
+                servers_above: None,
             }
         );
+    }
+
+    #[test]
+    fn the_nearest_folder_above_the_project_whose_mcp_json_claude_reads_is_named() {
+        let home = tempfile::tempdir().unwrap();
+        let project = made(home.path(), "a/b/project");
+        fs::write(Path::new(&project).join(".mcp.json"), "{}").unwrap();
+        // The project's own file is the project's.
+        assert_eq!(trusts(&project).servers_above, None);
+        let a = made(home.path(), "a");
+        fs::write(Path::new(&a).join(".mcp.json"), "{}").unwrap();
+        assert_eq!(trusts(&project).servers_above, Some(a.clone()));
+        let b = made(home.path(), "a/b");
+        fs::write(Path::new(&b).join(".mcp.json"), "{}").unwrap();
+        assert_eq!(trusts(&project).servers_above, Some(b));
+        // A folder called so is no file of servers.
+        let c = made(home.path(), "c/project");
+        made(home.path(), "c/.mcp.json");
+        assert_eq!(trusts(&c).servers_above, None);
     }
 
     #[test]

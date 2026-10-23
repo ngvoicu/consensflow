@@ -30,6 +30,20 @@
 //!   elsewhere (a folder of a repository made after the folder was answered, whose yes
 //!   would trust the repository) the engine must press nothing, and the window must
 //!   still ask after.
+//! - Claude Code, once a folder is trusted, asks of a server of its `.mcp.json` it was
+//!   never told to use in a dialog of its own (2.1.309, T-383): "New MCP server found in
+//!   this project", its `❯` on "Continue without using this MCP server", Up moving it to
+//!   "Use this MCP server", which keeps the server's name in the folder's
+//!   `.claude/settings.local.json` and starts it. It reads the `.mcp.json` of every
+//!   folder above as well. A window shut out of MCP servers (`--strict-mcp-config`)
+//!   never asks, nor one whose person accepted full-permission mode in their own
+//!   settings (the owner's do): the run's cases with a server open their windows
+//!   without that flag, their connectors shut out otherwise. The owner's decision of
+//!   2026-10-23 has ConsensFlow use the server in the project's own folder (a new
+//!   repository: the folder answered, then the server used, the window at its prompt;
+//!   with two servers, both used through "Enable selected"; opened again, nothing
+//!   asked); where a folder above the project's has a `.mcp.json` of its own the engine
+//!   must press nothing into the dialog, and the window must still ask after.
 //! - Codex opened alone (`codex --dangerously-bypass-approvals-and-sandbox`) asks in
 //!   the same folders before it starts a thread ("Trust this folder?", its `›` on
 //!   "Trust and continue", which Enter takes, a yes for the repository's root, which
@@ -144,6 +158,12 @@ const RESUMED: [(&str, usize, usize, usize); 2] = [
     ("a chief's", 2_400, 850, 140),
 ];
 
+/// The `.mcp.json` of the cases with a server: one that starts and ends at once; and of
+/// the case with two.
+const SERVER: &str = r#"{"mcpServers":{"probe":{"command":"/usr/bin/true"}}}"#;
+const SERVERS: &str =
+    r#"{"mcpServers":{"probe":{"command":"/usr/bin/true"},"probe2":{"command":"/usr/bin/true"}}}"#;
+
 /// A folder a window is opened in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Case {
@@ -171,10 +191,18 @@ enum Case {
     Worktree,
     /// A submodule of a repository nobody trusted (`git submodule add`).
     Submodule,
+    /// A new repository whose `.mcp.json` names a server.
+    Server,
+    /// The same repository, opened again once its server is used.
+    ServerAgain,
+    /// A new repository whose `.mcp.json` names two servers.
+    Servers,
+    /// A plain folder below one whose `.mcp.json` names a server.
+    ServerAbove,
 }
 
 impl Case {
-    const ALL: [Case; 11] = [
+    const ALL: [Case; 15] = [
         Case::Fresh,
         Case::Granted,
         Case::GrantedInRepository,
@@ -186,6 +214,10 @@ impl Case {
         Case::Untrusted,
         Case::Worktree,
         Case::Submodule,
+        Case::Server,
+        Case::ServerAgain,
+        Case::Servers,
+        Case::ServerAbove,
     ];
 
     const fn name(self) -> &'static str {
@@ -201,6 +233,10 @@ impl Case {
             Case::Untrusted => "untrusted's folder",
             Case::Worktree => "linked worktree",
             Case::Submodule => "submodule",
+            Case::Server => "repository with a server",
+            Case::ServerAgain => "repository with a server again",
+            Case::Servers => "repository with two servers",
+            Case::ServerAbove => "plain below a folder with a server",
         }
     }
 
@@ -221,6 +257,10 @@ impl Case {
             Case::Worktree => ("worktree", None),
             // Its repository is made with it inside another (`submodule`).
             Case::Submodule => ("superproject/sub", None),
+            Case::Server | Case::ServerAgain => ("server", Some("server")),
+            Case::Servers => ("servers", Some("servers")),
+            // Its server is the folder above's (`look`).
+            Case::ServerAbove => ("server-above/app", None),
         }
     }
 }
@@ -240,7 +280,26 @@ fn must_ask(harness: Harness, case: Case) -> bool {
                     | Case::Untrusted
                     | Case::Worktree
                     | Case::Submodule
+                    | Case::Server
+                    | Case::Servers
+                    | Case::ServerAbove
             )
+}
+
+/// Whether `harness` must ask of a server of a `.mcp.json` in `case`, once the folder is
+/// answered: Claude Code where the folder or one above it names one.
+fn must_serve(harness: Harness, case: Case) -> bool {
+    harness == Harness::Claude && matches!(case, Case::Server | Case::Servers | Case::ServerAbove)
+}
+
+/// The servers a case's folder, or the folder above it, names: what a window of it reads
+/// once it is opened with the project's servers.
+fn servers_of(case: Case) -> Option<&'static str> {
+    match case {
+        Case::Server | Case::ServerAgain | Case::ServerAbove => Some(SERVER),
+        Case::Servers => Some(SERVERS),
+        _ => None,
+    }
 }
 
 /// Whether `harness` must ask in `case` of what its folder's settings grant: Claude
@@ -305,6 +364,7 @@ fn engine_key(harness: Harness, screen: &[String]) -> Result<Option<Vec<u8>>> {
     Ok(match read["key"].as_str() {
         Some("enter") => Some(b"\r".to_vec()),
         Some("down") => Some(b"\x1b[B".to_vec()),
+        Some("up") => Some(b"\x1b[A".to_vec()),
         _ => None,
     })
 }
@@ -333,8 +393,9 @@ fn engine_reads_prompt(harness: Harness, screen: &[String]) -> Result<bool> {
 }
 
 /// The folder the engine says a yes trusts, for a window opened in the project's
-/// folder `directory`, and whether it is the project's.
-fn predicted(directory: &Path) -> Result<(String, bool)> {
+/// folder `directory`, whether it is the project's, and whether no folder above the
+/// project's has servers of its own: whether the engine uses a server of the project's.
+fn predicted(directory: &Path) -> Result<(String, bool, bool)> {
     let read = ask::question(&json!({
         "op": "trust", "kind": Harness::Claude.kind(), "screen": [], "directory": directory,
     }))?;
@@ -342,7 +403,35 @@ fn predicted(directory: &Path) -> Result<(String, bool)> {
     Ok((
         trusts["folder"].as_str().unwrap_or_default().to_owned(),
         trusts["inside"] == true,
+        trusts["servers_above"].is_null(),
     ))
+}
+
+/// The servers the local settings of `directory` say Claude Code was told to use.
+fn servers_used(directory: &Path) -> serde_json::Value {
+    fs::read_to_string(directory.join(".claude").join("settings.local.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .map(|settings| settings["enabledMcpjsonServers"].clone())
+        .unwrap_or_default()
+}
+
+/// The window's screen once it shows a question or its prompt, as the engine reads them,
+/// or after `DRAWS`: Claude Code draws the dialog of a new server a moment after the
+/// question about the folder is answered.
+fn settled(rig: &Rig, window: &Window, harness: Harness) -> Result<Vec<String>> {
+    let until = Instant::now() + DRAWS;
+    loop {
+        let screen = screen_of(rig, window);
+        if Instant::now() > until
+            || window.closed()
+            || engine_asks(harness, &screen)?
+            || engine_reads_prompt(harness, &screen)?
+        {
+            return Ok(screen);
+        }
+        sleep(Duration::from_millis(500));
+    }
 }
 
 /// Where Claude Code keeps its own record of folders: `.claude.json` in the config folder
@@ -496,7 +585,20 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     if must_grant(harness, case) {
         pre_approve(&directory)?;
     }
-    if let (Some(repository), false) = (repository, case == Case::Again) {
+    if let (Some(servers), true) = (servers_of(case), must_serve(harness, case)) {
+        let names = if case == Case::ServerAbove {
+            live_folder_in(&home, &format!("{base}/server-above"))?
+        } else {
+            directory.clone()
+        };
+        fs::write(names.join(".mcp.json"), servers).map_err(|source| Error::File {
+            action: "write",
+            path: names.join(".mcp.json"),
+            source,
+        })?;
+    }
+    if let (Some(repository), false) = (repository, matches!(case, Case::Again | Case::ServerAgain))
+    {
         let at = live_folder_in(&home, &format!("{base}/{repository}"))?;
         let made = Run::new(Path::new("git"))
             .args(["init", "-q"])
@@ -513,9 +615,13 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
         .into_owned();
     let record = claude_record(rig, install);
     let trusted_before = claude_trusted(&record, &under);
-    let window = Open::new(rig, install, &name, &id)
-        .without_trust()
-        .open(log)?;
+    let opening = Open::new(rig, install, &name, &id).without_trust();
+    let window = if harness == Harness::Claude && servers_of(case).is_some() {
+        opening.with_the_projects_servers()
+    } else {
+        opening
+    }
+    .open(log)?;
     let drew = window.still(DRAWS);
     let first = screen_of(rig, &window);
     let mut lines = vec![format!("drew: {drew}")];
@@ -524,18 +630,24 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     // The question of the folder's grants, which the engine answers only where the
     // folder its yes records is the project's.
     let grants = asked && engine_read(harness, &first)?["grants"] == true;
-    let (folder, inside) = predicted(&directory)?;
+    let (folder, inside, servers_alone) = predicted(&directory)?;
     let mut keys = 0;
+    // Whether the dialog of a new server was read, and the keys pressed into it.
+    let mut served = false;
+    let mut server_keys = 0;
     let mut screen = first.clone();
     while let Some(key) = engine_key(harness, &screen)? {
-        if keys == MOST_KEYS || grants && !inside {
+        let serving = engine_read(harness, &screen)?["servers"] == true;
+        served |= serving;
+        if keys == MOST_KEYS || grants && !inside || serving && !(inside && servers_alone) {
             break;
         }
         window.press(&key)?;
         keys += 1;
+        server_keys += usize::from(serving);
         sleep(Duration::from_millis(300));
         window.still(DRAWS);
-        screen = screen_of(rig, &window);
+        screen = settled(rig, &window, harness)?;
     }
     let answered = !engine_asks(harness, &screen)?;
     let unread = speaks_of_trust(&first) && !asked;
@@ -543,6 +655,14 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     if grants {
         lines.push(format!(
             "the question of the folder's grants, a yes trusting {folder} (the project's: {inside}); {keys} keys; still asks after: {}",
+            !answered
+        ));
+    }
+    let used = servers_used(&directory);
+    if must_serve(harness, case) {
+        lines.push(format!(
+            "the dialog of a new server read: {served}; the project's alone: {}; {server_keys} keys into it; still asks after: {}; the folder's local settings use {used}",
+            inside && servers_alone,
             !answered
         ));
     }
@@ -584,7 +704,26 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     let held = match (must_grant(harness, case), inside) {
         (true, true) => grants && keys > 0 && at_prompt,
         (true, false) => grants && keys == 0 && !answered,
-        (false, _) => !grants && asked == must_ask(harness, case) && at_prompt,
+        // The dialog of a new server, once the folder is answered: the server used where
+        // it is the project's alone, the window then at its prompt; elsewhere nothing
+        // pressed into it, and still asked.
+        (false, _) if must_serve(harness, case) => {
+            asked
+                && served
+                && if inside && servers_alone {
+                    server_keys > 0
+                        && at_prompt
+                        && used
+                            == if case == Case::Servers {
+                                json!(["probe", "probe2"])
+                            } else {
+                                json!(["probe"])
+                            }
+                } else {
+                    server_keys == 0 && !answered && used.is_null()
+                }
+        }
+        (false, _) => !grants && !served && asked == must_ask(harness, case) && at_prompt,
     };
     Ok(Seen {
         asked,
@@ -615,7 +754,9 @@ fn windows(install: &Installed, stamp: &str, log: &Log) -> Result<Vec<Check>> {
             harness.name(),
             case.name(),
             seen.held,
-            if must_grant(harness, case) && seen.keys == 0 {
+            if must_serve(harness, case) {
+                format!("asked; then of a new server; {} keys in all", seen.keys)
+            } else if must_grant(harness, case) && seen.keys == 0 {
                 "asked of its grants; held, no key pressed".to_owned()
             } else if must_grant(harness, case) {
                 format!("asked of its grants; answered with {} keys", seen.keys)
@@ -1090,7 +1231,10 @@ mod tests {
                 "repository below",
                 "untrusted's folder",
                 "linked worktree",
-                "submodule"
+                "submodule",
+                "repository with a server",
+                "repository with two servers",
+                "plain below a folder with a server"
             ]
         );
         for case in Case::ALL {
@@ -1140,6 +1284,7 @@ mod tests {
             2
         );
         assert_eq!(Case::Again.folder().1, Some("repository"));
+        assert_eq!(Case::ServerAgain.folder(), Case::Server.folder());
         assert_eq!(Case::Below.folder().1, None);
     }
 }

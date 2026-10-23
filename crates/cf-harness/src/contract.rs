@@ -229,11 +229,15 @@ pub struct Prepared {
 
 /// What a yes to a harness's question about trusting a window's folder trusts: the
 /// folder, as the system names it, and whether it is the project's folder or one
-/// below it, which ConsensFlow answers for; one outside it is the human's.
+/// below it, which ConsensFlow answers for; one outside it is the human's. And the
+/// nearest folder above the project's whose `.mcp.json` Claude Code reads as well,
+/// where there is one: its dialog of a new server asks of that file's servers as of
+/// the project's own, and they are the human's ([`Question::Servers`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Trusts {
     pub folder: String,
     pub inside: bool,
+    pub servers_above: Option<String>,
 }
 
 /// What a window's last lines show of its harness's question about trusting its
@@ -254,6 +258,13 @@ pub enum Question {
     /// apply without asking, and records the folder [`Trusts`] names as trusted: it is
     /// answered as the first question is, only where that folder is the project's.
     Grants(Option<&'static [u8]>),
+    /// Claude Code's dialog of a server of `.mcp.json` it was never told to use, asked
+    /// once the folder is trusted (2.1.309, T-383), and the key a person presses next
+    /// toward using it where its choice is placed. Using one starts its command and is
+    /// kept in the local settings of the window's folder; ConsensFlow approves it where
+    /// the folder [`Trusts`] names is the project's and no folder above the project's
+    /// has servers of its own (the owner's decision of 2026-10-23).
+    Servers(Option<&'static [u8]>),
 }
 
 /// A window open on its harness.

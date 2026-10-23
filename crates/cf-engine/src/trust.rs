@@ -38,7 +38,13 @@
 //! first is (the owner's decision of 2026-10-23): yes, where the folder its yes records
 //! is the project's folder or below it; elsewhere, or where its choice cannot be
 //! placed, nothing is pressed and the human is told of it in words of its own, once
-//! for the windows that ask it together. A launch that is to
+//! for the windows that ask it together. Claude Code's dialog of a server of the
+//! project's `.mcp.json` it was never told to use, asked once the folder is trusted
+//! ([`Question::Servers`]), is answered as the owner decided on 2026-10-23: the server
+//! is used, where the folder a yes to the first question records is the project's and
+//! no folder above the project's has a `.mcp.json` of its own (Claude Code asks of
+//! those servers in the same dialog); elsewhere, or where its choice cannot be placed,
+//! it is held and told of as the grants are. A launch that is to
 //! say its role first never meets the question: only a harness that keeps the
 //! instructions its conversation began with is told its role so, and that is Codex,
 //! which never asks as ConsensFlow opens it.
@@ -114,12 +120,26 @@ pub(crate) enum Trusting {
 /// member of a project opened in it) are spoken of once, and the folders the
 /// human said yes to in a window, which the project's other windows that ask of
 /// them are answered for. The question of a folder's grants is spoken of apart
-/// (`told_grants`), until the window it was told of is past it.
+/// (`told_grants`), until the window it was told of is past it; so is the dialog of
+/// new servers (`told_servers`): once that ConsensFlow used them, and, until the
+/// window it was told of is past it, that the human is to answer it.
 #[derive(Debug, Default)]
 pub(crate) struct TrustState {
     told: RefCell<HashSet<(i64, String, bool)>>,
     told_grants: RefCell<HashSet<(i64, String)>>,
+    told_servers: RefCell<HashSet<(i64, String, bool)>>,
     accepted: RefCell<HashSet<(i64, String)>>,
+}
+
+/// Which of its harness's questions a window asks: they come one after another in a
+/// window (the first question, then the dialog of new servers), each given its own
+/// keys and its own time before the human is told.
+fn dialog(question: Question) -> u8 {
+    match question {
+        Question::Toward(_) | Question::Unplaced => 0,
+        Question::Grants(_) => 1,
+        Question::Servers(_) => 2,
+    }
 }
 
 /// What one look at the window found.
@@ -185,7 +205,12 @@ impl Dispatcher {
         pane: &Pane,
         window: &Rc<dyn Window>,
     ) -> Result<(), EngineError> {
-        let Some(Trusts { folder, inside }) = window.trusts().cloned() else {
+        let Some(Trusts {
+            folder,
+            inside,
+            servers_above,
+        }) = window.trusts().cloned()
+        else {
             return Ok(());
         };
         let began = self.now();
@@ -193,7 +218,10 @@ impl Dispatcher {
         // again on its conversation holds it all from the start, and a look that could
         // not read it says nothing of growth.
         let mut opened_with: Option<usize> = None;
+        // The keys pressed in the watch, and into the question it asks now.
         let mut keys = 0;
+        let mut asked_keys = 0;
+        let mut asks_now = None;
         // The screen the last key was pressed on, and how many looks have found it
         // since: a key goes into a screen that moved since the last one, so a slow
         // redraw is never given a second, or into one that stayed as it was for
@@ -212,9 +240,11 @@ impl Dispatcher {
         // whose yes is carried to the project's other windows, the only ones a key of
         // ConsensFlow's can answer.
         let mut sure = false;
-        // Whether the human was told of the question of the folder's grants: once its
-        // window is past it, the next window that asks it is told of again.
+        // Whether the human was told of the question of the folder's grants, or of the
+        // dialog of new servers: once its window is past it, the next window that asks it
+        // is told of again.
         let mut grants = false;
+        let mut servers = false;
         let (at_prompt, cleared) = loop {
             // A window no longer the record's ends the watch as any other: what it was
             // told of is forgotten below, and nothing else is done for it.
@@ -235,6 +265,12 @@ impl Dispatcher {
                     record.window.borrow_mut().trust = Trusting::Asked;
                     gone = 0;
                     self.changed();
+                    // Another question than the last look's: its own keys, its own time.
+                    if asks_now.replace(dialog(question)) != Some(dialog(question)) {
+                        asked_keys = 0;
+                        asking = 0;
+                        pressed_on = None;
+                    }
                     // A folder the human said yes to in another window of the
                     // project is answered as they answered it.
                     let accepted = self
@@ -248,10 +284,17 @@ impl Dispatcher {
                     asking += 1;
                     sure |= matches!(question, Question::Toward(_));
                     let pressing = match question {
-                        Question::Toward(key) if (inside || accepted) && keys < MOST_KEYS => {
+                        Question::Toward(key) if (inside || accepted) && asked_keys < MOST_KEYS => {
                             Some(key)
                         }
-                        Question::Grants(Some(key)) if inside && keys < MOST_KEYS => Some(key),
+                        Question::Grants(Some(key)) if inside && asked_keys < MOST_KEYS => {
+                            Some(key)
+                        }
+                        Question::Servers(Some(key))
+                            if inside && servers_above.is_none() && asked_keys < MOST_KEYS =>
+                        {
+                            Some(key)
+                        }
                         _ => None,
                     };
                     // A window inside the project's folder whose conversation quotes the
@@ -259,7 +302,14 @@ impl Dispatcher {
                     // and given a key toward a yes, which goes into its input box,
                     // and the human is told ConsensFlow answered (as since round 4).
                     if let Some(key) = pressing {
-                        if inside {
+                        if matches!(question, Question::Servers(_)) {
+                            self.tell_servers_once(project, &folder, true, || {
+                                format!(
+                                    "@{}'s window asked whether to use a new MCP server that the project's .mcp.json names; ConsensFlow said to use it, as the project's folder is trusted by choosing it. Claude Code starts the server's command, and keeps the choice in {folder}/.claude/settings.local.json.",
+                                    participant.handle
+                                )
+                            })?;
+                        } else if inside {
                             self.tell_trust_once(project, &folder, true, || {
                                 if matches!(question, Question::Grants(_)) {
                                     format!(
@@ -283,8 +333,20 @@ impl Dispatcher {
                         };
                         if press && self.press_toward_trust(pane, key).await {
                             keys += 1;
+                            asked_keys += 1;
                             pressed_on = Some((lines, 0));
                         }
+                    } else if asking >= TELL_LOOKS && matches!(question, Question::Servers(_)) {
+                        // Its servers are not the project's alone, or its choice cannot be
+                        // placed: the human's.
+                        servers = true;
+                        self.tell_servers_held(
+                            project,
+                            &folder,
+                            inside,
+                            servers_above.as_deref(),
+                            participant,
+                        )?;
                     } else if asking >= TELL_LOOKS && matches!(question, Question::Grants(_)) {
                         // Its yes would record a folder outside the project's, or its
                         // choice cannot be placed: the human's.
@@ -394,6 +456,12 @@ impl Dispatcher {
         // is a window that went while it asked.
         if grants {
             self.forget_grants_told(project, &folder);
+        }
+        if servers {
+            self.trust
+                .told_servers
+                .borrow_mut()
+                .remove(&(project.id, folder.clone(), false));
         }
         if !self.shows(record, pane) {
             return Ok(());
@@ -508,6 +576,69 @@ impl Dispatcher {
             .told_grants
             .borrow_mut()
             .remove(&(project.id, folder.to_owned()));
+    }
+
+    /// A note to the human about the dialog of new servers that `participant`'s window
+    /// asks, which ConsensFlow does not answer: `folder`, which a yes to the first
+    /// question records, is outside the project's folder, or a folder above the
+    /// project's has servers of its own (`servers_above`), or, neither, its choice could
+    /// not be placed. The first time the project's windows ask it since the last that
+    /// did was past it.
+    fn tell_servers_held(
+        &self,
+        project: &ProjectView,
+        folder: &str,
+        inside: bool,
+        servers_above: Option<&str>,
+        participant: &ParticipantView,
+    ) -> Result<(), EngineError> {
+        let why = match (inside, servers_above) {
+            (false, _) => format!(
+                "The project's folder {} is in the repository {folder}, which is outside it, so ConsensFlow does not answer it.",
+                project.directory
+            ),
+            (true, Some(above)) => format!(
+                "{above}, above the project's folder, has a .mcp.json of its own, whose servers Claude Code asks of in the same dialog, so ConsensFlow does not answer it."
+            ),
+            (true, None) => "ConsensFlow could not answer it.".to_owned(),
+        };
+        self.tell_servers_once(project, folder, false, || {
+            format!(
+                "@{handle}'s window asks whether to use a new MCP server that its folder's .mcp.json, or a folder above it, names: a server it uses starts its command on this machine. {why} Answer it in that window: \"Use this MCP server\" uses it, \"Continue without using this MCP server\" goes on without it. What waits for @{handle} goes on by itself once you have.",
+                handle = participant.handle
+            )
+        })
+    }
+
+    /// A note to the human about the dialog of new servers that the project's windows
+    /// ask in `folder`: that ConsensFlow `answered` it, the first time; or that the human
+    /// is to, the first time since the last window it was told of was past it.
+    fn tell_servers_once(
+        &self,
+        project: &ProjectView,
+        folder: &str,
+        answered: bool,
+        body: impl FnOnce() -> String,
+    ) -> Result<(), EngineError> {
+        if !self
+            .trust
+            .told_servers
+            .borrow_mut()
+            .insert((project.id, folder.to_owned(), answered))
+        {
+            return Ok(());
+        }
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: body(),
+            },
+        )?;
+        self.changed();
+        Ok(())
     }
 
     /// A note to the human about `folder`, the first time the project's windows
