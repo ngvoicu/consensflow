@@ -20,6 +20,9 @@ its time is older than the last build), and the files were recorded again. It ha
 been given its tarball by the run (`<folder>.<id>.tgz`, which the tests name
 `0000abcd-12345678`; the lock holds the same name), a `finally` that removes it, and the
 line that says which tree it unpacked (`== tree …`), and the files were recorded again. The
+unpack has since run Windows' own tar by its path (`& $tar`, `System32\tar.exe`, and the run
+ends saying so where there is none), as a bare `tar.exe` gave Git's GNU tar on CI's PATH, and
+the files were recorded again. The
 JavaScript is gone, so a
 golden is no longer a proof that the script is as it was: it holds what the
 script is, so that an edit nobody meant to it shows.

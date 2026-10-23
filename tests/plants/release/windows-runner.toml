@@ -570,6 +570,9 @@ file = "tools/xtask/src/windows/script.rs"
 find = "    RUN,\n    RUNNING,\n"
 replace = "    \".windows-run.ps1.kept\",\n    RUNNING,\n"
 
+# Its padding (400 characters, about 1,070 encoded) takes the bootstrap past the margin of a thousand and
+# not past the limit, where the run would be refused before it sends anything (T-348: 6,300 of 8,000).
+
 [[plant]]
 name = "windows runner: the command line carries more than the bootstrap needs"
 meant = "the_longest_run_there_is_leaves_the_command_line_a_margin_of_a_thousand_and_more"
@@ -578,7 +581,7 @@ runs = ["xtask-lib-windows"]
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
 find = "$held = $false\n$lock = $null\n"
-replace = "$held = $false\n# xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n$lock = $null\n"
+replace = "$held = $false\n# xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n$lock = $null\n"
 
 # A stop ends the run's own process (T-263).
 
@@ -1120,3 +1123,60 @@ find = '''
 replace = '''
   if ($true) {
     $base'''
+
+# Windows' own tar, named by its path (T-348): a bare `tar.exe` is the first on the PATH, and CI's
+# Git Bash puts Git's usr\bin, with a GNU tar, before System32; GNU tar takes `C:\…` for a host and
+# ends 2 before anything is unpacked (CI run 39896583469: six cases of the lock). A machine without
+# it ends the run saying so.
+
+[[plant]]
+name = "windows runner: the tree is unpacked by the first tar on the PATH"
+meant = "the_tree_is_unpacked_by_windows_own_tar_named_by_its_path_and_never_by_the_first_tar_on_the_path"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "& $tar -xmzf $tarball -C $dir"
+replace = "tar.exe -xmzf $tarball -C $dir"
+
+[[plant]]
+name = "windows runner: the tree is unpacked by the first tar on the PATH (on the machine)"
+meant = "a_run_started_with_gits_programs_first_on_the_path_unpacks_the_tree_with_windows_own_tar"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "& $tar -xmzf $tarball -C $dir"
+replace = "tar.exe -xmzf $tarball -C $dir"
+
+[[plant]]
+name = "windows runner: the tar named is not the system's"
+meant = "the_tree_is_unpacked_by_windows_own_tar_named_by_its_path_and_never_by_the_first_tar_on_the_path"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "$tar = Join-Path $env:SystemRoot 'System32\\tar.exe'"
+replace = "$tar = Join-Path $env:SystemRoot 'tar.exe'"
+
+[[plant]]
+name = "windows runner: a machine without its own tar is not told from one with it"
+meant = "the_tree_is_unpacked_by_windows_own_tar_named_by_its_path_and_never_by_the_first_tar_on_the_path"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {"
+replace = "if ($false) {"
+
+[[plant]]
+name = "windows runner: a machine without its own tar is not told from one with it (on the machine)"
+meant = "a_run_on_a_machine_without_windows_own_tar_ends_saying_so_before_it_unpacks_anything"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {"
+replace = "if ($false) {"
