@@ -825,7 +825,7 @@ replace = '                    let _ = self.left_exits.borrow_mut().remove(&part
 
 [[plant]]
 name = "turn-end-min: a window that closes keeps what its task was held for"
-meant = "a_task_held_again_in_a_window_opened_again_is_told_again"
+meant = "a_task_held_again_in_a_window_opened_again_is_told_again_and_its_lane_says_it_only_while_it_is"
 runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
@@ -984,7 +984,7 @@ replace = '        if false {'
 
 [[plant]]
 name = "turn-end-min engine: a noticed monitor is decided while another job is pending"
-meant = "a_monitor_whose_time_ran_out_is_not_looked_at_while_another_job_or_an_agent_is_pending"
+meant = "a_monitor_that_said_its_time_ran_out_is_not_looked_at_while_another_job_or_an_agent_is_pending"
 runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
@@ -994,7 +994,7 @@ replace = '            && pending.total() >= noticed'
 
 [[plant]]
 name = "turn-end-min engine: a socket's monitor is taken for over when no command runs"
-meant = "a_monitor_of_a_socket_or_of_an_mcp_server_that_said_it_ended_waits_for_finish"
+meant = "a_monitor_of_a_socket_or_of_no_source_read_that_said_it_ended_waits_for_finish"
 runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
@@ -1024,7 +1024,7 @@ replace = '                held.told.as_ref().map(|told| told.task) == Some(now.
 
 [[plant]]
 name = "turn-end-min engine: a note and Finish count a monitor that said it ended as one that runs"
-meant = "a_monitor_whose_time_ran_out_is_over_once_on_a_later_pass_no_command_of_the_harness_runs"
+meant = "a_monitor_that_said_its_time_ran_out_waits_while_a_command_runs_and_the_note_says_how_many"
 runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
@@ -1046,7 +1046,7 @@ replace = '        if ended_natively || self.candidate_can_settle() || self.cand
 
 [[plant]]
 name = "turn-end-min host: a process of the window no look can read is taken for none running"
-meant = "a_look_that_must_not_miss_a_process_is_none_where_one_of_the_windows_cannot_be_read"
+meant = "a_look_that_must_not_miss_a_process_is_hidden_where_one_of_the_windows_cannot_be_read"
 runs = ["tem-panes-process-tree"]
 
 [[plant.edit]]
