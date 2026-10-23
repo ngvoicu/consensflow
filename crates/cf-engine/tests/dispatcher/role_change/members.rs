@@ -661,3 +661,71 @@ fn a_session_whose_launch_cannot_say_its_role_and_whose_kill_is_refused_has_the_
         )]
     );
 }
+
+/// The same launch, with a second note told to the session behind the first: the first is
+/// what the launch was for, kept as the launch is given up; the second waits still, and
+/// waits for the resume too. Both are named in the chief's note of the pause, the why said
+/// once, and the human hears of each once (the chief's decision, T-77: the second went
+/// unnamed).
+#[test]
+fn a_session_whose_launch_cannot_say_its_role_with_a_second_note_waiting_names_both_words_kept_for_its_resume(
+) {
+    let context = codex();
+    let (project, after, session, _member, note) = told_before_a_reopen_that_failed(&context);
+    let second = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project.id,
+            &NewNote {
+                from: Some("chief".to_owned()),
+                to: session.clone(),
+                task: Some(1),
+                body: "Mind the tests".to_owned(),
+            },
+        )
+        .unwrap();
+    for _ in 0..6 {
+        after.pass().unwrap();
+    }
+
+    let why = "the note that says its role did not reach it";
+    assert_eq!(context.task(project.id, 1).task.state, "paused");
+    for id in [note.id, second.id] {
+        let kept = context.message(id);
+        assert_eq!(
+            (kept.state.as_str(), kept.reason.as_deref()),
+            (
+                "queued",
+                Some(format!("kept for T-1's resume: {why}").as_str())
+            ),
+            "m-{id}"
+        );
+    }
+    let to_chief: Vec<String> = context
+        .inbox(context.id(project.id, "chief"))
+        .into_iter()
+        .map(|message| message.body)
+        .filter(|said| said.starts_with("T-1 is paused: "))
+        .collect();
+    assert_eq!(
+        to_chief,
+        [format!(
+            "T-1 is paused: @{session}'s window closed: {why}; the words told its window wait for the resume: m-{}, m-{}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation.",
+            note.id, second.id
+        )]
+    );
+    let to_human: Vec<String> = context
+        .inbox(context.id(project.id, "human"))
+        .into_iter()
+        .rev()
+        .map(|message| message.body)
+        .filter(|said| said.contains("waits for T-1's resume"))
+        .collect();
+    assert_eq!(
+        to_human,
+        [note.id, second.id].map(|id| format!(
+            "m-{id}, a note from @chief on T-1, waits for T-1's resume to reach @{session}: {why}."
+        ))
+    );
+}

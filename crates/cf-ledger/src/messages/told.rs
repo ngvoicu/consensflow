@@ -25,7 +25,7 @@ use serde_json::json;
 
 use super::carrying::{adopt, carried_into};
 use super::pauses::tell_kept;
-use super::{message_task, messages};
+use super::{known_message, message_task, messages};
 use crate::model::{self, LedgerError, HELD_TASK_STATES, MAX_BODY, MEMBER_ROLES};
 use crate::queue::{send, Sent};
 use crate::store::Store;
@@ -175,6 +175,55 @@ pub(super) fn kept_for_resume(
     adopt(store, message.id)?;
     tell_kept(store, task, message, reason)?;
     Ok(true)
+}
+
+/// Words told to the window of T-`number`, which a give-up of the window has just
+/// paused (`why`), that still wait for it: queued, in no paste under way, but
+/// `except` (words the give-up kept already as their paste failed, and named). They
+/// wait for the resume, as words kept as their paste failed do, and say so, and its
+/// requester hears which, and why, in the note of the pause ([`tell_kept`]): the
+/// teller is never left to think they went in (the chief, T-77). Each of them, for
+/// the engine to tell the human; none where the task is not paused.
+pub(crate) fn keep_waiting(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    except: Option<i64>,
+    why: &str,
+) -> Result<Vec<MessageView>, LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        if task.state != "paused" {
+            return Ok(Vec::new());
+        }
+        let waiting = messages(
+            store,
+            &format!(
+                "{MESSAGE_SELECT} WHERE m.task_id = ?1 AND {told} AND m.recipient_id = ?2
+                   AND m.state = 'queued' AND m.id IS NOT ?3
+                   AND (m.carried_by IS NULL
+                        OR m.carried_by NOT IN (SELECT id FROM message WHERE state = 'delivering'))
+                 ORDER BY m.id",
+                told = told("m")
+            ),
+            params![task.id, task.assignee_id, except],
+        )?;
+        let mut kept = Vec::with_capacity(waiting.len());
+        for message in waiting {
+            store.db.execute(
+                "UPDATE message SET reason = ? WHERE id = ?",
+                params![format!("kept for T-{number}'s resume: {why}"), message.id],
+            )?;
+            store.log(
+                project_id,
+                "delivery.kept",
+                json!({ "message": message.id, "reason": why }),
+            )?;
+            tell_kept(store, &task, &message, why)?;
+            kept.push(known_message(store, message.id)?);
+        }
+        Ok(kept)
+    })
 }
 
 /// The words told to T-`number`'s windows that no window ever had, oldest first:

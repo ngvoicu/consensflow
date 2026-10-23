@@ -17,7 +17,7 @@ use super::{known_message, message_task, messages, require_message};
 use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
-use crate::tasks::{release_ready, withdrawn_late};
+use crate::tasks::{pause_again, release_ready, withdrawn_late};
 use crate::views::MESSAGE_SELECT;
 
 /// The participants something waits on: a message on its way to them, or a
@@ -398,8 +398,9 @@ pub(crate) fn retry_delivery(
 /// A delivery given up: a task it carried, still queued, fails with it, and
 /// what it carried is its own again, for the reopening to take. Words told to
 /// the window fail their task too (`told`), but while it is paused, when they
-/// are kept for its resume; and a brief of the chief's own step done while it
-/// was on its way is withdrawn (`withdrawn_late`). Neither is failed.
+/// are kept for its resume; a brief of the chief's own step done while it
+/// was on its way is withdrawn (`withdrawn_late`); and the words that resume a
+/// paused task pause it again (`pause_again`). None of these is a failed task.
 pub(crate) fn fail_delivery(
     store: &mut Store,
     message_id: i64,
@@ -420,6 +421,10 @@ pub enum GivenUp {
     /// A brief of the chief's own step done while it was on its way
     /// (`withdrawn_late`): cancelled, and no failure.
     Withdrawn,
+    /// The words that resume a paused task, which never reached its window
+    /// (`pause_again`): they failed, and the task is paused again, its requester
+    /// told why in the note of the pause.
+    Paused,
 }
 
 /// [`fail_delivery`], saying what it did ([`GivenUp`]).
@@ -437,6 +442,9 @@ pub(crate) fn give_up_delivery(
             }
             if kept_for_resume(store, &message, &task, reason)? {
                 return Ok((known_message(store, message_id)?, GivenUp::Kept));
+            }
+            if pause_again(store, &message, &task, reason)? {
+                return Ok((known_message(store, message_id)?, GivenUp::Paused));
             }
         }
         store.db.execute(

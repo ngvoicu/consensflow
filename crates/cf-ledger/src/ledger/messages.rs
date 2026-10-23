@@ -294,6 +294,20 @@ impl Ledger {
         messages::give_up_delivery(&mut self.store, message_id, reason)
     }
 
+    /// Words told to the window of T-`number` that still wait for it as a give-up of
+    /// the window has paused the task (`why`), but `except`: they wait for its resume,
+    /// and its requester hears which, and why, in the note of the pause. Each of them;
+    /// none where the task is not paused.
+    pub fn keep_waiting(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        except: Option<i64>,
+        why: &str,
+    ) -> Result<Vec<MessageView>, LedgerError> {
+        messages::keep_waiting(&mut self.store, project_id, number, except, why)
+    }
+
     /// Every message on its way to a window, oldest first.
     pub fn in_flight(&self) -> Result<Vec<MessageView>, LedgerError> {
         messages::in_flight(&self.store)

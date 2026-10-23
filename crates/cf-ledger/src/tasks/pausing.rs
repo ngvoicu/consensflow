@@ -5,14 +5,16 @@
 //! takes back. What the window keeps goes in with the words that resume it.
 
 use cf_base::time;
-use cf_proto::ledger::{HeldTask, Stop, TaskMoved, TaskThread, TaskView};
+use cf_proto::ledger::{HeldTask, MessageView, Stop, TaskMoved, TaskThread, TaskView};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Map, Value};
 
 use super::{
     carrier_body, delivery_body, m_list, require_task_state, task, task_by_id, task_found,
 };
-use crate::messages::{fold, leave_pause_notes, release_carried, tell_goes_on, transfer};
+use crate::messages::{
+    fold, leave_pause_notes, note_pause, release_carried, tell_goes_on, transfer,
+};
 use crate::model::{self, LedgerError, ACTIVE_TASK_STATES, MAX_BODY};
 use crate::queue::{queue, send, Queued, Sent};
 use crate::staff::{require_free, Giving};
@@ -307,6 +309,59 @@ pub(crate) fn paused_task(
         Some((project_id, number)) => task(store, project_id, number),
         None => Ok(None),
     }
+}
+
+/// The words that resume a paused task (`message`: the resume queued them as it moved
+/// the task from paused to queued), given up before its window had them (`reason`): the
+/// task is paused again, never failed, as a task whose window closes is (field 3.0.6),
+/// and not failed as a first brief that never reached its window fails its task. The
+/// words fail, for they never went in, and its requester is told so, and why, in the
+/// note of the pause; what they carried waits for the next resume, which carries it
+/// (`fold`). Whether they were such words (T-77: a resume whose window never came up
+/// failed its task, and left the words kept for it queued under a failed task).
+pub(crate) fn pause_again(
+    store: &mut Store,
+    message: &MessageView,
+    task: &TaskRow,
+    reason: &str,
+) -> Result<bool, LedgerError> {
+    if message.kind != "task" || task.state != "queued" {
+        return Ok(false);
+    }
+    let resumed = store
+        .db
+        .prepare(
+            "SELECT 1 FROM event
+       WHERE project_id = ? AND kind = 'task.state' AND json_extract(data, '$.task') = ?
+         AND json_extract(data, '$.from') = 'paused' AND json_extract(data, '$.to') = 'queued'
+         AND json_extract(data, '$.message') = ?",
+        )?
+        .exists(params![task.project_id, task.number, message.id])?;
+    if !resumed {
+        return Ok(false);
+    }
+    store.db.execute(
+        "UPDATE message SET state = 'failed', reason = ? WHERE id = ?",
+        params![reason, message.id],
+    )?;
+    store.log(
+        message.project_id,
+        "delivery.failed",
+        json!({ "message": message.id, "reason": reason }),
+    )?;
+    release_carried(store, task.id)?;
+    let reason = reason.lines().collect::<Vec<_>>().join(" ");
+    let because = format!(
+        "the words that resumed it, m-{}, did not reach @{}'s window: {reason}",
+        message.id, message.recipient
+    );
+    let mut detail = Map::new();
+    detail.insert("by".into(), Value::Null);
+    detail.insert("because".into(), json!(because));
+    pause(store, task, detail)?;
+    let requester = store.participant_row(task.requester_id)?.handle;
+    note_pause(store, task.project_id, &requester, task.number, &because)?;
+    Ok(true)
 }
 
 /// Whether a tell for this task has reached the participant's window since

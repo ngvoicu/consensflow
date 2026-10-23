@@ -127,9 +127,11 @@ impl Dispatcher {
     /// is settled at the close, which pauses its task, and then the message it was to
     /// be given goes, failing as a launch's first message does, so that whoever gave it
     /// hears why and no launch follows at the next pass; words told to the window about
-    /// the task are kept for its resume instead, the requester and the human told why.
-    /// A member's window the host would not kill has no exit to pause its task: its
-    /// message goes all the same, and fails. A launch that was to say the role first, and has not, is given up
+    /// the task are kept for its resume instead, the requester and the human told why,
+    /// and so are words that wait for the window still. A member's window the host would
+    /// not kill, or whose kill it does not answer in its time
+    /// ([`Dispatcher::close_own_within`]), has no exit to pause its task: its message
+    /// goes all the same, and fails. A launch that was to say the role first, and has not, is given up
     /// as one that cannot ([`Dispatcher::abandon_launch`]): what fails is the message
     /// the role went ahead of, and not the note that says the role, which goes with
     /// the launch (a member's task stayed queued, and was launched for again at
@@ -169,20 +171,30 @@ impl Dispatcher {
             free_since: None,
             entered_again: false,
         };
-        // The window's exit is settled at its close, before what it was to be given:
-        // the host answers a kill before the exit comes, so a member's task paused by
-        // the exit only once the message had failed it (the merge's review, T-16 F1).
-        let closed = match &pane {
-            Some(pane) => self.close_own(record, pane).await?,
-            None => true,
-        };
-        // A chief's window the host would not kill is looked at again; a member's
-        // message goes all the same, its task never paused by an exit that never came
-        // (T-47 P3-1: left at work, asked and killed again at every pass, nobody told).
-        if !closed && participant.role == "chief" {
-            return Ok(());
+        if participant.role == "chief" {
+            // A chief's window the host would not kill is looked at again.
+            let closed = match &pane {
+                Some(pane) => self.close_own(record, pane).await?,
+                None => true,
+            };
+            if !closed {
+                return Ok(());
+            }
+            return self.launch_failed(record, &project, &participant, Some(failing), &said);
         }
-        self.launch_failed(record, &project, &participant, Some(failing), &said)
+        // A member's exit is settled at its close, before what it was to be given: the
+        // host answers a kill before the exit comes, so its task paused by the exit only
+        // once the message had failed it (the merge's review, T-16 F1). A kill refused,
+        // or not answered in its time, leaves no exit to pause the task: the message goes
+        // all the same, and fails (T-47 P3-1: left at work, asked and killed again at
+        // every pass, nobody told). Words still waiting for the window wait for the
+        // resume of the task the exit paused, and are said to.
+        let before = self.in_hand(record)?;
+        if let Some(pane) = &pane {
+            self.close_own_within(record, pane).await?;
+        }
+        self.launch_failed(record, &project, &participant, Some(failing), &said)?;
+        self.keep_waiting(&project, before, Some(message.id), &said)
     }
 
     /// A launch whose window did not come up in the time it had, its harness asked
@@ -225,16 +237,19 @@ impl Dispatcher {
         let settles = record.delivery.borrow_mut().delivering.take().is_some();
         record.window.borrow_mut().starts_given_up += 1;
         // The chief's window goes without taking its project with it: the chief is tried again.
-        if participant.role == "chief" {
+        let before = if participant.role == "chief" {
             self.close_own(record, &pane).await?;
+            None
         } else {
+            let before = self.in_hand(record)?;
             // A member's exit is settled at the close, before its first message fails: the
             // exit pauses its task, and words told to its window wait for the resume, as at
             // an unfit window's close (T-47 P2-1). The launch is not held for a kill that
             // never answers: one refused, or not answered in its time, leaves no exit to
             // pause the task, and the message fails, whoever gave it told why (T-63).
             self.close_own_within(record, &pane).await?;
-        }
+            before
+        };
         let because = if first {
             format!("the window could not take its first message: {error}")
         } else {
@@ -257,7 +272,11 @@ impl Dispatcher {
             }
             failing => failing,
         };
+        let except = failing.as_ref().map(|failing| failing.message);
         self.launch_failed(record, project, participant, failing, &said)?;
+        // Words still waiting for a member's window wait for the resume of the task its
+        // exit paused, and are said to.
+        self.keep_waiting(project, before, except, &said)?;
         // The chief opens again at its time whatever waits for it, told its turn was cut
         // where the window had begun one (`Dispatcher::step`).
         if let Some(relaunch) = record.window.borrow_mut().relaunch.as_mut() {

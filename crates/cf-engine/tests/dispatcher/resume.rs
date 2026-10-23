@@ -1484,6 +1484,9 @@ fn a_member_whose_window_never_comes_up_and_whose_kill_is_refused_has_the_note_t
 /// held), so T-1 is paused at once and the note waits for its resume, which gives it
 /// once. Before, T-1 stayed at work until the exit came, and the next pass pasted the
 /// note into the window being closed: the note read delivered, and its words were lost.
+/// The chief is told which words wait, and why, in the note of the pause, and the human
+/// once, as of words kept as their paste failed: never left to think they went in (the
+/// chief's decision, T-77; before, the note of the pause named neither).
 #[test]
 fn a_member_opened_again_whose_window_never_comes_up_is_given_nothing_and_the_note_told_it_waits_for_its_resume(
 ) {
@@ -1528,6 +1531,31 @@ fn a_member_opened_again_whose_window_never_comes_up_is_given_nothing_and_the_no
     assert!(given(&context, &session)
         .iter()
         .all(|words| !words.contains("Use the grammar in the docs")));
+    let why = format!("the window never came up: {NEVER_NAMED}");
+    assert_eq!(
+        waiting.reason.as_deref(),
+        Some(format!("kept for T-1's resume: {why}").as_str())
+    );
+    let kept_words = format!("m-{}", note.id);
+    assert_eq!(
+        tiers
+            .notes("chief")
+            .into_iter()
+            .filter(|said| said.starts_with("T-1 is paused: "))
+            .collect::<Vec<_>>(),
+        [format!(
+            "T-1 is paused: @{session}'s window closed: {why}; the words told its window wait for the resume: {kept_words}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+        )]
+    );
+    assert_eq!(
+        to_human(&context, project)
+            .into_iter()
+            .filter(|said| said.contains(&kept_words))
+            .collect::<Vec<_>>(),
+        [format!(
+            "{kept_words}, a note from @chief on T-1, waits for T-1's resume to reach @{session}: {why}."
+        )]
+    );
 
     // The exit comes, and settles nothing more; the resume's window has the note, once.
     let host = Rc::clone(&context.host);
@@ -1539,6 +1567,127 @@ fn a_member_opened_again_whose_window_never_comes_up_is_given_nothing_and_the_no
     context.resume_task(project, 1, "Carry on");
     for _ in 0..4 {
         after.pass().unwrap();
+    }
+    assert_eq!(context.message(note.id).state, "delivered");
+    assert_eq!(tiers.task(1).task.state, "working");
+    let given = given(&context, &session);
+    assert_eq!(
+        given
+            .iter()
+            .filter(|words| words.contains("Use the grammar in the docs"))
+            .count(),
+        1,
+        "{given:?}"
+    );
+}
+
+/// A task paused as its window closed, a note the chief told its window while it waits,
+/// and the chief's resume, whose window never comes up: the words that resume it, which
+/// carry the note, never reach the window. The task is paused again, never failed, as a
+/// task whose window closes is; the words that resumed it fail, and the note waits for the
+/// next resume, which carries it, once. The chief hears both in the note of the pause, and
+/// the human once each (T-77: T-1 failed on the resume's words, and the note was left
+/// queued under a failed task, unsaid). Exits held, the bridge host's order.
+#[test]
+fn a_resume_whose_window_never_comes_up_pauses_its_task_again_and_the_note_it_carried_waits_for_the_next(
+) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context.adapter.with(&session, |agent| agent.settled = true);
+    context.host.hold_exits.set(true);
+    let window = context.host.last(&session).unwrap().pane;
+    let host = Rc::clone(&context.host);
+    context.run(async move { host.exited(window).await });
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let note = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project,
+            &NewNote {
+                from: Some("chief".to_owned()),
+                to: session.clone(),
+                task: Some(1),
+                body: "Use the grammar in the docs".to_owned(),
+            },
+        )
+        .unwrap();
+
+    never_up(&context.adapter);
+    context.resume_task(project, 1, "Carry on");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let launch = launch_of(&context, &session);
+    let first = launch["message"].as_str().unwrap();
+    assert!(first.contains("Use the grammar in the docs"), "{first}");
+    let resumed = tiers
+        .task(1)
+        .messages
+        .into_iter()
+        .rfind(|message| message.kind == "task")
+        .expect("the words that resume it");
+    assert!(
+        resumed.body.ends_with("Resumed: Carry on"),
+        "{}",
+        resumed.body
+    );
+
+    let why = format!("the window could not take its first message: {NEVER_NAMED}");
+    assert_eq!(tiers.task(1).task.state, "paused", "never failed");
+    assert_eq!(context.message(resumed.id).state, "failed");
+    let kept = context.message(note.id);
+    assert_eq!(
+        (kept.state.as_str(), kept.reason.as_deref()),
+        (
+            "queued",
+            Some(format!("kept for T-1's resume: {why}").as_str())
+        )
+    );
+    let (words, kept_words) = (format!("m-{}", resumed.id), format!("m-{}", note.id));
+    assert_eq!(
+        tiers
+            .notes("chief")
+            .into_iter()
+            .filter(|said| said.contains(&words))
+            .collect::<Vec<_>>(),
+        [format!(
+            "T-1 is paused: the words that resumed it, {words}, did not reach @{session}'s window: {why}; the words told its window wait for the resume: {kept_words}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+        )]
+    );
+    assert!(
+        !tiers
+            .notes("chief")
+            .iter()
+            .any(|said| said.starts_with("T-1 failed")),
+        "{:?}",
+        tiers.notes("chief")
+    );
+    assert_eq!(
+        to_human(&context, project)
+            .into_iter()
+            .rev()
+            .filter(|said| said.contains(&words) || said.contains(&kept_words))
+            .collect::<Vec<_>>(),
+        [
+            format!("{words}, a task from @chief on T-1, did not reach @{session}: {why}."),
+            format!(
+                "{kept_words}, a note from @chief on T-1, waits for T-1's resume to reach @{session}: {why}."
+            ),
+        ]
+    );
+
+    // The next resume's window comes up, and has the note, once.
+    *context.adapter.started.borrow_mut() = None;
+    context.host.hold_exits.set(false);
+    context.resume_task(project, 1, "Carry on, again");
+    for _ in 0..4 {
+        context.pass().unwrap();
     }
     assert_eq!(context.message(note.id).state, "delivered");
     assert_eq!(tiers.task(1).task.state, "working");

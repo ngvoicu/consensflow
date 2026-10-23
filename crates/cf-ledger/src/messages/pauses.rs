@@ -150,12 +150,14 @@ const KEPT: &str = "; the words told its window wait for the resume: ";
 /// What `because` says once told words `id`, kept for the resume as their paste
 /// failed (`why`, on one line, so a note of several tasks still reads back), are
 /// named in it: the why and the words, the why said once, and later words added
-/// to the first.
+/// to the first. A `because` that says the why already says it once.
 fn with_kept(because: &str, id: i64, why: &str) -> String {
+    let why = why.lines().collect::<Vec<_>>().join(" ");
     if because.contains(KEPT) {
         format!("{because}, m-{id}")
+    } else if because.ends_with(&why) {
+        format!("{because}{KEPT}m-{id}")
     } else {
-        let why = why.lines().collect::<Vec<_>>().join(" ");
         format!("{because}: {why}{KEPT}m-{id}")
     }
 }

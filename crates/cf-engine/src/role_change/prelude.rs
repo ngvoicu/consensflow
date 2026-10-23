@@ -308,10 +308,14 @@ impl Dispatcher {
         // resume, as at an unfit window's close (T-47 P2-1). The prelude is out of the
         // record already, or the exit would fail that message itself. A kill refused, or
         // not answered in its time, leaves no exit to pause the task: the message fails,
-        // and whoever gave it hears why (T-63).
+        // and whoever gave it hears why (T-63). Words still waiting for the window wait for
+        // the resume of the task the exit paused, and are said to.
+        let before = self.in_hand(record)?;
         if let Some(pane) = &pane {
             self.close_own_within(record, pane).await?;
         }
-        self.launch_failed(record, project, participant, failing, &said)
+        let except = failing.as_ref().map(|failing| failing.message);
+        self.launch_failed(record, project, participant, failing, &said)?;
+        self.keep_waiting(project, before, except, &said)
     }
 }

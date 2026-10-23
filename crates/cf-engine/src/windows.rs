@@ -47,8 +47,13 @@ const RELAUNCH_MS: i64 = 5_000;
 const RELAUNCH_MAX_MS: i64 = 5 * 60_000;
 
 /// How long a member's launch given up waits for its window's kill to be answered
-/// before it settles without the exit ([`Dispatcher::close_own_within`]).
-const KILL_ANSWER_WAIT: Duration = Duration::from_secs(5);
+/// before it settles without the exit ([`Dispatcher::close_own_within`]). The pane host
+/// answers once the window's programs are gone: on the Mac in about 7 ms, and in the
+/// whole close grace (`cf_panes`' `CLOSE_GRACE`, 10 s; 10.02 s measured) where the
+/// window leaves a job that ignores the request to end; on Windows (zeewin) in 2 to 10
+/// ms, its tree ended at once (T-77, `kill_answer_times_with_the_real_grace` in
+/// `cf-panes`). Three times the longest.
+const KILL_ANSWER_WAIT: Duration = Duration::from_secs(30);
 
 /// What a window is doing, as the board and the trace say it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1192,8 +1197,17 @@ impl Dispatcher {
     /// [`KILL_ANSWER_WAIT`]: none where the host gave none by then, and the close goes
     /// on apart, its exit settled whenever it comes and what it fails with told to the
     /// log, as the host's own exit's is. The pane host's kill is a request with no
-    /// deadline, and a member's launch given up is not held for one that never answers
-    /// (the chief's restart, 8bb0a465, left the kill unawaited for it).
+    /// deadline (the chief's restart, 8bb0a465, left the kill unawaited for it).
+    ///
+    /// The one rule of every member's give-up of a window: one unfit for work
+    /// ([`Dispatcher::give_up_unfit`]), one that never came up
+    /// ([`Dispatcher::give_up_unstarted`]) and one that could not be told its role
+    /// ([`Dispatcher::abandon_launch`]). Each closes the window with this before the
+    /// message the launch was for goes, so that the exit pauses the task and words told
+    /// to the window wait for its resume, said to its requester and the human; a kill
+    /// refused, or not answered in its time, leaves no exit, and the message fails as
+    /// before. None is held for a kill that never answers. A chief's give-up waits for
+    /// its kill ([`Dispatcher::close_own`]).
     pub(crate) async fn close_own_within(
         self: &Rc<Self>,
         record: &Rc<Record>,

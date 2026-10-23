@@ -56,7 +56,9 @@ pub(crate) use receipt::{
 pub(crate) use roles::{note_role, role_notes_to};
 pub(crate) use taken_back::take_back;
 pub use told::is_told;
-pub(crate) use told::{launch_called_off, tell_queued, told_unreceived, told_waiting, Dropped};
+pub(crate) use told::{
+    keep_waiting, launch_called_off, tell_queued, told_unreceived, told_waiting, Dropped,
+};
 
 /// A note: from a participant (ConsensFlow itself when none) to another,
 /// about one of the project's tasks or none.
