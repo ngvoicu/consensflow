@@ -239,7 +239,7 @@ replace = "        if false {"
 
 [[plant]]
 name = "turn end review 2: cf says nothing of the agents left"
-meant = "finishing"
+meant = "finish_promises_no_ending_and_says_the_jobs_and_agents_its_harness_counted_may_run_on"
 runs = ["tep-turn-end-review-2-cf-board-task"]
 
 [[plant.edit]]

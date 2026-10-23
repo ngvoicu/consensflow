@@ -505,7 +505,7 @@ replace = ''
 
 [[plant]]
 name = "codex role: a Codex window opened with a message of its own is read at rest by the turn the quit cut"
-meant = "a_window_opened_with_a_message_of_its_own_is_not_read_at_rest_by_the_turn_the_quit_cut"
+meant = "codex::resumed::a_window_opened_with_a_message_of_its_own_is_not_read_at_rest_by_the_turn_the_quit_cut"
 runs = ["harness-codex-resumed"]
 
 [[plant.edit]]
