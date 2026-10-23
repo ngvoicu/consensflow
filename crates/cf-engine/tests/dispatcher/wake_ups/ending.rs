@@ -8,7 +8,7 @@ use cf_engine::testing::Context;
 use cf_harness::contract::{Held, Readiness};
 use cf_ledger::{WakeUpUnit, DEFAULT_WAKE_UP_TEXT};
 
-use super::{at_rest, given, passes, set, woken, DAY, MINUTE};
+use super::{at_rest, given, moved, passes, set, woken, DAY, MINUTE};
 
 #[test]
 fn the_calls_turned_off_stop_at_once_and_a_setting_made_while_it_runs_applies_at_once() {
@@ -25,7 +25,7 @@ fn the_calls_turned_off_stop_at_once_and_a_setting_made_while_it_runs_applies_at
     assert_eq!(given(&context), 1);
     context.adapter.answer("chief", "Nothing is left.");
     context.pass().unwrap();
-    context.give(project.id, "zeus", "Write the parser");
+    moved(&context, &project);
     set(&context, &project, false, 5, WakeUpUnit::Minutes);
     context.advance(DAY);
     passes(&context);

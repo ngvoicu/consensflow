@@ -47,6 +47,7 @@ use crate::scheduler::SchedulerState;
 use crate::seams::{EngineError, Seams};
 use crate::shown::Shown;
 use crate::stalls::StallsState;
+use crate::trust::{self, TrustState, Trusting};
 use crate::windows::{Activity, ActivityState, WindowsState};
 
 /// When a Switch chief goes: now, or once the chief's turn ends.
@@ -101,6 +102,8 @@ pub struct Dispatcher {
     pub(crate) stalls: StallsState,
     /// What the human's Resume waits for after a start (`resume`).
     pub(crate) resumes: ResumeState,
+    /// What the questions of windows about trusting their folder were said of (`trust`).
+    pub(crate) trust: TrustState,
 }
 
 impl Dispatcher {
@@ -116,6 +119,7 @@ impl Dispatcher {
             scheduler: SchedulerState::default(),
             stalls: StallsState::default(),
             resumes: ResumeState::default(),
+            trust: TrustState::default(),
         })
     }
 
@@ -997,15 +1001,22 @@ impl Dispatcher {
         if !unnamed {
             record.window.borrow_mut().named = true;
         }
-        let drawing =
-            (observed.items().is_empty() || unnamed) && !returning(self.drawn(record)).await;
+        // One whose harness may ask, or asks, whether to trust its folder is starting
+        // still: nothing goes into it, as a paste's Enter would answer the question
+        // (`trust`).
+        let asking = record.window.borrow().trust != Trusting::Past;
+        let drawing = asking
+            || ((observed.items().is_empty() || unnamed) && !returning(self.drawn(record)).await);
         if self.forgotten(record) {
             return Ok(());
         }
         let starting = drawing || (unnamed && !record.window.borrow().named);
         // An out member's window says so, and nothing else, until the reset.
         if !self.is_out(&owner) {
-            let activity = if starting {
+            // The reason is given once the question is on its screen.
+            let activity = if record.window.borrow().trust == Trusting::Asked {
+                Activity::because(ActivityState::Starting, trust::HELD)
+            } else if starting {
                 Activity::of(ActivityState::Starting)
             } else if let Some(waiting) = &observed.waiting {
                 Activity {

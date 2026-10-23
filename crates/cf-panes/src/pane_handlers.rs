@@ -374,6 +374,8 @@ fn stream_to_page(
             output: stream,
             screen,
             ended,
+            // Paid, with this thread's end, once the exit is told.
+            owed: _owed,
         } = streamed;
         for message in stream {
             printed.note();

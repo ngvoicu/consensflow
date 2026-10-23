@@ -621,7 +621,9 @@ fn an_entrys_words_are_masked_whole_before_they_are_cut_and_matched_whole() {
 #[test]
 fn the_products_late_ancestor_fixture_reads_at_rest_as_the_product_reads_it() {
     // Claude Code 2.1.268 wrote the turn's prompt after its answer and its boundary:
-    // the answer's parents, attachments all, lead to it. It begins no turn.
+    // the answer's parents, attachments all, lead to it. It begins no turn. A
+    // capture of 2.1.268; no later version, up to 2.1.305, was seen to write an
+    // answer whose parent comes after it.
     let fixture = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../tests/engine/fixtures/completion/claude-code/v268-late-ancestors.jsonl"

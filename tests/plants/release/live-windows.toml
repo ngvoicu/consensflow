@@ -21,6 +21,8 @@
 e2e-live-path = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::path::"]
 e2e-live-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::command::"]
 e2e-stops-tool = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::tool::"]
+e2e-stops-stuck = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "stuck::"]
+e2e-descent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::"]
 
 # Which program on the PATH is taken.
 
@@ -198,3 +200,101 @@ runs = ["e2e-stops-tool"]
 file = "crates/cf-e2e/tests/live_stops/midturn/tool.rs"
 find = "    pid.parse::<u64>().ok().map(|_| line)"
 replace = "    pid.parse::<u64>().ok().map(|_| process)"
+
+# What the `stuck` case reads of the machine's processes (T-2, T-75): Git Bash's `sh.exe` and
+# `sleep.exe` are listed by their path, with backslashes, and in double quotes where it holds a
+# space (`"C:\Program Files\Git\usr\bin\sh.exe" ./ignore-signals-cf-stops-live.sh`, zeewin,
+# 2026-10-21).
+[[plant]]
+name = "live windows: the stuck case reads a program's path with a slash only"
+meant = "the_commands_processes_are_found_by_the_command_lines_windows_lists_for_them_too"
+runs = ["e2e-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '''(?:"(?:[^"]*[\\/])?(?i:{name}(?:\.exe)?)"|(?:\S*[\\/])?(?i:{name}(?:\.exe)?))'''
+replace = '''(?:"(?:[^"]*/)?(?i:{name}(?:\.exe)?)"|(?:\S*/)?(?i:{name}(?:\.exe)?))'''
+
+[[plant]]
+name = "live windows: the stuck case reads a program without its extension only"
+meant = "the_commands_processes_are_found_by_the_command_lines_windows_lists_for_them_too"
+runs = ["e2e-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '''(?:"(?:[^"]*[\\/])?(?i:{name}(?:\.exe)?)"|(?:\S*[\\/])?(?i:{name}(?:\.exe)?))'''
+replace = '''(?:"(?:[^"]*[\\/])?(?i:{name})"|(?:\S*[\\/])?(?i:{name}))'''
+
+[[plant]]
+name = "live windows: the stuck case reads a quoted path as no program"
+meant = "the_commands_processes_are_found_by_the_command_lines_windows_lists_for_them_too"
+runs = ["e2e-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '''(?:"(?:[^"]*[\\/])?(?i:{name}(?:\.exe)?)"|(?:\S*[\\/])?(?i:{name}(?:\.exe)?))'''
+replace = '''(?:\S*[\\/])?(?i:{name}(?:\.exe)?)'''
+
+# Git Bash's own programs have the parent Git Bash says (T-141, P3-7): the sleep of the stuck script
+# has no parent that runs, for the sh that started it forked a copy of itself that has gone.
+[[plant]]
+name = "live windows: a cygwin program whose parent has gone is given none"
+meant = "a_cygwin_program_whose_parent_has_gone_is_given_the_parent_git_bash_says_it_has"
+runs = ["e2e-descent", "e2e-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = "            process.ppid = parent;"
+replace = "            let _ = parent;"
+
+[[plant]]
+name = "live windows: a parent that began after the child is its parent"
+meant = "what_git_bash_does_not_vouch_for_is_listed_as_it_was"
+runs = ["e2e-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = "                .is_some_and(|started| *started <= process.identity.started)"
+replace = "                .is_some_and(|_| true)"
+
+[[plant]]
+name = "live windows: Git Bash is asked of every process whose parent runs"
+meant = "a_cygwin_program_whose_parent_has_gone_is_given_the_parent_git_bash_says_it_has"
+runs = ["e2e-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = "        if process.ppid == 0 || began.contains_key(&process.ppid) {"
+replace = "        if process.ppid == 0 {"
+
+# T-194's P3-1 and P3-7: a row of `ps` with a status letter, the image path of an orphan, and the
+# case's account of a member that ran nothing.
+[[plant]]
+name = "live windows: a row of ps that begins with a status letter is no row"
+meant = "a_row_that_begins_with_a_status_letter_is_a_row_and_so_is_its_parents"
+runs = ["e2e-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = "                if first.len() == 1 && first.chars().all(|letter| letter.is_ascii_alphabetic()) {"
+replace = "                if false {"
+
+[[plant]]
+name = "live windows: the folder of an orphan's image is not read"
+meant = "an_orphan_is_known_by_the_image_it_runs_and_not_by_how_its_command_line_spells_the_folder"
+runs = ["e2e-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = "        let Some(folder) = process.exe.as_deref().and_then(image_folder) else {"
+replace = "        let Some(folder) = None::<String> else {"
+
+[[plant]]
+name = "live windows: a member with no window is said to have a blank screen"
+meant = "a_member_with_no_window_says_so_and_a_blank_screen_is_said_to_be_one"
+runs = ["e2e-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '        None => "     it has no window".to_owned(),'
+replace = '        None => "     its screen: ".to_owned(),'

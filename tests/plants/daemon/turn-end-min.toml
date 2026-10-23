@@ -346,7 +346,7 @@ replace = ''
 
 [[plant]]
 name = "turn-end-min reader: a compaction's summary is a message to the member"
-meant = "the_summary_is_an_item_of_the_users_that_says_it_is_the_compactions_and_a_prompt_is_none"
+meant = "the_summary_is_a_user_s_item_marked_as_the_compaction_s_and_no_other_item_is"
 runs = ["tem-reader"]
 
 [[plant.edit]]
@@ -666,12 +666,12 @@ runs = ["tem-cf-board-task"]
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
 find = '''
-const MOVES: [&str; 7] = [
-    "done", "accept", "cancel", "reopen", "pause", "resume", "finish",
+const MOVES: [&str; 8] = [
+    "done", "accept", "cancel", "reopen", "edit", "pause", "resume", "finish",
 ];'''
 replace = '''
-const MOVES: [&str; 7] = [
-    "done", "accept", "cancel", "reopen", "pause", "resume", "finished",
+const MOVES: [&str; 8] = [
+    "done", "accept", "cancel", "reopen", "edit", "pause", "resume", "finished",
 ];'''
 
 [[plant]]

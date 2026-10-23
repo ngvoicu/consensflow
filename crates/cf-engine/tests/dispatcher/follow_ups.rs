@@ -71,7 +71,9 @@ fn a_follow_up_waiting_for_what_it_needs_keeps_no_window_open_and_goes_to_one_op
 /// A follow-up that waited for what it needs while its session was at work on
 /// another, given since, is released when that one is called off, in the same
 /// step: the window is still at work on the task it was given, which the pass
-/// stops, and the follow-up goes to it once it is at rest.
+/// stops, and the follow-up goes to it once it is at rest. Two follow-ups queued
+/// behind the window's task go in order: the first is given the window when the
+/// task is accepted, and the second is ready, waiting for it.
 #[test]
 fn a_follow_up_released_by_the_cancel_of_its_sessions_task_goes_once_the_window_is_stopped() {
     let context = Context::new();
@@ -81,65 +83,64 @@ fn a_follow_up_released_by_the_cancel_of_its_sessions_task_goes_once_the_window_
     context.pass().unwrap();
     context.pass().unwrap();
     let session = tiers.assignee(1);
-    context.adapter.answer("zeus", "Parser done");
-    context.pass().unwrap();
-    assert_eq!(tiers.task(1).task.state, "done");
 
-    // T-2 waits on the board for T-1 to be accepted; T-3 goes to the window.
-    for (needs, body) in [(vec![1], "Now the lexer"), (Vec::new(), "First the tests")] {
+    // T-2 and T-3 wait on the board for T-1 to be accepted, in that order.
+    for body in ["First the tests", "Now the lexer"] {
         context.create_task(
             project,
             NewTask {
                 from: "chief".to_owned(),
                 after: Some(1),
-                needs,
                 body: body.to_owned(),
                 ..NewTask::default()
             },
         );
     }
-    for _ in 0..4 {
-        context.pass().unwrap();
-    }
-    assert_eq!(tiers.task(3).task.state, "working");
-    assert_eq!(tiers.assignee(3), session);
+    context.adapter.answer("zeus", "Parser done");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
     context
         .ledger
         .borrow_mut()
         .accept_task(project, 1, "chief")
         .unwrap();
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "working");
+    assert_eq!(tiers.assignee(2), session);
     assert_eq!(
-        tiers.task(2).task.state,
+        tiers.task(3).task.state,
         "open",
         "ready, and waiting for the window"
     );
 
-    // T-3 is called off, and T-2 is queued for the window at once.
+    // T-2 is called off, and T-3 is queued for the window at once.
     context
         .ledger
         .borrow_mut()
-        .cancel_task(project, 3, "human")
+        .cancel_task(project, 2, "human")
         .unwrap();
-    assert_eq!(tiers.task(2).task.state, "queued");
+    assert_eq!(tiers.task(3).task.state, "queued");
     let presses = context.host.inputs().len();
     context.pass().unwrap();
     assert_eq!(
         context.host.inputs().len(),
         presses + 1,
-        "the window is stopped: it is at work on T-3"
+        "the window is stopped: it is at work on T-2"
     );
 
-    // The agent stops, and T-2 goes to its window, the same one.
+    // The agent stops, and T-3 goes to its window, the same one.
     context.adapter.answer("zeus", "Stopped.");
     for _ in 0..3 {
         context.pass().unwrap();
     }
-    assert_eq!(tiers.task(2).task.state, "working");
-    assert_eq!(tiers.task(3).task.state, "cancelled");
+    assert_eq!(tiers.task(3).task.state, "working");
+    assert_eq!(tiers.task(2).task.state, "cancelled");
     let words = given(&context, "zeus");
     assert_match(
         words.last().unwrap(),
-        r"^\[ConsensFlow m-\d+ · T-2 · task from @chief\]\nNow the lexer$",
+        r"^\[ConsensFlow m-\d+ · T-3 · task from @chief\]\nNow the lexer$",
     );
 }
 

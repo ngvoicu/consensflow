@@ -16,6 +16,7 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use cf_base::env::Env;
 use common::{arg_line, arg_lines, checkout, err, out, programs, xtask};
+use sha2::{Digest, Sha256};
 
 /// A checkout: a git repository whose files are added to its index (no commit is
 /// made: none is needed), laid out as xtask finds its own (`tools/xtask`).
@@ -50,6 +51,77 @@ fn path_with(fakes: &Path) -> PathBuf {
     std::env::join_paths(std::iter::once(fakes.to_path_buf()).chain(rest))
         .unwrap()
         .into()
+}
+
+/// What a machine says of the tree it unpacked once it has it, for `tree`: the line
+/// `== tree <identity>`, the identity being the commit the checkout is at (none: the
+/// trees of these tests have no commit) and the first 16 hex digits of a SHA-256 over
+/// the files that go over, in git's order, each as its name's length (8 bytes,
+/// little-endian), its name, `file`, and its bytes. It is how the documentation of
+/// `windows` says a tree is told from another, written out here once more on purpose.
+fn tree_line(tree: &tempfile::TempDir) -> String {
+    let listing = Command::new("git")
+        .args(["ls-files", "-co", "--exclude-standard", "-z"])
+        .current_dir(tree.path())
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .output()
+        .unwrap();
+    assert!(listing.status.success(), "{}", err(&listing));
+    let mut hash = Sha256::new();
+    for name in String::from_utf8(listing.stdout)
+        .unwrap()
+        .split('\0')
+        .filter(|name| !name.is_empty())
+    {
+        let path = tree.path().join(name);
+        if fs::symlink_metadata(&path).is_err() {
+            continue;
+        }
+        hash.update((name.len() as u64).to_le_bytes());
+        hash.update(name.as_bytes());
+        hash.update(b"file");
+        hash.update(fs::read(&path).unwrap());
+    }
+    let digest = hash.finalize();
+    let content: String = digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("== tree none {content}")
+}
+
+/// The run script (`.windows-run.ps1`) in the tarball that the fake `scp` kept as number
+/// `n` (counting from 1), the file a run is asked for, in `keep`.
+fn run_script_kept(keep: &Path, n: usize) -> String {
+    let ran = Command::new("tar")
+        .args(["-xzOf", &format!("{n}.tgz"), ".windows-run.ps1"])
+        .current_dir(keep)
+        .output()
+        .unwrap();
+    assert!(ran.status.success(), "tar: {}", err(&ran));
+    out(&ran)
+}
+
+/// The run's own name in the `host:folder.<id>.tgz` its scp was asked to send to.
+fn id_in_scp(destination: &str) -> String {
+    let name = destination
+        .strip_prefix("arg: \"zeewin:")
+        .and_then(|rest| rest.strip_suffix(".tgz\""))
+        .unwrap_or_else(|| panic!("not a tarball for the machine: {destination}"));
+    let (_, id) = name
+        .split_once('.')
+        .unwrap_or_else(|| panic!("no run name in {name}"));
+    assert_eq!(id.len(), 17, "{id}");
+    id.to_owned()
+}
+
+/// The run's own name in the script that unpacks its tarball.
+fn id_in_script(script: &str) -> String {
+    let at =
+        script.find("'consensflow-build.").expect("a tarball named") + "'consensflow-build.".len();
+    script[at..at + 17].to_owned()
 }
 
 /// `args` run as a developer would, in the checkout `tree` is, with `fakes` first on the PATH.
@@ -174,11 +246,15 @@ fn a_run_sends_the_tree_as_it_is_and_has_the_machine_run_the_script_the_javascri
     let tree = tree(&[("keep.txt", "kept"), ("gone.txt", "deleted since")]);
     // Tracked, and gone: the copy that broke on it.
     fs::remove_file(tree.path().join("gone.txt")).unwrap();
+    let said_tree = tree_line(&tree);
+    let kept = tempfile::tempdir().unwrap();
     let ran = on(
         &tree,
         fakes.path(),
         &[
             ("FAKE_CHILD_STDERR", "said"),
+            ("FAKE_CHILD_FIRST", &said_tree),
+            ("FAKE_CHILD_KEEP", kept.path().to_str().unwrap()),
             ("FAKE_CHILD_LAST", "== exit 0"),
         ],
         &[
@@ -201,12 +277,26 @@ fn a_run_sends_the_tree_as_it_is_and_has_the_machine_run_the_script_the_javascri
     assert_eq!(scp.len(), 3, "{scp:?}");
     assert_eq!(scp[0], arg_line("-q"));
     assert!(scp[1].ends_with("tree.tgz\""), "{}", scp[1]);
-    assert_eq!(scp[2], arg_line("zeewin:consensflow-build.tgz"));
+    // The tarball is sent under the run's own name: no other run sends to it.
+    let id = id_in_scp(scp[2]);
+    assert_eq!(
+        scp[2],
+        arg_line(format!("zeewin:consensflow-build.{id}.tgz"))
+    );
 
     let ssh = arg_lines(programs[1]);
     assert_eq!(ssh.len(), 2, "{ssh:?}");
     assert_eq!(ssh[0], arg_line("zeewin"));
-    assert!(script_in(ssh[1]) == golden("xtask-test-integration"));
+    let script = script_in(ssh[1]);
+    assert_eq!(
+        id_in_script(&script),
+        id,
+        "the script unpacks the tarball that was sent"
+    );
+    // The script the template makes for a run of that name is the one that was recorded.
+    assert!(script.replace(&id, "0000abcd-12345678") == golden("xtask-test-integration"));
+    // What the run is asked for went in the tarball, as it was recorded.
+    assert!(run_script_kept(kept.path(), 1) == golden("xtask-test-integration.run"));
     // What each said on its error stream: scp's on the terminal's, ssh's relayed.
     assert_eq!(err(&ran).matches("said").count(), 2, "{}", err(&ran));
 }
@@ -258,7 +348,8 @@ fn a_run_starts_no_ssh_when_the_tree_could_not_be_sent() {
     let said = err(&ran);
     assert!(said.starts_with("windows: `scp -q "), "{said}");
     assert!(
-        said.ends_with(":consensflow-build.tgz` ended with status 3\n"),
+        said.contains(" zeewin:consensflow-build.")
+            && said.ends_with(".tgz` ended with status 3\n"),
         "{said}"
     );
     // The one that was asked is the one that said what it was asked.
@@ -269,10 +360,15 @@ fn a_run_starts_no_ssh_when_the_tree_could_not_be_sent() {
 fn a_run_asks_for_the_folder_the_build_and_the_variables_it_was_given() {
     let fakes = programs(&["scp", "ssh"]);
     let tree = tree(&[("keep.txt", "kept")]);
+    let kept = tempfile::tempdir().unwrap();
     let ran = on(
         &tree,
         fakes.path(),
-        &[("FAKE_CHILD_LAST", "== exit 0")],
+        &[
+            ("FAKE_CHILD_FIRST", &tree_line(&tree)),
+            ("FAKE_CHILD_KEEP", kept.path().to_str().unwrap()),
+            ("FAKE_CHILD_LAST", "== exit 0"),
+        ],
         &[
             "windows",
             "--host",
@@ -292,26 +388,47 @@ fn a_run_asks_for_the_folder_the_build_and_the_variables_it_was_given() {
     assert!(ran.status.success(), "{}", err(&ran));
     let report = out(&ran);
     let programs: Vec<&str> = report.split("cwd: ").skip(1).collect();
-    assert_eq!(arg_lines(programs[0])[2], arg_line("zeewin:build-2.tgz"));
+    let id = id_in_scp(arg_lines(programs[0])[2]);
+    assert_eq!(
+        arg_lines(programs[0])[2],
+        arg_line(format!("zeewin:build-2.{id}.tgz"))
+    );
+    // The folder is on the command line, and nothing the run is asked for is.
     let script = script_in(arg_lines(programs[1])[1]);
     assert!(
         script.contains("$dir = Join-Path $env:USERPROFILE 'build-2'\n"),
         "{script}"
     );
-    assert!(script.contains("Set-Location (Join-Path $dir 'app/src-tauri')\n"));
-    assert!(script.contains("'npm ci --no-audit --no-fund', "));
-    assert!(script.contains("$env:CONSENSFLOW_TEST_DAEMON = 'native'\n"));
-    assert!(script.contains("'cargo test'"));
+    for asked in [
+        "app/src-tauri",
+        "npm ci",
+        "CONSENSFLOW_TEST_DAEMON",
+        "cargo test",
+    ] {
+        assert!(!script.contains(asked), "{asked}: {script}");
+    }
+    // It is in the tarball, as the run script.
+    let asked = run_script_kept(kept.path(), 1);
+    assert!(asked.contains("Set-Location (Join-Path $dir 'app/src-tauri')\n"));
+    assert!(asked.contains("'npm ci --no-audit --no-fund', "));
+    assert!(asked.contains("$env:CONSENSFLOW_TEST_DAEMON = 'native'\n"));
+    assert!(asked.contains("'cargo test'"));
 }
 
 #[test]
 fn a_matrix_runs_each_pair_on_the_machine_builds_it_once_and_keeps_a_log_of_each() {
     let fakes = programs(&["scp", "ssh"]);
-    let tree = tree(&[("keep.txt", "kept")]);
+    // The logs of the runs are written into the checkout, as ignored files are.
+    let tree = tree(&[("keep.txt", "kept"), (".gitignore", "evals/reports\n")]);
+    let kept = tempfile::tempdir().unwrap();
     let ran = on(
         &tree,
         fakes.path(),
-        &[("FAKE_CHILD_LAST", "== exit 0")],
+        &[
+            ("FAKE_CHILD_FIRST", &tree_line(&tree)),
+            ("FAKE_CHILD_KEEP", kept.path().to_str().unwrap()),
+            ("FAKE_CHILD_LAST", "== exit 0"),
+        ],
         &[
             "windows-matrix",
             "--host",
@@ -343,18 +460,9 @@ fn a_matrix_runs_each_pair_on_the_machine_builds_it_once_and_keeps_a_log_of_each
         "{said}"
     );
 
-    // What each run said is its log's: the fake's report of ssh, with the script it was given.
-    let script_of = |log: &str| {
-        let text = fs::read_to_string(folder.join(log)).unwrap();
-        let line = arg_lines(&text)
-            .into_iter()
-            .find(|line| line.starts_with("arg: \"powershell"))
-            .unwrap_or_else(|| panic!("no script in {text}"))
-            .to_owned();
-        script_in(&line)
-    };
-    let first = script_of("round-trip-devin-devin.log");
-    let second = script_of("round-trip-claude-devin,pi.log");
+    // What each run is asked for is in the tarball it sent, the first run's first.
+    let first = run_script_kept(kept.path(), 1);
+    let second = run_script_kept(kept.path(), 2);
     assert!(
         first.contains(
             "'cargo xtask eval --scenario round-trip --chief devin --staff devin --timeout-min 30'"
@@ -381,30 +489,91 @@ fn script(folder: &Path, name: &str, body: &str) {
 }
 
 /// What zeewin does: the command's own status is said in the last line, and ssh
-/// ends with 1 for any failure, the command's own and the lock's refusal alike.
+/// ends with 1 for any failure, the command's own and the lock's refusal alike. The
+/// tree it unpacked is said before the command's words, but for the refusal, which
+/// unpacks nothing.
 #[cfg(unix)]
 #[test]
 fn a_run_answers_the_status_the_machine_says_though_its_ssh_ends_with_1() {
     for (said, answer) in [(7, 7), (75, 75), (0, 0)] {
         let fakes = tempfile::tempdir().unwrap();
-        script(fakes.path(), "scp", "exit 0");
+        let kept = fakes.path().join("tree.tgz");
+        script(fakes.path(), "scp", r#"cp "$2" "$CF_KEPT""#);
         let flattened = i32::from(said != 0);
+        // The first ask is the run; the next, for the reports it left, is a listing of none,
+        // which the machine's PowerShell ends with 0 whatever the run did.
         script(
             fakes.path(),
             "ssh",
-            &format!("echo \"in the run\"; echo \"== exit {said}\"; exit {flattened}"),
+            &format!(
+                "n=$(cat \"$0.count\" 2>/dev/null || echo 0); echo $((n+1)) > \"$0.count\"; \
+                 if [ \"$n\" -gt 0 ]; then exit 0; fi; \
+                 echo \"in the run\"; if [ {said} -ne 75 ]; then echo \"== tree $(tar -xzOf \"$CF_KEPT\" .windows-tree)\"; fi; echo \"== exit {said}\"; exit {flattened}"
+            ),
         );
         let tree = tree(&[("keep.txt", "kept")]);
         let ran = on(
             &tree,
             fakes.path(),
-            &[],
+            &[("CF_KEPT", kept.to_str().unwrap())],
             &["windows", "--host", "zeewin", "--", "cmd", "/c", "x"],
         );
         assert_eq!(ran.status.code(), Some(answer), "said {said}");
-        assert_eq!(out(&ran), format!("in the run\n== exit {said}\n"));
+        let said_tree = if said == 75 {
+            String::new()
+        } else {
+            format!("{}\n", tree_line(&tree))
+        };
+        assert_eq!(
+            out(&ran),
+            format!("in the run\n{said_tree}== exit {said}\n")
+        );
         assert_eq!(err(&ran), "");
     }
+}
+
+/// A machine that says another tree than the one a run sent has not run it: the run is
+/// ended there, fails whatever the command went on to say, and says both trees.
+#[cfg(unix)]
+#[test]
+fn a_run_told_another_tree_than_it_sent_fails_loud_and_is_ended_there() {
+    let fakes = tempfile::tempdir().unwrap();
+    let log = fakes.path().join("log");
+    script(fakes.path(), "scp", "exit 0");
+    // The first ssh is the run, which says another tree and a pass; the second is the
+    // machine being asked to end it.
+    script(
+        fakes.path(),
+        "ssh",
+        r#"printf '%s\n' "$$" >> "$CF_LOG"; if [ -e "$CF_FIRST" ]; then exit 0; fi; : > "$CF_FIRST"; echo "== tree none 0000000000000000"; echo "== exit 0"; exit 0"#,
+    );
+    let tree = tree(&[("keep.txt", "kept")]);
+    let first = fakes.path().join("first");
+    let ran = on(
+        &tree,
+        fakes.path(),
+        &[
+            ("CF_LOG", log.to_str().unwrap()),
+            ("CF_FIRST", first.to_str().unwrap()),
+        ],
+        &["windows", "--host", "zeewin", "--", "cmd", "/c", "x"],
+    );
+    assert_eq!(ran.status.code(), Some(1), "{}", err(&ran));
+    let said = err(&ran);
+    assert!(
+        said.starts_with("windows: the machine ran another tree than the one this run sent"),
+        "{said}"
+    );
+    assert!(
+        said.contains("it said `== tree none 0000000000000000`"),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!("this run sent `{}`", tree_line(&tree))),
+        "{said}"
+    );
+    // The machine was asked to end it: a second ssh.
+    assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 2);
 }
 
 /// What a stop does to a run, as a person causes it: Ctrl-C (the signal it is)
@@ -481,10 +650,250 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
     );
     // The run's ssh is gone, and the second ssh carried the script that ends the run.
     assert!(!cf_process::alive(held[0].parse().unwrap()), "{logged:?}");
+    let stop = script_in(&format!("arg: \"{}\"", ends[1]));
+    // It ends the run its record names: this run's, by the name its tarball has, which
+    // is the one it sent and the one its script unpacks, and it takes that tarball away.
+    let id = id_in_script(&script_in(&format!("arg: \"{}\"", held[1])));
     assert_eq!(
-        script_in(&format!("arg: \"{}\"", ends[1])),
-        "\n$ProgressPreference = 'SilentlyContinue'\n\
-         $running = Join-Path (Join-Path $env:USERPROFILE 'consensflow-build') '.windows-run.pid'\n\
-         if (Test-Path $running) { taskkill /PID (Get-Content $running) /T /F | Out-Null; Remove-Item -LiteralPath $running -Force }\n"
+        stop,
+        format!(
+            "\n$ProgressPreference = 'SilentlyContinue'\n\
+             $dir = Join-Path $env:USERPROFILE 'consensflow-build'\n\
+             $running = Join-Path $dir '.windows-run.pid'\n\
+             $owner = Join-Path $dir '.windows-run.id'\n\
+             $of = @(Get-Content $owner -ErrorAction SilentlyContinue)\n\
+             if ($of[0] -eq '{id}') {{ taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null; Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) {{ Remove-Item -LiteralPath $running -Force }} }}\n\
+             Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.{id}.tgz') -Force -ErrorAction SilentlyContinue\n\
+             exit 0\n"
+        )
     );
+}
+
+/// The Windows machine the live case below runs on: `CF_WINDOWS_HOST`, else zeewin.
+#[cfg(unix)]
+fn live_host() -> String {
+    std::env::var("CF_WINDOWS_HOST").unwrap_or_else(|_| "zeewin".into())
+}
+
+/// A checkout for a run on the real machine, committed, with a marker only it holds and
+/// a batch file that says it and then holds the machine's lock for about 20 seconds.
+/// Its commit is the second answer.
+#[cfg(unix)]
+fn live_tree(marker: &str) -> (tempfile::TempDir, String) {
+    let dir = tree(&[
+        ("marker.txt", marker),
+        (
+            "hold.cmd",
+            "@echo off\r\ntype marker.txt\r\nping -n 20 127.0.0.1 >nul\r\n",
+        ),
+    ]);
+    let git = |words: &[&str]| {
+        let ran = Command::new("git")
+            .args(words)
+            .current_dir(dir.path())
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .output()
+            .unwrap();
+        assert!(ran.status.success(), "git {words:?}: {}", err(&ran));
+        out(&ran).trim().to_owned()
+    };
+    git(&[
+        "-c",
+        "user.name=windows-test",
+        "-c",
+        "user.email=windows-test@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "-m",
+        marker,
+    ]);
+    let commit = git(&["rev-parse", "HEAD"]);
+    (dir, commit)
+}
+
+/// `args` run as `cargo xtask windows` is by a worker's tree (what `windows-from-tree.sh`
+/// does: the session's variables and cmux's wrappers stay out), against the machine, in
+/// the checkout `tree`: the xtask that was built for the tests, or `CF_WINDOWS_XTASK`
+/// where a case wants another to be tried.
+#[cfg(unix)]
+fn live_start(tree: &tempfile::TempDir, folder: &str, command: &[&str]) -> std::process::Child {
+    use std::process::Stdio;
+
+    let own = Env::from_process();
+    let path: Vec<PathBuf> = std::env::split_paths(own.os("PATH").unwrap())
+        .filter(|part| !part.to_string_lossy().to_lowercase().contains("cmux"))
+        .collect();
+    let program = std::env::var("CF_WINDOWS_XTASK")
+        .unwrap_or_else(|_| env!("CARGO_BIN_EXE_xtask").to_owned());
+    let mut start = Command::new(program);
+    start.env_clear();
+    for (name, value) in own.iter() {
+        let name = name.to_string_lossy();
+        let session = ["CLAUDE", "CMUX", "AI_AGENT"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix));
+        if !session && name != "PATH" && !name.starts_with("GIT_") {
+            start.env(&*name, value);
+        }
+    }
+    start
+        .env("PATH", std::env::join_paths(path).unwrap())
+        .env(
+            "CARGO_MANIFEST_DIR",
+            tree.path().join("tools").join("xtask"),
+        )
+        .current_dir(tree.path())
+        .args(["windows", "--host", &live_host(), "--dir", folder])
+        // Twelve variables of a hundred characters: more than the command line of ssh could
+        // hold with the build, which they ride in the tarball instead of.
+        .args((0..12).flat_map(|at| {
+            [
+                "--env".to_owned(),
+                format!("CF_LIVE_{at}={}", "v".repeat(100)),
+            ]
+        }))
+        .arg("--")
+        .args(command)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap()
+}
+
+/// `script` run on the machine, as the shell of its ssh server runs it (PowerShell).
+#[cfg(unix)]
+fn on_the_machine(script: &str) -> String {
+    let ran = Command::new("ssh")
+        .arg(live_host())
+        .arg(script)
+        .output()
+        .unwrap();
+    assert!(ran.status.success(), "ssh: {}{}", out(&ran), err(&ran));
+    out(&ran)
+}
+
+/// The case's own folder and what is left in the profile of it, taken away when the case
+/// ends, however it ends.
+#[cfg(unix)]
+struct Folder(String);
+
+#[cfg(unix)]
+impl Drop for Folder {
+    fn drop(&mut self) {
+        let folder = &self.0;
+        let _ = Command::new("ssh")
+            .arg(live_host())
+            .arg(format!(
+                "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $env:USERPROFILE '{folder}'), (Join-Path $env:USERPROFILE '{folder}.*tgz')"
+            ))
+            .output();
+    }
+}
+
+/// The real machine, one run at a time: two runs started together from two trees, as two
+/// workers' are. Each must run its own tree or be refused by the lock, and what a run
+/// that is refused sent must not be what the run that holds the lock unpacks, nor stay
+/// there. The folder is this case's own, so that its lock is its own: workers' runs in
+/// the default folder neither wait for it nor are waited for by it, and what it proves of
+/// the lock and the tarballs is the same code. Run it with
+/// `cargo test -p xtask --test windows -- --ignored two_runs_started_together`.
+#[cfg(unix)]
+#[test]
+#[ignore = "runs on the Windows machine over ssh (zeewin, or CF_WINDOWS_HOST), for about a minute"]
+fn two_runs_started_together_from_two_trees_each_run_their_own_tree_or_are_refused() {
+    let folder = format!("cf-test-two-runs-{}", std::process::id());
+    let _cleanup = Folder(folder.clone());
+    let (a, a_commit) = live_tree("marker of tree A");
+    let (b, b_commit) = live_tree("marker of tree B");
+    // Together, to the millisecond: both are started before either has sent a word, so that
+    // their scripts ask the machine for its lock at the moments their uploads end.
+    let (first, second) = (
+        live_start(&a, &folder, &["hold.cmd"]),
+        live_start(&b, &folder, &["hold.cmd"]),
+    );
+    let (first, second) = (
+        first.wait_with_output().unwrap(),
+        second.wait_with_output().unwrap(),
+    );
+    // Whatever was sent there, said before it is removed.
+    let left = on_the_machine(&format!(
+        "Get-ChildItem $env:USERPROFILE -Filter '{folder}*.tgz' | ForEach-Object {{ $_.Name }}"
+    ));
+
+    for (name, run) in [("first", &first), ("second", &second)] {
+        println!(
+            "--- {name}: status {:?}\n{}{}",
+            run.status.code(),
+            out(run),
+            err(run)
+        );
+    }
+    println!("--- tarballs left on the machine: {:?}", left.trim());
+
+    let statuses = (first.status.code(), second.status.code());
+    let ((won, won_marker, won_commit), (lost, lost_marker, lost_tree, lost_commit)) =
+        match statuses {
+            (Some(0), Some(75)) => (
+                (&first, "marker of tree A", &a_commit),
+                (&second, "marker of tree B", &b, &b_commit),
+            ),
+            (Some(75), Some(0)) => (
+                (&second, "marker of tree B", &b_commit),
+                (&first, "marker of tree A", &a, &a_commit),
+            ),
+            other => panic!(
+                "one run holds the lock and the other is refused with 75, not {other:?}\n--- first\n{}{}\n--- second\n{}{}",
+                out(&first),
+                err(&first),
+                out(&second),
+                err(&second)
+            ),
+        };
+    // The run that held the lock ran its own tree, and said so.
+    let said = out(won);
+    assert!(said.contains(won_marker), "{said}");
+    // The twelve variables got there: the last one is said by the run script before its command.
+    assert!(said.contains("== env CF_LIVE_11="), "{said}");
+    assert!(
+        !said.contains(lost_marker),
+        "the run that held the lock ran the other run's tree: {said}"
+    );
+    assert!(
+        said.lines().any(|line| line
+            .trim_end()
+            .starts_with(&format!("== tree {won_commit} "))),
+        "{said}"
+    );
+    assert!(!said.contains(lost_commit.as_str()), "{said}");
+    // The one that was refused said so, ran nothing and said no tree.
+    let refused = out(lost);
+    assert!(
+        refused.contains("A run is still going on this machine"),
+        "{refused}"
+    );
+    assert!(!refused.contains("== tree "), "{refused}");
+    assert!(!refused.contains(lost_marker), "{refused}");
+    // And what either sent is gone, the refused one's too.
+    assert_eq!(left.trim(), "", "tarballs left on the machine");
+
+    // Once the lock is free, the run that was refused runs its own tree. Its command ends
+    // with a marker that has no line end (`type` of the file), which the run must still
+    // answer as a pass: the line it ends by is on a line of its own.
+    let again = live_start(lost_tree, &folder, &["type", "marker.txt"])
+        .wait_with_output()
+        .unwrap();
+    let said = out(&again);
+    assert_eq!(again.status.code(), Some(0), "{said}{}", err(&again));
+    assert!(
+        said.lines().any(|line| line
+            .trim_end()
+            .starts_with(&format!("== tree {lost_commit} "))),
+        "{said}"
+    );
+    assert!(said.contains(lost_marker), "{said}");
 }

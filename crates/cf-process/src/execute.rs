@@ -106,28 +106,29 @@ impl Read {
 
 /// Reads both streams to their ends, keeping each one's first `limit`
 /// bytes, and stops at once when either says more, as Node's `maxBuffer`
-/// does.
+/// does: whether it stopped so.
 pub(crate) async fn read_both(
     stdout: &mut (impl AsyncRead + Unpin),
     stderr: &mut (impl AsyncRead + Unpin),
     out: &mut Read,
     err: &mut Read,
     limit: usize,
-) {
+) -> bool {
     let (mut out_open, mut err_open) = (true, true);
     let (mut out_chunk, mut err_chunk) = ([0; 16 * 1024], [0; 16 * 1024]);
     while out_open || err_open {
         tokio::select! {
             read = stdout.read(&mut out_chunk), if out_open => match read {
                 Ok(0) | Err(_) => out_open = false,
-                Ok(count) => if !out.keep(&out_chunk[..count], limit) { return },
+                Ok(count) => if !out.keep(&out_chunk[..count], limit) { return true },
             },
             read = stderr.read(&mut err_chunk), if err_open => match read {
                 Ok(0) | Err(_) => err_open = false,
-                Ok(count) => if !err.keep(&err_chunk[..count], limit) { return },
+                Ok(count) => if !err.keep(&err_chunk[..count], limit) { return true },
             },
         }
     }
+    false
 }
 
 /// The command as Node's message writes it: the file, then each argument,

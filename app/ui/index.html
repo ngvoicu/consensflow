@@ -158,6 +158,32 @@
       <button class="quiet-button" type="submit" autofocus>Close</button>
     </form>
   </dialog>
+  <!-- The history viewer (core/history-viewer.js): everything kept of a participant's
+       conversations, from the History button on its window's head, a page at a time. -->
+  <dialog id="history-dialog" class="screen history-viewer" aria-labelledby="history-title">
+    <header class="history-head">
+      <h2 class="history-title" id="history-title">History</h2>
+      <span class="history-who"></span>
+      <span class="spacer"></span>
+      <button class="quiet-button" type="button" name="history-refresh">Refresh</button>
+    </header>
+    <p class="history-hint">Not stored: tool calls and thinking.</p>
+    <div class="history-bar">
+      <form class="history-search" role="search">
+        <input type="search" name="history-find" maxlength="1000" placeholder="Find in the history" aria-label="Find in the history" title="A search holds at most 1,000 characters">
+        <button class="quiet-button" type="submit">Find</button>
+      </form>
+      <label class="history-switch"><input type="checkbox" name="history-tools"> Show tool output</label>
+      <span class="spacer"></span>
+      <button class="quiet-button" type="button" name="history-older">Older</button>
+      <span class="history-page" role="status"></span>
+      <button class="quiet-button" type="button" name="history-newer">Newer</button>
+    </div>
+    <section class="history-body" aria-label="The conversations" tabindex="0"></section>
+    <form class="dialog-actions" method="dialog">
+      <button class="quiet-button" type="submit" autofocus>Close</button>
+    </form>
+  </dialog>
   <!-- What the app says of specs for every project that does not say otherwise, and the Specmint
        it brings (core/specs-settings.js): each control saves as it changes, and the variants and
        versions are drawn from what the daemon reads of the bundled files. -->

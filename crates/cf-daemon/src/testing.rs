@@ -197,6 +197,13 @@ impl Scene {
             .unwrap();
     }
 
+    /// T-1's window ends its turn with a result, and the chief accepts the task.
+    pub fn accept(&self) {
+        let mut ledger = self.context.ledger.borrow_mut();
+        ledger.record_result(self.project.id, 1, "Done").unwrap();
+        ledger.accept_task(self.project.id, 1, "chief").unwrap();
+    }
+
     /// Message `id`, as the ledger has it now.
     pub fn message(&self, id: i64) -> MessageView {
         let found = self.context.ledger.borrow().message(id).unwrap();

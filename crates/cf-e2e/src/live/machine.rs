@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 use crate::process::{own_var, Run};
 use crate::rig::Config;
-use crate::{files, Error, Result};
+use crate::{checkout, files, Error, Result};
 
 pub use path::{command, working_command};
 pub use wrapper::{isolated_claude, shimmed_claude, shimmed_claude_with_servers, ISOLATION};
@@ -267,6 +267,14 @@ fn windows_environment(
         .collect()
 }
 
+/// Where the report of a rig built for the real harnesses is kept, from the checkout's
+/// root: under its build folder, not in the machine's temp folder. The windows of such a
+/// rig show what a real harness drew with the person's login, which no masker is sure to
+/// hide, and the temp folder would keep it for good; a clean of the build folder takes
+/// this away. CI uploads it for a failed job (ten cases of the rig suite build on this
+/// rig with the stand-in, and hold no real harness's output there).
+const REPORTS: &str = "app/src-tauri/target/live-reports";
+
 /// A rig whose windows run the stand-in `stand_in` for Claude and find every
 /// harness of `installs`, logged in as the machine is: each one's command's
 /// folder, and Node's where it is another, are on their `PATH` (in the order
@@ -290,7 +298,9 @@ fn rig_keeping_claude_in(
     claude_config: Option<String>,
 ) -> Config {
     let machine = |name: &str| own_var(name);
-    let mut config = Config::new(stand_in).var("LANG", "en_US.UTF-8");
+    let mut config = Config::new(stand_in)
+        .var("LANG", "en_US.UTF-8")
+        .reports_in(checkout::path(REPORTS));
     for name in ["USER", "LOGNAME"] {
         if let Some(value) = machine(name) {
             config = config.var(name, value);

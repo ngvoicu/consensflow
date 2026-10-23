@@ -15,12 +15,15 @@
 
 mod answered_again;
 mod approval;
+mod behind_work;
 mod carrying;
 mod decided;
 mod doors;
+mod edited_brief;
 mod fixture;
 mod gate;
 mod legacy;
+mod open_questions;
 mod pause_notes;
 mod questions;
 mod sessions;

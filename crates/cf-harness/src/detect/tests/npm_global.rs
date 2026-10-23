@@ -20,29 +20,29 @@ fn npm_shim(script: &str) -> String {
 }
 
 /// A path as text.
-fn text(path: &Path) -> String {
+pub(super) fn text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
 /// A Windows machine as a test lays one out, on any system: a home, the
 /// roaming folder `APPDATA` names, and a folder PATH names that holds nothing.
-struct Machine {
-    root: tempfile::TempDir,
+pub(super) struct Machine {
+    pub(super) root: tempfile::TempDir,
 }
 
 impl Machine {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             root: tempfile::tempdir().unwrap(),
         }
     }
 
-    fn home(&self) -> PathBuf {
+    pub(super) fn home(&self) -> PathBuf {
         self.root.path().join("home")
     }
 
     /// The folder PATH names.
-    fn bin(&self) -> PathBuf {
+    pub(super) fn bin(&self) -> PathBuf {
         self.root.path().join("bin")
     }
 
@@ -52,13 +52,13 @@ impl Machine {
     }
 
     /// npm's global folder, `%APPDATA%\npm`.
-    fn npm(&self) -> PathBuf {
+    pub(super) fn npm(&self) -> PathBuf {
         self.roaming().join("npm")
     }
 
     /// Its environment, with `changes` made to it: a variable given none is
     /// taken away.
-    fn env(&self, changes: &[(&str, Option<&str>)]) -> Env {
+    pub(super) fn env(&self, changes: &[(&str, Option<&str>)]) -> Env {
         let mut vars: BTreeMap<String, String> = [
             ("OS", "Windows_NT".to_owned()),
             (

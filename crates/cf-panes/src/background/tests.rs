@@ -167,6 +167,32 @@ fn a_server_the_harness_starts_late_is_no_work_of_the_turn_and_is_not_named() {
     assert_eq!(baseline.left_running(&tree).total, 2);
 }
 
+/// A harness that ends the script of the agent's command by its number (Pi, on a stop) leaves the
+/// script's child, which no shell the harness started leads to any longer: it is left running, not
+/// named and not ended, until its window closes (T-142, P3-7, seen on zeewin with the `stuck` case:
+/// the sleep outlived the script by up to its 200 s). What the host saw to be the turn's work while
+/// the chain was whole is forgotten at the next look, as every look is made on the tree alone, and
+/// the daemon asks for none during a turn. Remembering it (what was seen the turn's, and runs
+/// still, is the turn's at the end of it) is a change of what the host ends, and it is not made
+/// here: it needs a look the host makes itself during the turn.
+#[test]
+#[ignore = "issues/a-command-whose-shell-the-harness-ended-leaves-its-children-running.md: the host forgets what it saw to be the turn's work, so the child of a script the harness ended by its number is left until the window closes"]
+fn what_was_seen_to_be_the_turns_work_is_still_it_when_the_shell_that_started_it_was_ended() {
+    let baseline = marked(&[program()], None, None);
+    let running = vec![
+        program(),
+        member(40, "/bin/bash -c sh ./script", "bash", of(10)),
+        member(41, "sh ./script", "sh", of(40)),
+        member(42, "sleep 200", "sleep", of(41)),
+    ];
+    // A look while the script runs: the chain is whole, and the sleep is the turn's.
+    assert_eq!(turns(&baseline, &running), [40, 41, 42]);
+    // The harness ended the script by its number: the shells are gone and the sleep runs on, with
+    // no parent that runs. It was the turn's, and still runs.
+    let after = vec![program(), member(42, "sleep 200", "sleep", None)];
+    assert_eq!(turns(&baseline, &after), [42]);
+}
+
 #[test]
 fn a_job_that_has_lost_its_shell_is_no_work_of_the_turn_and_is_not_named() {
     let baseline = marked(&[program()], None, None);

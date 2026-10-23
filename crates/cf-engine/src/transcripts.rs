@@ -5,6 +5,7 @@
 //! copied.
 
 use cf_harness::contract::Observed;
+use cf_harness::records::Item;
 use cf_ledger::ParticipantView;
 use serde_json::Value;
 
@@ -54,10 +55,7 @@ impl Dispatcher {
             copied.saturating_sub(1)
         };
         if items.len() > from {
-            let new: Vec<Value> = items[from..]
-                .iter()
-                .map(|item| serde_json::to_value(item).unwrap_or(Value::Null))
-                .collect();
+            let new: Vec<Value> = items[from..].iter().map(to_copy).collect();
             let changed = self.seams.ledger.borrow_mut().copy_transcript(
                 conversation.id,
                 &new,
@@ -100,6 +98,18 @@ impl Dispatcher {
         self.changed();
         Ok(())
     }
+}
+
+/// An item as the ledger copies it: as its reading writes it, and marked when
+/// it is a compaction's summary, which a reading never says.
+fn to_copy(item: &Item) -> Value {
+    let mut value = serde_json::to_value(item).unwrap_or(Value::Null);
+    if item.compaction {
+        if let Value::Object(fields) = &mut value {
+            fields.insert("compaction".to_owned(), Value::Bool(true));
+        }
+    }
+    value
 }
 
 #[cfg(test)]

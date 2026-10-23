@@ -338,10 +338,20 @@ mod tests {
             commentary: true,
             compaction: false,
         });
+        // A compaction's summary is the user's item it was to Node.
+        record.items.push(Item {
+            id: Arc::from("u_1"),
+            role: Role::User,
+            text: Arc::from("Summary"),
+            complete: true,
+            at: None,
+            commentary: false,
+            compaction: true,
+        });
         record.settlement = Settlement::InFlight;
         assert_eq!(
             serde_json::to_string(&Reading::Known(record)).unwrap(),
-            r#"{"items":[{"id":"msg_1","role":"assistant","text":"Done.","complete":true,"at":"2026-09-06T17:27:06.000Z"},{"id":"msg_2","role":"assistant","text":"Reading the diff","complete":false,"commentary":true}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"in-flight"}}"#
+            r#"{"items":[{"id":"msg_1","role":"assistant","text":"Done.","complete":true,"at":"2026-09-06T17:27:06.000Z"},{"id":"msg_2","role":"assistant","text":"Reading the diff","complete":false,"commentary":true},{"id":"u_1","role":"user","text":"Summary","complete":true}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"in-flight"}}"#
         );
         // What a settled turn left running is said only where there is some: agents as
         // they always were, the jobs, the retired jobs and the monitors noticed by their

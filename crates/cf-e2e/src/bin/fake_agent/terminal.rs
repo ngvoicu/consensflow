@@ -86,6 +86,24 @@ impl Keys {
         }
     }
 
+    /// What the terminal gives next, as it came, waiting for it: none when the
+    /// terminal is gone. A question read before the window's prompt takes its keys so.
+    // The stand-in Devin, which reads its terminal here too, asks no such question.
+    #[allow(dead_code)]
+    pub fn chunk(&mut self) -> Option<Vec<u8>> {
+        self.incoming.recv().ok()
+    }
+
+    /// What the terminal gave since the last read, as it came, waiting for none.
+    #[allow(dead_code)]
+    pub fn since(&mut self) -> Vec<u8> {
+        let mut given = Vec::new();
+        while let Ok(more) = self.incoming.try_recv() {
+            given.extend(more);
+        }
+        given
+    }
+
     /// What the terminal gave since the last call, as events, waiting a moment
     /// for it (an Escape that nothing follows in that moment is the key). None
     /// when the terminal is gone.

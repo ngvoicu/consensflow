@@ -195,8 +195,9 @@ impl Timeline {
 }
 
 /// What an entry of the ledger's log says of the project, for the timeline: a
-/// wake-up call, the chief switched, the project closed or resumed; none for the rest,
-/// which the tasks and the windows say.
+/// wake-up call, or one held back while work was on its way, the chief
+/// switched, the project closed or resumed; none for the rest, which the tasks
+/// and the windows say.
 fn logged(event: &Event) -> Option<String> {
     let data = &event.data;
     let text = |value: &Value| value.as_str().unwrap_or("?").to_owned();
@@ -204,6 +205,16 @@ fn logged(event: &Event) -> Option<String> {
         "project.wake_up" => Some(format!(
             "a wake-up call nudged the chief (m-{})",
             data["message"]
+        )),
+        "project.wake_up_skipped" => Some(format!(
+            "a wake-up call was held back while work was on its way ({})",
+            data["tasks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|task| format!("T-{task}"))
+                .collect::<Vec<_>>()
+                .join(", ")
         )),
         "chief.switched" => Some(format!(
             "the chief is now {} ({}){}",

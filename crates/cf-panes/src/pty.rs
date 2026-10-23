@@ -6,16 +6,26 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+#[cfg(unix)]
+use portable_pty::native_pty_system;
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize};
 
 use crate::background::Baseline;
 use crate::ended::{Ended, EndedSlot};
 use crate::screen::PaneScreen;
 
 mod close;
+#[cfg(windows)]
+mod conpty;
+#[cfg(all(test, windows))]
+thread_local! {
+    /// Whether a test has the exit watcher of the windows this thread opens fail to start.
+    static WATCH_FAILS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 #[cfg(test)]
 mod keys;
 mod output_end;
+mod owed;
 #[cfg(all(any(test, feature = "test-support"), unix))]
 mod sentinel;
 mod turn;
@@ -23,6 +33,7 @@ mod turn;
 pub use close::CLOSE_GRACE;
 use close::{ask_all_to_exit, terminate, terminate_asked, terminate_detached};
 pub(crate) use output_end::Handed;
+pub use owed::ExitOwed;
 #[cfg(all(any(test, feature = "test-support"), unix))]
 pub use sentinel::Sentinel;
 
@@ -80,6 +91,9 @@ pub struct StreamedPane {
     pub screen: Arc<PaneScreen>,
     /// How the window's program ended, once anyone read its status.
     pub ended: Arc<EndedSlot>,
+    /// The window's exit, owed to the daemon until whoever reads `output` is done: the table
+    /// is asked whether every one has been told ([`PaneTable::exits_told_within`]).
+    pub owed: ExitOwed,
 }
 
 /// The child environment carried by `pane.open`: inherit the parent, apply
@@ -242,8 +256,10 @@ fn advertise_terminal(
 }
 
 struct Pane {
-    master: Box<dyn MasterPty + Send>,
+    /// Before the master, so that the terminal's input is let go before the master closes
+    /// it: on Windows a console that waits on its input is then told it has ended (`conpty`).
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
     process_group_id: Option<i32>,
     #[cfg(target_os = "macos")]
@@ -351,6 +367,8 @@ pub struct PaneTable {
     next_id: AtomicU64,
     updating: AtomicBool,
     teardown: Arc<Teardown>,
+    /// The exits of the windows whose output is read, which are yet to be told.
+    exits: Arc<owed::ExitsOwed>,
     /// How long a closed window's programs are given to end once asked to
     /// ([`CLOSE_GRACE`]): a test gives less.
     close_grace: Duration,
@@ -412,6 +430,7 @@ impl PaneTable {
             next_id: AtomicU64::new(1),
             updating: AtomicBool::new(false),
             teardown: Arc::new(Teardown::default()),
+            exits: Arc::new(owed::ExitsOwed::default()),
             close_grace: grace,
         }
     }
@@ -501,7 +520,14 @@ impl PaneTable {
             return Err(PaneError::AlreadyOpen(key));
         }
 
+        // A window whose tree cannot be owned does not open: closing it could not end
+        // what the harness starts. On Windows the harness is started in its job.
+        #[cfg(windows)]
+        let job = Arc::new(crate::job_object::JobObject::new()?);
+        #[cfg(unix)]
         let pty_system = native_pty_system();
+        #[cfg(windows)]
+        let pty_system = conpty::ConPty::joining(Arc::clone(&job));
         let pair = pty_system
             .openpty(size)
             .map_err(|error| PaneError::Pty(error.to_string()))?;
@@ -535,25 +561,11 @@ impl PaneTable {
         let mut process_tree = crate::process_tree::ProcessTree::new();
         #[cfg(target_os = "macos")]
         command.env(crate::process_tree::OWNER_ENV, &process_tree.marker);
-        #[cfg(windows)]
-        let job = Arc::new(crate::job_object::JobObject::new()?);
-        #[cfg_attr(not(windows), allow(unused_mut))]
-        let mut child = pair
+        let child = pair
             .slave
             .spawn_command(command)
             .map_err(|error| PaneError::Pty(error.to_string()))?;
         drop(pair.slave);
-        // A window whose tree cannot be owned does not open: closing it could
-        // not end what the harness starts.
-        #[cfg(windows)]
-        if let Err(error) = child
-            .process_id()
-            .ok_or_else(|| io::Error::other("the harness has no process id"))
-            .and_then(|pid| job.assign(pid))
-        {
-            let _ = child.kill();
-            return Err(PaneError::Io(error));
-        }
 
         #[cfg(unix)]
         let process_group_id = child.process_id().and_then(|pid| i32::try_from(pid).ok());
@@ -643,15 +655,22 @@ impl PaneTable {
                 terminal_of(pane),
             )
         };
+        // A window that fails here lets go of its output before it is ended: on Windows a
+        // console closed while its output is held open and unread may wait for ever (`conpty`).
         let terminal = match terminal {
             Ok(terminal) => terminal,
             Err(error) => {
+                drop(reader);
                 let _ = self.kill(&key);
                 return Err(error);
             }
         };
         #[cfg(windows)]
-        self.watch_exit(&key)?;
+        if let Err(error) = self.watch_exit(&key) {
+            drop(reader);
+            let _ = self.kill(&key);
+            return Err(error);
+        }
 
         let (sender, output) = mpsc::channel();
         let output_key = key.clone();
@@ -669,7 +688,16 @@ impl PaneTable {
             output,
             screen,
             ended,
+            owed: self.exits.owe(),
         })
+    }
+
+    /// Whether the exit of every window whose output is read has been told, waited for
+    /// until `within`: the exit of a window that was ended is told when its output has
+    /// ended and its program is proven gone, a moment after the close that ended it, and a
+    /// host that stops closes its own output only once they are.
+    pub fn exits_told_within(&self, within: Duration) -> bool {
+        self.exits.paid_within(within)
     }
 
     pub fn ack(&self, key: &PaneKey, seq: u64) -> Result<(), PaneError> {
@@ -897,7 +925,7 @@ impl PaneTable {
     /// on the program, gives the pseudoconsole a moment to pass on what it
     /// printed last, and retires the pane; its master's drop closes the
     /// pseudoconsole, the output ends, and `pane.exit` follows as anywhere.
-    /// A window whose end could not be seen does not open.
+    /// A window whose end could not be seen does not open: its opener ends it.
     #[cfg(windows)]
     fn watch_exit(self: &Arc<Self>, key: &PaneKey) -> Result<(), PaneError> {
         use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
@@ -915,6 +943,10 @@ impl PaneTable {
             }
         }
 
+        #[cfg(test)]
+        if WATCH_FAILS.get() {
+            return Err(PaneError::Io(io::Error::other("planted: no watcher")));
+        }
         let pid = self
             .lock_panes()?
             .get(key)
@@ -944,11 +976,7 @@ impl PaneTable {
                     })
                     .map(|_| ())
             });
-        if let Err(error) = watched {
-            let _ = self.kill(key);
-            return Err(PaneError::Io(error));
-        }
-        Ok(())
+        watched.map_err(PaneError::Io)
     }
 
     pub fn list(&self) -> Result<Vec<PaneInfo>, PaneError> {
@@ -1332,7 +1360,8 @@ pub(crate) mod conpty_test {
     /// Everything the pane printed until `needle`, acknowledged as read.
     /// ConPTY wraps the child's text in its own escape sequences, and its
     /// output does not end when the child does, so a test reads for text. It
-    /// also opens by asking where the cursor is and holds the child's output
+    /// may open by asking where the cursor is (a console made to inherit its cursor does;
+    /// the pane host's are not) and hold the child's output
     /// until a terminal answers; the page's xterm does, and so does this.
     pub fn read_until(
         table: &PaneTable,

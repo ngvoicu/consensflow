@@ -284,7 +284,8 @@ async function open(page, data = model()) {
     window.__calls = []
     window.__model = data
     // Every listener of each event, as the app keeps them: one registered twice hears it
-    // twice. `__listeners.get(name)` says the event to all of them.
+    // twice. `__listeners.get(name)` says the event to all of them; an event no listener
+    // is there for is heard by none, as the app says it.
     window.__handlers = new Map()
     window.__listeners = new Map()
     // The drops the app keeps for the page to ask of, by their numbers, as file_drop.rs keeps
@@ -301,7 +302,7 @@ async function open(page, data = model()) {
         window.__drops.set(id, paths)
         if (window.__drops.size > 16) window.__drops.delete(window.__drops.keys().next().value)
       }
-      window.__listeners.get('file-drop')({
+      window.__listeners.get('file-drop')?.({
         event: 'file-drop',
         id: 0,
         payload: { id, paths, position },
@@ -2250,6 +2251,40 @@ test("shows what a task's window wrote, from ConsensFlow's own copy, under the t
   await expect(items.nth(2)).toHaveAttribute('data-role', 'assistant')
 })
 
+test("names a compaction's summary in what a window wrote as one, never as what was sent to it", async ({
+  page,
+}) => {
+  const data = model()
+  data.transcripts = {
+    '1:2': {
+      total: 2,
+      items: [
+        { id: 'u1', role: 'user', text: 'Write the parser', complete: true, at: null },
+        {
+          id: 's1',
+          role: 'user',
+          text: 'This session is being continued.',
+          complete: true,
+          at: null,
+          compaction: true,
+        },
+      ],
+    },
+  }
+  await open(page, data)
+  await page.locator('button.card[data-task="2"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-2' })
+  await drawer.locator('details[data-section="transcript"] summary').click()
+  const items = drawer
+    .getByRole('list', { name: "What T-2's window wrote" })
+    .locator('.transcript-item')
+  await expect(items.locator('.transcript-head')).toHaveText([
+    'Sent to the window',
+    'Compaction summary',
+  ])
+  await expect(items.nth(1)).toHaveAttribute('data-compaction', 'true')
+})
+
 /** T-2 with a long answer in what its window wrote. */
 function longTranscript() {
   const data = model()
@@ -2948,6 +2983,14 @@ test('adds a saved agent to the staff as a tester, or as one more role of a memb
   await expect(dialog.locator('.dialog-help')).toContainText(
     'a tester checks it by running it when the chief asks',
   )
+  // The tester has its place among the roles, after the reviewer.
+  await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
+    'Worker',
+    'Advisor',
+    'Reviewer',
+    'Tester',
+    'Image designer',
+  ])
   // Any agent may test but the image agent, which only draws.
   await dialog.getByLabel('Role').selectOption('tester')
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
@@ -6986,10 +7029,11 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
   await expect
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
-  // The chief's window opens and closes with the project: its card has no Open, only Switch chief.
+  // The chief's window opens and closes with the project: its card has no Open, only its
+  // History and Switch chief.
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['Switch chief'])
+    .toEqual(['History', 'Switch chief'])
 })
 
 /**
@@ -7065,11 +7109,11 @@ test("keeps a session's terminal out of the dock until the human shows it, and t
     reviewer.getByRole('button', { name: "Show @zeus · brisk-birch's terminal" }),
   ).toBeVisible()
   // The chief's terminal has nothing to show or hide, on its row or its card:
-  // its row has no tools, and its card switches the chief.
+  // its row has no tools, and its card reads its history and switches the chief.
   await expect(page.locator('tr[data-handle="chief"] .row-head button')).toHaveCount(0)
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['Switch chief'])
+    .toEqual(['History', 'Switch chief'])
   // Out of the dock, a session's window is fed all the same: what it prints
   // is taken and acknowledged, so it never waits for a reader.
   expect(await page.evaluate(() => window.__emulators.length)).toBe(3)
@@ -7199,8 +7243,9 @@ test("offers Hide alone on a session's card, which tells the daemon: the window 
   const row = page.locator('tr[data-handle="zeus-amber-pine"]')
   const card = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
   await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
-  // An icon, named by its tip like the row's tools; nothing on the card ends the window.
-  await expect.poll(() => named(card.locator('button'))).toEqual(['Hide terminal'])
+  // Its History, and Hide: an icon, named by its tip like the row's tools; nothing on the
+  // card ends the window.
+  await expect.poll(() => named(card.locator('button'))).toEqual(['History', 'Hide terminal'])
   await expect(card.getByRole('button', { name: /^Close/ })).toHaveCount(0)
   await card.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }).click()
   await expect.poll(() => docked(page)).toEqual(['chief'])
@@ -7223,7 +7268,7 @@ test("keeps a shown session's card head on one line, Hide in it, at the default 
   await unfold(page)
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   const card = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
-  await expect.poll(() => named(card.locator('button'))).toEqual(['Hide terminal'])
+  await expect.poll(() => named(card.locator('button'))).toEqual(['History', 'Hide terminal'])
   // Every part of the head inside its 30px: a name wrapped onto three lines ran out of it.
   const outside = () =>
     card.evaluate((card) => {

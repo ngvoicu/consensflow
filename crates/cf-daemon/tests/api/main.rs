@@ -73,11 +73,11 @@ const FINISH_IN_THE_USAGE: &str = "the usage `cf help` prints inside a window li
 
 /// The traces the receipt and stop redesign moved on purpose: a choice answer
 /// is received, not read at its creation, a resume takes in what its window
-/// kept, a command written wrong asks the board nothing, and a brief that
-/// waits at the gate is not given to an agent; those the decision on a
-/// result moved: the result is withdrawn, not pasted after it; and those that
-/// print the verbs of `cf task`, which have `finish` now. Found by playing
-/// them against the daemon.
+/// kept, a command written wrong asks the board nothing, and `cf task get`
+/// prints the brief of a task no window holds under its header; those the
+/// decision on a result moved: the result is withdrawn, not pasted after it;
+/// and those that print the verbs of `cf task`, which have `finish` now. Found
+/// by playing them against the daemon.
 const DEPARTED: &[Departed] = &[
     ("core-api-003", RESULT_ACCEPTED),
     (
@@ -95,8 +95,8 @@ const DEPARTED: &[Departed] = &[
         "a resume carries the brief that never arrived and logs `message.carried`: one more clock reading, so the task's `updatedAt` is a second later",
     ),
     (
-        "cf-board-010",
-        "the task an agent reads while its brief waits at the gate has no `body`: the brief is for its window once the human passes it on",
+        "cf-board-015",
+        "`cf task get` prints the brief of a task no window ever held (here one cancelled, then deleted, while it was open) under its header, so the whole brief can be read before it goes out: Node printed the header alone",
     ),
     (
         "cf-board-022",

@@ -37,6 +37,7 @@ mod stalls;
 mod stops;
 mod taken_back;
 mod transcripts;
+mod trust;
 mod turn_end;
 mod unstarted;
 mod wake_ups;

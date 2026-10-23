@@ -35,16 +35,23 @@ use support::trace::{self, Tally};
 /// of its corners.
 const SUITES: [&str; 2] = ["core-page", "corners-page"];
 
-/// The traces the receipt and stop redesign moved on purpose, found by playing
-/// them against the daemon.
-const DEPARTED: &[Departed] = &[(
-    "core-page-013",
-    "a release cancels the old window's kept rows with the reason `carried into T-n's brief for its next window`; Node gave none",
-)];
+/// The traces the receipt and stop redesign moved on purpose, and the refusal
+/// of a cancel that open tasks wait for, found by playing them against the
+/// daemon.
+const DEPARTED: &[Departed] = &[
+    (
+        "core-page-013",
+        "a release cancels the old window's kept rows with the reason `carried into T-n's brief for its next window`; Node gave none",
+    ),
+    (
+        "core-page-022",
+        "the human cancels T-1 while T-2 waits for it: the cancel is refused (`waited-for`) until T-2 is cancelled, where Node cancels it and T-2 stays blocked for good",
+    ),
+];
 
 /// The operations this build added to Node's: no recording of Node's asks
 /// them, and the page's own unit tests (`src/page/tests`) do.
-const ADDED: [PageOperation; 12] = [
+const ADDED: [PageOperation; 14] = [
     PageOperation::WakeUpGet,
     PageOperation::WakeUpSet,
     PageOperation::ProjectSpecs,
@@ -57,6 +64,8 @@ const ADDED: [PageOperation; 12] = [
     PageOperation::SpecsPresent,
     PageOperation::SpecsOpen,
     PageOperation::TaskFinish,
+    PageOperation::HistoryGet,
+    PageOperation::HistoryPart,
 ];
 
 /// Every operation of Node's page is asked by some trace: what the traces hold

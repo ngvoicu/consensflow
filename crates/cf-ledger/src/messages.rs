@@ -24,7 +24,7 @@ use cf_proto::ledger::{MessageView, Question};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
-use crate::model::{self, require_active, LedgerError, MAX_BODY};
+use crate::model::{self, require_active, LedgerError, FINISHED_TASK_STATES, MAX_BODY};
 use crate::questions::{render_choices, render_questions, require_choices, require_questions};
 use crate::queue::{queue, send, withdraw, Queued, Sent};
 use crate::store::Store;
@@ -182,8 +182,8 @@ pub(crate) fn ask(
 /// options is answered by choice (or by text, one line per question): that
 /// answer is read at once and never delivered, because the harness door
 /// that asked collects it and the tool call completes with it; the asker's
-/// task resumes here. A question on a cancelled task takes no answer, from
-/// either side: nobody waits for it. `from` is the answerer's participant
+/// task resumes here. A question on a task that is over (accepted, cancelled
+/// or failed) takes no answer, from either side: nobody waits for it. `from` is the answerer's participant
 /// id: handles repeat across projects (every chief is `chief`), ids never do.
 pub(crate) fn answer(
     store: &mut Store,
@@ -223,12 +223,8 @@ pub(crate) fn answer(
             ));
         }
         if let Some(task) = message_task(store, question_id)? {
-            if task.state == "cancelled" {
-                return Err(LedgerError::refused_with(
-                    "task-cancelled",
-                    format!("T-{} is cancelled: nobody waits for this answer", task.number),
-                    409,
-                ));
+            if FINISHED_TASK_STATES.contains(&task.state.as_str()) {
+                return Err(finished_task_takes_no_answer(&task));
             }
         }
         if answered(store, question_id)? {
@@ -289,15 +285,53 @@ pub(crate) fn answer(
     })
 }
 
-/// Whether a question has an answer, on its way or still gated; one that was
-/// declined, or that failed to arrive, never counts: the question takes another.
+/// The refusal of an answer to a question on a task that is over (accepted,
+/// cancelled or failed): nobody waits for it, and a failed task is the one that
+/// can be gone on with, so it is told how.
+fn finished_task_takes_no_answer(task: &TaskRow) -> LedgerError {
+    let number = task.number;
+    let (code, words) = match task.state.as_str() {
+        "cancelled" => (
+            "task-cancelled",
+            format!("T-{number} is cancelled: nobody waits for this answer"),
+        ),
+        "accepted" => (
+            "task-accepted",
+            format!(
+                "T-{number} is accepted, so it is finished and nobody waits for this answer: to give what is still wanted, add a task for the same window with cf task add --after T-{number} \"…\""
+            ),
+        ),
+        _ => (
+            "task-failed",
+            format!(
+                "T-{number} failed, so nobody waits for this answer: reopen T-{number} to go on with it (cf task reopen T-{number} \"…\")"
+            ),
+        ),
+    };
+    LedgerError::refused_with(code, words, 409)
+}
+
+/// SQL that says the question called `question` (a table alias) has an answer
+/// that stands: one on its way, being delivered, delivered, read, or still held
+/// at the gate. One that was cancelled (declined, withdrawn, taken back with its
+/// task) or that failed to arrive is none: the question takes another. The one
+/// rule by which a second answer is refused (`answered`) and by which the
+/// chief's handoff lists what it has yet to answer (`chief_open_work`).
+pub(crate) fn has_standing_answer(question: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM message a WHERE a.reply_to = {question}.id AND a.kind = 'answer'
+                   AND a.state NOT IN ('cancelled', 'failed'))"
+    )
+}
+
+/// Whether a question has an answer that stands ([`has_standing_answer`]).
 fn answered(store: &Store, question_id: i64) -> Result<bool, LedgerError> {
     Ok(store
         .db
-        .prepare(
-            "SELECT 1 FROM message WHERE reply_to = ? AND kind = 'answer'
-               AND state NOT IN ('cancelled', 'failed')",
-        )?
+        .prepare(&format!(
+            "SELECT 1 FROM message q WHERE q.id = ? AND {}",
+            has_standing_answer("q")
+        ))?
         .exists([question_id])?)
 }
 

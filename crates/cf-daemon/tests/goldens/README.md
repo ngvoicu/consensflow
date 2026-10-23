@@ -17,7 +17,7 @@ traces, for the players that read them (`../api/`, `../page/`, `../screens/`,
 |---|---|
 | `<suite>-<NNN>.json.gz` | one trace per test that reached a surface |
 | `pages/agents.html`, `pages/harnesses.html` | the two pages the screens served, `$TOKEN` and `$VERSION` where the token and the version go |
-| `operations.json`, `daemon.json`, `files.json` | the page's operations (Node's 28 and the ones added since: `wakeup.get`, `wakeup.set`, `project.specs`, `project.rename`, `project.describe`, `specs.get`, `specs.set`, `specs.tree`, `specs.file`, `specs.present`, `specs.open`), the daemon's handle line and start and stop lines, and its log and trace line formats |
+| `operations.json`, `daemon.json`, `files.json` | the page's operations (Node's 28 and the ones added since: `wakeup.get`, `wakeup.set`, `project.specs`, `project.rename`, `project.describe`, `specs.get`, `specs.set`, `specs.tree`, `specs.file`, `specs.present`, `specs.open`, `history.get`, `history.part`), the daemon's handle line and start and stop lines, and its log and trace line formats |
 
 ## Changed after Node
 
@@ -33,3 +33,11 @@ recordings in four ways, none of them by recording again.
   check without the tester, as Node's ledger had them (migration 0012 added the
   tester). They are not rewritten: the player holds the database this ledger left to
   them as Node's schema had it (`cf_ledger::testing::hold_apart_what_node_never_had_in_its_schema`).
+
+`cf task edit` (board task T-110, 3.0.6) moved the usage `cf` prints once more, and the
+sentence it says of a task verb it does not know: the usage has the entry `cf task edit
+T-3 "…"` and one more line under `--after`, in `cf-board-028` and `-029`, and the sentence
+names `edit`, in `cf-board-022`. Changed by hand, in those words alone. The recordings of
+the crates' own goldens (`crates/cf/tests/goldens/board.json`) were changed with them.
+Round 2 of the same task (T-158) changed one phrase of that entry, by hand, in `cf-board-028`
+and `-029`: `(open, blocked or queued)` became `(open, queued, or paused)`.

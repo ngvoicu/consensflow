@@ -46,20 +46,68 @@ fn a_compaction_while_idle_leaves_the_turn_before_it_at_rest() {
 }
 
 #[test]
-fn the_summary_is_an_item_of_the_users_that_says_it_is_the_compactions_and_a_prompt_is_none() {
-    let mut records = vec![hello(), answer("a1", "u1"), duration("d1", "a1")];
-    records.extend([compacted("c1", "d1"), compact_summary("s1", "c1")]);
-    records.push(user("u2", json!("s1"), json!("Go on")));
+fn the_summary_is_a_user_s_item_marked_as_the_compaction_s_and_no_other_item_is() {
     let mut stage = Stage::new();
-    stage.write(&records);
+    stage.write(&[
+        hello(),
+        answer("a1", "u1"),
+        duration("d1", "a1"),
+        compacted("c1", "d1"),
+        compact_summary("s1", "c1"),
+        user("u2", json!("s1"), json!("Go on")),
+    ]);
     let Reading::Known(record) = &*stage.reader.look(&Options::default(), 0) else {
-        panic!("a reading");
+        panic!("an unknown reading");
     };
-    let users: Vec<(&str, bool)> = record
+    let marked: Vec<(&str, Role, bool)> = record
         .items
         .iter()
-        .filter(|item| item.role == Role::User)
-        .map(|item| (&*item.id, item.compaction))
+        .map(|item| (&*item.id, item.role, item.compaction))
         .collect();
-    assert_eq!(users, [("u1", false), ("s1", true), ("u2", false)]);
+    assert_eq!(
+        marked,
+        [
+            ("u1", Role::User, false),
+            ("m1", Role::Assistant, false),
+            ("s1", Role::User, true),
+            ("u2", Role::User, false),
+        ]
+    );
+}
+
+/// T-187: a record that reaches the file in pieces (`writeln!` of a value writes
+/// it a token at a time) is read once it is whole, and no look between is
+/// unreadable: the last line, cut anywhere, waits for the rest. The tail is
+/// written in pieces of 1, 2, 3, 5, 7, 16, 50, 97 and 300 bytes, a look after
+/// each, and read as the three items it holds, the summary once.
+#[test]
+fn the_summary_a_compaction_writes_in_pieces_is_read_once_whole_and_no_look_between_fails() {
+    let tail = Stage::lines(&[compacted("c1", "d1"), compact_summary("s1", "c1")]);
+    for size in [1, 2, 3, 5, 7, 16, 50, 97, 300] {
+        let mut stage = Stage::new();
+        stage.write(&[hello(), answer("a1", "u1"), duration("d1", "a1")]);
+        assert!(!stage.look().starts_with("unknown"));
+        for piece in tail.as_bytes().chunks(size) {
+            let mut file = fs::OpenOptions::new()
+                .append(true)
+                .open(stage.file())
+                .unwrap();
+            std::io::Write::write_all(&mut file, piece).unwrap();
+            let seen = stage.look();
+            assert!(!seen.starts_with("unknown"), "cut by {size}: {seen}");
+        }
+        let Reading::Known(record) = &*stage.reader.look(&Options::default(), 0) else {
+            panic!("an unknown reading");
+        };
+        let marked: Vec<(&str, bool)> = record
+            .items
+            .iter()
+            .map(|item| (&*item.id, item.compaction))
+            .collect();
+        assert_eq!(
+            marked,
+            [("u1", false), ("m1", false), ("s1", true)],
+            "cut by {size}"
+        );
+    }
 }

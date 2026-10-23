@@ -190,7 +190,10 @@ fn knows_the_window_commands_and_the_ones_outside_a_window() -> Outcome {
         .ok_or("task is a command with verbs")?;
     assert_eq!(
         task.iter().map(String::as_str).collect::<Vec<_>>(),
-        ["accept", "add", "cancel", "done", "finish", "get", "list", "pause", "reopen", "resume"]
+        [
+            "accept", "add", "cancel", "done", "edit", "finish", "get", "list", "pause", "reopen",
+            "resume"
+        ]
     );
     for command in [
         "inbox", "ask", "answer", "tell", "history", "agent", "setup", "doctor",

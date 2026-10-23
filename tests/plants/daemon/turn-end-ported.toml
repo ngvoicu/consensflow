@@ -25,7 +25,7 @@ tep-turn-end-engine-lib-turn-end = ["cargo", "test", "--offline", "-p", "cf-engi
 
 [[plant]]
 name = "background rig: a window's close kills a job that is not given its grace"
-meant = "a_job_that_ignores_the_signals"
+meant = "a_job_that_ignores_the_signals_that_ask_it_to_end_is_killed_by_the_windows_close_once_its_grace_is_over_and_the_result_waits_for_neither"
 runs = ["tep-background-rig-background-grace"]
 builds = true
 
@@ -51,8 +51,8 @@ runs = ["tep-turn-end-finish-cf-verb"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "    \"done\", \"accept\", \"cancel\", \"reopen\", \"pause\", \"resume\", \"finish\",\n];"
-replace = "    \"done\", \"accept\", \"cancel\", \"reopen\", \"pause\", \"resume\", \"resume\",\n];"
+find = "    \"done\", \"accept\", \"cancel\", \"reopen\", \"edit\", \"pause\", \"resume\", \"finish\",\n];"
+replace = "    \"done\", \"accept\", \"cancel\", \"reopen\", \"edit\", \"pause\", \"resume\", \"resume\",\n];"
 
 [[plant]]
 name = "turn end finish: cf says nothing of what follows a finish"
@@ -71,8 +71,8 @@ runs = ["tep-turn-end-finish-cf-goldens"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "use add, list, get, done, accept, reopen, cancel, pause, resume or finish"
-replace = "use add, list, get, done, accept, reopen, cancel, pause or resume"
+find = "use add, list, get, done, accept, reopen, edit, cancel, pause, resume or finish"
+replace = "use add, list, get, done, accept, reopen, edit, cancel, pause or resume"
 
 [[plant]]
 name = "turn end finish: cf says its unknown task command in Node’s words"
@@ -81,8 +81,8 @@ runs = ["tep-turn-end-finish-daemon-api"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "use add, list, get, done, accept, reopen, cancel, pause, resume or finish"
-replace = "use add, list, get, done, accept, reopen, cancel, pause or resume"
+find = "use add, list, get, done, accept, reopen, edit, cancel, pause, resume or finish"
+replace = "use add, list, get, done, accept, reopen, edit, cancel, pause or resume"
 
 [[plant]]
 name = "turn end finish page: a card does not say what it waits on"
@@ -163,7 +163,7 @@ replace = "    : STATE_LABEL[task.state]"
 
 [[plant]]
 name = "turn end finish page: three jobs are said as one"
-meant = "on the card of a task whose lane counts"
+meant = "says \"waiting on 3 background jobs\" on the card of a task whose lane counts 3 jobs and 0 agents"
 runs = ["tep-turn-end-finish-page-finish"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
@@ -218,7 +218,7 @@ replace = "${STATE_LABEL[task.state]}"
 
 [[plant]]
 name = "turn end finish rig: on round 1 the chief has no finish"
-meant = "a_task_waiting_on_a_job_that_never_ends"
+meant = "the_chief_finishes_a_task_held_by_a_job_that_never_ends_with_its_workers_last_answer"
 runs = ["tep-turn-end-finish-regression-never-ends"]
 builds = true
 
@@ -340,7 +340,7 @@ replace = "        String::new()"
 
 [[plant]]
 name = "turn end: the words of a result are not trimmed"
-meant = "the_words_of_an_answer_are_its_items_trimmed"
+meant = "the_words_of_an_answer_are_its_items_trimmed_and_none_says_so"
 runs = ["tep-turn-end-engine-lib-turn-end"]
 
 [[plant.edit]]
@@ -350,7 +350,7 @@ replace = "        .map(|item| &*item.text)"
 
 [[plant]]
 name = "turn end: the items of a final answer run together"
-meant = "the_words_of_an_answer_are_its_items_trimmed"
+meant = "the_words_of_an_answer_are_its_items_trimmed_and_none_says_so"
 runs = ["tep-turn-end-engine-lib-turn-end", "tep-turn-end-engine-final-answer"]
 
 [[plant.edit]]

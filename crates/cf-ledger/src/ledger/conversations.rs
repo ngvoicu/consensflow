@@ -5,8 +5,8 @@ use serde_json::Value;
 
 use super::Ledger;
 use crate::{
-    conversations, ChiefConversation, ChiefOpenWork, ChiefSwitch, ConversationView, LastSwitch,
-    LedgerError, ProjectView, TaskTranscript,
+    conversations, ChiefConversation, ChiefOpenWork, ChiefSwitch, ConversationView, HistoryAsk,
+    HistoryRead, LastSwitch, LedgerError, MessageOpening, ProjectView, TaskTranscript, TextPart,
 };
 
 impl Ledger {
@@ -52,6 +52,38 @@ impl Ledger {
     /// The chief's earlier conversations, oldest first, with their items.
     pub fn chief_history(&self, project_id: i64) -> Result<Vec<ChiefConversation>, LedgerError> {
         conversations::chief_history(&self.store, project_id)
+    }
+
+    /// One read of participant `handle`'s history for the viewer: every
+    /// conversation, headed, and the items from where `ask` says, a page's
+    /// worth at most and no more text than `ask.scan`.
+    pub fn read_history(
+        &self,
+        project_id: i64,
+        handle: &str,
+        ask: &HistoryAsk<'_>,
+    ) -> Result<HistoryRead, LedgerError> {
+        conversations::read_history(&self.store, project_id, handle, ask)
+    }
+
+    /// A part of one item's text, of participant `handle`'s history, the one
+    /// at row `row` of conversation `conversation`, from character `from`.
+    pub fn read_history_part(
+        &self,
+        project_id: i64,
+        handle: &str,
+        conversation: i64,
+        row: i64,
+        from: usize,
+    ) -> Result<TextPart, LedgerError> {
+        conversations::read_history_part(&self.store, project_id, handle, conversation, row, from)
+    }
+
+    /// Message `id` as far as a delivery's line names it: no further than its
+    /// opening ([`crate::MESSAGE_OPENING`] bytes of its body), its body never
+    /// read whole.
+    pub fn message_opening(&self, id: i64) -> Result<Option<MessageOpening>, LedgerError> {
+        conversations::message_opening(&self.store, id)
     }
 
     /// What waits on the chief now, for a chief that takes over.

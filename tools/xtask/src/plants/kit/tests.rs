@@ -44,6 +44,7 @@ runs = ["goldens", "own", ["cargo", "test", "-p", "y"]]
 builds = true
 prepare = [["cargo", "xtask", "smoke-updater", "--export-bridge"]]
 requires = ["app/x"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "src/a.rs"
@@ -156,6 +157,35 @@ fn a_plant_has_what_it_is_meant_by_the_runs_it_names_and_what_it_asks_for_first(
     assert_eq!(two.runs.len(), 1);
     assert!(two.runs[0].builds && !two.builds);
     assert!(two.prepare.is_empty() && two.requires.is_empty());
+    // One is for the systems it names, another, naming none, for every one.
+    assert_eq!(one.platforms, ["macos", "linux"]);
+    assert!(one.runs_on("macos") && one.runs_on("linux") && !one.runs_on("windows"));
+    assert!(two.platforms.is_empty());
+    assert!(two.runs_on("windows") && two.runs_on("macos"));
+}
+
+#[test]
+fn a_plant_for_a_system_there_is_none_of_or_for_none_is_an_error_of_its_table() {
+    for (platforms, said) in [
+        (
+            r#"["macos", "darwin"]"#,
+            "the plant `second: one` is for `darwin`, which is no system a plant is for: \
+             macos, windows, linux",
+        ),
+        (
+            "[]",
+            "the plant `second: one` is for no system: name one, or leave its platforms out",
+        ),
+    ] {
+        let second = SECOND.replace(
+            "runs = [\"goldens\"]",
+            &format!("runs = [\"goldens\"]\nplatforms = {platforms}"),
+        );
+        let (_folder, context) = demo(KIT, FIRST, &second);
+        let error = error_of(load(&context));
+        assert!(error.ends_with(said), "{error}");
+        assert!(error.contains("second.toml"), "{error}");
+    }
 }
 
 #[test]
@@ -323,6 +353,7 @@ fn plant(edits: &[(&str, &str, &str)]) -> Plant {
         builds: false,
         prepare: Vec::new(),
         requires: Vec::new(),
+        platforms: Vec::new(),
         edits: edits
             .iter()
             .map(|(file, find, replace)| Edit {

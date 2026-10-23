@@ -73,10 +73,8 @@ replace = "const POLL_WAIT: Duration = Duration::from_secs(21);"
 
 [[plant]]
 name = "players: cf asks for a transcript of ten items whatever it was asked for"
-meant = "a_transcript_says_nothing_of_any_answer_whether_it_prints_the_thread_or_not"
-# The one trace that asks for another number of items (cf-board-001) is departed, so `cf`'s
-# own case holds it.
-runs = ["daemon-api", "cf-lib-board"]
+meant = "a_transcript_is_asked_for_as_many_items_as_the_chief_wants"
+runs = ["cf-lib-board"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"

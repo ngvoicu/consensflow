@@ -2,7 +2,9 @@
 //! given first ([`Env::search_path`]), then in the places each installs itself,
 //! which a Finder-launched app's PATH may lack, under the home (and npm's folder
 //! on Windows, which the environment names), then in the system's own folders
-//! of programs (`/opt/homebrew/bin` on a Mac: [`Env::tool_folders`]). Only a
+//! of programs (`/opt/homebrew/bin` on a Mac: [`Env::tool_folders`]), and last
+//! Pi's managed install, `~/.pi/agent/bin`, which Pi's installers put on the
+//! PATH of the shell they ran in, not of an app already open. Only a
 //! login shell puts those on the PATH, and one too slow to answer left a
 //! Homebrew `codex` not installed (2026-10-15). The daemon runs everything with
 //! them after its PATH, and a harness is still looked for on the PATH as given:
@@ -18,6 +20,7 @@ use cf_base::env::Env;
 use cf_proto::agents::Harness;
 use serde::Serialize;
 
+use crate::pi::paths::agent_dir;
 use crate::shared::paths::{home, set};
 
 /// Every harness, in the order Node's harness list had them: the order
@@ -43,6 +46,9 @@ pub struct Detected {
 fn locations(harness: Harness) -> &'static [&'static [&'static str]] {
     match harness {
         Harness::Devin => &[&[".local", "bin"]],
+        // `.claude/local` is the old local installer's place, a legacy one: Claude
+        // Code 2.1.305, the newest seen, still updates and diagnoses an install
+        // there, but nothing installs there fresh (it installs to `.local/bin`).
         Harness::Claude => &[&[".local", "bin"], &[".claude", "local"]],
         Harness::Codex => &[&[".codex", "bin"], &[".local", "bin"]],
         Harness::Opencode => &[&[".opencode", "bin"], &[".local", "bin"]],
@@ -86,15 +92,60 @@ fn npm_global(env: &Env) -> Option<PathBuf> {
     Some(PathBuf::from(set(env, "APPDATA")?).join("npm"))
 }
 
+/// Where Pi's own installers (`install.ps1`, `install.sh`) put the launcher of
+/// a managed install, under the home: `bin` of the agent folder, which is
+/// `~/.pi/agent` unless the human named another (`PI_CODING_AGENT_DIR`, [`managed`]).
+/// On Windows it is the only place, and the installer puts it first on the
+/// user's PATH, which an app started before that keeps the old one of;
+/// elsewhere the installer also links it from the first folder of the PATH it
+/// may write in, and the launcher is there all the same.
+const MANAGED_PI: [&str; 3] = [".pi", "agent", "bin"];
+
+/// The folders of `harness`'s managed install, which only Pi has: `bin` of the agent
+/// folder as Pi reads it (`pi::paths::agent_dir`: `PI_CODING_AGENT_DIR`, which both
+/// installers read too, an empty one being none, else `~/.pi/agent`; `~`, `~/` and on
+/// Windows `~\` are the home), then of the default one under the home when that is
+/// another (an install made before the variable was set is still there). A relative
+/// folder is the home's: the installers read it against where they ran, which a
+/// terminal opens in the home, and this daemon's own working folder is no place of
+/// theirs: with no home there is nothing to read a relative folder against, and it is no place.
+/// None where the environment names no folder and has no home.
+fn managed(harness: Harness, env: &Env) -> Vec<PathBuf> {
+    if harness != Harness::Pi {
+        return Vec::new();
+    }
+    let home = home(env).ok().map(PathBuf::from);
+    let named = agent_dir(env).ok().and_then(|agent| {
+        let agent = PathBuf::from(agent);
+        match &home {
+            Some(home) if agent.is_relative() => Some(home.join(agent)),
+            None if agent.is_relative() => None,
+            _ => Some(agent),
+        }
+        .map(|folder| folder.join("bin"))
+    });
+    let default = home.map(|home| {
+        MANAGED_PI
+            .iter()
+            .fold(home, |folder, part| folder.join(part))
+    });
+    let default = default.filter(|default| Some(default) != named.as_ref());
+    named.into_iter().chain(default).collect()
+}
+
 /// The absolute path `harness`'s CLI resolves to here, or none: a pane opens
 /// only on an absolute program. On PATH, else in the harness's own places,
 /// else in the common ones, npm's folder on Windows the last of them, else in
-/// the system's folders of programs.
+/// the system's folders of programs, else in the folder of a managed install.
+/// That one is the last so that a place added to the others never changes which
+/// CLI is found where one was: a Pi in npm's folder is still the Pi found when
+/// a managed one is there too.
 pub fn harness_path(harness: Harness, env: &Env) -> Option<PathBuf> {
     let command = harness.as_str();
     cf_process::on_search_path(command, env).or_else(|| {
         let folders = homed(harness, env).into_iter().chain(npm_global(env));
         let folders = folders.chain(env.tool_folders().iter().cloned());
+        let folders = folders.chain(managed(harness, env));
         cf_process::find_in(command, folders, env)
     })
 }

@@ -239,6 +239,8 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "specs.file",
     "specs.present",
     "specs.open",
+    "history.get",
+    "history.part",
 ];
 
 #[tauri::command]

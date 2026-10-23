@@ -6,6 +6,16 @@ fn running(pid: u32, started: u64, ppid: u32, command: &str) -> Running {
         identity: Identity { pid, started },
         ppid,
         command: command.to_owned(),
+        exe: None,
+    }
+}
+
+/// `process` as Windows' table lists one: with the path of the image it runs, which names its
+/// program whatever its command line spells (`Git\bin\..\usr\bin` and `Git\usr\bin` are one).
+fn at(exe: &str, process: Running) -> Running {
+    Running {
+        exe: Some(exe.to_owned()),
+        ..process
     }
 }
 
@@ -354,4 +364,283 @@ fn no_live_check_ends_a_process_but_through_the_descent() {
     assert!(!ends_a_process(
         "    // signal(pid, Signal::Kill) ended the worker."
     ));
+}
+
+/// What Git Bash's `ps -W` said on zeewin (2026-10-21) while `bash -c "sh ./plain.sh"` ran a
+/// script that ran `sleep 40`: a Windows program is listed by a number that is its Windows
+/// number plus 0x400000 and a parent of 0, a Cygwin program by a number of its own, its parent
+/// that Cygwin number, and its Windows number in the fourth column.
+const PS_W: &str = "\
+      PID    PPID    PGID     WINPID  TTY         UID    STIME COMMAND
+  4203344       0       0       9040  ?              0 18:25:26 C:\\Program Files\\Git\\bin\\bash.exe
+  4212332       0       0      18028  ?              0 18:25:26 C:\\Program Files\\Git\\usr\\bin\\bash.exe
+     1464       1    1464       9736  cons0     197609 18:25:26 /usr/bin/sh
+     1466    1464    1464      25892  cons0     197609 18:25:26 /usr/bin/sleep
+";
+
+const GIT_BIN: &str = r"C:\Program Files\Git\usr\bin";
+const SYSTEM_POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0";
+
+/// The processes of that look at the machine, as Windows' table lists them: the sleep's parent
+/// (29604, a copy of the shell that forked to start it) is gone.
+fn forked() -> Vec<Running> {
+    vec![
+        at(
+            r"C:\Program Files\Git\bin\bash.exe",
+            running(
+                9040,
+                10,
+                10952,
+                r#""C:\Program Files\Git\bin\bash.exe" -c "sh ./plain.sh""#,
+            ),
+        ),
+        at(
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+            running(
+                18028,
+                11,
+                9040,
+                r#""C:\Program Files\Git\bin\..\usr\bin\bash.exe" -c "sh ./plain.sh""#,
+            ),
+        ),
+        at(
+            r"C:\Program Files\Git\usr\bin\sh.exe",
+            running(
+                9736,
+                12,
+                18028,
+                r#""C:\Program Files\Git\usr\bin\sh.exe" ./plain.sh"#,
+            ),
+        ),
+        at(
+            r"C:\Program Files\Git\usr\bin\sleep.exe",
+            running(
+                25892,
+                14,
+                29604,
+                r#""C:\Program Files\Git\usr\bin\sleep.exe" 40"#,
+            ),
+        ),
+        at(
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            running(10952, 1, 4424, "powershell.exe"),
+        ),
+    ]
+}
+
+#[test]
+fn a_cygwin_program_whose_parent_has_gone_is_given_the_parent_git_bash_says_it_has() {
+    let asked = std::cell::RefCell::new(Vec::new());
+    let repaired = with_cygwin_parents(forked(), |folder| {
+        asked.borrow_mut().push(folder.to_owned());
+        Some(PS_W.to_owned())
+    });
+    // The sleep's parent is the shell, by the number Windows has for it.
+    let sleep = repaired
+        .iter()
+        .find(|one| one.identity.pid == 25892)
+        .unwrap();
+    assert_eq!(sleep.ppid, 9736);
+    // The rest are as they were: parents that run are never asked about.
+    let mut expected = forked();
+    expected
+        .iter_mut()
+        .find(|one| one.identity.pid == 25892)
+        .unwrap()
+        .ppid = 9736;
+    assert_eq!(repaired, expected);
+    // The window's tree has it now, where it had not.
+    let window = Identity {
+        pid: 9040,
+        started: 10,
+    };
+    assert!(!descending_from(&forked(), window)
+        .iter()
+        .any(|one| one.identity.pid == 25892));
+    assert!(descending_from(&repaired, window)
+        .iter()
+        .any(|one| one.identity.pid == 25892));
+    // `ps` was asked once for each folder of a program that has no parent that runs, by the image
+    // the table says: the sleep's, which is Git Bash's, and the powershell's (of which a folder
+    // with no `ps` says nothing).
+    assert_eq!(
+        *asked.borrow(),
+        [GIT_BIN.to_owned(), SYSTEM_POWERSHELL.to_owned()]
+    );
+}
+
+#[test]
+fn what_git_bash_does_not_vouch_for_is_listed_as_it_was() {
+    // No `ps` there (a folder that holds none), a `ps` that says nothing of the process, a
+    // parent that Windows does not list, and a parent that began after the child: none is a
+    // parent to give.
+    for (ps, listed_parent_started) in [
+        (None, 12),
+        (Some("      PID    PPID    PGID     WINPID\n"), 12),
+        // The shell's Cygwin number is not in the table.
+        (
+            Some("     1466    1464    1464      25892  cons0  197609 18:25:26 /usr/bin/sleep\n"),
+            12,
+        ),
+        // The shell is there, but began after the sleep did: a number another process took.
+        (Some(PS_W), 99),
+    ] {
+        let mut list = forked();
+        list.iter_mut()
+            .find(|one| one.identity.pid == 9736)
+            .unwrap()
+            .identity
+            .started = listed_parent_started;
+        let repaired = with_cygwin_parents(list.clone(), |_| ps.map(str::to_owned));
+        assert_eq!(repaired, list, "{ps:?}");
+    }
+    // A process whose parent runs, or that names none, is never looked up.
+    let mut list = forked();
+    list.push(at(
+        r"C:\Program Files\Git\usr\bin\ls.exe",
+        running(7, 1, 0, r#""C:\Program Files\Git\usr\bin\ls.exe""#),
+    ));
+    let repaired = with_cygwin_parents(list.clone(), |folder| {
+        (folder == GIT_BIN).then(|| PS_W.to_owned())
+    });
+    assert_eq!(
+        repaired
+            .iter()
+            .find(|one| one.identity.pid == 7)
+            .unwrap()
+            .ppid,
+        0
+    );
+}
+
+#[test]
+fn the_cygwin_table_is_read_for_its_numbers_and_the_folder_of_an_image_from_its_path() {
+    assert_eq!(
+        cygwin_table(PS_W),
+        [
+            CygwinRow {
+                pid: 4_203_344,
+                ppid: 0,
+                winpid: 9040
+            },
+            CygwinRow {
+                pid: 4_212_332,
+                ppid: 0,
+                winpid: 18028
+            },
+            CygwinRow {
+                pid: 1464,
+                ppid: 1,
+                winpid: 9736
+            },
+            CygwinRow {
+                pid: 1466,
+                ppid: 1464,
+                winpid: 25892
+            },
+        ]
+    );
+    for (exe, folder) in [
+        (r"C:\Program Files\Git\usr\bin\sleep.exe", Some(GIT_BIN)),
+        (r"C:\msys64\usr\bin\sh.exe", Some(r"C:\msys64\usr\bin")),
+        ("/usr/bin/sleep", Some("/usr/bin")),
+        ("sleep.exe", None),
+        ("", None),
+    ] {
+        assert_eq!(image_folder(exe).as_deref(), folder, "{exe}");
+    }
+}
+
+/// Cygwin's `ps` begins each row with a status letter (`S` stopped, `I` reading its terminal, `O`
+/// writing it) or a space, then the number in seven columns: a process that reads its terminal is
+/// `I`, and was no row (T-194, P3-1).
+const PS_W_FLAGGED: &str = "\
+      PID    PPID    PGID     WINPID  TTY         UID    STIME COMMAND
+O     1464       1    1464       9736  cons0     197609 18:25:26 /usr/bin/sh
+S     1466    1464    1464      25892  cons0     197609 18:25:26 /usr/bin/sleep
+I     1470    1466    1466      31000  cons0     197609 18:25:27 /usr/bin/cat
+";
+
+#[test]
+fn a_row_that_begins_with_a_status_letter_is_a_row_and_so_is_its_parents() {
+    assert_eq!(
+        cygwin_table(PS_W_FLAGGED),
+        [
+            CygwinRow {
+                pid: 1464,
+                ppid: 1,
+                winpid: 9736
+            },
+            CygwinRow {
+                pid: 1466,
+                ppid: 1464,
+                winpid: 25892
+            },
+            CygwinRow {
+                pid: 1470,
+                ppid: 1466,
+                winpid: 31000
+            },
+        ]
+    );
+    // The sh reads its terminal and the sleep is stopped: the sleep's parent is the sh all the same.
+    let mut list = forked();
+    list.push(at(
+        r"C:\Program Files\Git\usr\bin\cat.exe",
+        running(31000, 15, 7777, r#""C:\Program Files\Git\usr\bin\cat.exe""#),
+    ));
+    let repaired = with_cygwin_parents(list, |_| Some(PS_W_FLAGGED.to_owned()));
+    let parent = |pid: u32| {
+        repaired
+            .iter()
+            .find(|one| one.identity.pid == pid)
+            .unwrap()
+            .ppid
+    };
+    assert_eq!(parent(25892), 9736);
+    // And the cat, whose own parent has gone too, is the sleep's: the row of a sleep that is
+    // stopped or reads its terminal says so as any other does.
+    assert_eq!(parent(31000), 25892);
+    // A letter alone, a word of letters, or two letters are no status.
+    assert_eq!(cygwin_table("IO 1 2 3 4 x\nI\nsh 1 2 3 4 x\n"), []);
+}
+
+/// An orphan is known by the image it runs, which Windows' table gives plain, and not by how its
+/// command line spells the folder (T-194, P3-7): the shell that started it as `Git\bin\..\usr\bin`
+/// and the sleep as `Git\usr\bin` are one folder and one `ps -W`; a process whose image the table
+/// could not say is left as it was, whatever its command line says.
+#[test]
+fn an_orphan_is_known_by_the_image_it_runs_and_not_by_how_its_command_line_spells_the_folder() {
+    let mut list = forked();
+    list.push(at(
+        r"C:\Program Files\Git\usr\bin\ls.exe",
+        running(
+            31000,
+            15,
+            7777,
+            r#""C:\Program Files\Git\bin\..\usr\bin\ls.exe" -l"#,
+        ),
+    ));
+    list.push(running(
+        31001,
+        15,
+        7777,
+        r#""C:\Program Files\Git\usr\bin\ls.exe""#,
+    ));
+    let asked = std::cell::RefCell::new(Vec::new());
+    let repaired = with_cygwin_parents(list.clone(), |folder| {
+        asked.borrow_mut().push(folder.to_owned());
+        (folder == GIT_BIN).then(|| PS_W.to_owned())
+    });
+    assert_eq!(
+        *asked.borrow(),
+        [GIT_BIN.to_owned(), SYSTEM_POWERSHELL.to_owned()],
+        "one folder, once"
+    );
+    // The ls is no one `ps` knows, and the one with no image is not asked about at all.
+    for pid in [31000, 31001] {
+        let before = list.iter().find(|one| one.identity.pid == pid).unwrap();
+        let after = repaired.iter().find(|one| one.identity.pid == pid).unwrap();
+        assert_eq!(before, after, "{pid}");
+    }
 }

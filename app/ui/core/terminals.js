@@ -57,6 +57,8 @@ export class TerminalsView {
   #onChange
   /** The human asking to switch the chief, from its card. */
   #onSwitchChief
+  /** The human asking to read everything kept of a participant's conversations, from its card. */
+  #onHistory
   /** The human trying the chief again before its quota resets, from its card. */
   #onTryAgain
   /** The human hiding a session's terminal, from its card: the page takes the card out and tells the daemon. */
@@ -89,6 +91,7 @@ export class TerminalsView {
       createEmulator,
       onChange = () => {},
       onSwitchChief = () => {},
+      onHistory = () => {},
       onTryAgain = () => {},
       onHideTerminal = () => {},
     },
@@ -96,6 +99,7 @@ export class TerminalsView {
     this.#stage = stage
     this.#onChange = onChange
     this.#onSwitchChief = onSwitchChief
+    this.#onHistory = onHistory
     this.#onTryAgain = onTryAgain
     this.#onHideTerminal = onHideTerminal
     this.#registry = new EmulatorRegistry({
@@ -446,11 +450,11 @@ export class TerminalsView {
 
   /**
    * A card's head: whose window it is, its lamp, and what is done with it
-   * there. The chief's says what the chief is doing and runs on, and switches
-   * it. Only a session's terminal hides, as on its board row, and the daemon
-   * closes its window once nothing holds it open; deleting the session is its
-   * row's alone. Only an open project's cards are drawn: nothing on a closed
-   * one acts.
+   * there. Every card reads its participant's whole history. The chief's says
+   * what the chief is doing and runs on, and switches it. Only a session's
+   * terminal hides, as on its board row, and the daemon closes its window once
+   * nothing holds it open; deleting the session is its row's alone. Only an
+   * open project's cards are drawn: nothing on a closed one acts.
    */
   #head(entry, lane, board, agent) {
     const { participant } = lane
@@ -458,9 +462,16 @@ export class TerminalsView {
     const now = Date.now()
     // A button kept across redraws acts on the participant as it is now.
     entry.participant = participant
+    const history = button(
+      'History',
+      'quiet-button',
+      () => this.#onHistory(entry.participant),
+      `Read everything kept of ${name}'s conversations`,
+    )
     const tools =
       participant.role === 'chief'
         ? [
+            history,
             button(
               'Switch chief',
               'quiet-button',
@@ -471,6 +482,7 @@ export class TerminalsView {
           ]
         : [
             element('span', 'terminal-meta', participant.harness ?? ''),
+            history,
             ...(participant.member === null
               ? []
               : [
