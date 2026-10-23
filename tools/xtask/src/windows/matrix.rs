@@ -117,7 +117,7 @@ fn logs_in(root: &Path, clock: &mut dyn Clock) -> PathBuf {
 }
 
 /// The eval of `scenario` for `pair`, as the words that start it on the machine.
-fn eval(options: &MatrixOptions, scenario: &str, pair: &Pair) -> Vec<String> {
+pub(super) fn eval(options: &MatrixOptions, scenario: &str, pair: &Pair) -> Vec<String> {
     let mut words: Vec<String> = [
         "cargo",
         "xtask",

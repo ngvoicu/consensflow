@@ -38,6 +38,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use cf_harness::contract::{Pane, Trusts, Window};
+use cf_harness::records::Reading;
 use cf_ledger::{NewNote, ParticipantView, ProjectView};
 use cf_proto::panes::{SnapshotRequest, TAIL_LINES};
 use serde_json::{json, Value};
@@ -54,6 +55,15 @@ const LOOK: Duration = Duration::from_millis(500);
 /// How long a window that never held still, its record empty, is watched for the
 /// question: a harness asks it as it starts, before anything else is drawn.
 pub(crate) const ASKS_WITHIN_MS: i64 = 30_000;
+
+/// How many looks a screen the last key went into may stay as it was before the key
+/// is pressed again: the window did not take it.
+const PRESS_AGAIN_LOOKS: u32 = 10;
+
+/// How many looks in a row a window that asked may show neither the question nor its
+/// prompt before it counts as past the question: 12 s, since a resumed window draws
+/// its conversation before its prompt, and a yes is banked only at the prompt.
+const GONE_LOOKS: u32 = 24;
 
 /// How many keys are pressed toward a yes before the question goes to the human:
 /// a screen that is not moved by them is one the engine does not read right.
@@ -148,18 +158,31 @@ impl Dispatcher {
             return Ok(());
         };
         let began = self.now();
-        let opened_with = self.record_length(window).await;
+        // What the record held at the first look that could read it: a window opened
+        // again on its conversation holds it all from the start, and a look that could
+        // not read it says nothing of growth.
+        let mut opened_with: Option<usize> = None;
         let mut keys = 0;
-        // The screen the last key was pressed on: a key goes only into a screen that
-        // moved since, so a slow redraw is never given a second one.
-        let mut pressed_on: Option<Vec<String>> = None;
-        loop {
+        // The screen the last key was pressed on, and how many looks have found it
+        // since: a key goes into a screen that moved since the last one, so a slow
+        // redraw is never given a second, or into one that stayed as it was for
+        // [`PRESS_AGAIN_LOOKS`], whose window did not take the key.
+        let mut pressed_on: Option<(Vec<String>, u32)> = None;
+        // How many looks in a row found the question gone with no prompt on the screen.
+        let mut gone = 0;
+        let at_prompt = loop {
             if !self.shows(record, pane) {
                 return Ok(());
             }
+            let length = self.record_length(window).await;
+            if opened_with.is_none() {
+                opened_with = length;
+            }
+            let grown = matches!((opened_with, length), (Some(from), Some(now)) if now > from);
             match self.trust_look(pane, &**window).await {
                 Seen::Asks(key, lines) => {
                     record.window.borrow_mut().trust = Trusting::Asked;
+                    gone = 0;
                     self.changed();
                     // A folder the human said yes to in another window of the
                     // project is answered as they answered it.
@@ -177,11 +200,16 @@ impl Dispatcher {
                                 )
                             })?;
                         }
-                        if pressed_on.as_ref() != Some(&lines)
-                            && self.press_toward_trust(pane, key).await
-                        {
+                        let press = match pressed_on.as_mut() {
+                            Some((on, looks)) if *on == lines => {
+                                *looks += 1;
+                                *looks >= PRESS_AGAIN_LOOKS
+                            }
+                            _ => true,
+                        };
+                        if press && self.press_toward_trust(pane, key).await {
                             keys += 1;
-                            pressed_on = Some(lines);
+                            pressed_on = Some((lines, 0));
                         }
                     } else {
                         self.tell_trust_once(project, &folder, false, || {
@@ -199,25 +227,34 @@ impl Dispatcher {
                         })?;
                     }
                 }
-                Seen::Prompt => break,
+                Seen::Prompt => break true,
                 Seen::Other => {
-                    if self.record_length(window).await > opened_with {
-                        break;
+                    // Its record grown past what it held: past the question, whoever
+                    // answered it (or a process before it writing still).
+                    if grown {
+                        break false;
                     }
                     let asked = record.window.borrow().trust == Trusting::Asked;
-                    if !asked && self.now() - began > ASKS_WITHIN_MS {
-                        break;
+                    if asked {
+                        // The question gone for good with no prompt to read (a prompt
+                        // drawn otherwise than the harness's reader knows): past it.
+                        gone += 1;
+                        if gone >= GONE_LOOKS {
+                            break false;
+                        }
+                    } else if self.now() - began > ASKS_WITHIN_MS {
+                        break false;
                     }
                 }
             }
             self.seams.time.sleep(LOOK).await;
-        }
+        };
         let asked = record.window.borrow().trust == Trusting::Asked;
-        // The question left a window that went on (its prompt on its screen, or its
-        // record grown: never the question's absence alone, which a No leaves on
-        // the way out), and no key of ConsensFlow's answered it: the human said yes,
-        // for every window of the project.
-        if asked && keys == 0 {
+        // The question left a window now at its prompt, and no key of ConsensFlow's
+        // answered it: the human said yes, for every window of the project. Nothing
+        // else says so: not the question's absence, which a No leaves on the way out,
+        // nor the record's growth, which may be a process before the window's.
+        if asked && keys == 0 && at_prompt {
             self.trust
                 .accepted
                 .borrow_mut()
@@ -267,11 +304,11 @@ impl Dispatcher {
     }
 
     /// How many items the harness's record of the window holds now: none where it
-    /// cannot be read.
-    async fn record_length(&self, window: &Rc<dyn Window>) -> usize {
-        returning(window.observe())
-            .await
-            .map_or(0, |observed| observed.items().len())
+    /// could not be read.
+    async fn record_length(&self, window: &Rc<dyn Window>) -> Option<usize> {
+        let observed = returning(window.observe()).await.ok()?;
+        matches!(observed.reading.as_deref(), Some(Reading::Known(_)))
+            .then(|| observed.items().len())
     }
 
     /// Presses `key` into the window, as a person does: whether the host took it.

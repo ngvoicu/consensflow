@@ -7,7 +7,12 @@
 //! word shows), then, for each variable named in `FAKE_CHILD_REPORT` (comma
 //! apart), `var <NAME>: <value>` or `var <NAME>: unset`. `FAKE_CHILD_LAST` is a
 //! line it then writes, the last it says on its standard output (`== exit 0`, for
-//! the runs on the Windows machine, which end by saying how the command ended).
+//! the runs on the Windows machine, which end by saying how the command ended), and
+//! `FAKE_CHILD_FIRST` a line it writes before the rest (`== tree …`, which the machine
+//! says of the tree it unpacked, once, before the command's own words).
+//! With `FAKE_CHILD_KEEP` naming a folder it keeps a copy of any file it is given that is
+//! named `….tgz` there (`1.tgz`, `2.tgz` in the order it was given them), which is what
+//! `scp` is given: the tarball a run sends, for a test to read what is in it.
 //! `FAKE_CHILD_STDERR` is written to its standard error, and `FAKE_CHILD_EXIT` is
 //! the code it exits with (0 when it is not a number or not there). With
 //! `FAKE_CHILD_QUIET` set it reports nothing: for a test that lets it write where
@@ -22,8 +27,20 @@ use cf_base::env::Env;
 
 fn main() -> ExitCode {
     let env = Env::from_process();
+    if let Some(keep) = env.path("FAKE_CHILD_KEEP") {
+        for arg in std::env::args_os().skip(1) {
+            let path = std::path::PathBuf::from(&arg);
+            if path.extension().is_some_and(|ext| ext == "tgz") && path.is_file() {
+                let kept = std::fs::read_dir(keep).map_or(0, Iterator::count) + 1;
+                let _ = std::fs::copy(&path, keep.join(format!("{kept}.tgz")));
+            }
+        }
+    }
     let stdout = io::stdout();
     let mut out = stdout.lock();
+    if let Some(first) = env.text("FAKE_CHILD_FIRST") {
+        let _ = writeln!(out, "{first}");
+    }
     if env.text("FAKE_CHILD_QUIET").is_none() {
         let folder = std::env::current_dir().map_or_else(
             |cause| format!("unknown ({cause})"),

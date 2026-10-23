@@ -350,7 +350,7 @@ replace = "            more_tools: tools > TOOLS_COUNTED,"
 
 [[plant]]
 name = "session viewer: a heading's count of tools' outputs says nothing of there being more"
-meant = "heads each conversation"
+meant = "heads each conversation with its harness and agent, from when until when, and what ended it"
 runs = ["viewer-ui-headings"]
 
 [[plant.edit]]

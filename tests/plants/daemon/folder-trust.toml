@@ -16,6 +16,11 @@
 # harness's prompt or the record's growth, never on a screen without the question; a key goes only
 # into a screen that moved since the last one.
 #
+# Round 3 (a review of round 2): an asking window is past the question on its prompt, on its
+# record's growth past the first reading that could read it, or once the question has been gone
+# for a few looks; only a prompt says the human said yes; the question is the two choices with the
+# cursor on one; a key the window did not take is pressed again.
+#
 # The cases are `crates/cf-e2e/tests/regressions/a_trust_question_after_git_init_stopped_every_launch.rs`
 # (a stand-in that asks as Claude Code 2.1.305 does, the shape the live suite
 # `cargo xtask live folder-trust` found) and the readers' own tests. The rig's cases build the
@@ -35,6 +40,14 @@ folder-trust-rig-no = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "
 folder-trust-rig-first-frame = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_whose_first_frame"]
 folder-trust-rig-plain = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_that_asks_nothing"]
 folder-trust-rig-redraw = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_question_slow_to_redraw"]
+folder-trust-rig-plain-prompt = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_whose_prompt_is_drawn_otherwise"]
+folder-trust-rig-dropped-key = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_that_did_not_take_a_key"]
+folder-trust-rig-quoted = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_screen_that_quotes_the_question"]
+folder-trust-rig-grows = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_record_that_grows_as_a_no"]
+folder-trust-rig-record-away = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_opened_again_whose_record_cannot_be_read"]
+folder-trust-rig-chief-plain = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_opened_again_at_rest_whose_prompt"]
+folder-trust-rig-reads-late = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_that_reads_the_humans_keys_late"]
+folder-trust-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "trust::"]
 folder-trust-rig-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief"]
 
 [[plant]]
@@ -100,8 +113,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "        if asked && keys == 0 {"
-replace = "        if asked && keys == usize::MAX {"
+find = "        if asked && keys == 0 && at_prompt {"
+replace = "        if asked && keys == usize::MAX && at_prompt {"
 
 [[plant]]
 name = "folder trust: every window that asks is told of again"
@@ -174,8 +187,8 @@ runs = ["folder-trust-readers"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
-find = "        if chosen(screen, '❯').is_some_and(|choice| choice.ends_with(YES)) {"
-replace = "        if chosen(screen, '❯').is_none_or(|choice| !choice.ends_with(YES)) {"
+find = "        Some(choice) if choice.ends_with(YES) => Some(ENTER),"
+replace = "        Some(choice) if choice.ends_with(NO) => Some(ENTER),"
 
 [[plant]]
 name = "folder trust: Claude's question is read from its yes alone"
@@ -230,8 +243,14 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "                    if self.record_length(window).await > opened_with {"
-replace = "                    if self.record_length(window).await > 0 {"
+find = '''
+            if opened_with.is_none() {
+                opened_with = length;
+            }'''
+replace = '''
+            if opened_with.is_none() {
+                opened_with = Some(0);
+            }'''
 
 [[plant]]
 name = "folder trust: a linked worktree's yes is taken for its own folder, and the main checkout is answered for (round 1)"
@@ -316,8 +335,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "                        if pressed_on.as_ref() != Some(&lines)"
-replace = "                        if (pressed_on.as_ref() != Some(&lines) || keys < MOST_KEYS)"
+find = "                            Some((on, looks)) if *on == lines => {"
+replace = "                            Some((on, looks)) if *on == lines && keys == usize::MAX => {"
 
 [[plant]]
 name = "folder trust: Claude's prompt is never read"
@@ -328,3 +347,111 @@ runs = ["folder-trust-readers"]
 file = "crates/cf-harness/src/claude/trust.rs"
 find = "    shows(screen, PROMPT) && toward_trust(screen).is_none()"
 replace = "    shows(screen, PROMPT) && toward_trust(screen).is_none() && false"
+
+[[plant]]
+name = "folder trust: an asking window whose prompt is drawn otherwise is never past the question (round 2)"
+meant = "a_chief_opened_again_at_rest_whose_prompt_is_drawn_otherwise_is_handed_its_result_after_the_yes"
+runs = ["folder-trust-rig-chief-plain"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                        if gone >= GONE_LOOKS {"
+replace = "                        if gone >= u32::MAX {"
+
+[[plant]]
+name = "folder trust: a record that grows as a No ends the window is banked as the human's yes (round 2)"
+meant = "a_record_that_grows_as_a_no_ends_the_window_is_no_yes"
+runs = ["folder-trust-rig-grows"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = '''
+                    if grown {
+                        break false;'''
+replace = '''
+                    if grown {
+                        break true;'''
+
+[[plant]]
+name = "folder trust: a record unread at the first look counts as empty (round 2)"
+meant = "a_window_opened_again_whose_record_cannot_be_read_at_first_is_still_answered"
+runs = ["folder-trust-rig-record-away"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = '''
+            if opened_with.is_none() {
+                opened_with = length;'''
+replace = '''
+            if opened_with.is_none() {
+                opened_with = Some(length.unwrap_or(0));'''
+
+[[plant]]
+name = "folder trust: a window that went on without its prompt banks the human's yes (round 2)"
+meant = "a_record_that_grows_as_a_no_ends_the_window_is_no_yes"
+runs = ["folder-trust-rig-grows"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "        if asked && keys == 0 && at_prompt {"
+replace = "        if asked && keys == 0 {"
+
+[[plant]]
+name = "folder trust: a screen that names both choices reads as the question (round 2)"
+meant = "a_screen_that_quotes_the_question_asks_nothing"
+runs = ["folder-trust-rig-quoted"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "        _ => None,"
+replace = "        _ => Some(DOWN),"
+
+[[plant]]
+name = "folder trust: a screen that names both choices reads as the question"
+meant = "a_message_that_quotes_the_question_asks_nothing"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "        _ => None,"
+replace = "        _ => Some(DOWN),"
+
+[[plant]]
+name = "folder trust: a key the window did not take is never pressed again (round 2)"
+meant = "a_window_that_did_not_take_a_key_is_given_it_again"
+runs = ["folder-trust-rig-dropped-key"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                                *looks >= PRESS_AGAIN_LOOKS"
+replace = "                                *looks >= u32::MAX"
+
+[[plant]]
+name = "folder trust: the stand-in takes one key a read, and drops the human's Enter that came with their Down (main's Windows CI, 2026-10-21)"
+meant = "a_worker_that_reads_the_humans_keys_late_takes_their_yes_and_goes_on_after"
+runs = ["folder-trust-rig-reads-late"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/trust.rs"
+find = "        for key in keys_in(&given) {"
+replace = "        for key in keys_in(&given).into_iter().take(1) {"
+
+[[plant]]
+name = "folder trust: the stand-in writes a line and its end apart, and two windows' yeses share a line (main's Windows CI rerun, 2026-10-21)"
+meant = "two_windows_that_append_at_once_leave_two_whole_lines"
+runs = ["folder-trust-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/trust.rs"
+find = '    file.write_all(format!("{line}\n").as_bytes())'
+replace = '''
+    file.write_all(line.as_bytes())?;
+    sleep(Duration::from_millis(200));
+    file.write_all(b"\n")'''

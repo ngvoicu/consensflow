@@ -149,9 +149,10 @@ fn listed(board: &Board) -> Vec<String> {
 /// - athena's, before the human removed her from the staff: T-9 given to her
 ///   by name, T-10 given to her by name and paused, T-11 done in a session
 ///   of hers, T-12 done in another and accepted, T-13 given to her by name
-///   and waiting for T-1. Her removal cancelled T-9, the one task in her
-///   hands (queued); the others stay as they were, and her lane and her
-///   sessions' went.
+///   and waiting for T-1. Her removal cancelled T-9 (queued) and T-13, which
+///   waited on the board for T-1 bound to her lane (T-158: it would otherwise
+///   be queued for a lane nothing opens); the others stay as they were, and
+///   her lane and her sessions' went.
 fn replanned(file: &Path) -> Board {
     let mut ledger = open_ledger(file, options()).expect("a ledger");
     let project = project(&mut ledger);
@@ -223,7 +224,7 @@ fn a_task_no_lane_has_is_among_the_open_ones_whatever_its_state_as_node_draws_th
             "open T-10 paused",
             "open T-11 done",
             "open T-12 accepted",
-            "open T-13 open",
+            "open T-13 cancelled",
             "zeus T-6 cancelled",
             "hera T-7 done",
             "zeus-amber-pine T-1 done",

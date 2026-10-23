@@ -1,8 +1,6 @@
-use std::net::Ipv4Addr;
-
 use super::*;
 use crate::updater_smoke::say::Line;
-use crate::updater_smoke::testing::{env, https_get as ask};
+use crate::updater_smoke::testing::{env, https_get as ask, unanswered};
 
 #[test]
 fn offers_a_release_the_way_a_releases_feed_does_a_versioned_github_asset_signed() {
@@ -69,17 +67,96 @@ fn serves_the_feed_and_the_archive_when_offered_and_not_found_when_not() {
     served.close();
     drop(say);
     assert_eq!(lines.iter().collect::<Vec<_>>(), [], "no client failed");
-    // Closed, it takes no one.
-    assert!(TcpStream::connect((
-        Ipv4Addr::LOCALHOST,
-        served
-            .url
-            .trim_start_matches("https://127.0.0.1:")
-            .trim_end_matches("/feed")
-            .parse::<u16>()
-            .unwrap()
-    ))
-    .is_err());
+    // Closed, it answers no one. The port is no proof of it: another process can hold it.
+    assert!(
+        unanswered(&served.url, &tls.ca_cert, Duration::from_secs(2)),
+        "a closed feed answered"
+    );
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the certificates are made by the system's openssl"
+)]
+fn a_feed_that_is_up_answers_and_a_port_nothing_holds_does_not() {
+    let folder = tempfile::tempdir().unwrap();
+    let tls = make_tls(folder.path(), &env()).unwrap();
+    let (say, _lines) = Say::channel();
+    let mut served = serve_updates(&tls, &say).unwrap();
+    // The patience is only the longest a silence is waited for: an answer ends it.
+    assert!(!unanswered(
+        &served.url,
+        &tls.ca_cert,
+        Duration::from_secs(60)
+    ));
+    served.close();
+    // The port of a feed that is closed is refused at once, or answered by no one.
+    assert!(unanswered(
+        &served.url,
+        &tls.ca_cert,
+        Duration::from_millis(300)
+    ));
+}
+
+/// A process that holds the socket a server closed: the port stays open, the system takes
+/// the connections for it, and no one serves them. It happens with no one meaning it: the
+/// socket of a server is made close-on-exec in a second step on macOS, and a program that
+/// starts a process in between, as these tests do from many threads, leaves it the socket.
+#[cfg(unix)]
+struct Holder(std::process::Child);
+
+#[cfg(unix)]
+impl Holder {
+    /// A listener on a port of the loopback, closed here and held by a process that
+    /// was started while its socket was inherited.
+    fn of_a_closed_listener() -> (Self, std::net::SocketAddr) {
+        use std::net::Ipv4Addr;
+        use std::os::fd::AsRawFd;
+        use std::process::Stdio;
+
+        use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+
+        use crate::process::{spawn, Invocation};
+
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        fcntl(listener.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
+        let sleeping = Invocation::new("/bin/sleep", Path::new(".")).arg("600");
+        let process = spawn(&sleeping, &Env::default(), Stdio::null(), false).unwrap();
+        drop(listener);
+        (Self(process), address)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Holder {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[test]
+#[cfg(unix)]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the certificates are made by the system's openssl"
+)]
+fn a_port_a_process_holds_after_the_server_closed_it_takes_a_connect_and_answers_no_one() {
+    let folder = tempfile::tempdir().unwrap();
+    let tls = make_tls(folder.path(), &env()).unwrap();
+    let (_holder, address) = Holder::of_a_closed_listener();
+    let started = std::time::Instant::now();
+    // The listener was closed here, and a connect to its port goes through all the same,
+    // which is why a failed connect cannot be asked of a closed server.
+    assert!(TcpStream::connect(address).is_ok());
+    let held = format!("https://127.0.0.1:{}/feed", address.port());
+    assert!(unanswered(&held, &tls.ca_cert, Duration::from_millis(300)));
+    assert!(
+        started.elapsed() >= Duration::from_millis(300),
+        "the silence is waited for as long as it is given"
+    );
 }
 
 #[test]

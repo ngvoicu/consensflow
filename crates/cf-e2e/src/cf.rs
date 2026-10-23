@@ -7,12 +7,22 @@
 //! could pass against sources it never saw (a change in hand not built yet, a
 //! plant). `cargo build` knows when the build is up to date, and then it takes
 //! a moment.
+//!
+//! A run that built `cf` and the pane host before it, from the sources as they
+//! are, says where (`BUILT`), and they are taken from there and not built: under
+//! nextest each test is a process of its own, which would build them for itself,
+//! and cargo links a binary again as it builds, taking it from under a test of
+//! another process that is starting it (the plants' runner, 2026-10-16).
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::process::Run;
+use crate::process::{own_var, Run};
 use crate::{checkout, Error, Result};
+
+/// The variable that names the folder `cf` and the pane host were built in for
+/// the run, before it, from the sources as they are.
+pub const BUILT: &str = "CF_E2E_BUILT";
 
 /// The folder the workspace builds a release binary in, from the checkout's
 /// root: `.cargo/config.toml` puts the build folder at `app/src-tauri/target`.
@@ -22,24 +32,25 @@ const RELEASE: [&str; 4] = ["app", "src-tauri", "target", "release"];
 type Built = OnceLock<std::result::Result<PathBuf, String>>;
 
 /// The `cf` under test: built, or found up to date, when this is first asked
-/// for, and the same one for every case of the run.
+/// for, and the same one for every case of the run; or the one built before the
+/// run (`BUILT`).
 pub fn binary() -> Result<&'static Path> {
     static BUILT: Built = OnceLock::new();
-    built(&BUILT, "cf", "cf", &[])
+    built(&BUILT, "cf", "cf", &[], given())
 }
 
 /// The pane host under test, `consensflow-bridge`: the program that gives each
 /// window its terminal, which the app starts beside the daemon. Built as `cf`
-/// is, once for a run.
+/// is, once for a run, or the one built before it.
 pub fn pane_host() -> Result<&'static Path> {
     static BUILT: Built = OnceLock::new();
-    built(&BUILT, "cf-panes", "consensflow-bridge", &[])
+    built(&BUILT, "cf-panes", "consensflow-bridge", &[], given())
 }
 
 /// The test binary `harness-ask`, which answers what a live test asks of the
 /// harness code of the product: the harness crate's own, built with the feature
 /// that makes it (it ships with nothing). Built as `cf` is, once for a run, and
-/// the first time a test asks.
+/// the first time a test asks; never before the run.
 pub fn harness_ask() -> Result<&'static Path> {
     static BUILT: Built = OnceLock::new();
     built(
@@ -47,12 +58,13 @@ pub fn harness_ask() -> Result<&'static Path> {
         "cf-harness",
         "harness-ask",
         &["--features", "test-support"],
+        None,
     )
 }
 
 /// The test binary `engine-ask`, which answers what a live test asks of the
 /// engine's texts (the note a window the human's Resume brings back is given): the
-/// engine crate's own, built as `harness-ask` is.
+/// engine crate's own, built as `harness-ask` is, once for a run and never before it.
 pub fn engine_ask() -> Result<&'static Path> {
     static BUILT: Built = OnceLock::new();
     built(
@@ -60,23 +72,53 @@ pub fn engine_ask() -> Result<&'static Path> {
         "cf-engine",
         "engine-ask",
         &["--features", "test-support"],
+        None,
     )
 }
 
+/// The folder the run built `cf` and the pane host in before it, where it says one.
+fn given() -> Option<PathBuf> {
+    own_var(BUILT)
+        .filter(|folder| !folder.is_empty())
+        .map(PathBuf::from)
+}
+
 /// The build of the binary `bin` of the package `package`, with the cargo words
-/// `more` after the rest, made the first time it is asked for and kept in `cell`.
-fn built(cell: &'static Built, package: &str, bin: &str, more: &[&str]) -> Result<&'static Path> {
-    cell.get_or_init(|| {
-        build(
+/// `more` after the rest, made the first time it is asked for and kept in `cell`;
+/// or, where the run built it before in the folder `before`, that one.
+fn built(
+    cell: &'static Built,
+    package: &str,
+    bin: &str,
+    more: &[&str],
+    before: Option<PathBuf>,
+) -> Result<&'static Path> {
+    cell.get_or_init(|| match before {
+        Some(folder) => taken(&folder, bin),
+        None => build(
             Run::new(env!("CARGO")),
             &checkout::root(),
             package,
             bin,
             more,
-        )
+        ),
     })
     .as_deref()
     .map_err(|message| Error::Build(message.clone()))
+}
+
+/// The binary `bin` the run built in `folder` before it: an error where it is not
+/// there, which no build is made for.
+fn taken(folder: &Path, bin: &str) -> std::result::Result<PathBuf, String> {
+    let built = folder.join(format!("{bin}{}", std::env::consts::EXE_SUFFIX));
+    if built.is_file() {
+        Ok(built)
+    } else {
+        Err(format!(
+            "{BUILT} says {bin} was built in {}, and there is none there",
+            folder.display()
+        ))
+    }
 }
 
 /// Builds the binary `bin` of the package `package` in the checkout at `root`
@@ -226,6 +268,72 @@ mod tests {
         )
         .unwrap_err();
         assert!(failed.starts_with("could not start `"), "{failed}");
+    }
+
+    /// Run by the test below in a process of its own, given `BUILT`: says the `cf` and
+    /// the pane host under test.
+    #[test]
+    #[ignore = "a program the tests of cf start"]
+    fn helper_says_the_programs_under_test() {
+        println!("cf: {}", binary().unwrap().display());
+        println!("pane host: {}", pane_host().unwrap().display());
+    }
+
+    #[test]
+    fn the_programs_built_before_the_run_are_those_under_test_and_none_is_built() {
+        let folder = tempfile::tempdir().unwrap();
+        let named = |bin: &str| {
+            folder
+                .path()
+                .join(format!("{bin}{}", std::env::consts::EXE_SUFFIX))
+        };
+        files::write(&named("cf"), "").unwrap();
+        files::write(&named("consensflow-bridge"), "").unwrap();
+        // A build would fail at once: no compiler is there.
+        let ran = Run::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "cf::tests::helper_says_the_programs_under_test",
+                "--ignored",
+                "--nocapture",
+            ])
+            .var(BUILT, folder.path())
+            .var("RUSTC", folder.path().join("no-rustc"))
+            .run()
+            .unwrap();
+        assert_eq!(ran.code, Some(0), "{}", ran.output());
+        assert!(
+            ran.stdout
+                .contains(&format!("cf: {}\n", named("cf").display())),
+            "{}",
+            ran.output()
+        );
+        assert!(
+            ran.stdout.contains(&format!(
+                "pane host: {}\n",
+                named("consensflow-bridge").display()
+            )),
+            "{}",
+            ran.output()
+        );
+    }
+
+    #[test]
+    fn a_program_the_run_says_it_built_and_did_not_is_an_error_and_is_not_built() {
+        let folder = tempfile::tempdir().unwrap();
+        let failed = taken(folder.path(), "cf").unwrap_err();
+        assert_eq!(
+            failed,
+            format!(
+                "CF_E2E_BUILT says cf was built in {}, and there is none there",
+                folder.path().display()
+            )
+        );
+        static CELL: Built = OnceLock::new();
+        let failed = built(&CELL, "cf", "cf", &[], Some(folder.path().to_path_buf()))
+            .unwrap_err()
+            .to_string();
+        assert!(failed.contains("and there is none there"), "{failed}");
     }
 
     #[test]

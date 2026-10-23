@@ -24,29 +24,30 @@
 //! - Pi, OpenCode and Devin (`--respect-workspace-trust false`) never ask.
 //!
 //! Two parts. **windows**: the window of each harness whose bare window is the app's
-//! (Claude Code, Pi, OpenCode, Devin: Codex's is not), opened as the app opens one
-//! (its own command line for a new conversation; a Claude window shut out of the
-//! owner's MCP servers and browser, and not asked to trust its folder first), in
-//! folders of its own made fresh for the run, below the live folders: a plain folder;
-//! a new repository (`git init`), and the same again once answered; a repository,
-//! then a plain folder and a new repository below it once it is trusted; a plain
-//! folder of a repository nobody trusted; and a linked worktree (`git worktree add`)
-//! of a repository nobody trusted. Its screen is read as the engine reads it (the
-//! last lines the pane host sends, through the harness code's own reader,
-//! `harness-ask trust`); a window that asks is answered with the keys the engine
-//! presses, and must then be at its prompt. Claude Code must keep the yes for the
-//! folder the engine says a yes trusts, and for no other (read from its own record of
-//! folders, which the run never writes): in a linked worktree that is the checkout it
-//! belongs to. A screen that speaks of trust the reader does not read as the
-//! question, and a harness that asks where it should not or does not where it
-//! should, are failures. **projects**: for Claude Code and Codex, a project through
-//! the daemon in a new repository nobody trusted: its chief a real window of the
-//! harness; a worker of it given a task beside a stand-in chief; and a worker whose
-//! first task is done in a plain folder, which is then made a repository, and whose
-//! follow-up opens its window again on its conversation. The chief must come up idle,
-//! the tasks be done and the follow-up's window be a resumed one, and the human's
-//! notes must say that ConsensFlow answered yes once for Claude Code, and never for
-//! Codex.
+//! (Claude Code, Pi, OpenCode, Devin: Codex's is not), opened as the app opens one (its
+//! own command line for a new conversation; a Claude window shut out of the owner's MCP
+//! servers and browser, and not asked to trust its folder first), in folders of its own
+//! made fresh for the run, below the live folders: a plain folder; a new repository
+//! (`git init`), and the same again once answered; a repository, then a plain folder
+//! and a new repository below it once it is trusted; a plain folder of a repository
+//! nobody trusted; a linked worktree (`git worktree add`) of a repository nobody
+//! trusted; and a submodule (`git submodule add`) of one. Its screen is read as the
+//! engine reads it (the last lines the pane host sends, through the harness code's own
+//! reader, `harness-ask trust`); a window that asks is answered with the keys the
+//! engine presses, and must then be at its prompt as the engine reads it (for Claude
+//! Code, the reader its watch ends on: a prompt drawn otherwise fails the run). Claude
+//! Code must keep the yes for the folder the engine says a yes trusts, and for no other
+//! (read from its own record of folders, which the run never writes): in a linked
+//! worktree that is the checkout it belongs to, in a submodule the submodule itself. A
+//! screen that speaks of trust the reader does not read as the question, and a harness
+//! that asks where it should not or does not where it should, are failures.
+//! **projects**: for Claude Code and Codex, a project through the daemon in a new
+//! repository nobody trusted: its chief a real window of the harness; a worker of it
+//! given a task beside a stand-in chief; and a worker whose first task is done in a
+//! plain folder, which is then made a repository, and whose follow-up opens its window
+//! again on its conversation. The chief must come up idle, the tasks be done and the
+//! follow-up's window be a resumed one, and the human's notes must say that ConsensFlow
+//! answered yes once for Claude Code, and never for Codex.
 //!
 //! What Claude Code writes of a yes is taken back with `claude purge` at the end;
 //! the run says which folders it could not have it forget. Codex writes nothing here.
@@ -113,10 +114,12 @@ enum Case {
     Untrusted,
     /// A linked worktree of a repository nobody trusted (`git worktree add`).
     Worktree,
+    /// A submodule of a repository nobody trusted (`git submodule add`).
+    Submodule,
 }
 
 impl Case {
-    const ALL: [Case; 8] = [
+    const ALL: [Case; 9] = [
         Case::Fresh,
         Case::Repository,
         Case::Again,
@@ -125,6 +128,7 @@ impl Case {
         Case::RepositoryBelow,
         Case::Untrusted,
         Case::Worktree,
+        Case::Submodule,
     ];
 
     const fn name(self) -> &'static str {
@@ -137,6 +141,7 @@ impl Case {
             Case::RepositoryBelow => "repository below",
             Case::Untrusted => "untrusted's folder",
             Case::Worktree => "linked worktree",
+            Case::Submodule => "submodule",
         }
     }
 
@@ -152,6 +157,8 @@ impl Case {
             Case::Untrusted => ("untrusted/folder", Some("untrusted")),
             // Its repository is the checkout it belongs to, made with it (`worktree`).
             Case::Worktree => ("worktree", None),
+            // Its repository is made with it inside another (`submodule`).
+            Case::Submodule => ("superproject/sub", None),
         }
     }
 }
@@ -167,6 +174,7 @@ fn must_ask(harness: Harness, case: Case) -> bool {
                 | Case::RepositoryBelow
                 | Case::Untrusted
                 | Case::Worktree
+                | Case::Submodule
         )
 }
 
@@ -179,11 +187,28 @@ fn speaks_of_trust(screen: &[String]) -> bool {
 /// The key the engine presses next into a window of `harness` showing `screen`: none
 /// where it reads no question there.
 fn engine_key(harness: Harness, screen: &[String]) -> Result<Option<Vec<u8>>> {
-    let read = ask::question(&json!({ "op": "trust", "kind": harness.kind(), "screen": screen }))?;
+    let read = engine_read(harness, screen)?;
     Ok(match read["key"].as_str() {
         Some("enter") => Some(b"\r".to_vec()),
         Some("down") => Some(b"\x1b[B".to_vec()),
         _ => None,
+    })
+}
+
+/// What the engine reads in `screen`, a window of `harness`'s: the key it presses
+/// next, and whether the screen is the harness's prompt.
+fn engine_read(harness: Harness, screen: &[String]) -> Result<serde_json::Value> {
+    ask::question(&json!({ "op": "trust", "kind": harness.kind(), "screen": screen }))
+}
+
+/// Whether the engine reads `screen` as the prompt of a window of `harness`: for
+/// Claude Code, by the reader its watch ends on; the others are read at their prompt
+/// where nothing on their screen speaks of trust.
+fn engine_reads_prompt(harness: Harness, screen: &[String]) -> Result<bool> {
+    Ok(if harness == Harness::Claude {
+        engine_read(harness, screen)?["prompt"] == true
+    } else {
+        !speaks_of_trust(screen)
     })
 }
 
@@ -283,6 +308,29 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
         let tree = home.join(".consensflow-candidate/live").join(&name);
         git(&main, &["worktree", "add", "-q", &tree.to_string_lossy()])?;
     }
+    if case == Case::Submodule {
+        let source = live_folder_in(&home, &format!("{base}/submodule-source"))?;
+        git(&source, &["init", "-q"])?;
+        git(&source, &["commit", "-q", "--allow-empty", "-m", "first"])?;
+        let superproject = live_folder_in(&home, &format!("{base}/superproject"))?;
+        git(&superproject, &["init", "-q"])?;
+        git(
+            &superproject,
+            &["commit", "-q", "--allow-empty", "-m", "first"],
+        )?;
+        git(
+            &superproject,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                &source.to_string_lossy(),
+                "sub",
+            ],
+        )?;
+    }
     let directory = live_folder_in(&home, &name)?;
     if let (Some(repository), false) = (repository, case == Case::Again) {
         let at = live_folder_in(&home, &format!("{base}/{repository}"))?;
@@ -327,7 +375,7 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     }
     let answered = engine_key(harness, &screen)?.is_none();
     let unread = speaks_of_trust(&first) && !asked;
-    let at_prompt = drew && !window.closed() && answered && !speaks_of_trust(&screen);
+    let at_prompt = drew && !window.closed() && answered && engine_reads_prompt(harness, &screen)?;
     if asked {
         lines.push(format!("answered with {keys} keys; after them:"));
         lines.extend(screen.iter().map(|line| format!("  {line}")));
@@ -396,10 +444,12 @@ fn windows(
             },
         ));
     }
-    let made = Case::ALL
-        .into_iter()
-        .map(|case| case.folder().0)
-        .chain(["untrusted", "worktree-main"]);
+    let made = Case::ALL.into_iter().map(|case| case.folder().0).chain([
+        "untrusted",
+        "worktree-main",
+        "superproject",
+        "submodule-source",
+    ]);
     for folder in made {
         let path = live_folder_in(&home, &format!("{base}/{folder}"))?;
         folders.push(path.to_string_lossy().into_owned());
@@ -609,7 +659,8 @@ mod tests {
                 "parent",
                 "repository below",
                 "untrusted's folder",
-                "linked worktree"
+                "linked worktree",
+                "submodule"
             ]
         );
         for case in Case::ALL {

@@ -83,3 +83,61 @@ fn only_the_end_is_kept() {
     }
     assert!(tail.kept.len() <= KEEP, "{}", tail.kept.len());
 }
+
+/// The first line `chunks` say that begins with `== tree `, when a stream says them one after the other.
+fn marked_in(chunks: &[&[u8]]) -> Option<String> {
+    let mut marked = Marked::new("== tree ");
+    for chunk in chunks {
+        marked.push(chunk);
+    }
+    marked.found().map(str::to_owned)
+}
+
+#[test]
+fn the_line_that_begins_with_the_mark_is_found_whole_wherever_the_chunks_end() {
+    let said: &[u8] = b"out\r\n== tree abc 123\r\nmore\r\n";
+    assert_eq!(marked_in(&[said]).as_deref(), Some("== tree abc 123"));
+    // Cut at every place there is: inside the mark, inside the line, between its
+    // carriage return and its line feed.
+    for at in 0..said.len() {
+        let (before, after) = said.split_at(at);
+        assert_eq!(
+            marked_in(&[before, after]).as_deref(),
+            Some("== tree abc 123"),
+            "cut at {at}"
+        );
+    }
+    // A line feed alone ends a line as well, and one byte at a time is the same.
+    assert_eq!(marked_in(&[b"== tree x\n"]).as_deref(), Some("== tree x"));
+    let bytes: Vec<&[u8]> = said.chunks(1).collect();
+    assert_eq!(marked_in(&bytes).as_deref(), Some("== tree abc 123"));
+}
+
+#[test]
+fn only_the_first_such_line_counts_and_only_a_line_that_begins_with_the_mark() {
+    assert_eq!(
+        marked_in(&[b"== tree one\n== tree two\n"]).as_deref(),
+        Some("== tree one")
+    );
+    assert_eq!(
+        marked_in(&[b" == tree x\nsay == tree x\n== treex\n== tree\n"]),
+        None
+    );
+    // The mark with nothing after it is a line that says no tree, but it is the line.
+    assert_eq!(marked_in(&[b"== tree \n"]).as_deref(), Some("== tree "));
+    // A line is whole when it ends: one the stream ends in the middle of is not said.
+    assert_eq!(marked_in(&[b"== tree abc"]), None);
+    assert_eq!(marked_in(&[]), None);
+}
+
+#[test]
+fn a_line_longer_than_a_line_of_the_script_can_be_is_never_read_from_its_middle() {
+    let long = format!("== tree {}\n", "x".repeat(KEEP * 2));
+    assert_eq!(marked_in(&[long.as_bytes()]), None);
+    // The next line is read afresh.
+    let after = format!("{long}== tree ok\n");
+    assert_eq!(
+        marked_in(&[after.as_bytes()]).as_deref(),
+        Some("== tree ok")
+    );
+}
