@@ -530,6 +530,12 @@ fn helper_has_no_node_test_context() {
 
 #[test]
 #[ignore = "a program the tests of runs start"]
+fn helper_has_the_temp_folder_its_run_gave_it() {
+    assert!(std::env::temp_dir().ends_with("the-runs-temp"));
+}
+
+#[test]
+#[ignore = "a program the tests of runs start"]
 #[allow(clippy::disallowed_methods)] // The test is of what the environment it is started with holds.
 fn helper_has_no_colour() {
     assert_eq!(std::env::var("NO_COLOR").as_deref(), Ok("1"));
@@ -612,6 +618,19 @@ fn a_command_that_says_no_more_than_its_status_is_the_catch_itself_whatever_it_p
         "{:?}",
         three.caught()
     );
+}
+
+#[test]
+fn a_command_is_given_the_temp_folder_its_run_made_for_it() {
+    let mut runner = runner(Duration::from_secs(120));
+    runner.temp_in(&std::env::temp_dir().join("the-runs-temp"));
+    let ran = ended(
+        runner
+            .run(&helper("helper_has_the_temp_folder_its_run_gave_it"))
+            .unwrap(),
+    );
+    assert_eq!(ran.code, Some(0), "{}", ran.output);
+    assert!(ran.caught().is_empty(), "{}", ran.output);
 }
 
 #[test]
@@ -1742,7 +1761,17 @@ fn driven_within(
     let status =
         crate::plants::driver::run(checkout, &family, &chosen, &mut runner(limit), &mut out)
             .unwrap();
-    (status, String::from_utf8(out).unwrap())
+    let said = String::from_utf8(out).unwrap();
+    // A run that did not catch every plant keeps its folder, for whoever reads the verdict:
+    // these tests are not those, and leave none behind in the machine's.
+    if let Some(folder) = said
+        .lines()
+        .next()
+        .and_then(|first| first.strip_prefix("copies of what is planted are kept in "))
+    {
+        let _ = fs::remove_dir_all(folder);
+    }
+    (status, said)
 }
 
 /// What the driver says of `plant` in `checkout`, its commands run as processes.

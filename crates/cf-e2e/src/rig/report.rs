@@ -6,7 +6,6 @@
 //! where. And how a window's bytes become the text on its screen.
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -208,10 +207,15 @@ fn message_line(message: &Value) -> String {
 /// What the daemon says of its projects, asked as the page asks: each lane, and
 /// the newest messages in the inbox of each participant, with the state of each;
 /// and what waits at the gate. Each text of an answer is told whole before any of
-/// it is cut.
+/// it is cut. Not asked once a close was tried: the daemon's input is gone then, and
+/// where it is there still it answers nothing (ten seconds waited for in each question).
 fn said_by_the_daemon(rig: &Rig, tell: &Tell) -> String {
     if !process::is_alive(rig.daemon.id()) {
         return "  the daemon is gone\n".to_owned();
+    }
+    if rig.close_failed {
+        return "  not asked: the rig's close was tried, and the daemon's input is gone\n"
+            .to_owned();
     }
     let page = |method: &str, body: Value| rig.page(method, body).map(|answer| tell.value(&answer));
     let Ok(listed) = page("projects.list", json!({})) else {
@@ -257,7 +261,9 @@ fn said_by_the_daemon(rig: &Rig, tell: &Tell) -> String {
 }
 
 /// Says on the standard error what the rig showed: for a case that failed
-/// with the rig still up.
+/// with the rig still up. Through `eprint!`, which a test's output holds for the
+/// case that failed and says nothing of for one that passed.
+#[allow(clippy::print_stderr)] // Said in the output of the test that failed.
 pub(super) fn say(rig: &Rig) {
     let tell = Tell(rig.masker.as_ref());
     let mut report = String::from("\n--- the rig, as the failed case left it\n");
@@ -291,20 +297,24 @@ pub(super) fn say(rig: &Rig) {
     if !stray.is_empty() {
         report.push_str(&format!("lines that are no frame: {stray:?}\n"));
     }
-    let where_kept = keep(&rig.root, &tell.text(&report));
-    let _ = std::io::stderr().write_all(where_kept.as_bytes());
+    let where_kept = keep(&rig.root, &tell.text(&report), rig.reports.as_deref());
+    eprint!("{where_kept}");
 }
 
 /// Keeps `report`, what a rig dropped unclosed says of itself, in a file beside its home
-/// `root` (the home goes with the rig), on the machine it ran on; and what its error
-/// output says instead: where the report is, and none of its words. Whatever runs a rig
-/// (an agent's tool, another machine's runner) takes its error output off the machine,
-/// and the report holds what its windows showed.
-fn keep(root: &Path, report: &str) -> String {
+/// `root` (the home goes with the rig), or in `folder` where the rig is given one
+/// ([`Config::reports_in`]), on the machine it ran on; and what its error output says
+/// instead: where the report is, and none of its words. Whatever runs a rig (an agent's
+/// tool, another machine's runner) takes its error output off the machine, and the report
+/// holds what its windows showed.
+fn keep(root: &Path, report: &str, folder: Option<&Path>) -> String {
     let name = root
         .file_name()
         .map_or_else(|| "rig".into(), |name| name.to_string_lossy());
-    let file = root.with_file_name(format!("{name}-left.txt"));
+    let file = match folder {
+        Some(folder) => folder.join(format!("{name}-left.txt")),
+        None => root.with_file_name(format!("{name}-left.txt")),
+    };
     match files::write(&file, report) {
         Ok(()) => format!(
             "\n--- the rig, as the failed case left it, is kept in {}\n",
@@ -412,7 +422,7 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let root = folder.path().join("consensflow-integration-AbC123");
         let report = "--- p1-long-claude-1: \"correct horse battery staple\"\n";
-        let said = keep(&root, report);
+        let said = keep(&root, report, None);
         let file = folder
             .path()
             .join("consensflow-integration-AbC123-left.txt");
@@ -425,8 +435,14 @@ mod tests {
             )
         );
         assert!(!said.contains("horse"), "{said}");
+        // Given a folder, the file is in it, and the folder is made.
+        let reports = folder.path().join("reports");
+        let said = keep(&root, report, Some(&reports));
+        let file = reports.join("consensflow-integration-AbC123-left.txt");
+        assert_eq!(fs::read_to_string(&file).unwrap(), report);
+        assert!(said.contains(&file.display().to_string()), "{said}");
         // A file that cannot be written: said so, with none of the report either.
-        let said = keep(&file.join("home"), report);
+        let said = keep(&file.join("home"), report, None);
         assert!(said.contains("could not be kept"), "{said}");
         assert!(!said.contains("horse"), "{said}");
     }

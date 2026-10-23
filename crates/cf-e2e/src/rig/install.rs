@@ -65,6 +65,11 @@ pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<
         env.push(("TEMP".to_owned(), temp.clone()));
         env.push(("TMP".to_owned(), temp));
         env.push(("USERPROFILE".to_owned(), text(&home)));
+    } else {
+        // The same on Unix, where the programs of a rig would else find `/tmp`: the temp
+        // folder of the test that runs the rig, a plant run's own for a plant run, which
+        // then holds everything its rigs write.
+        env.push(("TMPDIR".to_owned(), text(&std::env::temp_dir())));
     }
     env.push(("CF_TEST_HARNESS".to_owned(), text(&config.stand_in)));
     if let Some(codex) = &config.codex {
@@ -231,6 +236,30 @@ mod tests {
         assert_eq!(get("CF_TEST_NO_SUCH"), "");
         // Nothing of the machine's own gets in.
         assert!(!env.iter().any(|(name, _)| name == "CONSENSFLOW_URL"));
+    }
+
+    #[test]
+    fn the_programs_of_a_rig_are_told_the_temp_folder_of_the_test_that_runs_it() {
+        // Whatever they write there (a socket's folder, a harness's scratch files) is in the
+        // folder a plant run gave its test, with the homes and the reports, and goes with it.
+        let root = Path::new("root");
+        let env = environment(root, &root.join("fake-bin"), &config());
+        let temp = std::env::temp_dir().to_string_lossy().into_owned();
+        let names: &[&str] = if cfg!(windows) {
+            &["TEMP", "TMP"]
+        } else {
+            &["TMPDIR"]
+        };
+        for name in names {
+            assert_eq!(var(&env, name), temp, "{name}");
+        }
+        // A case that wants another says so, and it comes last.
+        let own = environment(
+            root,
+            &root.join("fake-bin"),
+            &config().var(names[0], "/mine"),
+        );
+        assert_eq!(var(&own, names[0]), "/mine");
     }
 
     #[test]

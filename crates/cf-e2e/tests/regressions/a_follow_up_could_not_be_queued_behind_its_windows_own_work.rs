@@ -106,5 +106,6 @@ fn a_follow_up_added_while_its_window_is_at_work_waits_for_the_task_and_goes_int
     })?;
     assert_eq!(task(&project, 2)?.0, "done", "T-2 had its result first");
     assert_eq!(task(&project, 3)?.1, session, "the same window");
+    rig.close()?;
     Ok(())
 }

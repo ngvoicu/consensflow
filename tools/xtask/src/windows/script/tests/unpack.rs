@@ -22,21 +22,14 @@ fn unpacking(text: &str) -> Vec<&str> {
 
 #[test]
 fn the_tree_is_unpacked_by_tar_with_each_file_given_the_time_of_the_unpack() {
-    let text = plain(&[]);
+    let text = bootstrap();
     assert_eq!(
         unpacking(&text),
-        [
-            "tar.exe",
-            "-xmzf",
-            "(Join-Path",
-            "$env:USERPROFILE",
-            "'consensflow-build.tgz')",
-            "-C",
-            "$dir"
-        ]
+        ["tar.exe", "-xmzf", "$tarball", "-C", "$dir"]
     );
     // A folder with a space in its name is one word of the PowerShell, as it is of the others.
     let other = remote_script(&Script {
+        id: ID,
         dir: "build two",
         inside: ".",
         steps: &[],
@@ -44,9 +37,10 @@ fn the_tree_is_unpacked_by_tar_with_each_file_given_the_time_of_the_unpack() {
         env: &[],
     });
     assert!(
-        other.contains("-xmzf (Join-Path $env:USERPROFILE 'build two.tgz') -C $dir\n"),
+        other.contains("$tarball = Join-Path $env:USERPROFILE 'build two.0000abcd-12345678.tgz'\n"),
         "{other}"
     );
+    assert!(other.contains("-xmzf $tarball -C $dir\n"), "{other}");
 }
 
 /// What a file packed with a time long past has for a time once `tar` has unpacked
@@ -79,7 +73,7 @@ fn time_after_unpacking(flags: &str) -> SystemTime {
 #[test]
 fn a_file_changed_long_ago_is_unpacked_with_the_time_of_the_unpack_and_without_the_flag_with_its_own(
 ) {
-    let flags = unpacking(&plain(&[]))[1].to_owned();
+    let flags = unpacking(&bootstrap())[1].to_owned();
     // Packed in 2001: the script's flags give it the time of now.
     let age = |time: SystemTime| time.elapsed().unwrap_or_default();
     assert!(

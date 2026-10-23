@@ -24,6 +24,11 @@ struct Fake<A: FnMut(&[String]) -> Answer> {
     stops_in_state: VecDeque<bool>,
     /// How many times the state was asked.
     states: usize,
+    /// The checkout's root where git says nothing of it (`gitless`).
+    gitless: Option<PathBuf>,
+    /// The temp folder it was given, and for each command whether it was there.
+    temp: Option<PathBuf>,
+    temp_there: Vec<bool>,
 }
 
 impl<A: FnMut(&[String]) -> Answer> Fake<A> {
@@ -32,6 +37,9 @@ impl<A: FnMut(&[String]) -> Answer> Fake<A> {
             answer,
             ran: Vec::new(),
             stops: VecDeque::new(),
+            gitless: None,
+            temp: None,
+            temp_there: Vec::new(),
             state_of: None,
             stops_in_state: VecDeque::new(),
             states: 0,
@@ -42,6 +50,15 @@ impl<A: FnMut(&[String]) -> Answer> Fake<A> {
 impl<A: FnMut(&[String]) -> Answer> Runner for Fake<A> {
     fn run(&mut self, command: &[String]) -> Answer {
         self.ran.push(command.join(" "));
+        self.temp_there
+            .push(self.temp.as_ref().is_some_and(|folder| folder.is_dir()));
+        // What a rig of the command leaves in its temp folder: a home, a report.
+        if let Some(folder) = &self.temp {
+            let _ = fs::write(
+                folder.join(format!("left-by-{}", command[0])),
+                "a rig's home",
+            );
+        }
         (self.answer)(command)
     }
 
@@ -57,6 +74,14 @@ impl<A: FnMut(&[String]) -> Answer> Runner for Fake<A> {
         Some(self.state_of.as_ref().map_or_else(String::new, |file| {
             fs::read_to_string(file).unwrap_or_default()
         }))
+    }
+
+    fn gitless(&mut self) -> Option<PathBuf> {
+        self.gitless.clone()
+    }
+
+    fn temp_in(&mut self, folder: &Path) {
+        self.temp = Some(folder.to_path_buf());
     }
 }
 
@@ -256,7 +281,7 @@ fn family(plants: Vec<Plant>) -> Family {
 }
 
 /// What `run` answered, and what it said.
-fn go(
+fn go_keeping(
     context: &Context,
     family: &Family,
     runner: &mut dyn Runner,
@@ -265,6 +290,27 @@ fn go(
     let mut out = Vec::new();
     let status = run(context, family, &chosen, runner, &mut out);
     (status, String::from_utf8(out).unwrap())
+}
+
+/// [`go_keeping`], and the folder a run that ended and kept it (a plant not caught) is
+/// removed: the tests leave none in the machine's temp folder. A run that ended in an
+/// error keeps its folder for the test that asked for the error to look at.
+fn go(
+    context: &Context,
+    family: &Family,
+    runner: &mut dyn Runner,
+) -> (Result<i32, Failure>, String) {
+    let (status, said) = go_keeping(context, family, runner);
+    if status.is_ok() {
+        if let Some(folder) = said
+            .lines()
+            .next()
+            .and_then(|first| first.strip_prefix("copies of what is planted are kept in "))
+        {
+            let _ = fs::remove_dir_all(folder);
+        }
+    }
+    (status, said)
 }
 
 /// The folder the copies were kept in, from what the run said first.
@@ -521,6 +567,143 @@ fn a_failure_that_names_no_test_is_run_so_again_and_its_command_twice_without_th
         ),
         "{said}"
     );
+}
+
+#[test]
+fn the_commands_are_given_a_temp_folder_in_the_runs_own_folder_which_goes_with_it() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper(
+        "p: one",
+        &[("first", false), ("second", false)],
+    )]);
+    let mut runner = Fake::new(|command| match command[0].as_str() {
+        "first" => catches(&context, "m::the_test"),
+        _ => passes(),
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0);
+    let given = runner.temp.clone().unwrap_or_default();
+    assert_eq!(given, copies_folder(&said), "{given:?}");
+    assert!(
+        !runner.temp_there.is_empty() && runner.temp_there.iter().all(|there| *there),
+        "it was there for each command: {:?}",
+        runner.temp_there
+    );
+    assert!(!given.exists(), "it went with the run's folder");
+}
+
+/// How many bytes the path of a Unix socket may have (`sun_path` on a Mac), the end included.
+#[cfg(unix)]
+const SUN_PATH: usize = 104;
+
+/// How many bytes of that the longest socket a plant run can make must leave to spare.
+#[cfg(unix)]
+const TO_SPARE: usize = 16;
+
+#[cfg(unix)]
+#[test]
+fn the_longest_socket_path_a_plant_run_can_make_is_not_within_16_bytes_of_the_limit() {
+    // The Codex session of a rig makes its socket in the first of two folders that fits:
+    // under the rig's home, which is made in the temp folder the run gave (the run's folder
+    // itself), or under that temp folder. Neither is a name the run chooses but its folder,
+    // and a Mac whose temp folder is as long as this one's has no more than that to give.
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("first", false)])]);
+    let mut runner = Fake::new(|_| catches(&context, "m::the_test"));
+    let (status, _) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0);
+    let run = runner.temp.clone().unwrap().to_string_lossy().into_owned();
+    let in_the_home =
+        format!("{run}/consensflow-integration-XXXXXX/consensflow/tmp/codex-XXXXXX/native.sock");
+    let in_the_temp_folder = format!("{run}/consensflow/codex-XXXXXX/native.sock");
+    let made = [in_the_home, in_the_temp_folder]
+        .into_iter()
+        .find(|path| path.len() < SUN_PATH)
+        .unwrap_or_else(|| panic!("no socket of a Codex session fits under {run}"));
+    assert!(
+        made.len() + TO_SPARE <= SUN_PATH,
+        "{made} is {} bytes of the {SUN_PATH} a socket's path may have",
+        made.len()
+    );
+}
+
+#[test]
+fn a_run_refused_for_a_checkout_git_says_nothing_of_makes_no_folder_and_runs_nothing() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("first", false)])]);
+    let mut runner = Fake::new(|_| passes());
+    runner.gitless = Some(context.root.clone());
+    let (status, said) = go_keeping(&context, &family, &mut runner);
+    assert_eq!(
+        status.unwrap_err().to_string(),
+        format!(
+            "plants need a git checkout at {} to tell a changed checkout",
+            context.root.display()
+        )
+    );
+    assert!(said.is_empty(), "{said}");
+    assert!(runner.ran.is_empty(), "{:?}", runner.ran);
+    assert_eq!(
+        runner.temp, None,
+        "a folder was made for a run that never was"
+    );
+}
+
+#[test]
+fn a_run_with_a_plant_that_was_not_caught_keeps_its_folder_with_what_its_runs_left_in_it() {
+    // A plant that missed, one that hung, and one that did not build: each leaves what
+    // its runs wrote in the run's temp folder (a hung one's rig home is the only trace
+    // of it), and the folder stays for whoever reads the verdict.
+    let hung = || {
+        Ok(Execution::Ended(Ran {
+            hung: true,
+            ..Ran::new(&["cargo", "test", "-p", "x"], None, "", None)
+        }))
+    };
+    let broken = || {
+        ended(
+            101,
+            "error[E0432]: unresolved import\nerror: could not compile `x`\n",
+        )
+    };
+    for (what, answer) in [
+        ("missed", Box::new(passes) as Box<dyn Fn() -> Answer>),
+        ("hung", Box::new(hung)),
+        ("broken", Box::new(broken)),
+    ] {
+        let (_folder, context) = checkout();
+        let family = family(vec![
+            upper("p: caught", &[("first", false)]),
+            upper("p: not caught", &[("second", false)]),
+        ]);
+        let mut runner = Fake::new(|command| match command[0].as_str() {
+            "first" => catches(&context, "m::the_test"),
+            _ => answer(),
+        });
+        let (status, said) = go_keeping(&context, &family, &mut runner);
+        let folder = copies_folder(&said);
+        assert_eq!(status.unwrap(), 1, "{what}: {said}");
+        assert!(
+            folder.is_dir(),
+            "{what}: the run's folder was removed: {said}"
+        );
+        for left in ["left-by-first", "left-by-second"] {
+            assert!(
+                folder.join(left).is_file(),
+                "{what}: {left} was removed with the folder"
+            );
+        }
+        // It says so, and the verdict is still the last line.
+        assert!(
+            said.contains(&format!(
+                "1 plant was not caught: what its runs left is kept in {}\n",
+                folder.display()
+            )),
+            "{what}: {said}"
+        );
+        assert!(said.ends_with("1 of 2 plants caught\n"), "{what}: {said}");
+        fs::remove_dir_all(folder).unwrap();
+    }
 }
 
 #[test]

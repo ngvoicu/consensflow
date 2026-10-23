@@ -69,6 +69,9 @@ const OUTPUT_LIMIT: usize = 64 * 1024 * 1024;
 /// The variable `node --test` sets for the ones it starts.
 const NODE_TEST_CONTEXT: &str = "NODE_TEST_CONTEXT";
 
+/// The variables a program is told its temp folder by: Unix's, and Windows' two.
+const TEMP_FOLDER: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
+
 /// Where each run's report is written, under the build folder git leaves out.
 const RUNS: &str = "app/src-tauri/target/plants-runs";
 
@@ -154,6 +157,13 @@ pub trait Runner {
     /// Whether this program was asked to stop since it was last asked: a stop that
     /// came with no command in hand is not lost.
     fn stopped(&mut self) -> bool;
+
+    /// Gives the commands it runs from now on `folder` as their temp folder. A plant
+    /// makes tests fail on purpose, and a rig of the integration suites keeps a report
+    /// of each case that fails (and leaves its home when its run was ended): in the
+    /// machine's own temp folder those stay for good, in the run's they go with it.
+    /// A runner that runs nothing has none to give.
+    fn temp_in(&mut self, _folder: &Path) {}
 
     /// What the checkout is now, as far as a command's run can tell: the same text
     /// where nothing of it changed, whatever wrote it. How a command did without a
@@ -610,6 +620,20 @@ pub fn refused(command: &[String], context: &Context) -> Option<String> {
 }
 
 impl Runner for Execute {
+    fn temp_in(&mut self, folder: &Path) {
+        let kept = self
+            .checkout
+            .env
+            .iter()
+            .filter(|(name, _)| !TEMP_FOLDER.iter().any(|temp| *name == OsStr::new(temp)))
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .collect::<Vec<_>>();
+        let given = TEMP_FOLDER
+            .iter()
+            .map(|name| (OsString::from(name), folder.as_os_str().to_owned()));
+        self.checkout.env = Env::from_vars(kept.into_iter().chain(given));
+    }
+
     fn run(&mut self, command: &[String]) -> Result<Execution, Error> {
         let reporter = Reporter::of(command);
         if let Some(why) = reporter.refused(command, &self.checkout) {
