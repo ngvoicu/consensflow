@@ -1804,17 +1804,22 @@ replace = """
             return Err(refused("""
 
 [[plant]]
-name = "turn-end-min engine: a turn's answer starts at the brief, not at the latest paste"
+name = "turn-end-min engine: a turn whose latest message is told words has no start"
 meant = "words_told_while_the_brief_is_on_its_way_go_in_next_and_the_answer_after_them_is_the_result"
 runs = ["tem-engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = """
+        let Some(latest) = latest else {
+            return Ok(None);
+        };
         let receipt = latest.receipt.get("item").and_then(Value::as_str);"""
 replace = """
-        let receipt = latest.receipt.get("item").and_then(Value::as_str).filter(|_| false);
-        let latest = &thread.messages[0];"""
+        let Some(latest) = latest.filter(|latest| latest.kind != "note") else {
+            return Ok(None);
+        };
+        let receipt = latest.receipt.get("item").and_then(Value::as_str);"""
 
 [[plant]]
 name = "turn-end-min engine: Finish takes the chief's own step"

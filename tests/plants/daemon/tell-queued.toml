@@ -73,16 +73,10 @@ find = """
         }"""
 replace = ""
 
-[[plant]]
-name = "tell queued: told words pasted on their own are not the window's latest message, on the rig"
-meant = "words_told_to_a_task_whose_window_is_not_up_go_in_after_its_brief_once_each"
-runs = ["rig-regression-tell-queued"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "         AND (m.kind IN ('task', 'answer') OR ({}))"
-replace = "         AND (m.kind IN ('task', 'answer') OR ({} AND 1 = 0))"
+# "told words pasted on their own are not the window's latest message, on the rig" is retired at
+# the merge with turn-end (T-397): turn-end's result is the last complete answer after the window's
+# latest message, so a start at the brief instead of at the told words takes the same answer, and no
+# rig case can tell the plant from the code. Its ledger copy below is still caught.
 
 [[plant]]
 name = "tell queued: told words pasted on their own are not the window's latest message"
