@@ -167,6 +167,85 @@ fn tarballs_in(profile: &Path) -> Vec<String> {
         .collect()
 }
 
+/// The programs of a case that are marked by the address they ping (`mark`): their process ids.
+/// The processes are asked of the system by their command line, so that nothing another case
+/// of this binary starts is taken for one. A question the system does not answer is asked
+/// again, and then fails the case: no answer is not "none".
+fn marked(env: &Env, mark: &str) -> Vec<u32> {
+    let script = format!(
+        "$ProgressPreference = 'SilentlyContinue'\n$ErrorActionPreference = 'Stop'\nGet-CimInstance Win32_Process -Filter \"Name='PING.EXE'\" | Where-Object {{ $_.CommandLine -like '*{mark}*' }} | ForEach-Object {{ $_.ProcessId }}\n"
+    );
+    for attempt in 0..4 {
+        let ran = process::capture(
+            &Invocation::new("powershell", ".")
+                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+                .arg(encode_script(&script).unwrap()),
+            env,
+        )
+        .unwrap();
+        if ran.code == 0 {
+            return ran
+                .stdout
+                .lines()
+                .filter_map(|line| line.trim().parse().ok())
+                .collect();
+        }
+        assert!(attempt < 3, "the system would not say: {}", ran.stderr);
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    unreachable!("the last attempt panics")
+}
+
+/// Ends the programs marked by `mark` when it is dropped, whatever the case ended with:
+/// a case that fails must not leave them running on the machine it ran on.
+struct Marks<'a> {
+    env: &'a Env,
+    mark: &'static str,
+}
+
+impl Drop for Marks<'_> {
+    fn drop(&mut self) {
+        for id in marked(self.env, self.mark) {
+            let _ = process::capture(
+                &Invocation::new("taskkill", ".").args(["/F", "/PID", &id.to_string()]),
+                self.env,
+            );
+        }
+    }
+}
+
+/// The stop of the run `id`, as ssh has the machine run it: its own PowerShell, with the
+/// profile of the case.
+fn stop(case: &Case, id: &str) {
+    let stop = process::capture(
+        &Invocation::new("powershell", ".")
+            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+            .arg(encode_script(&stop_script(SHARED, id)).unwrap())
+            .var("USERPROFILE", &case.profile),
+        &case.env,
+    )
+    .unwrap();
+    assert_eq!(stop.code, 0, "{}{}", stop.stdout, stop.stderr);
+    // It says nothing: what `taskkill` says of the programs the system is ending as it
+    // reads them ("could not be terminated", "not supported") is for no one, and the
+    // person who stopped the run would have it on their terminal.
+    assert_eq!((stop.stdout.as_str(), stop.stderr.as_str()), ("", ""));
+}
+
+/// Waits for the run's own process to be gone (a minute at most): what a stop ends is the run, so
+/// it is the process that is waited for, not the end of its output, which stays open as long as
+/// any process that holds a copy of it lives.
+fn gone(mut run: Child) {
+    let until = Instant::now() + Duration::from_secs(60);
+    while run.try_wait().unwrap().is_none() {
+        assert!(
+            Instant::now() < until,
+            "the run's process outlived its stop by a minute"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// Two runs of the script as it is sent, started together on one profile.
 fn together(scratch: &Path, env: &Env) -> (PathBuf, [Came; 2]) {
     let profile = scratch.join("profile");
@@ -417,35 +496,23 @@ fn a_stop_ends_the_run_the_owner_file_names_by_its_process_whatever_the_older_fi
     // held the lock (the milliseconds between the open and the write): the stop must end
     // the run, not the process in that file, and must leave that file to the script it is.
     let case = Case::new();
+    let _marks = Marks {
+        env: &case.env,
+        mark: "127.0.0.76",
+    };
     let id = "0000b007-00000007";
-    let run = case.run(id, &[("keep.txt", b"kept")], None, "ping -n 60 127.0.0.1");
-    until("the run never named itself", || {
-        case.copy().join(OWNER).exists()
+    let run = case.run(id, &[("keep.txt", b"kept")], None, "ping -n 60 127.0.0.76");
+    // The command is running: its program is there to be ended with the run.
+    until("the run never started its command", || {
+        !marked(&case.env, "127.0.0.76").is_empty()
     });
     let other = sleeper(&case.env);
     let other_id = other.id();
     fs::write(case.copy().join(RUNNING), other_id.to_string()).unwrap();
-    let stop = process::capture(
-        &Invocation::new("powershell", ".")
-            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
-            .arg(encode_script(&stop_script(SHARED, id)).unwrap())
-            .var("USERPROFILE", &case.profile),
-        &case.env,
-    )
-    .unwrap();
-    assert_eq!(stop.code, 0, "{}{}", stop.stdout, stop.stderr);
-    // The run is gone: what the stop ends is the run, so it is the run's process that is waited
-    // for (a minute at most), not the end of its output, which stays open as long as any
-    // process that holds a copy of it lives, the run's own or another's.
-    let mut run = run;
-    let until = Instant::now() + Duration::from_secs(60);
-    while run.try_wait().unwrap().is_none() {
-        assert!(
-            Instant::now() < until,
-            "the run's process outlived its stop by a minute"
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    stop(&case, id);
+    gone(run);
+    // Nothing the run started is running: its `ping -n 60` was a minute from its end.
+    assert_eq!(marked(&case.env, "127.0.0.76"), Vec::<u32>::new());
     assert!(!case.copy().join(OWNER).exists());
     // The process in the older file is alive and its file is as it was written.
     let left = fs::read_to_string(case.copy().join(RUNNING)).unwrap();
@@ -464,4 +531,113 @@ fn a_stop_ends_the_run_the_owner_file_names_by_its_process_whatever_the_older_fi
         == 0);
     end(other);
     assert!(tarballs_in(&case.profile).is_empty());
+}
+
+/// A batch file that keeps starting programs, as a test runner does (a thousand pings of a
+/// few seconds each, three thousand starts at the most, so that a stop that fails leaves a
+/// few seconds' worth and not a machine full): `mark` is the address they ping.
+fn spawner(mark: &str) -> Vec<u8> {
+    format!("@echo off\r\nfor /L %%i in (1,1,3000) do start \"\" /b ping -n 12 {mark} >nul\r\n")
+        .into_bytes()
+}
+
+#[test]
+fn a_stop_that_lands_while_the_run_is_starting_programs_leaves_none_of_them_running() {
+    // Seen on zeewin, 2026-10-23: the stop was `taskkill /T /F`, which reads the tree and then
+    // ends what it read, leaves first and the program that starts the others last (about 7 ms
+    // each), and whatever is started while it goes on it never read. A stop that landed on a
+    // run starting programs left 21 to 50 of them running, every time (and a single `ping -n 60` 7
+    // times in 142 when it landed as the run started its command, which then held the
+    // run's output open for its whole minute). The run is in a job now, that the system ends
+    // with the run's process, started programs and all.
+    let mark = "127.0.0.71";
+    for round in 0..2 {
+        let case = Case::new();
+        let _marks = Marks {
+            env: &case.env,
+            mark,
+        };
+        let id = format!("0000b1{round:02x}-0000000{round}");
+        let spawner = spawner(mark);
+        let run = case.run(&id, &[("spawn.cmd", &spawner)], None, "spawn.cmd");
+        until("the run never started its programs", || {
+            marked(&case.env, mark).len() >= 6
+        });
+        stop(&case, &id);
+        gone(run);
+        // Still going, for a moment after the run is gone: the system is ending them, and a
+        // process it ended is listed until its last handle is closed. Not for the seconds of a
+        // ping that nothing ended (the ones the stop did not read lived 11 s).
+        let until = Instant::now() + Duration::from_secs(2);
+        let mut left = marked(&case.env, mark);
+        while !left.is_empty() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(100));
+            left = marked(&case.env, mark);
+        }
+        assert!(
+            left.is_empty(),
+            "round {round}: {} of the programs the run started are still running after its stop",
+            left.len()
+        );
+        assert!(tarballs_in(&case.profile).is_empty());
+    }
+}
+
+#[test]
+fn what_a_command_leaves_running_when_the_run_ends_by_itself_is_left_running() {
+    // As before the job: a program a command starts and leaves (a daemon a test left, a
+    // build's watcher) is not ended by the run's end, only by a stop. The job's end-on-close
+    // is taken away where the run ends by itself.
+    let mark = "127.0.0.72";
+    let case = Case::new();
+    let _marks = Marks {
+        env: &case.env,
+        mark,
+    };
+    let leave = format!("@echo off\r\nstart \"\" /b ping -n 30 {mark} >nul\r\n").into_bytes();
+    let mut run = case.run(
+        "0000b201-00000001",
+        &[("leave.cmd", &leave)],
+        None,
+        "leave.cmd",
+    );
+    // The run's process is gone (its output is not: the program left holds a copy of it).
+    let until = Instant::now() + Duration::from_secs(60);
+    while run.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < until, "the run never ended");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(
+        run.try_wait().unwrap().and_then(|status| status.code()),
+        Some(0)
+    );
+    assert_eq!(
+        marked(&case.env, mark).len(),
+        1,
+        "the program it left is running"
+    );
+    assert!(tarballs_in(&case.profile).is_empty());
+}
+
+#[test]
+fn a_stop_of_a_run_that_has_already_ended_says_nothing_and_takes_its_records_away() {
+    // A Ctrl-C that lands as the run ends, or the records a killed run left: the owner file
+    // names a process that is not there. The stop has nothing to end, says nothing (what
+    // `taskkill` says of a process it cannot find is for no one) and clears the records.
+    let case = Case::new();
+    let id = "0000b301-00000001";
+    let mut ended = process::spawn(
+        &Invocation::new("cmd", ".").args(["/c", "exit", "0"]),
+        &case.env,
+        Stdio::null(),
+        false,
+    )
+    .unwrap();
+    ended.wait().unwrap();
+    let pid = ended.id();
+    fs::write(case.copy().join(OWNER), format!("{id}\n{pid}\n")).unwrap();
+    fs::write(case.copy().join(RUNNING), pid.to_string()).unwrap();
+    stop(&case, id);
+    assert!(!case.copy().join(OWNER).exists());
+    assert!(!case.copy().join(RUNNING).exists());
 }

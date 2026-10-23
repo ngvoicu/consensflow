@@ -277,7 +277,7 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
     // line is the last).
     assert!(
         boot.contains(
-            "\n} finally {\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($held) {\n    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue\n    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n  }\n  if ($lock) { $lock.Dispose() }\n}\n"
+            "\n} finally {\n  if ($null -ne $job) { [CfJob]::Release($job) }\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($held) {\n    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue\n    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n  }\n  if ($lock) { $lock.Dispose() }\n}\n"
         ),
         "{boot}"
     );
@@ -395,8 +395,9 @@ fn the_script_that_ends_a_run_there_ends_the_run_the_lock_names_and_takes_its_ta
          $running = Join-Path $dir '.windows-run.pid'\n\
          $owner = Join-Path $dir '.windows-run.id'\n\
          $of = @(Get-Content $owner -ErrorAction SilentlyContinue)\n\
-         if ($of[0] -eq '0000abcd-12345678') { taskkill /PID ($of[1]) /T /F | Out-Null; Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force } }\n\
-         Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.0000abcd-12345678.tgz') -Force -ErrorAction SilentlyContinue\n"
+         if ($of[0] -eq '0000abcd-12345678') { taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null; Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force } }\n\
+         Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.0000abcd-12345678.tgz') -Force -ErrorAction SilentlyContinue\n\
+         exit 0\n"
     );
 }
 
@@ -621,7 +622,7 @@ fn a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another() {
     assert_eq!(guarded.len(), 1, "{text}");
     assert!(
         guarded[0].starts_with(
-            "if ($of[0] -eq '0000abcd-12345678') { taskkill /PID ($of[1]) /T /F | Out-Null; "
+            "if ($of[0] -eq '0000abcd-12345678') { taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null; "
         ),
         "{text}"
     );
@@ -753,6 +754,81 @@ fn powershell_runs_the_finally_that_takes_the_tarball_away_when_the_script_leave
 }
 
 #[test]
+fn a_run_is_put_in_a_job_that_ends_with_it_before_it_starts_anything_and_a_run_that_cannot_be_says_so(
+) {
+    let text = script(&BUILD, "x", &parse_env(&strings(&["A=1"])).unwrap());
+    let at = |what: &str| {
+        text.find(what)
+            .unwrap_or_else(|| panic!("{what} is not there: {text}"))
+    };
+    // The run script puts its process in the job first: every program it starts after is in it.
+    assert!(
+        text.starts_with("\n$job = $null\ntry {\n  Add-Type -TypeDefinition @'\nusing System;"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  $made = [CfJob]::Enter()\n  if ($made -eq [IntPtr]::Zero) { throw [CfJob]::Why }\n  $job = $made\n"),
+        "{text}"
+    );
+    assert!(at("$made = [CfJob]::Enter()") < at("$env:Path"));
+    assert!(at("$made = [CfJob]::Enter()") < at("foreach ($step in"));
+    assert!(at("$made = [CfJob]::Enter()") < at("$env:A = '1'"));
+    assert!(at("$made = [CfJob]::Enter()") < at("cmd /c \"$run 2>&1\""));
+    // A run that cannot be put in a job (no compiler, no right, the system's no) goes on as it did,
+    // saying so, and never ends without its exit line for it.
+    assert!(
+        text.contains("} catch { Write-Output \"== no job: $($_.Exception.Message), so a stop will not end at once what this run starts\" }\n"),
+        "{text}"
+    );
+    // What the C# does: a job that ends what is in it when its last handle closes (the only one is this
+    // process's), this process put in it, and `Release`, which takes the end-on-close away.
+    assert!(text.contains("Limit(job, 0x2000)"), "{text}");
+    assert!(
+        text.contains("AssignProcessToJobObject(job, GetCurrentProcess())"),
+        "{text}"
+    );
+    assert!(
+        text.contains("public static void Release(IntPtr job) { Limit(job, 0); }"),
+        "{text}"
+    );
+    assert!(
+        text.contains("SetInformationJobObject(job, 9, ref e, Marshal.SizeOf(typeof(Extended)))"),
+        "{text}"
+    );
+    // The here-string that holds it is closed on a line of its own, and nothing in the C# ends it.
+    assert_eq!(text.matches("\n'@\n").count(), 1, "{text}");
+    assert!(!JOB_SOURCE.contains("'@"));
+}
+
+#[test]
+fn the_job_is_released_where_a_run_ends_by_itself_and_not_where_it_is_killed() {
+    let boot = bootstrap();
+    let at = |what: &str| {
+        boot.find(what)
+            .unwrap_or_else(|| panic!("{what} is not there: {boot}"))
+    };
+    // Set before the try, so that a run that never gets so far has none to release.
+    assert!(at("$job = $null\n") < at("try {\n"));
+    assert_eq!(boot.matches("[CfJob]::Release($job)").count(), 1, "{boot}");
+    // In the `finally`, which `exit` goes through and a killed process does not: the first
+    // thing it does, so that nothing else it does can keep a program from being left running.
+    let finally = &boot[at("} finally {\n")..];
+    assert!(
+        finally.starts_with("} finally {\n  if ($null -ne $job) { [CfJob]::Release($job) }\n"),
+        "{finally}"
+    );
+    // The bootstrap does not name the job's C#: it is in the run script, and the bootstrap
+    // calls it only where it was made.
+    assert!(
+        !boot.contains("Add-Type") && !boot.contains("CreateJobObject"),
+        "{boot}"
+    );
+    // The stop is the same as before the job: the system ends the programs of the run when the
+    // process the stop ends is gone.
+    assert!(stop_script(DIR, ID).contains("taskkill /PID ($of[1]) /T /F"));
+}
+
+#[test]
 fn a_mark_in_a_value_is_only_text_and_no_template_has_a_mark_nothing_fills() {
     // What is written in is not read again.
     let text = script(&[], "echo «dir» «running»", &[]);
@@ -856,9 +932,11 @@ fn the_longest_run_there_is_leaves_the_command_line_a_margin_of_a_thousand_and_m
         run.contains("--switch-to") && run.contains("--pi-staff-model"),
         "{run}"
     );
+    // It holds the job's C# besides, and is longer than the line could carry: that is what the
+    // tarball is for.
     assert!(
-        encode_script(&run).unwrap().len() < ENCODED_LIMIT,
-        "the longest run script is no longer than the line was: not the margin it is for"
+        encode_script(&run).is_err(),
+        "the run script has outgrown the line, as it may"
     );
 }
 

@@ -658,8 +658,9 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
              $running = Join-Path $dir '.windows-run.pid'\n\
              $owner = Join-Path $dir '.windows-run.id'\n\
              $of = @(Get-Content $owner -ErrorAction SilentlyContinue)\n\
-             if ($of[0] -eq '{id}') {{ taskkill /PID ($of[1]) /T /F | Out-Null; Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) {{ Remove-Item -LiteralPath $running -Force }} }}\n\
-             Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.{id}.tgz') -Force -ErrorAction SilentlyContinue\n"
+             if ($of[0] -eq '{id}') {{ taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null; Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) {{ Remove-Item -LiteralPath $running -Force }} }}\n\
+             Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.{id}.tgz') -Force -ErrorAction SilentlyContinue\n\
+             exit 0\n"
         )
     );
 }

@@ -10,6 +10,7 @@ $running = Join-Path $dir '.windows-run.pid'
 $owner = Join-Path $dir '.windows-run.id'
 $held = $false
 $lock = $null
+$job = $null
 try {
 New-Item -ItemType Directory -Force $dir | Out-Null
 try { $lock = [IO.File]::Open((Join-Path $dir '.windows-run.lock'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {} catch { $why = $_.Exception.Message }
@@ -26,6 +27,7 @@ if ($failed.Count) { Exit-Run 1 }
 Write-Output "== tree $(Get-Content -LiteralPath (Join-Path $dir '.windows-tree') -TotalCount 1)"
 . ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '.windows-run.ps1'))))
 } finally {
+  if ($null -ne $job) { [CfJob]::Release($job) }
   Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue
   if ($held) {
     Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue

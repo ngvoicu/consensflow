@@ -39,6 +39,12 @@
 #   files unpacked are held to the identity by the sweep; the lock's refusal always has its exit line;
 #   a process id in the older file counts only for a PowerShell older than the file; the uploads of a
 #   folder that is gone are taken away a day after.
+# - A stop ends everything the run started (T-322): the run is put in a job that the system ends with
+#   the run's process (`CfJob` in the run script), released where the run ends by itself. A stop that
+#   was `taskkill /T /F` alone read the tree and then ended what it read, so what a run started while
+#   it went on was left running (zeewin, 2026-10-23: 21 to 50 programs of a run that kept starting
+#   them, a single `ping -n 60` 7 times in 142 stops, none in 142 with the job). The plants marked `(on the machine)` are of the
+#   tests that run PowerShell on Windows; they say `platforms = ["windows"]` and are tried there.
 #
 # The tests are xtask's library's (`windows::`), which read the scripts' text and pack a tree in a
 # repository made for each test; on Windows one runs the sweep in the machine's PowerShell too.
@@ -721,3 +727,155 @@ runs = ["xtask-lib-windows"]
 file = "tools/xtask/src/windows/script.rs"
 find = "-and -not (Test-Path -LiteralPath (Join-Path $beside $Matches.folder)) "
 replace = ""
+
+# A stop ends everything the run started (T-322).
+
+[[plant]]
+name = "windows runner: the job ends nothing when its last handle closes"
+meant = "a_run_is_put_in_a_job_that_ends_with_it_before_it_starts_anything_and_a_run_that_cannot_be_says_so"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (!Limit(job, 0x2000))"
+replace = "if (!Limit(job, 0))"
+
+[[plant]]
+name = "windows runner: the job ends nothing when its last handle closes (on the machine)"
+meant = "a_stop_that_lands_while_the_run_is_starting_programs_leaves_none_of_them_running"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (!Limit(job, 0x2000))"
+replace = "if (!Limit(job, 0))"
+
+[[plant]]
+name = "windows runner: the run is not put in the job that was made"
+meant = "a_run_is_put_in_a_job_that_ends_with_it_before_it_starts_anything_and_a_run_that_cannot_be_says_so"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (!AssignProcessToJobObject(job, GetCurrentProcess()))"
+replace = "if (false)"
+
+[[plant]]
+name = "windows runner: the run is not put in the job that was made (on the machine)"
+meant = "a_stop_that_lands_while_the_run_is_starting_programs_leaves_none_of_them_running"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (!AssignProcessToJobObject(job, GetCurrentProcess()))"
+replace = "if (false)"
+
+[[plant]]
+name = "windows runner: a run that cannot be put in a job ends without its exit line"
+meant = "a_run_is_put_in_a_job_that_ends_with_it_before_it_starts_anything_and_a_run_that_cannot_be_says_so"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "} catch { Write-Output \"== no job:"
+replace = "} catch { throw; Write-Output \"== no job:"
+
+[[plant]]
+name = "windows runner: the job is made after the command is started"
+meant = "a_run_is_put_in_a_job_that_ends_with_it_before_it_starts_anything_and_a_run_that_cannot_be_says_so"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  $made = [CfJob]::Enter()\n  if ($made -eq [IntPtr]::Zero) { throw [CfJob]::Why }\n  $job = $made\n} catch { Write-Output \"== no job: $($_.Exception.Message), so a stop will not end at once what this run starts\" }\n"
+replace = "} catch {}\n"
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "cmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n\"##;\n\n/// The C#"
+replace = "$job = [CfJob]::Enter()\ncmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n\"##;\n\n/// The C#"
+
+[[plant]]
+name = "windows runner: the job is never released where the run ends by itself"
+meant = "the_job_is_released_where_a_run_ends_by_itself_and_not_where_it_is_killed"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($null -ne $job) { [CfJob]::Release($job) }\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: the job is never released where the run ends by itself (on the machine)"
+meant = "what_a_command_leaves_running_when_the_run_ends_by_itself_is_left_running"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($null -ne $job) { [CfJob]::Release($job) }\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: the job is released after what else the end of a run does"
+meant = "the_job_is_released_where_a_run_ends_by_itself_and_not_where_it_is_killed"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($null -ne $job) { [CfJob]::Release($job) }\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n"
+replace = "  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($null -ne $job) { [CfJob]::Release($job) }\n"
+
+[[plant]]
+name = "windows runner: the stop does not end the tree it reads"
+meant = "the_job_is_released_where_a_run_ends_by_itself_and_not_where_it_is_killed"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "taskkill /PID ($of[1]) /T /F"
+replace = "taskkill /PID ($of[1]) /F"
+
+[[plant]]
+name = "windows runner: the stop lets taskkill say what it could not end"
+meant = "the_script_that_ends_a_run_there_ends_the_run_the_lock_names_and_takes_its_tarball_away"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null;"
+replace = "taskkill /PID ($of[1]) /T /F | Out-Null;"
+
+[[plant]]
+name = "windows runner: the stop lets taskkill say what it could not end (on the machine)"
+meant = "a_stop_of_a_run_that_has_already_ended_says_nothing_and_takes_its_records_away"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null;"
+replace = "taskkill /PID ($of[1]) /T /F | Out-Null;"
+
+[[plant]]
+name = "windows runner: the stop ends with the status of its last command"
+meant = "the_script_that_ends_a_run_there_ends_the_run_the_lock_names_and_takes_its_tarball_away"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "-ErrorAction SilentlyContinue\nexit 0\n\"##;"
+replace = "-ErrorAction SilentlyContinue\n\"##;"
+
+[[plant]]
+name = "windows runner: the stop ends with the status of its last command (on the machine)"
+meant = "a_stop_of_a_run_that_has_already_ended_says_nothing_and_takes_its_records_away"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "-ErrorAction SilentlyContinue\nexit 0\n\"##;"
+replace = "-ErrorAction SilentlyContinue\n\"##;"

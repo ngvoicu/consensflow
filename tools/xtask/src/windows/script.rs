@@ -311,10 +311,10 @@ pub fn remote_script(script: &Script) -> String {
 }
 
 /// The run script ([`RUN`]), which the bootstrap runs in its own scope once the tree is
-/// unpacked and said: `steps` run in the copy, then the variables `env` given to the
-/// process and said in the output, then `command` run from `inside`, a folder of the
-/// copy. The steps do not see the variables: they are the command's. It ends the run
-/// (`Exit-Run`) with the command's status.
+/// unpacked and said: the run put in a job, then `steps` run in the copy, then the
+/// variables `env` given to the process and said in the output, then `command` run from
+/// `inside`, a folder of the copy. The steps do not see the variables: they are the
+/// command's. It ends the run (`Exit-Run`) with the command's status.
 pub fn run_script(script: &Script) -> String {
     let steps: Vec<String> = script
         .steps
@@ -334,6 +334,7 @@ pub fn run_script(script: &Script) -> String {
     fill(
         RUN_TEMPLATE,
         &[
+            ("job", JOB_SOURCE),
             ("command_file", COMMAND_FILE),
             ("steps", &steps.join(", ")),
             ("given", &given),
@@ -408,7 +409,11 @@ pub fn sweep_script() -> String {
 /// does not pass on. Only the run the lock's owner file ([`OWNER`]) names is ended, and
 /// the process it names (not the one in the older file, which another script may have
 /// written over): a run that was stopped before its script had the lock (or that the
-/// lock refused) must not end the one that holds it.
+/// lock refused) must not end the one that holds it. The stop says nothing, and ends
+/// with 0 whether or not there was a run, a process or a tarball left to end: it ended
+/// with the status of its last command, so that a stop of a run whose tarball was gone
+/// already (the run had ended) ended with 1, which the Mac took for a run that may still
+/// be going on the machine.
 pub fn stop_script(dir: &str, id: &str) -> String {
     fill(
         STOP,
@@ -469,6 +474,10 @@ fn fill(template: &str, parts: &[(&str, &str)]) -> String {
 ///   started before the file was written, so that a process id a later program has taken
 ///   is no run, and the lock decides. The file is read as nothing if it is gone or is
 ///   being written.
+/// - The job the run script puts the run in ([`RUN_TEMPLATE`]) is released here, in the
+///   `finally`, which every way the run ends by itself goes through (`Exit-Run`'s `exit`
+///   too) and the end of a run by a stop does not: so a program a command leaves running
+///   stays running when the run ends, and is ended with the run when the run is killed.
 const REMOTE: &str = r##"
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Stop'
@@ -481,6 +490,7 @@ $running = Join-Path $dir '«running»'
 $owner = Join-Path $dir '«owner»'
 $held = $false
 $lock = $null
+$job = $null
 try {
 New-Item -ItemType Directory -Force $dir | Out-Null
 try { $lock = [IO.File]::Open((Join-Path $dir '«lock»'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {} catch { $why = $_.Exception.Message }
@@ -497,6 +507,7 @@ if ($failed.Count) { Exit-Run 1 }
 Write-Output "«tree_mark»$(Get-Content -LiteralPath (Join-Path $dir '«tree_file»') -TotalCount 1)"
 . ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '«run»'))))
 } finally {
+  if ($null -ne $job) { [CfJob]::Release($job) }
   Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue
   if ($held) {
     Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue
@@ -507,9 +518,30 @@ Write-Output "«tree_mark»$(Get-Content -LiteralPath (Join-Path $dir '«tree_fi
 "##;
 
 /// The run script, with a mark where each part of it goes. It begins and ends with a line
-/// feed. Codex's own PATH entry is a junction an SSH session may not cross ("an
-/// untrusted mount point"): its release folder is named outright.
+/// feed.
+///
+/// - It puts the run in a job (`CfJob`, [`JOB_SOURCE`]) before anything it asks for is
+///   started: the job ends every process in it when the last handle to it closes, and
+///   this process holds the only one, so that a run that is killed (a stop's `taskkill`
+///   ends its process) has every program it started ended with it by the system, and not
+///   as `taskkill /T` does, a tree it has read and then walks while the run goes on
+///   starting programs, which leaves what is started during the walk (measured on zeewin,
+///   2026-10-23: a stop that landed while a command was starting programs left 21 to 50 of
+///   them running every time, and a single `ping -n 60` was left 7 times in 142 stops, for
+///   its whole 60 seconds; with the job, 0 in 142). A run that cannot be put in a job is said (`== no job`) and goes on as it
+///   did before: its stop is the one that walks the tree.
+/// - Codex's own PATH entry is a junction an SSH session may not cross ("an untrusted
+///   mount point"): its release folder is named outright.
 const RUN_TEMPLATE: &str = r##"
+$job = $null
+try {
+  Add-Type -TypeDefinition @'
+«job»
+'@
+  $made = [CfJob]::Enter()
+  if ($made -eq [IntPtr]::Zero) { throw [CfJob]::Why }
+  $job = $made
+} catch { Write-Output "== no job: $($_.Exception.Message), so a stop will not end at once what this run starts" }
 $env:Path = "C:\Program Files\nodejs;$env:USERPROFILE\.cargo\bin;" + $env:Path
 $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorAction SilentlyContinue).Target
 if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
@@ -526,6 +558,35 @@ $run = Join-Path $dir '«command_file»'
 cmd /c "$run 2>&1"
 Exit-Run $LASTEXITCODE
 "##;
+
+/// The C# that `Add-Type` makes of the job in the run script: a job that ends every
+/// process in it when its last handle closes (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`,
+/// 0x2000), the calling process put in it (so are the programs it starts from then on,
+/// and theirs), and `Release`, which takes the end-on-close away again at a normal end.
+/// The structures are the system's (`JOBOBJECT_EXTENDED_LIMIT_INFORMATION`, 144 bytes
+/// where a pointer is 8) and `9` is `JobObjectExtendedLimitInformation`. `Why` says what
+/// failed, with the system's error number, where `Enter` answers zero.
+const JOB_SOURCE: &str = r#"using System;
+using System.Runtime.InteropServices;
+public static class CfJob {
+  [StructLayout(LayoutKind.Sequential)] struct Basic { public long UserTime, JobUserTime; public uint Flags; public UIntPtr MinWs, MaxWs; public uint Active; public UIntPtr Affinity; public uint Priority, Scheduling; }
+  [StructLayout(LayoutKind.Sequential)] struct Io { public ulong A, B, C, D, E, F; }
+  [StructLayout(LayoutKind.Sequential)] struct Extended { public Basic Basic; public Io Io; public UIntPtr ProcessMem, JobMem, PeakProcess, PeakJob; }
+  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int kind, ref Extended info, int size);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+  [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+  static bool Limit(IntPtr job, uint flags) { var e = new Extended(); e.Basic.Flags = flags; return SetInformationJobObject(job, 9, ref e, Marshal.SizeOf(typeof(Extended))); }
+  public static string Why = "";
+  public static IntPtr Enter() {
+    IntPtr job = CreateJobObject(IntPtr.Zero, null);
+    if (job == IntPtr.Zero) { Why = "CreateJobObject failed: " + Marshal.GetLastWin32Error(); return IntPtr.Zero; }
+    if (!Limit(job, 0x2000)) { Why = "SetInformationJobObject failed: " + Marshal.GetLastWin32Error(); return IntPtr.Zero; }
+    if (!AssignProcessToJobObject(job, GetCurrentProcess())) { Why = "AssignProcessToJobObject failed: " + Marshal.GetLastWin32Error(); return IntPtr.Zero; }
+    return job;
+  }
+  public static void Release(IntPtr job) { Limit(job, 0); }
+}"#;
 
 /// The sweep, with a mark where each part of it goes. `Clear-Stale` answers how many
 /// things it left in the folder it was given, and says nothing else, so what it
@@ -611,8 +672,9 @@ $dir = Join-Path $env:USERPROFILE '«dir»'
 $running = Join-Path $dir '«running»'
 $owner = Join-Path $dir '«owner»'
 $of = @(Get-Content $owner -ErrorAction SilentlyContinue)
-if ($of[0] -eq '«id»') { taskkill /PID ($of[1]) /T /F | Out-Null; Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force } }
+if ($of[0] -eq '«id»') { taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null; Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force } }
 Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '«tarball»') -Force -ErrorAction SilentlyContinue
+exit 0
 "##;
 
 #[cfg(test)]

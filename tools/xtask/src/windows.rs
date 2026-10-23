@@ -43,6 +43,23 @@
 //! the end of its command and the lock with it, and every run after it is refused, naming
 //! its process, until it ends or someone ends that process on the machine.
 //!
+//! A stop ends the run and everything it started. The run script puts the run in a job
+//! (`CfJob`, compiled by `Add-Type` in about 150 ms) before it starts anything: a job that
+//! the system ends, every process in it, when the last handle to it closes, and the run's
+//! process holds the only one. The stop kills the run's process, as it did (`taskkill /T
+//! /F`), and the system ends the rest at once, those the stop read and those that were
+//! started while it read them. The stop alone left the second kind: `taskkill /T` reads
+//! the tree, then ends what it read, leaves first and the program that starts the others
+//! last (about 7 ms a process), so that what the run starts while that goes on is never
+//! read. Measured on zeewin, 2026-10-23: a stop that landed on a command that kept
+//! starting programs left 21 to 50 of them running every time, and, of 142 stops of a run that was starting
+//! a single `ping -n 60` (every 10 ms from 0 to 700 ms after it began, twice each), 7 left
+//! it running, for its whole minute and holding the run's output open; with the job, none
+//! of 142 did. At a normal end the run releases the
+//! job (the end-on-close is taken away), so a program a command leaves running stays
+//! running, as before. A run that cannot be put in a job says so in its output (`== no
+//! job: …`) and goes on, its stop being the walk alone.
+//!
 //! Two scripts are sent. The bootstrap goes on ssh's command line, which holds 8,000
 //! characters of it ([`script::ENCODED_LIMIT`]) and is the same for every run but for
 //! the folder and the run's name: it takes the lock, unpacks, sweeps, says the tree, and
