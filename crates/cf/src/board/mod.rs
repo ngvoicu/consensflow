@@ -51,14 +51,14 @@ impl From<BoardError> for Failure {
 }
 
 /// What a command answers: the API's data for `--json`, a sentence otherwise,
-/// and the answers the output carries whole, if it is one that does.
+/// and the messages the output carries whole, if it is one that does.
 pub struct Said {
     data: Value,
     text: String,
     wrote: Option<Wrote>,
 }
 
-/// The answers a command's output carries whole, and how it was read: what
+/// The messages a command's output carries whole, and how it was read: what
 /// `cf` says to the board, once the output is complete, to have them received.
 struct Wrote {
     via: &'static str,
@@ -84,11 +84,12 @@ impl Said {
 }
 
 impl Wrote {
-    /// The output is complete: the board is told which answers it carried
-    /// whole, and an answer it says so of is received. What the board says back
-    /// is of no use to a command that has printed what it was asked to (a
-    /// daemon of Node's knows no such route): it is not raised, and an answer
-    /// not acknowledged waits to be pasted, as an unread one does.
+    /// The output is complete: the board is told which messages it carried
+    /// whole, and one it says so of is received, as the way it was read
+    /// receives it. What the board says back is of no use to a command that has
+    /// printed what it was asked to (a daemon of Node's knows no such route): it
+    /// is not raised, and a message not acknowledged waits to be pasted, as an
+    /// unread one does.
     fn acknowledge(&self, board: &Board) {
         if self.answers.is_empty() {
             return;
@@ -171,8 +172,8 @@ fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<Said
     }
 }
 
-/// `cf inbox read m-N` prints a message whole, and so says of an answer that it
-/// wrote it whole. `cf inbox` lists first lines, cut, and says nothing of what
+/// `cf inbox read m-N` prints a message whole, and so says it wrote it whole
+/// when it still waited to be pasted: the board decides what that receives. `cf inbox` lists first lines, cut, and says nothing of what
 /// it printed: no preview is a body, and a list does not know which are.
 fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
     let reading = rest.first().map(String::as_str) == Some("read");
@@ -198,8 +199,8 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
             message_line(&message),
             js::text(message.get("body"))
         );
-        let answers = lines::waiting_answers(std::slice::from_ref(&message));
-        return Ok(Said::new(message, text).having_written("inbox", answers));
+        let waiting = lines::waiting_message(&message);
+        return Ok(Said::new(message, text).having_written("inbox", waiting));
     }
     let mut answer = board.get("/api/inbox")?;
     let messages = answer.take("messages")?;

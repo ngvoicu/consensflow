@@ -26,6 +26,7 @@ mod legacy;
 mod open_questions;
 mod pause_notes;
 mod questions;
+mod read_in_the_inbox;
 mod sessions;
 mod taken_back;
 mod told;

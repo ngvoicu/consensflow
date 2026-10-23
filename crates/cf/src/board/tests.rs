@@ -286,31 +286,36 @@ fn message(kind: &str, state: &str) -> Value {
     } })
 }
 
+/// A message `cf inbox read` printed whole while it still waited to be pasted
+/// is acknowledged, whatever its kind: the board decides what a read in the
+/// inbox receives, and a question, a result or a note read there is not typed
+/// in after it (T-260). One that is not queued is not.
 #[test]
-fn an_answer_cf_inbox_read_printed_whole_is_acknowledged_and_nothing_else_is() {
-    for json in [false, true] {
-        let ran = cf_with(
-            &["inbox", "read", "m-12"],
-            json,
-            vec![
-                reply(200, message("answer", "queued")),
-                reply(200, json!({})),
-            ],
-            None,
-        );
-        assert_eq!(ran.code.unwrap(), 0);
-        assert!(ran.out.contains("and then YAML"));
-        assert_eq!(
-            asked(&ran),
-            [("GET", "/api/inbox/12"), ("POST", "/api/answers/read")]
-        );
-        assert_eq!(ran.asked[1].2, acknowledged(&[12], "inbox"));
-        assert_eq!(ran.flushed_at, Some(1));
+fn a_message_cf_inbox_read_printed_whole_while_it_waited_is_acknowledged_and_nothing_else_is() {
+    for kind in ["answer", "question", "result", "note"] {
+        for json in [false, true] {
+            let ran = cf_with(
+                &["inbox", "read", "m-12"],
+                json,
+                vec![reply(200, message(kind, "queued")), reply(200, json!({}))],
+                None,
+            );
+            assert_eq!(ran.code.unwrap(), 0);
+            assert!(ran.out.contains("and then YAML"));
+            assert_eq!(
+                asked(&ran),
+                [("GET", "/api/inbox/12"), ("POST", "/api/answers/read")],
+                "{kind}"
+            );
+            assert_eq!(ran.asked[1].2, acknowledged(&[12], "inbox"));
+            assert_eq!(ran.flushed_at, Some(1));
+        }
     }
     for (kind, state) in [
-        ("note", "queued"),
+        ("note", "delivered"),
         ("answer", "read"),
-        ("question", "queued"),
+        ("question", "delivering"),
+        ("result", "cancelled"),
     ] {
         let ran = cf(
             &["inbox", "read", "m-12"],

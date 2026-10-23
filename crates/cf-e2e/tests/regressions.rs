@@ -44,6 +44,8 @@ mod a_compaction_written_beside_an_answer_tore_its_line;
 mod a_follow_up_could_not_be_queued_behind_its_windows_own_work;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
 mod a_pause_a_hung_worker_ignored_stranded_its_task;
+#[path = "regressions/a_question_the_chief_answered_was_typed_in_later.rs"]
+mod a_question_the_chief_answered_was_typed_in_later;
 #[path = "regressions/a_result_delivered_twice_to_a_devin_chief.rs"]
 mod a_result_delivered_twice_to_a_devin_chief;
 #[path = "regressions/a_result_pasted_again_after_its_window_went.rs"]

@@ -78,7 +78,8 @@ enum Outcome {
 /// and the one that names `FOLLOW_UP_BEHIND_WORK`, which the follow-up queued
 /// behind a window's work moved: Node refuses it; and the one that names
 /// `REMOVAL_CANCELS_WAITING`, which the removal's cancel of the tasks waiting
-/// for a member moved.
+/// for a member moved; and the 4 that name `ANSWERED_AS_IT_WAITED`, which the
+/// settling of a question answered as it waited moved (T-260).
 /// Departed traces that Node's suite recorded only off Windows: the test
 /// that wrote `home-copies-004` was skipped there, as Windows holds an open
 /// ledger's files. Elsewhere each must be there.
@@ -86,6 +87,7 @@ const RECORDED_OFF_WINDOWS: &[&str] = &["home-copies-004"];
 
 const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-api-003", 19, RESULT_ACCEPTED),
+    ("core-api-005", 17, ANSWERED_AS_IT_WAITED),
     ("core-api-006", 15, "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
     ("core-dispatcher-010", 121, REASON_PAUSE),
     ("core-dispatcher-042", 72, "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, so the chief has no message waiting (`withWork`), where Node's has the note"),
@@ -122,8 +124,11 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-messages-013", 10, READ_AT_ONCE),
     ("ledger-messages-014", 10, READ_AT_ONCE),
     ("ledger-messages-015", 11, READ_AT_ONCE),
+    ("ledger-messages-016", 12, ANSWERED_AS_IT_WAITED),
     ("ledger-messages-017", 10, DOOR_READ),
     ("ledger-messages-022", 12, DOOR_READ),
+    ("ledger-page-reads-004", 8, ANSWERED_AS_IT_WAITED),
+    ("ledger-page-reads-005", 9, ANSWERED_AS_IT_WAITED),
     ("ledger-page-reads-009", 41, REMOVAL_CANCELS_WAITING),
     ("ledger-projects-002", 14, KEPT_IN_BRIEF),
     ("ledger-projects-011", 8, NO_MARK_TO_FORGET),
@@ -233,6 +238,10 @@ const KEPT_BY_PAUSE: &str =
 const STOP_IN_EVENT: &str =
     "a pause's `task.state` event carries `stop`, the sequence of the stop it asked: Node's has no such key";
 /// The reason a release gives what the old window still held for the human.
+/// A question its recipient answered while it still waited in the queue is
+/// never typed in after (T-260).
+const ANSWERED_AS_IT_WAITED: &str =
+    "the chief answers a question still queued for it: the question is `read`, its receipt naming the answer and its time the answer's, so it is never typed in after, where Node leaves it `queued` to be pasted";
 const WINDOW_ENDED: &str =
     "a release withdraws what the old window still held for the human with the reason `withdrawn: @x's window ended first`; Node gave none";
 

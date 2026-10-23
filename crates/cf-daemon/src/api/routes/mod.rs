@@ -102,7 +102,7 @@ pub enum Route {
     Answers,
     /// `POST /api/answers/<id>/receipt`: a door says it handed its answer over.
     AnswerReceipt { id: String },
-    /// `POST /api/answers/read`: `cf` says which answers it wrote whole.
+    /// `POST /api/answers/read`: `cf` says which messages it wrote whole.
     AnswersRead,
 }
 

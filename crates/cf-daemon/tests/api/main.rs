@@ -67,14 +67,20 @@ const RESULT_ACCEPTED: &str = "the chief accepts the task while its result is st
 /// The same when the chief sent the task back.
 const RESULT_SENT_BACK: &str = "the chief sends the task back while its result is still queued for it: the result is withdrawn (`cancelled`, with the reason `T-n was sent back`), where Node leaves it `queued` to be pasted after the decision";
 
+/// A question the chief answered while it still waited in its queue is never
+/// typed in after (T-260).
+const ANSWERED_AS_IT_WAITED: &str = "the chief answers a question still queued for it: the question is `read`, its receipt naming the answer and its time the answer's, so it is never typed in after (T-260), where Node leaves it `queued` to be pasted";
+
 /// The traces the receipt and stop redesign moved on purpose: a choice answer
 /// is received, not read at its creation, a resume takes in what its window
 /// kept, a command written wrong asks the board nothing, and `cf task get`
-/// prints the brief of a task no window holds under its header; and those the
-/// decision on a result moved: the result is withdrawn, not pasted after it.
+/// prints the brief of a task no window holds under its header; those the
+/// decision on a result moved: the result is withdrawn, not pasted after it;
+/// and those a question answered as it waited moved: it is read, not pasted.
 /// Found by playing them against the daemon.
 const DEPARTED: &[Departed] = &[
     ("core-api-003", RESULT_ACCEPTED),
+    ("core-api-005", ANSWERED_AS_IT_WAITED),
     (
         "core-api-006",
         "the answer to a question with options lands `queued`: it is read when received, not when written",
@@ -89,6 +95,8 @@ const DEPARTED: &[Departed] = &[
         "cf-board-003",
         "a resume carries the brief that never arrived and logs `message.carried`: one more clock reading, so the task's `updatedAt` is a second later",
     ),
+    ("cf-board-006", ANSWERED_AS_IT_WAITED),
+    ("cf-board-008", ANSWERED_AS_IT_WAITED),
     (
         "cf-board-015",
         "`cf task get` prints the brief of a task no window ever held (here one cancelled, then deleted, while it was open) under its header, so the whole brief can be read before it goes out: Node printed the header alone",

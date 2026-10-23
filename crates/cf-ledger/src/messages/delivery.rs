@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use super::again::tell_failed_answer;
 use super::carrying::{adopt, carried, release_carried};
 use super::receipt::reconcile;
-use super::{known_message, message_task, messages, require_message};
+use super::{known_message, message_task, messages, require_message, settle_answered};
 use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
@@ -345,8 +345,9 @@ pub(crate) fn cancel_message(
 }
 
 /// Queued again; `refund` gives back the attempt when the window went before
-/// it could land. It joins the task message that waits for its window, if one
-/// does: a resume that came while it was on its way. A row that was left
+/// it could land. A question answered while it was being pasted is not: the
+/// one asked has it (`settle_answered`). It joins the task message that waits
+/// for its window, if one does: a resume that came while it was on its way. A row that was left
 /// under a carrier that cannot carry it any more (the Node daemon was pasting
 /// it on its own when it stopped, which `release_stranded` leaves to the
 /// delivery that settles it) is let go of that carrier first: carried, it
@@ -377,6 +378,7 @@ pub(crate) fn retry_delivery(
             [message_id],
         )?;
         adopt(store, message_id)?;
+        settle_answered(store, message_id)?;
         known_message(store, message_id)
     })
 }

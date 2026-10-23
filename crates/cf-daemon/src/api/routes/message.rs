@@ -1,6 +1,6 @@
 //! `GET /api/inbox/<id>`: one message, whole, to its recipient or its sender,
 //! unless it still waits for the human. The id is the digits as the path had
-//! them: the 404 quotes them as typed. It changes nothing: an answer read here
+//! them: the 404 quotes them as typed. It changes nothing: a message read here
 //! is received when `cf` says it wrote it whole (`POST /api/answers/read`).
 
 use serde_json::json;

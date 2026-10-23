@@ -102,20 +102,29 @@ pub fn message_line(message: &Value) -> String {
 /// The numbers of the answers among `messages` that still wait in the queue
 /// to be pasted: the ones a command that wrote every body of `messages` in
 /// full has written whole, and so says it has. An answer already read, or
-/// withheld, or any other kind of message, is not one of them. A result is
-/// none: it is put to its reader for a decision, which ends it (the ledger
-/// withdraws it then), and a read is no decision. Told as received, it would
-/// never be pasted, and a chief that read it and decided nothing would not be
-/// reminded that the task still waits for it.
+/// withheld, or any other kind of message, is not one of them: a thread is the
+/// task's, and the rest of it is not the reader's to receive one by one.
 pub fn waiting_answers(messages: &[Value]) -> Vec<i64> {
     messages
         .iter()
-        .filter(|message| {
-            message.get("kind").and_then(Value::as_str) == Some("answer")
-                && message.get("state").and_then(Value::as_str) == Some("queued")
-        })
-        .filter_map(|message| message.get("id").and_then(Value::as_i64))
+        .filter(|message| message.get("kind").and_then(Value::as_str) == Some("answer"))
+        .filter_map(waiting)
         .collect()
+}
+
+/// The number of a message `cf inbox read` wrote whole, when it still waits in
+/// the queue to be pasted: whatever its kind, the board decides what a read in
+/// the inbox receives. A question, a result or a note read there is the
+/// reader's, and is not typed in after it (T-260).
+pub fn waiting_message(message: &Value) -> Vec<i64> {
+    waiting(message).into_iter().collect()
+}
+
+/// The number of a message that still waits in the queue.
+fn waiting(message: &Value) -> Option<i64> {
+    (message.get("state").and_then(Value::as_str) == Some("queued"))
+        .then(|| message.get("id").and_then(Value::as_i64))
+        .flatten()
 }
 
 /// The items of a JSON list; none when it is no list.

@@ -58,6 +58,7 @@ mod pause_notes;
 mod pending_agents;
 mod quota;
 mod quoted_headers;
+mod read_in_the_inbox;
 mod receipts;
 mod restart;
 mod resumable;

@@ -539,6 +539,85 @@ async fn a_result_named_in_a_read_is_left_queued_for_the_decision_that_ends_it()
     assert_eq!(scene.kicks.get(), 0);
 }
 
+/// What `cf inbox read` printed whole is the reader's, whatever its kind, and is
+/// never typed in after it (T-260): a question, a result or a note named by a read
+/// in the inbox is `read`, and the dispatcher is woken. A task's words are not:
+/// only their paste proves them, and nothing is woken for them.
+#[tokio::test]
+async fn a_question_a_result_or_a_note_named_in_a_read_of_the_inbox_is_received_and_a_tasks_words_are_not(
+) {
+    let scene = scene();
+    let task = working_task(&scene);
+    let result = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .record_result(scene.project.id, task, "Parser done")
+        .unwrap()
+        .message
+        .unwrap();
+    let chief = scene.id("chief");
+    let note = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .note(
+            scene.project.id,
+            &cf_ledger::NewNote {
+                from: Some("zeus".to_owned()),
+                to: "chief".to_owned(),
+                body: "The tests are slow".to_owned(),
+                task: Some(task),
+            },
+        )
+        .unwrap();
+    for (id, kind) in [
+        (scene.question.id, "question"),
+        (result.id, "result"),
+        (note.id, "note"),
+    ] {
+        assert_eq!(scene.message(id).state, "queued", "{kind}");
+        let kicks = scene.kicks.get();
+        let (status, said) = read_from(&scene, &scene.chief, &said_read(&[id], "inbox")).await;
+        assert_eq!((status, said), (200, json!({})), "{kind}");
+        let read = scene.message(id);
+        assert_eq!(read.state, "read", "{kind}");
+        assert_eq!(read.receipt, json!({ "read": "inbox" }), "{kind}");
+        assert_eq!(
+            scene.kicks.get(),
+            kicks + 1,
+            "{kind}: the dispatcher is woken"
+        );
+    }
+    assert_eq!(
+        scene.context.ledger.borrow().next_delivery(chief).unwrap(),
+        None,
+        "nothing the chief read is left to paste"
+    );
+
+    let brief = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .create_task(
+            scene.project.id,
+            &cf_ledger::NewTask {
+                from: "chief".to_owned(),
+                to: Some("zeus".to_owned()),
+                body: "Lexer".to_owned(),
+                ..cf_ledger::NewTask::default()
+            },
+        )
+        .unwrap()
+        .message
+        .unwrap();
+    let kicks = scene.kicks.get();
+    let (status, _) = read_from(&scene, &scene.zeus, &said_read(&[brief.id], "inbox")).await;
+    assert_eq!(status, 200);
+    assert_eq!(scene.message(brief.id).state, "queued");
+    assert_eq!(scene.kicks.get(), kicks, "nothing was read");
+}
+
 #[tokio::test]
 async fn an_answer_held_for_the_human_is_not_received_by_being_named() {
     let scene = scene();

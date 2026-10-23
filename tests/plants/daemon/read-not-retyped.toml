@@ -1,0 +1,204 @@
+# A question the chief had read and answered was typed into its window later, as if new (this
+# board, 2026-10-22, ConsensFlow 3.0.5; m-2927, m-2931, m-3103; T-260): it waited behind the
+# chief's turn, the chief read it with `cf inbox read` and answered it with `cf answer`, and when
+# the turn ended it was pasted with "Run in your shell: cf answer m-…". The rules, as the chief
+# decided:
+# - what `cf inbox read` printed whole while it was still queued is received, whatever its kind
+#   (`Read::receives`, `crates/cf-ledger/src/messages/receipt.rs`): a question, a result, a note
+#   or an answer is `read` and never pasted after; a task's words and a note that says a role are
+#   not. `cf` says so of any queued message it printed (`crates/cf/src/board/lines.rs`,
+#   `waiting_message`), and the board leaves the choice to the ledger and wakes the dispatcher only
+#   when something was received (`crates/cf-daemon/src/api/routes/answers.rs`);
+# - a question answered is never pasted: still queued when answered, or queued again by a paste
+#   retried after it was answered, it is `read` with a receipt naming the answer
+#   (`settle_answered`, `crates/cf-ledger/src/messages.rs`, called from `answer()` and from
+#   `retry_delivery`, `crates/cf-ledger/src/messages/delivery.rs`); one the asker's own window
+#   answered first is withdrawn, as one held at the gate is.
+#
+# The cases are the ledger's (`crates/cf-ledger/tests/receipt/read_in_the_inbox.rs`), the
+# engine's (`crates/cf-engine/tests/dispatcher/read_in_the_inbox.rs`), the board's
+# (`crates/cf-daemon/src/api/routes/answers/tests.rs`), `cf`'s (`crates/cf/src/board/tests.rs`)
+# and the rig's, in the field's shape
+# (`crates/cf-e2e/tests/regressions/a_question_the_chief_answered_was_typed_in_later.rs`). The
+# rig's build the native `cf` and daemon from the sources as planted, so their plants say
+# `builds`. Every name holds `read not retyped`, so `npm run plants:daemon -- "read not retyped"`
+# runs them all.
+
+[run]
+retyped-rig-question = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_question_the_chief_answered_was_typed_in_later::a_question_the_chief_read"]
+retyped-rig-result = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_question_the_chief_answered_was_typed_in_later::a_result_the_chief_read"]
+
+# --- rule 1: what `cf inbox read` printed whole is received ---
+
+[[plant]]
+name = "read not retyped: a read in the inbox receives answers only, as before"
+meant = "a_question_the_chief_read_in_its_inbox_and_answered_is_never_the_head_of_its_queue"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = 'Read::Inbox => message.kind != "task" && !says_a_role,'
+replace = 'Read::Inbox => message.kind == "answer",'
+
+[[plant]]
+name = "read not retyped: the same, and the chief's turn ends on a result it read pasted again (the engine)"
+meant = "pastes_no_result_the_chief_read_in_its_inbox_and_pastes_what_it_did_not_read"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = 'Read::Inbox => message.kind != "task" && !says_a_role,'
+replace = 'Read::Inbox => message.kind == "answer",'
+
+# In the field's shape the chief reads the question and then answers it, so either rule alone
+# keeps it from being typed in: the rig's question case is planted with both taken away, as main
+# had it.
+[[plant]]
+name = "read not retyped: neither rule, as on main, and a question the chief read and answered in its turn is typed in when the turn ends (the field's shape)"
+meant = "a_question_the_chief_read_and_answered_in_its_turn_is_not_typed_in_when_the_turn_ends"
+runs = ["retyped-rig-question"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = 'Read::Inbox => message.kind != "task" && !says_a_role,'
+replace = 'Read::Inbox => message.kind == "answer",'
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = """
+        }
+        settle_answered(store, question_id)?;"""
+replace = """
+        }"""
+
+[[plant]]
+name = "read not retyped: the same, and a result the chief read in its turn is typed in when the turn ends (the rig)"
+meant = "a_result_the_chief_read_in_its_turn_is_not_typed_in_when_the_turn_ends"
+runs = ["retyped-rig-result"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = 'Read::Inbox => message.kind != "task" && !says_a_role,'
+replace = 'Read::Inbox => message.kind == "answer",'
+
+[[plant]]
+name = "read not retyped: a read in the inbox receives a task's words and a role, which only their paste proves"
+meant = "a_tasks_words_or_a_role_read_in_the_inbox_wait_for_their_paste"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = 'Read::Inbox => message.kind != "task" && !says_a_role,'
+replace = 'Read::Inbox => true,'
+
+[[plant]]
+name = "read not retyped: a read in the inbox receives a role"
+meant = "a_tasks_words_or_a_role_read_in_the_inbox_wait_for_their_paste"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = 'Read::Inbox => message.kind != "task" && !says_a_role,'
+replace = 'Read::Inbox => message.kind != "task",'
+
+[[plant]]
+name = "read not retyped: a thread read with cf task get receives what is no answer"
+meant = "what_the_thread_of_cf_task_get_carried_receives_only_its_answers"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = 'Read::Task => message.kind == "answer",'
+replace = 'Read::Task => message.kind != "task",'
+
+[[plant]]
+name = "read not retyped: cf says only of an answer it printed in the inbox that it wrote it whole"
+meant = "a_message_cf_inbox_read_printed_whole_while_it_waited_is_acknowledged_and_nothing_else_is"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = "let waiting = lines::waiting_message(&message);"
+replace = "let waiting = lines::waiting_answers(std::slice::from_ref(&message));"
+
+[[plant]]
+name = "read not retyped: the same, and a result the chief read in its turn is typed in when the turn ends (the rig, through cf)"
+meant = "a_result_the_chief_read_in_its_turn_is_not_typed_in_when_the_turn_ends"
+runs = ["retyped-rig-result"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = "let waiting = lines::waiting_message(&message);"
+replace = "let waiting = lines::waiting_answers(std::slice::from_ref(&message));"
+
+[[plant]]
+name = "read not retyped: the board wakes the dispatcher for a read that received nothing"
+meant = "a_question_a_result_or_a_note_named_in_a_read_of_the_inbox_is_received_and_a_tasks_words_are_not"
+runs = ["daemon-lib-routes-answers"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/answers.rs"
+find = "if received > 0 {"
+replace = "if received > 0 || !named.is_empty() {"
+
+# --- rule 2: a question answered is never typed in ---
+
+[[plant]]
+name = "read not retyped: a question still queued when the one asked answers it waits to be pasted"
+meant = "a_question_answered_as_it_waited_is_read_naming_its_answer_and_never_typed_in"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = """
+        }
+        settle_answered(store, question_id)?;"""
+replace = """
+        }"""
+
+[[plant]]
+name = "read not retyped: the same, and the chief's turn ends on a question it answered pasted (the engine)"
+meant = "pastes_no_question_the_chief_answered_in_the_turn_it_waited_behind_however_it_read_it"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = """
+        }
+        settle_answered(store, question_id)?;"""
+replace = """
+        }"""
+
+[[plant]]
+name = "read not retyped: a question answered while its paste was on its way is queued again when the paste is retried"
+meant = "a_question_answered_while_its_paste_was_on_its_way_is_not_queued_again_when_it_is_retried"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = """
+        settle_answered(store, message_id)?;"""
+replace = ""
+
+[[plant]]
+name = "read not retyped: a question being pasted when it is answered is settled under its paste"
+meant = "a_question_answered_while_its_paste_was_on_its_way_is_not_queued_again_when_it_is_retried"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = 'if question.kind != "question" || question.state != "queued" {'
+replace = 'if question.kind != "question" {'
+
+[[plant]]
+name = "read not retyped: a question the asker's own window answered first is settled as the chief's"
+meant = "a_question_the_askers_own_window_answered_first_is_withdrawn"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '(question.state == "queued" && from_window)'
+replace = '(question.state == "queued" && from_window && false)'
