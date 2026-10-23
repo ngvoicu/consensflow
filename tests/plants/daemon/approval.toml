@@ -84,8 +84,8 @@ runs = ["ledger-approval"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/gate.rs"
-find = '                call_off(store, message.project_id, task.number, by)?;'
-replace = ''
+find = '        if message.kind == "task" {'
+replace = '        if message.kind == "task" && false {'
 
 [[plant]]
 name = "approval: whoever sent a declined message is not told"

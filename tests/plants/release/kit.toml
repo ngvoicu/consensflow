@@ -8,8 +8,9 @@
 # Windows runner's copy of the tree (`cargo xtask windows`: what it sends, and what it removes
 # there), and the updater smoke: its readers of evidence, and the product it holds (the app’s daemon choice,
 # the ledger’s one holder, the check of an update), the packaged smoke and the candidate
-# builder (`cargo xtask smoke` and `candidate`), and what hands over to xtask: the npm scripts
-# and the build hooks of Tauri.
+# builder (`cargo xtask smoke` and `candidate`), the release commands (`cargo xtask release
+# alpha` and `release promote`), and what hands over to xtask: the npm scripts and the build
+# hooks of Tauri.
 #
 # A run that tests the xtask package whole (`-p xtask --test …`) names the folder it is built in,
 # `--target-dir app/src-tauri/target/xtask-check`, which `cargo xtask check` tests xtask in: the
@@ -22,16 +23,35 @@
 
 run_limit_minutes = 10
 rebuild = ["cargo", "xtask", "build-cf", "--offline"]
-tables = ["feeds", "publish", "workflow", "portable", "agents", "updater", "updater-product", "tooling", "sidecar", "drivers", "update", "sign-mac", "packaged", "wiring", "live-models", "live-windows", "windows-runner"]
+tables = ["feeds", "publish", "workflow", "portable", "agents", "updater", "updater-product", "tooling", "sidecar", "drivers", "update", "sign-mac", "packaged", "wiring", "live-models", "live-windows", "windows-runner", "release-commands", "ci-times"]
 
 [run]
 # The proof of the agents screens against the native daemon, built from the sources as they are.
 agents-proof = { command = ["cargo", "xtask", "test", "agents", "--offline"], builds = true }
 # The smoke's readers of evidence (processes, daemon, ledger), and of the terminal command.
 smoke-evidence = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::evidence", "updater_smoke::ledger"]
+# The smoke's driver: where it keeps its builds, and what it does with the apps it is given.
+smoke-driver = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::tests::"]
+# The cache the smoke keeps its builds in: its folder, its marker, its lock, and the record beside the kept update.
+smoke-cache = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::cache::"]
+# The lint a plant is tried with: clippy over xtask with warnings denied, which is the gate's. A run
+# whose source does not build is no catch, and clippy ends with "could not compile" when it denies a
+# warning, so node runs it and says the first line it denied and nothing more: the run ends with 1
+# and its words are no "could not compile". (A plant can only start cargo or node.)
+smoke-lint = ["node", "-e", '''
+const ran = require("child_process").spawnSync("cargo", ["clippy", "--offline", "-p", "xtask", "--all-targets", "--", "-D", "warnings"], { encoding: "utf8" });
+if (ran.status !== 0) {
+  const denied = `${ran.stderr}\n${ran.stdout}`.split("\n").find((line) => line.startsWith("error"));
+  console.log(`clippy denied: ${denied}`);
+  process.exit(1);
+}
+''']
 # The rule of the feeds and its checks, against GitHub as the simulator has it.
 feeds = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "feeds_rule", "--test", "feeds_plan", "--test", "feeds_prerequisites", "--test", "feeds_check", "--test", "feeds_cli"]
 smoke-launchers = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::launchers"]
+# The app the smoke starts (what it reports, and that it is ended with all it made), and the machine of a case.
+smoke-app = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::app"]
+smoke-case = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::case::"]
 # The app crate's tests of the portable app's collector, built as a worktree can build it.
 app-portable = ["cargo", "xtask", "app", "test", "portable::"]
 # The publisher, every state a run can be cut short in, and the workflow's steps run as written.

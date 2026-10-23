@@ -26,6 +26,43 @@ parentheses. Changed by hand, in those words alone, when the tester was added; t
 daemon's traces of the same words (`crates/cf-daemon/tests/goldens`) were changed with
 them.
 
+## The usage after a tell could wait
+
+`cf tell` to a task still queued, its window not up yet, keeps its words for the window
+(the field report of 2026-10-15). Its entry in the usage has a third line that says so,
+`(queued: kept for its window, to go in after its brief)`: added by hand to the six prints
+of `board.json` that hold the usage (`cf task --help` among them, which prints the lines
+that go on from the commands), as `crates/cf/src/board/usage.txt` has it, and to the
+daemon's traces of the same words.
+
+## The usage and the replies of 3.0.6's field reports
+
+The owner's decisions of 2026-10-16 on the field report of 2026-10-15 moved `board.json`
+in three ways, each made by hand:
+
+- the transcript's entry in the usage has a line for `--page` and `--find` (B7), and its
+  tail says that `--file` reads a long text from a file, which no shell cuts, and that the
+  four commands that take one say how it ends (B6): the six prints that hold the usage,
+  `cf task --help` among them, where the `--file` example follows the heredoc's;
+- the reply of each case that gives a window words (`cf task add`, `resume`, `tell`: ten
+  cases) has a last line, `Sent: <n> characters, ending "<its last words>".` (B6);
+- the daemon's traces of the same commands were changed with them.
+## The usage after `cf task edit`
+
+`board.json` holds the usage again (the six prints named above) and the sentence `cf
+task` says of a verb it does not know (`unknown task command "frobnicate": use add,
+list, get, done, accept, reopen, edit, cancel, pause or resume`). Each names the new
+verb, `cf task edit T-3 "…"`, which replaces the brief of a task no window has been
+given yet (board task T-110, 3.0.6), and the `--after` entry says one more line: while
+T-3 is at work the follow-up waits for T-3 to be accepted, where Node refused it. The
+six prints have the entry and the line as `crates/cf/src/board/usage.txt` has them, and
+the sentence has the verb: changed by hand, in those words alone. The daemon's traces
+of the same words (`crates/cf-daemon/tests/goldens`) were changed with them.
+Round 2 of the same task (T-158) changed one phrase of that entry, by hand, in the same six
+prints: `(open, blocked or queued)` became `(open, queued, or paused)`, since a task paused
+before any window had it is editable too (the same number of characters, so the role text's
+documented sizes did not move).
+
 ## Two cases changed by hand after Node
 
 In `cli.darwin.json` and `cli.win32.json`, the cases `unknown command: -h`
@@ -43,3 +80,13 @@ too. The board's commands have no recorded case of this (Node's board answered
 the word only as `cf --help` and `cf task --help`, which `board.json` holds):
 `crates/cf/tests/help.rs` and `help_standalone.rs` hold the rest. The `why` of
 each case says the same in its file.
+
+## `cf task edit` takes its brief from a file
+
+The merge of main's `cf task edit` with 3.0.6's field work (board task T-340): a new
+brief is words that give a window work, so `edit` takes them as the others do, from a
+file with `--file` (B6), and its reply says how they end. The usage's line of the
+commands that take a file names it, `(task add, reopen, resume, edit and tell)`, and the
+next says `Those five say how many characters went`: changed by hand, in those words
+alone, in the four prints of `board.json` that hold that tail and in the daemon's trace
+of the same words (`crates/cf-daemon/tests/goldens/cf-board-028.json.gz`).

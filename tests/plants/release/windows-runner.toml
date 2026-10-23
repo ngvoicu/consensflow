@@ -15,6 +15,37 @@
 #   system puts a plain file where the link is, which is what git sees of a link; the links
 #   themselves are tried on Unix.
 #
+# - Several workers' runs queue for the one machine, and each run is its own (2026-10-22, T-219:
+#   every run sent to the same `<folder>.tgz`, so a run whose script had not unpacked yet was handed
+#   the tree of the run that sent after it, and zeewin's green was another tree's). A run's tarball
+#   is named by the run (`<folder>.<id>.tgz`) and the script unpacks that one and removes it
+#   however it ends, a refusal by the lock too, and takes the lock away only if it holds it; the
+#   lock stays the process alone, as every version of the script reads it, and the run that holds
+#   it is named in a file beside it, which a stop reads: a stop ends only its own run. The machine
+#   says the tree it unpacked (`== tree <commit> <hash>`, from a file the tarball holds), which
+#   must be the one sent: another ends the run there, and a 0 with no tree said is a failure.
+#   What runs that never got so far left is taken away by the next sweep, an hour after.
+# - The lock is one act of the system (T-253): a file the script opens for itself alone, as its
+#   first act in the folder (`FileShare.None`), so of two runs that start within a millisecond one is
+#   refused; a run that ended any way has closed it, so a lock a dead run left is no lock. The
+#   process stays in the old file for the scripts of the older form, which refuse a run that is still
+#   going by it. And the line a run ends by begins with a line feed: a command's output goes to the
+#   stream as it writes it, and one that ends inside a line (`type` of a file with no final line end)
+#   had the line written onto its words, which was no exit line, and a pass was answered as 1.
+#
+# - The script is two (T-263): the bootstrap on ssh's command line (the lock, the unpack, the sweep, the
+#   tree said) and the run script in the tarball (the steps, the variables, the command), so that what
+#   a run is asked for has no limit but the shell's. A stop ends the process the owner file names; the
+#   files unpacked are held to the identity by the sweep; the lock's refusal always has its exit line;
+#   a process id in the older file counts only for a PowerShell older than the file; the uploads of a
+#   folder that is gone are taken away a day after.
+# - A stop ends everything the run started (T-322): the run is put in a job that the system ends with
+#   the run's process (`CfJob` in the run script), released where the run ends by itself. A stop that
+#   was `taskkill /T /F` alone read the tree and then ended what it read, so what a run started while
+#   it went on was left running (zeewin, 2026-10-23: 21 to 50 programs of a run that kept starting
+#   them, a single `ping -n 60` 7 times in 142 stops, none in 142 with the job). The plants marked `(on the machine)` are of the
+#   tests that run PowerShell on Windows; they say `platforms = ["windows"]` and are tried there.
+#
 # The tests are xtask's library's (`windows::`), which read the scripts' text and pack a tree in a
 # repository made for each test; on Windows one runs the sweep in the machine's PowerShell too.
 # Every name holds `windows runner`, so `npm run plants:release -- "windows runner"` runs them all.
@@ -73,8 +104,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "Get-Content -Encoding UTF8 (Join-Path $dir"
-replace = "Get-Content (Join-Path $dir"
+find = '$now = [Collections.Generic.HashSet[string]]::new([string[]](Get-Content -Encoding UTF8 (Join-Path $dir'
+replace = '$now = [Collections.Generic.HashSet[string]]::new([string[]](Get-Content (Join-Path $dir'
 
 [[plant]]
 name = "windows runner: the sweep does not go in the tarball"
@@ -83,8 +114,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/tree.rs"
-find = "        .chain([SYNCED, SWEEP])"
-replace = "        .chain([SYNCED])"
+find = "        .chain([SYNCED, TREE, SWEEP, RUN])"
+replace = "        .chain([SYNCED, TREE, RUN])"
 
 # Folders.
 
@@ -95,8 +126,12 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "    $deep = $item -is [IO.DirectoryInfo] -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)"
-replace = "    $deep = $item -is [IO.DirectoryInfo]"
+find = '''
+    $deep = $item -is [IO.DirectoryInfo] -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    if (($kept'''
+replace = '''
+    $deep = $item -is [IO.DirectoryInfo]
+    if (($kept'''
 
 [[plant]]
 name = "windows runner: a folder left empty is kept"
@@ -117,8 +152,16 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "      $item.Delete()\n"
-replace = "      Remove-Item -LiteralPath $item.FullName -Force\n"
+find = '''
+      $item.Delete()
+      $removed.Add($name)
+    } catch {
+      $failed.Add("${name}'''
+replace = '''
+      Remove-Item -LiteralPath $item.FullName -Force
+      $removed.Add($name)
+    } catch {
+      $failed.Add("${name}'''
 
 [[plant]]
 name = "windows runner: what is removed is not said"
@@ -171,3 +214,969 @@ runs = ["xtask-lib-windows"]
 file = "app/.gitignore"
 find = "\n/src-tauri/resources\n"
 replace = "\n"
+
+# A run's tarball is its own (T-219).
+
+[[plant]]
+name = "windows runner: every run sends its tree to the same name"
+meant = "two_runs_that_overlap_send_their_trees_to_files_of_their_own"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '    format!("{dir}.{id}.tgz")'
+replace = "    let _ = id;\n    format!(\"{dir}.tgz\")"
+
+[[plant]]
+name = "windows runner: the script unpacks another name than its run's"
+meant = "a_run_names_the_tarball_it_unpacks_by_its_own_name_and_no_other_name_goes_in_the_script"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "$tarball = Join-Path $env:USERPROFILE '«tarball»'"
+replace = "$tarball = Join-Path $env:USERPROFILE '«dir».tgz'"
+
+[[plant]]
+name = "windows runner: the tree is sent to a name that is not the run's"
+meant = "a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_answered"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run.rs"
+find = "upload_name(&options.dir, &id)"
+replace = "upload_name(&options.dir, &run_id())"
+
+[[plant]]
+name = "windows runner: two runs of one process are named alike"
+meant = "a_run_is_named_to_the_width_a_script_is_made_for_and_no_two_runs_are_named_alike"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '    format!("{:08x}-{:08x}", std::process::id(), random & 0xffff_ffff)'
+replace = "    let _ = random;\n    format!(\"{:08x}-{:08x}\", std::process::id(), 0)"
+
+# What a run takes away, and what it leaves alone.
+
+[[plant]]
+name = "windows runner: a run leaves its tarball on the machine"
+meant = "a_run_removes_its_own_tarball_whichever_way_it_ends_and_the_lock_only_if_it_holds_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($held)"
+replace = "  if ($held)"
+
+[[plant]]
+name = "windows runner: a refused run takes the lock of the run that refused it"
+meant = "a_run_removes_its_own_tarball_whichever_way_it_ends_and_the_lock_only_if_it_holds_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($held) {\n    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue\n"
+replace = "  if ($true) {\n    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue\n"
+
+[[plant]]
+name = "windows runner: a refused run leaves its tarball on the machine"
+meant = "a_run_removes_its_own_tarball_whichever_way_it_ends_and_the_lock_only_if_it_holds_it"
+runs = ["xtask-lib-windows"]
+
+# The lock's refusal moves out of the try whose finally takes the upload away.
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "try {\nNew-Item -ItemType Directory -Force $dir | Out-Null\n"
+replace = "New-Item -ItemType Directory -Force $dir | Out-Null\n"
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "$held = $true\n"
+replace = "$held = $true\ntry {\n"
+
+[[plant]]
+name = "windows runner: the lock holds more than the process"
+meant = "the_process_is_still_written_and_read_as_every_version_reads_it_and_the_run_is_named_beside_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "Set-Content -Path $running -Value $PID\n"
+replace = "Set-Content -Path $running -Value @($PID, '«id»')\n"
+
+# A stop ends its own run and no other.
+
+[[plant]]
+name = "windows runner: a stop ends the run that holds the lock whoever's it is"
+meant = "a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if ($of[0] -eq '«id»') {"
+replace = "if ($of[0]) {"
+
+[[plant]]
+name = "windows runner: a stop leaves its run's tarball"
+meant = "a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '«tarball»') -Force -ErrorAction SilentlyContinue\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: a stop is made for another run"
+meant = "a_stop_ends_the_run_there_by_a_second_ssh_that_runs_the_script_that_ends_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run.rs"
+find = "stop: powershell(&stop_script(&options.dir, id))?,"
+replace = "stop: powershell(&stop_script(&options.dir, &run_id()))?,"
+
+# Runs that never got so far.
+
+[[plant]]
+name = "windows runner: the sweep takes a tarball that is not an hour old"
+meant = "the_tarballs_runs_left_beside_the_copy_are_taken_away_an_hour_after_they_were_written"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "$_.LastWriteTime -lt (Get-Date).AddHours(-1)"
+replace = "$_.LastWriteTime -lt (Get-Date)"
+
+[[plant]]
+name = "windows runner: the sweep takes the tarballs of other folders"
+meant = "the_tarballs_runs_left_beside_the_copy_are_taken_away_an_hour_after_they_were_written"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "[regex]::Escape($root.Name)"
+replace = "'.*'"
+
+# The tree the machine says it unpacked.
+
+[[plant]]
+name = "windows runner: the tarball does not carry the tree's identity"
+meant = "what_goes_over_is_packed_with_the_list_of_it_which_leaves_out_what_was_deleted"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/tree.rs"
+find = "        .chain([SYNCED, TREE, SWEEP, RUN])"
+replace = "        .chain([SYNCED, SWEEP, RUN])"
+
+[[plant]]
+name = "windows runner: the script says no tree"
+meant = "the_script_says_which_tree_it_unpacked_once_the_sweep_has_gone_and_before_anything_runs"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "Write-Output \"«tree_mark»$(Get-Content -LiteralPath (Join-Path $dir '«tree_file»') -TotalCount 1)\"\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: another tree than the one sent is let by"
+meant = "a_machine_that_says_another_tree_than_the_one_sent_ends_the_run_and_what_it_said_is_shown"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/session.rs"
+find = ".filter(|said| *said != tree)"
+replace = ".filter(|said| *said != tree && tree.is_empty())"
+
+[[plant]]
+name = "windows runner: a status 0 with no tree said is a pass"
+meant = "a_run_that_ended_with_0_without_saying_which_tree_it_ran_did_not_end_well"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/session.rs"
+find = "    if said == Some(0) && !tree_said {"
+replace = "    if said == Some(0) && !tree_said && code == Some(-1) {"
+
+[[plant]]
+name = "windows runner: a run told another tree is let go on there"
+meant = "a_run_told_another_tree_than_it_sent_ends_there_and_fails_saying_both"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run.rs"
+find = "        Ended::WrongTree(said) => {\n            let ended = end_there(context, options, &plan)?;\n"
+replace = "        Ended::WrongTree(said) => {\n            let ended = Ending::Ended;\n"
+
+[[plant]]
+name = "windows runner: a later line that says a tree takes the first one's place"
+meant = "only_the_first_such_line_counts_and_only_a_line_that_begins_with_the_mark"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/tail.rs"
+find = "            if self.found.is_some() {\n                return;\n            }\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: the tree's identity leaves out what is in the files"
+meant = "what_goes_over_changing_changes_the_tree_whatever_git_calls_the_change"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/tree.rs"
+find = "            io::copy(&mut file, &mut hash).map_err(read)?;"
+replace = "            let _ = &mut file;"
+
+[[plant]]
+name = "windows runner: the tree's identity leaves out the commit"
+meant = "a_tree_is_the_commit_the_checkout_is_at_and_a_hash_of_what_goes_over"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/tree.rs"
+find = '    Ok(format!("{commit} {}", content(context, files)?))'
+replace = '    Ok(format!("{NO_COMMIT} {}", content(context, files)?))'
+
+# The line a run ends by is a line of its own (T-253).
+
+[[plant]]
+name = "windows runner: the exit line is written onto the command's last words"
+meant = "a_command_whose_last_output_has_no_line_end_still_passes"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = 'Write-Output "`n«exit»$code"'
+replace = 'Write-Output "«exit»$code"'
+
+# The lock is taken in one act (T-253).
+
+[[plant]]
+name = "windows runner: the lock is opened for others to open as well"
+meant = "the_lock_is_a_file_opened_for_the_run_alone_before_anything_else_is_done_in_the_folder"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "'OpenOrCreate', 'ReadWrite', 'None')"
+replace = "'OpenOrCreate', 'ReadWrite', 'ReadWrite')"
+
+[[plant]]
+name = "windows runner: the lock is not opened"
+meant = "the_lock_is_a_file_opened_for_the_run_alone_before_anything_else_is_done_in_the_folder"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "try { $lock = [IO.File]::Open((Join-Path $dir '«lock»'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {} catch { $why = $_.Exception.Message }\n"
+replace = "$lock = $true\n"
+
+[[plant]]
+name = "windows runner: the lock is not closed when the run ends"
+meant = "the_lock_is_a_file_opened_for_the_run_alone_before_anything_else_is_done_in_the_folder"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($lock) { $lock.Dispose() }\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: the sweep removes the lock the run holds"
+meant = "the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "    OWNER,\n    LOCK,\n"
+replace = "    OWNER,\n    \".windows-run.lock.kept\",\n"
+
+[[plant]]
+name = "windows runner: the process of a lock of the older form is not looked at"
+meant = "the_process_is_still_written_and_read_as_every_version_reads_it_and_the_run_is_named_beside_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "$other = if ($holder) { try { Get-Process -Id $holder -ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item $running).LastWriteTime } } catch {} }\n"
+replace = "$other = $null\n"
+
+[[plant]]
+name = "windows runner: the process is not left for the scripts of the older form"
+meant = "the_process_is_still_written_and_read_as_every_version_reads_it_and_the_run_is_named_beside_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "Set-Content -Path $running -Value $PID\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: a record that is empty is asked of Get-Process"
+meant = "the_process_is_still_written_and_read_as_every_version_reads_it_and_the_run_is_named_beside_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "$other = if ($holder) {"
+replace = "$other = if ($true) {"
+
+[[plant]]
+name = "windows runner: the lock's refusal comes after the run has written its record"
+meant = "the_process_is_still_written_and_read_as_every_version_reads_it_and_the_run_is_named_beside_it"
+runs = ["xtask-lib-windows"]
+
+# The refusal moves below the record: the run that is refused has already taken the record.
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (-not $lock -or $other) {"
+replace = "Set-Content -Path $running -Value $PID\nif (-not $lock -or $other) {"
+
+# The script is two: what a run is asked for rides in the tarball (T-263).
+
+[[plant]]
+name = "windows runner: the run script is not read"
+meant = "the_script_says_which_tree_it_unpacked_once_the_sweep_has_gone_and_before_anything_runs"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = ". ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '«run»'))))\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: the run script is not sent"
+meant = "what_goes_over_is_packed_with_the_list_of_it_which_leaves_out_what_was_deleted"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/tree.rs"
+find = "        .chain([SYNCED, TREE, SWEEP, RUN])"
+replace = "        .chain([SYNCED, TREE, SWEEP])"
+
+[[plant]]
+name = "windows runner: the sweep removes the run script"
+meant = "the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "    RUN,\n    RUNNING,\n"
+replace = "    \".windows-run.ps1.kept\",\n    RUNNING,\n"
+
+# Its padding (400 characters, about 1,070 encoded) takes the bootstrap past the margin of a thousand and
+# not past the limit, where the run would be refused before it sends anything (T-348: 6,300 of 8,000).
+
+[[plant]]
+name = "windows runner: the command line carries more than the bootstrap needs"
+meant = "the_longest_run_there_is_leaves_the_command_line_a_margin_of_a_thousand_and_more"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "$held = $false\n$lock = $null\n"
+replace = "$held = $false\n# xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n$lock = $null\n"
+
+# A stop ends the run's own process (T-263).
+
+[[plant]]
+name = "windows runner: a stop ends the process of the older file"
+meant = "a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "taskkill /PID ($of[1]) /T /F"
+replace = "taskkill /PID (Get-Content $running) /T /F"
+
+[[plant]]
+name = "windows runner: a stop takes the older file whoever's it is"
+meant = "a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force }"
+replace = "Remove-Item -LiteralPath $running -Force"
+
+[[plant]]
+name = "windows runner: the end of a run takes the older file whoever's it is"
+meant = "a_run_removes_its_own_tarball_whichever_way_it_ends_and_the_lock_only_if_it_holds_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n"
+replace = "    Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue\n"
+
+[[plant]]
+name = "windows runner: the owner file names no process"
+meant = "the_process_is_still_written_and_read_as_every_version_reads_it_and_the_run_is_named_beside_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "Set-Content -Path $owner -Value @('«id»', $PID)"
+replace = "Set-Content -Path $owner -Value '«id»'"
+
+[[plant]]
+name = "windows runner: a run told another tree is said to be ended whether it was or not"
+meant = "a_run_told_another_tree_whose_end_there_the_machine_could_not_be_asked_for_says_it_may_go_on"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run.rs"
+find = "            let ended = end_there(context, options, &plan)?;\n            Err(Error::WrongTree {"
+replace = "            end_there(context, options, &plan)?;\n            let ended = Ending::Ended;\n            Err(Error::WrongTree {"
+
+# The files unpacked are the tree (T-263).
+
+[[plant]]
+name = "windows runner: the files unpacked are not held to the identity"
+meant = "the_files_unpacked_are_held_to_the_tree_that_was_sent_and_a_run_whose_files_differ_ends"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if ($unpacked -ne $sent) {"
+replace = "if ($false) {"
+
+[[plant]]
+name = "windows runner: the sweep hashes the names of the files and not what is in them"
+meant = "the_files_unpacked_are_held_to_the_tree_that_was_sent_and_a_run_whose_files_differ_ends"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($kind -eq 'file') { $bytes = [IO.File]::ReadAllBytes($path); $null = $sha.TransformBlock($bytes, 0, $bytes.Length, $null, 0) }\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: the Mac hashes a link by what it points at"
+meant = "a_link_is_known_by_its_name_alone_and_never_followed_for_a_machine_makes_no_link_of_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/tree.rs"
+find = "            .is_file()\n        {"
+replace = "            .is_file()\n            || true\n        {"
+
+# The lock never ends a run without its exit line (T-263).
+
+[[plant]]
+name = "windows runner: the record of a run that is being written is asked of Get-Process"
+meant = "the_process_is_still_written_and_read_as_every_version_reads_it_and_the_run_is_named_beside_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "$holder = Get-Content $running -ErrorAction SilentlyContinue\n"
+replace = "$holder = Get-Content $running\n"
+
+[[plant]]
+name = "windows runner: a lock that cannot be opened for another cause ends the run without a word"
+meant = "the_lock_is_a_file_opened_for_the_run_alone_before_anything_else_is_done_in_the_folder"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = " catch { $why = $_.Exception.Message }"
+replace = ""
+
+[[plant]]
+name = "windows runner: the cause a lock could not be opened for is not said"
+meant = "the_lock_is_a_file_opened_for_the_run_alone_before_anything_else_is_done_in_the_folder"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "$(if ($why) { \" (the lock could not be opened: $why)\" })"
+replace = ""
+
+# A process id given again is no run (T-263).
+
+[[plant]]
+name = "windows runner: a process that is no PowerShell holds the older file"
+meant = "the_process_is_still_written_and_read_as_every_version_reads_it_and_the_run_is_named_beside_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = " | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item $running).LastWriteTime }"
+replace = ""
+
+[[plant]]
+name = "windows runner: a PowerShell started after the older file was written holds it"
+meant = "the_process_is_still_written_and_read_as_every_version_reads_it_and_the_run_is_named_beside_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = " -and $_.StartTime -le (Get-Item $running).LastWriteTime"
+replace = ""
+
+# The uploads of a folder that is gone (T-263).
+
+[[plant]]
+name = "windows runner: the uploads of a folder that is gone are taken away within the hour"
+meant = "the_uploads_of_a_folder_that_is_gone_are_taken_away_a_day_after_they_were_written"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "$_.LastWriteTime -lt (Get-Date).AddDays(-1)"
+replace = "$_.LastWriteTime -lt (Get-Date).AddHours(-1)"
+
+[[plant]]
+name = "windows runner: the uploads of a folder that is there are taken away by the runs of another"
+meant = "the_uploads_of_a_folder_that_is_gone_are_taken_away_a_day_after_they_were_written"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "-and -not (Test-Path -LiteralPath (Join-Path $beside $Matches.folder)) "
+replace = ""
+
+# A stop ends everything the run started (T-322).
+
+[[plant]]
+name = "windows runner: the job ends nothing when its last handle closes"
+meant = "a_run_is_put_in_a_job_that_ends_with_it_before_it_starts_anything_and_a_run_that_cannot_be_says_so"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (!Limit(job, 0x2000))"
+replace = "if (!Limit(job, 0))"
+
+[[plant]]
+name = "windows runner: the job ends nothing when its last handle closes (on the machine)"
+meant = "a_stop_that_lands_while_the_run_is_starting_programs_leaves_none_of_them_running"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (!Limit(job, 0x2000))"
+replace = "if (!Limit(job, 0))"
+
+[[plant]]
+name = "windows runner: the run is not put in the job that was made"
+meant = "a_run_is_put_in_a_job_that_ends_with_it_before_it_starts_anything_and_a_run_that_cannot_be_says_so"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (!AssignProcessToJobObject(job, GetCurrentProcess()))"
+replace = "if (false)"
+
+[[plant]]
+name = "windows runner: the run is not put in the job that was made (on the machine)"
+meant = "a_stop_that_lands_while_the_run_is_starting_programs_leaves_none_of_them_running"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (!AssignProcessToJobObject(job, GetCurrentProcess()))"
+replace = "if (false)"
+
+[[plant]]
+name = "windows runner: a run that cannot be put in a job ends without its exit line"
+meant = "a_run_is_put_in_a_job_that_ends_with_it_before_it_starts_anything_and_a_run_that_cannot_be_says_so"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "} catch { Write-Output \"== no job:"
+replace = "} catch { throw; Write-Output \"== no job:"
+
+[[plant]]
+name = "windows runner: the job is made after the command is started"
+meant = "a_run_is_put_in_a_job_that_ends_with_it_before_it_starts_anything_and_a_run_that_cannot_be_says_so"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  $made = [CfJob]::Enter()\n  if ($made -eq [IntPtr]::Zero) { throw [CfJob]::Why }\n  $job = $made\n} catch { Write-Output \"== no job: $($_.Exception.Message), so a stop will not end at once what this run starts\" }\n"
+replace = "} catch {}\n"
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "cmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n\"##;\n\n/// The C#"
+replace = "$job = [CfJob]::Enter()\ncmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n\"##;\n\n/// The C#"
+
+[[plant]]
+name = "windows runner: the job is never released where the run ends by itself"
+meant = "the_job_is_released_where_a_run_ends_by_itself_and_not_where_it_is_killed"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($null -ne $job) { [CfJob]::Release($job) }\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: the job is never released where the run ends by itself (on the machine)"
+meant = "what_a_command_leaves_running_when_the_run_ends_by_itself_is_left_running"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($null -ne $job) { [CfJob]::Release($job) }\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: the job is released after what else the end of a run does"
+meant = "the_job_is_released_where_a_run_ends_by_itself_and_not_where_it_is_killed"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($null -ne $job) { [CfJob]::Release($job) }\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n"
+replace = "  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($null -ne $job) { [CfJob]::Release($job) }\n"
+
+[[plant]]
+name = "windows runner: the stop does not end the tree it reads"
+meant = "the_job_is_released_where_a_run_ends_by_itself_and_not_where_it_is_killed"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "taskkill /PID ($of[1]) /T /F"
+replace = "taskkill /PID ($of[1]) /F"
+
+[[plant]]
+name = "windows runner: the stop lets taskkill say what it could not end"
+meant = "the_script_that_ends_a_run_there_ends_the_run_the_lock_names_and_takes_its_tarball_away"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null;"
+replace = "taskkill /PID ($of[1]) /T /F | Out-Null;"
+
+[[plant]]
+name = "windows runner: the stop lets taskkill say what it could not end (on the machine)"
+meant = "a_stop_of_a_run_that_has_already_ended_says_nothing_and_takes_its_records_away"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null;"
+replace = "taskkill /PID ($of[1]) /T /F | Out-Null;"
+
+[[plant]]
+name = "windows runner: the stop ends with the status of its last command"
+meant = "the_script_that_ends_a_run_there_ends_the_run_the_lock_names_and_takes_its_tarball_away"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "-ErrorAction SilentlyContinue\nexit 0\n\"##;"
+replace = "-ErrorAction SilentlyContinue\n\"##;"
+
+[[plant]]
+name = "windows runner: the stop ends with the status of its last command (on the machine)"
+meant = "a_stop_of_a_run_that_has_already_ended_says_nothing_and_takes_its_records_away"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "-ErrorAction SilentlyContinue\nexit 0\n\"##;"
+replace = "-ErrorAction SilentlyContinue\n\"##;"
+
+# What the reports a run left keep (`script::REPORTS_KEPT_DAYS`, T-34 P3-6): older than the limit
+# is removed by the sweep, in that folder alone, and nothing newer is touched.
+[[plant]]
+name = "windows runner: the reports are never pruned"
+meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: what is newer than the limit is pruned"
+meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '    if ($inside -or $written -ge $cutoff) {'
+replace = '    if ($inside -or $written -lt $cutoff) {'
+
+[[plant]]
+name = "windows runner: the reports are kept a day"
+meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "pub const REPORTS_KEPT_DAYS: u32 = 14;"
+replace = "pub const REPORTS_KEPT_DAYS: u32 = 1;"
+
+[[plant]]
+name = "windows runner: a report that cannot be removed ends the run"
+meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '      $unpruned.Add("${name}: $($_.Exception.Message)")'
+replace = '      $failed.Add("${name}: $($_.Exception.Message)")'
+
+[[plant]]
+name = "windows runner: a folder that is a link is looked into when the reports are pruned"
+meant = "a_folder_that_is_a_link_is_not_looked_into_and_one_left_empty_is_removed"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''
+    $deep = $item -is [IO.DirectoryInfo] -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    $inside = if'''
+replace = '''
+    $deep = $item -is [IO.DirectoryInfo]
+    $inside = if'''
+
+[[plant]]
+name = "windows runner: a folder written within the limit is not looked into when the reports are pruned"
+meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '    $inside = if ($deep) { Clear-Old $item } else { 0 }'
+replace = '    $inside = if ($deep -and $written -lt $cutoff) { Clear-Old $item } else { 0 }'
+
+[[plant]]
+name = "windows runner: a folder is removed with what is left in it"
+meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '    if ($inside -or $written -ge $cutoff) {'
+replace = '    if ($written -ge $cutoff) {'
+
+# A reports folder that is itself a link is not walked (T-141, P3-8).
+[[plant]]
+name = "windows runner: a reports folder that is a link is pruned where it goes"
+meant = "a_folder_that_is_a_link_is_not_looked_into_and_one_left_empty_is_removed"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
+replace = "  $null = Clear-Old $folder\n"
+
+# What a run leaves in `evals/reports` there is brought back here (T-141, P3-3), the files this checkout
+# lacks and nothing it has, by names of a report's alone, whole; the runner and the matrix both do it.
+[[plant]]
+name = "windows runner: the reports a run left are not brought back"
+meant = "a_run_that_ended_there_with_a_status_brings_its_reports_back_and_answers_the_commands_status"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = "        let _ = bring_back(context, options, console);\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: the matrix's machine does not bring the reports back"
+meant = "the_matrixs_machine_brings_the_reports_back_too"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/matrix.rs"
+find = "        super::fetch::run_keeping(self.context, options, console, self.interrupt)"
+replace = "        super::run::run(self.context, options, console, self.interrupt)"
+
+[[plant]]
+name = "windows runner: a report this checkout has is replaced"
+meant = "the_reports_this_checkout_lacks_are_brought_back_and_the_ones_it_has_are_kept_as_they_are"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = '''
+        if to.exists() {
+            continue;
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "windows runner: what the matrix writes under windows is brought back"
+meant = "what_is_here_already_or_the_matrix_writes_is_not_asked_for_and_nothing_is_said_of_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = '''
+        if name.starts_with("windows/") {
+            continue;
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "windows runner: any name the machine lists is brought back"
+meant = "a_name_that_is_no_reports_is_said_and_is_never_copied_or_made_a_path"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = "        if is_report_name(name) {"
+replace = "        if true {"
+
+[[plant]]
+name = "windows runner: a copy of any size is a report"
+meant = "a_copy_that_is_not_the_size_the_machine_listed_is_taken_back_and_said"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = "            Ok(found) if found.len() == file.size => {"
+replace = "            Ok(_) => {"
+
+[[plant]]
+name = "windows runner: a copy is made under the report's own name"
+meant = "a_copy_that_is_not_the_size_the_machine_listed_is_taken_back_and_said"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = "        .arg(&part);"
+replace = "        .arg(to);"
+
+[[plant]]
+name = "windows runner: a file that cannot be copied ends the bringing back"
+meant = "a_file_that_cannot_be_copied_is_said_and_the_others_are_still_brought"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = '''
+            Err(said) => writeln!(
+                console.err,
+                "windows: the report {} could not be brought back: {said}",
+                file.name
+            )
+            .map_err(Error::Output)?,
+'''
+replace = '''
+            Err(said) => {
+                return writeln!(
+                    console.err,
+                    "windows: the report {} could not be brought back: {said}",
+                    file.name
+                )
+                .map_err(Error::Output)
+            }
+'''
+
+# T-194's P3-3 and P3-6: the reports come into the main checkout's folder, and the listing does
+# not walk a reports folder that is itself a link.
+[[plant]]
+name = "windows runner: the reports come into the tree's own folder and go with the tree"
+meant = "the_reports_come_into_the_main_checkouts_folder_when_the_run_goes_from_a_tree_linked_to_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = "        Some(main) if main.is_dir() => {"
+replace = "        Some(main) if false && main.is_dir() => {"
+
+[[plant]]
+name = "windows runner: the reports are said to be in the tree's folder when they are in the main checkout's"
+meant = "the_reports_come_into_the_main_checkouts_folder_when_the_run_goes_from_a_tree_linked_to_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = "        if in_main { \"the main checkout's \" } else { \"\" },"
+replace = '        "",'
+
+[[plant]]
+name = "windows runner: the reports listing walks a reports folder that is a link"
+meant = "the_listing_does_not_walk_a_reports_folder_that_is_itself_a_link"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''
+  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    $base'''
+replace = '''
+  if ($true) {
+    $base'''
+
+# Windows' own tar, named by its path (T-348): a bare `tar.exe` is the first on the PATH, and CI's
+# Git Bash puts Git's usr\bin, with a GNU tar, before System32; GNU tar takes `C:\…` for a host and
+# ends 2 before anything is unpacked (CI run 39896583469: six cases of the lock). A machine without
+# it ends the run saying so.
+
+[[plant]]
+name = "windows runner: the tree is unpacked by the first tar on the PATH"
+meant = "the_tree_is_unpacked_by_windows_own_tar_named_by_its_path_and_never_by_the_first_tar_on_the_path"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "& $tar -xmzf $tarball -C $dir"
+replace = "tar.exe -xmzf $tarball -C $dir"
+
+[[plant]]
+name = "windows runner: the tree is unpacked by the first tar on the PATH (on the machine)"
+meant = "a_run_started_with_gits_programs_first_on_the_path_unpacks_the_tree_with_windows_own_tar"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "& $tar -xmzf $tarball -C $dir"
+replace = "tar.exe -xmzf $tarball -C $dir"
+
+[[plant]]
+name = "windows runner: the tar named is not the system's"
+meant = "the_tree_is_unpacked_by_windows_own_tar_named_by_its_path_and_never_by_the_first_tar_on_the_path"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "$tar = Join-Path $env:SystemRoot 'System32\\tar.exe'"
+replace = "$tar = Join-Path $env:SystemRoot 'tar.exe'"
+
+[[plant]]
+name = "windows runner: a machine without its own tar is not told from one with it"
+meant = "the_tree_is_unpacked_by_windows_own_tar_named_by_its_path_and_never_by_the_first_tar_on_the_path"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {"
+replace = "if ($false) {"
+
+[[plant]]
+name = "windows runner: a machine without its own tar is not told from one with it (on the machine)"
+meant = "a_run_on_a_machine_without_windows_own_tar_ends_saying_so_before_it_unpacks_anything"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {"
+replace = "if ($false) {"

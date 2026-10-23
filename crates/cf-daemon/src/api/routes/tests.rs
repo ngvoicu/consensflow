@@ -94,6 +94,7 @@ fn a_task_route_is_the_task_and_the_word_after_it_whatever_the_method() {
         ("done", TaskAction::Done),
         ("accept", TaskAction::Accept),
         ("reopen", TaskAction::Reopen),
+        ("edit", TaskAction::Edit),
         ("cancel", TaskAction::Cancel),
         ("pause", TaskAction::Pause),
         ("resume", TaskAction::Resume),
@@ -320,8 +321,22 @@ pub(super) mod support {
 
     /// A task the chief gave `zeus` by name and its window took: working.
     pub(in crate::api::routes) fn working_task(scene: &Scene) -> i64 {
+        let (number, brief) = queued_task(scene);
         let mut ledger = scene.context.ledger.borrow_mut();
-        let created = ledger
+        ledger.begin_delivery(brief).unwrap();
+        ledger
+            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
+            .unwrap();
+        number
+    }
+
+    /// A task the chief gave `zeus` by name, its brief queued for a window not
+    /// up yet: its number, and its brief's.
+    pub(in crate::api::routes) fn queued_task(scene: &Scene) -> (i64, i64) {
+        let created = scene
+            .context
+            .ledger
+            .borrow_mut()
             .create_task(
                 scene.project.id,
                 &NewTask {
@@ -332,12 +347,7 @@ pub(super) mod support {
                 },
             )
             .unwrap();
-        let brief = created.message.unwrap().id;
-        ledger.begin_delivery(brief).unwrap();
-        ledger
-            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
-            .unwrap();
-        created.task.number
+        (created.task.number, created.message.unwrap().id)
     }
 
     /// [`working_task`], and a question `zeus` asked the chief through its
@@ -463,6 +473,19 @@ pub(super) mod support {
     /// A task the daemon gave a window of `zeus` of its own (a session), which
     /// has finished it: the one a follow-up goes back to.
     pub(in crate::api::routes) fn finished_session_task(scene: &Scene) -> i64 {
+        let number = session_task_at_work(scene);
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .record_result(scene.project.id, number, "Done.")
+            .unwrap();
+        number
+    }
+
+    /// A task opened for a standard worker and given to a session of `zeus` by
+    /// the daemon, its brief received: the session is at work on it.
+    pub(in crate::api::routes) fn session_task_at_work(scene: &Scene) -> i64 {
         let number = open_task(scene);
         let mut ledger = scene.context.ledger.borrow_mut();
         let project = ledger.project(scene.project.id).unwrap().unwrap();
@@ -477,9 +500,6 @@ pub(super) mod support {
         ledger.begin_delivery(brief).unwrap();
         ledger
             .confirm_delivery(brief, Some(&json!({ "item": "test" })))
-            .unwrap();
-        ledger
-            .record_result(scene.project.id, number, "Done.")
             .unwrap();
         number
     }

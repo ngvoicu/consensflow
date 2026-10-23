@@ -214,7 +214,7 @@ runs = ["help"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '            ..if verb == "get" { GET } else { Shape::TEXT }'
+find = '            ..shape_of(verb)'
 replace = "            ..Shape::TEXT"
 
 [[plant]]

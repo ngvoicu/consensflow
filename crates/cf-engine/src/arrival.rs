@@ -67,6 +67,7 @@ use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{begin, returning};
 use crate::seams::EngineError;
+use crate::trust::Trusting;
 
 /// An Enter, pressed once more for a paste its window did not send.
 const ENTER: u8 = 13;
@@ -157,6 +158,11 @@ impl Dispatcher {
             return Ok(());
         };
         if delivering.launch {
+            // A first message waits as long as its window asks whether to trust its
+            // folder, and has its whole time once it is past that (`trust`).
+            if record.window.borrow().trust != Trusting::Past {
+                return Ok(());
+            }
             let waited = self.now() - delivering.since;
             // The chief's window is the human's: however long it takes to
             // show its first message (the handoff), it is never closed for that.

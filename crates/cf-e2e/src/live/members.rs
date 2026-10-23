@@ -48,6 +48,7 @@ use tempfile::TempDir;
 use super::machine::{live_folder_in, Harness, Installed, ISOLATION};
 use super::window::trust_claude;
 use super::{agents, installed, last_lines, rig, rig_with_stand_ins, Log};
+use crate::process::Run;
 use crate::rig::{Config, Project, Rig};
 use crate::{files, Error, Result};
 
@@ -61,7 +62,8 @@ pub use board::{
 };
 pub use command::{quiet_command, runs_command, shown, LongCommand};
 pub use descent::{
-    descending_from, end_chosen, holding, Ended, Identity, Machine, Running, ThisMachine,
+    descending_from, end_chosen, holding, with_cygwin_parents, Ended, Identity, Machine, Running,
+    ThisMachine,
 };
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};
 pub use plan::{
@@ -160,6 +162,7 @@ impl Members {
         let trust = match installs
             .iter()
             .find(|install| install.harness() == Harness::Claude)
+            .filter(|_| !plan.repository)
         {
             Some(claude) => Some(trusted(&rig, claude, &folder, log)?),
             None => None,
@@ -507,6 +510,19 @@ fn prepare(rig: &Rig, plan: &Plan) -> Result<PathBuf> {
     }
     for (path, text) in &plan.files {
         files::write(&folder.join(path), text)?;
+    }
+    if plan.repository {
+        let made = Run::new(Path::new("git"))
+            .args(["init", "-q"])
+            .arg(&folder)
+            .inheriting_env()
+            .run()?;
+        if made.code != Some(0) {
+            return Err(Error::Daemon(format!(
+                "git init {}: {made}",
+                folder.display()
+            )));
+        }
     }
     Ok(folder)
 }

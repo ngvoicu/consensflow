@@ -1,9 +1,12 @@
 //! One task: reading it and its transcript; the order of the checks (the task
 //! before the verb) and the numbers read as JavaScript reads them. The verbs
-//! that move it are [`verbs`]. Where a test says what Node answered, it is what
-//! the real API answered the same request (the probe that printed those answers
-//! went with Node's API).
+//! that move it are [`verbs`], the chief's own step's [`own_steps`]; how deep a
+//! transcript reaches, [`depth`]. Where a
+//! test says what Node answered, it is what the real API answered the same
+//! request (the probe that printed those answers went with Node's API).
 
+mod depth;
+mod own_steps;
 mod verbs;
 
 use hyper::Method;
@@ -199,12 +202,13 @@ async fn a_task_is_read_with_its_thread_less_what_waits_for_the_human() {
     assert_eq!(thread.messages[0].state, "gated");
 }
 
-/// Every window reads the task whose brief waits at the gate: its words are in
-/// no view of it, and every key is where it was. The task's title stays: it is
-/// the card's label, which every window lists and the human sees on the board
-/// (a brief of one line is its own title).
+/// Every window that did not give the task reads it whose brief waits at the
+/// gate: its words are in no view of it, and every key is where it was. The
+/// task's title stays: it is the card's label, which every window lists and the
+/// human sees on the board (a brief of one line is its own title).
 #[tokio::test]
-async fn a_brief_that_waits_at_the_gate_is_in_no_agents_view_of_the_task() {
+async fn a_brief_that_waits_at_the_gate_is_in_no_view_of_the_task_of_a_window_that_did_not_give_it()
+{
     let scene = scene();
     let scope = "Tokenize every file under src and print the tokens";
     let (session, _) = gated_brief_of(&scene, &format!("Lexer\n{scope}"));
@@ -233,7 +237,7 @@ async fn a_brief_that_waits_at_the_gate_is_in_no_agents_view_of_the_task() {
     let seen = serde_json::to_value(&seen).unwrap();
     assert_eq!(seen["body"], format!("Lexer\n{scope}"));
     assert_eq!(seen["messages"][0]["state"], "gated");
-    for token in [&scene.chief, &scene.zeus, &session] {
+    for token in [&scene.zeus, &session] {
         let (status, said) = get(&scene, token, "1").await;
         assert_eq!(status, 200);
         let task = said["task"].as_object().unwrap();
@@ -250,12 +254,41 @@ async fn a_brief_that_waits_at_the_gate_is_in_no_agents_view_of_the_task() {
     }
 }
 
+/// The chief wrote the brief that waits for the human: it reads it back, as
+/// Node's recording of the chief reading its own gated task has it
+/// (`cf-board-010`), with the thread still leaving out what is gated. A member
+/// that is not the one who gave the task is not given it.
+#[tokio::test]
+async fn the_chief_reads_the_brief_it_wrote_while_it_waits_at_the_gate_and_a_member_does_not() {
+    let scene = scene();
+    let scope = "Tokenize every file under src and print the tokens";
+    let (session, brief) = gated_brief_of(&scene, &format!("Lexer\n{scope}"));
+    assert_eq!(scene.message(brief).state, "gated");
+    let (status, said) = get(&scene, &scene.chief, "1").await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        said["task"]["body"],
+        format!("Lexer\n{scope}"),
+        "the chief gave the task: its brief is its own to read"
+    );
+    assert_eq!(
+        said["task"]["messages"],
+        json!([]),
+        "and the thread still leaves out what waits at the gate"
+    );
+    for token in [&scene.zeus, &session] {
+        let (_, said) = get(&scene, token, "1").await;
+        assert_eq!(said["task"]["body"], "", "a member is not given it");
+        assert!(!said.to_string().contains(scope), "{said}");
+    }
+}
+
 #[tokio::test]
 async fn a_brief_is_given_once_it_has_passed_the_gate_and_a_later_message_held_there_does_not_take_it_back(
 ) {
     let scene = scene();
     let (session, brief) = gated_brief(&scene);
-    let (_, said) = get(&scene, &scene.chief, "1").await;
+    let (_, said) = get(&scene, &session, "1").await;
     assert_eq!(said["task"]["body"], "");
     // The human passes it on, and the window receives it.
     {
@@ -283,7 +316,7 @@ async fn a_brief_is_given_once_it_has_passed_the_gate_and_a_later_message_held_t
         resumed.message.map(|message| message.state).as_deref(),
         Some("gated")
     );
-    let (_, said) = get(&scene, &scene.chief, "1").await;
+    let (_, said) = get(&scene, &session, "1").await;
     assert_eq!(said["task"]["body"], "Lexer");
 }
 
@@ -449,6 +482,39 @@ async fn while_the_project_is_closed_a_brief_no_window_was_handed_is_in_no_agent
     project_is(&scene, "open");
     let (_, said) = get(&scene, &scene.zeus, &number).await;
     assert_eq!(said["task"]["body"], "The whole brief");
+}
+
+/// Where the Resume's rule meets main's (the merge of T-392): main lets the chief
+/// and whoever gave a task read its brief while it waits at the human's gate, as
+/// those who wrote it. The brief that waits for the Resume is theirs to read too:
+/// the human gave zeus a task, and while the project is closed the chief, who may
+/// move every task, reads its brief; zeus, whose window was never handed it, does
+/// not.
+#[tokio::test]
+async fn while_the_project_is_closed_the_chief_reads_a_brief_the_human_wrote_and_its_window_does_not(
+) {
+    let scene = scene();
+    let created = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .create_task(
+            scene.project.id,
+            &cf_ledger::NewTask {
+                from: "human".to_owned(),
+                to: Some("zeus".to_owned()),
+                body: "The whole brief".to_owned(),
+                ..cf_ledger::NewTask::default()
+            },
+        )
+        .unwrap();
+    let number = created.task.number.to_string();
+    project_is(&scene, "suspended");
+
+    let (_, said) = get(&scene, &scene.zeus, &number).await;
+    assert_eq!(said["task"]["body"], "", "its window: {said}");
+    let (_, said) = get(&scene, &scene.chief, &number).await;
+    assert_eq!(said["task"]["body"], "The whole brief", "{said}");
 }
 
 #[tokio::test]

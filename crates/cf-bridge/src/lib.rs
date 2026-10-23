@@ -108,11 +108,27 @@ struct BridgeInner {
     on_close: Option<Arc<CloseHandler>>,
     next_id: AtomicU64,
     closed: AtomicBool,
+    /// Whether the output stays open when the input ends cleanly
+    /// ([`BridgeBuilder::keep_output_after_eof`]).
+    keeps_output: bool,
+    /// Whether the output has ended, which a bridge that keeps it says apart from
+    /// `closed`; one that does not has it end with `closed`.
+    output_ended: AtomicBool,
     lifecycle: Mutex<Lifecycle>,
     closed_ready: Condvar,
     transport_shutdown: Arc<TransportShutdown>,
     max_frame_bytes: usize,
     default_request_deadline: Duration,
+}
+
+impl BridgeInner {
+    /// Whether nothing more can be said to the peer: the transport closed, and the
+    /// output with it, unless the bridge keeps its output past the end of its input
+    /// and has not ended it.
+    fn output_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+            && (!self.keeps_output || self.output_ended.load(Ordering::Acquire))
+    }
 }
 
 #[derive(Clone)]
@@ -131,6 +147,7 @@ pub struct BridgeBuilder {
     event_handlers: HashMap<String, Vec<Arc<EventHandler>>>,
     on_error: Option<Arc<ErrorHandler>>,
     on_close: Option<Arc<CloseHandler>>,
+    keeps_output: bool,
     max_frame_bytes: usize,
     default_request_deadline: Duration,
 }
@@ -144,6 +161,7 @@ impl BridgeBuilder {
             event_handlers: HashMap::new(),
             on_error: None,
             on_close: None,
+            keeps_output: false,
             max_frame_bytes,
             default_request_deadline: Duration::from_millis(DEFAULT_REQUEST_DEADLINE_MS),
         }
@@ -210,6 +228,18 @@ impl BridgeBuilder {
         F: Fn() + Send + Sync + 'static,
     {
         self.on_close = Some(Arc::new(handler));
+        self
+    }
+
+    /// A bridge that, when its input ends cleanly (the peer closed it, as a parent
+    /// tells a child it is done), goes on writing: the owner has still to say what
+    /// it did as it stopped, and ends the output itself ([`Bridge::end_output`]).
+    /// Nothing more is admitted from the peer, and the bridge is closed
+    /// ([`Bridge::is_closed`]) as ever; only the output is kept. A failure of the
+    /// transport ends both, as it always did. Without this the output ends with the
+    /// input, and what is said after is dropped.
+    pub fn keep_output_after_eof(&mut self) -> &mut Self {
+        self.keeps_output = true;
         self
     }
 
@@ -347,6 +377,8 @@ impl BridgeBuilder {
                 on_close: self.on_close,
                 next_id: AtomicU64::new(0),
                 closed: AtomicBool::new(false),
+                keeps_output: self.keeps_output,
+                output_ended: AtomicBool::new(false),
                 lifecycle: Mutex::new(Lifecycle {
                     closed: false,
                     in_flight_handlers: 0,
@@ -461,7 +493,7 @@ impl Bridge {
     }
 
     fn encode_event(&self, op: String, body: Value) -> Result<Option<Vec<u8>>, BridgeError> {
-        if self.is_closed() {
+        if self.inner.output_closed() {
             return Ok(None);
         }
         let frame = Frame {
@@ -489,6 +521,41 @@ impl Bridge {
             Ok(mut writer) => drop(writer.take()),
             Err(poisoned) => drop(poisoned.into_inner().take()),
         }
+    }
+
+    /// Ends the output of a bridge that keeps it past the end of its input
+    /// ([`BridgeBuilder::keep_output_after_eof`]): what was said is written, and the
+    /// peer's input ends after it. The writer is given `within` to write what is queued;
+    /// a peer that reads nothing has it cut off then, and the answer is `false`. Of no
+    /// use before the input has ended, which the writer's end is waited for until.
+    pub fn end_output(&self, within: Duration) -> bool {
+        self.close_input();
+        let deadline = Instant::now() + within;
+        let flushed = self.wait_for_the_writer(deadline);
+        self.cut_output();
+        flushed
+    }
+
+    /// Whether the transport's workers have ended by `deadline`.
+    fn wait_for_the_writer(&self, deadline: Instant) -> bool {
+        let mut guard = self
+            .inner
+            .lifecycle
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        while guard.transport_workers != 0 {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            guard = self
+                .inner
+                .closed_ready
+                .wait_timeout(guard, left)
+                .unwrap_or_else(|error| error.into_inner())
+                .0;
+        }
+        true
     }
 
     pub fn wait_closed(&self) -> Result<(), BridgeError> {
@@ -802,7 +869,7 @@ impl Bridge {
             canceled,
         };
         loop {
-            if self.is_closed() {
+            if self.inner.output_closed() {
                 return Err(BridgeError::Eof);
             }
             let send_result = {
@@ -859,28 +926,34 @@ impl Bridge {
     }
 
     fn close_with_eof(&self) {
-        self.close_transport(BridgeError::Eof, false);
+        self.close_transport(BridgeError::Eof, false, self.inner.keeps_output);
     }
 
     fn fail_transport(&self, error: BridgeError) {
-        self.close_transport(error, true);
+        self.close_transport(error, true, false);
     }
 
-    fn close_transport(&self, error: BridgeError, report: bool) {
+    /// Closes the transport: nothing more is admitted from the peer, and what waits
+    /// on it is refused with `error`. The output ends with it, unless it is `keeps_output`
+    /// (the end of an input that the bridge keeps its output past): a failure of the
+    /// transport after that ends the output all the same.
+    fn close_transport(&self, error: BridgeError, report: bool, keeps_output: bool) {
         let mut lifecycle = self
             .inner
             .lifecycle
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         if lifecycle.closed {
+            drop(lifecycle);
+            if !keeps_output {
+                self.cut_output();
+            }
             return;
         }
         lifecycle.closed = true;
         self.inner.closed.store(true, Ordering::Release);
-        self.inner.transport_shutdown.request();
-        match self.inner.writer.lock() {
-            Ok(mut writer) => drop(writer.take()),
-            Err(poisoned) => drop(poisoned.into_inner().take()),
+        if !keeps_output {
+            self.cut_output();
         }
         let pending = match self.inner.pending.lock() {
             Ok(mut pending) => pending
@@ -903,6 +976,17 @@ impl Bridge {
         }
         if let Some(handler) = &self.inner.on_close {
             handler();
+        }
+    }
+
+    /// Ends the output at once: what is queued and not written is dropped, and a write
+    /// that waits for a peer that reads nothing is interrupted (on Unix).
+    fn cut_output(&self) {
+        self.inner.output_ended.store(true, Ordering::Release);
+        self.inner.transport_shutdown.request();
+        match self.inner.writer.lock() {
+            Ok(mut writer) => drop(writer.take()),
+            Err(poisoned) => drop(poisoned.into_inner().take()),
         }
     }
 
@@ -969,7 +1053,7 @@ fn writer_loop(
         if job.canceled.load(Ordering::Acquire) {
             continue;
         }
-        if inner.closed.load(Ordering::Acquire) {
+        if inner.output_closed() {
             return;
         }
         drop(inner);
@@ -1703,6 +1787,17 @@ mod tests {
             )
         }
 
+        /// Whether the bridge closes within `within`: one that does not is a failure of the
+        /// test that asks, not a test that never ends.
+        fn closes_within(bridge: &super::super::Bridge, within: Duration) -> bool {
+            let (closed, closing) = std::sync::mpsc::channel();
+            let waiting = bridge.clone();
+            thread::spawn(move || {
+                let _ = closed.send(waiting.wait_closed().is_ok());
+            });
+            closing.recv_timeout(within).unwrap_or(false)
+        }
+
         fn connect_split(builder: BridgeBuilder) -> (super::super::ConnectedBridge, Peer) {
             let (rust_input, mut peer_writer) =
                 UnixStream::pair().expect("create bridge input socket pair");
@@ -2189,6 +2284,138 @@ mod tests {
                 input_released_before_peer_cleanup && output_released_before_peer_cleanup,
                 "wait_closed returned before EOF terminated both transport workers"
             );
+        }
+
+        /// The peer ends the bridge's input, as a parent tells a child it is done: the
+        /// bridge is closed to it as ever, and a bridge that keeps its output can still say
+        /// what its owner did as it stopped, until the owner ends the output.
+        #[test]
+        fn a_bridge_that_keeps_its_output_says_what_is_left_after_its_input_ends_and_ends_it_on_request(
+        ) {
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
+            builder.keep_output_after_eof();
+            let (connected, mut peer) = connect_split(builder);
+            peer.writer
+                .shutdown(std::net::Shutdown::Write)
+                .expect("end the bridge's input");
+            connected
+                .bridge
+                .wait_launches_closed()
+                .expect("the input ends");
+            assert!(connected.bridge.is_closed());
+
+            // Nothing is asked of the peer any more; what the owner tells it still goes.
+            assert!(matches!(
+                connected.bridge.request("late", json!(null), Some(50)),
+                Err(BridgeError::Eof)
+            ));
+            assert!(connected
+                .bridge
+                .event("pane.exit", json!({"id":"p1"}))
+                .expect("an event after the input ended"));
+            let said = peer.receive();
+            assert_eq!(
+                (said["kind"].as_str(), said["op"].as_str(), &said["body"]),
+                (Some("evt"), Some("pane.exit"), &json!({"id":"p1"}))
+            );
+
+            // Ended on request, after what was queued: the peer reads to its end.
+            assert!(connected
+                .bridge
+                .event("pane.exit", json!({"id":"p2"}))
+                .expect("a second event"));
+            assert!(connected.bridge.end_output(Duration::from_secs(2)));
+            assert_eq!(peer.receive()["body"], json!({"id":"p2"}));
+            let mut rest = String::new();
+            assert_eq!(
+                peer.reader
+                    .read_line(&mut rest)
+                    .expect("the output ends cleanly"),
+                0,
+                "{rest}"
+            );
+            assert!(closes_within(&connected.bridge, Duration::from_secs(5)));
+            assert!(!connected
+                .bridge
+                .event("pane.exit", json!({"id":"p3"}))
+                .expect("an event after the output ended"));
+        }
+
+        /// The ordinary end: the output goes with the input, and what is said after is dropped.
+        #[test]
+        fn a_bridge_that_does_not_keep_its_output_ends_it_with_its_input() {
+            let (connected, mut peer) = connect_split(BridgeBuilder::new(Role::Host, 1024));
+            peer.set_read_timeout(Duration::from_secs(5));
+            peer.writer
+                .shutdown(std::net::Shutdown::Write)
+                .expect("end the bridge's input");
+            assert!(closes_within(&connected.bridge, Duration::from_secs(5)));
+            assert!(!connected
+                .bridge
+                .event("pane.exit", json!({"id":"p1"}))
+                .expect("an event after the input ended"));
+            let mut rest = String::new();
+            assert_eq!(
+                peer.reader.read_line(&mut rest).expect("the output ends"),
+                0,
+                "{rest}"
+            );
+        }
+
+        /// A peer that reads nothing is not waited for: the output is cut off after the
+        /// time it was given, and the blocked write is let go of.
+        #[test]
+        fn ending_the_output_of_a_peer_that_reads_nothing_gives_up_after_its_time() {
+            let mut builder = BridgeBuilder::new(Role::Host, 9 * 1024 * 1024);
+            builder.keep_output_after_eof();
+            let (connected, peer_input, peer_output, _input_probe, mut output_probe) =
+                connect_tracked_split(builder);
+            occupy_real_output(&connected.bridge, &mut output_probe);
+            drop(peer_input);
+            connected
+                .bridge
+                .wait_launches_closed()
+                .expect("the input ends");
+
+            let began = Instant::now();
+            assert!(!connected.bridge.end_output(Duration::from_millis(300)));
+            assert!(
+                began.elapsed() < Duration::from_secs(5),
+                "the output was waited for: {:?}",
+                began.elapsed()
+            );
+            assert!(
+                closes_within(&connected.bridge, Duration::from_secs(5)),
+                "the blocked write was not let go of"
+            );
+            drop(peer_output);
+        }
+
+        /// The peer's end of the output breaks after the input has ended: the output ends
+        /// with the failure, as it would have with the input, and the bridge closes.
+        #[test]
+        fn a_failed_write_ends_an_output_the_bridge_kept() {
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
+            builder.keep_output_after_eof();
+            let (connected, peer_input, peer_output, _input_probe, _output_probe) =
+                connect_tracked_split(builder);
+            drop(peer_input);
+            connected
+                .bridge
+                .wait_launches_closed()
+                .expect("the input ends");
+            drop(peer_output);
+
+            let _ = connected.bridge.event("pane.exit", json!({"id":"p1"}));
+            assert!(
+                closes_within(&connected.bridge, Duration::from_secs(5)),
+                "the failed output did not close the bridge"
+            );
+            // The output is ended, and nothing more is said to a queue that is gone.
+            assert!(!connected
+                .bridge
+                .event("pane.exit", json!({"id":"p2"}))
+                .expect("an event after the output failed"));
         }
 
         #[test]

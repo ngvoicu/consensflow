@@ -4,6 +4,7 @@
 use std::io::BufReader;
 use std::path::Path;
 use std::process::ChildStdout;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -39,16 +40,24 @@ impl Rig {
     pub fn start(config: Config) -> Result<Self> {
         let turn = serial::turn();
         // A home of its own, which goes if the rig never starts; or the one it is
-        // to resume on.
+        // to resume on. In the machine's temp folder, whatever the rig is built for: the
+        // real harnesses' windows open in no git repository there, where a home under the
+        // checkout would put them in ConsensFlow's own (the repository's settings and
+        // instructions, a project by its root for trust, one project for every window).
+        // The homes a killed run left in the folder, older than a day and worked in by no
+        // process, are taken away first, unread (`sweep`).
         let (root, scratch) = match &config.existing_root {
             Some(root) => (root.clone(), None),
             None => {
+                let folder = config.homes.clone().unwrap_or_else(std::env::temp_dir);
+                files::make_dir(&folder)?;
+                super::sweep::homes(&folder);
                 let scratch = tempfile::Builder::new()
                     .prefix("consensflow-integration-")
-                    .tempdir()
+                    .tempdir_in(&folder)
                     .map_err(|source| Error::File {
                         action: "make a folder in",
-                        path: std::env::temp_dir(),
+                        path: folder.clone(),
                         source,
                     })?;
                 (scratch.path().to_path_buf(), Some(scratch))
@@ -85,8 +94,11 @@ impl Rig {
             stranger,
             forget: config.stand_in_records.map(Forget::new),
             masker: config.masker,
+            reports: config.reports,
             keep_root: false,
             closed: false,
+            close_failed: false,
+            close_expected_to_fail: AtomicBool::new(false),
             _turn: turn,
         })
     }

@@ -2,11 +2,14 @@
 //! to a participant by name, or opened for a pool and tier of the staff and
 //! assigned by the daemon, or taken back to the board (`giving`); paused, held
 //! and resumed (`pausing`); finished with a result and accepted, sent back,
-//! cancelled, failed, and deleted from the board by the human (`finishing`);
-//! and read with their threads.
+//! cancelled, failed, and deleted from the board by the human (`finishing`),
+//! the chief's own step by its word (`own_steps`); their briefs replaced before
+//! a window has them (`editing`); and read with their threads.
 
+mod editing;
 mod finishing;
 mod giving;
+mod own_steps;
 mod pausing;
 
 use cf_proto::ledger::{TaskThread, TaskView};
@@ -16,12 +19,14 @@ use crate::model::LedgerError;
 use crate::store::Store;
 use crate::views::{message_view, task_view, TaskRow, MESSAGE_SELECT, TASK_SELECT};
 
+pub(crate) use editing::edit_task;
 pub(crate) use finishing::{
-    accept_task, call_off, cancel_task, delete_tasks, fail_task, record_result, release_ready,
-    reopen_task,
+    accept_task, call_off, cancel_task, delete_tasks, fail_task, note_stranded_waits,
+    record_result, release_ready, reopen_task, tell_stranded_waiters, Ending,
 };
 pub use giving::NewTask;
 pub(crate) use giving::{assign_task, check_release, create_task, release_task};
+pub(crate) use own_steps::withdrawn_late;
 pub(crate) use pausing::{
     clear_hold, held_tasks_due, hold_task, pause_task, pause_with_project, paused_task,
     resume_task, resume_with_project, stop_of, take_over_pause, task_in_hand, told_since_paused,
@@ -207,7 +212,11 @@ fn task_by_id(store: &Store, id: i64) -> Result<TaskView, LedgerError> {
 }
 
 /// A task still on the board, in one of `states`, for `action`.
-fn require_task_state(task: &TaskRow, states: &[&str], action: &str) -> Result<(), LedgerError> {
+pub(crate) fn require_task_state(
+    task: &TaskRow,
+    states: &[&str],
+    action: &str,
+) -> Result<(), LedgerError> {
     require_on_board(task, action)?;
     if states.contains(&task.state.as_str()) {
         return Ok(());

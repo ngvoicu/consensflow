@@ -26,7 +26,7 @@ const SEAM: &str = "adapter:claude-code";
 const ZEUS: &str = "p1-zeus-amber-pine";
 
 /// What was pasted into zeus's window for `message`, its first paste.
-fn pasted(context: &Context, pane: &str, message: i64) -> String {
+pub(crate) fn pasted(context: &Context, pane: &str, message: i64) -> String {
     handed_to(context, SEAM, pane)
         .into_iter()
         .find(|text| text.contains(&marker_of(message)))
@@ -44,7 +44,7 @@ fn said(context: &Context, pane: &str, body: &str) -> usize {
 
 /// The human presses Enter in the window of `handle` on what its box holds, `text`:
 /// its record shows it given, and the window answers and comes to rest.
-fn human_sends(context: &Context, handle: &str, text: &str) {
+pub(crate) fn human_sends(context: &Context, handle: &str, text: &str) {
     let given = context.adapter.item(Role::User, text);
     let answer = context.adapter.item(Role::Assistant, "ok");
     context.adapter.with(handle, |agent| {

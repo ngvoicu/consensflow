@@ -5,7 +5,7 @@
 //! (`messages/continuations.rs`; the lead's design of 2026-10-17, after both
 //! reviews of round 7).
 
-use cf_ledger::{continuation, HandOver, MessageView, NewNote};
+use cf_ledger::{continuation, GivenUp, HandOver, MessageView, NewNote};
 
 use crate::fixture::{world, World};
 
@@ -175,9 +175,13 @@ fn a_continuation_handed_over_that_comes_back_after_its_task_moved_is_withdrawn(
         );
 
         if given_up {
-            w.ledger
-                .fail_delivery(note.id, "the window never showed it")
+            let (_, came_to) = w
+                .ledger
+                .give_up_delivery(note.id, "the window never showed it")
                 .expect("given up");
+            // The merge of main's field 3.0.6 (T-392): said as withdrawn, so the
+            // engine tells nobody of a failure.
+            assert_eq!(came_to, GivenUp::Withdrawn, "said as withdrawn");
         } else {
             w.ledger
                 .retry_delivery(note.id, "the paste wrote nothing", true)

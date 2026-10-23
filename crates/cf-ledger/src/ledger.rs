@@ -23,6 +23,7 @@ use crate::model::LedgerError;
 use crate::names;
 use crate::schema::{migrate, MIGRATIONS};
 use crate::store::Store;
+use crate::tasks::note_stranded_waits;
 
 /// An event as it is logged: when, of which project, what kind, and its data.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,7 +72,9 @@ pub struct Ledger {
 /// messages of their own again (`messages::release_stranded`). The tasks of what
 /// was let go of, there or by migration 0019 (what rode in every carrier an
 /// earlier build began to paste), are reconciled once, by the first start after
-/// it that gets that far (`messages::reconcile_released`).
+/// it that gets that far (`messages::reconcile_released`). A task that waits
+/// for a cancelled one, which a cancel up to 3.0.5 left behind, is told to the
+/// chief once (`tasks::note_stranded_waits`).
 pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError> {
     let db = Connection::open(file)?;
     // SQLite's own default waits five seconds for a lock: a second instance
@@ -84,7 +87,10 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
         // closes; taking it here is what makes this connection the only one.
         db.execute_batch("BEGIN EXCLUSIVE; COMMIT")?;
         db.execute_batch("PRAGMA journal_mode = WAL")?;
-        db.execute_batch("PRAGMA synchronous = FULL")?;
+        db.execute_batch(&format!(
+            "PRAGMA synchronous = {}",
+            synchronous(cfg!(feature = "test-support"))
+        ))?;
         migrate(&db, &MIGRATIONS)
     })();
     if let Err(cause) = ready {
@@ -94,11 +100,27 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
     let mut store = Store::new(db, options.clock, options.names, options.trace);
     release_stranded(&mut store)?;
     reconcile_released(&mut store)?;
+    note_stranded_waits(&mut store)?;
     Ok(Ledger {
         store,
         #[cfg(feature = "test-support")]
         watcher: std::cell::RefCell::new(None),
     })
+}
+
+/// How much of its disk a ledger waits for at each commit: the product's waits
+/// until the commit is on the disk (`FULL`), and so does every build that ships.
+/// The ledgers the tests open (`test-support`, which no build that ships has) go
+/// with their folders, and no test reads one back from a disk that lost power:
+/// they wait for nothing. On Windows a commit waited for is a flush: the daemon's
+/// test that writes 20,000 of them (`pages_through_thousands_of_conversations`)
+/// took 63 s on zeewin, and 14 s without the wait (2026-10-22).
+fn synchronous(for_tests: bool) -> &'static str {
+    if for_tests {
+        "OFF"
+    } else {
+        "FULL"
+    }
 }
 
 /// What an opening that failed tells: a held file, or one that is no ledger,
@@ -194,5 +216,32 @@ impl Ledger {
     pub fn close_in_place(&mut self) -> Result<(), LedgerError> {
         let open = std::mem::replace(&mut self.store.db, Connection::open_in_memory()?);
         open.close().map_err(|(_, cause)| cause.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn synchronous_of(ledger: &Ledger) -> i64 {
+        ledger
+            .sqlite()
+            .query_row("PRAGMA synchronous", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn the_product_waits_for_its_disk_at_each_commit_and_a_ledger_for_tests_waits_for_none() {
+        assert_eq!(synchronous(false), "FULL");
+        assert_eq!(synchronous(true), "OFF");
+    }
+
+    #[test]
+    fn a_ledger_opened_with_the_test_support_waits_for_no_disk() {
+        let folder = tempfile::tempdir().unwrap();
+        let ledger =
+            open_ledger(&folder.path().join("consensflow.db"), Options::default()).unwrap();
+        // SQLite's own numbers: 0 is OFF, 2 is FULL.
+        assert_eq!(synchronous_of(&ledger), 0);
     }
 }

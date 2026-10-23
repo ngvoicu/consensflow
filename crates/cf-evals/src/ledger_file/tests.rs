@@ -30,6 +30,16 @@ fn count(db: &Connection, table: &str) -> i64 {
 }
 
 #[test]
+fn a_ledger_file_made_to_be_read_waits_for_no_disk_at_a_commit_whether_or_not_it_is_in_wal_mode() {
+    let folder = tempfile::tempdir().unwrap();
+    for (n, wal) in [(1, false), (2, true)] {
+        let db = open(&file(&folder, n), wal).unwrap();
+        // SQLite's own numbers: 0 is OFF, 2 is FULL.
+        assert_eq!(pragma(&db, "synchronous"), ["Integer(0)"], "wal {wal}");
+    }
+}
+
+#[test]
 fn a_ledger_file_is_at_the_schema_the_build_knows_which_is_the_number_of_migrations_and_sound() {
     let folder = tempfile::tempdir().unwrap();
     let on_disk = fs::read_dir(migrations_folder())

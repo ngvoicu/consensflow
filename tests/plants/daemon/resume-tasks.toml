@@ -62,6 +62,10 @@ harness-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t
 engine-stale-box = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stale_box::"]
 # The owner's shape on the rig: two tasks at work and one the human paused, closed and resumed.
 rig-regression-resume-tasks = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "tasks_left_paused_by_a_close_and_resume::"]
+# Where the Resume's Enter meets main's field 3.0.6 (the merge of T-392): own steps, told words.
+engine-meeting-main = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "meeting_main::"]
+# What one task's route reads out, a closed project's brief among it.
+daemon-routes-task = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::task::"]
 
 # --- the Resume, as main had it ---
 
@@ -641,13 +645,13 @@ runs = ["ledger-suspended", "engine-closed-given-nothing"]
 file = "crates/cf-ledger/src/messages/delivery.rs"
 find = '''
         if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
-            return known_message(store, message_id);
+            return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
         store.db.execute(
             "UPDATE message SET state = 'failed','''
 replace = '''
         if withdrawn_if_stale(store, &message)? {
-            return known_message(store, message_id);
+            return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
         store.db.execute(
             "UPDATE message SET state = 'failed','''
@@ -659,16 +663,12 @@ runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''
-        if given_up.state != "failed" {
-            return Ok(());
-        }'''
-replace = '''
-        let _ = given_up;'''
+find = "            GivenUp::Withdrawn => return Ok(()),"
+replace = "            GivenUp::Withdrawn => {}"
 
 [[plant]]
 name = "resume tasks: a pause note left on its way by its task's cancel says its warning again though it arrived"
-meant = "a_pause_note_cancelled_on_its_way_and_given_all_the_same_is_not_said_again"
+meant = "a_pause_note_on_its_way_when_its_task_is_cancelled_that_arrives_says_nothing_again"
 runs = ["engine-closed-given-nothing", "ledger-suspended"]
 
 [[plant.edit]]
@@ -983,7 +983,7 @@ fn withdraw_pause_notes_silently(store: &Store, task: &TaskRow) -> Result<(), Le
 
 [[plant]]
 name = "resume tasks: a window of several's note does not say to resume its tasks one at a time"
-meant = "the_chief_resumes_the_tasks_of_a_window_of_several_one_at_a_time_as_its_note_says"
+meant = "a_window_that_holds_several_tasks_a_quit_left_at_work_has_them_paused_by_the_resume_and_the_chief_told_why"
 runs = ["ledger-suspended", "engine-closed-given-nothing"]
 
 [[plant.edit]]
@@ -1293,7 +1293,7 @@ meant = "a_message_taken_back_was_handed_whether_or_not_its_transport_marked_it"
 runs = ["ledger-handed"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
+file = "crates/cf-ledger/src/messages/taken_back.rs"
 find = '''
             "UPDATE message SET state = 'queued', reason = ?, delivered_at = NULL, receipt = NULL,
                handed_at = COALESCE(handed_at, delivered_at)
@@ -1308,7 +1308,7 @@ meant = "a_message_taken_back_was_handed_whether_or_not_its_transport_marked_it"
 runs = ["ledger-handed"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
+file = "crates/cf-ledger/src/messages/taken_back.rs"
 find = '''
             "UPDATE message SET state = 'queued', delivered_at = NULL, receipt = NULL,
                handed_at = COALESCE(handed_at, delivered_at)
@@ -1346,13 +1346,13 @@ runs = ["ledger-continuations"]
 file = "crates/cf-ledger/src/messages/delivery.rs"
 find = '''
         if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
-            return known_message(store, message_id);
+            return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
         store.db.execute(
             "UPDATE message SET state = 'failed','''
 replace = '''
         if withdrawn_on_its_way(store, &message)? {
-            return known_message(store, message_id);
+            return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
         store.db.execute(
             "UPDATE message SET state = 'failed','''
@@ -1398,7 +1398,7 @@ meant = "a_continuation_riding_in_a_carrier_that_comes_back_is_withdrawn_unless_
 runs = ["ledger-continuations"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
+file = "crates/cf-ledger/src/messages/taken_back.rs"
 find = '''
         withdraw_stale_among(store, &kept)?;'''
 replace = ""
@@ -1722,7 +1722,7 @@ replace = ""
 
 [[plant]]
 name = "resume tasks: the players keep the handed column in the text of the message table"
-meant = "takes_the_column_out_of_the_text_sqlite_wrote_for_the_message_table_and_of_no_other"
+meant = "testing::handed::tests::takes_the_column_out_of_the_text_sqlite_wrote_for_the_message_table_and_of_no_other"
 runs = ["ledger-testing-mark"]
 
 [[plant.edit]]
@@ -2103,7 +2103,7 @@ meant = "a_paste_taken_back_leaves_a_row_withdrawn_after_its_hand_over_withdrawn
 runs = ["ledger-handed"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
+file = "crates/cf-ledger/src/messages/taken_back.rs"
 find = "                        THEN json_extract(receipt, '$.cancelled') END IS NOT NULL\","
 replace = "                        THEN json_extract(receipt, '$.cancelled') END IS NULL AND 0\","
 
@@ -2306,3 +2306,48 @@ runs = ["engine-stale-box"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = "        for participant in participants {"
 replace = "        for participant in participants.iter().filter(|_| because.is_none()) {"
+
+# --- where the Resume's rules meet main's field 3.0.6 (the merge of T-392) ---
+
+[[plant]]
+name = "resume tasks: the Enter sends the brief of the chief's own step finished while the screen was looked at"
+meant = "a_brief_of_the_chiefs_own_step_finished_while_its_enter_looked_is_withheld_and_never_sent_again"
+runs = ["engine-meeting-main"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if let Some(task) = message_task(store, message_id)? {
+            if withdrawn_late(store, &message, &task)? {
+                return Ok(HandOver::Withdrawn);
+            }
+        }
+'''
+replace = "\n"
+
+[[plant]]
+name = "resume tasks: a pause note withdrawn at its last attempt is said to have failed"
+meant = "a_pause_note_on_its_way_when_its_task_is_cancelled_says_its_warning_again_if_it_is_given_up"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
+            return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+        }'''
+replace = '''
+        if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
+            return Ok((known_message(store, message_id)?, GivenUp::Failed));
+        }'''
+
+[[plant]]
+name = "resume tasks: a brief that waits is kept from all but its writer, as before the merge"
+meant = "while_the_project_is_closed_the_chief_reads_a_brief_the_human_wrote_and_its_window_does_not"
+runs = ["daemon-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "        if held_back && !may_move(caller, &task) {"
+replace = "        if held_back {"
+

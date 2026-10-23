@@ -171,8 +171,8 @@ fn the_staff_a_replacement_holds_whole_is_as_large_as_the_docs_say() {
             .last()
             .unwrap_or(0)
     };
-    assert_eq!(rows_whole(true), 43, "docs: whole to 43 rows with specs on");
-    assert_eq!(rows_whole(false), 72, "docs: whole to 72 rows without");
+    assert_eq!(rows_whole(true), 37, "docs: whole to 37 rows with specs on");
+    assert_eq!(rows_whole(false), 65, "docs: whole to 65 rows without");
 }
 
 /// How many units of a Windows command line a word takes, as the pane host
@@ -254,12 +254,12 @@ fn the_command_line_of_a_windows_launch_is_the_size_the_docs_say() {
     const LIMIT: usize = 32_766;
 
     let word = |rows| on_a_windows_line(rows, true, FRAMING);
-    assert_eq!(word(1), 14_122, "docs: 14,122 units at 1 row");
-    assert_eq!(word(25), 15_313, "docs: 15,313 units at 25 rows");
-    assert_eq!(word(45), 16_313, "docs: 16,313 units at 45 rows");
+    assert_eq!(word(1), 14_463, "docs: 14,463 units at 1 row");
+    assert_eq!(word(25), 15_654, "docs: 15,654 units at 25 rows");
+    assert_eq!(word(45), 16_654, "docs: 16,654 units at 45 rows");
     assert_eq!(
         on_a_windows_line(25, false, FRAMING),
-        13_891,
+        14_232,
         "docs: 1,422 fewer without specs"
     );
 
@@ -272,16 +272,16 @@ fn the_command_line_of_a_windows_launch_is_the_size_the_docs_say() {
             .last()
             .unwrap_or(0)
     };
-    assert_eq!(rows_held(true, FRAMING), 360, "docs: 360 rows");
+    assert_eq!(rows_held(true, FRAMING), 354, "docs: 354 rows");
     assert_eq!(
         rows_held(true, FRAMING + CODEX_OWN + 200),
-        307,
-        "docs: 307 rows with Codex's own instructions"
+        301,
+        "docs: 301 rows with Codex's own instructions"
     );
     assert_eq!(
         rows_held(false, FRAMING),
-        388,
-        "docs: 388 rows without specs"
+        382,
+        "docs: 382 rows without specs"
     );
 }
 

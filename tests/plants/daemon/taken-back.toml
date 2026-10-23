@@ -65,7 +65,7 @@ meant = "a_brief_its_window_took_back_is_kept_again_and_the_words_that_resume_th
 runs = ["taken-back-ledger"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
+file = "crates/cf-ledger/src/messages/taken_back.rs"
 find = '''"UPDATE message SET state = 'queued', reason = ?, delivered_at = NULL, receipt = NULL'''
 replace = '''"UPDATE message SET state = 'cancelled', reason = ?, delivered_at = NULL, receipt = NULL'''
 
@@ -75,20 +75,16 @@ meant = "words_that_resumed_the_task_before_the_stop_was_paid_take_the_message_i
 runs = ["taken-back-ledger", "taken-back-engine"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
+file = "crates/cf-ledger/src/messages/taken_back.rs"
 find = '''
         adopt(store, message_id)?;
         known_message(store, message_id)
     })
-}
-
-/// A delivery given up'''
+}'''
 replace = '''
         known_message(store, message_id)
     })
-}
-
-/// A delivery given up'''
+}'''
 
 [[plant]]
 name = "taken back: what its paste carried is left received, and lost with it"
@@ -96,7 +92,7 @@ meant = "a_resume_taken_back_with_what_it_carried_is_kept_again_with_it_and_the_
 runs = ["taken-back-ledger"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
+file = "crates/cf-ledger/src/messages/taken_back.rs"
 find = '''
         store.db.execute(
             "UPDATE message SET state = 'queued', delivered_at = NULL, receipt = NULL,

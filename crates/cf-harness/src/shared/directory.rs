@@ -1,7 +1,8 @@
 //! A folder as the system names it (`realpath` of `fs/promises`): the folder
 //! a window works in, which OpenCode's server names its sessions' folders by
 //! too (the one a request says and the one a session comes back with must
-//! compare equal, whether the folder is reached through a link or not).
+//! compare equal, whether the folder is reached through a link or not), and
+//! which Claude Code finds the repository it trusts from (`trust`).
 
 use std::path::Path;
 

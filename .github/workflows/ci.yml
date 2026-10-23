@@ -65,10 +65,35 @@ jobs:
       # rig's: the daemon and the pane host in real terminals, with
       # stand-in agents in the windows, and the regressions': a case for each
       # bug the owner hit in real use, on that rig.
-      # Windows' runner took 21 minutes here before B5 (2026-10-18), whose
-      # regressions ran it past 30 with nothing hung.
-      - run: npm run test:daemons
-        timeout-minutes: 50
+      # Two steps, a limit for each (`npm run test:daemons` still runs the three
+      # for a person and for `cargo xtask check`). It was one step with 50
+      # minutes, and the regressions grew past them: 26 cases on 2026-10-17, 73
+      # on 2026-10-22, 25 s a case on macOS on average and 32 on Windows, a rig at
+      # a time by design. The step took 21 minutes on Windows before (2026-10-18),
+      # then 44:46 on Windows and 48:55 on macOS at a8c2e3cf, 50:00 on macOS at
+      # 04bc9d66, and was cut at bcf8a1d0.
+      # Measured in the runs of 2026-10-18 to 22, macOS and Windows: the daemon's
+      # 15 cases 26 to 50 s and 33 to 71 s; the rig's 116 to 119 cases (100 to 103
+      # on Windows) 1,041 to 1,165 s and 900 to 962 s; the regressions' 42 cases
+      # in 1,331 s (27 in 1,211 s) at the start, and 70 to 73 cases (53 to 56) in
+      # 1,788 to 1,863 s and 1,658 to 1,781 s in the last three runs; and the
+      # tests' build, 16 s at most in a step. The slowest of each, added up on
+      # macOS, which is the slower:
+      #   daemon and rig: 16 + 50 + 1,165 = 1,231 s = 20.5 min
+      #   regressions:    16 + 1,863 = 1,879 s = 31.3 min
+      # The limit is 1.4 times that, to the next five minutes: 1.4 * 20.5 = 28.7,
+      # so 30; 1.4 * 31.3 = 43.8, so 45. The runs of one binary differ by 12 % at
+      # most (the rig's, above); the rest is room for the cases that land before
+      # the regressions are made faster. Both worsts are under 80 % of their
+      # limit (24 and 36 minutes), where `cargo xtask ci-times` fails a run. The
+      # regressions have 281 s left to that mark on macOS and 363 s on Windows
+      # (1,797 s there): 11 more cases at the averages above, and 32 before the
+      # cut (28 on Windows). The daemon and the rig go first: the build of
+      # cf-e2e is theirs.
+      - run: npm run test:daemon-and-rig
+        timeout-minutes: 30
+      - run: npm run test:regressions
+        timeout-minutes: 45
       # The CLI's suites against the native cf, which answers every verb.
       - run: npm run test:clis
         timeout-minutes: 15
@@ -82,13 +107,34 @@ jobs:
       # The workspace's other crates, the pane host's tests among them, from
       # its root: they link no dialog code, so they need no manifest. The
       # headless tests (cf-panes/tests/headless.rs) drive the helper; they are
-      # Unix-only and build empty on Windows. A limit for the same reason, with
-      # room for a slow runner: the ledger's replay alone has taken from 2 to 7
-      # minutes on Windows' (2026-10-06), the step 9 to 15. The black-box suites
-      # of crates/cf-e2e ran above, each with a limit of its own; what is left
-      # of that crate is its support and the stand-in agents' own tests. On
-      # 2026-10-19 Windows' step, 19 to 21 minutes in the runs before, passed
-      # 25 with no test failed or hung, in the ledger's replay: hence 40.
+      # Unix-only and build empty on Windows. The black-box suites of
+      # crates/cf-e2e ran above, each with a limit of its own; what is left of
+      # that crate is its support and the stand-in agents' own tests.
+      # The limit is a bound over what the step takes on Windows' runner, with a
+      # margin, and `cargo xtask ci-times` fails when a run passes 80 % of it (32
+      # minutes). The step took 17.8 minutes there in the median (13 to 23) until
+      # 2026-10-18, 25 once on 2026-10-19, then grew run after run to 34 (main at
+      # 04bc9d66, 2026-10-21) and was cut at 40 in the Release run of
+      # 3.0.6-alpha.1, in the ledger's replay, which did not grow (203 s in the
+      # median before, 232 after): the clock ran out there. What grew, binary by
+      # binary: the dispatcher's schedule exploring (B5, 2026-10-18, +170 s, more
+      # since), the history viewer (2026-10-21: the daemon's tests +160 s, its
+      # whole-history tests +115 s), the long run (2026-10-19, +110 s) and the
+      # release commands' tests (2026-10-21, +60 s). Much of it was the commits of
+      # ledgers made for a test, each a flush on Windows, which wait for no disk
+      # now (cf-ledger's `synchronous`), and the replay of Node's recordings runs
+      # four at a time. On zeewin the binaries took 645 s before and 443 s after;
+      # applied binary by binary to CI's last three runs (30.7 minutes in the
+      # median), that is about 20 minutes: a floor of the saving, as zeewin's disk
+      # is quicker than the runner's. 40 stays, as it was: the slowest of the runs
+      # before the growth (25 minutes) was 1.4 times their median, and 1.4 times 20
+      # is 28, under the 32 the check allows. The runs after this one confirm it (`cargo xtask
+      # ci-times --step "cargo test --workspace" --binaries`). The step is not
+      # split by crate: each part would build the workspace again (3.5 minutes),
+      # and the largest binary left, the dispatcher's, is about a quarter of it.
+      # nextest runs a plant's `cargo test` (tools/xtask's plants), and the plants'
+      # own tests run it: built once, then the cache's (~/.cargo/bin).
+      - run: cargo install cargo-nextest --version 0.9.148 --locked
       - run: cargo test --workspace --exclude app --exclude cf-e2e
         timeout-minutes: 40
       - run: cargo test -p cf-e2e --lib --bins
@@ -103,3 +149,38 @@ jobs:
       - run: cargo test -p cf-bridge --features local
         timeout-minutes: 15
       - run: cargo clippy -p cf-bridge --features local --all-targets -- -D warnings
+
+      # A rig case that fails keeps a report of what its windows showed beside
+      # its home, in the runner's temp folder (cf-e2e's rig/report.rs, `keep`),
+      # which goes with the runner: so a failure that does not reproduce at home
+      # is read from these (2026-10-21: Windows' folder-trust case). Node names
+      # the folder as the Rust that wrote there does (TMPDIR on the Mac's
+      # runner; on Windows', TMP, which Rust reads first and the runner sets as
+      # it does TEMP, which Node reads); `runner.temp` is another folder. The
+      # reports hold the stand-in agents' output and the daemon's log, from a
+      # rig whose environment is its own (cf-e2e's rig/install.rs): no real
+      # harness, home or token. The step that names the folder runs only for a
+      # failed job, and the upload, for one that wrote none, says nothing. A rig
+      # built for the real harnesses (cf-e2e's live::rig) keeps its report under the
+      # workspace's build folder instead, and ten cases of the rig suite build on it
+      # with the stand-in, so they fail into that folder: a second upload, not a second
+      # line of the first's path, since the action roots an artifact at the common
+      # ancestor of its paths and Windows' temp folder and workspace share none (C:, D:).
+      # On a runner no real harness runs, so that folder holds stand-in output only.
+      - name: Where the rig keeps the reports of its failed cases
+        if: failure()
+        run: echo "RIG_TEMP=$(node -p "require('os').tmpdir()")" >> "$GITHUB_ENV"
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rig-reports-${{ matrix.os }}
+          path: ${{ env.RIG_TEMP }}/consensflow-integration-*-left.txt
+          if-no-files-found: ignore
+          retention-days: 7
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: live-rig-reports-${{ matrix.os }}
+          path: app/src-tauri/target/live-reports/consensflow-integration-*-left.txt
+          if-no-files-found: ignore
+          retention-days: 7

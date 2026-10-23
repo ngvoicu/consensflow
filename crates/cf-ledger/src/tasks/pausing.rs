@@ -201,11 +201,7 @@ fn pause(
     let Some(window) = task.assignee_id else {
         return Ok(());
     };
-    store.db.execute(
-        "UPDATE message SET door_closed_at = (SELECT updated_at FROM task WHERE id = ?1)
-         WHERE task_id = ?1 AND sender_id = ?2 AND kind = 'question' AND door_closed_at IS NULL",
-        params![task.id, window],
-    )?;
+    shut_doors(store, task, window)?;
     let claimed: Vec<i64> = store
         .db
         .prepare(
@@ -225,6 +221,20 @@ fn pause(
             json!({ "message": answer, "because": format!("T-{} was paused", task.number) }),
         )?;
     }
+    Ok(())
+}
+
+/// The doors of the questions `window` asked on `task` through its harness's own
+/// tool are shut, from the time the task last moved (so the move comes first):
+/// the next poll of each is told so, and the window's question ends at once
+/// rather than waiting on an answer that cannot come. A pause does it before
+/// anything presses a key, and so does the acceptance of the task.
+pub(super) fn shut_doors(store: &Store, task: &TaskRow, window: i64) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE message SET door_closed_at = (SELECT updated_at FROM task WHERE id = ?1)
+         WHERE task_id = ?1 AND sender_id = ?2 AND kind = 'question' AND door_closed_at IS NULL",
+        params![task.id, window],
+    )?;
     Ok(())
 }
 

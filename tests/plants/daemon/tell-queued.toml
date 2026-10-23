@@ -1,0 +1,425 @@
+# A tell refused for a task still queued (the field report of 2026-10-15, batch B, B3: the chief
+# told a task before its worker's window was up, and the board answered "T-n has no window to tell:
+# it is queued"). The words are kept for the window now (`crates/cf-ledger/src/messages/told.rs`):
+# they ride in the brief's paste while it waits, or go in as the window's next message once a launch
+# has begun with the brief, and the window's answer is no result until it has had them; a cancel
+# that comes first takes them, and whoever told them hears so. The case is
+# `crates/cf-e2e/tests/regressions/tell_refused_for_a_queued_task.rs`; the ledger's tests are in
+# `crates/cf-ledger/tests/receipt/queued_tells.rs`, the engine's in
+# `crates/cf-engine/tests/dispatcher/queued_tells.rs`.
+#
+# The first plant puts 3.0.5's refusal back; the next two take out what makes the words go in after
+# a brief already on its way (the hold of the result, and the words as the window's latest message),
+# each shown on the rig and in its own crate; one makes the words no row the window keeps, so they
+# ride in no brief's paste; the rest take out what says the words went with a cancel (to the
+# requester, to another teller, to the chief that cancels), what `cf` says of a kept tell, and the
+# board's story of them. The rig's case builds the
+# native `cf` from the sources as they are planted, so its plants say `builds`. Every name holds
+# `tell queued`, so `npm run plants:daemon -- "tell queued"` runs them all.
+
+[run]
+rig-regression-tell-queued = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "tell_refused_for_a_queued_task::"]
+engine-queued-tells = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "queued_tells"]
+cf-tell = ["cargo", "test", "--offline", "-p", "cf", "--test", "tell"]
+board-story = ["node", "--test", "--test-reporter=tap", "--test-name-pattern=told to a task", "tests/board-ui.test.mjs"]
+ledger-told-edges = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "told_edges::"]
+rig-stand-in-codex-workers = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stand_in_codex::the_stand_in_codexs_plugin_server_leads"]
+
+[[plant]]
+name = "tell queued: a tell to a task still queued is refused, as 3.0.5 refused it"
+meant = "words_told_to_a_task_whose_window_is_not_up_go_in_after_its_brief_once_each"
+runs = ["rig-regression-tell-queued"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "    task.assignee.is_some() && (WINDOWED.contains(&task.state.as_str()) || task.state == QUEUED)"
+replace = "    task.assignee.is_some() && WINDOWED.contains(&task.state.as_str())"
+
+[[plant]]
+name = "tell queued: the route refuses a tell to a task still queued"
+meant = "a_queued_task_is_told_with_no_pause_and_its_words_wait_for_its_window_after_its_brief"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "    task.assignee.is_some() && (WINDOWED.contains(&task.state.as_str()) || task.state == QUEUED)"
+replace = "    task.assignee.is_some() && WINDOWED.contains(&task.state.as_str())"
+
+[[plant]]
+name = "tell queued: the answer to a brief on its way is the result while the told words wait, on the rig"
+meant = "words_told_to_a_task_whose_window_is_not_up_go_in_after_its_brief_once_each"
+runs = ["rig-regression-tell-queued"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+        if told {
+            return Ok(None);
+        }"""
+replace = ""
+
+[[plant]]
+name = "tell queued: the answer to a brief on its way is the result while the told words wait"
+meant = "words_told_while_the_brief_is_on_its_way_go_in_next_and_the_answer_after_them_is_the_result"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+        if told {
+            return Ok(None);
+        }"""
+replace = ""
+
+[[plant]]
+name = "tell queued: told words pasted on their own are not the window's latest message, on the rig"
+meant = "words_told_to_a_task_whose_window_is_not_up_go_in_after_its_brief_once_each"
+runs = ["rig-regression-tell-queued"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "         AND (m.kind IN ('task', 'answer') OR ({}))"
+replace = "         AND (m.kind IN ('task', 'answer') OR ({} AND 1 = 0))"
+
+[[plant]]
+name = "tell queued: told words pasted on their own are not the window's latest message"
+meant = "words_told_once_the_brief_is_on_its_way_go_in_next_and_the_answer_after_them_is_the_result"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "         AND (m.kind IN ('task', 'answer') OR ({}))"
+replace = "         AND (m.kind IN ('task', 'answer') OR ({} AND 1 = 0))"
+
+[[plant]]
+name = "tell queued: words told while the brief waits are kept as no row of the window's, and do not ride in its paste"
+meant = "words_told_while_the_brief_waits_ride_in_its_paste_after_it_in_the_order_told_and_pause_nothing"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = '''
+                task: Some(number),
+                kind: "note",
+                ..Sent::default()'''
+replace = '''
+                task: Some(number),
+                kind: "note",
+                urgent: true,
+                ..Sent::default()'''
+
+[[plant]]
+name = "tell queued: words told before the window opens are not in its first message"
+meant = "words_told_before_the_window_opens_ride_in_its_first_message_after_the_brief"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = '''
+                task: Some(number),
+                kind: "note",
+                ..Sent::default()'''
+replace = '''
+                task: Some(number),
+                kind: "note",
+                urgent: true,
+                ..Sent::default()'''
+
+[[plant]]
+name = "tell queued: a teller who neither asked for the task nor called it off is not told its words went"
+meant = "a_teller_who_neither_asked_for_the_task_nor_called_it_off_hears_which_of_its_words_went"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "        for sender in senders {"
+replace = "        for sender in senders.into_iter().take(0) {"
+
+[[plant]]
+name = "tell queued: the told words a human's cancel took are not said to the chief"
+meant = "a_task_the_human_cancels_first_takes_the_words_and_the_chief_hears_which_went"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            let dropped = off.dropped.said_to(&requester.handle);"
+replace = "            let dropped = String::new();"
+
+[[plant]]
+name = "tell queued: the told words a human's decline took are not said to the chief"
+meant = "a_brief_the_human_declines_takes_the_words_held_with_it_and_the_chief_hears_which_went"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = """                word = format!("{lead}{}", off.dropped.said_to(&requester));"""
+replace = """                word = lead.clone();"""
+
+[[plant]]
+name = "tell queued: a chief's cancel does not say which of its told words went with it"
+meant = "a_cancel_says_which_of_the_callers_words_its_window_never_had_went_with_it"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "    if !dropped.is_empty() {"
+replace = "    if false && !dropped.is_empty() {"
+
+[[plant]]
+name = "tell queued: cf says a kept tell paused its task"
+meant = "a_tell_to_a_queued_task_says_the_words_wait_for_its_window_and_nothing_is_paused"
+runs = ["cf-tell"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = """    let text = if js::text(message.get("kind")) == "note" {"""
+replace = """    let text = if js::text(message.get("kind")) == "kept" {"""
+
+[[plant]]
+name = "tell queued: cf task cancel says nothing of the told words that went with it"
+meant = "a_cancel_says_which_of_the_words_told_the_window_went_with_it"
+runs = ["cf-tell"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = """        _ => format!("{}{dropped}", task_line(&task)),"""
+replace = """        _ => format!("{}{}", task_line(&task), &dropped[..0]),"""
+
+[[plant]]
+name = "tell queued: the board's story of a task leaves out the words told to its window"
+meant = "are in its story under Told, waiting for its window, and no other note is"
+runs = ["board-story"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "  message.kind === 'note' && Boolean(message.sender) && message.recipient === task.assignee"
+replace = "  false && message.kind === 'note' && Boolean(message.sender) && message.recipient === task.assignee"
+
+# The two reviews of 2026-10-16 (Astra and Sol): each fix taken out again.
+
+[[plant]]
+name = "tell queued: told words that never reach the window leave their task at work, and the answer to the brief becomes the result"
+meant = "words_that_never_reach_the_window_fail_the_task_and_the_answer_to_the_brief_is_no_result"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "            fail_for(store, &message, &task)?;"
+replace = ""
+
+[[plant]]
+name = "tell queued: told words that never reach the window fail nothing in the ledger"
+meant = "told_words_that_never_reach_the_window_fail_their_task_and_its_answer_is_no_result"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "            fail_for(store, &message, &task)?;"
+replace = ""
+
+[[plant]]
+name = "tell queued: a task failed for told words that never arrived tells its requester nothing of why"
+meant = "words_that_never_reach_the_window_fail_the_task_and_the_answer_to_the_brief_is_no_result"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                    && (message.kind == \"task\" || is_told(message, thread.task.assignee.as_deref()))"
+replace = "                    && message.kind == \"task\""
+
+[[plant]]
+name = "tell queued: told words a window took back at a pause stay delivered, as 3.0.5 left all but a brief"
+meant = "words_the_window_took_back_at_a_pause_go_in_again_with_the_words_that_resume_the_task"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/taken_back.rs"
+find = "            (message.kind == \"task\" || is_told(message, assignee.as_deref()))"
+replace = "            message.kind == \"task\""
+
+[[plant]]
+name = "tell queued: the ledger takes back no told words"
+meant = "told_words_a_window_took_back_are_kept_for_it_again_and_the_resume_carries_them"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/taken_back.rs"
+find = "        if !(message.kind == \"task\" || is_told(&message, assignee.as_deref()))"
+replace = "        if message.kind != \"task\""
+
+[[plant]]
+name = "tell queued: told words passed on by the human go ahead of older ones still held"
+meant = "told_words_go_in_the_order_told_whatever_order_the_human_passes_them_on_in"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+            sql_list(&HELD_TASK_STATES),
+            behind_held_words("m")'''
+replace = '''
+            sql_list(&HELD_TASK_STATES),
+            "(1 = 0)"'''
+
+[[plant]]
+name = "tell queued: told words passed on by the human ride in the brief ahead of older ones still held"
+meant = "told_words_go_in_the_order_told_whatever_order_the_human_passes_them_on_in"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''
+             ORDER BY c.id DESC LIMIT 1",
+            behind_held_words("m")'''
+replace = '''
+             ORDER BY c.id DESC LIMIT 1",
+            "(1 = 0)"'''
+
+[[plant]]
+name = "tell queued: the message last pasted is the one with the greatest id, not the one last delivered"
+meant = "the_message_last_pasted_is_the_one_last_delivered_whatever_its_id"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "       ORDER BY m.delivered_at DESC, m.id DESC LIMIT 1\","
+replace = "       ORDER BY m.id DESC LIMIT 1\","
+
+[[plant]]
+name = "tell queued: a tell takes the way of the task as it was read before its words came in"
+meant = "a_tell_goes_the_way_its_task_is_on_once_its_words_are_in"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "        .filter(|now| reaches(now))"
+replace = "        .filter(|_| false)"
+
+[[plant]]
+name = "tell queued: a launch cancelled before its window opened tells nobody of the words in its first message"
+meant = "words_in_the_first_message_of_a_launch_cancelled_before_its_window_opened_are_said_to_have_gone"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+        self.seams
+            .ledger
+            .borrow_mut()
+            .launch_called_off(delivering.message)?;'''
+replace = ""
+
+[[plant]]
+name = "tell queued: a launch cancelled before its window opened says nothing of the words a task taken back said in its brief"
+meant = "a_launch_called_off_before_its_window_opened_tells_whoever_told_the_words_in_its_first_message"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "                   OR (m.reason = ?3 AND m.id < ?2"
+replace = "                   OR (m.reason = ?3 AND 1 = 0 AND m.id < ?2"
+
+[[plant]]
+name = "tell queued: a cancel after the task was taken back says nothing of the words its next brief said"
+meant = "words_a_task_taken_back_said_in_its_next_brief_went_with_it_while_no_window_had_that_brief"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "               OR (m.state = 'cancelled' AND m.reason = ?3"
+replace = "               OR (m.state = 'cancelled' AND 1 = 0 AND m.reason = ?3"
+
+[[plant]]
+name = "tell queued: a result recorded twice passes the dispatcher's case"
+meant = "words_told_while_the_brief_is_on_its_way_go_in_next_and_the_answer_after_them_is_the_result"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        store.move_task(&task, \"done\", json!({ \"result\": message_id }))?;"
+replace = '''
+        queue(
+            store,
+            project_id,
+            &Queued {
+                to: task.requester_id,
+                from: task.assignee_id,
+                kind: "result",
+                task_id: Some(task.id),
+                body,
+                ..Queued::default()
+            },
+        )?;
+        store.move_task(&task, "done", json!({ "result": message_id }))?;'''
+
+[[plant]]
+name = "tell queued: a result recorded twice passes the rig's case"
+meant = "words_told_to_a_task_whose_window_is_not_up_go_in_after_its_brief_once_each"
+runs = ["rig-regression-tell-queued"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        store.move_task(&task, \"done\", json!({ \"result\": message_id }))?;"
+replace = '''
+        queue(
+            store,
+            project_id,
+            &Queued {
+                to: task.requester_id,
+                from: task.assignee_id,
+                kind: "result",
+                task_id: Some(task.id),
+                body,
+                ..Queued::default()
+            },
+        )?;
+        store.move_task(&task, "done", json!({ "result": message_id }))?;'''
+
+[[plant]]
+name = "tell queued: a result pasted twice into the chief's window passes the dispatcher's case"
+meant = "words_told_while_the_brief_is_on_its_way_go_in_next_and_the_answer_after_them_is_the_result"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {"
+replace = '''
+        if begun.message.kind == "result" {
+            let _ = returning(window.deliver(&admitting, &pane, &text)).await;
+        }
+        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {'''
+
+# The flake found in the gate (2026-10-15): the case read a worker's process file as
+# soon as it was there, which under load was before its process was in it. The plant
+# writes the file in two steps and puts the case's old read back: it fails as it did.
+
+[[plant]]
+name = "tell queued: a worker's process file read as soon as it is there, written in two steps"
+meant = "the_stand_in_codexs_plugin_server_leads_a_group_of_its_own_and_starts_its_workers_when_a_tool_is_called"
+runs = ["rig-stand-in-codex-workers"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex/servers.rs"
+find = '''
+    let writing = format!("{file}.pid.writing");
+    fs::write(&writing, std::process::id().to_string())?;
+    fs::rename(writing, format!("{file}.pid"))'''
+replace = '''
+    let mut made = fs::File::create(format!("{file}.pid"))?;
+    thread::sleep(Duration::from_millis(500));
+    made.write_all(std::process::id().to_string().as_bytes())'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/rig/stand_in_codex.rs"
+find = '''
+        let pid = pid_in(&beside(&worker(number), "pid"))
+            .map_err(|failed| format!("worker {number} does not run: {failed}"))?;'''
+replace = '''
+        assert!(until_there(&beside(&worker(number), "pid")), "worker {number} runs");
+        let pid: u32 = files::read_string(&beside(&worker(number), "pid"))?
+            .trim()
+            .parse()?;'''

@@ -21,12 +21,12 @@ use cf_base::env::Env;
 use cf_base::json::from_slice_lossy;
 use serde_json::Value;
 
-use super::directory::real_path;
 use super::{is_session_id, succeeded, url, Launched, Wires, OVERSIZED};
 use crate::seams::arm;
 use crate::seams::loopback::{BodyFailed, Method, Request};
 use crate::seams::processes::{Child, Program, Streams};
 use crate::shared::child::stop;
+use crate::shared::directory::real_path;
 
 /// How long the whole of it has, from the start, for a window
 /// (`createSession`'s `timeoutMs`).

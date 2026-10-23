@@ -445,12 +445,15 @@ fn a_pause_note_on_its_way_when_its_task_is_cancelled_says_its_warning_again_if_
     let mut w = world();
     let (cancelled, note) = cancelled_on_its_way(&mut w);
 
-    let given_up = w
+    let (given_up, came_to) = w
         .ledger
-        .fail_delivery(note, "the window never showed its first message")
+        .give_up_delivery(note, "the window never showed its first message")
         .expect("given up");
 
     assert_eq!(given_up.state, "cancelled");
+    // The merge of main's field 3.0.6 (T-392): said as withdrawn, so the engine
+    // tells nobody of a failure.
+    assert_eq!(came_to, cf_ledger::GivenUp::Withdrawn, "said as withdrawn");
     assert_eq!(
         said_again(&w),
         [format!("T-{cancelled} cancelled. Before that, {OUTLIVED}.")]

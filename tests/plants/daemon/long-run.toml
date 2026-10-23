@@ -1831,6 +1831,16 @@ file = "crates/cf-evals/src/long_run/timeline.rs"
 find = '        "project.wake_up" => Some(format!('
 replace = '        "project.wake_up.never" => Some(format!('
 
+[[plant]]
+name = "long run: the timeline says no wake-up call held back for work"
+meant = "a_wake_up_call_held_back_while_work_was_on_its_way_is_told_with_the_tasks_that_held_it"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/timeline.rs"
+find = '        "project.wake_up_skipped" => Some(format!('
+replace = '        "project.wake_up_skipped.never" => Some(format!('
+
 # The owner's ask: the long run's project, as the evals' workspace is made of a scenario, with none
 # of the owner's work uncommitted
 
@@ -3084,8 +3094,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/report.rs"
-find = "    let _ = std::io::stderr().write_all(where_kept.as_bytes());"
-replace = "    let _ = std::io::stderr().write_all(tell.text(&report).as_bytes());"
+find = '    eprint!("{where_kept}");'
+replace = '    eprint!("{}", tell.text(&report));'
 
 # The long run, rounds 14 and 15 (both reviewers' looks at rounds 13 and 14): A1 judges a task's
 # rest at its look only, and what that look cannot tell (its window's own record not held to it,

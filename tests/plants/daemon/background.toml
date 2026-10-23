@@ -61,6 +61,8 @@ panes-lib-tree = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "proc
 panes-lib-turn = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "turn"]
 # The pane host's tests of how a window closes.
 panes-lib-close = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "close"]
+# The parent Git Bash says for a program of its own kind whose parent has gone (T-142, P3-7).
+panes-lib-cygwin = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "cygwin"]
 # What the Windows tests of an ending read of a pane's job, held on a list of members.
 panes-lib-job = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "ending_tests::job"]
 # What Devin's wire log says of a window that is on a turn, held on logs staged as it writes them.
@@ -1710,13 +1712,13 @@ find = '''
         std::thread::scope(|scope| {
             for pane in open {
                 scope.spawn(move || {
-                    let _ = panes.reap(&PaneKey::new(pane.id, pane.generation));
+                    let _ = close(panes, &PaneKey::new(pane.id, pane.generation));
                 });
             }
         });'''
 replace = '''
         for pane in open {
-            let _ = panes.reap(&PaneKey::new(pane.id, pane.generation));
+            let _ = close(panes, &PaneKey::new(pane.id, pane.generation));
         }'''
 
 [[plant]]
@@ -2125,8 +2127,8 @@ runs = ["panes-lib-turn"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/headless.rs"
-find = '                    let _ = panes.reap(&PaneKey::new(pane.id, pane.generation));'
-replace = '                    let _ = panes.kill(&PaneKey::new(pane.id, pane.generation));'
+find = '    close_all(panes, PaneTable::reap);'
+replace = '    close_all(panes, PaneTable::kill);'
 
 # The same through the daemon and the pane host, on the stand-in Claude whose window runs a
 # status line as Claude Code does (`crates/cf-e2e/tests/regressions/
@@ -2288,3 +2290,74 @@ replace = '''
             left: baseline.left_running(&tree.members()?),
             ..Ending::default()
         })'''
+
+# A program of Git Bash's own kind that a script started names a parent that has gone (a forked
+# copy of the shell), so the chain from it to the shell the harness started is broken and a stop
+# leaves it (T-142, P3-7): the parent `ps -W` says is given instead (`crates/cf-panes/src/cygwin.rs`,
+# read where the job's members are, `job_object.rs`, which only Windows builds and the live
+# `stuck` case on Windows holds). One plant takes one rule out; a test of it fails.
+[[plant]]
+name = "background: a shell that has no Windows number is a program's parent"
+meant = "the_parent_of_a_program_is_the_shell_git_bash_says_by_the_number_windows_has_for_it"
+runs = ["panes-lib-cygwin"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/cygwin.rs"
+find = "    (parent.winpid != 0).then_some(parent.winpid)"
+replace = "    Some(parent.winpid)"
+
+[[plant]]
+name = "background: the parent of a program is its Cygwin number, not the shell's Windows one"
+meant = "the_parent_of_a_program_is_the_shell_git_bash_says_by_the_number_windows_has_for_it"
+runs = ["panes-lib-cygwin"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/cygwin.rs"
+find = "    (parent.winpid != 0).then_some(parent.winpid)"
+replace = "    (parent.pid != 0).then_some(parent.pid)"
+
+[[plant]]
+name = "background: ps is asked for every process and not once for each folder"
+meant = "ps_is_asked_once_for_each_folder_and_what_it_does_not_say_is_left_out"
+runs = ["panes-lib-cygwin"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/cygwin.rs"
+find = "        let rows = tables\n            .entry(folder.as_path())"
+replace = "        let rows = tables\n            .entry(Path::new(\"\"))"
+
+[[plant]]
+name = "background: a table's header or other lines are rows"
+meant = "the_table_is_read_for_its_numbers_and_the_header_and_other_lines_say_nothing"
+runs = ["panes-lib-cygwin"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/cygwin.rs"
+find = "                .map(|word| word.parse::<u32>().ok());"
+replace = "                .map(|word| Some(word.parse::<u32>().unwrap_or(0)));"
+
+# What T-194 asked of the Cygwin reading (T-202): a row that begins with a status letter is a row,
+# and `ps` is run from a folder that has the layer it runs on.
+[[plant]]
+name = "background: a row of ps that begins with a status letter is no row"
+meant = "a_row_that_begins_with_a_status_letter_is_a_row_and_so_is_its_parent_s"
+runs = ["panes-lib-cygwin"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/cygwin.rs"
+find = "                if first.len() == 1 && first.chars().all(|letter| letter.is_ascii_alphabetic()) {"
+replace = "                if false {"
+
+[[plant]]
+name = "background: a ps.exe with no Cygwin layer beside it is run"
+meant = "ps_is_run_from_a_folder_that_has_it_and_the_layer_it_runs_on"
+runs = ["panes-lib-cygwin"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/cygwin.rs"
+find = '''
+        && ["msys-2.0.dll", "cygwin1.dll"]
+            .iter()
+            .any(|layer| exists(&folder.join(layer)))
+'''
+replace = ""

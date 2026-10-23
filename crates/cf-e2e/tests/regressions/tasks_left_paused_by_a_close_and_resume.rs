@@ -19,6 +19,7 @@
 use cf_e2e::rig::{Project, Rig, OPEN};
 use serde_json::{json, Value};
 
+use crate::a_trust_question_after_git_init_stopped_every_launch::{git_init, notes_of, trusted};
 use crate::{config, secs, Outcome};
 
 /// How the window of a resumed task is told its turn was cut, after its number.
@@ -209,6 +210,70 @@ fn a_close_and_a_resume_bring_back_the_tasks_the_close_paused_in_their_own_windo
         1,
         "T-3's window was opened again"
     );
+    rig.close()?;
+    Ok(())
+}
+
+/// Where the Resume meets folder trust (the merge of T-392): a window the Resume
+/// opens again on its conversation may ask whether to trust its folder before
+/// anything else, here after `git init` in the project's folder while it was
+/// closed. ConsensFlow answers yes in the project's own folder, and the word to go
+/// on goes in once the window is past the question, once.
+#[test]
+fn a_window_the_resume_opens_again_on_the_trust_question_is_answered_and_told_once_its_turn_was_cut(
+) -> Outcome {
+    let rig = Rig::start(config().var("CF_TEST_TRUST", "worker"))?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let id = project.id();
+    let tier = project.add_member("worker")?["member"]["tier"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    let task = at_work(&rig, &project, &tier, 1)?;
+    assert_eq!(
+        trusted(&rig),
+        "",
+        "no question in a folder outside a repository"
+    );
+
+    let closed = rig.page("project.close", json!({ "project": id }))?;
+    assert_eq!(closed["ok"], true, "{closed}");
+    rig.wait_for("every window of the project to close", secs(60), || {
+        let board = project.board()?;
+        Ok(board["lanes"]
+            .as_array()
+            .is_some_and(|lanes| lanes.iter().all(|lane| lane["pane"].is_null())))
+    })?;
+    let before = frames_of(&rig, &task.pane).len();
+    git_init(rig.workspace())?;
+
+    let resumed = rig.page("project.resume", json!({ "project": id }))?;
+    assert_eq!(resumed["ok"], true, "{resumed}");
+    rig.wait_for("T-1's window to be opened again", secs(60), || {
+        Ok(frames_of(&rig, &task.pane).len() > before)
+    })?;
+    let again = frames_of(&rig, &task.pane).remove(before);
+    assert_eq!(
+        after(&again, "--resume"),
+        task.session,
+        "{:?}",
+        again["argv"]
+    );
+    let words = format!("while you were working on T-1{CUT}");
+    rig.wait_for("T-1 to be done", secs(90), || {
+        Ok(state(&project, 1)? == "done")
+    })?;
+    assert_eq!(told(&rig, &task.session, &words), 1, "told once");
+    let same = |line: &str| {
+        std::fs::canonicalize(line).ok() == std::fs::canonicalize(rig.workspace()).ok()
+    };
+    assert!(
+        trusted(&rig).lines().any(same),
+        "the window was never told yes: {}",
+        trusted(&rig)
+    );
+    let notes = notes_of(&project, rig.workspace())?;
+    assert_eq!(notes.len(), 1, "the human is told once: {notes:?}");
     rig.close()?;
     Ok(())
 }

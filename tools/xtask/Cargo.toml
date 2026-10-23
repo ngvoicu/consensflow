@@ -31,6 +31,9 @@ thiserror.workspace = true
 # The version the sources agree on, read by the commands that stage and pack
 # (cf-release), and the console host's package (its SHA-256 and its zip).
 cf-release.workspace = true
+# The order of releases and the version a feed names, as the publisher reads
+# them: `release alpha` and `release promote` ask it of the feeds.
+cf-publish.workspace = true
 sha2.workspace = true
 zip.workspace = true
 # The runner of the Windows machine: the PowerShell script that ssh hands it is
@@ -48,9 +51,12 @@ rusqlite.workspace = true
 # The plants: their data is TOML (tests/plants), read as the structures that
 # say what a plant is; their runs are started by cf-process, which runs on tokio,
 # and a Ctrl-C is heard through tokio's signals, so that the sources are put back.
+# What a run's tests did is read from the reports the test runners write: JUnit
+# (nextest's and Node's) and Playwright's JSON.
 serde.workspace = true
 tokio = { workspace = true, features = ["rt", "signal"] }
 toml.workspace = true
+quick-xml.workspace = true
 rustls.workspace = true
 plist.workspace = true
 memchr.workspace = true

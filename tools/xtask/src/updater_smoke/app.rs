@@ -280,14 +280,16 @@ impl App {
             .map_err(|cause| Error::new(format!("could not wait for the app: {cause}")))
     }
 
-    /// Ends every process the app has been, its group and whatever is under it.
+    /// Ends every process the app has been, its group and whatever is under it. The
+    /// input is closed last: an app that reads it quits at its end, so closing it
+    /// first leaves the app free to go by its own quit before the kill reaches it.
     pub fn kill_recorded(&self) {
-        self.close_input();
         let pids: Vec<u32> = locked(&self.0.reports).pids.iter().copied().collect();
         for pid in pids {
             kill_group(pid);
             kill_tree(pid);
         }
+        self.close_input();
     }
 }
 
