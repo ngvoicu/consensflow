@@ -189,10 +189,58 @@ fn waits_for_a_member(task: &Value) -> bool {
     js::text(task.get("state")) == "open" && matches!(task.get("assignee"), Some(Value::Null))
 }
 
+/// The states of a task that is over: nothing is left to do on it, by its
+/// member or by the chief (the ledger's `FINISHED_TASK_STATES`).
+const OVER: [&str; 3] = ["accepted", "cancelled", "failed"];
+
+/// The flags of `cf task list`.
+const LIST: Shape = Shape {
+    switches: &["--all"],
+    valued: &[],
+    leading: 0,
+};
+
+/// Whether a lane is an idle session: it has tasks on the board, and every
+/// one is over. The chief's lane never is, and a lane with no task, which the
+/// list never prints, is none either.
+fn is_idle(lane: &Value, tasks: &[Value]) -> bool {
+    js::text(lane.get("role")) != "chief"
+        && !tasks.is_empty()
+        && tasks
+            .iter()
+            .all(|task| OVER.contains(&js::text(task.get("state")).as_ref()))
+}
+
+/// `data`, the board's answer, with its `lanes` as given and the idle ones
+/// under `idle`, which stands right after them.
+fn idle_apart(data: Value, lanes: Vec<Value>, idle: Vec<Value>) -> Value {
+    let Value::Object(fields) = data else {
+        return data;
+    };
+    let mut apart = Map::new();
+    for (key, value) in fields {
+        let lanes_key = key == "lanes";
+        apart.insert(
+            key,
+            if lanes_key {
+                Value::Array(lanes.clone())
+            } else {
+                value
+            },
+        );
+        if lanes_key {
+            apart.insert("idle".to_owned(), Value::Array(idle.clone()));
+        }
+    }
+    Value::Object(apart)
+}
+
 /// `cf task list`: what waits for a member, the other tasks no lane has, then
-/// each lane's.
+/// the lanes with something to look at, and how many idle sessions there are
+/// besides; `--all` lists those too, as the board always did.
 fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
-    if split(rest, Shape::TEXT).asks_for_help() {
+    let words = split(rest, LIST);
+    if words.asks_for_help() {
         return Ok(help_of(&["task", "list"]));
     }
     let answer = board.get("/api/tasks")?;
@@ -207,8 +255,14 @@ fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
             lines.extend(group.into_iter().map(task_line));
         }
     }
+    let (mut kept, mut idle) = (Vec::new(), Vec::new());
     for lane in answer.list(answer.value().get("lanes"), "lanes")? {
         let lane_tasks = answer.list(lane.get("tasks"), "tasks")?;
+        if !words.on("--all") && is_idle(lane, lane_tasks) {
+            idle.push(lane);
+            continue;
+        }
+        kept.push(lane);
         if !lane_tasks.is_empty() {
             lines.push(format!(
                 "@{} ({})",
@@ -218,12 +272,28 @@ fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
             lines.extend(lane_tasks.iter().map(task_line));
         }
     }
+    if !idle.is_empty() {
+        lines.push(format!(
+            "and {} idle session{} (`cf task list --all`)",
+            idle.len(),
+            if idle.len() == 1 { "" } else { "s" }
+        ));
+    }
     let text = if lines.is_empty() {
         "No tasks yet.".to_string()
     } else {
         lines.join("\n")
     };
-    Ok(Said::new(answer.into_value(), text))
+    let data = if words.on("--all") {
+        answer.into_value()
+    } else {
+        let (kept, idle) = (
+            kept.into_iter().cloned().collect(),
+            idle.into_iter().cloned().collect(),
+        );
+        idle_apart(answer.into_value(), kept, idle)
+    };
+    Ok(Said::new(data, text))
 }
 
 /// The brief `cf task get` prints under the header, or nothing. A window that was
@@ -404,12 +474,41 @@ mod tests {
         })
     }
 
+    /// What `cf task list words…` said of a board that answered `answer`.
+    fn said(words: &[&str], answer: &Value) -> Said {
+        let api = scripted(vec![reply(200, answer.clone())]);
+        let words: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+        board_list(&words, &Board::new(Some(&api.url), "tok")).unwrap()
+    }
+
     /// What `cf task list` prints of a board with these open tasks and lanes.
     fn listed(open: &[Value], lanes: &Value) -> String {
-        let api = scripted(vec![reply(200, json!({ "open": open, "lanes": lanes }))]);
-        board_list(&[], &Board::new(Some(&api.url), "tok"))
-            .unwrap()
-            .text
+        said(&[], &json!({ "open": open, "lanes": lanes })).text
+    }
+
+    fn lane(handle: &str, role: &str, tasks: &[Value]) -> Value {
+        json!({ "handle": handle, "role": role, "tasks": tasks })
+    }
+
+    /// A board with members at work in every state that needs a look, the
+    /// chief's lane, a session with nothing on it, and idle sessions: the
+    /// ones whose tasks are all over.
+    fn a_board_with_idle_sessions() -> Value {
+        json!({
+            "open": [card(10, "open", None)],
+            "lanes": [
+                lane("chief", "chief", &[card(1, "accepted", Some("chief"))]),
+                lane("zeus", "worker", &[card(2, "accepted", Some("zeus")), card(9, "working", Some("zeus"))]),
+                lane("hera", "reviewer", &[card(3, "accepted", Some("hera"))]),
+                lane("athena", "worker", &[card(4, "cancelled", Some("athena")), card(5, "failed", Some("athena"))]),
+                lane("ares", "tester", &[card(6, "done", Some("ares"))]),
+                lane("eos", "designer", &[]),
+                lane("apollo", "worker", &[card(7, "queued", Some("apollo"))]),
+                lane("hermes", "worker", &[card(8, "paused", Some("hermes"))]),
+                lane("demeter", "worker", &[card(11, "waiting", Some("demeter"))]),
+                lane("hades", "advisor", &[card(12, "open", Some("hades"))]),
+            ],
+        })
     }
 
     #[test]
@@ -441,6 +540,150 @@ mod tests {
             ]
             .join("\n")
         );
+    }
+
+    /// `cf task list` of `a_board_with_idle_sessions`, every lane with a task
+    /// as the board always listed them.
+    const WHOLE_LIST: &str = "Waiting for a member
+T-10 [open] for a standard worker ← @chief: Task 10
+@chief (chief)
+T-1 [accepted] @chief ← @chief: Task 1
+@zeus (worker)
+T-2 [accepted] @zeus ← @chief: Task 2
+T-9 [working] @zeus ← @chief: Task 9
+@hera (reviewer)
+T-3 [accepted] @hera ← @chief: Task 3
+@athena (worker)
+T-4 [cancelled] @athena ← @chief: Task 4
+T-5 [failed] @athena ← @chief: Task 5
+@ares (tester)
+T-6 [done] @ares ← @chief: Task 6
+@apollo (worker)
+T-7 [queued] @apollo ← @chief: Task 7
+@hermes (worker)
+T-8 [paused] @hermes ← @chief: Task 8
+@demeter (worker)
+T-11 [waiting] @demeter ← @chief: Task 11
+@hades (advisor)
+T-12 [open] @hades ← @chief: Task 12";
+
+    /// The same without Hera and Athena, whose tasks are all over, and with their line.
+    const WITHOUT_THE_IDLE: &str = "Waiting for a member
+T-10 [open] for a standard worker ← @chief: Task 10
+@chief (chief)
+T-1 [accepted] @chief ← @chief: Task 1
+@zeus (worker)
+T-2 [accepted] @zeus ← @chief: Task 2
+T-9 [working] @zeus ← @chief: Task 9
+@ares (tester)
+T-6 [done] @ares ← @chief: Task 6
+@apollo (worker)
+T-7 [queued] @apollo ← @chief: Task 7
+@hermes (worker)
+T-8 [paused] @hermes ← @chief: Task 8
+@demeter (worker)
+T-11 [waiting] @demeter ← @chief: Task 11
+@hades (advisor)
+T-12 [open] @hades ← @chief: Task 12
+and 2 idle sessions (`cf task list --all`)";
+
+    #[test]
+    fn the_sessions_with_nothing_to_look_at_are_one_line_and_the_members_with_work_stay_listed() {
+        let board = a_board_with_idle_sessions();
+        assert_eq!(said(&[], &board).text, WITHOUT_THE_IDLE);
+        // The chief's lane stays whatever its tasks say, and a session with
+        // nothing on it was never listed: neither is one of the idle.
+        let text = said(&[], &board).text;
+        assert!(text.contains("@chief (chief)\nT-1 [accepted]"), "{text}");
+        assert!(!text.contains("@eos"), "{text}");
+    }
+
+    #[test]
+    fn a_session_with_one_task_left_to_look_at_stays_listed_whatever_the_rest_say() {
+        for (state, shown) in [
+            ("open", true),
+            ("queued", true),
+            ("working", true),
+            ("waiting", true),
+            ("paused", true),
+            ("done", true),
+            ("accepted", false),
+            ("cancelled", false),
+            ("failed", false),
+        ] {
+            let lanes = json!([lane(
+                "zeus",
+                "worker",
+                &[
+                    card(1, "accepted", Some("zeus")),
+                    card(2, state, Some("zeus"))
+                ]
+            )]);
+            let text = listed(&[], &lanes);
+            assert_eq!(text.contains("@zeus (worker)"), shown, "{state}: {text}");
+            assert_eq!(text.contains("idle session"), !shown, "{state}: {text}");
+        }
+    }
+
+    #[test]
+    fn all_lists_every_session_with_a_task_as_the_board_always_did() {
+        let board = a_board_with_idle_sessions();
+        let all = said(&["--all"], &board);
+        assert_eq!(all.text, WHOLE_LIST);
+        // And the JSON is the board's answer, as it was.
+        assert_eq!(all.data, board);
+    }
+
+    #[test]
+    fn the_json_holds_the_idle_sessions_under_a_key_of_their_own() {
+        let mut board = a_board_with_idle_sessions();
+        board["counts"] = json!({ "tasks": 12 });
+        let data = said(&[], &board).data;
+        let handles = |key: &str| -> Vec<String> {
+            data[key]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|lane| lane["handle"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(
+            handles("lanes"),
+            ["chief", "zeus", "ares", "eos", "apollo", "hermes", "demeter", "hades"]
+        );
+        // Whole lanes, as the board gave them.
+        assert_eq!(handles("idle"), ["hera", "athena"]);
+        assert_eq!(data["idle"][0], board["lanes"][2]);
+        assert_eq!(data["idle"][1]["tasks"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            data.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["open", "lanes", "idle", "counts"]
+        );
+        // A board with none says so in the same key.
+        let none = said(&[], &json!({ "open": [], "lanes": [] })).data;
+        assert_eq!(none, json!({ "open": [], "lanes": [], "idle": [] }));
+    }
+
+    #[test]
+    fn one_idle_session_is_said_in_the_singular_and_a_board_of_nothing_else_says_only_that() {
+        let lanes = json!([lane(
+            "hera",
+            "reviewer",
+            &[card(3, "accepted", Some("hera"))]
+        )]);
+        assert_eq!(
+            listed(&[], &lanes),
+            "and 1 idle session (`cf task list --all`)"
+        );
+        let lanes = json!([
+            lane("hera", "reviewer", &[card(3, "accepted", Some("hera"))]),
+            lane("athena", "worker", &[card(4, "failed", Some("athena"))]),
+        ]);
+        assert_eq!(
+            listed(&[], &lanes),
+            "and 2 idle sessions (`cf task list --all`)"
+        );
+        assert_eq!(listed(&[], &json!([])), "No tasks yet.");
     }
 
     /// What `cf task add words…` posted and printed, the board answering with `answer`.

@@ -41,3 +41,9 @@ names `edit`, in `cf-board-022`. Changed by hand, in those words alone. The reco
 the crates' own goldens (`crates/cf/tests/goldens/board.json`) were changed with them.
 Round 2 of the same task (T-158) changed one phrase of that entry, by hand, in `cf-board-028`
 and `-029`: `(open, blocked or queued)` became `(open, queued, or paused)`.
+
+`cf task list` with idle sessions (board task T-261, 3.0.6) moved the usage `cf` prints once
+more: its line reads `cf task list [--all]` and says what the flag adds, in every print of it
+in `cf-board-028` and `-029`. Changed by hand, in those words alone. The recordings of the
+crates' own goldens (`crates/cf/tests/goldens/board.json`) were changed with them, and one
+more there: the case `cf task list --json` carries an `idle` key (see that folder's README).

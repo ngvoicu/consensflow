@@ -20,7 +20,8 @@ cf inside a ConsensFlow window: the board's commands.
   cf task add --self --needs T-3 "…" your own later step: its brief comes back to you when T-3 is accepted
   … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted
   … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task
-  cf task list                      the board: what waits for a member, then every lane
+  cf task list [--all]              the board: what waits for a member, then the lanes
+                                    with a task to look at; --all adds the idle sessions
   cf task get T-3                   one task and its whole thread
   cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)
   cf task done T-3 "…"              finish a task assigned to you (the chief)
