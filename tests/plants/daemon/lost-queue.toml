@@ -235,14 +235,23 @@ find = "                length.map(|at| (session.clone(), at))"
 replace = "                length.and(None)"
 
 [[plant]]
-name = "lost-queue: the window's looks tell no relaunch"
+name = "lost-queue: the window's looks tell no relaunch, nor the turn the old process left open"
 meant = "a_window_opened_again_reads_its_own_turn_at_rest_though_the_closed_process_had_a_message_queued"
 runs = ["lost-queue-adapter"]
 
+# Since T-432 a Claude window is never launched with a message: one opened again reads
+# the turn the old process left open as well (`left_open`), which sets its queued
+# message aside as the relaunch's reading does. Either alone keeps the window's turn
+# its own, so the plant takes both away (each alone: 7 of 7 cases pass; both: 3 fail).
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
 find = "            let options = told(self.relaunched.as_ref(), &session);"
 replace = "            let options = Options::default();"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            let left_open = if resumable {"
+replace = "            let left_open = if false {"
 
 [[plant]]
 name = "lost-queue: the window tells its relaunch to a conversation it was followed to"
