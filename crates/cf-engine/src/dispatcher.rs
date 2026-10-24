@@ -694,6 +694,7 @@ impl Dispatcher {
         // that exited: the role it was never told.
         let owed = self.owed(&record)?;
         record.delivery.borrow_mut().prelude = None;
+        let said_yes = trust::yes_at_exit(&record, &shown);
         self.closed(&record);
         // No door survives its window: what one claimed and none acknowledged is the ledger's again.
         self.seams
@@ -721,6 +722,11 @@ impl Dispatcher {
         else {
             return Ok(());
         };
+        // The human's yes in a window that was gone before the watch looked again is still
+        // theirs for the project's other windows that ask (`trust::yes_at_exit`).
+        if let Some(folder) = said_yes {
+            self.trust.accept(project.id, folder);
+        }
         // A launch the exit ended says what its window showed.
         let at_launch = owed.is_some()
             || delivering

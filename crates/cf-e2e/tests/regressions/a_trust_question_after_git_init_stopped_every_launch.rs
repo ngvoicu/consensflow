@@ -176,10 +176,50 @@ fn a_worker_that_reads_the_humans_keys_late_takes_their_yes_and_goes_on_after() 
     outside_answered_by_the_human(&[("CF_TEST_TRUST_READS_LATE_MS", "1500")])
 }
 
+#[test]
+fn a_worker_the_human_said_yes_in_that_is_gone_before_the_next_look_still_has_its_yes_carried(
+) -> Outcome {
+    // T-358's merge of turn-end with main, on zeewin (2026-10-23, and 8 of 48 copies of the
+    // case above on its tree): a worker's window closes once its task is done, which can be
+    // within the half second between two looks at the screen. The human's yes was banked
+    // only by a look that saw the window's prompt, so the other window was never answered.
+    // Here both windows end as soon as they are past the question. The host takes a fifth of
+    // a second to tell an end, and a look finds the prompt in that time one time in three:
+    // four sets of the case run at once, and none may leave its other window unanswered.
+    let sets: Vec<_> = (0..4)
+        .map(|_| {
+            std::thread::spawn(|| {
+                outside_answered_by_the_human(&[("CF_TEST_TRUST_LEAVES_MS", "0")])
+                    .map_err(|failed| failed.to_string())
+            })
+        })
+        .collect();
+    let failed: Vec<String> = sets
+        .into_iter()
+        .filter_map(|set| {
+            set.join()
+                .unwrap_or_else(|_| Err("the set panicked".to_owned()))
+                .err()
+        })
+        .collect();
+    assert!(
+        failed.is_empty(),
+        "{} of 4 sets failed: {failed:?}",
+        failed.len()
+    );
+    Ok(())
+}
+
 /// Two of the worker's windows ask of a folder outside the project; the human says
-/// yes in one, with the stand-in set by `vars` besides, and both tasks go on.
+/// yes in one, with the stand-in set by `vars` besides, and both tasks go on, or, where
+/// the windows end as soon as they are past the question, the yes is carried to the other.
 fn outside_answered_by_the_human(vars: &[(&str, &str)]) -> Outcome {
     let rig = asking_with(vars)?;
+    // Windows that end as soon as they are past the question are watched to ask for a second
+    // only: the cases beside this one hold the twelve.
+    let leaves = vars
+        .iter()
+        .any(|(name, _)| *name == "CF_TEST_TRUST_LEAVES_MS");
     // The repository is the workspace; the project's folder is below it.
     let root = rig.workspace().to_path_buf();
     git_init(&root)?;
@@ -205,7 +245,7 @@ fn outside_answered_by_the_human(vars: &[(&str, &str)]) -> Outcome {
     // The chief tells T-1's window something meanwhile: it waits for the window to
     // be past the question, whose Enter would choose "No, exit".
     rig.tell(project.id(), "CF tell T-1 :: KEEP_THIS_IN_MIND")?;
-    sleep(Duration::from_secs(12));
+    sleep(Duration::from_secs(if leaves { 1 } else { 12 }));
     for number in [1, 2] {
         let state = project.task(number)?["state"].clone();
         assert!(
@@ -268,6 +308,11 @@ fn outside_answered_by_the_human(vars: &[(&str, &str)]) -> Outcome {
                 == 2)
         },
     )?;
+    if leaves {
+        assert_eq!(notes_of(&project, &root)?.len(), 1, "told once");
+        rig.close()?;
+        return Ok(());
+    }
     waiting(
         &rig,
         &project,

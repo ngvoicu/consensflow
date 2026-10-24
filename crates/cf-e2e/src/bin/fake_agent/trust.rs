@@ -23,7 +23,9 @@
 //! given, as a window that did not take it; with `CF_TEST_RECORD_GROWS_ON_NO` set its
 //! record grows once as a No ends it, as a process before it the host could not end
 //! writes still; and with `CF_TEST_RECORD_AWAY_MS` set a record a case moved aside
-//! comes back that long after the window starts ([`bring_the_record_back`]).
+//! comes back that long after the window starts ([`bring_the_record_back`]); and with
+//! `CF_TEST_TRUST_LEAVES_MS` set a window that was answered yes ends that long after it
+//! draws its prompt, as a window whose task is done and closed at once does.
 
 use std::fs;
 use std::io::{self, Write};
@@ -129,10 +131,17 @@ fn keys_in(given: &str) -> Vec<Key> {
 
 /// What came of the question.
 pub enum Answer {
-    /// It was not asked, or a yes answered it: the window goes on.
+    /// It was not asked: the window goes on.
     GoOn,
+    /// A yes answered it: the window goes on.
+    Yes,
     /// "No, exit", or Escape: the window ends.
     Exit,
+}
+
+/// How long after its prompt a window that was answered yes ends, where it does.
+pub fn leaves_after() -> Option<Duration> {
+    millis("CF_TEST_TRUST_LEAVES_MS")
 }
 
 /// The root of the git repository `folder` is in: none out of one.
@@ -261,7 +270,7 @@ pub fn ask(
                     out.flush().map_err(failed)?;
                     drop(out);
                     sleep(starts.unwrap_or_default());
-                    return Ok(Answer::GoOn);
+                    return Ok(Answer::Yes);
                 }
                 Key::Escape => {
                     append(config, KEYS, "escape").map_err(failed)?;

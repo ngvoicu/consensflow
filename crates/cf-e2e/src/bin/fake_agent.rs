@@ -249,6 +249,10 @@ fn run(
     };
     say(&format!("fake agent {said} on {}{mode}\n", launch.session))
         .map_err(|failed| failed.to_string())?;
+    if let (trust::Answer::Yes, Some(after)) = (&answer, trust::leaves_after()) {
+        thread::sleep(after);
+        leave(&status_file, 0);
+    }
 
     let (turns, queued) = mpsc::channel::<String>();
     let stop = Arc::new(Stop::default());

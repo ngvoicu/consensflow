@@ -161,6 +161,8 @@ pub(crate) struct WindowPart {
     pub(crate) named: bool,
     /// Where it stands with its harness's question about trusting its folder.
     pub(crate) trust: Trusting,
+    /// How many keys ConsensFlow pressed into it toward a yes to that question.
+    pub(crate) trust_keys: usize,
     /// The last stop this window process paid: its task and the sequence. It
     /// dies with the window, and a window opened later owes nothing for the
     /// stops asked before it opened.
@@ -207,6 +209,7 @@ impl Default for WindowPart {
             drawn: false,
             named: false,
             trust: Trusting::Past,
+            trust_keys: 0,
             stopped: None,
             interrupted: None,
             unstopped: None,

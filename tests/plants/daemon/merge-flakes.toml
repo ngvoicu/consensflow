@@ -9,9 +9,21 @@
 # alike. An end seen by `wait` now waits for the thread to read to the end of the pipe,
 # for `HELD` at most (`crates/cf-e2e/src/process/spawned.rs`, `process.rs`). The tests are
 # the rig's own, `crates/cf-e2e/src/process/tests.rs`.
+#
+# Folder trust's late-keys case, `a_worker_that_reads_the_humans_keys_late…`, timed out after
+# 30 s on zeewin once in the same merge, and did not on main in 73 runs of it, 12 at a time,
+# nor in a whole crate's run. On T-358's tree (turn-end, whose workers' windows close once
+# their task is done) 8 of 48 copies did, each with the human's yes taken in one window, its
+# task done and its window closed, and the other window asking still, no key of ConsensFlow's
+# in it. The human's yes was banked for the project's other windows only by a look at the
+# screen that saw the window's prompt, a look every half second, and that window was gone
+# before the next. The exit's own screen is read now (`trust::yes_at_exit`, `dispatcher::exited`);
+# the stand-in's `CF_TEST_TRUST_LEAVES_MS` ends a window as it is past the question.
 
 [run]
 process-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell"]
+trust-rig-gone = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_the_human_said_yes_in_that_is_gone"]
+trust-rig-no = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_humans_no"]
 
 [[plant]]
 name = "merge flakes: an end seen by wait does not wait for the program's error output to be all kept"
@@ -47,3 +59,25 @@ runs = ["process-lib"]
 file = "crates/cf-e2e/src/process/spawned.rs"
 find = "            ended_by(reader, Instant::now() + HELD);"
 replace = "            ended_by(reader, Instant::now() + Duration::from_secs(60));"
+
+[[plant]]
+name = "merge flakes: the human's yes in a window that ended before the watch looked again is not banked from the screen it ended with"
+meant = "a_worker_the_human_said_yes_in_that_is_gone_before_the_next_look_still_has_its_yes_carried"
+runs = ["trust-rig-gone"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.trust.accept(project.id, folder);\n        }\n        // A launch the exit ended"
+replace = "            let _ = folder;\n        }\n        // A launch the exit ended"
+
+[[plant]]
+name = "merge flakes: a window that ended at the question banks a yes at its exit"
+meant = "a_humans_no_in_one_window_is_no_yes_for_the_others"
+runs = ["trust-rig-no"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "    window.shows_prompt(shown.lines()).then(|| folder.clone())"
+replace = "    Some(folder.clone())"

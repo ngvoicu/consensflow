@@ -102,8 +102,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "if (inside || accepted) && keys < MOST_KEYS {"
-replace = "if (inside || accepted && false) && keys < MOST_KEYS {"
+find = "if (inside || accepted) && record.window.borrow().trust_keys < MOST_KEYS {"
+replace = "if (inside || accepted && false) && record.window.borrow().trust_keys < MOST_KEYS {"
 
 [[plant]]
 name = "folder trust: the human's yes is never written down"
@@ -113,8 +113,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "        if asked && keys == 0 && at_prompt {"
-replace = "        if asked && keys == usize::MAX && at_prompt {"
+find = "        if asked && record.window.borrow().trust_keys == 0 && at_prompt {"
+replace = "        if asked && record.window.borrow().trust_keys == usize::MAX && at_prompt {"
 
 [[plant]]
 name = "folder trust: every window that asks is told of again"
@@ -397,8 +397,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "        if asked && keys == 0 && at_prompt {"
-replace = "        if asked && keys == 0 {"
+find = "        if asked && record.window.borrow().trust_keys == 0 && at_prompt {"
+replace = "        if asked && record.window.borrow().trust_keys == 0 {"
 
 [[plant]]
 name = "folder trust: a screen that names both choices reads as the question (round 2)"

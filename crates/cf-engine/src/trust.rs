@@ -13,7 +13,9 @@
 //! repository the project's folder is below) is the human's: the notes say so
 //! once, and the window waits for their answer in it; once they said yes in one
 //! window, the project's other windows that ask of that folder are answered as
-//! they answered. Either way nothing goes into the window, and nothing gives its
+//! they answered; a window that ended before the screen was looked at again, its
+//! task done and its window closed at once, is read off the screen the host kept
+//! of it ([`yes_at_exit`]). Either way nothing goes into the window, and nothing gives its
 //! launch up, while the question is on its screen ([`Trusting`]); once it has gone
 //! the launch goes on as any other, its first message given its whole time from
 //! then. ConsensFlow writes none of the harness's own files: Claude Code rewrites
@@ -96,6 +98,14 @@ pub(crate) struct TrustState {
     accepted: RefCell<HashSet<(i64, String)>>,
 }
 
+impl TrustState {
+    /// The human said yes to `folder` in a window of `project`: its other windows that
+    /// ask of it are answered as they answered.
+    pub(crate) fn accept(&self, project: i64, folder: String) {
+        self.accepted.borrow_mut().insert((project, folder));
+    }
+}
+
 /// What one look at the window found.
 enum Seen {
     /// The question, the key toward a yes, and the lines it was read in.
@@ -104,6 +114,23 @@ enum Seen {
     Prompt,
     /// A screen still drawing, or one that is neither.
     Other,
+}
+
+/// The folder a yes was said to in a window that ended, where one was: the window was
+/// asking when it ended, none of ConsensFlow's keys had answered it, and the screen the
+/// host kept of it is its harness's prompt. The screen is looked at every half second, and
+/// a window can be gone between two looks, its task done and its window closed at once, or
+/// ended of itself: the human's yes is then read off the screen it ended with, and banked
+/// for the project's other windows as one the watch saw is. A No leaves the question, or
+/// nothing, on the screen it ends with.
+pub(crate) fn yes_at_exit(record: &Record, shown: &Shown) -> Option<String> {
+    let part = record.window.borrow();
+    if part.trust != Trusting::Asked || part.trust_keys > 0 {
+        return None;
+    }
+    let window = part.window.as_ref()?;
+    let Trusts { folder, .. } = window.trusts()?;
+    window.shows_prompt(shown.lines()).then(|| folder.clone())
 }
 
 impl Dispatcher {
@@ -120,7 +147,11 @@ impl Dispatcher {
         let Some(window) = window.filter(|window| window.trusts().is_some()) else {
             return;
         };
-        record.window.borrow_mut().trust = Trusting::Looking;
+        {
+            let mut part = record.window.borrow_mut();
+            part.trust = Trusting::Looking;
+            part.trust_keys = 0;
+        }
         let (this, held, project, participant, pane) = (
             Rc::clone(self),
             Rc::clone(record),
@@ -162,7 +193,6 @@ impl Dispatcher {
         // again on its conversation holds it all from the start, and a look that could
         // not read it says nothing of growth.
         let mut opened_with: Option<usize> = None;
-        let mut keys = 0;
         // The screen the last key was pressed on, and how many looks have found it
         // since: a key goes into a screen that moved since the last one, so a slow
         // redraw is never given a second, or into one that stayed as it was for
@@ -191,7 +221,7 @@ impl Dispatcher {
                         .accepted
                         .borrow()
                         .contains(&(project.id, folder.clone()));
-                    if (inside || accepted) && keys < MOST_KEYS {
+                    if (inside || accepted) && record.window.borrow().trust_keys < MOST_KEYS {
                         if inside {
                             self.tell_trust_once(project, &folder, true, || {
                                 format!(
@@ -208,7 +238,7 @@ impl Dispatcher {
                             _ => true,
                         };
                         if press && self.press_toward_trust(pane, key).await {
-                            keys += 1;
+                            record.window.borrow_mut().trust_keys += 1;
                             pressed_on = Some((lines, 0));
                         }
                     } else {
@@ -254,11 +284,8 @@ impl Dispatcher {
         // answered it: the human said yes, for every window of the project. Nothing
         // else says so: not the question's absence, which a No leaves on the way out,
         // nor the record's growth, which may be a process before the window's.
-        if asked && keys == 0 && at_prompt {
-            self.trust
-                .accepted
-                .borrow_mut()
-                .insert((project.id, folder.clone()));
+        if asked && record.window.borrow().trust_keys == 0 && at_prompt {
+            self.trust.accept(project.id, folder.clone());
         }
         if !self.shows(record, pane) {
             return Ok(());
