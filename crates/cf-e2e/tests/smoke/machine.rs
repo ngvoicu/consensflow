@@ -67,6 +67,11 @@ impl Machine {
     /// `claude`) on its PATH. `paste_reader` is the program the harness runs to
     /// read a large paste.
     pub fn new(paste_reader: &Path) -> Result<Self> {
+        Self::with_harness(paste_reader, &harness())
+    }
+
+    /// A new machine as [`Machine::new`] makes one, with `script` as its harness.
+    pub fn with_harness(paste_reader: &Path, script: &str) -> Result<Self> {
         let root = tempfile::Builder::new()
             .prefix("cf-smoke-")
             .tempdir()
@@ -101,7 +106,7 @@ impl Machine {
         ] {
             files::make_dir(folder)?;
         }
-        files::write_executable(&machine.bin.join("claude"), harness())?;
+        files::write_executable(&machine.bin.join("claude"), script)?;
         Ok(machine)
     }
 

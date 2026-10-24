@@ -1,0 +1,74 @@
+# Plants in the page's acknowledgement of the windows' output and in the app's
+# web view, T-454's round. The pane host stops reading a window once a window of
+# its output (1 MiB) is owed an acknowledgement, and only the page acknowledges:
+# the page writes each message to its terminal as it comes and acknowledges up to
+# the last one drawn (app/ui/terminal-link.js), acknowledges the output of a pane
+# it let go of while it still runs, and on Windows a page whose process failed is
+# loaded again (app/src-tauri/src/page_crash.rs). What a throttled page gains is
+# shown on a built app only (crates/cf-e2e/tests/smoke/hidden.rs, its plants in
+# release/packaged.toml), and macOS's throttling switched off on an app built
+# with the plant, by hand.
+
+[run]
+page-acks = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "writes each message to its terminal|acknowledges what comes for a window"]
+app-page-crash = ["cargo", "xtask", "app", "test", "page_crash"]
+
+[[plant]]
+name = "page acks: each message waits for the one before it to be drawn"
+meant = "writes each message to its terminal as it comes and acknowledges up to the last one drawn"
+runs = ["page-acks"]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = '''    emulator
+      .write(new Uint8Array(message.bytes ?? []))
+      .then(() => this.#drawn(key, message))'''
+replace = '''    this.last = (this.last ?? Promise.resolve()).then(() =>
+      emulator.write(new Uint8Array(message.bytes ?? [])),
+    )
+    this.last
+      .then(() => this.#drawn(key, message))'''
+
+[[plant]]
+name = "page acks: every message is acknowledged on its own"
+meant = "writes each message to its terminal as it comes and acknowledges up to the last one drawn"
+runs = ["page-acks"]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "    if (!ack.sending) void this.#acknowledge(ack)"
+replace = "    void this.#invoke('pane_ack', { id, generation, seq })"
+
+[[plant]]
+name = "page acks: the output of a pane let go of while it runs is dropped unacknowledged"
+meant = "acknowledges what comes for a window the page let go of while it still runs, and draws none of it"
+runs = ["page-acks"]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "    if (this.#retired.has(key)) return this.#drawn(key, message)"
+replace = "    if (this.#retired.has(key)) return"
+
+[[plant]]
+name = "page crash: a page whose own process ended is not loaded again (Windows)"
+meant = "only_the_pages_own_process_ending_or_hanging_loads_it_again"
+runs = ["app-page-crash"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/page_crash.rs"
+find = '''    kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED
+        || kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE'''
+replace = '''    kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE'''
+
+[[plant]]
+name = "page crash: the browser's own process ending is taken for the page's (Windows)"
+meant = "only_the_pages_own_process_ending_or_hanging_loads_it_again"
+runs = ["app-page-crash"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/page_crash.rs"
+find = '''    kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED
+        || kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE'''
+replace = '''    kind.0 <= COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE.0'''

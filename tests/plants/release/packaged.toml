@@ -575,3 +575,27 @@ requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
 file = "crates/cf-e2e/tests/smoke.rs"
 find = "home: &machine.state,"
 replace = "home: &machine.probe,"
+
+# The hidden app's case (smoke/hidden.rs, T-454): a window that prints a flood while
+# the app is hidden is read as fast as shown.
+[[plant]]
+name = "packaged smoke, on the app: the hidden app's window never prints its flood"
+meant = "the_built_app_reads_its_windows_while_it_is_hidden"
+runs = ["smoke-on-the-app"]
+requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/fixtures/smoke-hidden-harness.sh"
+find = 'while [ ! -f "$CFSMOKE_GO" ]; do sleep 0.2; done'
+replace = 'while [ ! -f "$CFSMOKE_GO.never" ]; do sleep 0.2; done'
+
+[[plant]]
+name = "packaged smoke, on the app: the app is shown again before its window prints"
+meant = "the_built_app_reads_its_windows_while_it_is_hidden"
+runs = ["smoke-on-the-app"]
+requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/hidden.rs"
+find = "    thread::sleep(HIDDEN_FOR);\n"
+replace = "    thread::sleep(HIDDEN_FOR);\n    hide(app.pid(), false);\n"

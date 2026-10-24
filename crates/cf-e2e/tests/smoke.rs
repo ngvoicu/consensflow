@@ -37,6 +37,8 @@ mod app;
 mod bundle;
 #[path = "smoke/extension.rs"]
 mod extension;
+#[path = "smoke/hidden.rs"]
+mod hidden;
 #[path = "smoke/machine.rs"]
 mod machine;
 
