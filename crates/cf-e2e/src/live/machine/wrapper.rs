@@ -96,11 +96,12 @@ fn shimming_script(claude: &Path, stand_in: &Path, servers: Option<&Path>) -> St
     format!(
         "#!/bin/sh\n\
          # Written by a live test: a window whose agent's model is fake or fake-chief is the\n\
-         # stand-in's, which writes its records where the daemon reads Claude's; every other\n\
+         # stand-in's, which writes its records where the daemon reads Claude's (the run's own\n\
+         # config where it was given one); every other\n\
          # Claude window reaches no MCP server and no browser.\n\
          for arg in \"$@\"; do\n\
          \x20 case \"$arg\" in\n\
-         \x20   fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec {} \"$@\" ;;\n\
+         \x20   fake | fake-chief) CLAUDE_CONFIG_DIR=\"${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}\" exec {} \"$@\" ;;\n\
          \x20 esac\n\
          done\n\
          exec {} {servers}{} \"$@\"\n",
@@ -150,7 +151,7 @@ mod tests {
         // The stand-in's window is as it was: it has no server of the harness's.
         assert!(
             script.contains(
-                "fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec '/the/fake-agent' \"$@\" ;;"
+                "fake | fake-chief) CLAUDE_CONFIG_DIR=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\" exec '/the/fake-agent' \"$@\" ;;"
             ),
             "{script}"
         );
@@ -169,7 +170,7 @@ mod tests {
         );
         assert!(
             script.contains(
-                "fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec '/the/fake-agent' \"$@\" ;;"
+                "fake | fake-chief) CLAUDE_CONFIG_DIR=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\" exec '/the/fake-agent' \"$@\" ;;"
             ),
             "{script}"
         );
@@ -278,6 +279,17 @@ mod tests {
             run(&["-c", "echo $CLAUDE_CONFIG_DIR", "fake"]),
             "/h/.claude\n"
         );
+        // A run given a Claude config of its own has the stand-in write there, where the
+        // daemon reads Claude's records: never in the owner's own (T-432).
+        let own = crate::process::Run::new("/bin/sh")
+            .arg(&shim)
+            .args(["-c", "echo $CLAUDE_CONFIG_DIR", "fake"])
+            .var("HOME", "/h")
+            .var("CLAUDE_CONFIG_DIR", "/run/own")
+            .run()
+            .unwrap()
+            .stdout;
+        assert_eq!(own, "/run/own\n");
     }
 
     #[cfg(windows)]

@@ -62,6 +62,8 @@ mod a_task_waiting_on_a_cancelled_task_stayed_blocked_for_good;
 mod a_task_waiting_on_a_job_that_never_ends_was_finished_by_the_chief;
 #[path = "regressions/a_trust_question_after_git_init_stopped_every_launch.rs"]
 mod a_trust_question_after_git_init_stopped_every_launch;
+#[path = "regressions/a_windows_first_message_was_on_its_command_line.rs"]
+mod a_windows_first_message_was_on_its_command_line;
 #[path = "regressions/a_worker_that_waited_on_its_run_with_monitor_lost_it.rs"]
 mod a_worker_that_waited_on_its_run_with_monitor_lost_it;
 #[path = "regressions/a_workers_still_going_was_given_as_its_result.rs"]

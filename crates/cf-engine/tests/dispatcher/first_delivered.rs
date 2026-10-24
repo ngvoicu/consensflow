@@ -1,0 +1,301 @@
+//! A launch's first message that its window is delivered once it is up (T-432): a
+//! Claude Code, Pi or Codex window opens with nothing on its command line, which
+//! every process on the machine reads, and the step hands the message over by the
+//! window's own `deliver` once the window is past any question of trusting its
+//! folder, has drawn and is at rest. None of these tests is held to a Node
+//! recording: Node's adapters put the message on the command line.
+
+use std::cell::Cell;
+use std::rc::Rc;
+
+use cf_engine::delivery_text::marker_of;
+use cf_engine::testing::Context;
+use cf_harness::contract::{FirstMessage, Held, Readiness};
+use cf_proto::trace::{Traced, WindowEvent};
+use serde_json::json;
+
+use crate::withheld_enter::times_handed;
+
+const SEAM: &str = "adapter:claude-code";
+
+/// The Enter a paste is sent with.
+const ENTER: u8 = 13;
+
+/// A context whose windows are delivered their first message once up.
+fn delivered() -> Context {
+    let context = Context::new();
+    context.adapter.first.set(FirstMessage::Delivered);
+    context
+}
+
+/// A project with zeus on its staff, and the brief of T-1 given to zeus.
+fn briefed(context: &Context) -> (i64, i64) {
+    let project = context.with_staff(&["zeus"]).id;
+    let brief = context
+        .give(project, "zeus", "Parser")
+        .message
+        .expect("its brief")
+        .id;
+    (project, brief)
+}
+
+/// Passes of the dispatcher, each settled.
+fn passes(context: &Context, count: usize) {
+    for _ in 0..count {
+        context.pass().unwrap();
+        context.settle();
+    }
+}
+
+/// What the trace says held `message`, in order.
+fn held(context: &Context, message: i64) -> Vec<String> {
+    context
+        .trace
+        .lines
+        .borrow()
+        .iter()
+        .filter_map(|line| match &line.what {
+            Traced::Window {
+                event:
+                    WindowEvent::DeliveryHeld {
+                        message: held,
+                        reason,
+                    },
+                ..
+            } if *held == message => Some(reason.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The Enters pressed into panes, by themselves.
+fn enters(context: &Context) -> usize {
+    context
+        .host
+        .inputs()
+        .iter()
+        .filter(|body| body["bytes"] == json!([ENTER]))
+        .count()
+}
+
+#[test]
+fn a_window_delivered_its_first_message_opens_with_none_and_is_handed_its_brief_once_up() {
+    let context = delivered();
+    let (_, brief) = briefed(&context);
+    passes(&context, 3);
+    let prepared = context.adapter.prepared();
+    assert!(prepared.len() >= 2, "the chief's window and zeus's");
+    assert!(
+        prepared.iter().all(|launch| launch["message"].is_null()),
+        "no launch is given its message: {prepared:?}"
+    );
+    assert_eq!(times_handed(&context, SEAM, brief), 1, "handed once");
+    assert_eq!(context.message(brief).state, "delivered");
+    context.close();
+}
+
+#[test]
+fn a_first_message_waits_while_its_window_is_not_ready_says_so_once_and_goes_in_once_it_is() {
+    let context = delivered();
+    let ready = Rc::new(Cell::new(false));
+    let asked = Rc::clone(&ready);
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        Ok(if asked.get() {
+            Readiness::Ready
+        } else {
+            Readiness::Held(Held::Because("the broker names no thread yet".to_owned()))
+        })
+    }));
+    let (_, brief) = briefed(&context);
+    passes(&context, 4);
+    assert_eq!(
+        times_handed(&context, SEAM, brief),
+        0,
+        "nothing while not ready"
+    );
+    assert_eq!(context.message(brief).state, "delivering");
+    let said = held(&context, brief);
+    assert_eq!(said.len(), 1, "said once, not every pass: {said:?}");
+    assert!(
+        said[0].contains("not ready for its first message")
+            && said[0].contains("the broker names no thread yet"),
+        "{said:?}"
+    );
+    ready.set(true);
+    passes(&context, 2);
+    assert_eq!(times_handed(&context, SEAM, brief), 1);
+    assert_eq!(context.message(brief).state, "delivered");
+    context.close();
+}
+
+#[test]
+fn a_first_message_waits_while_its_window_has_not_drawn_its_screen() {
+    let context = delivered();
+    // The host says the window has printed and not held still yet.
+    context.host.set_snapshot(json!({ "outputQuietMs": null }));
+    let (_, brief) = briefed(&context);
+    passes(&context, 4);
+    assert_eq!(
+        times_handed(&context, SEAM, brief),
+        0,
+        "nothing while it draws"
+    );
+    context.host.set_snapshot(json!({ "outputQuietMs": 5000 }));
+    passes(&context, 2);
+    assert_eq!(times_handed(&context, SEAM, brief), 1, "handed once drawn");
+    context.close();
+}
+
+#[test]
+fn a_first_message_its_window_refused_is_handed_again_at_the_next_step() {
+    let context = delivered();
+    let (_, brief) = briefed(&context);
+    context.pass().unwrap();
+    context.settle();
+    // Zeus's window is prepared: it refuses what it is handed, for now.
+    context.adapter.with("zeus", |agent| agent.admit = false);
+    passes(&context, 2);
+    assert!(times_handed(&context, SEAM, brief) >= 1, "it was tried");
+    assert_eq!(context.message(brief).state, "delivering", "owed still");
+    let said = held(&context, brief);
+    assert!(
+        said.iter()
+            .any(|reason| reason.contains("refused its first message")),
+        "{said:?}"
+    );
+    let tried = times_handed(&context, SEAM, brief);
+    context.adapter.with("zeus", |agent| agent.admit = true);
+    passes(&context, 2);
+    assert_eq!(times_handed(&context, SEAM, brief), tried + 1);
+    assert_eq!(context.message(brief).state, "delivered");
+    context.close();
+}
+
+#[test]
+fn a_window_never_ready_for_its_first_message_in_the_launch_s_time_is_given_up_and_its_brief_fails()
+{
+    let context = delivered();
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| {
+        Ok(Readiness::Held(Held::Because("starting".to_owned())))
+    }));
+    let (project, brief) = briefed(&context);
+    passes(&context, 3);
+    assert_eq!(context.message(brief).state, "delivering");
+    let killed = context.host.killed().len();
+    context.advance(120_001);
+    passes(&context, 3);
+    assert_eq!(times_handed(&context, SEAM, brief), 0, "never handed");
+    assert_eq!(context.message(brief).state, "failed");
+    assert_eq!(context.task(project, 1).task.state, "failed");
+    assert!(
+        context.host.killed().len() > killed,
+        "its window was closed"
+    );
+    let chief = context.id(project, "chief");
+    assert!(
+        context
+            .inbox(chief)
+            .iter()
+            .any(|message| message.body.contains("never ready for its first message")),
+        "the chief hears why"
+    );
+    context.close();
+}
+
+#[test]
+fn a_window_that_never_will_be_fit_for_its_first_message_is_given_up_at_once() {
+    let context = delivered();
+    let (project, brief) = briefed(&context);
+    context.pass().unwrap();
+    context.settle();
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| {
+        Ok(Readiness::Unfit("it came up in its normal mode".to_owned()))
+    }));
+    passes(&context, 3);
+    assert_eq!(times_handed(&context, SEAM, brief), 0);
+    assert_eq!(context.message(brief).state, "failed");
+    assert_eq!(context.task(project, 1).task.state, "failed");
+    context.close();
+}
+
+#[test]
+fn a_first_message_pasted_once_up_that_its_record_never_shows_is_pressed_enter_for_once_more() {
+    let context = delivered();
+    let (_, brief) = briefed(&context);
+    context.pass().unwrap();
+    context.settle();
+    // Zeus's window takes the paste and its record never shows it: its Enter was lost.
+    context.adapter.with("zeus", |agent| agent.arrive = false);
+    context.host.set_snapshot(json!({ "outputQuietMs": 5000 }));
+    passes(&context, 2);
+    assert_eq!(times_handed(&context, SEAM, brief), 1);
+    let before = enters(&context);
+    passes(&context, 2);
+    assert_eq!(enters(&context), before, "not before its time");
+    context.advance(10_001);
+    passes(&context, 2);
+    assert_eq!(enters(&context), before + 1, "one Enter more");
+    context.advance(10_001);
+    passes(&context, 2);
+    assert_eq!(enters(&context), before + 1, "and only one");
+    assert_eq!(times_handed(&context, SEAM, brief), 1, "never pasted twice");
+    context.close();
+}
+
+#[test]
+fn a_first_message_whose_project_closes_while_its_window_takes_it_is_given_back_and_goes_in_once_after_the_resume(
+) {
+    let context = delivered();
+    // The Close cannot close the windows: the hand-over is what keeps the message out.
+    context.host.refuse_kills.set(true);
+    let (project, brief) = briefed(&context);
+    let marker = marker_of(brief);
+    let taking = context.adapter.deliver_holds.hold(move |args| {
+        args[0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains(&marker))
+    });
+    context.pass().unwrap();
+    context.settle();
+    context.pass().unwrap();
+    context.settle();
+    // The Close waits for the hand-over under way; the hand-over is turned away.
+    let closing = context.begin_close_project(project);
+    context.settle();
+    taking.open();
+    // It could not close the windows, as the host refused: the project is closed all the same.
+    let refused = context.finish(closing).unwrap_err();
+    assert!(
+        format!("{refused:?}").contains("window-kept"),
+        "{refused:?}"
+    );
+    context.settle();
+    assert_eq!(
+        context
+            .adapter
+            .agent("zeus")
+            .items
+            .iter()
+            .filter(|item| item.text.contains(&marker_of(brief)))
+            .count(),
+        0,
+        "nothing went in"
+    );
+    assert_eq!(context.message(brief).state, "queued", "back in its queue");
+    context.host.refuse_kills.set(false);
+    context.resume_project(project).unwrap();
+    passes(&context, 4);
+    assert_eq!(context.message(brief).state, "delivered");
+    assert_eq!(
+        context
+            .adapter
+            .agent("zeus")
+            .items
+            .iter()
+            .filter(|item| item.text.contains(&marker_of(brief)))
+            .count(),
+        1,
+        "it went in once"
+    );
+    context.close();
+}

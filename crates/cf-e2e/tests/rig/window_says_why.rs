@@ -1,7 +1,9 @@
 //! A window that does not come up says why on its own screen, and the screen
 //! goes with the window: Pi on a machine with no login prints "No API key found
 //! for the selected model … Use /login" and waits, and every task given to it
-//! failed with only "the window never showed its first message". The daemon
+//! failed with only "the window never showed its first message" (a window delivered
+//! its first message once up, as the stand-in Claude here is, fails with "the window
+//! was never ready for its first message", T-432). The daemon
 //! keeps what the window last showed (the real pane host's screen, and the
 //! program's exit code where it ended) and says it in the failure the requester
 //! and the human hear, and in one line of its log. A screen that names a secret
@@ -76,12 +78,12 @@ fn says_a_window_that_stayed_named_a_secret_in_the_failure_the_chiefs_window_and
     let told = failure_told(&rig, project)?;
     let body = told["body"].as_str().unwrap_or_default();
     let failure = Regex::new(&format!(
-        r#"^T-1 failed: the window never showed its first message; {SCREEN}\. Reopen it with: cf task reopen T-1 "…"$"#
+        r#"^T-1 failed: the window was never ready for its first message; {SCREEN}\. Reopen it with: cf task reopen T-1 "…"$"#
     ))?;
     assert!(failure.is_match(body), "{body}");
     // The human hears it too, with whom it did not reach.
     let human = Regex::new(&format!(
-        r#"^m-\d+, a task from @chief on T-1, did not reach {WORKER}: the window never showed its first message; {SCREEN}\.$"#
+        r#"^m-\d+, a task from @chief on T-1, did not reach {WORKER}: the window was never ready for its first message; {SCREEN}\.$"#
     ))?;
     let heard = Project::new(&rig, project).inbox("human")?;
     assert!(
@@ -103,7 +105,7 @@ fn says_a_window_that_stayed_named_a_secret_in_the_failure_the_chiefs_window_and
     );
     // One line of the daemon's log.
     let logged = Regex::new(&format!(
-        r#"(?m)^\S+ warn the launch of p{project}-worker-[a-z]+-[a-z]+ failed: the window never showed its first message; {SCREEN}$"#
+        r#"(?m)^\S+ warn the launch of p{project}-worker-[a-z]+-[a-z]+ failed: the window was never ready for its first message; {SCREEN}$"#
     ))?;
     let log = rig.log();
     assert!(logged.is_match(&log), "{log}");

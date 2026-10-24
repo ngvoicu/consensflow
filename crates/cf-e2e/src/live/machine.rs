@@ -287,7 +287,25 @@ const REPORTS: &str = "app/src-tauri/target/live-reports";
 /// ask the system's keychain by; on Windows they also have the machine's own
 /// folders for settings and programs ([`WINDOWS`]).
 pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
-    rig_keeping_claude_in(installs, stand_in, super::option("claude-config"))
+    let config = rig_keeping_claude_in(installs, stand_in, super::option("claude-config"));
+    keeping_pi_in(config, installs, super::option("pi-agent-dir"))
+}
+
+/// `config`, whose Pi windows keep their login, settings and sessions in `agent_dir`
+/// where it names a folder (`--pi-agent-dir`: one the run's caller made and copied
+/// Pi's login into, which keeps the owner's own folder out of the run). The daemon
+/// reads Pi's sessions by the same variable.
+fn keeping_pi_in(config: Config, installs: &[Installed], agent_dir: Option<String>) -> Config {
+    match agent_dir {
+        Some(folder)
+            if installs
+                .iter()
+                .any(|install| install.harness == Harness::Pi) =>
+        {
+            config.var("PI_CODING_AGENT_DIR", folder)
+        }
+        _ => config,
+    }
 }
 
 /// [`rig`], whose Claude windows keep their config in `claude_config` where it names a
@@ -354,7 +372,10 @@ pub fn rig_with_stand_ins(
             ),
         })?;
     let shim = shimmed_claude(folder, claude.command(), stand_in)?;
-    Ok(rig(installs, shim).stand_ins_write_in(claude.home().join(".claude")))
+    // Where the daemon reads Claude's records: the run's own config where it was given one.
+    let records =
+        super::option("claude-config").map_or_else(|| claude.home().join(".claude"), PathBuf::from);
+    Ok(rig(installs, shim).stand_ins_write_in(records))
 }
 
 /// The machine's `harness`, found as a person's shell finds it, with the home
