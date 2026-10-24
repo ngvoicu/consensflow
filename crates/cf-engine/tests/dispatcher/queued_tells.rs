@@ -7,12 +7,14 @@
 //! the task is paused, which are kept for its resume (the second review,
 //! 2026-10-16); words the window took back go in again with the words that
 //! resume it; and words in the first message of a launch called off before its
-//! window opened are said to have gone with it. None of these tests is held to
-//! a Node recording: Node refused the tell.
+//! window opened are said to have gone with it, as are those of a task whose
+//! member the human removes, or whose harness fails, before they went in
+//! (T-389). None of these tests is held to a Node recording: Node refused the
+//! tell.
 
 use cf_engine::delivery_text::marker_of;
 use cf_engine::testing::Context;
-use cf_ledger::NewNote;
+use cf_ledger::{NewNote, NewTask};
 
 use crate::fixtures::{assert_match, given, last_message, notes, Tiers};
 use crate::work_in_flight::looks_at;
@@ -345,5 +347,53 @@ fn words_in_the_first_message_of_a_launch_cancelled_before_its_window_opened_are
         )),
         "{:?}",
         notes(&context, chief)
+    );
+}
+
+#[test]
+fn words_told_to_the_window_of_a_task_whose_member_the_human_removes_are_said_to_have_gone() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    // The human asked for it; the chief told its window, which is not up yet.
+    context.create_task(
+        project.id,
+        NewTask {
+            from: "human".to_owned(),
+            to: Some("zeus".to_owned()),
+            body: "Parser".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    let told = tell(&context, project.id, 1, "Use the v2 grammar");
+
+    let removed = context.remove_member(project.id, "zeus").unwrap();
+    assert_eq!(removed.cancelled, [1]);
+    assert_eq!(context.message(told).state, "cancelled");
+    let chief = context.id(project.id, "chief");
+    assert!(
+        notes(&context, chief).contains(&format!(
+            "T-1 was cancelled: @zeus left the staff. What you told its window, m-{told}, went with it: it never had it."
+        )),
+        "{:?}",
+        notes(&context, chief)
+    );
+}
+
+#[test]
+fn words_still_on_their_way_when_the_harness_fails_the_task_are_said_to_have_gone() {
+    let context = Context::new();
+    let (tiers, session, told) = told_on_its_way(&context);
+    context.adapter.with("zeus", |agent| agent.failed = true);
+    context.adapter.answer("zeus", "Parser, half done");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "failed");
+    assert_eq!(context.message(told).state, "cancelled");
+    // The words first, in the ledger's step; then the engine's word of the failure.
+    assert_eq!(
+        tiers.notes("chief"),
+        [
+            format!("T-1 failed: @{session}'s harness reported a failure. What you told its window, m-{told}, went with it: it never had it."),
+            format!("T-1 failed: @{session}'s harness reported a failure. Reopen it with: cf task reopen T-1 \"…\""),
+        ]
     );
 }

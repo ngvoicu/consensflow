@@ -3,10 +3,13 @@
 //! the window, words a window took back, words the human passes on in another
 //! order than they were told, and words that went with a task called off while
 //! a launch was being prepared, or after the task was taken back to the board.
+//! A task ended by no cancel takes them too, and whoever told them hears so as a
+//! cancel tells it (T-389): its member removed, its harness failed, or the
+//! window it waited for on the board gone.
 
-use crate::fixture::{gated_world, ids, world};
+use crate::fixture::{gated_world, ids, world, World};
 use crate::queued_tells::{newest, queued, task_id, tell, waiting};
-use cf_ledger::NewNote;
+use cf_ledger::{NewNote, NewTask};
 
 /// What the chief hears when its words went with a task: `ids` named.
 fn went(ids: &[i64]) -> String {
@@ -311,4 +314,170 @@ fn a_launch_called_off_before_its_window_opened_tells_whoever_told_the_words_in_
     let notes = w.ledger.inbox(w.id("chief"), 100).unwrap().len();
     w.ledger.launch_called_off(brief).expect("nothing to tell");
     assert_eq!(w.ledger.inbox(w.id("chief"), 100).unwrap().len(), notes);
+}
+
+/// The notes `handle` has about T-`number`, oldest first.
+fn notes_on(w: &World, handle: &str, number: i64) -> Vec<String> {
+    let mut notes: Vec<_> = w
+        .ledger
+        .inbox(w.id(handle), 100)
+        .expect("the inbox")
+        .into_iter()
+        .filter(|message| message.kind == "note" && message.task_number == Some(number))
+        .collect();
+    notes.sort_by_key(|message| message.id);
+    notes.into_iter().map(|message| message.body).collect()
+}
+
+#[test]
+fn a_member_removed_takes_the_words_told_to_its_tasks_window_and_whoever_told_them_hears_which_went(
+) {
+    let lead = |task: i64| format!("T-{task} was cancelled: @zeus left the staff. ");
+
+    // The human asked for it; the chief, which neither asked for it nor removed
+    // the member, told its window (Calliope's item 9 of T-367).
+    let mut w = world();
+    let task = w
+        .ledger
+        .create_task(
+            w.project,
+            &NewTask {
+                from: "human".into(),
+                pool: Some("worker".into()),
+                tier: Some("standard".into()),
+                body: "Parser".into(),
+                ..NewTask::default()
+            },
+        )
+        .expect("the human's task")
+        .task
+        .number;
+    w.assign(task, "zeus");
+    let first = tell(&mut w, task, "Use the v2 grammar");
+    let second = tell(&mut w, task, "And keep the old tests");
+    w.ledger.remove_member(w.project, "zeus").expect("removed");
+    assert_eq!(w.state(task), "cancelled");
+    assert_eq!(w.states(&[first.id, second.id]), ["cancelled", "cancelled"]);
+    assert_eq!(
+        notes_on(&w, "chief", task),
+        [format!(
+            "{}What you told its window, m-{}, m-{}, went with it: it never had them.",
+            lead(task),
+            first.id,
+            second.id
+        )]
+    );
+
+    // The chief asked for it and told it: the removal's word to it names the task,
+    // and this one the words.
+    let mut w = world();
+    let (task, _, _) = queued(&mut w);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    w.ledger.remove_member(w.project, "zeus").expect("removed");
+    assert_eq!(
+        notes_on(&w, "chief", task),
+        [format!("{}{}", lead(task), went(&[told.id]))]
+    );
+
+    // The window had them with its brief: nothing of them went.
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    tell(&mut w, task, "Use the v2 grammar");
+    w.deliver(brief);
+    w.ledger.remove_member(w.project, "zeus").expect("removed");
+    assert!(notes_on(&w, "chief", task).is_empty());
+}
+
+#[test]
+fn a_task_whose_harness_failed_takes_the_words_still_on_their_way_and_whoever_told_them_hears_which_went(
+) {
+    // Told while the brief was on its way, so they go in next; the harness fails
+    // first.
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    w.begin(brief);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    w.confirm(brief);
+    assert_eq!(w.state(task), "working");
+    w.ledger
+        .fail_task(w.project, task, "@zeus's harness reported a failure")
+        .expect("failed");
+    assert_eq!(w.states(&[told.id]), ["cancelled"]);
+    assert_eq!(
+        notes_on(&w, "chief", task),
+        [format!(
+            "T-{task} failed: @zeus's harness reported a failure. {}",
+            went(&[told.id])
+        )]
+    );
+
+    // Pasted already: nothing of them went.
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    w.begin(brief);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    w.confirm(brief);
+    w.deliver(told.id);
+    w.ledger
+        .fail_task(w.project, task, "@zeus's harness reported a failure")
+        .expect("failed");
+    assert!(notes_on(&w, "chief", task).is_empty());
+}
+
+#[test]
+fn a_task_cancelled_as_its_window_is_gone_tells_whoever_told_its_window_which_words_went() {
+    // A follow-up bound to zeus's session, waiting for T-1, holding words told to
+    // its window: no build keeps words for an open task, so they are written as an
+    // older ledger could hold them. Then zeus left in that build.
+    let mut w = world();
+    let first = w.open("Parser").task.number;
+    let moved = w.assign(first, "zeus");
+    let session = moved.task.assignee.clone().expect("a session");
+    w.deliver(moved.message.expect("its brief").id);
+    let task = w
+        .follow_up(first, "Tests", &[])
+        .expect("a follow-up")
+        .task
+        .number;
+    let set = |w: &mut World, state: &'static str| {
+        w.edit(|db| {
+            db.execute(
+                "UPDATE task SET state = ?1 WHERE number = ?2",
+                rusqlite::params![state, task],
+            )
+            .expect("its state");
+        });
+    };
+    set(&mut w, "queued");
+    let chiefs = tell(&mut w, task, "Use the v2 grammar");
+    let humans = w
+        .ledger
+        .tell_queued(w.project, task, "human", "And keep the old tests")
+        .expect("kept");
+    set(&mut w, "open");
+    w.edit(|db| {
+        db.execute(
+            "UPDATE participant SET left_at = '2026-10-21T10:00:00.000Z'
+             WHERE handle = ?1 OR id = (SELECT member_id FROM participant WHERE handle = ?1)",
+            [&session],
+        )
+        .expect("zeus and its session are gone");
+    });
+
+    w.ledger
+        .record_result(w.project, first, "Done")
+        .expect("a result");
+    w.ledger
+        .accept_task(w.project, first, "chief")
+        .expect("accepted");
+    assert_eq!(w.state(task), "cancelled");
+    let lead = format!("T-{task} was cancelled: @zeus left the staff, so no window can take it.");
+    assert_eq!(
+        notes_on(&w, "chief", task),
+        [format!("{lead} {}", went(&[chiefs.id]))]
+    );
+    assert_eq!(
+        notes_on(&w, "human", task),
+        [format!("{lead} {}", went(&[humans.id]))]
+    );
 }

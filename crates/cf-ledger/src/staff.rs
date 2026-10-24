@@ -12,6 +12,7 @@ use rusqlite::{params, params_from_iter, OptionalExtension};
 use serde_json::json;
 
 use crate::conversations::current_conversation;
+use crate::messages::Dropped;
 use crate::model::{self, sql_list, LedgerError, MEMBER_ROLES};
 use crate::projects::NewMember;
 use crate::queue::{drop_queued, send, Sent};
@@ -262,7 +263,9 @@ pub(crate) fn set_roles<S: AsRef<str>>(
 
 /// A member leaves the staff. Its open tasks are cancelled, with the
 /// messages still on their way to it and its unread questions; whoever
-/// asked for those tasks is told, if its window runs. The tasks it holds are
+/// asked for those tasks is told, if its window runs, and whoever told their
+/// windows words they never had hears which went, as a cancel tells it
+/// (`Dropped`; T-389). The tasks it holds are
 /// the queued, working and waiting ones, and the open ones given to it or to
 /// one of its sessions that wait on the board for what they need (a follow-up
 /// behind its window's work): such a task has no pool and no other window, so
@@ -304,12 +307,23 @@ pub(crate) fn remove_member(
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let reason = format!("@{handle} left the staff");
+        // Read before they go, as a cancel reads them (`call_off`).
+        let dropped = open
+            .iter()
+            .map(|(task, _)| Dropped::of(store, task))
+            .collect::<Result<Vec<_>, _>>()?;
         for (task, _) in &open {
             drop_queued(store, task.id)?;
             store.move_task(task, "cancelled", json!({ "reason": reason }))?;
         }
         for (task, _) in &open {
             tell_stranded_waiters(store, project_id, task)?;
+        }
+        for ((task, _), dropped) in open.iter().zip(&dropped) {
+            // The word to whoever asked names the tasks, never the words: each
+            // teller hears of its own, the requester too.
+            let lead = format!("T-{} was cancelled: {reason}.", task.number);
+            dropped.tell_the_others(store, task, &lead, &[])?;
         }
         for id in &windows {
             store.db.execute(

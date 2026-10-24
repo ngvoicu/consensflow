@@ -1,0 +1,102 @@
+# Words told to a task's window that went with a task no cancel ended (T-389, 3.0.6; Calliope's
+# item 9 and P3s of T-367): a member's removal (`remove_member` in `crates/cf-ledger/src/staff.rs`),
+# a task cancelled as its window is gone (`cancel_unreachable`) and a task the daemon fails
+# (`fail_task`, both in `crates/cf-ledger/src/tasks/finishing.rs`) tell whoever told them which went,
+# as a cancel tells it (`Dropped`). An edit refused for a task taken back to the board says its next
+# window is told once the task is queued for it (`crates/cf-ledger/src/tasks/editing.rs`).
+#
+# Each plant takes one rule out again. The names begin with `removal tellers`, so
+# `cargo xtask plants daemon "removal tellers"` runs them.
+
+[run]
+ledger-told-edges = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "told_edges::"]
+ledger-edited-brief = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "edited_brief::"]
+engine-queued-tells = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "queued_tells::"]
+
+[[plant]]
+name = "removal tellers: a member's removal tells nobody which of the words told to its tasks' windows went"
+meant = "a_member_removed_takes_the_words_told_to_its_tasks_window_and_whoever_told_them_hears_which_went"
+runs = ["ledger-told-edges", "engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "            dropped.tell_the_others(store, task, &lead, &[])?;"
+replace = "            let _ = (dropped, lead);"
+
+[[plant]]
+name = "removal tellers: a member's removal reads the words that went once they are gone"
+meant = "a_member_removed_takes_the_words_told_to_its_tasks_window_and_whoever_told_them_hears_which_went"
+runs = ["ledger-told-edges", "engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+        let dropped = open
+            .iter()
+            .map(|(task, _)| Dropped::of(store, task))
+            .collect::<Result<Vec<_>, _>>()?;
+        for (task, _) in &open {
+            drop_queued(store, task.id)?;
+            store.move_task(task, "cancelled", json!({ "reason": reason }))?;
+        }
+'''
+replace = '''
+        for (task, _) in &open {
+            drop_queued(store, task.id)?;
+            store.move_task(task, "cancelled", json!({ "reason": reason }))?;
+        }
+        let dropped = open
+            .iter()
+            .map(|(task, _)| Dropped::of(store, task))
+            .collect::<Result<Vec<_>, _>>()?;
+'''
+
+[[plant]]
+name = "removal tellers: a member's removal tells the chief that asked for a task nothing of its words"
+meant = "a_member_removed_takes_the_words_told_to_its_tasks_window_and_whoever_told_them_hears_which_went"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "            dropped.tell_the_others(store, task, &lead, &[])?;"
+replace = '            dropped.tell_the_others(store, task, &lead, &["chief"])?;'
+
+[[plant]]
+name = "removal tellers: a task cancelled as its window is gone tells its requester nothing of its words"
+meant = "a_task_cancelled_as_its_window_is_gone_tells_whoever_told_its_window_which_words_went"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '            body: &format!("{lead}{}", dropped.said_to(&requester.handle)),'
+replace = "            body: &lead,"
+
+[[plant]]
+name = "removal tellers: a task cancelled as its window is gone tells no other teller of its words"
+meant = "a_task_cancelled_as_its_window_is_gone_tells_whoever_told_its_window_which_words_went"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    dropped.tell_the_others(store, task, &lead, &[&requester.handle])?;"
+replace = ""
+
+[[plant]]
+name = "removal tellers: a task the daemon fails tells nobody which of the words told to its window went"
+meant = "a_task_whose_harness_failed_takes_the_words_still_on_their_way_and_whoever_told_them_hears_which_went"
+runs = ["ledger-told-edges", "engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''        dropped.tell_the_others(store, &task, &format!("T-{number} failed: {reason}."), &[])?;'''
+replace = "        let _ = dropped;"
+
+[[plant]]
+name = "removal tellers: an edit refused for a task taken back to the board says to wait until its window has begun"
+meant = "a_task_taken_back_from_a_window_that_had_its_brief_is_not_edited"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '                "tell its next window once the task is queued for it: cf tell T-{number} \"…\""'
+replace = '                "tell its next window once it has begun: cf tell T-{number} \"…\""'
