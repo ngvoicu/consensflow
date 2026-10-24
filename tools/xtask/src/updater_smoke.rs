@@ -123,6 +123,7 @@ use cf_release::version::source_version;
 use crate::context::Context;
 use crate::dispatch::{Console, Failure};
 use crate::process;
+use crate::screen;
 use build::{build_app, export_release, flip_release, Build, Release, BRIDGE_TAG};
 use bundle::{copy_bundle, plist_value, remove_all};
 use case::{Given, Inputs};
@@ -190,6 +191,13 @@ pub fn run(
             console.err,
             "smoke:updater: the update path is macOS bundles and codesign"
         )?;
+        return Ok(1);
+    }
+    // The runs that start an app: building the apps, or exporting the bridge's source, shows no window.
+    if !options.export_bridge
+        && !options.build_only
+        && screen::locked("smoke:updater", context, console.err)?
+    {
         return Ok(1);
     }
     let releases = options.releases().map_err(Failure::Usage)?;

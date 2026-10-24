@@ -11,7 +11,8 @@
 //! - A suite of xtask's that is a `cargo test` (`cargo xtask app test …`, `cargo
 //!   xtask test <suite> …`, and the packaged smoke, `cargo xtask smoke …`, on a
 //!   Mac) is that `cargo test`, as the suite makes it (its folder, its variables,
-//!   its words), run under nextest the same way.
+//!   its words), run under nextest the same way. The smoke's is without the
+//!   `--nocapture` that a person's run has: nextest keeps what its test wrote.
 //! - `node --test …` writes the report of the plants' own reporter of Node's tests
 //!   (`reporters/node.mjs`, written into the run's folder) beside the report it
 //!   prints, its tests run in Node's own process (`node_words` says why, and what
@@ -69,7 +70,7 @@ enum Suite<'a> {
     App(&'a [String]),
     /// `test <name> …`: a suite of `cf-e2e`'s.
     Named(crate::suites::Suite, &'a [String]),
-    /// `smoke …`: the packaged smoke, on the app it names, if it names one.
+    /// `smoke …`: the packaged smoke, on the app it names, if it names one, with capture on.
     Smoke(Option<PathBuf>),
 }
 
@@ -93,7 +94,7 @@ impl<'a> Suite<'a> {
         match self {
             Self::App(rest) => crate::app::test(context, &os(rest)),
             Self::Named(suite, rest) => crate::suites::cargo_test(context, *suite, &os(rest)),
-            Self::Smoke(app) => crate::smoke::invocation(context, app.as_deref()),
+            Self::Smoke(app) => crate::smoke::captured(context, app.as_deref()),
         }
     }
 }

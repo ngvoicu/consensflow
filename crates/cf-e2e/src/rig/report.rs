@@ -21,6 +21,10 @@ const SCREEN: usize = 1_500;
 /// How many of the last lines of the daemon's log a failure shows.
 const LOG: usize = 30;
 
+/// The kinds of event that say why a delivery failed, was retried or was cancelled: each
+/// carries the daemon's own reason.
+const FAILURE_KINDS: [&str; 3] = ["delivery.failed", "delivery.retried", "delivery.cancelled"];
+
 /// How many of the last records of a conversation a failure shows.
 const RECORDS: usize = 4;
 
@@ -266,18 +270,38 @@ fn said_by_the_daemon(rig: &Rig, tell: &Tell) -> String {
 #[allow(clippy::print_stderr)] // Said in the output of the test that failed.
 pub(super) fn say(rig: &Rig) {
     let tell = Tell(rig.masker.as_ref());
+    let report = told(rig, &tell);
+    let where_kept = keep(&rig.root, &tell.text(&report), rig.reports.as_deref());
+    eprint!("{where_kept}");
+}
+
+/// What the rig showed of a failed case, as its report says it: the windows' screens, the
+/// programs' error output, the daemon's failure events and log, what the stand-in agents
+/// wrote, and what the daemon says, all told through the owner's masker.
+pub(super) fn report_of(rig: &Rig) -> String {
+    let mask = Tell(rig.masker.as_ref());
+    mask.text(&told(rig, &mask))
+}
+
+/// The report of a failed case (see [`say`]), each part of it told through the owner's masker
+/// as it is written, and the whole told again by the caller.
+fn told(rig: &Rig, tell: &Tell) -> String {
     let mut report = String::from("\n--- the rig, as the failed case left it\n");
     report.push_str(&format!("daemon stderr: {}\n", rig.daemon.errors().trim()));
     report.push_str(&format!("pane host stderr: {}\n", rig.host.errors().trim()));
+    report.push_str(
+        "the failure events of the run, from its event file (ids, kinds and the daemon's own reasons):\n",
+    );
+    report.push_str(&failure_lines(&rig.events(), tell));
     report.push_str("daemon log, the last lines:\n");
-    report.push_str(&log_lines(&rig.log(), &tell));
+    report.push_str(&log_lines(&rig.log(), tell));
     report.push_str("what the stand-in agents wrote:\n");
     report.push_str(&written(
         Path::new(rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default()),
-        &tell,
+        tell,
     ));
     report.push_str("what the daemon says:\n");
-    report.push_str(&said_by_the_daemon(rig, &tell));
+    report.push_str(&said_by_the_daemon(rig, tell));
     // Read under the lock, told after it: an owner's masker reads what the windows
     // printed under the same lock.
     let (windows, exits, stray) = {
@@ -291,14 +315,13 @@ pub(super) fn say(rig: &Rig) {
         (windows, seen.exits.clone(), seen.stray.clone())
     };
     for (id, screen) in windows {
-        report.push_str(&window_line(&id, &screen, &tell));
+        report.push_str(&window_line(&id, &screen, tell));
     }
-    report.push_str(&exits_line(&exits, &tell));
+    report.push_str(&exits_line(&exits, tell));
     if !stray.is_empty() {
         report.push_str(&format!("lines that are no frame: {stray:?}\n"));
     }
-    let where_kept = keep(&rig.root, &tell.text(&report), rig.reports.as_deref());
-    eprint!("{where_kept}");
+    report
 }
 
 /// Keeps `report`, what a rig dropped unclosed says of itself, in a file beside its home
@@ -324,6 +347,37 @@ fn keep(root: &Path, report: &str, folder: Option<&Path>) -> String {
             format!("\n--- the rig, as the failed case left it, could not be kept: {unkept}\n")
         }
     }
+}
+
+/// The failure events among `events`, each a line with its place in the file, its kind, its
+/// project and its message, and the daemon's own reason, told through `tell` and set on one
+/// line. No other part of an event is said: a window's screen and a conversation's words are
+/// none of it.
+fn failure_lines(events: &[Value], tell: &Tell) -> String {
+    let failures: Vec<&Value> = events
+        .iter()
+        .filter(|event| {
+            event["kind"]
+                .as_str()
+                .is_some_and(|kind| FAILURE_KINDS.contains(&kind))
+        })
+        .collect();
+    if failures.is_empty() {
+        return "  none\n".to_owned();
+    }
+    let mut text = String::new();
+    for event in failures {
+        let reason = tell.text(event["data"]["reason"].as_str().unwrap_or_default());
+        text.push_str(&format!(
+            "  {} {} project {} message {}: {}\n",
+            event["n"],
+            event["kind"].as_str().unwrap_or("?"),
+            event["project"],
+            event["data"]["message"],
+            reason.replace('\n', " "),
+        ));
+    }
+    text
 }
 
 /// The last [`LOG`] lines of the daemon's log `log`, told whole first, each a line
@@ -464,6 +518,24 @@ mod tests {
             let joined = wrapped.replace_all(&joined, "[masked]\n");
             joined.split('\n').map(str::to_owned).collect()
         })
+    }
+
+    #[test]
+    fn a_failure_lists_each_failure_event_by_its_ids_and_the_daemons_reason_and_nothing_else() {
+        let events = vec![
+            json!({ "n": 1, "at": "t", "kind": "window.activity", "participant": "worker", "state": "idle" }),
+            json!({ "n": 2, "at": "t", "kind": "delivery.retried", "project": 1, "data": { "message": 5, "reason": "the window never showed its first message" } }),
+            json!({ "n": 3, "at": "t", "kind": "message.sent", "project": 1, "data": { "message": 6, "body": "a transcript line" } }),
+            json!({ "n": 4, "at": "t", "kind": "delivery.failed", "project": 1, "data": { "message": 5, "reason": "the window never showed its first message; its last screen lines named a secret, so they are left out" } }),
+        ];
+        assert_eq!(
+            failure_lines(&events, &Tell(None)),
+            concat!(
+                "  2 delivery.retried project 1 message 5: the window never showed its first message\n",
+                "  4 delivery.failed project 1 message 5: the window never showed its first message; its last screen lines named a secret, so they are left out\n",
+            )
+        );
+        assert_eq!(failure_lines(&events[..1], &Tell(None)), "  none\n");
     }
 
     #[test]

@@ -738,6 +738,15 @@ impl Rig {
     }
 }
 
+impl Rig {
+    /// What a failed case of the rig leaves of it, as the report the rig keeps says it: the
+    /// windows' screens, the daemon's failure events and log, and what the stand-in agents
+    /// wrote, all told through the masker the rig was given.
+    pub fn failure_report(&self) -> String {
+        report::report_of(self)
+    }
+}
+
 impl Drop for Rig {
     /// A rig not closed (a case that failed on the way, by a check, by an error it
     /// returned, or by a close that failed: every case that passes ends by closing it)
