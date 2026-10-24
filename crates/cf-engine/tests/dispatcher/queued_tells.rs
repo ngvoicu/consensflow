@@ -347,3 +347,44 @@ fn words_in_the_first_message_of_a_launch_cancelled_before_its_window_opened_are
         notes(&context, chief)
     );
 }
+
+/// The same launch, called off by the human's Close first: the window is not
+/// opened, its first message waits for the Resume, and the human then cancels the
+/// task while the project is closed. The cancel said nothing of the words that rode
+/// in the launch, on their way as they were, so the launch's end says them
+/// (Calliope's review of the merge, T-408, P3-6).
+#[test]
+fn words_in_the_first_message_of_a_launch_a_close_called_off_are_said_to_have_gone_with_a_cancel_while_closed(
+) {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let preparing = context.adapter.prepare_holds.hold(|_| true);
+    let brief = context.give(project.id, "zeus", "Parser").message.unwrap();
+    let told = tell(&context, project.id, 1, "Use the v2 grammar");
+    context.pass().unwrap();
+    assert_eq!(context.message(brief.id).state, "delivering");
+
+    // The human closes the project while the window is prepared, then calls the
+    // task off before the Resume.
+    let closing = context.begin_close_project(project.id);
+    context.settle();
+    assert_eq!(context.project(project.id).state, "suspended");
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project.id, 1, "human")
+        .unwrap();
+    preparing.open();
+    context.finish(closing).unwrap();
+    context.settle();
+    assert!(context.host.last("zeus").is_none(), "no pane opened");
+    assert_eq!(context.project(project.id).state, "suspended");
+    let chief = context.id(project.id, "chief");
+    assert!(
+        notes(&context, chief).contains(&format!(
+            "T-1 was cancelled before its window opened. What you told its window, m-{told}, went with it: it never had it."
+        )),
+        "{:?}",
+        notes(&context, chief)
+    );
+}

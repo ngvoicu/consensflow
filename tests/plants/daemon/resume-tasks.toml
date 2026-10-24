@@ -66,6 +66,10 @@ rig-regression-resume-tasks = ["cargo", "test", "--offline", "-p", "cf-e2e", "--
 engine-meeting-main = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "meeting_main::"]
 # What one task's route reads out, a closed project's brief among it.
 daemon-routes-task = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::task::"]
+# Words told to a task's window, where their way is not the straight one.
+ledger-told-edges = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "told_edges::"]
+# The engine's tests of words told to a window before it has its task.
+engine-queued-tells = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "queued_tells"]
 
 # --- the Resume, as main had it ---
 
@@ -1856,7 +1860,7 @@ runs = ["daemon-routes"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "            _ if waits.holds(message) => held = true,"
+find = "            _ if waits.holds(message) => held = held.or(Some(WAITS)),"
 replace = ""
 
 [[plant]]
@@ -2360,6 +2364,84 @@ runs = ["daemon-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "        if held_back && !may_move(caller, &task) {"
-replace = "        if held_back {"
+find = "        if let Some(held) = held_back.filter(|_| !may_move(caller, &task.task.requester)) {"
+replace = "        if let Some(held) = held_back {"
 
+# --- the follow-ups of Calliope's review of the merge (T-408, T-413) ---
+
+[[plant]]
+name = "resume tasks: a window reads the first line of a brief that waits in its task's title"
+meant = "while_the_project_is_closed_the_title_of_a_brief_no_window_was_handed_says_it_waits"
+runs = ["daemon-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = """
+            task.task.title = held.to_owned();"""
+replace = ""
+
+[[plant]]
+name = "resume tasks: a window lists the first line of a brief that waits for the Resume"
+meant = "while_the_project_is_closed_a_card_whose_brief_no_window_was_handed_is_listed_saying_it_waits"
+runs = ["daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = "                waiting.clone_into(&mut summary.title);"
+replace = "                let _ = waiting;"
+
+[[plant]]
+name = "resume tasks: a window lists the first line of a brief that waits at the gate"
+meant = "a_card_whose_brief_waits_at_the_gate_is_listed_saying_so_but_to_its_writer"
+runs = ["daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = "    let held = !board.gated.is_empty() || waits.closed();"
+replace = "    let held = waits.closed();"
+
+[[plant]]
+name = "resume tasks: told words the human sent from the box after a cancel are never said to have arrived"
+meant = "told_words_the_human_sent_from_the_box_after_a_cancel_are_said_to_have_arrived_after_all"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = """
+        arrived_after_all(store, &pasted)?;"""
+replace = ""
+
+[[plant]]
+name = "resume tasks: told words the human sent from the box are said to have arrived after all with no cancel"
+meant = "told_words_the_human_sent_from_the_box_after_a_cancel_are_said_to_have_arrived_after_all"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = """        if task.state != "cancelled"
+            || !arrived"""
+replace = """        if !arrived"""
+
+[[plant]]
+name = "resume tasks: the Resume moves on a task the chief resumed while the project was closed"
+meant = "a_task_the_chief_resumes_while_the_project_is_closed_waits_queued_and_goes_on_at_the_resume"
+runs = ["daemon-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "             WHERE t.project_id = ? AND t.state = 'paused' AND t.paused_with_project = 1"
+replace = "             WHERE t.project_id = ? AND (t.state = 'queued' OR (t.state = 'paused' AND t.paused_with_project = 1))"
+
+[[plant]]
+name = "resume tasks: a launch a Close called off, its task cancelled while closed, tells nobody of the words in it"
+meant = "words_in_the_first_message_of_a_launch_a_close_called_off_are_said_to_have_gone_with_a_cancel_while_closed"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .launch_called_off(delivering.message)?;"""
+replace = ""

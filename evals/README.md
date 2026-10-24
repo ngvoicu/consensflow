@@ -244,7 +244,10 @@ only once its effect is seen (the paused task paused and on again, the killed
 window's task paused, a compaction boundary in the chief's own record that is new
 since the keys, the project open again with its chief's window, the Devin worker's
 window opened again after its cut, the chief's new window on the agent it was
-switched to, the tasks a Close paused out of `paused` once the owner resumed them);
+switched to, the tasks a Close paused out of `paused` by themselves once the owner
+resumed the project, each window opened again on its own conversation and told once
+that its turn was cut, and those of a window that held several left paused for the
+chief);
 one whose effect is not seen within four minutes, or whose ask was refused, is a
 break of the tenth invariant, with the board's rows and the window's screen. The
 restart after a compaction waits for a chief whose record still ends in it (A5's
