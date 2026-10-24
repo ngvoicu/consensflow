@@ -232,7 +232,7 @@ mod on_a_claude_config_of_the_cases_own {
 
         // A rig a failed case dropped is asked what the run came to, once, and cannot fail the case again.
         let dropped = Kept::new(kept.path().join("another"), Some(said));
-        drop(started(machine.path(), shims.path(), &dropped)?);
+        started(machine.path(), shims.path(), &dropped)?.close_as_dropped();
         assert_eq!(dropped.asked_what_it_came_to(), 1);
         Ok(())
     }
@@ -262,7 +262,7 @@ mod on_a_claude_config_of_the_cases_own {
         let dropped = Kept::new(kept.path().join("another"), None);
         let mut rig = started(machine.path(), shims.path(), &dropped)?;
         let home = rig.keep_home();
-        drop(rig);
+        rig.close_as_dropped();
         assert_eq!(dropped.asked().len(), 2, "{:?}", dropped.asked());
         assert!(
             dropped.asked()[0].starts_with("keep "),
@@ -293,10 +293,10 @@ mod on_a_claude_config_of_the_cases_own {
         std::fs::write(&file, "")?;
         let folder = Kept::new(file.join("claude-config"), None);
         let shims = tempfile::tempdir()?;
-        let failed = started(machine.path(), shims.path(), &folder)
-            .err()
-            .map(|failed| failed.to_string());
-        assert!(failed.is_some_and(|failed| failed.contains("claude-config")));
+        let Err(failed) = started(machine.path(), shims.path(), &folder) else {
+            panic!("a rig started on a Claude config that cannot be made");
+        };
+        assert!(failed.to_string().contains("claude-config"), "{failed}");
         assert_eq!(folder.asked_for(), 1);
         Ok(())
     }

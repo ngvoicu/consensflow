@@ -148,6 +148,27 @@ fn a_rig_its_case_closed_leaves_no_report() -> Outcome {
 const HEADING: &str = "--- the rig, as the failed case left it";
 
 #[test]
+fn a_rig_its_case_ends_as_a_drop_on_purpose_leaves_no_report() -> Outcome {
+    // A case about what a drop does (live-keychain's: the Claude config of a rig a failed
+    // case dropped is asked what the run came to), merged with the rule that a case that
+    // passes leaves no report (T-501).
+    let rig = crate::rig()?;
+    let home = home_of(&rig);
+
+    rig.close_as_dropped();
+
+    assert!(
+        !report_beside(&home).exists(),
+        "a report was kept of a rig its case dropped on purpose"
+    );
+    assert!(
+        !home.exists(),
+        "the home of a rig dropped on purpose is gone"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_rig_its_case_left_on_an_error_it_returned_keeps_its_report() -> Outcome {
     let mut home = None;
 

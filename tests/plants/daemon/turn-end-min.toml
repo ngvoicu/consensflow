@@ -1547,8 +1547,8 @@ runs = ["tem-e2e-machine"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = '                Some(folder) => config.var("CLAUDE_CONFIG_DIR", folder.clone()),'
-replace = '                Some(_) => config.unset("CLAUDE_CONFIG_DIR"),'
+find = '                (Some(folder), _) => config.var("CLAUDE_CONFIG_DIR", folder.clone()),'
+replace = '                (Some(_), _) => config.unset("CLAUDE_CONFIG_DIR"),'
 
 [[plant]]
 name = "turn-end-min live monitor-wait: its looks leave out what began before the first call itself"

@@ -113,6 +113,9 @@ folder-trust-rig-servers-frozen = ["cargo", "test", "--offline", "-p", "cf-e2e",
 folder-trust-rig-servers-refused = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_whose_dialog_leaves_its_server_out"]
 folder-trust-rig-servers-six = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked_of_six_new_servers"]
 folder-trust-rig-servers-later = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_server_added_to_the_projects_mcp_json_later"]
+folder-trust-kit-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::"]
+folder-trust-kit-window = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::window::"]
+folder-trust-rig-dropped = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_its_case_ends_as_a_drop_on_purpose_leaves_no_report"]
 folder-trust-rig-servers-keys = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked_to_trust_the_projects_new_repository_then_of_its_server"]
 
 [[plant]]
@@ -1490,3 +1493,38 @@ find = '''
                 format!("the MCP server {name}")'''
 replace = '''
                 format!("a new MCP server{}", &name[..0])'''
+
+[[plant]]
+name = "folder trust: the kit's own copy of the login wins over a Claude config folder the run was given (T-501, the merge with the long run)"
+meant = "a_claude_config_the_run_was_given_wins_over_the_kits_own_copy_of_the_login"
+runs = ["folder-trust-kit-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '                (Some(folder), _) => config.var("CLAUDE_CONFIG_DIR", folder.clone()),'
+replace = '                (Some(folder), None) => config.var("CLAUDE_CONFIG_DIR", folder.clone()),'
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '                (None, Some(kept)) => config.claude_config(Arc::clone(kept)),'
+replace = '                (_, Some(kept)) => config.claude_config(Arc::clone(kept)),'
+
+[[plant]]
+name = "folder trust: a Claude window that reads its project's servers loses the file of servers it was given (T-501, the merge with the long run)"
+meant = "a_claude_window_shuts_out_every_mcp_server_but_its_files_and_where_asked_its_projects"
+runs = ["folder-trust-kit-window"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/window/open.rs"
+find = "    if let Some(servers) = mcp_config {"
+replace = "    if let Some(servers) = mcp_config.filter(|_| !projects_servers) {"
+
+[[plant]]
+name = "folder trust: a rig its case ends as a drop on purpose keeps a report (T-501, the merge with rig reports)"
+meant = "a_rig_its_case_ends_as_a_drop_on_purpose_leaves_no_report"
+runs = ["folder-trust-rig-dropped"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = "            || (!self.closed && !failure_expected && !self.dropped_on_purpose)"
+replace = "            || (!self.closed && !failure_expected)"

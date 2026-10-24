@@ -110,6 +110,7 @@ impl Rig {
             closed: false,
             close_failed: false,
             close_expected_to_fail: AtomicBool::new(false),
+            dropped_on_purpose: false,
             _turn: turn,
         })
     }

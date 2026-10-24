@@ -37,8 +37,12 @@ runs = ["reports-closed"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
-find = "        if std::thread::panicking() || (!self.closed && !failure_expected) {"
-replace = "        if true {"
+find = '''
+        if std::thread::panicking()
+            || (!self.closed && !failure_expected && !self.dropped_on_purpose)
+        {'''
+replace = '''
+        if true {'''
 
 [[plant]]
 name = "rig reports: a rig whose case returned an error and left it keeps no report"
@@ -47,8 +51,12 @@ runs = ["reports-error"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
-find = "        if std::thread::panicking() || (!self.closed && !failure_expected) {"
-replace = "        if std::thread::panicking() {"
+find = '''
+        if std::thread::panicking()
+            || (!self.closed && !failure_expected && !self.dropped_on_purpose)
+        {'''
+replace = '''
+        if std::thread::panicking() {'''
 
 [[plant]]
 name = "rig reports: a rig shut down, whose case then failed a check, keeps no report"
@@ -57,8 +65,12 @@ runs = ["reports-check"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
-find = "        if std::thread::panicking() || (!self.closed && !failure_expected) {"
-replace = "        if !self.closed && !failure_expected {"
+find = '''
+        if std::thread::panicking()
+            || (!self.closed && !failure_expected && !self.dropped_on_purpose)
+        {'''
+replace = '''
+        if !self.closed && !failure_expected && !self.dropped_on_purpose {'''
 
 [[plant]]
 name = "rig reports: where a report is kept is said past the output a test run holds, for a case that passed"

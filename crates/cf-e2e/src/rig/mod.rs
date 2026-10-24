@@ -402,6 +402,8 @@ pub struct Rig {
     close_failed: bool,
     /// Whether the case holds its close to fail ([`Rig::expect_the_close_to_fail`]).
     close_expected_to_fail: AtomicBool,
+    /// Whether the case ends the rig as a drop does, on purpose ([`Rig::close_as_dropped`]).
+    dropped_on_purpose: bool,
     _turn: MutexGuard<'static, ()>,
 }
 
@@ -704,6 +706,14 @@ impl Rig {
         self.close_expected_to_fail.store(true, Ordering::Relaxed);
     }
 
+    /// Ends the rig as a case that failed leaves it, dropped unclosed: the drop's own way
+    /// (its home kept or taken away, its Claude config asked what the run came to), for
+    /// a case about that way. It keeps no report of the rig: the case holds to the drop,
+    /// and passes or fails by what it finds after.
+    pub fn close_as_dropped(mut self) {
+        self.dropped_on_purpose = true;
+    }
+
     /// Ends the rig, as [`Rig::close`] says. It is closed once that succeeded: a close
     /// that failed leaves the rig to be dropped unclosed, which keeps its report.
     fn shutdown(&mut self, exit: Duration) -> Result<()> {
@@ -784,7 +794,9 @@ impl Drop for Rig {
     fn drop(&mut self) {
         let failure_expected =
             self.close_failed && self.close_expected_to_fail.load(Ordering::Relaxed);
-        if std::thread::panicking() || (!self.closed && !failure_expected) {
+        if std::thread::panicking()
+            || (!self.closed && !failure_expected && !self.dropped_on_purpose)
+        {
             report::say(self);
         }
         let _ = self.shutdown(EXIT);
