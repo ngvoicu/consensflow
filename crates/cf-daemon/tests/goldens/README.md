@@ -67,3 +67,9 @@ the commands that take one says `(task add, reopen, resume, edit and tell)`, and
 `Those five say how many characters went`, in `cf-board-028`: those words alone. Where
 both sides had changed `cf-board-022`, `-028` and `-029`, each side's hand changes were
 put together, word for word, and nothing else moved.
+
+`cf task list` with idle sessions (board task T-261, 3.0.6) moved the usage `cf` prints once
+more: its line reads `cf task list [--all]` and says what the flag adds, in every print of it
+in `cf-board-028` and `-029`. Changed by hand, in those words alone. The recordings of the
+crates' own goldens (`crates/cf/tests/goldens/board.json`) were changed with them, and one
+more there: the case `cf task list --json` carries an `idle` key (see that folder's README).
