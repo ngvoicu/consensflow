@@ -590,7 +590,7 @@ pub(crate) fn cancel_message(
 /// continuation whose task is no longer at work in its window is withdrawn
 /// instead, and so is one that rides in it (`continuations`). A brief of the
 /// chief's own step done while it was on its way is not queued again
-/// (`withdrawn_late`).
+/// (`withdrawn_late`), nor the brief of a task that failed meanwhile.
 pub(crate) fn retry_delivery(
     store: &mut Store,
     message_id: i64,
@@ -602,6 +602,17 @@ pub(crate) fn retry_delivery(
         let message = require_message(store, message_id, "delivering")?;
         if let Some(task) = message_task(store, message_id)? {
             if withdrawn_late(store, &message, &task)? {
+                return known_message(store, message_id);
+            }
+            // The brief of a task the daemon failed while it was being pasted (its pane
+            // died) has no window to go to again: only the task's reopening wants it, and
+            // that brings the brief itself.
+            if message.kind == "task" && task.state == "failed" {
+                cancel_message(
+                    store,
+                    message_id,
+                    &format!("T-{} failed before it landed", task.number),
+                )?;
                 return known_message(store, message_id);
             }
         }
