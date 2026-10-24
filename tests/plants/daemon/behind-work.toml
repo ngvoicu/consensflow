@@ -377,7 +377,7 @@ replace = "            \"paused\" => format!(\"resume it\"),\n            \"queu
 
 [[plant]]
 name = "behind work: the removal of a member does not tell the chief of the follow-up behind its task"
-meant = "a_member_removed_with_a_task_a_follow_up_waits_behind_tells_the_chief_once_it_will_never_start"
+meant = "a_member_removed_with_a_task_a_follow_up_waits_behind_cancels_both_and_tells_the_chief_of_the_rest"
 runs = ["ledger-behind-work"]
 
 [[plant.edit]]

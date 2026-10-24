@@ -42,6 +42,7 @@ fake-agent-compact = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features"
 fake-devin-store = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-devin", "store::"]
 # The rig's stranger, which runs beside every window: its own tests, and a real rig's close.
 e2e-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger"]
+e2e-lib-process-shell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell::"]
 rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stranger::"]
 # The rig's last word, once it has closed: a real daemon and pane host.
 e2e-rig-last-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "last_exits"]
@@ -1751,8 +1752,8 @@ replace = "        if ran.is_some_and(|ran| ran.held && false) {"
 
 [[plant]]
 name = "long run: the rig's stranger, its own child, is left running when the rig is dropped"
-meant = "a_stranger_dropped_is_ended_through_its_handle"
-runs = ["e2e-lib-stranger"]
+meant = "a_spawned_program_is_ended_when_it_goes_out_of_scope"
+runs = ["e2e-lib-process-shell"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/process/spawned.rs"

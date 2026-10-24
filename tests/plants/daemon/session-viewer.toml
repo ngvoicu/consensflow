@@ -873,6 +873,10 @@ find = '''            element('span', 'terminal-meta', participant.harness ?? ''
 replace = '''            element('span', 'terminal-meta', participant.harness ?? ''),
 '''
 
+# Drawn as markup without the handler the app's policy refuses: the spec's afterEach holds every
+# test to a page the policy refuses nothing of, and a test whose body failed beside a hook that
+# threw is no catch of its own (the plants' runner). The body is what this plant is for.
+
 [[plant]]
 name = "session viewer: an item's text is drawn as markup"
 meant = "labels items as the task drawer does, a compaction's summary as one, and shows every text as text"
@@ -881,7 +885,7 @@ runs = ["viewer-ui-labels"]
 [[plant.edit]]
 file = "app/ui/core/history-viewer.js"
 find = "    entry.append(element('pre', 'transcript-body', item.text))"
-replace = "    entry.insertAdjacentHTML('beforeend', `<pre class=\"transcript-body\">${item.text}</pre>`)"
+replace = '''    entry.insertAdjacentHTML('beforeend', `<pre class="transcript-body">${item.text.replace(/ onerror="[^"]*"/g, '')}</pre>`)'''
 
 [[plant]]
 name = "session viewer: a compaction's summary is labelled as what was sent to the window"
