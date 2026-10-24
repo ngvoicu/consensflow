@@ -1122,6 +1122,24 @@ impl Dispatcher {
                 return Ok(());
             }
         }
+        // A launch's first message that its window is delivered once it is up goes
+        // in as soon as the window is past any question of trusting its folder, has
+        // drawn and is at rest, its project open (`hand_first`).
+        let owed = record
+            .delivery
+            .borrow()
+            .delivering
+            .as_ref()
+            .is_some_and(|delivering| delivering.owed.is_some());
+        if owed {
+            if !drawing && observed.settled && observed.waiting.is_none() && project.state == "open"
+            {
+                let (this, held) = (Rc::clone(self), Rc::clone(record));
+                self.act(record, async move { this.hand_first(&held).await })
+                    .await;
+            }
+            return Ok(());
+        }
         let free = record.delivery.borrow().delivering.is_none()
             && observed.settled
             && observed.waiting.is_none();

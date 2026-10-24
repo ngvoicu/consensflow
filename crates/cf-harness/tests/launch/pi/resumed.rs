@@ -149,14 +149,18 @@ fn a_window_that_shows_another_conversation_is_not_read_at_rest_by_the_turn_the_
     assert_eq!(observed.switched.as_deref(), Some("another-conversation"));
 }
 
+/// A window opened for a message its extension's inbox gives it once it is up
+/// (T-432) begins no turn as it opens: the message a launch names is not on its
+/// command line, and the window reads at rest by the turn the quit cut, as one
+/// opened with none does, so that its message can go in.
 #[test]
-fn a_window_opened_with_a_message_of_its_own_is_not_read_at_rest_by_the_turn_the_quit_cut() {
+fn a_window_opened_for_a_message_it_is_given_once_up_is_read_at_rest_by_the_turn_the_quit_cut() {
     let home = Home::new();
     let (_record, window) = resumed(&home, cut_in_a_call(), Some(TASK));
     shows(&home, SESSION);
     assert!(
-        !settled(&window),
-        "its message is its turn, and it is not in the record yet"
+        settled(&window),
+        "its message is not in it yet, and the turn the quit cut is no turn of its own"
     );
 }
 

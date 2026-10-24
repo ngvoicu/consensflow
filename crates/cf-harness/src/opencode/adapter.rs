@@ -54,8 +54,8 @@ use super::quota::retry_quota;
 use super::role::configure;
 use super::version;
 use crate::contract::{
-    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
-    Skill, Window, Work,
+    Adapter, Admission, FirstMessage, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
+    Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
@@ -219,8 +219,8 @@ impl Adapter for OpenCodeAdapter {
     }
 
     /// Its first message is posted to its server once the window is up (`seed`).
-    fn first_message_once_up(&self) -> bool {
-        true
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Started
     }
 }
 

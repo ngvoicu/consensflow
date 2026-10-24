@@ -548,6 +548,8 @@ fn a_displaced_message_that_rides_in_the_paste_of_another_is_not_begun_and_its_l
         free_since: None,
         entered_again: false,
         carried: Vec::new(),
+        owed: None,
+        late: false,
     };
     assert!(
         context

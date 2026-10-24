@@ -69,8 +69,8 @@ use super::record;
 use super::wire::selected_session;
 use super::wire_log::{Said, WireLog, PROMPT_GAP_MS};
 use crate::contract::{
-    Adapter, Admission, Held, Input, Interrupt, Launch, Observed, Pane, PaneHost, Prepared,
-    Readiness, Records, Skill, Window, Work,
+    Adapter, Admission, FirstMessage, Held, Input, Interrupt, Launch, Observed, Pane, PaneHost,
+    Prepared, Readiness, Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Role};
@@ -325,6 +325,12 @@ impl Adapter for DevinAdapter {
             presses: 2,
             close_after: Some(Duration::from_secs(1)),
         }
+    }
+
+    /// In a file of the launch's own, which `--prompt-file` names and Devin reads
+    /// as it opens (`install::prepare_prompt`).
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Opened
     }
 
     /// Pasted, and its box cleared with [`CLEAR_INPUT`].

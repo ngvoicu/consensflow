@@ -171,18 +171,22 @@ fn a_window_that_shows_another_thread_is_not_read_at_rest_by_the_turn_the_quit_c
     assert_eq!(observed.switched.as_deref(), Some(NEXT));
 }
 
+/// A window opened for a message the broker gives it once it is up (T-432) begins
+/// no turn as it opens: the message a launch names is not on its command line, and
+/// the window reads at rest by the turn the quit cut, as one opened with none does,
+/// so that its message can go in.
 #[test]
-fn a_window_opened_with_a_message_of_its_own_is_not_read_at_rest_by_the_turn_the_quit_cut() {
+fn a_window_opened_for_a_message_it_is_given_once_up_is_read_at_rest_by_the_turn_the_quit_cut() {
     let home = Home::new();
     let (record, fakes, window) = resumed(&home, cut_in_a_call(), Some(TASK));
     assert!(
-        !looks(&fakes, &window, Some(THREAD)).settled,
-        "its message is its turn, and it is not in the record yet"
+        looks(&fakes, &window, Some(THREAD)).settled,
+        "its message is not in it yet, and the turn the quit cut is no turn of its own"
     );
     assert_eq!(
         record.looks.get(),
-        1,
-        "the record was read by the look alone, not for a turn left open"
+        2,
+        "the record was read for a turn left open, then by the look"
     );
 }
 

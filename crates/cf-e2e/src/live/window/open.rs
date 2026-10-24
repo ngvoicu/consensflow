@@ -159,7 +159,7 @@ pub struct Open<'a> {
     claude_alone: Option<Value>,
     /// The MCP servers file a Claude window is given (`--mcp-config`), the only one it has.
     mcp_config: Option<PathBuf>,
-    /// The window's first message, on its command line ([`Open::seed`]).
+    /// The window's first message, as it opens ([`Open::seed`]).
     seed: Option<String>,
 }
 
@@ -185,9 +185,10 @@ impl<'a> Open<'a> {
         }
     }
 
-    /// The window opens with `message` its first, on its command line, as the daemon
-    /// launches a member's window with its task: its first turn begins as it opens, with
-    /// no rest before it.
+    /// The window opens with `message` its first, its first turn under way as it opens,
+    /// with no rest before it: Devin's in the prompt file its launch names, as the
+    /// daemon gives it; any other harness's on this check's own window's command line,
+    /// where the daemon delivers a window its first message once it is up (T-432).
     #[must_use]
     pub fn seed(mut self, message: &str) -> Self {
         self.seed = Some(message.to_owned());
@@ -310,7 +311,15 @@ impl<'a> Open<'a> {
         }
         let start = match &self.resume {
             Some(resumed) => ask::resume(agent, resumed)?,
-            None => ask::start(agent, session, self.seed.as_deref())?,
+            None => {
+                let mut start = ask::start(agent, session, self.seed.as_deref())?;
+                if let (Some(start), Some(seed)) = (start.as_mut(), &self.seed) {
+                    if start.prompt.is_none() {
+                        start.args.push(seed.clone());
+                    }
+                }
+                start
+            }
         }
         .ok_or_else(|| {
             Error::Daemon(format!(

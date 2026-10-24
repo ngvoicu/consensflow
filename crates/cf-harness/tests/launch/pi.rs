@@ -250,7 +250,8 @@ fn extension_takes(home: &Home) -> Vec<String> {
 }
 
 #[test]
-fn launches_pi_with_its_extension_a_session_name_of_ours_and_the_task_last() {
+fn launches_pi_with_its_extension_a_session_name_of_ours_and_no_task_or_role_text_on_its_command_line(
+) {
     let home = Home::new();
     let (adapter, _fakes) = adapter(&home);
     let plan = prepare(&adapter, &Request::default()).unwrap();
@@ -280,8 +281,9 @@ fn launches_pi_with_its_extension_a_session_name_of_ours_and_the_task_last() {
         "SKILL.md",
     ]);
     let mut argv = vec![home.executable.clone(), "--extension".to_owned(), extension];
-    argv.extend(["--skill".to_owned(), skill]);
-    argv.extend(["--append-system-prompt".to_owned(), ROLE.to_owned()]);
+    argv.extend(["--skill".to_owned(), skill.clone()]);
+    // The role's text by its file, which Pi reads where the path names one.
+    argv.extend(["--append-system-prompt".to_owned(), skill]);
     argv.extend(words(&["--session-id"]));
     argv.push(session);
     argv.extend(words(&[
@@ -290,9 +292,14 @@ fn launches_pi_with_its_extension_a_session_name_of_ours_and_the_task_last() {
         "--thinking",
         "high",
         "--approve",
-        TASK,
     ]));
+    // Its task goes in through the extension's inbox once the window is up
+    // (`FirstMessage::Delivered`): every process on the machine reads a command line.
     assert_eq!(plan.argv, argv);
+    assert!(plan
+        .argv
+        .iter()
+        .all(|word| !word.contains(TASK) && !word.contains(ROLE)));
     let root = home.launch_folder();
     let env = |name: &str| {
         let found = plan.env.iter().find(|(held, _)| held == name);

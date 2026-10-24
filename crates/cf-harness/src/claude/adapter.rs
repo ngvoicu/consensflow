@@ -65,8 +65,8 @@ use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
-    Adapter, Admission, Held, Input, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Skill, Trusts, Waiting, Window, Work,
+    Adapter, Admission, FirstMessage, Held, Input, Launch, Observed, Pane, PaneHost, Prepared,
+    Readiness, Records, Skill, Trusts, Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
@@ -143,24 +143,23 @@ impl Adapter for ClaudeAdapter {
                 None
             };
             let options = told(relaunched.as_ref(), &session);
-            // A turn the old process left open, which a window with no message
-            // to begin one has to be told apart from by what the record holds
-            // later. A window given a message begins its own turn.
-            let left_open = if resumable && launch.message.is_none() {
+            // A turn the old process left open, which the window has to be told
+            // apart from by what the record holds later: it begins its own only
+            // once it is delivered a message.
+            let left_open = if resumable {
                 let before = self.records.look(Harness::Claude, &session, &options).await;
                 LeftOpen::of(&before)
             } else {
                 None
             };
             let agent = launch.agent.unwrap_or_default();
-            let message = launch.message.map(window_text);
             let open = if resumable {
                 window_args::resume
             } else {
                 window_args::start
             };
             // None only for a conversation of an empty id, which no ledger holds.
-            let invocation = open(Harness::Claude, agent, Some(&session), message.as_deref())
+            let invocation = open(Harness::Claude, agent, Some(&session), None)
                 .ok_or_else(|| "a Claude window opens on a session id".to_owned())?;
             let mut argv = vec![executable];
             argv.extend(settings);
@@ -212,6 +211,15 @@ impl Adapter for ClaudeAdapter {
         } else {
             Servers::InGroup
         }
+    }
+
+    /// Pasted once the window is past the question of trusting its folder and has
+    /// drawn, as every later message is: Claude Code 2.1.310 has no other way in
+    /// for an interactive window's first message (a SessionStart hook's
+    /// `initialUserMessage` is read and never sent, T-432). Its record wraps the
+    /// paste (`<pasted_content id="…">`), as it wraps every later message's.
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Delivered
     }
 
     /// Pasted, and its box cleared with Control-C ([`stopped::CLEAR_INPUT`]).

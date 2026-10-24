@@ -90,14 +90,8 @@ pub trait Adapter {
         false
     }
 
-    /// Whether a window's first message goes in once the window is up, through
-    /// the harness's own server, which asks [`PaneHost::admits`] then
-    /// ([`Window::started`]): OpenCode's. Every other harness's goes in with the
-    /// command line its window opens with ([`Launch::message`]), handed over as
-    /// the window's pane is asked for.
-    fn first_message_once_up(&self) -> bool {
-        false
-    }
+    /// How a window is given its first message ([`FirstMessage`]).
+    fn first_message(&self) -> FirstMessage;
 
     /// How its windows take the words they are handed: over a channel of the
     /// harness's own, or pasted into the window's input box ([`Input`]).
@@ -156,6 +150,27 @@ pub struct Interrupt {
     pub close_after: Option<Duration>,
 }
 
+/// How a window is given its first message. None is on its command line: what
+/// is there is read by every process on the machine (`ps` is set-uid root on
+/// macOS), and a kill or wait by pattern whose words a message holds matches the
+/// window (T-432: a SIGINT to "xtask plants" closed two workers' windows).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FirstMessage {
+    /// In a file of the launch's own that the command line names, read as the
+    /// window opens ([`Launch::message`]), and handed over as the window's pane is
+    /// asked for: Devin's `--prompt-file`.
+    Opened,
+    /// Posted through the harness's own server once the window is up, which asks
+    /// [`PaneHost::admits`] then ([`Window::started`]): OpenCode's.
+    Started,
+    /// Handed over as any later message is, by the window's own
+    /// [`Window::deliver`], once the window is past any question of trusting its
+    /// folder and has drawn its screen: Claude Code's pasted (its record wraps it
+    /// as it wraps every paste), Pi's through its extension's inbox, Codex's
+    /// through its broker. The launch is given no [`Launch::message`].
+    Delivered,
+}
+
 /// How a harness's windows take the words they are handed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Input {
@@ -189,7 +204,10 @@ pub struct Launch<'a> {
     /// window of a daemon before this one): what the record holds then may still
     /// be written to by a process ConsensFlow does not hold.
     pub previous_gone: bool,
-    /// The window's first message, as the engine wrote it.
+    /// The window's first message, as the engine wrote it, where its harness takes
+    /// it as its window opens or once it is up ([`FirstMessage::Opened`],
+    /// [`FirstMessage::Started`]): none for a harness whose windows are delivered
+    /// their first message.
     pub message: Option<&'a str>,
     /// The agent it runs on: none for a chief from before every chief had one.
     pub agent: Option<Agent<'a>>,

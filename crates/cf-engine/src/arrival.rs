@@ -164,6 +164,15 @@ impl Dispatcher {
                 return Ok(());
             }
             let waited = self.now() - delivering.since;
+            // One handed over by a paste once its window was up is pressed Enter for
+            // once more, as any paste is; one its window read as it opened never is.
+            if delivering.late
+                && !delivering.entered_again
+                && waited > ENTER_AGAIN_MS
+                && self.pasted(record)
+            {
+                return self.enter_again(record, delivering.message).await;
+            }
             // The chief's window is the human's: however long it takes to
             // show its first message (the handoff), it is never closed for that.
             if delivering.chief || waited <= self.seams.limits.launch_ms {
@@ -178,7 +187,13 @@ impl Dispatcher {
             }
             let (this, held) = (Rc::clone(self), Rc::clone(record));
             let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
-            let because = "the window never showed its first message";
+            // A window delivered its first message once up that never took it was
+            // never ready for it (`hand_first`).
+            let because = if delivering.owed.is_some() {
+                "the window was never ready for its first message"
+            } else {
+                "the window never showed its first message"
+            };
             self.settle_failure(
                 delivering,
                 &self.unstarted_because(record, because, &shown),

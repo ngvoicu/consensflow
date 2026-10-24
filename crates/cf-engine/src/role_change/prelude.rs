@@ -198,6 +198,8 @@ impl Dispatcher {
             free_since: None,
             entered_again: false,
             carried: Vec::new(),
+            owed: None,
+            late: false,
         })
     }
 

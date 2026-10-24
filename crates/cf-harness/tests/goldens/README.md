@@ -171,6 +171,22 @@ once, with the reason here and in the commit.
   one look read `inFlight: true` and `settlement: in-flight`, and reads `false`
   and `settled` now; its items, `failed` and `quota` are Node's.
 
+- **No first message on a command line** (2026-10-24, T-432). A worker sent SIGINT
+  to every process whose `ps` line matched "xtask plants", and two other workers'
+  Claude windows closed: Node's adapters gave Claude Code, Pi and Codex their
+  window's first message, a task's brief, as the last argument of the window's
+  command line, which every process on the machine reads (`/bin/ps` is set-uid root
+  on macOS) and every kill or wait by pattern matches. Claude Code's, Pi's and
+  Codex's windows now open with none, and are delivered it once they are up as
+  every later message is (`FirstMessage::Delivered`); Devin still reads its own from
+  a file, and OpenCode is still posted its own. Pi's role text goes by its file,
+  which `--append-system-prompt` reads where the path names one. `launch/` moved for
+  it: in `tables.json`, the 162 windows of Claude Code, Pi and Codex given a seed
+  lost it from the end of their arguments; in each platform's scenarios, the 108
+  launches of those three given a message lost it from the end of their `argv`, and
+  Pi's 59 launches name the role's file after `--append-system-prompt` in place of
+  its text (the file `--skill` names). Nothing else of a step moved.
+
 ## The launch scenarios
 
 A scenario of `launch/scenarios.<platform>.json` is data, and the Rust player
