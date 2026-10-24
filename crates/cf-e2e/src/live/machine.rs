@@ -6,7 +6,9 @@
 //! (and writes its own sessions there, as it does for them), but for Claude Code's:
 //! a Claude Code window runs on a config folder of the run's own, which holds a copy
 //! of the machine's login and is removed with the run ([`login`]), so that nothing of
-//! the run is written in the person's `~/.claude`. What a window is given of the
+//! the run is written in the person's `~/.claude`; a run given a Claude config folder
+//! of its own (`--claude-config`) has its windows keep their config there instead: its
+//! caller made it and copied the login into it. What a window is given of the
 //! machine is what [`rig`] says: the variables the harness reads its login by, the
 //! folders it and Node are in, a locale that draws its screen, and the user's name,
 //! which a harness may ask the system's keychain by.
@@ -29,7 +31,7 @@ use std::sync::Arc;
 use super::login::Login;
 use crate::process::{own_var, Run};
 use crate::rig::{ClaudeConfig, Config};
-use crate::{files, Error, Result};
+use crate::{checkout, files, Error, Result};
 
 pub use path::{command, working_command};
 pub use wrapper::{isolated_claude, shimmed_claude, shimmed_claude_with_servers, ISOLATION};
@@ -284,21 +286,43 @@ fn windows_environment(
         .collect()
 }
 
+/// Where the report of a rig built for the real harnesses is kept, from the checkout's
+/// root: under its build folder, not in the machine's temp folder. The windows of such a
+/// rig show what a real harness drew with the person's login, which no masker is sure to
+/// hide, and the temp folder would keep it for good; a clean of the build folder takes
+/// this away. CI uploads it for a failed job (ten cases of the rig suite build on this
+/// rig with the stand-in, and hold no real harness's output there).
+const REPORTS: &str = "app/src-tauri/target/live-reports";
+
 /// A rig whose windows run the stand-in `stand_in` for Claude and find every
 /// harness of `installs`, logged in as the machine is: each one's command's
 /// folder, and Node's where it is another, are on their `PATH` (in the order
 /// given, none twice), and the variables they read their logins by are the
 /// machine's. The windows of the machine's Claude Code run on a config folder of
 /// the run's own, with a copy of its login ([`Installed::claude_config`]), which is
-/// the one the daemon reads Claude's records in as well; a Claude that has none (a
-/// stand-in, or the machine's on Windows) reads its config where `CLAUDE_CONFIG_DIR`
-/// does not point, so a rig that has it has the variable unset. The windows have a
-/// locale that draws their screens, and the user's name, which a harness may ask
-/// the system's keychain by; on Windows they also have the machine's own folders for
-/// settings and programs ([`WINDOWS`]).
+/// the one the daemon reads Claude's records in as well; where the run was given a
+/// folder of its own for it (`--claude-config`: one its caller made and copied a login
+/// into), they keep their config there instead. A Claude that has neither (a stand-in,
+/// or the machine's on Windows) reads its config where `CLAUDE_CONFIG_DIR` does not
+/// point, so a rig that has it has the variable unset. The windows have a locale that
+/// draws their screens, and the user's name, which a harness may ask the system's
+/// keychain by; on Windows they also have the machine's own folders for settings and
+/// programs ([`WINDOWS`]).
 pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
+    rig_keeping_claude_in(installs, stand_in, super::option("claude-config"))
+}
+
+/// [`rig`], whose Claude windows keep their config in `claude_config` where it names a
+/// folder.
+fn rig_keeping_claude_in(
+    installs: &[Installed],
+    stand_in: impl Into<PathBuf>,
+    claude_config: Option<String>,
+) -> Config {
     let machine = |name: &str| own_var(name);
-    let mut config = Config::new(stand_in).var("LANG", "en_US.UTF-8");
+    let mut config = Config::new(stand_in)
+        .var("LANG", "en_US.UTF-8")
+        .reports_in(checkout::path(REPORTS));
     for name in ["USER", "LOGNAME"] {
         if let Some(value) = machine(name) {
             config = config.var(name, value);
@@ -319,9 +343,12 @@ pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
             config = config.var(&name, value);
         }
         if install.harness == Harness::Claude {
-            config = match install.claude_config() {
-                Some(claude_config) => config.claude_config(Arc::clone(claude_config)),
-                None => config.unset("CLAUDE_CONFIG_DIR"),
+            // A folder the run was given wins: its caller made it and copied the login
+            // into it. Otherwise the kit's own copy of the login, where it has one.
+            config = match (&claude_config, install.claude_config()) {
+                (Some(folder), _) => config.var("CLAUDE_CONFIG_DIR", folder.clone()),
+                (None, Some(kept)) => config.claude_config(Arc::clone(kept)),
+                (None, None) => config.unset("CLAUDE_CONFIG_DIR"),
             };
         }
     }

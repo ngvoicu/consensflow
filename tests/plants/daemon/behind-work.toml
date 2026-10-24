@@ -310,8 +310,8 @@ runs = ["cf-lib-board"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "const MOVES: [&str; 7] = [\n    \"done\", \"accept\", \"cancel\", \"reopen\", \"edit\", \"pause\", \"resume\",\n];\n"
-replace = "const MOVES: [&str; 6] = [\"done\", \"accept\", \"cancel\", \"reopen\", \"pause\", \"resume\"];\n"
+find = "const MOVES: [&str; 8] = [\n    \"done\", \"accept\", \"cancel\", \"reopen\", \"edit\", \"pause\", \"resume\", \"finish\",\n];\n"
+replace = "const MOVES: [&str; 7] = [\"done\", \"accept\", \"cancel\", \"reopen\", \"pause\", \"resume\", \"finish\"];\n"
 
 [[plant]]
 name = "brief edit: `cf task edit` accepts no brief"
@@ -370,8 +370,8 @@ runs = ["ledger-edited-brief"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = "            \"paused\" => tell,\n"
-replace = "            \"paused\" => format!(\"resume it\"),\n"
+find = "            \"paused\" | \"queued\" => tell,\n"
+replace = "            \"paused\" => format!(\"resume it\"),\n            \"queued\" => tell,\n"
 
 # The merge with T-125 and T-152 (wt/board-fixes): a removal, a decline and a failure with a follow-up behind a task.
 

@@ -49,7 +49,7 @@ fn asking() -> Config {
 }
 
 /// `git init` in `folder`.
-fn git_init(folder: &Path) -> Outcome {
+pub(crate) fn git_init(folder: &Path) -> Outcome {
     let ran = Run::new(Path::new("git"))
         .args(["init", "-q"])
         .arg(folder)
@@ -85,7 +85,7 @@ fn real(folder: &Path) -> String {
 }
 
 /// The notes to the human that speak of trusting `folder`.
-fn notes_of(project: &Project, folder: &Path) -> cf_e2e::Result<Vec<String>> {
+pub(crate) fn notes_of(project: &Project, folder: &Path) -> cf_e2e::Result<Vec<String>> {
     let folder = real(folder);
     Ok(project
         .inbox("human")?
@@ -97,7 +97,7 @@ fn notes_of(project: &Project, folder: &Path) -> cf_e2e::Result<Vec<String>> {
 }
 
 /// The folders the stand-in was told to trust, a yes each.
-fn trusted(rig: &Rig) -> String {
+pub(crate) fn trusted(rig: &Rig) -> String {
     let config = rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default();
     files::read_string(&Path::new(config).join("trusted-folders")).unwrap_or_default()
 }

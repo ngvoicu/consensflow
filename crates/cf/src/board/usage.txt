@@ -23,14 +23,18 @@ cf inside a ConsensFlow window: the board's commands.
   cf task list                      the board: what waits for a member, then every lane
   cf task get T-3                   one task and its whole thread
   cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)
+                                    --page 2 for older ones, 50 a page; --find "…" for those that say it
   cf task done T-3 "…"              finish a task assigned to you (the chief)
   cf task accept|cancel T-3         move a task you asked for
   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
   cf task edit T-3 "…"              replace the brief of a task no window has yet (open, queued, or paused)
   cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait
   cf task resume T-3 "…"            go on with it: the same window, with your words
+  cf task finish T-3                take what a working task's worker said last as its result;
+                                    what its turn left running is not ended
   cf tell T-3 "…"                   stop T-3 and put this to its window: its answer arrives as
                                     a message; then cf task resume T-3 "…"
+                                    (queued: kept for its window, to go in after its brief)
   cf inbox [read m-12]              what is waiting for you, or one message in full
   cf ask "…"                        a question to the chief (a member's; the chief asks the
                                     human in its own terminal)
@@ -44,5 +48,8 @@ cf inside a ConsensFlow window: the board's commands.
 
 Any "…" can be - to read the text from standard input, as written:
   cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)
+A long one is surest in a file, which no shell cuts (task add, reopen, resume, edit and tell):
+  cf task add --tier standard --file brief.md
+Those five say how many characters went and how the text ends: see that it is all there.
 
 Add --json for machine output.

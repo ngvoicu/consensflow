@@ -262,6 +262,24 @@ fn a_harness_needs_its_commands_folder_and_nodes_where_that_is_another() {
 }
 
 #[test]
+fn a_rig_given_a_claude_config_of_its_own_keeps_its_claude_windows_there() {
+    let claude = Installed::at(Harness::Claude, "/opt/bin/claude", "/machine");
+    let debug = format!(
+        "{:?}",
+        rig_keeping_claude_in(
+            &[claude],
+            "/the/stand-in",
+            Some("/scratch/throwaway".to_owned())
+        )
+    );
+    assert!(
+        debug.contains("(\"CLAUDE_CONFIG_DIR\", \"/scratch/throwaway\")"),
+        "{debug}"
+    );
+    assert!(!debug.contains("unset: [\"CLAUDE_CONFIG_DIR\"]"), "{debug}");
+}
+
+#[test]
 fn a_rig_for_several_harnesses_has_each_ones_folders_once_and_claude_without_its_config_dir() {
     let claude = Installed::at(Harness::Claude, "/opt/bin/claude", "/machine");
     let pi = Installed::at(Harness::Pi, "/opt/bin/pi", "/machine").with_node("/node/bin");
@@ -324,6 +342,29 @@ fn the_real_claudes_windows_run_on_the_config_folder_they_are_given_and_the_vari
     // variable is not unset (a rig that clears it leaves Claude on `~/.claude`).
     assert!(debug.contains("claude_config: Some(Kept)"), "{debug}");
     assert!(debug.contains("unset: []"), "{debug}");
+}
+
+#[test]
+fn a_claude_config_the_run_was_given_wins_over_the_kits_own_copy_of_the_login() {
+    // The merge of live-keychain with the long run's `--claude-config`: a folder the run's
+    // caller made, the login copied into it, is where the windows keep their config, and
+    // the kit makes no copy of its own beside it.
+    let claude = Installed::at(Harness::Claude, "/opt/bin/claude", "/machine")
+        .with_claude_config(Arc::new(Kept));
+    let debug = format!(
+        "{:?}",
+        rig_keeping_claude_in(
+            &[claude],
+            "/the/stand-in",
+            Some("/scratch/throwaway".to_owned())
+        )
+    );
+    assert!(
+        debug.contains("(\"CLAUDE_CONFIG_DIR\", \"/scratch/throwaway\")"),
+        "{debug}"
+    );
+    assert!(debug.contains("claude_config: None"), "{debug}");
+    assert!(!debug.contains("unset: [\"CLAUDE_CONFIG_DIR\"]"), "{debug}");
 }
 
 #[test]

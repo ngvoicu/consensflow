@@ -1,5 +1,6 @@
-//! The last line of what a stream said, as the stream comes in chunks that end
-//! where they like (inside a line, between a carriage return and its line feed).
+//! The last line of what a stream said, and the first that began with a mark, as the
+//! stream comes in chunks that end where they like (inside a line, between a carriage
+//! return and its line feed).
 //!
 //! Only the end is kept, and only as much of it as a line the script ends by can
 //! be: a last line that is longer than that is not the one, and it is said not to
@@ -38,6 +39,60 @@ impl Tail {
             None => (text, !self.cut),
         };
         (whole && !line.is_empty()).then(|| line.to_owned())
+    }
+}
+
+/// The first line a stream says that begins with a mark (the line that says which tree
+/// the machine unpacked): whole, without its line end, and none but the first, so that
+/// what a command prints later cannot take its place.
+///
+/// A line is kept while it is read, up to [`KEEP`] bytes: a longer one is not the line the
+/// script says, and is never read from its middle.
+#[derive(Debug)]
+pub struct Marked {
+    mark: &'static str,
+    /// The line being read, if it can still be the one.
+    line: Vec<u8>,
+    /// Whether the line being read is longer than a line of the script can be.
+    long: bool,
+    found: Option<String>,
+}
+
+impl Marked {
+    pub fn new(mark: &'static str) -> Self {
+        Self {
+            mark,
+            line: Vec::new(),
+            long: false,
+            found: None,
+        }
+    }
+
+    /// What the stream says next.
+    pub fn push(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            if self.found.is_some() {
+                return;
+            }
+            if byte == b'\n' {
+                let line = String::from_utf8_lossy(&self.line);
+                let line = line.strip_suffix('\r').unwrap_or(&line);
+                if !self.long && line.starts_with(self.mark) {
+                    self.found = Some(line.to_owned());
+                }
+                self.line.clear();
+                self.long = false;
+            } else if self.line.len() < KEEP {
+                self.line.push(byte);
+            } else {
+                self.long = true;
+            }
+        }
+    }
+
+    /// The first line that began with the mark, whole, if one has been said.
+    pub fn found(&self) -> Option<&str> {
+        self.found.as_deref()
     }
 }
 

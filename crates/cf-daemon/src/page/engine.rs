@@ -1,5 +1,5 @@
 //! What the page's operations call on the engine: the human's operations on the
-//! dispatcher, and the five projections `board.get` adds to each lane. The
+//! dispatcher, and the projections `board.get` adds to each lane. The
 //! operations are written against this trait, so that their tests stand a small
 //! stand-in in the engine's place, and the daemon gives
 //! [`cf_engine::Dispatcher`].
@@ -22,7 +22,7 @@
 use std::rc::Rc;
 
 use cf_engine::seams::EngineError;
-use cf_engine::{Activity, ActivityState, Dispatcher, SwitchTo, SwitchWhen};
+use cf_engine::{Activity, ActivityState, Dispatcher, Finished, SwitchTo, SwitchWhen};
 use cf_harness::contract::{Pane, Work};
 use cf_ledger::{
     DeletedProject, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
@@ -93,6 +93,12 @@ pub trait Engine {
         number: i64,
     ) -> Work<'_, Result<TaskReleased, EngineError>>;
 
+    /// The human's Finish: what the worker of a working task said last is its result,
+    /// and nothing it left running is ended (`finishTask`). Refused, with the reason, for
+    /// a task that is not working, that no member's open window works on, or whose worker
+    /// wrote no complete answer since its latest message.
+    fn finish_task(&self, project: i64, number: i64) -> Work<'_, Result<Finished, EngineError>>;
+
     /// A member out of quota is back before its reset (`backFromQuota`).
     fn back_from_quota(&self, project: i64, handle: &str) -> Result<ParticipantView, EngineError>;
 
@@ -123,6 +129,11 @@ pub trait Engine {
     /// which is nearly always. A lane says it only then, so no other board
     /// answer moves.
     fn unstopped(&self, participant: i64) -> Option<Value>;
+
+    /// What the task of the participant's window waits on, while it does:
+    /// `{task, jobs, agents}`, none when it waits on nothing, which is nearly
+    /// always. A lane says it only then, as it says an ignored stop.
+    fn held(&self, participant: i64) -> Option<Value>;
 }
 
 /// An activity as Node's dispatcher wrote its object: `{state}`, `{state,
@@ -225,6 +236,10 @@ impl Engine for Rc<Dispatcher> {
         Box::pin(Dispatcher::reassign_task(self, project, number))
     }
 
+    fn finish_task(&self, project: i64, number: i64) -> Work<'_, Result<Finished, EngineError>> {
+        Box::pin(Dispatcher::finish_task(self, project, number, "human"))
+    }
+
     fn back_from_quota(&self, project: i64, handle: &str) -> Result<ParticipantView, EngineError> {
         Dispatcher::back_from_quota(self, project, handle)
     }
@@ -258,6 +273,11 @@ impl Engine for Rc<Dispatcher> {
     fn unstopped(&self, participant: i64) -> Option<Value> {
         Dispatcher::unstopped(self, participant)
             .map(|ignored| json!({ "task": ignored.task, "rounds": ignored.rounds }))
+    }
+
+    fn held(&self, participant: i64) -> Option<Value> {
+        Dispatcher::held_for(self, participant)
+            .map(|hold| json!({ "task": hold.task, "jobs": hold.jobs, "agents": hold.agents }))
     }
 }
 

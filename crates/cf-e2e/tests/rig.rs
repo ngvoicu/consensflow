@@ -50,7 +50,9 @@
 //! window's beside them, which every case that ends a window holds the pane host to
 //! leaving as it was, and whose end of its own is no end the pane host gave it. So is
 //! `last_exits`: the exits the pane host tells as a rig closes, which the long run of
-//! the evals reads after the close.)
+//! the evals reads after the close. So is `reports`: a rig keeps a report of a case
+//! that failed and none of one that passed, and every case here and in the
+//! regressions that starts a rig closes it.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -89,6 +91,8 @@ mod described;
 mod devin_bypass_first;
 #[path = "rig/help.rs"]
 mod help;
+#[path = "rig/homes.rs"]
+mod homes;
 #[cfg(unix)]
 #[path = "rig/kept_config.rs"]
 mod kept_config;
@@ -104,6 +108,8 @@ mod live_members;
 mod live_support;
 #[path = "rig/pending_agents.rs"]
 mod pending_agents;
+#[path = "rig/reports.rs"]
+mod reports;
 #[path = "rig/specs.rs"]
 mod specs;
 #[cfg(unix)]

@@ -11,12 +11,15 @@ use serde_json::{json, Value};
 
 use super::again::tell_failed_answer;
 use super::carrying::{adopt, carried, release_carried};
+use super::continuations::{withdraw_stale_among, withdrawn_if_stale};
+use super::pauses::withdrawn_on_its_way;
 use super::receipt::reconcile;
+use super::told::{behind_held_words, fail_for, kept_for_resume, told};
 use super::{known_message, message_task, messages, require_message};
 use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
-use crate::tasks::release_ready;
+use crate::tasks::{release_ready, withdrawn_late};
 use crate::views::MESSAGE_SELECT;
 
 /// The participants something waits on: a message on its way to them, or a
@@ -50,7 +53,8 @@ pub(crate) fn with_work(store: &Store, project_id: i64) -> Result<Vec<i64>, Ledg
 /// message's paste, or that a door took for its harness, is not the head; and
 /// while a task message for the window waits for the human's approval, nothing
 /// else about its task goes, whoever wrote it and in whatever order they are
-/// approved: the words that came first are not passed over.
+/// approved: the words that came first are not passed over. Nor are older words
+/// told to the window (`told`) that the human still holds.
 pub(crate) fn next_delivery(
     store: &Store,
     participant_id: i64,
@@ -106,9 +110,11 @@ fn next_delivery_among(
              AND words.recipient_id = m.recipient_id AND words.kind = 'task'
              AND words.state = 'gated'
          ))
+         AND NOT {}
          AND (?3 IS NULL OR m.id = ?3)
        ORDER BY m.id LIMIT 1",
-            sql_list(&HELD_TASK_STATES)
+            sql_list(&HELD_TASK_STATES),
+            behind_held_words("m")
         ))?
         .query_map(params![participant_id, serial, only], |row| {
             row.get::<_, i64>(0)
@@ -118,10 +124,12 @@ fn next_delivery_among(
     next.map_or(Ok(None), |id| store.message(id))
 }
 
-/// The newest message pasted into a participant's window about a task, and
-/// proved by what the window's record showed: a task message or an answer
-/// that is `delivered` and rides in no other's paste. What the window wrote
-/// after its marker is the task's result.
+/// The message last pasted into a participant's window about a task, and
+/// proved by what the window's record showed: a task message, an answer or
+/// words told to the window (`told`) that is `delivered` and rides in no
+/// other's paste. What the window wrote after its marker is the task's result.
+/// The last is the last delivered, whatever their ids say: the human may pass
+/// on held words in another order than they were written.
 pub(crate) fn last_pasted(
     store: &Store,
     participant_id: i64,
@@ -131,8 +139,10 @@ pub(crate) fn last_pasted(
         store,
         &format!(
             "{MESSAGE_SELECT} WHERE m.task_id = ? AND m.recipient_id = ?
-         AND m.kind IN ('task', 'answer') AND m.state = 'delivered' AND m.carried_by IS NULL
-       ORDER BY m.id DESC LIMIT 1"
+         AND (m.kind IN ('task', 'answer') OR ({}))
+         AND m.state = 'delivered' AND m.carried_by IS NULL
+       ORDER BY m.delivered_at DESC, m.id DESC LIMIT 1",
+            told("m")
         ),
         params![task_id, participant_id],
     )?
@@ -243,6 +253,209 @@ pub(crate) fn begin_delivery(store: &mut Store, message_id: i64) -> Result<Begun
     })
 }
 
+/// The receipt of a delivered message is forgotten (`Ledger::forget_receipt`).
+#[cfg(feature = "test-support")]
+pub(crate) fn forget_receipt(store: &mut Store, message_id: i64) -> Result<(), LedgerError> {
+    store.write(|store| {
+        store.db.execute(
+            "UPDATE message SET receipt = 'null' WHERE id = ?",
+            params![message_id],
+        )?;
+        Ok(())
+    })
+}
+
+/// What the transport is to do with a hand-over begun ([`admit`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandOver {
+    /// It goes to the window now, and is the window's from then on.
+    Admitted,
+    /// Nothing goes in: the project is closed, and the message waits for the Resume.
+    Closed,
+    /// Nothing goes in: the message, or a row its paste carries, was withdrawn
+    /// since its delivery began (its task moved on, `continuations`).
+    Withdrawn,
+}
+
+/// The transport is about to let a hand-over begun ([`begin_delivery`]) go to its
+/// window, after every wait of its own: the paste asked of the pane host, the
+/// inbox rename made, the request given to its connection, the command line its
+/// window opens with. It goes while the project is open, the message still on
+/// its way, and every row of `begun_with` (what its paste was begun with) still
+/// riding in it; then the message and those rows are marked handed, in this
+/// write, and a reader of a closed project reads their text from now on (the
+/// daemon's `Waits`). A delivery that is only begun is not handed: what is still
+/// to come of it may never come (Sol's review of 2026-10-16, round 7). A
+/// continuation in it, on its own or riding, goes only while its task is at work
+/// in its window, and is withdrawn in this write otherwise (`continuations`). So
+/// does the brief of the chief's own step finished while it was on its way, in
+/// the finish's words (`withdrawn_late`): the transport asks again for an Enter
+/// that sends a paste left in the chief's input box, and a step accepted is no
+/// brief to send (the merge of main's field 3.0.6, T-392).
+pub(crate) fn admit(
+    store: &mut Store,
+    message_id: i64,
+    begun_with: &[i64],
+) -> Result<HandOver, LedgerError> {
+    store.write(|store| {
+        let Some(message) = store.message(message_id)? else {
+            return Ok(HandOver::Withdrawn);
+        };
+        let open = store
+            .db
+            .prepare("SELECT 1 FROM project WHERE id = ? AND state = 'open'")?
+            .exists([message.project_id])?;
+        if !open {
+            return Ok(HandOver::Closed);
+        }
+        let mut stale = withdrawn_if_stale(store, &message)?;
+        for row in carried(store, message_id)? {
+            stale |= withdrawn_if_stale(store, &row)?;
+        }
+        if stale {
+            return Ok(HandOver::Withdrawn);
+        }
+        if let Some(task) = message_task(store, message_id)? {
+            if withdrawn_late(store, &message, &task)? {
+                return Ok(HandOver::Withdrawn);
+            }
+        }
+        let riding: Vec<i64> = store
+            .db
+            .prepare("SELECT id FROM message WHERE carried_by = ? AND state = 'queued'")?
+            .query_map([message_id], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        if message.state != "delivering" || begun_with.iter().any(|id| !riding.contains(id)) {
+            return Ok(HandOver::Withdrawn);
+        }
+        let at = store.at();
+        store.db.execute(
+            "UPDATE message SET handed_at = ?1
+             WHERE id = ?2 OR (carried_by = ?2 AND state = 'queued')",
+            params![at, message_id],
+        )?;
+        Ok(HandOver::Admitted)
+    })
+}
+
+/// The first row of `begun_with` (what the paste of `message_id`, handed over
+/// already, was begun with) that its window has since: read, or delivered, while
+/// it rode in the paste. A row the window has is no row withdrawn: the window took
+/// the paste, and ran `cf` with it (Sol's review of 2026-10-20, round 10: an
+/// answer `cf task get` marked read was taken for withdrawn, and the words that
+/// carried it went again). None while the window has none of them.
+pub(crate) fn received_of(
+    store: &Store,
+    message_id: i64,
+    begun_with: &[i64],
+) -> Result<Option<i64>, LedgerError> {
+    let received: Vec<i64> = store
+        .db
+        .prepare(
+            "SELECT id FROM message
+             WHERE carried_by = ? AND state IN ('read', 'delivered') ORDER BY id",
+        )?
+        .query_map([message_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(received.into_iter().find(|id| begun_with.contains(id)))
+}
+
+/// What a receipt says of a message that arrived though its delivery was given up.
+const GIVEN_UP: &str = "it had been given up";
+
+/// What a receipt says of a row that arrived though it was withdrawn after the
+/// paste that carried it was handed over.
+pub const WITHDRAWN_AFTER_HANDED: &str = "after it was handed over";
+
+/// The window's record shows a paste it was handed whose Enter the engine
+/// withheld, the message given back to its queue or withdrawn since (`arrival`):
+/// the human sent what the box held (Calliope's review of 2026-10-21, round 11:
+/// the engine then pasted it again). The paste was admitted, or there would be
+/// nothing in the box, so the message arrived, whether it waits again or was
+/// withdrawn since, and in one write: it is begun as though pasted now, out of
+/// any carrier that took it since (`fold`), with the rows of `held` (what its
+/// paste was begun with) riding in it again and handed with it, a row withdrawn
+/// since among them, and confirmed with `receipt` (`confirm_delivery`, which
+/// marks those rows arrived too; with `telling`, `confirm_delivery_telling`). A
+/// message withdrawn since, or given up since, says so in its receipt. The
+/// message confirmed, if it waited, was withdrawn or was given up; none
+/// otherwise.
+pub(crate) fn confirm_sent_by_hand(
+    store: &mut Store,
+    message_id: i64,
+    held: &[i64],
+    receipt: &Value,
+    telling: bool,
+) -> Result<Option<MessageView>, LedgerError> {
+    store.write(|store| {
+        let Some(message) = store.message(message_id)? else {
+            return Ok(None);
+        };
+        // Withdrawn since, or given up since (a window that never went quiet for
+        // the key that empties its box; Calliope's review of 2026-10-21, round 13),
+        // it arrived all the same.
+        let withdrawn = message.state == "cancelled";
+        let given_up = message.state == "failed";
+        if !withdrawn && !given_up && message.state != "queued" {
+            return Ok(None);
+        }
+        let at = store.at();
+        store.db.execute(
+            "UPDATE message SET carried_by = NULL WHERE id = ?",
+            [message_id],
+        )?;
+        for row in held {
+            store.db.execute(
+                "UPDATE message SET carried_by = ?1, handed_at = ?2
+                 WHERE id = ?3 AND id != ?1 AND state IN ('queued', 'cancelled')",
+                params![message_id, at, row],
+            )?;
+        }
+        store.db.execute(
+            "UPDATE message SET state = 'delivering', attempts = attempts + 1, handed_at = ?1,
+               reason = CASE WHEN state = 'queued' THEN NULL ELSE reason END
+             WHERE id = ?2",
+            params![at, message_id],
+        )?;
+        store.log(
+            message.project_id,
+            "delivery.begun",
+            json!({ "message": message_id, "attempt": message.attempts + 1, "sentByHand": true }),
+        )?;
+        let mut receipt = receipt.clone();
+        if withdrawn {
+            receipt["cancelled"] = json!(WITHDRAWN_AFTER_HANDED);
+        }
+        if given_up {
+            receipt["failed"] = json!(GIVEN_UP);
+        }
+        let confirmed = if telling {
+            confirm_delivery_telling(store, message_id, Some(&receipt))?
+        } else {
+            confirm_delivery(store, message_id, Some(&receipt))?
+        };
+        Ok(Some(confirmed))
+    })
+}
+
+/// The messages of a project whose hand-over has begun at their window and is not
+/// over: one on its way that its transport let go ([`admit`]), and an answer a
+/// question's door claimed for its harness (`claim_answer`). Every other message
+/// still to be given was handed nothing.
+pub(crate) fn handed_over(store: &Store, project_id: i64) -> Result<Vec<i64>, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT id FROM message
+             WHERE project_id = ?
+               AND ((state = 'delivering' AND handed_at IS NOT NULL)
+                    OR (state = 'queued' AND (handed_at IS NOT NULL OR claimed_at IS NOT NULL)))
+             ORDER BY id",
+        )?
+        .query_map([project_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?)
+}
+
 /// The harness's own record proves the message arrived: `receipt` is what it
 /// showed. What its paste carried arrived with it, in the same step; then
 /// the task it is about is reconciled once.
@@ -268,9 +481,41 @@ pub(crate) fn confirm_delivery(
          WHERE carried_by = ? AND state = 'queued'",
             params![at, json!({ "carrier": message_id }).to_string(), message_id],
         )?;
+        // A row withdrawn after the paste that carried it was handed over (a pause
+        // or a cancel took it back) went in the paste all the same: the record says
+        // it arrived, and why it reads so (the chief's decision on Calliope's review
+        // of 2026-10-21, round 11). One withdrawn before the hand-over was in no
+        // paste, and stays withdrawn.
+        // Handed with this paste: `admit` and `confirm_sent_by_hand` stamp the
+        // carrier and its rows with one time, and a row handed with an earlier one
+        // and carried again since was in no paste of this (Calliope's review of
+        // 2026-10-21, round 12).
+        let late: Vec<i64> = store
+            .db
+            .prepare(
+                "SELECT id FROM message
+                 WHERE carried_by = ?1 AND state = 'cancelled'
+                   AND handed_at >= (SELECT handed_at FROM message WHERE id = ?1)
+                 ORDER BY id",
+            )?
+            .query_map([message_id], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        store.db.execute(
+            "UPDATE message SET state = 'delivered', delivered_at = ?1, receipt = ?2
+         WHERE carried_by = ?3 AND state = 'cancelled'
+           AND handed_at >= (SELECT handed_at FROM message WHERE id = ?3)",
+            params![
+                at,
+                json!({ "carrier": message_id, "cancelled": WITHDRAWN_AFTER_HANDED }).to_string(),
+                message_id
+            ],
+        )?;
         let mut data = json!({ "message": message_id });
         if !rode.is_empty() {
             data["carried"] = json!(rode);
+        }
+        if !late.is_empty() {
+            data["withdrawnAfterHanded"] = json!(late);
         }
         store.log(message.project_id, "delivery.confirmed", data)?;
         if let Some(task) = message_task(store, message_id)? {
@@ -350,7 +595,14 @@ pub(crate) fn cancel_message(
 /// under a carrier that cannot carry it any more (the Node daemon was pasting
 /// it on its own when it stopped, which `release_stranded` leaves to the
 /// delivery that settles it) is let go of that carrier first: carried, it
-/// would be skipped as one and never delivered.
+/// would be skipped as one and never delivered. It was handed nothing, nor
+/// was what it carried, whatever its transport let go: it is handed again, or
+/// never (`admit`). A pause note naming a task that moved on while it was on its
+/// way leaves it, and says its warning again (`withdrawn_on_its_way`). A
+/// continuation whose task is no longer at work in its window is withdrawn
+/// instead, and so is one that rides in it (`continuations`). A brief of the
+/// chief's own step done while it was on its way is not queued again
+/// (`withdrawn_late`).
 pub(crate) fn retry_delivery(
     store: &mut Store,
     message_id: i64,
@@ -360,10 +612,31 @@ pub(crate) fn retry_delivery(
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
         let message = require_message(store, message_id, "delivering")?;
+        if let Some(task) = message_task(store, message_id)? {
+            if withdrawn_late(store, &message, &task)? {
+                return known_message(store, message_id);
+            }
+        }
+        if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
+            return known_message(store, message_id);
+        }
+        let riding: Vec<i64> = carried(store, message_id)?
+            .iter()
+            .map(|row| row.id)
+            .collect();
+        withdraw_stale_among(store, &riding)?;
         store.db.execute(
-            "UPDATE message SET state = 'queued', reason = ?, attempts = MAX(attempts - ?, 0)
+            "UPDATE message SET state = 'queued', reason = ?, attempts = MAX(attempts - ?, 0),
+               handed_at = NULL
          WHERE id = ?",
             params![reason, i64::from(refund), message_id],
+        )?;
+        // A row withdrawn since keeps its mark: the paste goes again without it,
+        // handed later than it was, and its confirmation reads it delivered no more
+        // (`confirm_delivery` takes only the rows handed with the paste).
+        store.db.execute(
+            "UPDATE message SET handed_at = NULL WHERE carried_by = ? AND state = 'queued'",
+            [message_id],
         )?;
         store.log(
             message.project_id,
@@ -381,77 +654,61 @@ pub(crate) fn retry_delivery(
     })
 }
 
-/// A task message that arrived, and that its window then took back out of its
-/// conversation (Claude, stopped before a word of its answer, puts the message
-/// in its input box again and answers from what came before it), was not
-/// received after all. It is `queued` again, with `reason`: kept for the
-/// window as a task paused before its brief arrived keeps the brief, so the
-/// words that resume the task carry it. They do, whichever came first:
-/// - the resume not yet made: it takes the message with what is kept;
-/// - the resume made while the stop was being paid: the message joins it, as a
-///   delivery tried again does (`adopt`).
-///
-/// What its paste carried was in the window's conversation no longer than it
-/// was, so each row it carried is kept again too, and rides with it. The
-/// receipt it was given is no receipt: the carrier's will be. The task's state
-/// is not moved: it is paused, or queued behind the words that resume it.
-pub(crate) fn take_back(
-    store: &mut Store,
-    message_id: i64,
-    reason: &str,
-) -> Result<MessageView, LedgerError> {
-    model::require_text(reason, "reason", 1000)?;
-    store.write(|store| {
-        let message = require_message(store, message_id, "delivered")?;
-        let carried_by: Option<i64> = store.db.query_row(
-            "SELECT carried_by FROM message WHERE id = ?",
-            [message_id],
-            |row| row.get(0),
-        )?;
-        if message.kind != "task" || carried_by.is_some() {
-            return Err(LedgerError::refused_with(
-                "invalid-transition",
-                format!("message {message_id} is not a task message of its own"),
-                409,
-            ));
-        }
-        store.db.execute(
-            "UPDATE message SET state = 'queued', reason = ?, delivered_at = NULL, receipt = NULL
-         WHERE id = ?",
-            params![reason, message_id],
-        )?;
-        let kept: Vec<i64> = store
-            .db
-            .prepare(
-                "SELECT id FROM message WHERE carried_by = ? AND state = 'delivered' ORDER BY id",
-            )?
-            .query_map([message_id], |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        store.db.execute(
-            "UPDATE message SET state = 'queued', delivered_at = NULL, receipt = NULL
-         WHERE carried_by = ? AND state = 'delivered'",
-            [message_id],
-        )?;
-        store.log(
-            message.project_id,
-            "delivery.taken-back",
-            json!({ "message": message_id, "reason": reason, "kept": kept }),
-        )?;
-        adopt(store, message_id)?;
-        known_message(store, message_id)
-    })
-}
-
 /// A delivery given up: a task it carried, still queued, fails with it, and
-/// what it carried is its own again, for the reopening to take.
+/// what it carried is its own again, for the reopening to take. Words told to
+/// the window fail their task too (`told`), but while it is paused, when they
+/// are kept for its resume; and a brief of the chief's own step done while it
+/// was on its way is withdrawn (`withdrawn_late`). Neither is failed. A pause
+/// note whose task was cancelled while it was on its way is withdrawn instead,
+/// and says its warning again in a note of its own, which has its own attempts
+/// (`withdrawn_on_its_way`). A continuation whose task is no longer at work in
+/// its window is withdrawn instead too: nothing failed that was still to go
+/// (`continuations`).
 pub(crate) fn fail_delivery(
     store: &mut Store,
     message_id: i64,
     reason: &str,
 ) -> Result<MessageView, LedgerError> {
+    give_up_delivery(store, message_id, reason).map(|(message, _)| message)
+}
+
+/// What a delivery given up came to ([`give_up_delivery`]), which only the ledger
+/// knows: whoever tells of it says what was done, never what a state suggests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GivenUp {
+    /// The message failed (`failed`), and so did what it fails with it.
+    Failed,
+    /// Words told to the window, kept for their paused task's resume
+    /// (`kept_for_resume`): they wait, `queued`, and did not fail.
+    Kept,
+    /// Withdrawn (`cancelled`), and no failure: a brief of the chief's own step
+    /// done while it was on its way (`withdrawn_late`), a pause note whose task
+    /// moved on meanwhile, which says its warning again in a note of its own
+    /// (`withdrawn_on_its_way`), or a continuation whose task is no longer at
+    /// work in its window (`continuations`).
+    Withdrawn,
+}
+
+/// [`fail_delivery`], saying what it did ([`GivenUp`]).
+pub(crate) fn give_up_delivery(
+    store: &mut Store,
+    message_id: i64,
+    reason: &str,
+) -> Result<(MessageView, GivenUp), LedgerError> {
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
         let message = require_message(store, message_id, "delivering")?;
+        if let Some(task) = message_task(store, message_id)? {
+            if withdrawn_late(store, &message, &task)? {
+                return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+            }
+            if kept_for_resume(store, &message, &task, reason)? {
+                return Ok((known_message(store, message_id)?, GivenUp::Kept));
+            }
+        }
+        if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
+            return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+        }
         store.db.execute(
             "UPDATE message SET state = 'failed', reason = ? WHERE id = ?",
             params![reason, message_id],
@@ -467,11 +724,12 @@ pub(crate) fn fail_delivery(
                 store.move_task(&task, "failed", json!({}))?;
                 release_ready(store, task.project_id)?;
             }
+            fail_for(store, &message, &task)?;
             if message.kind == "answer" {
                 tell_failed_answer(store, &message, &task, reason)?;
             }
         }
-        known_message(store, message_id)
+        Ok((known_message(store, message_id)?, GivenUp::Failed))
     })
 }
 

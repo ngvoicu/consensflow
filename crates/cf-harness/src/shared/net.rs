@@ -1,7 +1,8 @@
 //! HTTP/1.1 to a peer on loopback, the system's `Loopback`
 //! (`seams::loopback`): the request sent as its caller wrote it, the
 //! reply's head, then its body within a size. A failure says whether a head
-//! came: before one, `send` fails; after one, only the body can. No
+//! came: before one, `send` fails; after one, only the body can. A send its
+//! caller no longer admits once its connection is up writes nothing. No
 //! `accept-encoding` is asked for, so no body comes compressed.
 
 use std::future::{poll_fn, Future};
@@ -15,6 +16,7 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 use url::{Position, Url};
 
+use crate::contract::NOT_ADMITTED;
 use crate::seams::loopback::{BodyFailed, Method, Request, FETCH_FAILED};
 
 /// The connection a reply comes over, driven while its head and its body
@@ -28,23 +30,38 @@ pub struct Reply {
     connection: Option<Connection>,
 }
 
-/// Sends `request`: its reply once a head came, or why none did.
-pub async fn send(request: Request) -> Result<Reply, String> {
-    exchange(request).await.map_err(|_| FETCH_FAILED.to_owned())
+/// Sends `request`, if `admits` says yes once its connection is up: its reply
+/// once a head came, or why none did ([`NOT_ADMITTED`] where nothing of it was
+/// written, as `admits` said no).
+pub async fn send(request: Request, admits: &dyn Fn() -> bool) -> Result<Reply, String> {
+    exchange(request, admits)
+        .await
+        .map_err(|failed| match failed {
+            Failed::NotAdmitted => NOT_ADMITTED.to_owned(),
+            Failed::Fetch => FETCH_FAILED.to_owned(),
+        })
 }
 
-/// The request sent and its head read, or what failed on the way.
-async fn exchange(request: Request) -> Result<Reply, String> {
-    let url = Url::parse(&request.url).map_err(|failed| failed.to_string())?;
-    let addresses = url
-        .socket_addrs(|| None)
-        .map_err(|failed| failed.to_string())?;
+/// Why no head came.
+enum Failed {
+    /// `admits` said no: nothing of the request was written.
+    NotAdmitted,
+    Fetch,
+}
+
+/// The request sent and its head read, or what failed on the way. `admits` is
+/// asked once nothing is left to wait for before the request is handed to the
+/// connection, which writes it as it is next driven, in the same poll: the
+/// connection and its handshake are awaited first.
+async fn exchange(request: Request, admits: &dyn Fn() -> bool) -> Result<Reply, Failed> {
+    let url = Url::parse(&request.url).map_err(|_| Failed::Fetch)?;
+    let addresses = url.socket_addrs(|| None).map_err(|_| Failed::Fetch)?;
     let stream = TcpStream::connect(&*addresses)
         .await
-        .map_err(|failed| failed.to_string())?;
+        .map_err(|_| Failed::Fetch)?;
     let (mut sender, connection) = http1::handshake::<_, Full<Bytes>>(TokioIo::new(stream))
         .await
-        .map_err(|failed| failed.to_string())?;
+        .map_err(|_| Failed::Fetch)?;
     let mut connection: Option<Connection> = Some(Box::pin(connection));
     let host = &url[Position::BeforeHost..Position::BeforePath];
     let mut message = hyper::Request::builder()
@@ -59,7 +76,10 @@ async fn exchange(request: Request) -> Result<Reply, String> {
     }
     let message = message
         .body(Full::new(Bytes::from(request.body.unwrap_or_default())))
-        .map_err(|failed| failed.to_string())?;
+        .map_err(|_| Failed::Fetch)?;
+    if !admits() {
+        return Err(Failed::NotAdmitted);
+    }
     let mut asked = std::pin::pin!(sender.send_request(message));
     let head = poll_fn(|context| {
         if let Poll::Ready(head) = asked.as_mut().poll(context) {
@@ -69,7 +89,7 @@ async fn exchange(request: Request) -> Result<Reply, String> {
         Poll::Pending
     })
     .await
-    .map_err(|failed| failed.to_string())?;
+    .map_err(|_| Failed::Fetch)?;
     Ok(Reply {
         status: head.status().as_u16(),
         body: head.into_body(),
@@ -159,12 +179,62 @@ mod tests {
         }
     }
 
+    /// `request` sent with nothing to ask whether it is admitted.
+    async fn sent(request: Request) -> Result<Reply, String> {
+        send(request, &|| true).await
+    }
+
+    /// Astra's review of 2026-10-16, round 5: the pane host admitted a native
+    /// send, and the project closed while its connection was made, which the
+    /// system makes in a wait of its own. It is asked once the connection is up,
+    /// and a send it does not admit writes nothing.
+    #[test]
+    fn a_send_is_asked_whether_it_is_admitted_once_its_connection_is_up() {
+        let (failed, asked) = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let port = listener.local_addr().unwrap().port();
+                let open = std::cell::Cell::new(true);
+                let request = Request {
+                    method: Method::Post,
+                    url: format!("http://127.0.0.1:{port}/deliver"),
+                    headers: Vec::new(),
+                    body: Some(b"{\"text\":\"hello\"}".to_vec()),
+                };
+                // What came over the connection until it ended or a request's head
+                // was whole; the connection then goes, answered with nothing.
+                let peer = async {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut asked = Vec::new();
+                    let mut chunk = [0; 4096];
+                    while !asked.windows(4).any(|end| end == b"\r\n\r\n") {
+                        let count = socket.read(&mut chunk).await.unwrap();
+                        if count == 0 {
+                            break;
+                        }
+                        asked.extend_from_slice(&chunk[..count]);
+                    }
+                    asked
+                };
+                // Polled once the send waits for its connection.
+                let closing = async { open.set(false) };
+                let admits = || open.get();
+                let (sent, (), asked) = tokio::join!(send(request, &admits), closing, peer);
+                (sent.err(), asked)
+            });
+        assert_eq!(failed.as_deref(), Some(NOT_ADMITTED));
+        assert_eq!(String::from_utf8_lossy(&asked), "", "nothing was written");
+    }
+
     #[test]
     fn a_reply_carries_its_status_and_its_body_whatever_the_status() {
         let ((status, body), asked) = against(
             b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 5\r\n\r\nno no",
             async |base| {
-                let mut reply = send(get(format!("{base}/session?directory=a+b%20c")))
+                let mut reply = sent(get(format!("{base}/session?directory=a+b%20c")))
                     .await
                     .unwrap();
                 (reply.status(), reply.body(1024).await)
@@ -188,7 +258,7 @@ mod tests {
     fn a_chunked_body_is_read_whole() {
         let (body, _) = against(
             b"HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n",
-            async |base| send(get(format!("{base}/")) ).await.unwrap().body(1024).await,
+            async |base| sent(get(format!("{base}/")) ).await.unwrap().body(1024).await,
         );
         assert_eq!(body.unwrap(), b"abcde");
     }
@@ -197,7 +267,7 @@ mod tests {
     fn a_body_past_its_size_is_too_large() {
         let (body, _) = against(
             b"HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n0123456789",
-            async |base| send(get(format!("{base}/"))).await.unwrap().body(4).await,
+            async |base| sent(get(format!("{base}/"))).await.unwrap().body(4).await,
         );
         assert_eq!(body.unwrap_err(), BodyFailed::TooLarge);
     }
@@ -207,7 +277,7 @@ mod tests {
         let ((status, body), _) = against(
             b"HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n0123",
             async |base| {
-                let mut reply = send(get(format!("{base}/"))).await.unwrap();
+                let mut reply = sent(get(format!("{base}/"))).await.unwrap();
                 (reply.status(), reply.body(1024).await)
             },
         );
@@ -224,7 +294,7 @@ mod tests {
                 headers: vec![("content-type".to_owned(), "application/json".to_owned())],
                 body: Some(b"{\"ok\":true}".to_vec()),
             };
-            send(request).await.unwrap().status()
+            sent(request).await.unwrap().status()
         });
         let asked = String::from_utf8(asked).unwrap();
         assert!(asked.starts_with("POST /deliver HTTP/1.1\r\n"), "{asked}");
@@ -241,7 +311,7 @@ mod tests {
                 let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
                 let port = listener.local_addr().unwrap().port();
                 drop(listener);
-                send(get(format!("http://127.0.0.1:{port}/"))).await.err()
+                sent(get(format!("http://127.0.0.1:{port}/"))).await.err()
             });
         assert_eq!(failed.as_deref(), Some("fetch failed"));
     }

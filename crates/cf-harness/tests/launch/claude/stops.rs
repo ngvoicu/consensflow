@@ -9,7 +9,8 @@
 //! `stopped-in-the-stop-hook`: Escape while a Stop hook that ignores signals
 //! ran after the answer; Claude's record of the interrupt names no message.
 
-use cf_harness::testing::EPOCH_MS;
+use cf_harness::contract::{HostError, PaneHost, Work, NOT_ADMITTED};
+use cf_harness::testing::{Answer, Driver, ScriptedHost, EPOCH_MS};
 
 use super::*;
 
@@ -327,6 +328,84 @@ fn the_text_claude_put_back_in_its_input_box_is_cleared_before_the_next_message_
         asked(&again),
         [("pane.write_paste".to_owned(), json!("More"))]
     );
+}
+
+/// The host as the engine hands it over just after it emptied the input box
+/// itself ([`PaneHost::cleared`]): otherwise the host it wraps.
+struct ClearedFirst<H>(H);
+
+impl<H: PaneHost> PaneHost for ClearedFirst<H> {
+    fn request<'a>(&'a self, op: &'a str, body: Value) -> Work<'a, Result<Value, HostError>> {
+        self.0.request(op, body)
+    }
+
+    fn admits(&self) -> bool {
+        self.0.admits()
+    }
+
+    fn cleared(&self) -> bool {
+        true
+    }
+}
+
+/// Both reviews of 2026-10-20, round 10: the engine empties an input box that
+/// holds a paste whose Enter it withheld, with Control-C, just before the next
+/// paste. Claude, read at rest by an interrupt, would press its own after it, and
+/// a second Control-C in a row ends Claude Code: one press, the engine's.
+#[test]
+fn a_box_the_engine_just_emptied_is_not_emptied_again_by_claude() {
+    let stopped = Stopped::new("stopped-before-a-word");
+    stopped.status("idle");
+    stopped.at(0);
+    stopped.settled();
+    stopped.window.interrupted();
+    stopped.at(5_000);
+    assert!(stopped.settled());
+
+    let host = ClearedFirst(taking());
+    let sent = finished(stopped.window.deliver(&host, &pane(), "Resumed: Go on"));
+    assert_eq!(sent, Ok(Admission::Admitted { queued: false }));
+    assert_eq!(
+        asked(&host.0),
+        [("pane.write_paste".to_owned(), json!("Resumed: Go on"))],
+        "the paste alone"
+    );
+}
+
+/// Both reviews of 2026-10-16, round 4: the project closed while Claude waited
+/// for the keys that clear its input box, and the paste went in after them. The
+/// paste asks the host whether it still admits it, after that wait.
+#[test]
+fn a_paste_the_host_stops_admitting_while_the_input_box_is_cleared_is_never_written() {
+    let stopped = Stopped::new("stopped-before-a-word");
+    stopped.status("idle");
+    stopped.at(0);
+    stopped.settled();
+    stopped.window.interrupted();
+    stopped.at(5_000);
+    assert!(stopped.settled());
+
+    let host = Rc::new(ScriptedHost::default());
+    host.answer("pane.input", [Answer::Held]);
+    let mut driver = Driver::default();
+    let (window, handing) = (Rc::clone(&stopped.window), Rc::clone(&host));
+    driver.begin(0, async move {
+        window.deliver(&*handing, &pane(), "Resumed: Go on").await
+    });
+    assert!(driver.run().is_empty(), "Ctrl+C waits for the host");
+    host.refuse_hand_overs();
+    assert!(host.release("pane.input", Ok(json!({ "ok": true }))));
+    assert_eq!(
+        driver.run(),
+        [(
+            0,
+            Ok(Admission::Refused {
+                reason: NOT_ADMITTED.to_owned()
+            })
+        )]
+    );
+    let ops: Vec<String> = host.take_asked().into_iter().map(|(op, _)| op).collect();
+    assert_eq!(ops, ["pane.input"], "nothing pasted");
 }
 
 #[test]

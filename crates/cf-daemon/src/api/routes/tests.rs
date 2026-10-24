@@ -98,6 +98,7 @@ fn a_task_route_is_the_task_and_the_word_after_it_whatever_the_method() {
         ("cancel", TaskAction::Cancel),
         ("pause", TaskAction::Pause),
         ("resume", TaskAction::Resume),
+        ("finish", TaskAction::Finish),
         ("tell", TaskAction::Tell),
         ("transcript", TaskAction::Transcript),
     ] {
@@ -321,8 +322,22 @@ pub(super) mod support {
 
     /// A task the chief gave `zeus` by name and its window took: working.
     pub(in crate::api::routes) fn working_task(scene: &Scene) -> i64 {
+        let (number, brief) = queued_task(scene);
         let mut ledger = scene.context.ledger.borrow_mut();
-        let created = ledger
+        ledger.begin_delivery(brief).unwrap();
+        ledger
+            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
+            .unwrap();
+        number
+    }
+
+    /// A task the chief gave `zeus` by name, its brief queued for a window not
+    /// up yet: its number, and its brief's.
+    pub(in crate::api::routes) fn queued_task(scene: &Scene) -> (i64, i64) {
+        let created = scene
+            .context
+            .ledger
+            .borrow_mut()
             .create_task(
                 scene.project.id,
                 &NewTask {
@@ -333,12 +348,7 @@ pub(super) mod support {
                 },
             )
             .unwrap();
-        let brief = created.message.unwrap().id;
-        ledger.begin_delivery(brief).unwrap();
-        ledger
-            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
-            .unwrap();
-        created.task.number
+        (created.task.number, created.message.unwrap().id)
     }
 
     /// [`working_task`], and a question `zeus` asked the chief through its
@@ -542,5 +552,16 @@ pub(super) mod support {
             .unwrap()
             .task
             .state
+    }
+
+    /// The project is closed (`suspended`) or open again: its windows' tokens
+    /// stay, as a window the Close could not close keeps its own.
+    pub(in crate::api::routes) fn project_is(scene: &Scene, state: &str) {
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .set_project_state(scene.project.id, state)
+            .unwrap();
     }
 }

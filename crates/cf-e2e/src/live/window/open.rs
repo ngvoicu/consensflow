@@ -5,7 +5,7 @@
 //! first ([`super::trust_claude`]).
 
 use std::cell::{Cell, RefCell};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
@@ -158,6 +158,10 @@ pub struct Open<'a> {
     member: Option<Member>,
     claude_alone: Option<Value>,
     projects_servers: bool,
+    /// The MCP servers file a Claude window is given (`--mcp-config`), the only one it has.
+    mcp_config: Option<PathBuf>,
+    /// The window's first message, on its command line ([`Open::seed`]).
+    seed: Option<String>,
 }
 
 impl<'a> Open<'a> {
@@ -178,7 +182,18 @@ impl<'a> Open<'a> {
             member: None,
             claude_alone: None,
             projects_servers: false,
+            mcp_config: None,
+            seed: None,
         }
+    }
+
+    /// The window opens with `message` its first, on its command line, as the daemon
+    /// launches a member's window with its task: its first turn begins as it opens, with
+    /// no rest before it.
+    #[must_use]
+    pub fn seed(mut self, message: &str) -> Self {
+        self.seed = Some(message.to_owned());
+        self
     }
 
     /// A Claude window with none of the owner's own settings (their hooks among them:
@@ -201,6 +216,15 @@ impl<'a> Open<'a> {
         self.projects_servers = true;
         self.env
             .push(("ENABLE_CLAUDEAI_MCP_SERVERS".to_owned(), "false".to_owned()));
+        self
+    }
+
+    /// A Claude window has the MCP servers the file `servers` names, and only those:
+    /// `--strict-mcp-config` shuts every other out, but for those of its folder's
+    /// `.mcp.json` where it reads them too ([`Open::with_the_projects_servers`]).
+    #[must_use]
+    pub fn mcp_config(mut self, servers: &Path) -> Self {
+        self.mcp_config = Some(servers.to_owned());
         self
     }
 
@@ -302,7 +326,7 @@ impl<'a> Open<'a> {
         }
         let start = match &self.resume {
             Some(resumed) => ask::resume(agent, resumed)?,
-            None => ask::start(agent, session, None)?,
+            None => ask::start(agent, session, self.seed.as_deref())?,
         }
         .ok_or_else(|| {
             Error::Daemon(format!(
@@ -349,16 +373,9 @@ impl<'a> Open<'a> {
         } else {
             &[]
         };
-        let projects_servers = self.projects_servers;
-        let isolation = || {
-            ISOLATION
-                .iter()
-                .filter(move |word| !(projects_servers && **word == "--strict-mcp-config"))
-        };
         let trust = if claude && self.trusting {
-            let shut_out = isolation().chain(alone).map(|word| (*word).to_owned());
             let argv: Vec<String> = std::iter::once(executable.clone())
-                .chain(shut_out)
+                .chain(claude_flags(self.projects_servers, None, alone))
                 .collect();
             Some(trust_claude(self.rig, &argv, &workspace)?)
         } else {
@@ -373,7 +390,11 @@ impl<'a> Open<'a> {
                 Some(hooks) => argv.extend(with_hooks(&settings, hooks)?),
                 None => argv.extend(settings),
             }
-            argv.extend(isolation().chain(alone).map(|word| (*word).to_owned()));
+            argv.extend(claude_flags(
+                self.projects_servers,
+                self.mcp_config.as_deref(),
+                alone,
+            ));
         }
         argv.extend(start.args);
         let argv = ask::program(&argv, &env).map_err(|failed| {
@@ -420,6 +441,28 @@ impl<'a> Open<'a> {
             killed: Cell::new(false),
         })
     }
+}
+
+/// The flags of a Claude window that shut out what the run is not to reach
+/// ([`ISOLATION`]), and `alone`: `--strict-mcp-config` but where it reads the MCP
+/// servers of its folder's `.mcp.json` (`projects_servers`), and the servers of the
+/// file `mcp_config` where it is given one.
+pub(super) fn claude_flags(
+    projects_servers: bool,
+    mcp_config: Option<&Path>,
+    alone: &[&str],
+) -> Vec<String> {
+    let mut flags: Vec<String> = ISOLATION
+        .iter()
+        .filter(|word| !(projects_servers && **word == "--strict-mcp-config"))
+        .chain(alone)
+        .map(|word| (*word).to_owned())
+        .collect();
+    if let Some(servers) = mcp_config {
+        flags.push("--mcp-config".to_owned());
+        flags.push(servers.to_string_lossy().into_owned());
+    }
+    flags
 }
 
 /// The words that open a Claude window on none of the owner's settings files: only the

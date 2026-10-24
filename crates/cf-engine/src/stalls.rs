@@ -3,7 +3,10 @@
 //! dispatcher). Its requester is told in a pause note, one note for the tasks
 //! that stall together. A restart that finds a dozen windows gone, or a project
 //! that closes with a dozen open, is one message in the chief's window and one
-//! turn, not a dozen.
+//! turn, not a dozen. A task whose window closed with its project (the human's
+//! Close, or the chief's window ending) is paused for the human's Resume of the
+//! project, which resumes it and withdraws the note, which nothing delivered
+//! meanwhile.
 //!
 //! The tasks that stall together are the stalls of one burst: a pass, or the
 //! closing of a project's windows. The first stall of a burst for a requester
@@ -55,14 +58,22 @@ impl Dispatcher {
     /// A task whose window went away is paused, and its requester told: in a
     /// note of its own, or in the one that told it of the stalls before this
     /// one in the same burst, if its reader has not been given it yet.
+    /// `own` when the engine closed the window itself: the ledger takes the
+    /// pause for the suspension's where the project is suspended, for the human's
+    /// Resume to end.
     pub(crate) fn stall(
         &self,
         project: &ProjectView,
         task: &TaskView,
         because: &str,
+        own: bool,
     ) -> Result<(), EngineError> {
         let mut ledger = self.seams.ledger.borrow_mut();
-        ledger.pause_task(project.id, task.number, None, Some(because))?;
+        if own {
+            ledger.pause_with_project(project.id, task.number, because)?;
+        } else {
+            ledger.pause_task(project.id, task.number, None, Some(because))?;
+        }
         let key = (project.id, task.requester.clone());
         let earlier = self.stalls.told.borrow().get(&key).copied();
         if let Some(note) = earlier {

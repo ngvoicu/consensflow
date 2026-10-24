@@ -1,5 +1,5 @@
 //! One task: `GET /api/tasks/<n>`, its `/transcript`, and the `POST`s that move
-//! it (`done`, `accept`, `reopen`, `edit`, `cancel`, `pause`, `resume`, `tell`). It
+//! it (`done`, `accept`, `reopen`, `edit`, `cancel`, `pause`, `resume`, `finish`, `tell`). It
 //! reads the task first, so an unknown one is 404 before anything else is
 //! asked; and it takes the task as it was then, awaiting the body after: who
 //! may do what is decided on the task as it was read, and the ledger decides on
@@ -12,21 +12,33 @@
 //! agent to read: the thread leaves out a gated message, and the brief is
 //! not given to a caller who may not move the task while it waits at the gate.
 //! The chief, and whoever else gave the task, wrote the brief: they read it.
+//! Nor is what waits for the Resume: while the project is closed, the thread
+//! leaves out a message no window was handed yet, and the brief while it is one
+//! but for those who wrote it ([`Waits`]). The transcript is read a page at a
+//! time and searched as well (`pages`).
+
+mod pages;
 
 use cf_base::js;
-use cf_ledger::{NewQuestion, TaskThread};
+use cf_ledger::{NewQuestion, TaskThread, TaskView};
 use hyper::Method;
 use serde_json::{json, Map, Value};
 
 use super::{Answer, Caller, Context, Failure, Request, TaskAction};
 use crate::api::views::{value, MessageSummary, TaskSummary};
+use crate::api::waits::Waits;
+use pages::Asked;
 
-/// A task in one of these states has a window a `tell` reaches (a queued one
-/// has none yet).
+/// A task in one of these states has a window a `tell` reaches and stops.
 const WINDOWED: [&str; 3] = ["working", "waiting", "paused"];
 
-/// The most items of a transcript one request may ask for.
-const MOST_ITEMS: f64 = 50.0;
+/// A task in this state has no window yet: a `tell` keeps its words for the one
+/// coming up.
+const QUEUED: &str = "queued";
+
+/// The most items of a transcript one request may ask for: a page's.
+#[allow(clippy::cast_precision_loss)]
+const MOST_ITEMS: f64 = pages::PER_PAGE as f64;
 
 /// How many it gives when it is asked for none that is a number.
 const DEFAULT_ITEMS: f64 = 10.0;
@@ -59,9 +71,14 @@ pub(super) async fn handle(
     if action.is_none() && get {
         // The thread as far as the human has let it go: a gated message waits
         // unseen, and so does the brief while it is one of them, but for those
-        // who wrote it.
-        let held_back = brief_waits_at_the_gate(&task);
-        task.messages.retain(|message| message.state != "gated");
+        // who wrote it. While the project is closed, so does a message no window
+        // was handed yet, and the brief while it is one, but for those who wrote
+        // it: `cf` would take an answer it printed for received, so one whose text
+        // waits is not in the thread at all.
+        let waits = Waits::now(context, caller)?;
+        let held_back = brief_waits(&task, &waits);
+        task.messages
+            .retain(|message| message.state != "gated" && !waits.holds(message));
         if held_back && !may_move(caller, &task) {
             task.task.body.clear();
         }
@@ -92,18 +109,20 @@ pub(super) async fn handle(
             ),
         )),
         TaskAction::Tell => tell(context, caller, &task, words),
+        TaskAction::Finish => finish(context, caller, &task).await,
         _ => moved(context, caller, &task, action, words.unwrap_or_default()),
     }
 }
 
-/// Whether the task's brief still waits for the human to pass it on: a task
-/// message for the window that has the task is held at the gate, and none was
-/// received by it. A window that received the brief has it, and a later task
-/// message held at the gate (the words of a resume) does not take it back.
-/// The brief is `TaskView.body`: the human and the board read it from the
-/// ledger, and so do the chief and whoever gave the task, who wrote it; an
-/// agent who did not does not until it has passed.
-fn brief_waits_at_the_gate(task: &TaskThread) -> bool {
+/// Whether the task's brief still waits: for the human to pass it on (a task
+/// message for the window that has the task is held at the gate), or for the
+/// Resume (one no window was handed yet, read while the project is closed,
+/// [`Waits`]), and none was received by the window. A window that received the
+/// brief has it, and a later task message that waits (the words of a resume)
+/// does not take it back. The brief is `TaskView.body`: the human and the board
+/// read it from the ledger, and so do the chief and whoever gave the task, who
+/// wrote it; an agent who did not does not until it has passed.
+fn brief_waits(task: &TaskThread, waits: &Waits) -> bool {
     let Some(window) = task.task.assignee.as_deref() else {
         return false;
     };
@@ -116,14 +135,15 @@ fn brief_waits_at_the_gate(task: &TaskThread) -> bool {
         match message.state.as_str() {
             "delivered" | "read" => return false,
             "gated" => held = true,
+            _ if waits.holds(message) => held = true,
             _ => {}
         }
     }
     held
 }
 
-/// What the task's window did so far, from ConsensFlow's own copy: the last
-/// items, for whoever gave the task.
+/// What the task's window did so far, from ConsensFlow's own copy, for whoever
+/// gave the task: the last items, or a page of them, searched or not (`pages`).
 fn transcript(
     context: &Context,
     caller: &Caller,
@@ -140,12 +160,16 @@ fn transcript(
             ),
         ));
     }
+    let (project, number) = (caller.project.id, task.task.number);
+    if let Some(asked) = Asked::of(request.param("page"), request.param("find")) {
+        let whole = context.ledger.borrow().transcript(project, number, None)?;
+        return Ok(Answer::ok(asked.answer(whole)?));
+    }
     let last = items_of(request.param("last"));
-    let transcript =
-        context
-            .ledger
-            .borrow()
-            .transcript(caller.project.id, task.task.number, Some(last))?;
+    let transcript = context
+        .ledger
+        .borrow()
+        .transcript(project, number, Some(last))?;
     Ok(Answer::ok(value(&transcript)?))
 }
 
@@ -198,7 +222,13 @@ fn done(
 /// `POST /api/tasks/<n>/tell`: stop the task and put this to its window. The
 /// agent is interrupted as for any pause, reads the question once idle, and
 /// its answer comes back as a message; the chief resumes the task with its
-/// words. An urgent question pauses its task itself, in the same step.
+/// words. An urgent question pauses its task itself, in the same step. A task
+/// still queued, its window not up yet, is not stopped: the words are kept for
+/// the window, and go in after its brief (`Ledger::tell_queued`). Which of the
+/// two it is, is read again once the words are in: the task may have gone on
+/// while they came (its brief arrived, its resume queued it again). A task that
+/// went where no tell reaches is told as it was read, and the ledger refuses it
+/// in its own words.
 fn tell(
     context: &Context,
     caller: &Caller,
@@ -206,34 +236,49 @@ fn tell(
     words: Option<&str>,
 ) -> Result<Answer, Failure> {
     let number = task.task.number;
-    let window = match &task.task.assignee {
-        Some(assignee) if WINDOWED.contains(&task.task.state.as_str()) => assignee,
+    let fresh = context.ledger.borrow().task(caller.project.id, number)?;
+    let telling = fresh
+        .as_ref()
+        .map(|thread| &thread.task)
+        .filter(|now| reaches(now))
+        .unwrap_or(&task.task);
+    let state = telling.state.as_str();
+    let window = match &telling.assignee {
+        Some(assignee) if reaches(telling) => assignee,
         _ => {
             return Err(Failure::refuse(
                 409,
                 "no-window",
-                format!(
-                    "T-{number} has no window to tell: it is {}",
-                    task.task.state
-                ),
+                format!("T-{number} has no window to tell: it is {state}"),
             ))
         }
     };
-    let told = context.ledger.borrow_mut().ask(
-        caller.project.id,
-        &NewQuestion {
-            from: Some(caller.participant.handle.clone()),
-            to: window.clone(),
-            // Whatever is no text is no words: the ledger refuses it as it
-            // refuses a blank one, once the task is paused for it.
-            body: words.map(str::to_owned),
-            task: Some(number),
-            questions: None,
-            urgent: true,
-        },
-    )?;
+    let told = if state == QUEUED {
+        // Whatever is no text is no words: the ledger refuses it as it refuses
+        // a blank one.
+        context.ledger.borrow_mut().tell_queued(
+            caller.project.id,
+            number,
+            &caller.participant.handle,
+            words.unwrap_or_default(),
+        )?
+    } else {
+        context.ledger.borrow_mut().ask(
+            caller.project.id,
+            &NewQuestion {
+                from: Some(caller.participant.handle.clone()),
+                to: window.clone(),
+                // Whatever is no text is no words: the ledger refuses it as it
+                // refuses a blank one, once the task is paused for it.
+                body: words.map(str::to_owned),
+                task: Some(number),
+                questions: None,
+                urgent: true,
+            },
+        )?
+    };
     (context.kick)();
-    // The task as it is now, paused.
+    // The task as it is now: paused, or still queued with the words kept.
     let now = context
         .ledger
         .borrow()
@@ -247,8 +292,38 @@ fn tell(
     Ok(Answer::ok(Value::Object(answer)))
 }
 
+/// `POST /api/tasks/<n>/finish`: what the worker of a working task said last is its result,
+/// and what its turn left running is not ended (the owner's decision of 2026-10-18: the
+/// chief can finish any working task). Only the engine reads the window, so it is asked,
+/// and answers with the task done, or with why it is not one to finish (not working, no
+/// member's open window works on it, no complete answer since its latest message). `jobs`
+/// and `agents` count what the worker's harness still counted running.
+async fn finish(context: &Context, caller: &Caller, task: &TaskThread) -> Result<Answer, Failure> {
+    let asked = (context.finish)(
+        caller.project.id,
+        task.task.number,
+        caller.participant.handle.clone(),
+    )
+    .await?;
+    (context.kick)();
+    Ok(Answer::ok(json!({
+        "task": value(&TaskSummary::from(&asked.task))?,
+        "jobs": asked.jobs,
+        "agents": asked.agents,
+    })))
+}
+
+/// Whether a tell reaches the task's window: one that has it, which it stops,
+/// or one coming up, which it keeps the words for.
+fn reaches(task: &TaskView) -> bool {
+    task.assignee.is_some() && (WINDOWED.contains(&task.state.as_str()) || task.state == QUEUED)
+}
+
 /// The moves of a task a coordinator makes with the ledger's own words: accept
-/// its result, cancel it, pause it, resume it, give it back.
+/// its result, cancel it, pause it, resume it, give it back. A cancel says
+/// which of the words the caller told the task's window went with it, the
+/// window never having had them (`dropped`, when any did): the ledger tells
+/// everyone else who told it some.
 fn moved(
     context: &Context,
     caller: &Caller,
@@ -259,9 +334,19 @@ fn moved(
     let (project, number) = (caller.project.id, task.task.number);
     let by = caller.participant.handle.as_str();
     let mut ledger = context.ledger.borrow_mut();
+    let mut dropped = Vec::new();
     let moved = match action {
         TaskAction::Accept => ledger.accept_task(project, number, by)?,
-        TaskAction::Cancel => ledger.cancel_task(project, number, by)?,
+        TaskAction::Cancel => {
+            // Read in the same borrow as the cancel: nothing is pasted between.
+            dropped = ledger
+                .told_unreceived(project, number)?
+                .into_iter()
+                .filter(|told| told.sender.as_deref() == Some(by))
+                .map(|told| told.id)
+                .collect();
+            ledger.cancel_task(project, number, by)?
+        }
         TaskAction::Edit => ledger.edit_task(project, number, by, words)?,
         TaskAction::Pause => ledger.pause_task(project, number, Some(by), None)?,
         TaskAction::Resume => ledger.resume_task(project, number, Some(by), words)?.task,
@@ -271,9 +356,12 @@ fn moved(
     };
     drop(ledger);
     (context.kick)();
-    Ok(Answer::ok(
-        json!({ "task": value(&TaskSummary::from(&moved))? }),
-    ))
+    let mut answer = Map::new();
+    answer.insert("task".to_owned(), value(&TaskSummary::from(&moved))?);
+    if !dropped.is_empty() {
+        answer.insert("dropped".to_owned(), json!(dropped));
+    }
+    Ok(Answer::ok(Value::Object(answer)))
 }
 
 /// Whether the window may do what only the chief or the one who gave the task
@@ -292,6 +380,7 @@ fn word(action: TaskAction) -> &'static str {
         TaskAction::Cancel => "cancel",
         TaskAction::Pause => "pause",
         TaskAction::Resume => "resume",
+        TaskAction::Finish => "finish",
         TaskAction::Tell => "tell",
         TaskAction::Transcript => "transcript",
     }

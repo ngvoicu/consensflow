@@ -20,6 +20,7 @@ use crate::model::{self, LedgerError, COORDINATOR_HANDLES};
 use crate::specs::{keep_specs, SpecsChange};
 use crate::staff::{add_participant, NewParticipant};
 use crate::store::Store;
+use crate::tasks::resume_with_project;
 use crate::views::{participant_view, ParticipantRow, PARTICIPANT_SELECT};
 use crate::wake_ups::{keep_wake_up, withdraw_queued, NewWakeUp};
 
@@ -341,7 +342,10 @@ pub(crate) fn projects(store: &Store) -> Result<Vec<ProjectView>, LedgerError> {
     ids.into_iter().map(|id| known_project(store, id)).collect()
 }
 
-/// Open or suspend a project.
+/// Open or suspend a project. A suspended one that opens (the human's Resume)
+/// has the tasks its suspension paused at work again, in the same write
+/// (`resume_with_project`): its windows come back after the write, and the
+/// first of them, the chief's, is never given the news that they are paused.
 pub(crate) fn set_project_state(
     store: &mut Store,
     id: i64,
@@ -370,6 +374,9 @@ pub(crate) fn set_project_state(
                 "the project was closed"
             };
             withdraw_queued(store, id, why)?;
+            if state == "open" {
+                resume_with_project(store, id)?;
+            }
         }
         known_project(store, id)
     })

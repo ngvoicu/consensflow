@@ -857,7 +857,7 @@ replace = ""
 
 [[plant]]
 name = "devin resume: a window unfit for work is held, and nothing is said on the board"
-meant = "a_members_window_unfit_for_work_closes_and_the_message_it_was_to_be_given_fails_with_why"
+meant = "a_members_window_unfit_for_work_closes_and_the_words_told_to_it_are_kept_for_its_resume"
 runs = ["engine-dispatcher-unfit"]
 
 [[plant.edit]]
@@ -872,5 +872,5 @@ runs = ["engine-dispatcher-unfit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/unstarted.rs"
-find = '''                Some(pane) => self.close_own(record, pane).await?,'''
-replace = '''                Some(_) => true,'''
+find = '''            Some(pane) => self.close_own(record, pane).await?,'''
+replace = '''            Some(_) => true,'''

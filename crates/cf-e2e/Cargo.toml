@@ -112,7 +112,8 @@ url.workspace = true
 # Signals by process id, whether a process is there, the group it is in, and the
 # terminal's raw mode, which std does not give (this crate allows unsafe code only in
 # the few calls a live check makes to hold a process it ends); and through its `libc`,
-# macOS's `proc_pidinfo`, which says when a process began to the microsecond.
+# macOS's `proc_pidinfo`, which says when a process began to the microsecond, and its
+# `TIOCOUTQ`, what a terminal holds that its reader has not read.
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["process", "signal", "term"] }
 

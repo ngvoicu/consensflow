@@ -6,12 +6,15 @@
 //! with its usage and asks the board nothing: it tells the word from text by
 //! what else the command was given (`words::Split::asks_for_help`).
 
+mod brief;
 mod cut;
 mod lines;
 mod task;
+mod transcript;
 mod usage;
 mod words;
 
+use std::ffi::OsString;
 use std::io::{self, Read, Write};
 
 use cf_board::{Board, BoardError};
@@ -26,6 +29,12 @@ use words::{message_id, quoted, require_text, split, task_number, Shape};
 const NOTE: Shape = Shape {
     switches: &["--human"],
     ..Shape::TEXT
+};
+
+/// The flags of `cf tell`, which names its task first.
+const TELL: Shape = Shape {
+    valued: &[brief::FILE],
+    ..Shape::NUMBERED
 };
 
 /// The flags of `cf history`.
@@ -107,22 +116,28 @@ fn help_of(path: &[&str]) -> Said {
     Said::new(json!({ "usage": usage }), usage)
 }
 
-/// Runs the command in `words` against `board`, reading a `-` text from
-/// `input`, answering with the API's JSON when `json` asks: the exit code.
-/// Only a failure to write `out` or `err` is an error. The answers an output
-/// carried whole are acknowledged to the board once all of it is written, and
-/// not when it was not: a read is not a receipt. Nor when the output is one
-/// that a harness may cut before its model reads it (`cut`): what was
-/// printed is measured, the text or the JSON, whichever it was.
+/// Runs the command in `given`, its words as the system gave them, against
+/// `board`, reading a `-` text from `input`, answering with the API's JSON when
+/// `json` asks: the exit code. Only a failure to write `out` or `err` is an
+/// error. The answers an output carried whole are acknowledged to the board
+/// once all of it is written, and not when it was not: a read is not a
+/// receipt. Nor when the output is one that a harness may cut before its model
+/// reads it (`cut`): what was printed is measured, the text or the JSON,
+/// whichever it was. The words are read as text, what is none replaced; a file
+/// a brief is read from is named by its word as it was given (`brief`).
 pub fn run(
-    words: &[String],
+    given: &[OsString],
     json: bool,
     board: &Board,
     input: &mut dyn Read,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> io::Result<u8> {
-    match command(words, board, input) {
+    let words: Vec<String> = given
+        .iter()
+        .map(|word| word.to_string_lossy().into_owned())
+        .collect();
+    match command(&words, given, board, input) {
         Ok(Said { data, text, wrote }) => {
             let printed = if json {
                 let data = cf_base::json::js_order(data);
@@ -148,18 +163,24 @@ pub fn run(
     }
 }
 
-fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
+/// The command in `words`, which `given` spells as the system gave them.
+fn command(
+    words: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
     let (verb, rest) = match words.split_first() {
         Some((verb, rest)) => (verb.as_str(), rest),
         None => ("help", words),
     };
     match verb {
         "help" | "--help" | "-h" => Ok(Said::new(json!({ "usage": usage() }), usage().to_string())),
-        "task" => task::command(rest, board, input),
+        "task" => task::command(rest, given, board, input),
         "inbox" => inbox(rest, board),
         "note" => note(rest, board, input),
         "ask" => ask(rest, board, input),
-        "tell" => tell(rest, board, input),
+        "tell" => tell(rest, given, board, input),
         "answer" => answer(rest, board, input),
         "staff" => staff(rest, board),
         "history" => history(rest, board),
@@ -254,23 +275,38 @@ fn ask(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
     Ok(Said::new(message, text))
 }
 
-fn tell(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
-    let words = split(rest, Shape::NUMBERED);
+fn tell(
+    rest: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
+    let words = split(rest, TELL);
     if words.asks_for_help() {
         return Ok(help_of(&["tell"]));
     }
     let number = task_number(rest.first().map(String::as_str))?;
     let what = require_text(
-        text_of(words.text, input)?,
+        brief::brief_of(&words, given, input)?,
         "cf tell T-<n> \"what to put to its window now\"",
     )?;
+    let sent = brief::sent(&what);
     let message = posted(board, &format!("/api/tasks/{number}/tell"), body_of(what))?;
-    let text = format!(
-        "T-{number} is paused and m-{} put to @{}; its answer arrives as a message. Then: cf task resume T-{number} \"…\"",
+    let (id, window) = (
         js::text(message.get("id")),
-        js::text(message.get("recipient"))
+        js::text(message.get("recipient")),
     );
-    Ok(Said::new(message, text))
+    // A task still queued is not stopped: its window is not up, and the words wait for it.
+    let text = if js::text(message.get("kind")) == "note" {
+        format!(
+            "T-{number} is queued: m-{id} waits for @{window}'s window and goes in after its brief. Nothing is paused, and nothing waits for an answer."
+        )
+    } else {
+        format!(
+            "T-{number} is paused and m-{id} put to @{window}; its answer arrives as a message. Then: cf task resume T-{number} \"…\""
+        )
+    };
+    Ok(Said::new(message, format!("{text}\n{sent}")))
 }
 
 fn answer(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
@@ -387,6 +423,7 @@ fn whoami(rest: &[String], board: &Board) -> Result<Said, Failure> {
 /// in a quoted heredoc (`cf task add --tier standard - <<'BRIEF'`) reaches
 /// the board as written, where the shell would run the backticks and `$( )`
 /// of a double-quoted one. The final newline is the heredoc's, not the text's.
+/// The commands that give a window work take a file as well (`brief`).
 fn text_of(text: String, input: &mut dyn Read) -> Result<String, Failure> {
     if text != "-" {
         return Ok(text);

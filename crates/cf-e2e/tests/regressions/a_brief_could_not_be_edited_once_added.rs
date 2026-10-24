@@ -111,5 +111,6 @@ fn a_blocked_task_edited_starts_with_the_new_brief_and_a_task_at_work_is_refused
     let result = cf(&rig, &chief, &["task", "get", "T-2"])?;
     assert!(result.contains("NEW"), "{result}");
     assert!(!result.contains("OLD"), "{result}");
+    rig.close()?;
     Ok(())
 }
