@@ -176,6 +176,8 @@ struct Seen {
     looks: usize,
     /// The last lines of the worker's window at the last look it had one.
     screen: String,
+    /// Its result, holding the word, was delivered to the chief.
+    delivered: bool,
 }
 
 /// The names of the processes `pgrep -f word` finds: none where it finds none.
@@ -203,7 +205,8 @@ fn matching(word: &str) -> Vec<String> {
 }
 
 /// Task `number` of `agent` looked at once a second until it is over: the command lines
-/// of the worker's windows and the machine's processes held to `word` at each look.
+/// of the worker's windows and the machine's processes held to `word` at each look; then,
+/// a task done, its result waited for at the chief.
 fn watch(members: &Members, agent: &str, number: i64, word: &str, log: &Log) -> Result<Seen> {
     let mut seen = Seen::default();
     let mut said = String::new();
@@ -243,6 +246,22 @@ fn watch(members: &Members, agent: &str, number: i64, word: &str, log: &Log) -> 
         }
         Ok(is_over(&thread).then_some(()))
     })?;
+    if seen.state == "done" {
+        seen.delivered = find(log, "the result", DELIVERS, LOOK, || {
+            let inbox = members.inbox(Some(members.chief()))?;
+            Ok(inbox
+                .iter()
+                .filter(|message| message["kind"] == "result")
+                .find(|message| {
+                    message["state"] == "delivered"
+                        && message["body"]
+                            .as_str()
+                            .is_some_and(|body| body.contains(word))
+                })
+                .map(|_| ()))
+        })?
+        .is_some();
+    }
     Ok(seen)
 }
 
@@ -305,33 +324,9 @@ fn judge(
             seen.screen
         ));
     }
-    let result = if seen.state == "done" {
-        find(
-            &Log::new("first-message"),
-            "the result",
-            DELIVERS,
-            LOOK,
-            || {
-                let inbox = members.inbox(Some(members.chief()))?;
-                Ok(inbox
-                    .iter()
-                    .filter(|message| message["kind"] == "result")
-                    .find(|message| {
-                        message["state"] == "delivered"
-                            && message["body"]
-                                .as_str()
-                                .is_some_and(|body| body.contains(word))
-                    })
-                    .map(|_| ()))
-            },
-        )?
-        .is_some()
-    } else {
-        false
-    };
     account.check(
         &format!("{step}: the result reached the chief with the word"),
-        result,
+        seen.delivered,
         delivered_result(&members.inbox(Some(members.chief()))?)
             .map_or("none".to_owned(), |body| live::cut(&body, 80)),
     );
