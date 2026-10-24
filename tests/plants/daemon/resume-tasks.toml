@@ -1668,7 +1668,7 @@ runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''        let Some(first) = delivering.filter(|_| !planned.first_once_up) else {'''
+find = '''        let Some(first) = delivering.filter(|_| planned.first == FirstMessage::Opened) else {'''
 replace = '''        let Some(first) = delivering else {'''
 
 [[plant]]
@@ -1678,7 +1678,7 @@ runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''            .filter(|_| planned.first_once_up);'''
+find = '''            .filter(|_| planned.first == FirstMessage::Started);'''
 replace = '''            .filter(|_| false);'''
 
 [[plant]]
@@ -1706,19 +1706,19 @@ find = '''        self.withdrawn.set(handed == HandOver::Withdrawn);'''
 replace = '''        self.withdrawn.set(false);'''
 
 [[plant]]
-name = "resume tasks: OpenCode takes its first message with its command line"
-meant = "opencode_takes_its_first_message_once_its_window_is_up_and_no_other_harness_does"
+name = "resume tasks: OpenCode reads its first message as its window opens"
+meant = "devin_reads_its_first_message_as_it_opens_opencode_posts_it_and_the_others_are_delivered_it"
 runs = ["harness-first-message"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/opencode/adapter.rs"
 find = '''
-    fn first_message_once_up(&self) -> bool {
-        true
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Started
     }'''
 replace = '''
-    fn first_message_once_up(&self) -> bool {
-        false
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Opened
     }'''
 
 [[plant]]

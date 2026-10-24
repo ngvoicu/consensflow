@@ -21,7 +21,6 @@
 [run]
 fm-launch-rule = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "scenarios::no_launch_puts_its_first_message_on_its_command_line"]
 fm-launch-pi-roles = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "pi::roles::"]
-fm-launch-claude-resumed = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::resumed::a_window_opened_for_a_message"]
 fm-engine-delivered = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "first_delivered::"]
 fm-rig-claude = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_windows_first_message_was_on_its_command_line::a_workers_claude"]
 fm-rig-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_windows_first_message_was_on_its_command_line::a_workers_codex"]
@@ -93,16 +92,6 @@ runs = ["fm-launch-pi-roles"]
 file = "crates/cf-harness/src/pi/adapter.rs"
 find = "argv.extend([\"--append-system-prompt\".to_owned(), role.file]);"
 replace = "argv.extend([\"--append-system-prompt\".to_owned(), launch.instructions.to_owned()]);"
-
-[[plant]]
-name = "first message: a window resumed for a message it is delivered once up reads the turn the quit cut as its own"
-meant = "a_window_opened_for_a_message_it_is_pasted_once_up_is_read_at_rest_by_the_turn_the_quit_cut"
-runs = ["fm-launch-claude-resumed"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            let left_open = if resumable {"
-replace = "            let left_open = if resumable && launch.message.is_none() {"
 
 [[plant]]
 name = "first message: the engine gives a window it delivers the message to on its launch as well"

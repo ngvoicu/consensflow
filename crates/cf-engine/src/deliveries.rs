@@ -592,12 +592,13 @@ impl Dispatcher {
                 );
                 return self.held_once(record, first.message, &reason);
             }
-            Readiness::Unfit(why) => return self.give_up_unfit(record, &message, &why).await,
+            Readiness::Unfit(reason) => return self.give_up_unfit(record, &message, &reason).await,
         }
         record.delivery.borrow_mut().unsent = false;
         let admitting =
             Admitting::new(self, message.project_id).handing(first.message, first.carried.clone());
-        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {
+        let handed = returning(window.deliver(&admitting, &pane, &text)).await;
+        let outcome = match handed {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.
             Err(error) => Admission::Refused {
