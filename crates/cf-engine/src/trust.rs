@@ -134,6 +134,33 @@ pub(crate) fn yes_at_exit(record: &Record, shown: &Shown) -> Option<String> {
 }
 
 impl Dispatcher {
+    /// A window the engine is about to close itself (a Close, a switch, a chief's
+    /// give-up), where it was asking and none of ConsensFlow's keys answered it: what
+    /// its screen shows is asked before the kill, for the engine settles such a close
+    /// with an exit of its own that says nothing of the screen, and a yes the human
+    /// said just before it is banked from what is read ([`yes_at_exit`]). The close
+    /// is no worse for a look that fails.
+    pub(crate) async fn bank_yes_before_close(&self, record: &Rc<Record>, pane: &Pane) {
+        let asking = {
+            let part = record.window.borrow();
+            part.trust == Trusting::Asked && part.trust_keys == 0
+        };
+        if !asking {
+            return;
+        }
+        let shown = self.look_at(pane).await;
+        // The window may have gone, or been opened again, while the host answered.
+        if record.window.borrow().pane.as_ref() != Some(pane) {
+            return;
+        }
+        let Some(folder) = yes_at_exit(record, &shown) else {
+            return;
+        };
+        if let Ok(Some(project)) = self.project_of(record.id) {
+            self.trust.accept(project.id, folder);
+        }
+    }
+
     /// Watches a window that was just opened for its harness's question about
     /// trusting its folder, apart from its launch, where its harness may ask one.
     pub(crate) async fn watch_trust(
@@ -376,3 +403,6 @@ impl Dispatcher {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

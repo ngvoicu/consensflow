@@ -132,10 +132,16 @@ impl Spawned {
             .into_owned()
     }
 
-    /// Whether it has ended. What it said on its error output may not all be kept
-    /// yet; [`Spawned::wait`] waits for that.
+    /// How it ended, if it has. It is a look, not a wait: what it said on its error
+    /// output may not all be kept yet, and a process it left that holds the pipe is
+    /// not waited for ([`Spawned::wait`] does both, once).
+    pub fn status(&mut self) -> Option<ExitStatus> {
+        self.child.try_wait().ok().flatten()
+    }
+
+    /// Whether it has ended ([`Spawned::status`]).
     pub fn has_exited(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(Some(_)))
+        self.status().is_some()
     }
 
     /// Waits for it to end, up to `within`: how it ended, or none if it was

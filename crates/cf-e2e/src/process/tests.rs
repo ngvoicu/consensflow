@@ -98,6 +98,58 @@ fn the_tests_own_variable_is_read_here_and_one_that_is_not_there_is_none() {
     assert_eq!(own_var("CF_E2E_NO_SUCH_VARIABLE"), None);
 }
 
+/// The variable that makes the test binary the programs the test below starts, and
+/// which of them.
+const SETTLE: &str = "CF_E2E_SETTLE_TEST";
+
+/// The name the test binary is asked to run, to be those programs.
+const SETTLE_PROGRAMS: &str = "process::tests::the_programs_the_settle_test_starts";
+
+/// Not a test of its own: the test binary again, started by the test below as two programs
+/// where there is no shell to do it with (on Windows). The first starts the second and ends
+/// at once, the second says its piece on the error output they share 300 ms later and ends.
+/// Run as a test it does nothing.
+#[test]
+// The first program is not to wait for the second: it ends first, and that is the case.
+#[allow(clippy::zombie_processes)]
+fn the_programs_the_settle_test_starts() {
+    match own_var(SETTLE).as_deref() {
+        Some("first") => {
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", SETTLE_PROGRAMS, "--nocapture"])
+                .env(SETTLE, "second")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap();
+        }
+        Some("second") => {
+            thread::sleep(Duration::from_millis(300));
+            writeln!(std::io::stderr(), "cf: it is refused").unwrap();
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output_wherever_it_runs() {
+    // The daemon's refused second start ended with 1, its sentence on the pipe, and a case
+    // that read its error output the moment it was gone found none (2026-10-23). Here the
+    // first program ends before the sentence is all in: the second says it a moment later.
+    let mut program = Run::new(std::env::current_exe().unwrap())
+        .args(["--exact", SETTLE_PROGRAMS, "--nocapture"])
+        .var(SETTLE, "first")
+        .spawn()
+        .unwrap();
+    let status = program.wait(Duration::from_secs(30)).unwrap();
+    assert_eq!(status.and_then(|status| status.code()), Some(0));
+    assert!(
+        program.errors().contains("cf: it is refused\n"),
+        "{:?}",
+        program.errors()
+    );
+}
+
 /// The runs that need a shell to be told what to do.
 #[cfg(unix)]
 mod shell {
@@ -272,6 +324,32 @@ mod shell {
         let status = program.wait(Duration::from_secs(10)).unwrap();
         assert_eq!(status.and_then(|status| status.code()), Some(0));
         assert_eq!(program.errors(), "cf: it is refused\n");
+    }
+
+    #[test]
+    fn a_spawned_programs_status_is_looked_at_and_not_waited_for_though_a_process_it_left_holds_its_error_output(
+    ) {
+        let mut program = sh("printf 'said\\n' >&2; sleep 20 & exit 0")
+            .spawn()
+            .unwrap();
+        let started = Instant::now();
+        let status = loop {
+            if let Some(status) = program.status() {
+                break status;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "it never ended"
+            );
+            thread::sleep(Duration::from_millis(2));
+        };
+        assert_eq!(status.code(), Some(0));
+        assert!(program.has_exited());
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     #[test]

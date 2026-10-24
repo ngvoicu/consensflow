@@ -23,7 +23,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, Interrupt, Launch, Prepared, Readiness, Skill, Waiting, Window, Work,
+    Adapter, Admission, Interrupt, Launch, Prepared, Readiness, Skill, Trusts, Waiting, Window,
+    Work,
 };
 use cf_harness::records::{Item, Quota, Role};
 use cf_proto::panes::Servers;
@@ -209,9 +210,25 @@ pub struct FakeAdapter {
     /// last window on it left it, as a harness's `--resume` does: not, as the fake of
     /// Node's suite, whose every window began with an empty record.
     pub resumes_records: Cell<bool>,
+    /// What a yes to its windows' question about trusting their folder would trust,
+    /// where its harness may ask one ([`FakeAdapter::asks_to_trust`]): none, as an
+    /// adapter that never asks, which the fake of Node's suite was.
+    pub trusts: RefCell<Option<Trusts>>,
 }
 
 impl FakeAdapter {
+    /// From now on its windows' harness may ask whether to trust their folder
+    /// before it starts, as Claude Code does in a git repository: a yes would
+    /// trust `folder`, and `inside` says it is the project's folder or below it.
+    /// A window reads its screen as the question where a line holds
+    /// `TRUST_QUESTION`, and as its prompt where a line holds `TRUST_PROMPT`.
+    pub fn asks_to_trust(&self, folder: &str, inside: bool) {
+        *self.trusts.borrow_mut() = Some(Trusts {
+            folder: folder.to_owned(),
+            inside,
+        });
+    }
+
     pub fn new(recorder: Recorder) -> Rc<Self> {
         Self::numbering(recorder, Rc::new(Cell::new(0)))
     }
@@ -257,6 +274,7 @@ impl FakeAdapter {
             wraps_pastes: Cell::new(false),
             forgets_first_messages: Cell::new(false),
             resumes_records: Cell::new(false),
+            trusts: RefCell::new(None),
         })
     }
 

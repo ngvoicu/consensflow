@@ -15,7 +15,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Admission, Held, Observed, Pane, PaneHost, Readiness, Waiting, Window, Work,
+    Admission, Held, Observed, Pane, PaneHost, Readiness, Trusts, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, Reading, Record, Settlement};
 use serde_json::{json, Value};
@@ -24,12 +24,20 @@ use super::adapter::{FakeAdapter, FakeAgent, Taking};
 use super::holds::Wrapped;
 use crate::runtime::next_turn;
 
+/// What a screen holds that is the question about trusting the folder, for a
+/// window whose adapter asks one ([`FakeAdapter::asks_to_trust`]), and what it holds
+/// that is the harness's prompt, once it is past the question.
+pub const TRUST_QUESTION: &str = "Do you trust this folder? (a test's question)";
+pub const TRUST_PROMPT: &str = "Ready for work (a test's prompt)";
+
 pub(super) struct FakeWindow {
     seam: String,
     launch: String,
     session: RefCell<String>,
     pid: Cell<Option<u32>>,
     fake: Rc<FakeAdapter>,
+    /// What a yes to its question would trust, where its adapter asks one.
+    trusts: Option<Trusts>,
 }
 
 impl FakeWindow {
@@ -39,12 +47,14 @@ impl FakeWindow {
         session: String,
         fake: Rc<FakeAdapter>,
     ) -> Self {
+        let trusts = fake.trusts.borrow().clone();
         Self {
             seam,
             launch,
             session: RefCell::new(session),
             pid: Cell::new(None),
             fake,
+            trusts,
         }
     }
 
@@ -72,9 +82,28 @@ impl FakeWindow {
     }
 }
 
+/// Whether some line of `screen` holds `words`.
+fn holds(screen: &[String], words: &str) -> bool {
+    screen.iter().any(|line| line.contains(words))
+}
+
 impl Window for FakeWindow {
     fn opened(&self, pid: Option<u32>) {
         self.pid.set(pid);
+    }
+
+    fn trusts(&self) -> Option<&Trusts> {
+        self.trusts.as_ref()
+    }
+
+    /// Down is the key toward a yes, whatever the screen: it is only asked where
+    /// the question is.
+    fn toward_trust(&self, screen: &[String]) -> Option<&'static [u8]> {
+        (self.trusts.is_some() && holds(screen, TRUST_QUESTION)).then_some(b"\x1b[B".as_slice())
+    }
+
+    fn shows_prompt(&self, screen: &[String]) -> bool {
+        self.trusts.is_some() && holds(screen, TRUST_PROMPT) && !holds(screen, TRUST_QUESTION)
     }
 
     fn follow(&self, session: &str) {

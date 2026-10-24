@@ -326,6 +326,7 @@ impl Dispatcher {
             window.unstopped = None;
             window.activity = Activity::of(ActivityState::Closed);
             window.trust = Trusting::Past;
+            window.trust_keys = 0;
             taken
         };
         if let Some(token) = token {
@@ -1192,8 +1193,13 @@ impl Dispatcher {
         pane: &Pane,
     ) -> Result<bool, EngineError> {
         let retiring = record.window.borrow().retiring;
-        if !retiring && !self.kill(record, pane).await? {
-            return Ok(false);
+        if !retiring {
+            // The exit is settled here, and says nothing of the screen the window ends
+            // with: where it was asking, the human's yes in it is read off the screen now.
+            self.bank_yes_before_close(record, pane).await;
+            if !self.kill(record, pane).await? {
+                return Ok(false);
+            }
         }
         let open = record.window.borrow().pane.as_ref() == Some(pane);
         if open {
