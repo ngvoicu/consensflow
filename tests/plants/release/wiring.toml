@@ -103,7 +103,7 @@ runs = ["xtask-suites"]
 file = ".github/workflows/ci.yml"
 find = '''
       - run: npm run test:regressions
-        timeout-minutes: 45
+        timeout-minutes: 35
 '''
 replace = ""
 
