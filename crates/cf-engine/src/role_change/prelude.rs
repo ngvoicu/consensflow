@@ -207,7 +207,7 @@ impl Dispatcher {
     /// launch's first message, and the replacement is withdrawn. A chief's stays
     /// in its queue, and the chief is tried again at the backoff
     /// (`launch_failed`); its exit closes no project, where the exit was neither
-    /// the human's (a project already closed) nor the engine's own.
+    /// the human's (a project already closed) nor the engine's own (`own`).
     pub(crate) fn settle_exited_launch(
         &self,
         record: &Rc<Record>,
@@ -215,9 +215,10 @@ impl Dispatcher {
         participant: &ParticipantView,
         prelude: &Prelude,
         because: &str,
+        own: bool,
     ) -> Result<(), EngineError> {
         if participant.role == "chief" {
-            let went_by_itself = project.state == "open" && !record.window.borrow().own_exit;
+            let went_by_itself = project.state == "open" && !own;
             return if went_by_itself {
                 self.launch_failed(record, project, participant, None, because)
             } else {
@@ -238,7 +239,10 @@ impl Dispatcher {
     /// One look at what a launch that says the role first still owes, with its
     /// window open: the replacement given up is a launch that did not come up, and
     /// so is a member's window that has not been ready for it within the time a
-    /// launch is given. Says whether the launch was given up, its window closing.
+    /// launch is given. Says whether the launch was given up, its window closing. A
+    /// member's is given up apart from the pass, as a delivery goes (`act`): its close
+    /// waits on the window's kill, and the pass is every window's (T-414 P3-1: the
+    /// pass waited, up to the close grace of a window that left a job running).
     pub(crate) async fn watch_prelude(
         self: &Rc<Self>,
         project: &ProjectView,
@@ -262,8 +266,21 @@ impl Dispatcher {
             Some("queued") if slow => "the window was never ready for the note that says its role",
             _ => return Ok(false),
         };
-        self.abandon_launch(project, participant, record, because)
-            .await?;
+        if participant.role == "chief" {
+            self.abandon_launch(project, participant, record, because)
+                .await?;
+            return Ok(true);
+        }
+        let (this, at, who, held) = (
+            Rc::clone(self),
+            project.clone(),
+            participant.clone(),
+            Rc::clone(record),
+        );
+        self.act(record, async move {
+            this.abandon_launch(&at, &who, &held, because).await
+        })
+        .await;
         Ok(true)
     }
 
@@ -309,13 +326,11 @@ impl Dispatcher {
         // record already, or the exit would fail that message itself. A kill refused, or
         // not answered in its time, leaves no exit to pause the task: the message fails,
         // and whoever gave it hears why (T-63). Words still waiting for the window wait for
-        // the resume of the task the exit paused, and are said to.
-        let before = self.in_hand(record)?;
+        // the resume of the task the exit paused, for why it was given up (`stall`).
         if let Some(pane) = &pane {
-            self.close_own_within(record, pane).await?;
+            let settling = failing.as_ref().map(|failing| failing.message);
+            self.close_own_within(record, pane, &said, settling).await?;
         }
-        let except = failing.as_ref().map(|failing| failing.message);
-        self.launch_failed(record, project, participant, failing, &said)?;
-        self.keep_waiting(project, before, except, &said)
+        self.launch_failed(record, project, participant, failing, &said)
     }
 }

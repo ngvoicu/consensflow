@@ -9,7 +9,9 @@ use std::rc::Rc;
 
 use cf_base::js;
 use cf_harness::contract::{Admission, Held, Observed, PaneHost, Readiness};
-use cf_ledger::{is_told, GivenUp, MessageView, NewNote, ParticipantView, ProjectView, TaskView};
+use cf_ledger::{
+    is_told, resumed_in_vain, GivenUp, MessageView, NewNote, ParticipantView, ProjectView, TaskView,
+};
 use cf_proto::trace::WindowEvent;
 
 use crate::delivery_text::{delivery_text, marker_of};
@@ -333,10 +335,18 @@ impl Dispatcher {
             GivenUp::Withdrawn => return Ok(()),
             GivenUp::Paused => {
                 let project = self.known_project(message.project_id)?;
-                if self.given_by_the_human(&project, message)? {
-                    return Ok(());
+                if !self.given_by_the_human(&project, message)? {
+                    self.tell_not_reached(&project, message, because)?;
                 }
-                return self.tell_not_reached(&project, message, because);
+                let paused = match message.task_number {
+                    Some(number) => self.seams.ledger.borrow().task(project.id, number)?,
+                    None => None,
+                };
+                if let Some(thread) = paused {
+                    let paused_because = resumed_in_vain(message, because);
+                    self.tell_stall(&project, &thread.task, &paused_because, because, None)?;
+                }
+                return Ok(());
             }
         }
         let project = self.known_project(message.project_id)?;
@@ -403,49 +413,16 @@ impl Dispatcher {
         Ok(task.is_some_and(|thread| thread.task.requester == "human"))
     }
 
-    /// The number of the task a member's window has in hand, queued for it, at work or
-    /// waiting, and so not paused: what a give-up of the window may pause
-    /// ([`Dispatcher::keep_waiting`]).
-    pub(crate) fn in_hand(&self, record: &Record) -> Result<Option<i64>, EngineError> {
-        let thread = self.seams.ledger.borrow().active_task(record.id, true)?;
-        Ok(thread.map(|thread| thread.task.number))
-    }
-
-    /// Words told to a member's window about T-`before`, the task it had in hand as a
-    /// give-up closed the window ([`Dispatcher::in_hand`]), that still wait for it: where
-    /// the give-up paused the task, they wait for its resume, but `except` (kept as its
-    /// paste failed, and said already), and its requester hears which, and why, in the
-    /// note of the pause, and the human once each ([`Dispatcher::tell_kept`]). The chief
-    /// is never left to think its words went in (T-77).
-    pub(crate) fn keep_waiting(
+    /// Words told to a window, kept for their task's resume as their paste failed or
+    /// as its window went (`because`): the human hears it once, as main told it of
+    /// words that did not reach the window, which these do at the resume; words held
+    /// for the human wait for their word first. A task the human gave was told of it
+    /// already: that note was theirs.
+    pub(crate) fn tell_kept(
         &self,
-        project: &ProjectView,
-        before: Option<i64>,
-        except: Option<i64>,
-        why: &str,
+        message: &MessageView,
+        because: &str,
     ) -> Result<(), EngineError> {
-        let Some(number) = before else {
-            return Ok(());
-        };
-        let kept = self
-            .seams
-            .ledger
-            .borrow_mut()
-            .keep_waiting(project.id, number, except, why)?;
-        for message in &kept {
-            self.tell_kept(message, why)?;
-        }
-        if !kept.is_empty() {
-            self.changed();
-        }
-        Ok(())
-    }
-
-    /// Words told to a window, kept for their task's resume as their paste failed
-    /// `because`: the human hears it once, as main told it of words that did not
-    /// reach the window, which these do at the resume. A task the human gave was
-    /// told of it already: that note was theirs.
-    fn tell_kept(&self, message: &MessageView, because: &str) -> Result<(), EngineError> {
         let Some(number) = message.task_number else {
             return Ok(());
         };
@@ -459,12 +436,21 @@ impl Dispatcher {
                 from: None,
                 to: "human".to_owned(),
                 task: Some(number),
-                body: format!(
-                    "m-{}, {}, waits for T-{number}'s resume to reach @{}: {because}.",
-                    message.id,
-                    described(message),
-                    message.recipient
-                ),
+                body: if message.state == "gated" {
+                    format!(
+                        "m-{}, {}, waits for your approval, then T-{number}'s resume, to reach @{}: {because}.",
+                        message.id,
+                        described(message),
+                        message.recipient
+                    )
+                } else {
+                    format!(
+                        "m-{}, {}, waits for T-{number}'s resume to reach @{}: {because}.",
+                        message.id,
+                        described(message),
+                        message.recipient
+                    )
+                },
             },
         )?;
         Ok(())
@@ -483,12 +469,32 @@ impl Dispatcher {
         self.tell_requester(project, task, because)
     }
 
+    /// Whoever gave a failed task hears why, and which words told to its window wait
+    /// for the reopen, which carries them (T-414 P3-4: they were left unsaid, as a
+    /// cancel says those it drops): queued, or held for the human.
     fn tell_requester(
         &self,
         project: &ProjectView,
         task: &TaskView,
         because: &str,
     ) -> Result<(), EngineError> {
+        let waiting: Vec<String> = self
+            .seams
+            .ledger
+            .borrow()
+            .told_unreceived(project.id, task.number)?
+            .into_iter()
+            .filter(|told| matches!(told.state.as_str(), "queued" | "gated"))
+            .map(|told| format!("m-{}", told.id))
+            .collect();
+        let waiting = if waiting.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "; the words told its window wait for the reopen: {}",
+                waiting.join(", ")
+            )
+        };
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
@@ -496,7 +502,7 @@ impl Dispatcher {
                 to: task.requester.clone(),
                 task: Some(task.number),
                 body: format!(
-                    "T-{0} failed: {because}. Reopen it with: cf task reopen T-{0} \"…\"",
+                    "T-{0} failed: {because}{waiting}. Reopen it with: cf task reopen T-{0} \"…\"",
                     task.number
                 ),
             },

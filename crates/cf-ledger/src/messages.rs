@@ -47,7 +47,7 @@ pub(crate) use delivery::{
 };
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub(crate) use holds::{note_hold, tell_goes_on};
-pub(crate) use pauses::{join_pause_note, leave_pause_notes, note_pause};
+pub(crate) use pauses::{join_pause_note, leave_pause_notes, note_pause, note_stall};
 pub use receipt::Read;
 pub(crate) use receipt::{
     claim_answer, door_born_closed, receive_read, reconcile, release_all_claims, release_claims,
@@ -56,9 +56,7 @@ pub(crate) use receipt::{
 pub(crate) use roles::{note_role, role_notes_to};
 pub(crate) use taken_back::take_back;
 pub use told::is_told;
-pub(crate) use told::{
-    keep_waiting, launch_called_off, tell_queued, told_unreceived, told_waiting, Dropped,
-};
+pub(crate) use told::{launch_called_off, tell_queued, told_unreceived, told_waiting, Dropped};
 
 /// A note: from a participant (ConsensFlow itself when none) to another,
 /// about one of the project's tasks or none.

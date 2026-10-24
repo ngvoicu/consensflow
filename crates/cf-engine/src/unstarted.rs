@@ -188,13 +188,12 @@ impl Dispatcher {
         // or not answered in its time, leaves no exit to pause the task: the message goes
         // all the same, and fails (T-47 P3-1: left at work, asked and killed again at
         // every pass, nobody told). Words still waiting for the window wait for the
-        // resume of the task the exit paused, and are said to.
-        let before = self.in_hand(record)?;
+        // resume of the task the exit paused, for why it was given up (`stall`).
         if let Some(pane) = &pane {
-            self.close_own_within(record, pane).await?;
+            self.close_own_within(record, pane, &said, Some(message.id))
+                .await?;
         }
-        self.launch_failed(record, &project, &participant, Some(failing), &said)?;
-        self.keep_waiting(&project, before, Some(message.id), &said)
+        self.launch_failed(record, &project, &participant, Some(failing), &said)
     }
 
     /// A launch whose window did not come up in the time it had, its harness asked
@@ -236,29 +235,34 @@ impl Dispatcher {
         // A member's message that the role went ahead of is no record's: it was given back.
         let settles = record.delivery.borrow_mut().delivering.take().is_some();
         record.window.borrow_mut().starts_given_up += 1;
-        // The chief's window goes without taking its project with it: the chief is tried again.
-        let before = if participant.role == "chief" {
-            self.close_own(record, &pane).await?;
-            None
-        } else {
-            let before = self.in_hand(record)?;
-            // A member's exit is settled at the close, before its first message fails: the
-            // exit pauses its task, and words told to its window wait for the resume, as at
-            // an unfit window's close (T-47 P2-1). The launch is not held for a kill that
-            // never answers: one refused, or not answered in its time, leaves no exit to
-            // pause the task, and the message fails, whoever gave it told why (T-63).
-            self.close_own_within(record, &pane).await?;
-            before
-        };
         let because = if first {
             format!("the window could not take its first message: {error}")
         } else {
             format!("the window never came up: {error}")
         };
-        let said = if settles || !first {
-            self.unstarted_because(record, &because, &shown)
+        let say = || {
+            if settles || !first {
+                self.unstarted_because(record, &because, &shown)
+            } else {
+                shown.after(&because)
+            }
+        };
+        // The chief's window goes without taking its project with it: the chief is tried again.
+        let said = if participant.role == "chief" {
+            self.close_own(record, &pane).await?;
+            say()
         } else {
-            shown.after(&because)
+            let said = say();
+            // A member's exit is settled at the close, before its first message fails: the
+            // exit pauses its task, and words told to its window wait for the resume, for
+            // why it was given up (`stall`), as at an unfit window's close (T-47 P2-1). The
+            // launch is not held for a kill that never answers: one refused, or not
+            // answered in its time, leaves no exit to pause the task, and the message
+            // fails, whoever gave it told why (T-63).
+            let settling = failing.as_ref().map(|failing| failing.message);
+            self.close_own_within(record, &pane, &said, settling)
+                .await?;
+            said
         };
         let failing = match failing {
             Some(delivering) if delivering.chief => {
@@ -272,11 +276,7 @@ impl Dispatcher {
             }
             failing => failing,
         };
-        let except = failing.as_ref().map(|failing| failing.message);
         self.launch_failed(record, project, participant, failing, &said)?;
-        // Words still waiting for a member's window wait for the resume of the task its
-        // exit paused, and are said to.
-        self.keep_waiting(project, before, except, &said)?;
         // The chief opens again at its time whatever waits for it, told its turn was cut
         // where the window had begun one (`Dispatcher::step`).
         if let Some(relaunch) = record.window.borrow_mut().relaunch.as_mut() {

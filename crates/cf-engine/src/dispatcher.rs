@@ -775,13 +775,14 @@ impl Dispatcher {
         };
         let launch_owed = owed.is_some();
         if let Some(prelude) = owed {
-            self.settle_exited_launch(&record, &project, &participant, &prelude, &because)?;
+            let own = record.window.borrow().own_exit_of(pane).is_some();
+            self.settle_exited_launch(&record, &project, &participant, &prelude, &because, own)?;
         }
         if participant.role == "chief" {
             // The chief's own exit closes the project as Close does, but for the
             // window of a launch that was to say the role: it did not come up, and
             // is tried again (`settle_exited_launch`).
-            let own = record.window.borrow().own_exit;
+            let own = record.window.borrow().own_exit_of(pane).is_some();
             if project.state == "open" && !own && !launch_owed {
                 self.seams
                     .ledger
@@ -836,19 +837,28 @@ impl Dispatcher {
                 };
                 let (own, with) = {
                     let window = record.window.borrow();
-                    (window.own_exit, window.closed_with.clone())
+                    (
+                        window.own_exit_of(pane).cloned(),
+                        window.closed_with.clone(),
+                    )
                 };
                 let closed = match with {
                     Some(with) => format!("@{}'s window closed {with}", participant.handle),
                     None => format!("@{}'s window closed", participant.handle),
                 };
-                let because = if own {
+                let because = if own.is_some() {
                     let outlived = shown.outlived().unwrap_or_default();
                     format!("{closed}{outlived}{besides}")
                 } else {
                     shown.after_with(&closed, &besides)
                 };
-                self.stall(&project, &thread.task, &because)?;
+                // The words told to the window that wait for it still wait for the resume,
+                // for why a give-up closed it where one did.
+                let (why, except) = match own {
+                    Some(own) => (own.why.unwrap_or_else(|| because.clone()), own.settling),
+                    None => (because.clone(), None),
+                };
+                self.stall(&project, &thread.task, &because, &why, except)?;
             } else {
                 self.tell_left_running(&project, &participant, left)?;
             }
@@ -945,7 +955,7 @@ impl Dispatcher {
             .active_task(participant.id, false)?;
         if let Some(thread) = task {
             let because = format!("@{}'s window is gone", participant.handle);
-            self.stall(project, &thread.task, &because)?;
+            self.stall(project, &thread.task, &because, &because, None)?;
             self.changed();
         }
         Ok(())

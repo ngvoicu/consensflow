@@ -347,3 +347,34 @@ fn words_in_the_first_message_of_a_launch_cancelled_before_its_window_opened_are
         notes(&context, chief)
     );
 }
+
+/// Words told before the window opens, riding in its brief, when that window never
+/// comes up: the brief fails and T-1 with it, as a brief that never reaches its window
+/// fails its task, and the words wait under the failed task for the reopen, which
+/// carries them. Its requester is told which, in the note of the failure (T-414 P3-4:
+/// the note said nothing of them, where a cancel says which words went with it).
+#[test]
+fn words_told_before_a_window_that_never_comes_up_are_said_to_wait_for_the_reopen() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    *context.adapter.started.borrow_mut() = Some(std::rc::Rc::new(|| {
+        Err("Devin never said which session it opened".to_owned())
+    }));
+    context.give(project.id, "zeus", "Parser");
+    let told = tell(&context, project.id, 1, "Use the v2 grammar");
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    assert_eq!(context.task(project.id, 1).task.state, "failed");
+    assert_eq!(context.message(told).state, "queued", "kept for the reopen");
+    let failed: Vec<String> = notes(&context, context.id(project.id, "chief"))
+        .into_iter()
+        .filter(|said| said.starts_with("T-1 failed: "))
+        .collect();
+    assert_eq!(
+        failed,
+        [format!(
+            "T-1 failed: the window could not take its first message: Devin never said which session it opened; the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\""
+        )]
+    );
+}

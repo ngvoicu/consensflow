@@ -11,7 +11,7 @@
 
 use std::rc::Rc;
 
-use cf_engine::testing::{Context, Restarted};
+use cf_engine::testing::{Context, Gate, Restarted};
 use cf_harness::records::Role;
 use cf_ledger::{MessageView, NewNote, NewTask, ProjectView};
 use serde_json::{json, Value};
@@ -715,17 +715,85 @@ fn a_session_whose_launch_cannot_say_its_role_with_a_second_note_waiting_names_b
             note.id, second.id
         )]
     );
-    let to_human: Vec<String> = context
+    // Once each: the word still waiting as the window went, then the one its give-up kept.
+    let mut to_human: Vec<String> = context
         .inbox(context.id(project.id, "human"))
         .into_iter()
-        .rev()
         .map(|message| message.body)
         .filter(|said| said.contains("waits for T-1's resume"))
         .collect();
+    to_human.sort_by_key(|said| {
+        said.split(',')
+            .next()
+            .and_then(|named| named.strip_prefix("m-")?.parse::<i64>().ok())
+    });
     assert_eq!(
         to_human,
         [note.id, second.id].map(|id| format!(
             "m-{id}, a note from @chief on T-1, waits for T-1's resume to reach @{session}: {why}."
         ))
     );
+}
+
+/// The same launch, whose window's kill the host never answers: the launch is given up
+/// apart from the pass, which ends while the kill waits (T-414 P3-1: the pass waited on
+/// the kill, every window's deliveries with it). Past the kill's wait the note the role
+/// went ahead of goes without the exit, failing, T-1 with it, whoever is told hearing
+/// why, as for a kill refused (P3-7: no case gave up this launch on a kill not answered).
+#[test]
+fn a_session_whose_launch_cannot_say_its_role_and_whose_kill_is_never_answered_is_given_up_apart_from_the_pass(
+) {
+    let context = codex();
+    let (project, after, session, _member, note) = told_before_a_reopen_that_failed(&context);
+    after.pass().unwrap();
+    let window = context.host.last(&session).expect("its window").pane;
+    let held = Gate::default();
+    *context.host.hold_kill.borrow_mut() = Some((window.generation, held.clone()));
+    let mut ended_with_the_kill_waiting = false;
+    for _ in 0..6 {
+        let passing = after.begin_pass();
+        context.settle();
+        assert!(passing.ended(), "the pass ends, whatever the kill does");
+        passing.take().unwrap().unwrap();
+        let asked = context.recorder.events().iter().any(|event| {
+            event["seam"] == "host"
+                && event["method"] == "kill"
+                && event["args"][0]["generation"] == window.generation
+        });
+        if asked {
+            assert!(context.host.killed().is_empty(), "the kill is not answered");
+            ended_with_the_kill_waiting = true;
+            break;
+        }
+    }
+    assert!(
+        ended_with_the_kill_waiting,
+        "the launch was given up, its kill waiting"
+    );
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+
+    assert!(context.timers.fire_next(), "the kill's wait ends");
+    context.settle();
+    let why = "the note that says its role did not reach it";
+    let failed = context.message(note.id);
+    assert_eq!(
+        (failed.state.as_str(), failed.reason.as_deref()),
+        ("failed", Some(why))
+    );
+    assert_eq!(context.task(project.id, 1).task.state, "failed");
+    let words = format!("m-{}", note.id);
+    let to_chief: Vec<String> = context
+        .inbox(context.id(project.id, "chief"))
+        .into_iter()
+        .map(|message| message.body)
+        .filter(|said| said.contains(&words))
+        .collect();
+    assert_eq!(
+        to_chief,
+        [format!(
+            "T-1 failed: what @chief told its window, {words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\""
+        )]
+    );
+    held.open();
+    context.settle();
 }

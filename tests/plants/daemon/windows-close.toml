@@ -205,8 +205,8 @@ runs = ["engine-closing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "let because = if own {"
-replace = "let because = if own && false {"
+find = '''let because = if own.is_some() {'''
+replace = '''let because = if own.is_some() && false {'''
 
 [[plant]]
 name = "windows close: the late exit of a window the engine closed pauses its session's queued task"

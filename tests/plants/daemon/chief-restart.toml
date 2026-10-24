@@ -66,8 +66,9 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/unstarted.rs"
-find = "            self.close_own_within(record, &pane).await?;"
-replace = "            let _ = &pane;"
+find = '''            self.close_own_within(record, &pane, &said, settling)
+                .await?;'''
+replace = '''            let _ = (&pane, settling);'''
 
 [[plant]]
 name = "chief restart: a window whose exit came while it was waited for is given up again"

@@ -12,9 +12,7 @@ use serde_json::{json, Map, Value};
 use super::{
     carrier_body, delivery_body, m_list, require_task_state, task, task_by_id, task_found,
 };
-use crate::messages::{
-    fold, leave_pause_notes, note_pause, release_carried, tell_goes_on, transfer,
-};
+use crate::messages::{fold, leave_pause_notes, release_carried, tell_goes_on, transfer};
 use crate::model::{self, LedgerError, ACTIVE_TASK_STATES, MAX_BODY};
 use crate::queue::{queue, send, Queued, Sent};
 use crate::staff::{require_free, Giving};
@@ -316,7 +314,8 @@ pub(crate) fn paused_task(
 /// task is paused again, never failed, as a task whose window closes is (field 3.0.6),
 /// and not failed as a first brief that never reached its window fails its task. The
 /// words fail, for they never went in, and its requester is told so, and why, in the
-/// note of the pause; what they carried waits for the next resume, which carries it
+/// note of the pause (the engine's, [`resumed_in_vain`]); what they carried waits for
+/// the next resume, which carries it
 /// (`fold`). Whether they were such words (T-77: a resume whose window never came up
 /// failed its task, and left the words kept for it queued under a failed task).
 pub(crate) fn pause_again(
@@ -350,18 +349,22 @@ pub(crate) fn pause_again(
         json!({ "message": message.id, "reason": reason }),
     )?;
     release_carried(store, task.id)?;
-    let reason = reason.lines().collect::<Vec<_>>().join(" ");
-    let because = format!(
-        "the words that resumed it, m-{}, did not reach @{}'s window: {reason}",
-        message.id, message.recipient
-    );
     let mut detail = Map::new();
     detail.insert("by".into(), Value::Null);
-    detail.insert("because".into(), json!(because));
+    detail.insert("because".into(), json!(resumed_in_vain(message, reason)));
     pause(store, task, detail)?;
-    let requester = store.participant_row(task.requester_id)?.handle;
-    note_pause(store, task.project_id, &requester, task.number, &because)?;
     Ok(true)
+}
+
+/// Why a task is paused again whose resume's words, `message`, never reached its
+/// window (`reason`, on one line): what its pause says ([`pause_again`]), and its
+/// note, which the engine writes with the stalls it tells of together.
+pub fn resumed_in_vain(message: &MessageView, reason: &str) -> String {
+    let reason = reason.lines().collect::<Vec<_>>().join(" ");
+    format!(
+        "the words that resumed it, m-{}, did not reach @{}'s window: {reason}",
+        message.id, message.recipient
+    )
 }
 
 /// Whether a tell for this task has reached the participant's window since

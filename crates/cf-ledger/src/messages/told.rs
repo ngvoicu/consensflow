@@ -177,19 +177,19 @@ pub(super) fn kept_for_resume(
     Ok(true)
 }
 
-/// Words told to the window of T-`number`, which a give-up of the window has just
-/// paused (`why`), that still wait for it: queued, in no paste under way, but
-/// `except` (words the give-up kept already as their paste failed, and named). They
-/// wait for the resume, as words kept as their paste failed do, and say so, and its
-/// requester hears which, and why, in the note of the pause ([`tell_kept`]): the
-/// teller is never left to think they went in (the chief, T-77). Each of them, for
-/// the engine to tell the human; none where the task is not paused.
+/// Words told to the window of T-`number`, which ConsensFlow has just paused as its
+/// window went away (`why`), that still wait for it: queued, or held for the human
+/// (`gated`), in no paste under way (one on its way is settled by its delivery, kept
+/// for the resume as its paste fails: `kept_for_resume`). They wait for the resume, as
+/// those do, and the queued say so; its requester hears which, and why, in the note of
+/// the pause ([`tell_kept`]). Not `except`, which its caller names itself. Each of
+/// them, for the engine to tell the human; none where the task is not paused.
 pub(crate) fn keep_waiting(
     store: &mut Store,
     project_id: i64,
     number: i64,
-    except: Option<i64>,
     why: &str,
+    except: Option<i64>,
 ) -> Result<Vec<MessageView>, LedgerError> {
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
@@ -200,7 +200,7 @@ pub(crate) fn keep_waiting(
             store,
             &format!(
                 "{MESSAGE_SELECT} WHERE m.task_id = ?1 AND {told} AND m.recipient_id = ?2
-                   AND m.state = 'queued' AND m.id IS NOT ?3
+                   AND m.state IN ('queued', 'gated') AND m.id IS NOT ?3
                    AND (m.carried_by IS NULL
                         OR m.carried_by NOT IN (SELECT id FROM message WHERE state = 'delivering'))
                  ORDER BY m.id",
@@ -210,8 +210,9 @@ pub(crate) fn keep_waiting(
         )?;
         let mut kept = Vec::with_capacity(waiting.len());
         for message in waiting {
+            // A row held for the human keeps the gate's own reason (none).
             store.db.execute(
-                "UPDATE message SET reason = ? WHERE id = ?",
+                "UPDATE message SET reason = ? WHERE id = ? AND state = 'queued'",
                 params![format!("kept for T-{number}'s resume: {why}"), message.id],
             )?;
             store.log(

@@ -12,7 +12,9 @@ use cf_ledger::{MessageView, NewNote, RESUME_WORDS};
 use serde_json::{json, Value};
 
 use crate::chiefs::to_human;
-use crate::fixtures::{assert_match, fail_next_retry, finished, given, native_of, Tiers};
+use crate::fixtures::{
+    assert_match, fail_next_retry, fail_next_write, finished, given, native_of, Tiers,
+};
 
 /// What a worker the quit cut in T-1 is told, and what the chief is told.
 const WORKER_CUT: &str = "ConsensFlow quit while you were working on T-1. Go on where you stopped.";
@@ -1700,4 +1702,108 @@ fn a_resume_whose_window_never_comes_up_pauses_its_task_again_and_the_note_it_ca
         1,
         "{given:?}"
     );
+}
+
+/// The same window, whose kill the host never answers, though its exit comes: the exit
+/// is the give-up's own, and pauses T-1. The close waits on the kill still, and the next
+/// window of the member, opened at T-1's resume, is no close of the engine's: when it
+/// crashes, its pause says how it ended and what it showed, as any crash's does (T-414
+/// P3-8: the record still read as closing its own window, and the crash was told as a
+/// close of the engine's, its screen left out).
+#[test]
+fn a_window_closed_while_a_kill_of_an_earlier_one_is_never_answered_is_no_close_of_the_engines() {
+    let context = Context::new();
+    let (tiers, after, session, note) = told_before_a_reopen_that_failed(&context);
+    let project = tiers.project.id;
+    let held = Gate::default();
+    let (host, handle, gate) = (Rc::clone(&context.host), session.clone(), held.clone());
+    *context.adapter.started.borrow_mut() = Some(Rc::new(move || {
+        let window = host.last(&handle).expect("its window").pane;
+        *host.hold_kill.borrow_mut() = Some((window.generation, gate.clone()));
+        Err(NEVER_NAMED.to_owned())
+    }));
+    after.pass().unwrap();
+    let window = context.host.last(&session).unwrap().pane;
+    let host = Rc::clone(&context.host);
+    context.run(async move { host.exited(window).await });
+    assert!(context.timers.fire_next(), "the kill's wait ends");
+    context.settle();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert_eq!(context.message(note.id).state, "queued");
+
+    // T-1 is resumed, and its next window comes up; then it crashes.
+    *context.adapter.started.borrow_mut() = None;
+    context.host.hold_exits.set(false);
+    context.resume_task(project, 1, "Carry on");
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "working");
+    context
+        .host
+        .exits_showing(Some(3), None, Some(&["Segmentation fault"]));
+    context.exit(&session);
+    after.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let paused = tiers
+        .notes("chief")
+        .into_iter()
+        .rev()
+        .find(|said| said.starts_with("T-1 is paused: "))
+        .expect("the note of the second pause");
+    assert!(
+        paused.starts_with(&format!(
+            "T-1 is paused: @{session}'s window closed (exit code 3); its screen ended with: \"Segmentation fault\""
+        )),
+        "{paused}"
+    );
+    drop(held);
+}
+
+/// A member opened again at the Resume whose window never comes up, its kill never
+/// answered in the wait: the launch goes on without the exit, the human told the member
+/// could not start, and the close goes on apart. When the kill is answered at last, the
+/// exit pauses T-1, and a ledger that cannot be written then fails that close: it is
+/// written down in the daemon's log, never lost (T-414 P3-7: no case reached it).
+#[test]
+fn a_close_that_fails_after_its_kill_was_waited_for_in_vain_is_written_down() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context.adapter.with(&session, |agent| agent.settled = true);
+    let after = quit_and_start(&context);
+    context.advance(1_000);
+    // The exit comes only through the close itself, as the bridge host sends it after it
+    // answers the kill: what fails is the close's own settling, nobody else's.
+    context.host.hold_exits.set(true);
+    let held = Gate::default();
+    let (host, handle, gate) = (Rc::clone(&context.host), session.clone(), held.clone());
+    *context.adapter.started.borrow_mut() = Some(Rc::new(move || {
+        let window = host.last(&handle).expect("its window").pane;
+        *host.hold_kill.borrow_mut() = Some((window.generation, gate.clone()));
+        Err(NEVER_NAMED.to_owned())
+    }));
+    after.resume_project(project).unwrap();
+    after.pass().unwrap();
+    assert!(context.timers.fire_next(), "the kill's wait ends");
+    context.settle();
+    assert!(to_human(&context, project).contains(&format!(
+        "@{session} could not start: the window never came up: {NEVER_NAMED}."
+    )));
+    assert_eq!(tiers.task(1).task.state, "working", "no exit has paused it");
+    assert!(context.log.failures.borrow().is_empty());
+
+    fail_next_write(&context);
+    held.open();
+    context.settle();
+    assert_eq!(
+        *context.log.failures.borrow(),
+        ["the ledger could not be written"]
+    );
+    context.log.failures.borrow_mut().clear();
 }

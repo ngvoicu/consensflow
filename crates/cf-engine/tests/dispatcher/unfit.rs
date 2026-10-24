@@ -497,12 +497,19 @@ fn a_members_window_unfit_for_work_with_a_second_note_waiting_names_both_words_k
             "T-1 is paused: @{session}'s window closed: {WHY}; the words told its window wait for the resume: m-{first}, m-{second}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
         )]
     );
+    // Once each: the word still waiting as the window went, then the one its give-up kept.
+    let mut human: Vec<String> = tiers
+        .notes("human")
+        .into_iter()
+        .filter(|said| said.contains("waits for T-1's resume"))
+        .collect();
+    human.sort_by_key(|said| {
+        said.split(',')
+            .next()
+            .and_then(|named| named.strip_prefix("m-")?.parse::<i64>().ok())
+    });
     assert_eq!(
-        tiers
-            .notes("human")
-            .into_iter()
-            .filter(|said| said.contains("waits for T-1's resume"))
-            .collect::<Vec<_>>(),
+        human,
         [first, second].map(|id| format!(
             "m-{id}, a note from @chief on T-1, waits for T-1's resume to reach @{session}: {WHY}."
         ))

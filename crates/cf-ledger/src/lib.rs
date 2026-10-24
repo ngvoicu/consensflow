@@ -62,5 +62,6 @@ pub use page_reads::PAGE_BYTES;
 pub use projects::{parse_description, parse_name, NewChief, NewMember, NewProject};
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
 pub use specs::SpecsChange;
+pub use tasks::resumed_in_vain;
 pub use tasks::{NewTask, RESUME_WORDS};
 pub use wake_ups::{NewWakeUp, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT, WAKE_UP_FLOOR_MS};

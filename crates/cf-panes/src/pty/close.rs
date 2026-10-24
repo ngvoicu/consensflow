@@ -44,12 +44,9 @@ use crate::process_tree::Subject;
 use super::{has_exited, wait_for_exit, Pane, PaneError, Teardown};
 
 /// How long a window's programs are given, once asked to end, before what is
-/// left of them is killed. A close that finds them all gone sooner does not wait,
-/// and on Windows, where nothing is asked, there is no grace. A kill is answered
-/// only after it, and the engine waits for that answer no longer than its
-/// `KILL_ANSWER_WAIT` (30 s) before a member's give-up goes on without the exit:
-/// keep this well below it.
-pub const CLOSE_GRACE: Duration = Duration::from_secs(10);
+/// left of them is killed: the protocol's, which the engine's wait for a kill's
+/// answer is derived from.
+pub use cf_proto::panes::CLOSE_GRACE;
 /// How often a close that waits looks.
 const LOOK_EVERY: Duration = Duration::from_millis(25);
 
