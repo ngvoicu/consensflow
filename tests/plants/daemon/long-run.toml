@@ -1310,26 +1310,14 @@ find = "    compactions(look) > before"
 replace = "    compactions(look) >= before"
 
 [[plant]]
-name = "long run 10: a suspend whose tasks stay paused after the owner's resume is taken for played"
-meant = "a_suspend_whose_tasks_stay_paused_after_the_owners_resume_failed"
+name = "long run 10: a suspend whose task stays paused after the Resume is taken for played"
+meant = "a_suspend_whose_task_stays_paused_after_the_resume_failed"
 runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/play.rs"
-find = """                unresolved.push(format!("T-{number} stayed paused after the owner's resume"));"""
+find = """                unresolved.push(format!("T-{number} stayed paused after the Resume"));"""
 replace = "                let _ = number;"
-
-[[plant]]
-name = "long run 10: a suspend whose resume of a paused task was refused is taken for played"
-meant = "a_suspend_whose_resume_was_refused_failed_unless_the_task_had_ended"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/play.rs"
-find = """                    unresolved.push(format!(
-                        "the resume of T-{number}, {state}, was refused: {why}"
-                    ));"""
-replace = "                    let _ = why;"
 
 [[plant]]
 name = "long run 10: a Devin cut whose worker's window was not opened again is taken for played"
@@ -3986,3 +3974,57 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/stalls.rs"
 find = "                    .is_ok_and(|lines| !lines.iter().any(|line| line.starts_with(&program)))"
 replace = "                    .is_ok_and(|lines| !lines.iter().any(|line| line.starts_with(&format!(\"{pid}0 \"))))"
+
+# --- the Suspend play under the Resume's rule (T-413): the Resume moves on by itself the
+# work its Close paused, so the play waits for it, reads each reopened window's command
+# line and its cut note, and leaves a window of several tasks to the chief.
+
+[[plant]]
+name = "long run 10: a suspend whose window came back on another conversation is taken for played"
+meant = "a_suspend_whose_window_did_not_come_back_on_its_own_conversation_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "        if !argv.contains(&session) {"
+replace = "        if argv.is_empty() {"
+
+[[plant]]
+name = "long run 10: a suspend whose window was not opened again is read on its old command line"
+meant = "a_suspend_whose_window_did_not_come_back_on_its_own_conversation_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "        let reopened = hand.wait(|hand| Ok(hand.stage.opened_with(&self.pane).len() > before))?;"
+replace = "        let reopened = hand.wait(|hand| Ok(hand.stage.opened_with(&self.pane).len() >= before))?;"
+
+[[plant]]
+name = "long run 10: a suspend whose window at work was never told its turn was cut is taken for played"
+meant = "a_suspend_whose_window_at_work_was_told_its_turn_was_cut_never_or_twice_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "        if self.working && !hand.wait(|hand| Ok(cut_notes(hand) > 0))? {"
+replace = "        if !self.working && !hand.wait(|hand| Ok(cut_notes(hand) > 0))? {"
+
+[[plant]]
+name = "long run 10: a suspend whose window was told twice its turn was cut is taken for played"
+meant = "a_suspend_whose_window_at_work_was_told_its_turn_was_cut_never_or_twice_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "        if told > 1 {"
+replace = "        if told > 2 {"
+
+[[plant]]
+name = "long run 10: a suspend whose window of several tasks went on is taken for played"
+meant = "a_suspend_of_a_window_that_held_two_tasks_leaves_them_paused_for_the_chief"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = '            "paused" => {}'
+replace = '            "paused" | "working" => {}'

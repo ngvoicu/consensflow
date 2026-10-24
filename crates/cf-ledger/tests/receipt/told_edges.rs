@@ -312,3 +312,118 @@ fn a_launch_called_off_before_its_window_opened_tells_whoever_told_the_words_in_
     w.ledger.launch_called_off(brief).expect("nothing to tell");
     assert_eq!(w.ledger.inbox(w.id("chief"), 100).unwrap().len(), notes);
 }
+
+/// Calliope's review of the merge (T-408, P3-2): told words whose paste sat in the
+/// window's box when its Enter was withheld (the human's Close came first) went back
+/// to their queue, so the cancel that came next said the window never had them. Then
+/// the human sent what the box held: they arrived after all, and whoever told them
+/// hears so, once. Both ways a paste holds them: as the paste itself, and riding in
+/// the brief's.
+#[test]
+fn told_words_the_human_sent_from_the_box_after_a_cancel_are_said_to_have_arrived_after_all() {
+    let after_all = |task: i64, id: i64| {
+        format!(
+            "T-{task} was cancelled, but the human sent what its window's input box held: \
+             the window had what you told it, m-{id}, after all."
+        )
+    };
+    let chief_notes = |w: &crate::fixture::World| -> Vec<String> {
+        w.ledger
+            .inbox(w.id("chief"), 100)
+            .unwrap()
+            .into_iter()
+            .map(|message| message.body)
+            .collect()
+    };
+
+    // The words are the paste: told while the brief was on its way, they went in next.
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    w.begin(brief);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    w.confirm(brief);
+    w.begin(told.id);
+    w.ledger.admit(told.id, &[]).unwrap();
+    w.ledger
+        .retry_delivery(told.id, "its Enter was withheld", true)
+        .expect("given back");
+    w.ledger
+        .cancel_task(w.project, task, "human")
+        .expect("cancelled");
+    assert!(newest(&w, "chief").body.contains(&went(&[told.id])));
+    w.ledger
+        .confirm_sent_by_hand(told.id, &[], &serde_json::json!({ "item": "u-1" }), false)
+        .unwrap()
+        .expect("confirmed");
+    assert_eq!(
+        w.ledger.message(told.id).unwrap().unwrap().state,
+        "delivered"
+    );
+    let said = chief_notes(&w);
+    assert_eq!(
+        said.iter()
+            .filter(|note| **note == after_all(task, told.id))
+            .count(),
+        1,
+        "{said:?}"
+    );
+    // A paste confirmed is confirmed once: nothing more is said.
+    assert!(w
+        .ledger
+        .confirm_sent_by_hand(told.id, &[], &serde_json::json!({ "item": "u-2" }), false)
+        .unwrap()
+        .is_none());
+    assert_eq!(chief_notes(&w).len(), said.len());
+
+    // The words ride in the brief's paste.
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    let carried: Vec<i64> = w.begin(brief).carried.iter().map(|row| row.id).collect();
+    assert_eq!(carried, [told.id]);
+    w.ledger.admit(brief, &carried).unwrap();
+    w.ledger
+        .retry_delivery(brief, "its Enter was withheld", true)
+        .expect("given back");
+    w.ledger
+        .cancel_task(w.project, task, "human")
+        .expect("cancelled");
+    assert!(newest(&w, "chief").body.contains(&went(&[told.id])));
+    w.ledger
+        .confirm_sent_by_hand(
+            brief,
+            &carried,
+            &serde_json::json!({ "item": "u-1" }),
+            false,
+        )
+        .unwrap()
+        .expect("confirmed");
+    assert_eq!(
+        w.ledger.message(told.id).unwrap().unwrap().state,
+        "delivered"
+    );
+    assert_eq!(newest(&w, "chief").body, after_all(task, told.id));
+
+    // Words withdrawn with no cancel of their task, which is still at work, tell
+    // nobody when the human sends them: nobody was told they went.
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    w.begin(brief);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    w.confirm(brief);
+    w.begin(told.id);
+    w.ledger.admit(told.id, &[]).unwrap();
+    w.ledger
+        .retry_delivery(told.id, "its Enter was withheld", true)
+        .expect("given back");
+    w.ledger
+        .cancel_message(told.id, "the chief took it back")
+        .expect("withdrawn");
+    assert_eq!(w.state(task), "working");
+    let before = chief_notes(&w).len();
+    w.ledger
+        .confirm_sent_by_hand(told.id, &[], &serde_json::json!({ "item": "u-1" }), false)
+        .unwrap()
+        .expect("confirmed");
+    assert_eq!(chief_notes(&w).len(), before);
+}

@@ -17,6 +17,7 @@ use crate::api::routes::tests::support::{
     answered_question, api, gated_brief, gated_brief_of, open_task, project_is, state_of,
     working_question, working_task,
 };
+use crate::api::waits::WAITS;
 use crate::testing::{scene, Scene};
 
 fn refused(answered: &(u16, Value)) -> (u16, &str, &str) {
@@ -203,9 +204,10 @@ async fn a_task_is_read_with_its_thread_less_what_waits_for_the_human() {
 }
 
 /// Every window that did not give the task reads it whose brief waits at the
-/// gate: its words are in no view of it, and every key is where it was. The
-/// task's title stays: it is the card's label, which every window lists and the
-/// human sees on the board (a brief of one line is its own title).
+/// gate: its words are in no view of it, and every key is where it was. Nor is
+/// its first line, which a task's title is: the title says the brief waits for
+/// the human (Calliope's review of the merge, T-408); the human's board reads it
+/// from the ledger.
 #[tokio::test]
 async fn a_brief_that_waits_at_the_gate_is_in_no_view_of_the_task_of_a_window_that_did_not_give_it()
 {
@@ -242,7 +244,7 @@ async fn a_brief_that_waits_at_the_gate_is_in_no_view_of_the_task_of_a_window_th
         assert_eq!(status, 200);
         let task = said["task"].as_object().unwrap();
         assert_eq!(task["body"], "", "the brief is not given");
-        assert_eq!(task["title"], "Lexer", "the card's label is");
+        assert_eq!(task["title"], super::GATED, "nor its first line");
         assert_eq!(
             task.keys().map(String::as_str).collect::<Vec<_>>(),
             TASK_KEYS
@@ -276,10 +278,12 @@ async fn the_chief_reads_the_brief_it_wrote_while_it_waits_at_the_gate_and_a_mem
         json!([]),
         "and the thread still leaves out what waits at the gate"
     );
+    assert_eq!(said["task"]["title"], "Lexer", "nor its title");
     for token in [&scene.zeus, &session] {
         let (_, said) = get(&scene, token, "1").await;
         assert_eq!(said["task"]["body"], "", "a member is not given it");
         assert!(!said.to_string().contains(scope), "{said}");
+        assert!(!said.to_string().contains("Lexer"), "{said}");
     }
 }
 
@@ -515,6 +519,98 @@ async fn while_the_project_is_closed_the_chief_reads_a_brief_the_human_wrote_and
     assert_eq!(said["task"]["body"], "", "its window: {said}");
     let (_, said) = get(&scene, &scene.chief, &number).await;
     assert_eq!(said["task"]["body"], "The whole brief", "{said}");
+}
+
+/// Calliope's review of the merge (T-408, P3-1): the brief's first line is the
+/// task's title, so a window read a line of a brief it was never handed in the
+/// title of `cf task get`. While the brief waits for the Resume, the title says so
+/// to a window that did not write it; the chief reads it, and the window does once
+/// the project is open.
+#[tokio::test]
+async fn while_the_project_is_closed_the_title_of_a_brief_no_window_was_handed_says_it_waits() {
+    let scene = scene();
+    let created = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .create_task(
+            scene.project.id,
+            &cf_ledger::NewTask {
+                from: "chief".to_owned(),
+                to: Some("zeus".to_owned()),
+                body: "Lexer\nTokenize every file under src".to_owned(),
+                ..cf_ledger::NewTask::default()
+            },
+        )
+        .unwrap();
+    let number = created.task.number.to_string();
+    project_is(&scene, "suspended");
+
+    let (_, said) = get(&scene, &scene.zeus, &number).await;
+    assert_eq!(said["task"]["title"], WAITS, "its window: {said}");
+    assert!(!said.to_string().contains("Lexer"), "{said}");
+    let (_, said) = get(&scene, &scene.chief, &number).await;
+    assert_eq!(said["task"]["title"], "Lexer", "{said}");
+
+    project_is(&scene, "open");
+    let (_, said) = get(&scene, &scene.zeus, &number).await;
+    assert_eq!(said["task"]["title"], "Lexer");
+}
+
+/// Calliope's review of the merge (T-408, P3-3): the chief resumes, while the
+/// project is still closed, a task the Close paused. The resume is taken, and its
+/// words wait for the Resume as every message does: the window does not read
+/// them. The Resume brings back only the tasks still paused, so this one is left
+/// to its words, queued, and its window reads them once the project is open.
+#[tokio::test]
+async fn a_task_the_chief_resumes_while_the_project_is_closed_waits_queued_and_goes_on_at_the_resume(
+) {
+    let scene = scene();
+    let number = working_task(&scene);
+    project_is(&scene, "suspended");
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .pause_with_project(scene.project.id, number, "the human closed the project")
+        .unwrap();
+    assert_eq!(state_of(&scene, number), "paused");
+
+    let (status, said) = api(
+        &scene,
+        Method::POST,
+        &format!("/api/tasks/{number}/resume"),
+        &scene.chief,
+        r#"{"body":"Carry on"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(state_of(&scene, number), "queued");
+    let words = scene
+        .context
+        .ledger
+        .borrow()
+        .task(scene.project.id, number)
+        .unwrap()
+        .unwrap()
+        .messages
+        .into_iter()
+        .rfind(|message| message.kind == "task")
+        .expect("the words that resume it");
+    assert_eq!(words.state, "queued");
+    let (_, said) = get(&scene, &scene.zeus, &number.to_string()).await;
+    assert!(!thread(&said).contains(&words.id), "{said}");
+    assert!(!said.to_string().contains("Carry on"), "{said}");
+
+    project_is(&scene, "open");
+    assert_eq!(
+        state_of(&scene, number),
+        "queued",
+        "the Resume leaves it to the words that resume it"
+    );
+    assert_eq!(scene.message(words.id).state, "queued");
+    let (_, said) = get(&scene, &scene.zeus, &number.to_string()).await;
+    assert!(thread(&said).contains(&words.id), "{said}");
 }
 
 #[tokio::test]

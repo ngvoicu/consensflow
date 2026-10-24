@@ -65,6 +65,7 @@ use super::mask::{mask, screen, Names};
 
 pub use end::end;
 pub use order::{CLOSE_NOTE, PROGRESS_LINES};
+pub use turns::CUT;
 
 /// What each invariant is called in a report, and the field's shape it is made of.
 pub const INVARIANTS: [(u8, &str, &str); 10] = [

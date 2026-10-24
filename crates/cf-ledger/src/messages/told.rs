@@ -17,7 +17,8 @@
 //! with their task when it is called off first, and whoever told them hears so
 //! ([`Dropped`]): at the cancel, or, for words in the first message of a launch
 //! still being prepared, once the launch is over with no window opened
-//! ([`launch_called_off`]).
+//! ([`launch_called_off`]); and once more if the human sends them from the
+//! window's input box after all ([`arrived_after_all`]).
 
 use cf_proto::ledger::MessageView;
 use rusqlite::params;
@@ -244,6 +245,64 @@ pub(crate) fn launch_called_off(store: &mut Store, carrier: i64) -> Result<(), L
         let lead = format!("T-{} was cancelled before its window opened.", task.number);
         Dropped(rode).tell_the_others(store, &task, &lead, &[])
     })
+}
+
+/// Told words of a task called off whose paste sat in its window's input box, its
+/// Enter withheld, so that they were back in their queue and the cancel told whoever
+/// told them that the window never had them; then the human sent what the box held,
+/// and they arrived (Calliope's review of the merge, T-408). Of `pasted`, the rows of
+/// a paste sent by hand as they were before it was confirmed, each that was told
+/// words withdrawn with its cancelled task and reads delivered now is told to whoever
+/// told it, in a note about the task: the window had it after all. Once: a paste is
+/// confirmed once, and its rows leave their withdrawal with it.
+pub(super) fn arrived_after_all(
+    store: &mut Store,
+    pasted: &[MessageView],
+) -> Result<(), LedgerError> {
+    let mut told_to: Vec<(TaskRow, String, Vec<String>)> = Vec::new();
+    for row in pasted.iter().filter(|row| row.state == "cancelled") {
+        let (Some(task), Some(sender)) = (message_task(store, row.id)?, row.sender.as_deref())
+        else {
+            continue;
+        };
+        let arrived = store
+            .message(row.id)?
+            .is_some_and(|now| now.state == "delivered");
+        if task.state != "cancelled"
+            || !arrived
+            || !is_told(row, assignee_of(store, &task)?.as_deref())
+        {
+            continue;
+        }
+        let id = format!("m-{}", row.id);
+        match told_to
+            .iter_mut()
+            .find(|(of, to, _)| of.id == task.id && to == sender)
+        {
+            Some((_, _, ids)) => ids.push(id),
+            None => told_to.push((task, sender.to_owned(), vec![id])),
+        }
+    }
+    for (task, sender, ids) in told_to {
+        let body = format!(
+            "T-{} was cancelled, but the human sent what its window's input box held: \
+             the window had what you told it, {}, after all.",
+            task.number,
+            ids.join(", ")
+        );
+        send(
+            store,
+            task.project_id,
+            &Sent {
+                to: &sender,
+                task: Some(task.number),
+                kind: "note",
+                body: &body,
+                ..Sent::default()
+            },
+        )?;
+    }
+    Ok(())
 }
 
 /// What a task called off took with it of the words told to its windows, which
