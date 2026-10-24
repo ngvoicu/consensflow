@@ -2675,16 +2675,38 @@ replace = """
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty.rs"
+find = """
+        #[cfg(target_os = "macos")]
+        let tree;"""
+replace = """
+        #[cfg(target_os = "macos")]
+        let tree;
+        #[cfg(windows)]
+        let job;"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = """
+            #[cfg(target_os = "macos")]
+            {
+                tree = pane.process_tree.clone();
+            }"""
+replace = """
+            #[cfg(target_os = "macos")]
+            {
+                tree = pane.process_tree.clone();
+            }
+            #[cfg(windows)]
+            {
+                job = Arc::clone(&pane.job);
+            }"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
 find = "            owed: self.exits.owe(),"
 replace = """            owed: self.exits.owe(),
             #[cfg(windows)]
-            job: Arc::clone(
-                &self
-                    .lock_panes()?
-                    .get(&key)
-                    .ok_or_else(|| PaneError::NotFound(key.clone()))?
-                    .job,
-            ),"""
+            job,"""
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
