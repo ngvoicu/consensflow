@@ -16,7 +16,7 @@
 use std::cell::RefCell;
 use std::ffi::OsString;
 use std::future::pending;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::rc::Rc;
@@ -80,23 +80,39 @@ struct Plan<'a> {
     bypass: bool,
     /// How long Codex's server has to come up.
     startup: Duration,
+    /// Why the system gave a program of the window no job, if it gave none.
+    refusal: fn(&Owned) -> Option<String>,
 }
 
 /// How a window's server is set up: how long it has to come up, and where it
-/// listens (this platform's endpoint, but for a test).
+/// listens (this platform's endpoint, but for a test); what tells it the system gave a
+/// program no job, and where it says so (what [`Owned::refusal`] says and its standard
+/// error, but for a test).
 struct Setup {
     startup: Duration,
     endpoint: fn(&Env) -> Result<Endpoint, EndpointError>,
+    refusal: fn(&Owned) -> Option<String>,
+    say: fn(&str),
+}
+
+impl Setup {
+    /// A window as it runs.
+    fn standard() -> Self {
+        Self {
+            startup: STARTUP,
+            endpoint: Endpoint::open,
+            refusal: |program| program.refusal().map(str::to_owned),
+            say: |line| {
+                let _ = writeln!(io::stderr(), "{line}");
+            },
+        }
+    }
 }
 
 /// Runs the window: `args` are the Codex program and its arguments. The
 /// result is the exit code, the TUI's; everything is ended and removed by then.
 pub(crate) async fn supervise(env: &Env, args: &[OsString]) -> Result<i32, SessionError> {
-    let setup = Setup {
-        startup: STARTUP,
-        endpoint: Endpoint::open,
-    };
-    supervise_with(env, args, setup).await
+    supervise_with(env, args, Setup::standard()).await
 }
 
 /// [`supervise`], the server set up as `setup` says.
@@ -113,12 +129,15 @@ async fn supervise_with(env: &Env, args: &[OsString], setup: Setup) -> Result<i3
         endpoint,
         bypass: codex_args.iter().any(|arg| arg == BYPASS),
         startup: setup.startup,
+        refusal: setup.refusal,
     };
     let mut session = Session::default();
     let outcome = session.run(&plan).await;
     // A folder that could not be removed is the window's last word, as it
     // was when JavaScript's `finally` threw.
-    session.finish(&plan).await?;
+    let finished = session.finish(&plan).await;
+    session.say_what_ran_in_no_job(setup.say);
+    finished?;
     outcome
 }
 
@@ -128,6 +147,9 @@ struct Session {
     backend: Option<Owned>,
     tui: Option<Owned>,
     broker: Option<Broker>,
+    /// What the window is to say once it has ended, on its standard error: which of its programs
+    /// the system gave no job (see [`without_a_job`]).
+    notes: Vec<String>,
 }
 
 impl Session {
@@ -186,6 +208,7 @@ impl Session {
         let mut backend = start_owned(&mut command)
             .map_err(|cause| SessionError::Server(format!("{program}: {cause}")))?;
         let stderr = backend.take_stderr();
+        self.note_if_in_no_job("Codex's server", (plan.refusal)(&backend));
         self.backend = Some(backend);
         let tail = Rc::clone(tail);
         Ok(tokio::task::spawn_local(async move {
@@ -259,8 +282,26 @@ impl Session {
             .stderr(Stdio::inherit());
         let tui =
             start_owned(&mut command).map_err(|cause| SessionError::Tui { program, cause })?;
+        self.note_if_in_no_job("Codex's TUI", (plan.refusal)(&tui));
         self.tui = Some(tui);
         Ok(())
+    }
+
+    /// Keeps a line to say, if the system gave the program `name` no job (`refusal` says why):
+    /// it is then ended with `taskkill`.
+    fn note_if_in_no_job(&mut self, name: &str, refusal: Option<String>) {
+        if let Some(why) = refusal {
+            self.notes.push(without_a_job(name, &why));
+        }
+    }
+
+    /// Says what was noted, once the window has ended, on the terminal it ran in: where its
+    /// programs have gone, the line is there to be read (and not drawn over, as one said while
+    /// the TUI ran would be).
+    fn say_what_ran_in_no_job(&self, say: fn(&str)) {
+        for note in &self.notes {
+            say(note);
+        }
     }
 
     /// Asks both to end.
@@ -292,6 +333,12 @@ impl Session {
         }
         Ok(())
     }
+}
+
+/// What the window says of a program of its own the system gave no job: that it ended with
+/// `taskkill`, which loses what the program starts as it is ended until the window closes.
+fn without_a_job(name: &str, why: &str) -> String {
+    format!("ConsensFlow: {name} ran in no job of its own, the system gave it none ({why}); it was ended with taskkill, which can leave what it started as it was ended running until the window closes")
 }
 
 /// Removes `folder` with what is in it; one already gone is no failure, as

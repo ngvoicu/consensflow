@@ -7,8 +7,8 @@
 //! takes the console from a program ("the console handle for the application is not set").
 //!
 //! On Windows the program runs in a job of its own, made before it runs (`job`'s module has why,
-//! and what a breakaway is), and ending it ends the job: whatever the program starts as it is
-//! ended too. The id of a program alone, ended with `taskkill /T`, does not (zeewin, T-322:
+//! and what a breakaway is; this job refuses one, as the window's job does), and ending it ends
+//! the job: whatever the program starts as it is ended too. The id of a program alone, ended with `taskkill /T`, does not (zeewin, T-322:
 //! 21 to 50 of a loop's programs outlived every one of 26 ends, and a program whose parent had
 //! gone was never read at all). A program that ended of itself has finished its work: its job
 //! is released and what it left running is left, as everywhere in this crate. Elsewhere there is
@@ -31,12 +31,14 @@ pub struct Owned {
 
 /// Starts `command` as the caller built it. On Windows it starts suspended, its console and its
 /// window left to it and its creation flags that one alone, and is put in a job of its own
-/// before it runs. The caller's `kill_on_drop` is kept: the job's end-on-close ends the rest.
-/// Why it did not start, if it did not (a program that could not be let run did not start).
+/// before it runs, from which nothing breaks away. The caller's `kill_on_drop` is kept: the
+/// job's end-on-close ends the rest. Why it did not start, if it did not (a program that could
+/// not be let run did not start). A program the system would not put in a job runs in none:
+/// see [`Owned::refusal`].
 pub fn start_owned(command: &mut Command) -> io::Result<Owned> {
     job::start_suspended(command);
     let mut child = command.spawn()?;
-    match Job::of(&child, false) {
+    match Job::sealed(&child) {
         Ok(job) => Ok(Owned { child, job }),
         Err(why) => {
             let _ = child.start_kill();
@@ -56,7 +58,14 @@ impl Owned {
         self.child.stderr.take()
     }
 
-    /// Whether it has exited. One that has exited of itself has its job released.
+    /// Why the system gave it no job, if it gave none: it then runs outside any of ours, and
+    /// [`Owned::end`] reaches it with `taskkill /T`, which loses what it starts as it is ended
+    /// (T-322). Never on Unix, where there is no job to give.
+    pub fn refusal(&self) -> Option<&str> {
+        self.job.refusal()
+    }
+
+    /// Whether it has exited. Its job is released once it has (see [`Owned::wait`]).
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
         let status = self.child.try_wait()?;
         if status.is_some() {
@@ -65,7 +74,9 @@ impl Owned {
         Ok(status)
     }
 
-    /// Waits until it has exited. One that has exited of itself has its job released.
+    /// Waits until it has exited, and releases its job then, whichever way it exited. One that
+    /// exited of itself has what it left running let go of. One that was ended (`end`) has
+    /// nothing left to hold: its job's processes were all ended with it.
     pub async fn wait(&mut self) -> io::Result<ExitStatus> {
         let status = self.child.wait().await?;
         self.job.release();
@@ -213,25 +224,19 @@ mod tests {
         }
     }
 
+    /// What an owned program that starts two programs, one of which asks to start a process outside
+    /// its job (`CREATE_BREAKAWAY_FROM_JOB`), said of each, once it has said both lines.
     #[cfg(windows)]
-    #[test]
-    fn an_owned_program_that_asks_to_break_away_may_and_the_one_that_does_not_ask_is_ended_with_its_job(
-    ) {
-        use crate::testing::{
-            gone_within, pids_so_far, starts_with_and_without_breakaway, Recorded, STARTS_WITHIN,
-        };
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("pids");
+    fn said_of_the_two(dir: &std::path::Path, run: &Run) -> (Vec<String>, Vec<u32>) {
+        use crate::testing::{pids_so_far, Recorded, STARTS_WITHIN};
+        let file = dir.join("pids");
         let _left = Recorded(&file);
         let runtime = runtime();
         let said = runtime.block_on(async {
-            let mut owned = start_owned(&mut command_of(&starts_with_and_without_breakaway(
-                dir.path(),
-            )))
-            .unwrap();
+            let mut owned = start_owned(&mut command_of(run)).unwrap();
             let until = Instant::now() + STARTS_WITHIN;
             let said = loop {
-                let said = std::fs::read_to_string(dir.path().join("outcome")).unwrap_or_default();
+                let said = std::fs::read_to_string(dir.join("outcome")).unwrap_or_default();
                 let lines: Vec<String> = said.lines().map(str::to_owned).collect();
                 if lines.len() >= 2 {
                     break lines;
@@ -244,20 +249,135 @@ mod tests {
             said
         });
         runtime.shutdown_timeout(Duration::from_secs(10));
-        assert_eq!(
-            said,
-            ["stays", "breaks"],
-            "the program that asked to leave started"
+        (said, pids_so_far(&file))
+    }
+
+    // The jobs of the Codex window's programs refuse the breakaway (Codex's `ensure_detached_launch`
+    // asks for one, and is to be refused in a window, as the pane's job refuses it: a daemon let
+    // through lands in the pane's job and dies at the window's close, T-424's P3-1).
+    #[cfg(windows)]
+    #[test]
+    fn an_owned_program_that_asks_to_break_away_is_refused_and_all_it_started_is_ended_with_its_job(
+    ) {
+        use crate::testing::{gone_within, starts_with_and_without_breakaway};
+        let dir = tempfile::tempdir().unwrap();
+        let (said, pids) =
+            said_of_the_two(dir.path(), &starts_with_and_without_breakaway(dir.path()));
+        assert_eq!(said[0], "stays");
+        assert!(
+            said[1].starts_with("refused"),
+            "nothing leaves the job of an owned program: {said:?}"
         );
-        let pids = pids_so_far(&file);
-        assert_eq!(pids.len(), 3, "{pids:?}");
+        assert_eq!(pids.len(), 2, "{pids:?}");
         assert!(
             gone_within(pids[1], Duration::from_secs(5)),
             "the program that asked for nothing is in the job, and ended with it"
         );
-        assert!(
-            crate::alive(pids[2]),
-            "the program that asked to be outside the job is outside it: the end left it"
-        );
+    }
+
+    /// The ids of the processes attached to this process's console, once it has one: given one
+    /// where it had none (a test run with no console has the console of nothing to ask about).
+    #[cfg(windows)]
+    fn on_this_console() -> Vec<u32> {
+        use windows_sys::Win32::System::Console::{AllocConsole, GetConsoleProcessList};
+        let mut list = [0_u32; 1024];
+        #[allow(unsafe_code)]
+        // SAFETY: AllocConsole takes nothing and fails where this process has a console already,
+        // which is then the one asked about; GetConsoleProcessList writes at most the 1024 ids
+        // it is given room for, into `list`.
+        let count = unsafe {
+            AllocConsole();
+            GetConsoleProcessList(list.as_mut_ptr(), 1024)
+        };
+        list[..usize::try_from(count).unwrap_or(0).min(1024)].to_vec()
+    }
+
+    /// A program that runs for half a minute at most, to be started and looked at.
+    #[cfg(windows)]
+    fn waits() -> Run {
+        Run {
+            program: r"C:\Windows\System32\PING.EXE".into(),
+            args: ["-n", "31", "127.0.55.9"].map(Into::into).to_vec(),
+            verbatim: false,
+        }
+    }
+
+    // A TUI is given the terminal its window runs in: the program an owned start makes is attached
+    // to the console of its caller (`CREATE_NO_WINDOW` would give it one of its own).
+    #[cfg(windows)]
+    #[test]
+    fn an_owned_program_is_attached_to_the_console_of_its_caller() {
+        // This process has a console before the program starts: one that starts where it has
+        // none is given a console of its own, and a console given later is not its.
+        on_this_console();
+        let runtime = runtime();
+        runtime.block_on(async {
+            let mut owned = start_owned(&mut command_of(&waits())).unwrap();
+            let pid = owned.id().unwrap();
+            let until = Instant::now() + Duration::from_secs(10);
+            while !on_this_console().contains(&pid) {
+                assert!(
+                    Instant::now() < until,
+                    "it is not on this console, which holds {:?}",
+                    on_this_console()
+                );
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            owned.end(Ending::Forced);
+            let _ = owned.wait().await;
+        });
+        runtime.shutdown_timeout(Duration::from_secs(10));
+    }
+
+    // And a program started hidden, as every other of this crate's is, is not.
+    #[cfg(windows)]
+    #[test]
+    fn a_program_started_hidden_has_a_console_of_its_own() {
+        on_this_console();
+        let runtime = runtime();
+        runtime.block_on(async {
+            let mut command = command_of(&waits());
+            job::start_in_job(&mut command);
+            let child = command.spawn().unwrap();
+            let job = Job::of(&child, false).unwrap();
+            let pid = child.id().unwrap();
+            // The program is running; a console it was to share is shared by now.
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            let on_this = on_this_console();
+            job.terminate();
+            assert!(
+                !on_this.contains(&pid),
+                "it is on this console, which holds {on_this:?}"
+            );
+        });
+        runtime.shutdown_timeout(Duration::from_secs(10));
+    }
+
+    // A program the system will not put in a job runs in none and says why, and is ended all the
+    // same, by `taskkill` (T-424's P3-2: the window's supervisor says so when it has ended). The
+    // system refuses none that a test can ask it to (see `Job::of_through`), so this one is refused.
+    #[cfg(windows)]
+    #[test]
+    fn an_owned_program_the_system_will_not_put_in_a_job_says_so_and_is_ended_without_one() {
+        const WHY: &str = "could not be put in a job of its own: Access is denied. (os error 5)";
+        let runtime = runtime();
+        runtime.block_on(async {
+            let mut command = command_of(&waits());
+            job::start_suspended(&mut command);
+            let child = command.spawn().unwrap();
+            let job = Job::of_through(&child, false, false, |_, _, _| Err(WHY.to_owned()))
+                .expect("a program that is not held whole is let run all the same");
+            let mut owned = Owned { child, job };
+            assert_eq!(owned.refusal(), Some(WHY));
+            let pid = owned.id().unwrap();
+            assert!(crate::alive(pid), "it was let run");
+            owned.end(Ending::Forced);
+            let _ = owned.wait().await;
+            assert!(
+                crate::testing::gone_within(pid, Duration::from_secs(5)),
+                "ended by taskkill, which is all that reaches a program in no job"
+            );
+        });
+        runtime.shutdown_timeout(Duration::from_secs(10));
     }
 }

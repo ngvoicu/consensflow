@@ -27,8 +27,13 @@ use super::{fail, record};
 /// What the launcher is started with, first.
 pub const LAUNCHER: &str = "--launcher";
 
-/// How many programs the server starts, at most.
-const STARTS: usize = 80;
+/// How many programs the server starts, at most: about six seconds of starting (10 ms apart, and
+/// the time each takes to start), against the second or so a window takes to end the server once
+/// the case has ended its TUI. At 80 the margin was 3: the window ended the server with 24 of its
+/// 80 started (zeewin, T-404), and a runner under load that took three times as long to react as it
+/// took to start programs finished the loop first. At 200 it is 8; a program still alive at the
+/// end of 20 seconds is far past what a case waits for, and 200 are no flood (T-322 had 15,800).
+const STARTS: usize = 200;
 
 /// How long between one start and the next: short, so that the window ends the server
 /// while it is starting one.

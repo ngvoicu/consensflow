@@ -25,7 +25,11 @@
 //! running, starts it detached with the flag, and where the job refuses, the update fails
 //! ("this Windows launcher prevents background processes from outliving it", T-363). libuv
 //! never asks, so npm's and Node's children stay in the job. Nothing may leave the job of a
-//! program held whole, the plants' runner's: the flag is refused there.
+//! program held whole, the plants' runner's: the flag is refused there. Nor the job of an
+//! owned program (`Owned`, the Codex window's): its window's job refuses a breakaway, and a
+//! launch of Codex's daemon that asked for one and was let through would land in that job and
+//! end at the window's close, which Codex names as the failure to avoid; refused, as it was
+//! before the program had a job of its own, the launch says so (T-424).
 
 use cf_base::env::Env;
 
@@ -117,9 +121,16 @@ pub(crate) struct Job {
     /// Held whole (`capture_whole`): waited for to be gone when the job is dropped.
     #[cfg(windows)]
     whole: bool,
+    /// Whether a process of the job that asks to start a process outside it may
+    /// (`JOB_OBJECT_LIMIT_BREAKAWAY_OK`).
+    #[cfg(windows)]
+    breakaway: bool,
     /// Whether what the program left is let go of (`release`).
     #[cfg(windows)]
     released: std::cell::Cell<bool>,
+    /// Why the system gave the program no job, where it was to have one and would not.
+    #[cfg(windows)]
+    refusal: Option<String>,
 }
 
 #[cfg(not(windows))]
@@ -130,9 +141,22 @@ impl Job {
         Ok(Self {})
     }
 
+    /// The job of `process`, which has just started, and from which nothing may break away:
+    /// there is none.
+    #[allow(clippy::unnecessary_wraps)] // As Windows has it.
+    pub(crate) fn sealed(_process: &tokio::process::Child) -> Result<Self, String> {
+        Ok(Self {})
+    }
+
     /// The job of a process this process did not start with one: there is none.
     pub(crate) fn unheld() -> Self {
         Self {}
+    }
+
+    /// Why the system gave the program no job: it is never asked for one here.
+    #[allow(clippy::unused_self)] // As Windows has it.
+    pub(crate) fn refusal(&self) -> Option<&str> {
+        None
     }
 
     /// Ends every process of the job: there is none.
@@ -154,8 +178,17 @@ impl Job {
         Self {
             handle: None,
             whole: false,
+            breakaway: false,
             released: std::cell::Cell::new(false),
+            refusal: None,
         }
+    }
+
+    /// As `unheld`, for a program the system would not put in a job: and why.
+    fn refused(why: String) -> Self {
+        let mut job = Self::unheld();
+        job.refusal = Some(why);
+        job
     }
 
     /// A job made for `process`, which was started suspended (`start_in_job`),
@@ -169,20 +202,51 @@ impl Job {
     /// ours, as libuv's children do where their job is refused, and is ended by
     /// `taskkill` instead.
     pub(crate) fn of(process: &tokio::process::Child, whole: bool) -> Result<Self, String> {
+        Self::of_through(process, whole, !whole, Self::made_for)
+    }
+
+    /// As `of` for a program that is not held whole, and from whose job nothing may break
+    /// away, asked or not (`Owned`'s: the Codex window's programs, whose window's job refuses a
+    /// breakaway; one let through, as Codex's launch of its daemon asks to be, lands in that
+    /// job and ends at the window's close). `refusal` says why a program the system would not
+    /// put in a job runs in none.
+    pub(crate) fn sealed(process: &tokio::process::Child) -> Result<Self, String> {
+        Self::of_through(process, false, false, Self::made_for)
+    }
+
+    /// As `of`, the job made by `make`: the system's own (`made_for`), or, in a test, one that
+    /// the system refuses (it nests a job in another whenever the new one sets no UI limit, as
+    /// every job of ours does, so it refuses none that a test can ask it to).
+    pub(crate) fn of_through(
+        process: &tokio::process::Child,
+        whole: bool,
+        breakaway: bool,
+        make: impl FnOnce(&tokio::process::Child, bool, bool) -> Result<Self, String>,
+    ) -> Result<Self, String> {
         let pid = process
             .id()
             .ok_or_else(|| "could not be let run: it has ended".to_owned())?;
-        let job = match Self::made_for(process, whole) {
+        let job = match make(process, whole, breakaway) {
             Ok(job) => job,
             Err(why) if whole => return Err(why),
-            Err(_) => Self::unheld(),
+            Err(why) => Self::refused(why),
         };
         resume(pid)?;
         Ok(job)
     }
 
+    /// Why the system gave the program no job, where it would not: it then runs outside any of
+    /// ours and is ended by `taskkill`, which loses what it starts as it is ended (T-322).
+    pub(crate) fn refusal(&self) -> Option<&str> {
+        self.refusal.as_deref()
+    }
+
     /// A job for `process`, which has been put in it and not yet let run.
-    fn made_for(process: &tokio::process::Child, whole: bool) -> Result<Self, String> {
+    fn made_for(
+        process: &tokio::process::Child,
+        whole: bool,
+        breakaway: bool,
+    ) -> Result<Self, String> {
         use windows_sys::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
         let failed = |what: &str| format!("{what}: {}", std::io::Error::last_os_error());
         let handle = process
@@ -201,9 +265,11 @@ impl Job {
             let job = Self {
                 handle: Some(made as usize),
                 whole,
+                breakaway,
                 released: std::cell::Cell::new(false),
+                refusal: None,
             };
-            if !limit(made as usize, limits_of(whole, true)) {
+            if !limit(made as usize, limits_of(breakaway, true)) {
                 return Err(failed("could not make a job of its own"));
             }
             if AssignProcessToJobObject(made, handle as _) == 0 {
@@ -238,15 +304,16 @@ impl Job {
         if self.released.replace(true) {
             return;
         }
-        limit(handle, limits_of(self.whole, false));
+        limit(handle, limits_of(self.breakaway, false));
     }
 }
 
 /// What a job limits: a process of it that fails unhandled ends (no dialog of Windows' to
-/// wait on); one that asks to start a process outside it may, unless the job holds a program
-/// whole; and, where `ends_on_close`, every process of it ends when its last handle closes.
+/// wait on); one that asks to start a process outside it may where `breakaway` (a program held
+/// whole, and an owned one, have none); and, where `ends_on_close`, every process of it ends
+/// when its last handle closes.
 #[cfg(windows)]
-fn limits_of(whole: bool, ends_on_close: bool) -> u32 {
+fn limits_of(breakaway: bool, ends_on_close: bool) -> u32 {
     use windows_sys::Win32::System::JobObjects::{
         JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION,
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
@@ -255,7 +322,7 @@ fn limits_of(whole: bool, ends_on_close: bool) -> u32 {
     if ends_on_close {
         limits |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     }
-    if !whole {
+    if breakaway {
         limits |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;
     }
     limits
@@ -721,7 +788,9 @@ mod tests {
             Job {
                 handle: Some(made as usize),
                 whole: true,
+                breakaway: false,
                 released: std::cell::Cell::new(false),
+                refusal: None,
             }
         };
         let ids = (0..count)
@@ -774,7 +843,9 @@ mod tests {
         let none = Job {
             handle: Some(event as usize),
             whole: true,
+            breakaway: false,
             released: std::cell::Cell::new(false),
+            refusal: None,
         };
         let ended = none.end();
         std::mem::forget(none);

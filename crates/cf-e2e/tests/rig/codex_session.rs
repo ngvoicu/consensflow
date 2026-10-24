@@ -196,6 +196,11 @@ fn opens_codex_as_its_server_on_a_private_socket_and_its_tui_through_the_broker_
         None,
     )?;
     assert_eq!(s.exit()?, Some(7), "{}", s.stderr());
+    assert!(
+        !s.stderr().contains("no job"),
+        "a window whose programs have jobs says nothing of them: {}",
+        s.stderr()
+    );
     let runs = s.runs();
     let (server_runs, tui_runs) = (of(&runs, "server"), of(&runs, "tui"));
     // On Unix a socket in a private folder of the home; on Windows loopback, on
