@@ -187,14 +187,20 @@ fn outside_answered_by_the_human(vars: &[(&str, &str)]) -> Outcome {
     std::fs::create_dir(&folder)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     two_tasks(&rig, &project)?;
-    rig.wait_for(
+    waiting(
+        &rig,
+        &project,
         "the human to be told of the folder outside",
         secs(60),
         || Ok(!notes_of(&project, &root)?.is_empty()),
     )?;
-    rig.wait_for("both of the worker's windows to be open", secs(30), || {
-        Ok(workers(&rig, &project).len() == 2)
-    })?;
+    waiting(
+        &rig,
+        &project,
+        "both of the worker's windows to be open",
+        secs(30),
+        || Ok(workers(&rig, &project).len() == 2),
+    )?;
     // Past the time a launch has, nothing failed, and nothing said yes for the human.
     // The chief tells T-1's window something meanwhile: it waits for the window to
     // be past the question, whose Enter would choose "No, exit".
@@ -242,10 +248,16 @@ fn outside_answered_by_the_human(vars: &[(&str, &str)]) -> Outcome {
     // Each step is bound from the one before it, so a stall says where it was: the
     // human's window takes their yes, the yes is carried to the other window, which
     // takes it too, and then both tasks are done.
-    rig.wait_for("the human's window to take their yes", secs(30), || {
-        Ok(!trusted(&rig).is_empty())
-    })?;
-    rig.wait_for(
+    waiting(
+        &rig,
+        &project,
+        "the human's window to take their yes",
+        secs(30),
+        || Ok(!trusted(&rig).is_empty()),
+    )?;
+    waiting(
+        &rig,
+        &project,
         "the yes to be carried to the other window",
         secs(30),
         || {
@@ -256,7 +268,9 @@ fn outside_answered_by_the_human(vars: &[(&str, &str)]) -> Outcome {
                 == 2)
         },
     )?;
-    rig.wait_for(
+    waiting(
+        &rig,
+        &project,
         "T-1 and T-2 to be done once both took the yes",
         secs(60),
         || both_done(&project),
@@ -318,6 +332,39 @@ fn a_task(rig: &Rig, project: &Project, tier: &str, number: i64, word: &str) -> 
         let state = project.task(number)?["state"].clone();
         assert_ne!(state, "failed", "T-{number} failed");
         Ok(state == "done")
+    })?;
+    Ok(())
+}
+
+/// Waits as `Rig::wait_for` does, and where it times out says where the case stood: the
+/// keys the question was given, the folders trusted, how many of the worker's windows are
+/// open, each task's state and what the board says of the worker. Which of the case's
+/// bounded waits ran out, and with the windows at what, is what a stall on a slow
+/// machine is read by.
+fn waiting(
+    rig: &Rig,
+    project: &Project,
+    what: &str,
+    within: Duration,
+    predicate: impl FnMut() -> cf_e2e::Result<bool>,
+) -> Outcome {
+    rig.wait_for(what, within, predicate).map_err(|failed| {
+        let state = |number| {
+            project
+                .task(number)
+                .map_or_else(|cause| cause.to_string(), |task| task["state"].to_string())
+        };
+        let lane = project
+            .lane("worker")
+            .map_or_else(|cause| cause.to_string(), |lane| lane["activity"].to_string());
+        format!(
+            "{failed}; keys given {:?}, trusted {:?}, {} worker windows open, T-1 {}, T-2 {}, worker {lane}",
+            keys_given(rig),
+            trusted(rig),
+            workers(rig, project).len(),
+            state(1),
+            state(2),
+        )
     })?;
     Ok(())
 }
