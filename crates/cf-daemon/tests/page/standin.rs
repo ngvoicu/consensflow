@@ -12,7 +12,7 @@ use std::rc::Rc;
 use cf_base::refusal::Refusal;
 use cf_daemon::page::Engine;
 use cf_engine::seams::EngineError;
-use cf_engine::{SwitchTo, SwitchWhen};
+use cf_engine::{Finished, SwitchTo, SwitchWhen};
 use cf_harness::contract::Work;
 use cf_ledger::{
     ChiefSwitch, DeletedProject, Ledger, LedgerError, NewProject, ParticipantView, ProjectView,
@@ -432,6 +432,19 @@ impl Engine for Standin {
     /// Node's dispatcher never says a window ignored its stop.
     fn unstopped(&self, _participant: i64) -> Option<Value> {
         None
+    }
+
+    /// Node's dispatcher held no task for a job its harness wakes its agent for, and
+    /// finished none: no recording asks it.
+    fn held(&self, _participant: i64) -> Option<Value> {
+        None
+    }
+
+    fn finish_task(&self, project: i64, number: i64) -> Work<'_, Result<Finished, EngineError>> {
+        let refusal = refused(format!(
+            "no recording finishes T-{number} of project {project}"
+        ));
+        Box::pin(async move { Err(refusal) })
     }
 }
 

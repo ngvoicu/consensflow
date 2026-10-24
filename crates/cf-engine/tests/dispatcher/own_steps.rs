@@ -67,3 +67,36 @@ fn a_brief_being_pasted_when_the_chief_finished_its_step_is_withdrawn_at_the_ref
         context.inbox(human)
     );
 }
+
+#[test]
+fn finish_refuses_the_chiefs_own_step_and_its_own_done_still_accepts_it_at_once() {
+    // Calliope's L3 on the merge of turn-end with field-306 (T-370): Finish is for a
+    // member's working task; the chief's own step ends by its own word, accepted at once.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.create_task(
+        project.id,
+        NewTask {
+            from: "chief".to_owned(),
+            to: Some("chief".to_owned()),
+            body: "Check the parser".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    let refused = context.finish_task(project.id, 1, "chief").unwrap_err();
+    assert_eq!(
+        refused.to_string(),
+        "cannot finish T-1: no member's window works on it"
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .record_result(project.id, 1, "Checked: it holds")
+        .unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "accepted");
+}

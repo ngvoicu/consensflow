@@ -21,6 +21,7 @@ use super::executor::Answer;
 use crate::chief_switch::SwitchTo;
 use crate::dispatcher::{Dispatcher, SwitchWhen};
 use crate::seams::EngineError;
+use crate::turn_end::Finished;
 use crate::windows::Activity;
 
 /// What a Switch chief is asked, as `switchChief` is given it.
@@ -198,6 +199,31 @@ impl Context {
             dispatcher.open_window(project, &handle).await
         });
         self.run(opening)
+    }
+
+    /// `by` (the chief's handle, or `human`) finishes T-`number` (`cf task finish`, the
+    /// board's Finish): an operation Node's dispatcher had none of.
+    pub fn finish_task(
+        &self,
+        project: i64,
+        number: i64,
+        by: &str,
+    ) -> Result<Finished, EngineError> {
+        let (dispatcher, by) = (Rc::clone(&self.dispatcher), by.to_owned());
+        let finishing = self.operation(
+            "finishTask",
+            json!([project, number, by]),
+            |finished: &Finished| {
+                json!({
+                    "task": finished.task.number,
+                    "state": finished.task.state,
+                    "jobs": finished.jobs,
+                    "agents": finished.agents,
+                })
+            },
+            async move { dispatcher.finish_task(project, number, &by).await },
+        );
+        self.run(finishing)
     }
 
     /// The human hides a session's terminal (`hideWindow`).
@@ -395,6 +421,30 @@ impl Restarted<'_> {
     /// The human's Resume, of a project this engine's start left suspended.
     pub fn resume_project(&self, project: i64) -> Result<Option<ProjectView>, EngineError> {
         self.context.run(self.resuming(project))
+    }
+
+    /// `by` finishes T-`number` with this engine ([`Context::finish_task`]).
+    pub fn finish_task(
+        &self,
+        project: i64,
+        number: i64,
+        by: &str,
+    ) -> Result<Finished, EngineError> {
+        let (engine, by) = (self.engine(), by.to_owned());
+        let finishing = self.context.operation(
+            "finishTask",
+            json!([project, number, by]),
+            |finished: &Finished| {
+                json!({
+                    "task": finished.task.number,
+                    "state": finished.task.state,
+                    "jobs": finished.jobs,
+                    "agents": finished.agents,
+                })
+            },
+            async move { engine.finish_task(project, number, &by).await },
+        );
+        self.context.run(finishing)
     }
 
     /// The human's Resume, begun where it is called.

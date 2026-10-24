@@ -13,6 +13,7 @@ use bytes::Bytes;
 use cf_base::refusal::Refusal;
 use cf_bridge::local::{Bridge, BridgeBuilder};
 use cf_catalog::AgentRow;
+use cf_engine::Finished;
 use cf_ledger::{
     open_ledger, MessageView, NewChief, NewMember, NewProject, NewQuestion, Options, ProjectView,
 };
@@ -110,6 +111,18 @@ impl AgentRows for NoRows {
     }
 }
 
+/// What the engine of a scene was asked to finish, and what it says of it: the task as
+/// the ledger has it, done, and the jobs and agents a test says its harness still counted,
+/// unless a test makes it refuse.
+#[derive(Default)]
+pub struct Finishings {
+    /// The project, the task and who asked, in the order they came.
+    pub asked: RefCell<Vec<(i64, i64, String)>>,
+    pub refusal: RefCell<Option<Refusal>>,
+    pub jobs: Cell<usize>,
+    pub agents: Cell<usize>,
+}
+
 /// A project of two windows and a question waiting.
 pub struct Scene {
     /// The home, which holds the ledger, the log and the trace until the scene goes.
@@ -117,6 +130,8 @@ pub struct Scene {
     pub context: Rc<Context>,
     /// How many times the dispatcher was woken.
     pub kicks: Rc<Cell<u32>>,
+    /// What the scene's engine was asked to finish.
+    pub finishings: Rc<Finishings>,
     pub project: ProjectView,
     /// The chief's window's token.
     pub chief: String,
@@ -261,10 +276,29 @@ pub fn scene() -> Scene {
     let (chief, zeus) = (token("chief"), token("zeus"));
     let kicks = Rc::new(Cell::new(0));
     let counted = Rc::clone(&kicks);
+    let ledger = Rc::new(RefCell::new(ledger));
+    let finishings = Rc::new(Finishings::default());
+    let finishing = (Rc::clone(&finishings), Rc::clone(&ledger));
     let context = Rc::new(Context {
-        ledger: Rc::new(RefCell::new(ledger)),
+        ledger,
         credentials: Rc::new(credentials),
         kick: Rc::new(move || counted.set(counted.get() + 1)),
+        finish: Rc::new(move |project, number, by| {
+            let (finishings, ledger) = (Rc::clone(&finishing.0), Rc::clone(&finishing.1));
+            Box::pin(async move {
+                finishings.asked.borrow_mut().push((project, number, by));
+                if let Some(refusal) = finishings.refusal.borrow().clone() {
+                    return Err(refusal);
+                }
+                let mut thread = ledger.borrow().task(project, number).unwrap().unwrap();
+                thread.task.state = "done".to_owned();
+                Ok(Finished {
+                    task: thread.task,
+                    jobs: finishings.jobs.get(),
+                    agents: finishings.agents.get(),
+                })
+            })
+        }),
         closing: Closing::new(),
         roster: Rc::new(NoRows),
         log: Rc::new(Log::new(home.path())),
@@ -274,6 +308,7 @@ pub fn scene() -> Scene {
         _home: home,
         context,
         kicks,
+        finishings,
         project,
         chief,
         zeus,

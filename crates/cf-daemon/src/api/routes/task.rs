@@ -1,5 +1,5 @@
 //! One task: `GET /api/tasks/<n>`, its `/transcript`, and the `POST`s that move
-//! it (`done`, `accept`, `reopen`, `edit`, `cancel`, `pause`, `resume`, `tell`). It
+//! it (`done`, `accept`, `reopen`, `edit`, `cancel`, `pause`, `resume`, `finish`, `tell`). It
 //! reads the task first, so an unknown one is 404 before anything else is
 //! asked; and it takes the task as it was then, awaiting the body after: who
 //! may do what is decided on the task as it was read, and the ledger decides on
@@ -109,6 +109,7 @@ pub(super) async fn handle(
             ),
         )),
         TaskAction::Tell => tell(context, caller, &task, words),
+        TaskAction::Finish => finish(context, caller, &task).await,
         _ => moved(context, caller, &task, action, words.unwrap_or_default()),
     }
 }
@@ -291,6 +292,27 @@ fn tell(
     Ok(Answer::ok(Value::Object(answer)))
 }
 
+/// `POST /api/tasks/<n>/finish`: what the worker of a working task said last is its result,
+/// and what its turn left running is not ended (the owner's decision of 2026-10-18: the
+/// chief can finish any working task). Only the engine reads the window, so it is asked,
+/// and answers with the task done, or with why it is not one to finish (not working, no
+/// member's open window works on it, no complete answer since its latest message). `jobs`
+/// and `agents` count what the worker's harness still counted running.
+async fn finish(context: &Context, caller: &Caller, task: &TaskThread) -> Result<Answer, Failure> {
+    let asked = (context.finish)(
+        caller.project.id,
+        task.task.number,
+        caller.participant.handle.clone(),
+    )
+    .await?;
+    (context.kick)();
+    Ok(Answer::ok(json!({
+        "task": value(&TaskSummary::from(&asked.task))?,
+        "jobs": asked.jobs,
+        "agents": asked.agents,
+    })))
+}
+
 /// Whether a tell reaches the task's window: one that has it, which it stops,
 /// or one coming up, which it keeps the words for.
 fn reaches(task: &TaskView) -> bool {
@@ -358,6 +380,7 @@ fn word(action: TaskAction) -> &'static str {
         TaskAction::Cancel => "cancel",
         TaskAction::Pause => "pause",
         TaskAction::Resume => "resume",
+        TaskAction::Finish => "finish",
         TaskAction::Tell => "tell",
         TaskAction::Transcript => "transcript",
     }

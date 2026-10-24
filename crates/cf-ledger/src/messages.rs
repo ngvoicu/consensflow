@@ -42,6 +42,8 @@ pub(crate) use carrying::{
 };
 pub use continuations::{continuation, continuation_tasks};
 pub(crate) use continuations::{withdraw_continuations, withdraw_stale};
+#[cfg(feature = "test-support")]
+pub(crate) use delivery::forget_receipt;
 pub use delivery::GivenUp;
 pub(crate) use delivery::{
     admit, begin_delivery, cancel_message, confirm_delivery, confirm_delivery_telling,

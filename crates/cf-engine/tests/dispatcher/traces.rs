@@ -190,6 +190,11 @@ const CLOSE_RESUMED: &str = "the human resumes the project the Close suspended: 
 /// has been told to its requester in a note not yet given.
 const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`T-1 was taken back`), where Node pastes it into the chief's window";
 
+/// What the engine gives as a worker's result: its final answer alone, what it wrote after
+/// its last tool call (the owner's decision of 2026-10-15), where Node's is everything the
+/// member wrote in its turn, in order.
+const FINAL_ANSWER: &str = "the member wrote a report, ran a command and ended with `Committed.`: the result is `Committed.`, the final answer, where Node's is the report and `Committed.`, everything it wrote in the turn";
+
 /// The tests the engine departs from Node's trace in on purpose, each with
 /// what the engine does that Node does not. Node never withdraws a note that
 /// told a requester a task was paused, so the notes the engine withdraws when
@@ -201,6 +206,10 @@ const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is pau
 /// hold note names the reset as the time the task goes on and never tells the
 /// requester it did.
 const DEPARTED: &[(&str, &str)] = &[
+    (
+        "keeps everything a member wrote in its turn, not only its last message",
+        FINAL_ANSWER,
+    ),
     (
         "closes the project when its chief window closes by itself, as Close does: every window goes and the work in them pauses",
         "the chief's window closes by itself and the worker's goes with the project: the note that T-1 is paused says so (`@zeus-amber-pine's window closed with the project when @chief's window closed`), where Node's says `@zeus-amber-pine's window closed`, as a worker's own crash does (the report of 2026-10-15, B2)",

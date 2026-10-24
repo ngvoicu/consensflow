@@ -253,6 +253,18 @@ pub(crate) fn begin_delivery(store: &mut Store, message_id: i64) -> Result<Begun
     })
 }
 
+/// The receipt of a delivered message is forgotten (`Ledger::forget_receipt`).
+#[cfg(feature = "test-support")]
+pub(crate) fn forget_receipt(store: &mut Store, message_id: i64) -> Result<(), LedgerError> {
+    store.write(|store| {
+        store.db.execute(
+            "UPDATE message SET receipt = 'null' WHERE id = ?",
+            params![message_id],
+        )?;
+        Ok(())
+    })
+}
+
 /// What the transport is to do with a hand-over begun ([`admit`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HandOver {

@@ -10,7 +10,8 @@ use super::Page;
 /// its window: after the lane's own fields, in this order, `agentMissing`,
 /// `activity`, `pane`, `hidden`, `switching` and `holding`, and, only while a
 /// stop of its task is ignored in every round and the host would not close its
-/// window, `unstopped`.
+/// window, `unstopped`, and, only while its task waits on a background job or
+/// agent that its harness wakes its agent for, `held`.
 pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let board = page.ledger.borrow().board(body.whole("project")?)?;
     let agents = saved(&page.env)?;
@@ -51,6 +52,10 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         // A window that would not stop: its task, and how often it was told to.
         if let Some(ignored) = page.engine.unstopped(id) {
             fields.insert("unstopped".to_owned(), ignored);
+        }
+        // A task that goes on in the background: its card says so.
+        if let Some(held) = page.engine.held(id) {
+            fields.insert("held".to_owned(), held);
         }
     }
     one("board", shown)

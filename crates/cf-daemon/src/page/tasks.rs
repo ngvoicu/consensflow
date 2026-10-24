@@ -1,6 +1,6 @@
 //! A task as the human sees and changes it: opened in the drawer, its
-//! transcript read, cancelled, paused, given to another member, resumed, and
-//! the finished ones taken off the board.
+//! transcript read, cancelled, paused, given to another member, finished on what
+//! its worker said last, resumed, and the finished ones taken off the board.
 
 use cf_base::js;
 use cf_ledger::RESUME_WORDS;
@@ -62,6 +62,20 @@ pub(super) async fn reassign(page: &Page, body: Body<'_>) -> Result<Fields, Said
         .reassign_task(body.whole("project")?, body.whole("task")?)
         .await?;
     merged(released)
+}
+
+/// `task.finish`: what the worker of a working task said last is its result, and
+/// nothing it left running is ended. `jobs` and `agents` count what its harness still
+/// counted running.
+pub(super) async fn finish(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let finished = page
+        .engine
+        .finish_task(body.whole("project")?, body.whole("task")?)
+        .await?;
+    let mut fields = one("task", finished.task)?;
+    fields.insert("jobs".to_owned(), finished.jobs.into());
+    fields.insert("agents".to_owned(), finished.agents.into());
+    Ok(fields)
 }
 
 /// `task.resume`: the human resumes without writing to the agent: the words

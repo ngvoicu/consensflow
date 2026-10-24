@@ -17,7 +17,9 @@
 //! What the owner should have seen (their decision of 2026-10-13: "we have to end
 //! everything and give the answer to the chief"): the worker's turn ends, the task
 //! is done, the chief is given the result and a line that says what was ended, and
-//! can accept it; the process is gone, and the board says nothing is running.
+//! can accept it; the process is gone, and the board says nothing is running. Since
+//! turn-end's smallest rule (2026-10-21) the turn's end ends nothing: the finished
+//! worker's window closes, the close ends the command, and the line is the close's.
 
 use cf_e2e::process::is_alive;
 use cf_e2e::rig::{Project, Rig, OPEN};
@@ -90,19 +92,26 @@ fn a_worker_that_leaves_a_command_that_never_exits_running_gives_the_chief_its_r
     })?;
     assert_eq!(results(&project)?[0]["body"], "WORKER_OK");
 
-    // The chief is told what was ended, and the board does not say work runs.
+    // The turn's end ends nothing (turn-end's smallest rule, 2026-10-21): the worker has
+    // nothing more to do, so its window closes at once, the close ends the command, and the
+    // chief is told what the close ended.
     rig.wait_for("the command to be ended", secs(30), || {
         Ok(!is_alive(command.pid()))
     })?;
-    rig.wait_for("the chief to be told what was ended", secs(30), || {
-        Ok(project.inbox("chief")?.iter().any(|message| {
-            message["kind"] == "note"
-                && message["body"].as_str().is_some_and(|body| {
-                    body.starts_with("T-1's turn left background work running. Ended: ")
-                        && body.contains("--background-job")
-                })
-        }))
-    })?;
+    rig.wait_for(
+        "the chief to be told what the close ended",
+        secs(30),
+        || {
+            Ok(project.inbox("chief")?.iter().any(|message| {
+                message["kind"] == "note"
+                    && message["body"].as_str().is_some_and(|body| {
+                        body.starts_with(
+                        "T-1's window closed with background work running, which its close ended: ",
+                    ) && body.contains("--background-job")
+                    })
+            }))
+        },
+    )?;
     assert_eq!(
         project.lane("worker")?["activity"]["reason"],
         Value::Null,

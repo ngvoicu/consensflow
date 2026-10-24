@@ -347,3 +347,126 @@ fn words_in_the_first_message_of_a_launch_cancelled_before_its_window_opened_are
         notes(&context, chief)
     );
 }
+
+#[test]
+fn words_carried_in_the_briefs_paste_are_answered_with_it_and_that_answer_is_the_result() {
+    // Calliope's L2 on the merge with turn-end (T-370): where a turn's answer begins is the
+    // paste of the window's latest message (`last_pasted`), here the brief that carried the
+    // words.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    let told = tell(&context, project.id, 1, "Use the v2 grammar");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(told).state, "delivered");
+    context
+        .adapter
+        .answer("zeus", "Parser done, on the v2 grammar");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let thread = context.task(project.id, 1);
+    assert_eq!(thread.task.state, "done");
+    let result = thread.messages.iter().find(|m| m.kind == "result").unwrap();
+    assert_eq!(result.body, "Parser done, on the v2 grammar");
+}
+
+#[test]
+fn an_answer_that_leaves_work_running_while_told_words_wait_is_no_hold_and_its_requester_is_told_nothing(
+) {
+    // Calliope's L1 on the merge with turn-end (T-370): the answer to the brief, its job
+    // running, is neither the result nor a hold while the words are on their way. They go
+    // in next, and the answer to them decides.
+    let context = Context::new();
+    let (tiers, session, told) = told_on_its_way(&context);
+    context.adapter.answer_leaving(
+        "zeus",
+        "The parser builds in the background",
+        cf_harness::records::Pending {
+            agents: 0,
+            jobs: 1,
+            retired: 0,
+            noticed: 0,
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert!(
+        !tiers
+            .notes("chief")
+            .iter()
+            .any(|note| note.contains("goes on in the background")),
+        "{:?}",
+        tiers.notes("chief")
+    );
+    let words = given(&context, &session);
+    assert_eq!(
+        words.last().unwrap(),
+        &format!("[ConsensFlow m-{told} · T-1 · note from @chief]\nUse the v2 grammar"),
+        "the words went in next"
+    );
+    context.pass().unwrap();
+    context
+        .adapter
+        .answer("zeus", "Parser done, on the v2 grammar");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let thread = tiers.task(1);
+    assert_eq!(thread.task.state, "done");
+    let result = thread.messages.iter().find(|m| m.kind == "result").unwrap();
+    assert_eq!(result.body, "Parser done, on the v2 grammar");
+}
+
+#[test]
+fn finish_is_refused_while_told_words_are_on_their_way_and_says_so_to_the_chief() {
+    // Calliope's L1 on the merge with turn-end (T-370): Finish recorded the answer to the
+    // brief over words that had not reached the window, or failed with the worker's
+    // sentence ("run cf task done again").
+    let context = Context::new();
+    let (tiers, session, told) = told_on_its_way(&context);
+    context.adapter.answer("zeus", "Parser done");
+    let refused = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .unwrap_err();
+    assert_eq!(
+        refused.to_string(),
+        format!(
+            "cannot finish T-1: words told to @{session} are on their way to its window, and its answer to them is the result; finish it once it has answered them, or cancel it"
+        )
+    );
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert_eq!(context.message(told).state, "queued");
+    // Once it has answered them, Finish takes that answer.
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(told).state, "delivered");
+    // In its window and not yet answered, they are the task's latest message to it
+    // (`last_pasted`), and Finish starts at their paste: the answer to the brief before them
+    // is no result (T-405's Finish window of L2).
+    let unanswered = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .unwrap_err();
+    assert_eq!(
+        unanswered.to_string(),
+        format!(
+            "cannot finish T-1: @{session} has written no complete answer since its latest message about it; wait for one, or cancel it"
+        )
+    );
+    assert_eq!(tiers.task(1).task.state, "working");
+    context
+        .adapter
+        .answer("zeus", "Parser done, on the v2 grammar");
+    let finished = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .expect("finished");
+    assert_eq!(finished.task.state, "done");
+    let thread = tiers.task(1);
+    let result = thread.messages.iter().find(|m| m.kind == "result").unwrap();
+    assert!(
+        result.body.starts_with("Parser done, on the v2 grammar"),
+        "{}",
+        result.body
+    );
+}

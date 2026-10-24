@@ -42,8 +42,8 @@ const GET: Shape = Shape {
 };
 
 /// The commands that move a task, which stands first among their words.
-const MOVES: [&str; 7] = [
-    "done", "accept", "cancel", "reopen", "edit", "pause", "resume",
+const MOVES: [&str; 8] = [
+    "done", "accept", "cancel", "reopen", "edit", "pause", "resume", "finish",
 ];
 
 /// `cf task` with `words`, the last of those `given` spells as the system gave them.
@@ -89,7 +89,7 @@ pub fn command(
             input,
         ),
         other => Err(Failure::Usage(format!(
-            "unknown task command {}: use add, list, get, done, accept, reopen, edit, cancel, pause or resume",
+            "unknown task command {}: use add, list, get, done, accept, reopen, edit, cancel, pause, resume or finish",
             quoted(other.unwrap_or_default())
         ))),
     }
@@ -380,6 +380,10 @@ fn moved(
             a_pool(task.get("pool"), task.get("tier"))
         ),
         "resume" => format!("T-{number} resumes in @{} with your words.", js::text(task.get("assignee"))),
+        "finish" => {
+            let count = |field: &str| answer.value().get(field).and_then(Value::as_u64);
+            finishing(number, &task, count("jobs"), count("agents"))
+        }
         // The chief's own step is accepted with its words: nothing comes back to decide.
         "done" if task.get("state").and_then(Value::as_str) == Some("accepted") => format!(
             "T-{number} is done and accepted: it was your own step, so nothing waits for your decision, and what needed it goes on."
@@ -391,6 +395,38 @@ fn moved(
         _ => format!("{}{dropped}", task_line(&task)),
     };
     Ok(Said::new(task, format!("{said}{sent}")))
+}
+
+/// What `cf task finish` says: the result is recorded, and nothing is ended. The `jobs` and
+/// `agents` the worker's harness still counted are said to run on until its window closes,
+/// or past it where the host cannot tell what is the window's (on Windows a program runs
+/// before its Job Object holds it, and on the Mac what left the window's session is not
+/// found, so the close does not end all of it).
+fn finishing(number: u64, task: &Value, jobs: Option<u64>, agents: Option<u64>) -> String {
+    let who = js::text(task.get("assignee"));
+    let (jobs, agents) = (jobs.unwrap_or(0), agents.unwrap_or(0));
+    let plural = |count: u64, one: &str, many: &str| match count {
+        1 => format!("1 {one}"),
+        _ => format!("{count} {many}"),
+    };
+    let jobs_said = plural(jobs, "background job", "background jobs");
+    let agents_said = plural(
+        agents,
+        "background agent or workflow",
+        "background agents or workflows",
+    );
+    let left = match (jobs, agents) {
+        (0, 0) => return format!(
+            "T-{number} is finished: what @{who} said last is its result, which reaches your inbox. Finishing ends nothing its turn left running."
+        ),
+        (_, 0) => jobs_said,
+        (0, _) => agents_said,
+        _ => format!("{jobs_said} and {agents_said}"),
+    };
+    let they = if jobs + agents == 1 { "it" } else { "they" };
+    format!(
+        "T-{number} is finished: what @{who} said last is its result, which reaches your inbox. Finishing does not end what its turn left running ({left}): {they} may run on until its window closes, or past it where the host cannot tell what is the window's."
+    )
 }
 
 /// What a cancel says of the messages `ids`, the words you told the task's
@@ -636,6 +672,61 @@ mod tests {
             said,
             "T-5 continues in @zeus-pale, the window that did T-3; its result arrives in your inbox. It waits until T-3 is accepted.\nSent: 5 characters, ending \"Tests\"."
         );
+    }
+
+    /// What `cf task finish T-7` says, the board answering with `answer`, and what it asked.
+    fn finished(answer: Value) -> (Said, Vec<cf_board::scripted::Received>) {
+        let api = scripted(vec![reply(200, answer)]);
+        let words = ["finish".to_owned(), "T-7".to_owned()];
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let said = command(
+            &words,
+            &given,
+            &Board::new(Some(&api.url), "tok"),
+            &mut std::io::empty(),
+        )
+        .unwrap();
+        (said, api.received())
+    }
+
+    #[test]
+    fn finish_asks_the_board_to_finish_the_task_with_no_words_and_says_what_follows() {
+        let (said, asked) = finished(json!({ "task": card(7, "done", Some("zeus-amber-pine")) }));
+        assert_eq!(asked.len(), 1);
+        assert_eq!(
+            (asked[0].method.as_str(), asked[0].path.as_str()),
+            ("POST", "/api/tasks/7/finish")
+        );
+        assert_eq!(asked[0].json(), Some(json!({})));
+        assert_eq!(
+            said.text,
+            "T-7 is finished: what @zeus-amber-pine said last is its result, which reaches your inbox. Finishing ends nothing its turn left running."
+        );
+    }
+
+    #[test]
+    fn finish_promises_no_ending_and_says_the_jobs_and_agents_its_harness_counted_may_run_on() {
+        for (jobs, agents, words) in [
+            (1, 0, "(1 background job): it may run on"),
+            (2, 0, "(2 background jobs): they may run on"),
+            (0, 1, "(1 background agent or workflow): it may run on"),
+            (
+                1,
+                2,
+                "(1 background job and 2 background agents or workflows): they may run on",
+            ),
+        ] {
+            let (said, _) = finished(json!({
+                "task": card(7, "done", Some("zeus-amber-pine")),
+                "jobs": jobs,
+                "agents": agents,
+            }));
+            assert_eq!(
+                said.text,
+                format!("T-7 is finished: what @zeus-amber-pine said last is its result, which reaches your inbox. Finishing does not end what its turn left running {words} until its window closes, or past it where the host cannot tell what is the window's."),
+                "{jobs} {agents}"
+            );
+        }
     }
 
     #[test]
