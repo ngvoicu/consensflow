@@ -348,6 +348,7 @@ fn stream_to_page(
             ended,
             // Paid, with this thread's end, once the exit is told.
             owed: _owed,
+            #[cfg(target_os = "macos")]
             tree,
         } = streamed;
         for message in stream {
@@ -368,7 +369,10 @@ fn stream_to_page(
             // does not change.
             let left = Left {
                 background,
-                possibly: tree.possibly_left(),
+                possibly: possibly_left(
+                    #[cfg(target_os = "macos")]
+                    &tree,
+                ),
             };
             let exit = exit_body(&key, &screen, status, left, handed.survivor);
             #[cfg(test)]
@@ -385,6 +389,22 @@ fn stream_to_page(
             inputs.retire(&key);
         }
     });
+}
+
+/// What may be the window's and runs on, not ended, for its exit to name: on macOS what its
+/// process tree names (`ProcessTree::possibly_left`); elsewhere none, and on Windows the
+/// pane's job ends its whole tree as its last handle closes, with the pane.
+fn possibly_left(
+    #[cfg(target_os = "macos")] tree: &crate::process_tree::ProcessTree,
+) -> Vec<PossiblyLeft> {
+    #[cfg(target_os = "macos")]
+    {
+        tree.possibly_left()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Vec::new()
+    }
 }
 
 /// What a window left running, for its exit: the turn's work, which its close ended, and

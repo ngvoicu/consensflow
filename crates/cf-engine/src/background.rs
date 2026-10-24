@@ -270,23 +270,39 @@ impl Dispatcher {
             return Ok(());
         };
         let number = thread.task.number;
-        let mut body = format!("T-{number}'s window closed");
-        if !left.is_empty() {
-            body.push_str(&format!(
-                " with background work still running: {}",
-                quote(left)
-            ));
-        }
-        if let Some(words) = possibly_left_words(possibly) {
-            body.push_str(&format!("; {words}"));
-        }
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
                 from: None,
                 to: thread.task.requester,
                 task: Some(number),
-                body,
+                body: closed_leaving(&format!("T-{number}'s window closed"), left, possibly),
+            },
+        )?;
+        Ok(())
+    }
+
+    /// What a chief's window that closed with work still running, or with processes the host
+    /// names as possibly its own, says to the human: no task's giver is there to tell, and the
+    /// words are a worker's close's. A window that closes with none says nothing.
+    pub(crate) fn tell_human_left_running(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        left: &[BackgroundProcess],
+        possibly: &[PossiblyLeft],
+    ) -> Result<(), EngineError> {
+        if left.is_empty() && possibly.is_empty() {
+            return Ok(());
+        }
+        let closed = format!("@{}'s window closed", participant.handle);
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: closed_leaving(&closed, left, possibly),
             },
         )?;
         Ok(())
@@ -345,6 +361,22 @@ fn line(process: &BackgroundProcess, masked: &mut usize) -> String {
 /// token in them hidden, and how many were left out or hidden said after them.
 pub(crate) fn quote(left: &[BackgroundProcess]) -> String {
     quote_of(left, left.len())
+}
+
+/// `closed` (a window closed), and what it left running and what may be its own, as a close
+/// note says them.
+fn closed_leaving(closed: &str, left: &[BackgroundProcess], possibly: &[PossiblyLeft]) -> String {
+    let mut said = closed.to_owned();
+    if !left.is_empty() {
+        said.push_str(&format!(
+            " with background work still running: {}",
+            quote(left)
+        ));
+    }
+    if let Some(words) = possibly_left_words(possibly) {
+        said.push_str(&format!("; {words}"));
+    }
+    said
 }
 
 /// What a note says of the processes the host named as possibly a window's and did not end

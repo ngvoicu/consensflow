@@ -88,6 +88,9 @@ panes-headless-window-ends = ["cargo", "test", "--offline", "-p", "cf-panes", "-
 # reaches; and the jobs it names none of (T-406). They signal nothing the report names.
 panes-headless-possibly-left = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_window_closed_names_a_server"]
 panes-headless-not-named = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_window_closed_does_not_name"]
+# A Windows window whose program exits by itself, whose job is ended before its exit is
+# handed to the bridge (T-422, zeewin).
+panes-handlers-windows-exit = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "a_window_whose_program_exits_by_itself"]
 # The app's quit, which closes the windows within the grace they are given.
 app-test-quitting = ["cargo", "xtask", "app", "test", "quitting"]
 # The cases of the rig (`background_work` and `background_close` of crates/cf-e2e): the
@@ -2550,8 +2553,8 @@ runs = ["panes-headless-possibly-left"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = "                possibly: tree.possibly_left(),"
-replace = "                possibly: { let _ = &tree; Vec::new() },"
+find = "        tree.possibly_left()"
+replace = "        { let _ = tree; Vec::new() }"
 
 [[plant]]
 name = "background possibly-left: the note to whoever gave the task says nothing of what may be the window's"
@@ -2583,3 +2586,109 @@ file = "crates/cf-proto/src/panes.rs"
 find = "    pub possibly_left: Vec<PossiblyLeft>,"
 replace = """    #[serde(skip_deserializing)]
     pub possibly_left: Vec<PossiblyLeft>,"""
+
+[[plant]]
+name = "background possibly-left: what the report names is admitted into what was seen"
+meant = "the_bound_refuses_what_is_named_and_no_close_or_ending_signals_it"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/bound.rs"
+find = "    /// Whether `target` may be signalled, `table` being the processes there are now: it"
+replace = """
+    /// Admits `identity` into what was seen.
+    pub fn admit(&self, identity: Identity) {
+        self.seen
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(identity.unique);
+    }
+
+    /// Whether `target` may be signalled, `table` being the processes there are now: it"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = "            .filter(|p| system.runs(key_of(p.identity)))"
+replace = """            .filter(|p| system.runs(key_of(p.identity)) && {
+                self.bound.admit(p.identity);
+                true
+            })"""
+
+[[plant]]
+name = "background possibly-left: a job whose number another process took as its marker was read is named"
+meant = "a_job_whose_number_another_process_took_as_its_marker_was_read_is_not_named"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = "            .filter(|p| system.runs(key_of(p.identity)))"
+replace = "            .filter(|p| system.runs(key_of(p.identity)) || p.identity.pid > 0)"
+
+[[plant]]
+name = "background possibly-left: each read of a process's arguments makes a buffer of its own"
+meant = "reads_of_the_marker_share_one_buffer_for_what_the_system_says_of_a_process"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = """
+    ARGUMENTS.with(|buffer| {
+        let mut bytes = buffer.borrow_mut();"""
+replace = """
+    ARGUMENTS.with(|_| {
+        let mut bytes = Vec::new();"""
+
+[[plant]]
+name = "background possibly-left: a chief's window that closes tells the human nothing of what it left"
+meant = "a_chiefs_window_that_closes_tells_the_human_what_it_left_and_what_may_be_its_own"
+runs = ["engine-dispatcher-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = """
+                shown.left_running(),
+                shown.possibly_left(),
+            )?;"""
+replace = """
+                &[],
+                &[],
+            )?;"""
+
+[[plant]]
+name = "background possibly-left: a Windows window's exit holds a handle of its job past the exit"
+meant = "a_window_whose_program_exits_by_itself_has_ended_what_it_started_when_its_exit_is_handed"
+platforms = ["windows"]
+runs = ["panes-handlers-windows-exit"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = """
+    #[cfg(target_os = "macos")]
+    pub(crate) tree: crate::process_tree::ProcessTree,
+}"""
+replace = """
+    #[cfg(target_os = "macos")]
+    pub(crate) tree: crate::process_tree::ProcessTree,
+    #[cfg(windows)]
+    pub(crate) job: Arc<crate::job_object::JobObject>,
+}"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = "            owed: self.exits.owe(),"
+replace = """            owed: self.exits.owe(),
+            #[cfg(windows)]
+            job: Arc::clone(
+                &self
+                    .lock_panes()?
+                    .get(&key)
+                    .ok_or_else(|| PaneError::NotFound(key.clone()))?
+                    .job,
+            ),"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "            owed: _owed,"
+replace = """            owed: _owed,
+            #[cfg(windows)]
+            job: _job,"""

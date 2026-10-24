@@ -216,7 +216,7 @@ pub(super) fn processes() -> io::Result<Vec<Process>> {
 pub(super) fn has_marker(pid: i32, marker: &str) -> bool {
     // No arguments or environment values are logged, retained, or returned to
     // the app: the environment is only read for the marker.
-    procargs(pid).is_some_and(|bytes| environment_has_marker(&bytes, marker))
+    read_procargs(pid, |bytes| environment_has_marker(bytes, marker)).unwrap_or(false)
 }
 
 /// What the system keeps of a process's arguments and environment
@@ -224,28 +224,49 @@ pub(super) fn has_marker(pid: i32, marker: &str) -> bool {
 /// arguments and the environment, each ended by a NUL. None for a process that
 /// cannot be read (it ended, or it is not ours to read).
 pub(super) fn procargs(pid: i32) -> Option<Vec<u8>> {
-    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
-    // macOS bounds argv + environment by ARG_MAX.
-    let mut bytes = vec![0u8; 1024 * 1024];
-    let mut size = bytes.len();
-    // SAFETY: `mib` holds the `mib.len()` name entries passed with it, and
-    // `bytes` is writable for the `size` bytes passed with it, which sysctl
-    // lowers to what it wrote. Nothing is set: the new value is null, of length 0.
-    let result = unsafe {
-        libc::sysctl(
-            mib.as_mut_ptr(),
-            mib.len() as u32,
-            bytes.as_mut_ptr().cast(),
-            &mut size,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    if result != 0 {
-        return None;
-    }
-    bytes.truncate(size);
-    Some(bytes)
+    read_procargs(pid, <[u8]>::to_vec)
+}
+
+thread_local! {
+    /// The buffer what the system keeps of a process's arguments and environment is read
+    /// into, made once for a thread (macOS bounds them by `ARG_MAX`, a megabyte) and used
+    /// for every read on it: a report reads the marker of each of its candidates.
+    static ARGUMENTS: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// `read` of what the system keeps of the process `pid`'s arguments and environment
+/// ([`procargs`]), in this thread's buffer: none where it cannot be read.
+fn read_procargs<T>(pid: i32, read: impl FnOnce(&[u8]) -> T) -> Option<T> {
+    ARGUMENTS.with(|buffer| {
+        let mut bytes = buffer.borrow_mut();
+        if bytes.is_empty() {
+            #[cfg(test)]
+            BUFFERS_MADE.with(|made| made.set(made.get() + 1));
+            bytes.resize(1024 * 1024, 0);
+        }
+        let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+        let mut size = bytes.len();
+        // SAFETY: `mib` holds the `mib.len()` name entries passed with it, and
+        // `bytes` is writable for the `size` bytes passed with it, which sysctl
+        // lowers to what it wrote. Nothing is set: the new value is null, of length 0.
+        let result = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                mib.len() as u32,
+                bytes.as_mut_ptr().cast(),
+                &mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        (result == 0).then(|| read(&bytes[..size.min(bytes.len())]))
+    })
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many buffers for a process's arguments and environment this thread has made.
+    static BUFFERS_MADE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The fields after the program's path and its padding: the arguments, as many

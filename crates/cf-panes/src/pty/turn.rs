@@ -31,7 +31,7 @@ use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::time::Instant;
 
-use cf_proto::panes::{Background, BackgroundProcess, Ending, PossiblyLeft, Servers};
+use cf_proto::panes::{Background, BackgroundProcess, Ending, Servers};
 
 #[cfg(target_os = "macos")]
 use super::close;
@@ -44,7 +44,7 @@ use crate::process_tree::Subject;
 /// A pane's tree, held where the table's lock is not: looking at it walks the
 /// system's processes, which no lock of the table is held for.
 #[derive(Clone)]
-pub(crate) struct Tree {
+struct Tree {
     #[cfg(target_os = "macos")]
     tree: crate::process_tree::ProcessTree,
     #[cfg(windows)]
@@ -65,20 +65,6 @@ impl Tree {
         #[cfg(not(any(target_os = "macos", windows)))]
         {
             Ok(Vec::new())
-        }
-    }
-
-    /// What may be the window's and runs on, not ended, for its exit to name
-    /// (`ProcessTree::possibly_left`): a look, nothing is signalled or seen. A platform
-    /// that cannot look has none, and so has Windows, whose job object ends the whole tree.
-    pub(crate) fn possibly_left(&self) -> Vec<PossiblyLeft> {
-        #[cfg(target_os = "macos")]
-        {
-            self.tree.possibly_left()
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            Vec::new()
         }
     }
 
@@ -140,7 +126,7 @@ fn steadily_looked_at(baseline: &Baseline, tree: &Tree) -> io::Result<Background
 }
 
 impl Pane {
-    pub(super) fn tree(&self) -> Tree {
+    fn tree(&self) -> Tree {
         Tree {
             #[cfg(target_os = "macos")]
             tree: self.process_tree.clone(),

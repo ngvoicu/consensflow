@@ -356,6 +356,105 @@ fn a_program_whose_console_host_died_is_ended_and_gone_before_the_daemon_hears_i
     connected.bridge.wait_closed().expect("the bridge closes");
 }
 
+/// A program that starts a ping of its own (`Start-Process`, which a harness's agent runs for a
+/// server), writes its number to the file `CF_CHILD` names, and exits.
+const STARTS_A_CHILD_AND_EXITS: &str = "$child = Start-Process -WindowStyle Hidden -PassThru \
+     -FilePath 'ping.exe' -ArgumentList '-n','1008','127.0.0.1'; \
+     Set-Content -LiteralPath $env:CF_CHILD -Value $child.Id; Write-Output 'STARTED#'; exit 0";
+
+/// What a window's program left in its job is gone by the time the exit of a window whose
+/// program exited by itself is handed to the bridge: the pane's job ends its tree as its last
+/// handle closes, with the pane, and the exit says what the window left as gone. An exit that
+/// held a handle of the job of its own (the copy of the window's tree it kept to name what may
+/// be the window's, T-406, Calliope's review T-421) moved that end past the exit, and the
+/// child ran on while the daemon was told the window had closed.
+#[test]
+fn a_window_whose_program_exits_by_itself_has_ended_what_it_started_when_its_exit_is_handed() {
+    let _pty_guard = serial_pty_test();
+    let Host {
+        inputs,
+        bridge: connected,
+        mut daemon,
+        printed: seen,
+        ..
+    } = Host::start(false);
+    let mut events = Vec::new();
+    let child_file =
+        Freed(std::env::temp_dir().join(format!("cf-exit-child-{}", std::process::id())));
+    let _ = std::fs::remove_file(&child_file.0);
+    let child_of = |file: &PathBuf| {
+        std::fs::read_to_string(file)
+            .ok()
+            .and_then(|text| text.trim().parse::<u32>().ok())
+    };
+    // Whether the child runs, asked as the exit of this pane is handed to the bridge.
+    let ran_when_handed = Arc::new(Mutex::new(None));
+    let asked = Arc::clone(&ran_when_handed);
+    let file = child_file.0.clone();
+    *EXIT_HANDED.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(move |key| {
+        if key.id == "child-pane" {
+            *asked.lock().unwrap_or_else(PoisonError::into_inner) =
+                Some(child_of(&file).map(running));
+        }
+    }));
+
+    let opened = daemon.ask(
+        "pane.open",
+        json!({
+            "id": "child-pane", "generation": 1,
+            "cwd": std::env::temp_dir(),
+            "argv": powershell(STARTS_A_CHILD_AND_EXITS),
+            "env": HashMap::from([("CF_CHILD", child_file.0.to_string_lossy())]),
+            "size": {"rows": 24, "cols": 80},
+        }),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+
+    // What it prints, the cursor question answered as the page answers it, until the exit.
+    let until = Instant::now() + Duration::from_secs(60);
+    let mut exit = None;
+    while exit.is_none() && Instant::now() < until {
+        if let Ok((_, bytes)) = seen.recv_timeout(Duration::from_millis(50)) {
+            if bytes.windows(4).any(|query| query == b"\x1b[6n") {
+                let answered = daemon.ask(
+                    "pane.reply",
+                    json!({"id":"child-pane","generation":1,"bytes":b"\x1b[1;1R".to_vec()}),
+                    &mut events,
+                );
+                assert_eq!(answered["ok"], true, "{answered}");
+            }
+        }
+        exit = events
+            .iter()
+            .find(|event| event["op"] == "pane.exit")
+            .map(|event| event["body"].clone());
+        if exit.is_none() {
+            if let Some(frame) = daemon.next(Instant::now() + Duration::from_millis(50)) {
+                events.push(frame);
+            }
+        }
+    }
+    *EXIT_HANDED.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    let child = child_of(&child_file.0);
+    if let Some(child) = child.filter(|child| running(*child)) {
+        end(child);
+    }
+    assert!(exit.is_some(), "the daemon never heard the window closed");
+    assert!(child.is_some(), "the program never said its child's number");
+    assert_eq!(
+        *ran_when_handed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner),
+        Some(Some(false)),
+        "the exit was handed to the bridge while what the window started still ran"
+    );
+
+    inputs.close_and_drain();
+    drop(daemon);
+    connected.bridge.wait_closed().expect("the bridge closes");
+}
+
 /// Windows still open when the daemon ends the host's input are ended with the host, which
 /// tells the exit of each, with the program it left running, before it closes its own
 /// output: the daemon's end of the bridge reads to its end what the host said as it stopped

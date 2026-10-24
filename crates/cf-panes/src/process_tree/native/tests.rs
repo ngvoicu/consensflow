@@ -89,3 +89,17 @@ fn nobody_holds_a_number_only_where_the_system_answers_that_no_process_has_it() 
     child.wait().expect("reap it");
     assert!(nobody_holds(pid), "nobody, once it is reaped");
 }
+
+#[test]
+fn reads_of_the_marker_share_one_buffer_for_what_the_system_says_of_a_process() {
+    // A report reads the marker of every candidate; each read made a buffer of a megabyte
+    // before (Calliope's review T-421).
+    let me = std::process::id() as i32;
+    let before = BUFFERS_MADE.with(std::cell::Cell::get);
+    for _ in 0..3 {
+        assert!(!has_marker(me, "a marker no process carries"));
+    }
+    assert!(procargs(me).is_some(), "this process's own arguments");
+    let made = BUFFERS_MADE.with(std::cell::Cell::get) - before;
+    assert!(made <= 1, "{made} buffers for four reads on one thread");
+}

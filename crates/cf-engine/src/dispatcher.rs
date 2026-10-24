@@ -778,6 +778,14 @@ impl Dispatcher {
             self.settle_exited_launch(&record, &project, &participant, &prelude, &because)?;
         }
         if participant.role == "chief" {
+            // What the chief's window left running is the human's to know: no task's giver
+            // is there to tell.
+            self.tell_human_left_running(
+                &project,
+                &participant,
+                shown.left_running(),
+                shown.possibly_left(),
+            )?;
             // The chief's own exit closes the project as Close does, but for the
             // window of a launch that was to say the role: it did not come up, and
             // is tried again (`settle_exited_launch`).

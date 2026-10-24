@@ -564,6 +564,40 @@ fn a_window_that_goes_by_itself_names_in_its_pause_note_what_may_be_its_own_afte
 }
 
 #[test]
+fn a_chiefs_window_that_closes_tells_the_human_what_it_left_and_what_may_be_its_own() {
+    // The chief's window has no task whose giver a note could tell: the human is told, in the
+    // words a worker's close says it in (Calliope's review T-421).
+    let context = Context::new();
+    let tiers = working(&context);
+    context.host.exits_leaving(&[LOCK]);
+    context.host.exits_possibly_leaving(&["node"]);
+
+    context.exit("chief");
+
+    let told = tiers.notes("human");
+    assert!(
+        told.contains(&format!(
+            "@chief's window closed with background work still running: {LOCK}; pid 4001 (node) may be this window's and was not ended"
+        )),
+        "{told:?}"
+    );
+}
+
+#[test]
+fn a_chiefs_window_that_closes_with_nothing_left_tells_the_human_nothing_of_it() {
+    let context = Context::new();
+    let tiers = working(&context);
+
+    context.exit("chief");
+
+    let told = tiers.notes("human");
+    assert!(
+        told.iter().all(|note| !note.contains("background work") && !note.contains("may be this window's")),
+        "{told:?}"
+    );
+}
+
+#[test]
 fn a_window_that_closes_with_nothing_running_says_nothing_of_it() {
     let context = Context::new();
     let tiers = working(&context);

@@ -211,8 +211,9 @@ impl ProcessTree {
     /// returns); so is a job the user started through a server that the window started and
     /// that hands its environment on (a `screen` or `tmux` server, an editor), which is why
     /// this names and never signals (T-406, Astraeus's review T-411). Nothing looked at here
-    /// is seen ([`Bound::observe`] is not asked). None where the program was never read,
-    /// or the system's table cannot be.
+    /// is seen ([`Bound::observe`] is not asked). A process whose number another took by the
+    /// time its marker was read is not named. None where the program was never read, or the
+    /// system's table cannot be.
     pub fn possibly_left(&self) -> Vec<PossiblyLeft> {
         self.possibly_left_by(&Native)
     }
@@ -234,6 +235,9 @@ impl ProcessTree {
             })
             .filter(|p| !self.bound.allows(&table, p.identity))
             .filter(|p| system.carries(p.identity.pid, &self.marker))
+            // The marker was read by number: what answered is the process of the table only
+            // if it is still there, as a signal is sent to none that took its number.
+            .filter(|p| system.runs(key_of(p.identity)))
             .map(|p| PossiblyLeft {
                 pid: p.identity.pid.unsigned_abs(),
                 program: p.name.clone(),

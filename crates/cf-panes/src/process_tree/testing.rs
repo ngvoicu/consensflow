@@ -110,6 +110,8 @@ pub(super) struct Machine {
     marker: String,
     /// Numbers held by processes the table does not hold: another user's, or a zombie.
     held: Vec<i32>,
+    /// Processes of the table whose numbers another process has taken since it was read.
+    taken: Vec<i32>,
 }
 
 impl Machine {
@@ -121,6 +123,7 @@ impl Machine {
             marked: Vec::new(),
             marker: String::new(),
             held: Vec::new(),
+            taken: Vec::new(),
         }
     }
 
@@ -134,6 +137,13 @@ impl Machine {
     /// The machine, where processes the table does not hold have the numbers `pids`.
     pub fn holding(mut self, pids: &[i32]) -> Self {
         self.held = pids.to_vec();
+        self
+    }
+
+    /// The machine, where the processes `pids` of the table have ended since it was read and
+    /// others have their numbers: none of them runs.
+    pub fn taking(mut self, pids: &[i32]) -> Self {
+        self.taken = pids.to_vec();
         self
     }
 
@@ -176,16 +186,15 @@ impl System for Machine {
         Ok(self.processes.clone())
     }
 
-    /// A process of the table runs until it is sent SIGKILL.
+    /// A process of the table runs until it is sent SIGKILL, unless its number was taken.
     fn runs(&self, key: ProcessKey) -> bool {
-        self.processes
+        self.processes.iter().any(|process| {
+            key_of(process.identity) == key && !self.taken.contains(&process.identity.pid)
+        }) && !self
+            .sent
+            .borrow()
             .iter()
-            .any(|process| key_of(process.identity) == key)
-            && !self
-                .sent
-                .borrow()
-                .iter()
-                .any(|(pid, signal)| u32::try_from(*pid) == Ok(key.pid) && *signal == libc::SIGKILL)
+            .any(|(pid, signal)| u32::try_from(*pid) == Ok(key.pid) && *signal == libc::SIGKILL)
     }
 
     fn send(&self, to: Identity, signal: i32) -> io::Result<()> {

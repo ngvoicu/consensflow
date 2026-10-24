@@ -103,6 +103,18 @@ fn a_marked_job_whose_sessions_number_a_process_holds_is_not_named() {
 }
 
 #[test]
+fn a_job_whose_number_another_process_took_as_its_marker_was_read_is_not_named() {
+    // The job ended after the table was read, and a process that took its number answered
+    // the read of the marker: what was read is not the job's, so nothing is named.
+    let table = a_window_with_a_detached_server((2, 0));
+    let machine = Machine::new(table.clone())
+        .marking(MARKER, &[SERVER])
+        .taking(&[SERVER]);
+
+    assert_eq!(named(&tree_of(&table), &machine), Vec::<u32>::new());
+}
+
+#[test]
 fn a_window_whose_program_was_never_read_names_nothing() {
     let table = a_window_with_a_detached_server((2, 0));
     let machine = Machine::new(table.clone()).marking(MARKER, &[SERVER]);
