@@ -362,6 +362,32 @@ fn a_session_resumed_on_a_task_it_holds_is_not_read_to_answer_it_by_the_word_it_
 }
 
 #[test]
+fn finish_takes_no_word_a_session_gave_its_role_for_an_answer_to_the_task() {
+    // The merge with Resume after Close (T-371): a message pasted into the window after
+    // the task's latest moves Finish's start past it, and the note that says the role is
+    // no such message, for its word is the role's and none of the task's.
+    let context = codex();
+    let project = working_session(&context);
+    let session = session_of(&context, &project);
+    quit_with_the_role_rewritten(&context, &session);
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    after.resume_project(project.id).unwrap();
+    after.pass().unwrap();
+    after.pass().unwrap();
+    context.codex.answer(&session, UNDERSTOOD);
+
+    let refused = after.finish_task(project.id, 1, "chief").unwrap_err();
+    assert!(
+        refused
+            .to_string()
+            .contains("has written no complete answer"),
+        "{refused}"
+    );
+}
+
+#[test]
 fn a_session_that_had_answered_its_task_before_the_quit_gives_that_answer_as_its_result_and_not_the_word_it_gave_the_role(
 ) {
     let context = codex();

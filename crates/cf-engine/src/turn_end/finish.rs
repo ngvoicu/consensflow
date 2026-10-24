@@ -169,15 +169,19 @@ impl Dispatcher {
                     ),
                 )
             })?;
+        let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
         // A message ConsensFlow pasted into the window since (the Resume's word to go on,
         // which no start is taken from) is answered by what follows it, as at a turn's end;
-        // the harness's own notifications, which wake a held task's turns, are none (the
-        // merge with Resume after Close, T-405's L10).
+        // the harness's own notifications, which wake a held task's turns, are none, nor is
+        // the note that says the role, whose word is the role's (the merge with Resume after
+        // Close, T-405's L10).
         let start = items[start + 1..]
             .iter()
-            .rposition(|item| item.role == Role::User && header_id(&item.text).is_some())
+            .rposition(|item| {
+                item.role == Role::User
+                    && header_id(&item.text).is_some_and(|id| !replacements.contains(&id))
+            })
             .map_or(start, |later| start + 1 + later);
-        let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
         let run = answers_to_the_task(&items[start + 1..], &replacements)
             .and_then(|answers| answers.complete_run)
             .ok_or_else(none)?;

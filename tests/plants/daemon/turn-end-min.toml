@@ -30,6 +30,7 @@ tem-panes-clock = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "bac
 tem-engine-queued-tells = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "queued_tells::"]
 tem-engine-own-steps = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "own_steps::"]
 tem-engine-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::"]
+tem-engine-role-members = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::members::"]
 tem-panes-headless-commands = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_look_at_the_commands_over_the_wire"]
 tem-e2e-mcp = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::mcp_server::"]
 tem-e2e-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::"]
@@ -511,7 +512,9 @@ replace = '    last.is_some().then_some(Answers {'
 
 [[plant]]
 name = "turn-end-min: the task's latest message is found by any quotation of its header, where its receipt names no item of the record"
-meant = "the_result_is_what_follows_the_paste_its_arrival_was_proved_by_never_a_quotation_of_its_header"
+# Since the merge with Resume after Close (T-371), a paste after the quotation moves Finish's
+# start past it as it moves the turn end's, so the quotation is taken only where no paste follows.
+meant = "where_no_paste_proves_where_the_latest_message_arrived_there_is_no_result_and_finish_says_why"
 runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
@@ -1855,8 +1858,8 @@ runs = ["tem-engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '            .rposition(|item| item.role == Role::User && header_id(&item.text).is_some())'
-replace = '            .rposition(|item| item.role == Role::User && header_id(&item.text).is_some() && false)'
+find = '                item.role == Role::User'
+replace = '                false && item.role == Role::User'
 
 [[plant]]
 name = "turn-end-min engine: a held task whose jobs the Resume retired takes no result"
@@ -1880,3 +1883,13 @@ find = '''
         record.held.borrow_mut().rests.pasted();'''
 replace = '''
         self.mark_turn(record, &pane).await;'''
+
+[[plant]]
+name = "turn-end-min engine: Finish takes the word a session gave its role for the task's answer"
+meant = "finish_takes_no_word_a_session_gave_its_role_for_an_answer_to_the_task"
+runs = ["tem-engine-role-members"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = '                    && header_id(&item.text).is_some_and(|id| !replacements.contains(&id))'
+replace = '                    && header_id(&item.text).is_some()'
