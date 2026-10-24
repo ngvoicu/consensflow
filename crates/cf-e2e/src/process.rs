@@ -45,6 +45,8 @@ use crate::{Error, Result};
 
 #[cfg(unix)]
 pub use pid::group_of;
+#[cfg(unix)]
+pub use pid::stall;
 pub use pid::{alive_among, end_all, is_alive, signal, started, Signal};
 pub use spawned::{Sink, Spawned};
 
