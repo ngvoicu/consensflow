@@ -14,7 +14,7 @@ fn a_break_is_recorded_once_at_the_first_look_that_finds_it() {
         vec![Break::new(
             3,
             "3:m-132",
-            "T-14's ended notice came after its result",
+            "T-14's close note m-132 came while T-14 was still working",
         )]
     };
     let kept = keeper.keep(&first, found());
@@ -24,10 +24,7 @@ fn a_break_is_recorded_once_at_the_first_look_that_finds_it() {
     assert!(keeper.keep(&later, found()).is_empty());
     assert_eq!(keeper.breaks.len(), 1);
     assert!(keeper.broke(3) && !keeper.broke(2));
-    assert_eq!(
-        kept[0].name(),
-        "an ended notice comes with or before its result"
-    );
+    assert_eq!(kept[0].name(), "no work is ended under a task at work");
     assert_eq!(kept[0].to_value()["at"], "2026-10-15T10:01:00.000Z");
 }
 

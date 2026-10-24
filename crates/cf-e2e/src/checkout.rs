@@ -52,6 +52,13 @@ pub fn files_below(dir: &Path, skipping: &[&str]) -> Result<Vec<PathBuf>> {
     Ok(found)
 }
 
+/// Whether `path` is a file of its own: not a folder, and not a link, which
+/// [`files_below`] lists as the link and a reader does not read through (a link to
+/// a folder, as the gate's exported copy holds for `node_modules`, is no text).
+pub fn is_plain_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|kind| kind.is_file())
+}
+
 fn collect(dir: &Path, skipping: &[&str], found: &mut Vec<PathBuf>) -> Result {
     for entry in fs::read_dir(dir).map_err(Error::file("list", dir))? {
         let entry = entry.map_err(Error::file("list", dir))?;
@@ -149,6 +156,23 @@ mod tests {
                 root.path().join("real").join("inside.txt")
             ]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_plain_file_is_neither_a_folder_nor_a_link_to_one_nor_to_a_file_nor_a_broken_link() {
+        let root = tempfile::tempdir().unwrap();
+        touch(&root.path().join("real").join("inside.txt"));
+        let link = |to: &str, name: &str| {
+            std::os::unix::fs::symlink(root.path().join(to), root.path().join(name)).unwrap();
+        };
+        link("real", "to-folder");
+        link("real/inside.txt", "to-file");
+        link("nowhere", "broken");
+        assert!(is_plain_file(&root.path().join("real").join("inside.txt")));
+        for not in ["real", "to-folder", "to-file", "broken", "missing"] {
+            assert!(!is_plain_file(&root.path().join(not)), "{not}");
+        }
     }
 
     #[test]

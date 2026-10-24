@@ -1,9 +1,25 @@
-//! What reaches the chief of a task, in its order and in its words: the notice
-//! that what a worker's turn left running was ended comes with its result or
-//! before it, never after (3, A3: a mutation run ended mid-edit, its notice m-132
-//! after the result m-131); and a result is its turn's final answer whole, the
-//! words after its last tool call, with none of the progress written on the way
-//! (4, A4: results that held every progress line). Its turn is the one the delivery
+//! What reaches the chief of a task, in its order and in its words: work is never ended
+//! under a task still working, and a result is its turn's final answer whole, the words
+//! after its last tool call, with none of the progress written on the way.
+//!
+//! 3 (A3: a mutation run ended mid-edit, its notice m-132 after the result m-131): under
+//! 3.0.6 a worker's turn ends nothing it left running (turn-end), so that shape cannot
+//! arise; what holds is that no window's close ends work while its task is at work. The
+//! note of such a close says so (`T-14's window closed with background work running, which
+//! its close ended: …`, [`CLOSE_NOTE_SAYS`]) and is written once the task has ended, by a
+//! result, a Finish, a cancel or a failure: a close note while its task is still queued,
+//! working or waiting, with no end before it, is a break. The pause note of a window that
+//! closed under a working task ("is paused: … with background work still running") is a
+//! pause and no ending; the sentence a result finished at someone's word holds is part of
+//! that result. Whose window a close note is the log does not say, so the task's own moves
+//! are the evidence: a task reassigned since it was created may have the earlier worker's
+//! window close under the new worker's work, which is none of its ending; and one that
+//! ended, was sent back and works again may have the earlier attempt's window close late or
+//! the new attempt's, which the log cannot tell apart: unresolved, said once in the
+//! timeline, never a break and never taken to hold.
+//!
+//! 4 (A4: results that held every progress line): a result is its turn's final answer
+//! whole. Its turn is the one the delivery
 //! attempt of its task that began it began, in that attempt's conversation, and no
 //! further than the next delivery of another task: a turn of an earlier attempt (a
 //! retry's turn lost, its result the old answer again) or of the next task (a late
@@ -14,61 +30,59 @@
 //! turn. Both read
 //! the ledger alone: the messages, the log of the tasks' states and deliveries, and
 //! the daemon's copy of the worker's conversation.
-//!
-//! A task may be worked more than once: done, sent back, and done again; and a
-//! notice is of the attempt of its own result, whenever it is written. Only the log
-//! tells an attempt from the next, by the moves of the task: when it was written is
-//! no word of whose it is (the notice of an old attempt may come late, a moment
-//! before the next attempt's result). A notice no result came before is of a result
-//! to come, or of none: it holds. One after a result, the task having begun no
-//! attempt since (no move but to `done` or an end), is of that result, and came after
-//! it: a break. One after a result and after the task was sent back may be that
-//! result's, late, or the next attempt's own, which the log does not say: it is
-//! unresolved, said so once in the timeline, never a break and never taken to hold.
 
 use super::deliveries::delivered_to;
 use super::work::lines_of;
 use super::{plain, Break, Evidence, Settings, Unjudged};
 use crate::clock;
-use crate::long_run::ledger::{Item, Ledger, Message};
+use crate::long_run::ledger::{Event, Item, Ledger, Message};
 use crate::long_run::look::Look;
 use crate::long_run::mask::{cut, Names};
 
-/// What an "ended" notice says, whoever's turn it was: the note of what a turn
-/// left running (`T-14's turn left background work running. Ended: …`), and of a
-/// task let go once its job was gone.
-pub const ENDED: [&str; 2] = ["'s turn left background work running", " is let go: "];
+/// What the note of a window's close says (turn-end, `tell_left_running`): `T-14's window
+/// closed with background work running, which its close ended: …`. The pause note of a
+/// window that closed under a working task says "still running" and is not it.
+pub const CLOSE_NOTE_SAYS: &str =
+    "'s window closed with background work running, which its close ended";
 
-/// The shape of a break of the third whose late notice is the background "ended" note
-/// (`ENDED[0]`), and of one whose notice is the note of a task let go (`ENDED[1]`): a
-/// list of known breaks tells them apart ([`crate::long_run::known`]).
-pub const ENDED_NOTE: &str = "ended-note";
-pub const LET_GO_NOTE: &str = "let-go-note";
+/// The shape of a break of the third, which a list of known breaks matches by
+/// ([`crate::long_run::known`]).
+pub const CLOSE_NOTE: &str = "close-note";
 
 /// The shape of a break of the fourth whose result holds lines of its turn's progress
 /// (turn-end's A4): one that is not the turn's final answer, whole, has none.
 pub const PROGRESS_LINES: &str = "progress-lines";
 
-/// The states a task is in once an attempt has its result: a move to any other
-/// after a result begins another attempt.
-const AFTER_A_RESULT: [&str; 4] = ["done", "accepted", "cancelled", "failed"];
+/// The states a task is in once an attempt has ended: a move to any other after one
+/// begins another attempt.
+const ENDED_STATES: [&str; 4] = ["done", "accepted", "cancelled", "failed"];
+
+/// The states of a task at work.
+const WORKING_STATES: [&str; 3] = ["queued", "working", "waiting"];
+
+/// The kinds of event that move a task to a state (`to`).
+const MOVES: [&str; 3] = ["task.state", "task.assigned", "task.released"];
 
 /// How long a line of progress is before a result holding it counts: a word or
 /// two is in any answer.
 const PROGRESS: usize = 24;
 
-/// Whose an ended notice is, as far as the log tells.
-enum Whose<'l> {
-    /// No result came before it: it is of a result to come, or of none.
-    NoResultBefore,
-    /// Of the result before it: the task began no attempt between them.
-    Of(&'l Message),
-    /// The task was sent back between the result before it and the notice: that
-    /// result's, late, or the next attempt's own.
-    Unbound(&'l Message),
+/// What the log says of a task at the moment a close note of it was written.
+enum Standing {
+    /// It had ended and was not at work again: the close came after its ending.
+    Ended,
+    /// It was at work (the state), no end before it, and was never reassigned: the close
+    /// ended work under it.
+    Working(String, String),
+    /// It had ended, was sent back, and was at work again (the state): the note is the
+    /// earlier attempt's late or the new attempt's own.
+    SentBack(String),
+    /// Neither: not at work, or at work under another worker than the one whose window it
+    /// may be, or no move of it logged at all.
+    Neither,
 }
 
-/// The ended notices of the ledger's tasks: each with its task's row and number.
+/// The close notes of the ledger's tasks: each with its task's row and number.
 fn notices(ledger: &Ledger) -> impl Iterator<Item = (&Message, i64, i64)> {
     ledger
         .messages
@@ -76,7 +90,7 @@ fn notices(ledger: &Ledger) -> impl Iterator<Item = (&Message, i64, i64)> {
         .filter(|message| {
             message.sender.is_none()
                 && message.kind == "note"
-                && ENDED.iter().any(|said| message.body.contains(said))
+                && message.body.contains(CLOSE_NOTE_SAYS)
         })
         .filter_map(|notice| {
             let task = notice.task?;
@@ -85,12 +99,12 @@ fn notices(ledger: &Ledger) -> impl Iterator<Item = (&Message, i64, i64)> {
         })
 }
 
-/// 3: an ended notice that came after its own result.
-pub fn ended_after_result(look: &Look) -> Vec<Break> {
+/// 3: a close note that came while its task was at work, no end before it.
+pub fn closed_under_work(look: &Look) -> Vec<Break> {
     let names = Names::of(look);
     let mut found = Vec::new();
     for (notice, task, number) in notices(&look.ledger) {
-        let Whose::Of(result) = whose(&look.ledger, task, number, notice) else {
+        let Standing::Working(state, since) = standing(&look.ledger, task, number, notice) else {
             continue;
         };
         found.push(
@@ -98,20 +112,16 @@ pub fn ended_after_result(look: &Look) -> Vec<Break> {
                 3,
                 format!("3:m-{}", notice.id),
                 format!(
-                    "T-{number}'s ended notice m-{} came after its result m-{}",
-                    notice.id, result.id
+                    "T-{number}'s close note m-{} came while T-{number} was still {state}: the close ended work under a task at work",
+                    notice.id
                 ),
             )
-            .with_shape(if notice.body.contains(ENDED[0]) {
-                ENDED_NOTE
-            } else {
-                LET_GO_NOTE
-            })
+            .with_shape(CLOSE_NOTE)
             .with(Evidence {
-                rows: [result, notice]
-                    .iter()
-                    .map(|row| message_row(row, &names))
-                    .collect(),
+                rows: vec![
+                    message_row(notice, &names),
+                    format!("T-{number} {state} since {since}"),
+                ],
                 ..Evidence::default()
             }),
         );
@@ -119,53 +129,93 @@ pub fn ended_after_result(look: &Look) -> Vec<Break> {
     found
 }
 
-/// 3, unresolved: an ended notice after a result, written once the task had been sent
-/// back since, which the log does not tie to that result or to the next.
+/// 3, unresolved: a close note written while its task was at work again, after it had
+/// ended and been sent back, which the log does not tie to the earlier attempt's window or
+/// to the new one's.
 pub fn unbound_notices(look: &Look) -> Vec<Unjudged> {
     notices(&look.ledger)
-        .filter_map(|(notice, task, number)| match whose(&look.ledger, task, number, notice) {
-            Whose::Unbound(result) => Some(Unjudged::new(
+        .filter_map(|(notice, task, number)| match standing(&look.ledger, task, number, notice) {
+            Standing::SentBack(state) => Some(Unjudged::new(
                 3,
                 format!("3:m-{}", notice.id),
                 format!(
-                    "T-{number}'s ended notice m-{} came after its result m-{} and after T-{number} was sent back: whether it is that result's, late, or the next attempt's own, the log does not say",
-                    notice.id, result.id
+                    "T-{number}'s close note m-{} came while T-{number} was {state} again, after it had ended and been sent back: whether it is the earlier attempt's window's, closed late, or the new attempt's own, the log does not say",
+                    notice.id
                 ),
             )),
-            Whose::NoResultBefore | Whose::Of(_) => None,
+            Standing::Ended | Standing::Working(..) | Standing::Neither => None,
         })
         .collect()
 }
 
-/// Whose `notice` (of the task whose row is `task`, T-`number`) is: by the last
-/// result of the task before it, and whether the log says the task moved, between
-/// that result and the notice, to a state of another attempt. A move whose time the
-/// log does not order against the two (the same moment, or none read) may be between.
-fn whose<'l>(ledger: &'l Ledger, task: i64, number: i64, notice: &Message) -> Whose<'l> {
-    let Some(result) = ledger
+/// What the log says of the task whose row is `task`, T-`number`, when `notice` was
+/// written: by the moves of the task up to then (a move the log puts at the notice's own
+/// moment may be before it), and the results before it.
+fn standing(ledger: &Ledger, task: i64, number: i64, notice: &Message) -> Standing {
+    let written = clock::millis(&notice.created_at).unwrap_or(i64::MAX);
+    let moves: Vec<&Event> = ledger
+        .events
+        .iter()
+        .filter(|event| {
+            event.data["task"].as_i64() == Some(number)
+                && clock::millis(&event.at).is_none_or(|at| at <= written)
+        })
+        .collect();
+    let ended = ledger
         .messages_of(task)
         .into_iter()
+        .any(|message| message.kind == "result" && message.id < notice.id)
+        || moves
+            .iter()
+            .filter_map(|event| moved_to(event))
+            .any(|state| ENDED_STATES.contains(&state));
+    let Some((state, event)) = moves
+        .iter()
         .rev()
-        .find(|message| message.kind == "result" && message.id < notice.id)
+        .find_map(|event| Some((moved_to(event)?, event)))
     else {
-        return Whose::NoResultBefore;
+        return if ended {
+            Standing::Ended
+        } else {
+            Standing::Neither
+        };
     };
-    let (from, to) = (
-        clock::millis(&result.created_at).unwrap_or(i64::MIN),
-        clock::millis(&notice.created_at).unwrap_or(i64::MAX),
-    );
-    let sent_back = ledger.events_of("task.state").iter().any(|event| {
-        event.data["task"].as_i64() == Some(number)
-            && !event.data["to"]
-                .as_str()
-                .is_some_and(|state| AFTER_A_RESULT.contains(&state))
-            && clock::millis(&event.at).is_none_or(|moved| from <= moved && moved <= to)
-    });
-    if sent_back {
-        Whose::Unbound(result)
+    if ENDED_STATES.contains(&state) {
+        Standing::Ended
+    } else if !WORKING_STATES.contains(&state) {
+        Standing::Neither
+    } else if ended {
+        Standing::SentBack(state.to_owned())
+    } else if reassigned(&moves) {
+        Standing::Neither
     } else {
-        Whose::Of(result)
+        Standing::Working(state.to_owned(), event.at.clone())
     }
+}
+
+/// The state a logged move of a task is to: none for an event that is no move.
+fn moved_to(event: &Event) -> Option<&str> {
+    MOVES
+        .contains(&event.kind.as_str())
+        .then(|| event.data["to"].as_str())
+        .flatten()
+}
+
+/// Whether the task was given to more than one worker by the `moves` of its log (the
+/// events of the task up to the note): the worker its first state names (`task.created`,
+/// `to`) and each it was assigned to since (`task.assigned`).
+fn reassigned(moves: &[&Event]) -> bool {
+    let mut workers: Vec<&str> = moves
+        .iter()
+        .filter_map(|event| match event.kind.as_str() {
+            "task.created" => event.data["to"].as_str(),
+            "task.assigned" => event.data["assignee"].as_str(),
+            _ => None,
+        })
+        .collect();
+    workers.sort_unstable();
+    workers.dedup();
+    workers.len() > 1
 }
 
 /// The results a worker wrote that are old enough to be judged against the copy of

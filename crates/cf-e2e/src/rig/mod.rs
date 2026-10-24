@@ -632,6 +632,14 @@ impl Rig {
         self.shutdown(EXIT)
     }
 
+    /// Begins the close without waiting for it: the daemon's input and the pane host's
+    /// end, as the app's quit ends them. [`Rig::shut_down_within`] then waits for them, its
+    /// time counted from there, so a case can wait for an event of the close first.
+    pub fn begin_close(&self) {
+        self.daemon.end_input();
+        self.host.end_input();
+    }
+
     /// [`Rig::close`], but the daemon and the pane host each have `within` to end,
     /// where [`Rig::close`] gives them a few seconds, which suits the stand-in
     /// agents that leave when asked: a real harness's window may take longer than
