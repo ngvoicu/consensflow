@@ -1916,3 +1916,16 @@ find = """
                     && header_id"""
 replace = """
                     && header_id"""
+
+# The fix-forward of turn-end's landing (T-371): the stand-in's monitor ends once the case lets
+# it, after the chief was told the monitor alone runs.
+
+[[plant]]
+name = "turn-end-min rig: a held task whose count fell is not told again"
+meant = "a_worker_that_armed_monitor_on_its_run_goes_on_until_the_monitor_ends_and_its_report_is_the_result"
+runs = ["tem-rig-monitor"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '                held.told.as_ref() == Some(&now)'
+replace = '                held.told.is_some()'

@@ -33,12 +33,16 @@
 //!   once, and ends. While the job runs the monitor sees `events` lines, each a notification
 //!   with an `<event>` and no status, which wakes a turn that answers `Saw <event>`; the job's
 //!   end wakes a turn that answers [`MONITOR_WATCHES`]; and the monitor's own end, a
-//!   notification of its task `completed`, wakes the turn that answers the report.
+//!   notification of its task `completed`, wakes the turn that answers the report. The
+//!   monitor ends once the case lets it ([`MONITOR_MAY_END`]), so the case sees what the turn
+//!   the job's end woke led to before the monitor's end wakes another.
 
 use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use cf_e2e::pattern;
 use regex::Regex;
@@ -132,6 +136,20 @@ pub const MONITOR_WATCHES: &str = "The run ended; the monitor still watches it."
 
 /// How long a `CLAUDE-MONITOR`'s monitor watches before it expires, as its call asks.
 const MONITOR_MS: u64 = 1_800_000;
+
+/// The kind of the file beside a `CLAUDE-MONITOR`'s job (`<file>.monitor-may-end`) whose
+/// coming lets its monitor end: the case writes it (`Job::let_its_monitor_end` of the rig).
+/// A wait of a fixed time between the job's end and the monitor's could be outrun by a slow
+/// runner, whose passes then never saw the turn the job's end woke at rest (CI's macOS
+/// runner, twice, on 8504697f); and with it too long, by a quick one.
+pub const MONITOR_MAY_END: &str = "monitor-may-end";
+
+/// How long the monitor waits at most for the case to let it end, so that a case that
+/// never does leaves no stand-in waiting for good: past any case's own wait for it.
+const MONITOR_HELD: Duration = Duration::from_secs(300);
+
+/// How often the file that lets the monitor end is looked for.
+const MONITOR_LOOK: Duration = Duration::from_millis(100);
 
 /// What Claude Code 2.1.305 writes when the monitor `id` sees the line `event`
 /// (`tests/fixtures/claude/monitor-wait.jsonl` of `cf-harness`): no status.
@@ -340,8 +358,8 @@ fn start_a_job(window: &Window, seconds: u64, how: How, report: &str) -> Result<
 
 /// Starts the job of a `CLAUDE-MONITOR` and the monitor that watches it: the ids Claude
 /// Code gives each. The monitor's events come while the job runs, `events` of them spread
-/// over its `seconds`; the job's end wakes the window, and so does the monitor's own end a
-/// moment after, whose turn answers `report`.
+/// over its `seconds`; the job's end wakes the window, and so does the monitor's own end
+/// once the case lets it ([`MONITOR_MAY_END`]), whose turn answers `report`.
 fn watch_a_job(
     window: &Window,
     events: u64,
@@ -355,14 +373,19 @@ fn watch_a_job(
         notification(&job, MONITOR_WATCHES),
         monitor_ended(&watching, report),
     );
+    let started: Arc<OnceLock<PathBuf>> = Arc::new(OnceLock::new());
+    let job_file = Arc::clone(&started);
     let ended = move || {
         tasks.ended();
         let _ = wake.send(ended_job);
-        thread::sleep(std::time::Duration::from_millis(500));
+        if let Some(file) = job_file.get() {
+            until_let_end(file);
+        }
         tasks.ended();
         let _ = wake.send(ended_monitor);
     };
     let file = window.jobs.start("job", seconds, false, false, ended)?;
+    let _ = started.set(file.clone());
     until_up(&file)?;
     let (wake, id) = (window.wake.clone(), watching.clone());
     thread::spawn(move || {
@@ -373,6 +396,19 @@ fn watch_a_job(
         }
     });
     Ok((job, watching))
+}
+
+/// Waits for the case to let the monitor that watches the job `file` end, or for
+/// [`MONITOR_HELD`].
+fn until_let_end(file: &Path) {
+    let mut gate = file.as_os_str().to_owned();
+    gate.push(".");
+    gate.push(MONITOR_MAY_END);
+    let gate = PathBuf::from(gate);
+    let deadline = Instant::now() + MONITOR_HELD;
+    while !gate.exists() && Instant::now() < deadline {
+        thread::sleep(MONITOR_LOOK);
+    }
 }
 
 /// Writes the steps of a turn, in order, as Claude Code does: the assistant's message that
