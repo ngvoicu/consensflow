@@ -6,14 +6,25 @@ use super::build::BRIDGE_TAG;
 use super::signing::tauri_bin;
 use super::testing::{fake_bundle, hold_when_free, Fake};
 use super::*;
+use crate::screen::testing::{with_ioreg, LOCKED_ANSWER, UNLOCKED_ANSWER};
 
 /// What `cargo xtask smoke-updater <words>` is, run here: the status, what it said, and what it said as a failure.
 fn smoke_updater(words: &[&str]) -> (std::result::Result<i32, String>, String, String) {
     smoke_updater_in(&Env::from_process(), words)
 }
 
-/// The same, in this environment.
+/// The same, in this environment, on a machine whose screen is not locked whichever this
+/// one's is (`screen`).
 fn smoke_updater_in(
+    env: &Env,
+    words: &[&str],
+) -> (std::result::Result<i32, String>, String, String) {
+    let (_screen, env) = with_ioreg(env, UNLOCKED_ANSWER);
+    smoke_updater_on(&env, words)
+}
+
+/// The same, in exactly this environment.
+fn smoke_updater_on(
     env: &Env,
     words: &[&str],
 ) -> (std::result::Result<i32, String>, String, String) {
@@ -423,6 +434,29 @@ fn keeps_the_runs_folder_when_told_to() {
 }
 
 #[test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the update path is macOS bundles and codesign"
+)]
+fn a_locked_screen_refuses_a_run_that_shows_a_window_in_words_before_anything_is_made() {
+    let world = World::new();
+    // Where the cache is to be there is a file: a run that was not refused ends at once on that,
+    // and does not go on to build apps for minutes.
+    fs::write(world.folder.path().join("cache"), "not a folder").unwrap();
+    let (_screen, env) = with_ioreg(&Env::from_process(), LOCKED_ANSWER);
+    let options = world.options(&[]);
+    let words: Vec<&str> = options.iter().map(String::as_str).collect();
+    let (status, out, err) = smoke_updater_on(&env, &words);
+    assert_eq!(status.unwrap(), 1, "{err}");
+    assert_eq!(out, "");
+    assert_eq!(
+        err,
+        "smoke:updater: the screen is locked: a window can't be shown; unlock the Mac and run it again\n"
+    );
+    assert!(!world.folder.path().join("machines").exists());
+}
+
+#[test]
 fn builds_and_says_where_and_runs_nothing_when_told_to_build_only() {
     if !can_run() {
         return;
@@ -434,6 +468,22 @@ fn builds_and_says_where_and_runs_nothing_when_told_to_build_only() {
     assert!(out.contains("smoke:updater: update: "), "{out}");
     assert!(!out.contains("=="), "{out}");
     assert!(!world.folder.path().join("machines").exists());
+}
+
+#[test]
+fn builds_and_says_where_and_runs_nothing_when_told_to_build_only_even_on_a_locked_screen() {
+    if !can_run() {
+        return;
+    }
+    let world = World::new();
+    // No window is shown, so no screen is asked for.
+    let (_screen, env) = with_ioreg(&Env::from_process(), LOCKED_ANSWER);
+    let options = world.options(&["--build-only"]);
+    let words: Vec<&str> = options.iter().map(String::as_str).collect();
+    let (status, out, err) = smoke_updater_on(&env, &words);
+    assert_eq!(status.unwrap(), 0, "{err}");
+    assert!(out.contains("smoke:updater: installed flip app: "), "{out}");
+    assert!(!err.contains("the screen is locked"), "{err}");
 }
 
 #[test]

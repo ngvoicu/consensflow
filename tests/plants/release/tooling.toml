@@ -566,6 +566,18 @@ find = '''            [cargo, test, ..] if cargo == "cargo" && test == "test" =>
 replace = '''            [cargo, test, ..] if cargo == "cargo" && test == "test" => Self::Status,'''
 
 [[plant]]
+name = "tooling: the packaged smoke is run under nextest as a person runs it, without capture"
+meant = "a_suite_of_xtask_s_is_the_cargo_test_it_runs_under_nextest_in_its_folder_with_its_variables"
+runs = ["xtask-lib-plants"]
+# The smoke is a Mac's: elsewhere the command is no suite and the test does not look at it.
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = "            Self::Smoke(app) => crate::smoke::captured(context, app.as_deref()),"
+replace = "            Self::Smoke(app) => crate::smoke::invocation(context, app.as_deref()),"
+
+[[plant]]
 name = "tooling: the plants' reporter of Node's tests says no file Node failed whole"
 meant = "node_s_report_names_each_test_as_written_and_a_file_that_ran_none_of_its_own"
 runs = ["xtask-lib-plants"]

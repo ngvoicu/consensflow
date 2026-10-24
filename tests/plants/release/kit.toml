@@ -24,17 +24,6 @@
 run_limit_minutes = 10
 rebuild = ["cargo", "xtask", "build-cf", "--offline"]
 tables = ["feeds", "publish", "workflow", "portable", "agents", "updater", "updater-product", "tooling", "sidecar", "drivers", "update", "sign-mac", "packaged", "wiring", "live-models", "live-windows", "windows-runner", "release-commands", "ci-times"]
-# The plants that do not apply to main yet, which `plants release --check` (the gate's step) says
-# known rather than failing: the packaged smoke's four on the app. Their run `smoke-on-the-app`
-# (`cargo xtask smoke`) is refused: the `cargo test … -- --nocapture` it starts would run without
-# capture, which nextest cannot report. T-333 mends them, and then empties this list. A plant named
-# here that applies again fails the check until it is taken off.
-known_unapplied = [
-  "packaged smoke, on the app: the harness finds no system command on its PATH",
-  "packaged smoke, on the app: the daemon is held to the program of the app and not to its cf",
-  "packaged smoke, on the app: the second cf ui is held to a refusal the ledger does not give",
-  "packaged smoke, on the app: the agents are proved on a home that is not the daemons",
-]
 
 [run]
 # The proof of the agents screens against the native daemon, built from the sources as they are.
