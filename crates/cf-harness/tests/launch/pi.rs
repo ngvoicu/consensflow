@@ -24,13 +24,13 @@ use cf_base::env::Env;
 use cf_base::path;
 use cf_harness::contract::{
     Adapter, Admission, Agent, Held, Launch, LaunchId, Pane, Prepared, Readiness, Records, Specs,
-    Work,
+    Work, NOT_ADMITTED,
 };
 use cf_harness::pi::{prepare_extension, Extension, PiAdapter};
 use cf_harness::records::{Item, Options, PiSettlement, Quota, Reading, Record, Role, Settlement};
 use cf_harness::seams::Time;
 use cf_harness::testing::{
-    fake_executable, finished, AnsweringHost, Driver, Fakes, FIRST_MESSAGE_MS,
+    fake_executable, finished, Answer, AnsweringHost, Driver, Fakes, ScriptedHost, FIRST_MESSAGE_MS,
 };
 use cf_proto::agents::Harness;
 use cf_proto::specs::Variant;
@@ -422,6 +422,50 @@ fn delivers_through_the_real_channel_a_claim_then_the_extension_inbox() {
             "half  of it, \u{241b}[31mred\u{241b}[0m and 50%\u{240d}60%"
         ]
     );
+}
+
+/// Both reviews of 2026-10-16, round 4: Pi's claim comes after the engine's last
+/// look at the project. Once it is answered, the host is asked whether it still
+/// admits the send: one it does not leaves the inbox as it was, the record's
+/// temporary removed.
+#[test]
+fn a_send_the_host_stops_admitting_while_its_claim_waits_never_reaches_the_inbox() {
+    let home = Home::new();
+    let (adapter, _fakes) = adapter(&home);
+    let window = prepare(&adapter, &Request::default()).unwrap().window;
+    let host = Rc::new(ScriptedHost::default());
+    host.answer("pane.claim", [Answer::Held]);
+    let pane = Pane {
+        id: "s1-zeus".to_owned(),
+        generation: 2,
+    };
+    let mut driver = Driver::default();
+    let (deliver, claims) = (Rc::clone(&window), Rc::clone(&host));
+    driver.begin(
+        0,
+        async move { deliver.deliver(&*claims, &pane, "late").await },
+    );
+    assert!(driver.run().is_empty(), "the claim waits for the host");
+    host.refuse_hand_overs();
+    assert!(host.release("pane.claim", Ok(json!({ "ok": true }))));
+    assert_eq!(
+        driver.run(),
+        [(
+            0,
+            Ok(Admission::Refused {
+                reason: NOT_ADMITTED.to_owned()
+            })
+        )]
+    );
+    let inbox = path::join(&[&home.launch_folder(), "inbox"]);
+    let left: Vec<String> = fs::read_dir(&inbox)
+        .map(|entries| {
+            entries
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(left.is_empty(), "the inbox holds nothing: {left:?}");
 }
 
 /// The reading of a conversation holding `items`, its turn `settlement`.

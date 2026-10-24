@@ -108,11 +108,25 @@ impl Context {
 
     /// The human's Resume (`resumeProject`).
     pub fn resume_project(&self, project: i64) -> Result<Option<ProjectView>, EngineError> {
+        self.run(self.resuming(project))
+    }
+
+    /// The human's Resume, begun where it is called.
+    pub fn begin_resume_project(
+        &self,
+        project: i64,
+    ) -> Answer<Result<Option<ProjectView>, EngineError>> {
+        self.executor.start_now(self.resuming(project))
+    }
+
+    fn resuming(
+        &self,
+        project: i64,
+    ) -> impl Future<Output = Result<Option<ProjectView>, EngineError>> + 'static {
         let dispatcher = Rc::clone(&self.dispatcher);
-        let resume = self.operation("resumeProject", json!([project]), answer, async move {
+        self.operation("resumeProject", json!([project]), answer, async move {
             dispatcher.resume_project(project).await
-        });
-        self.run(resume)
+        })
     }
 
     /// The human's Close (`closeProject`).
@@ -276,6 +290,13 @@ impl Context {
     pub fn exit(&self, handle: &str) {
         let (host, handle) = (Rc::clone(&self.host), handle.to_owned());
         self.run(async move { host.exit(&handle).await });
+    }
+
+    /// The same, begun where it is called: what the exit does may wait on the test.
+    pub fn begin_exit(&self, handle: &str) -> Answer<()> {
+        let (host, handle) = (Rc::clone(&self.host), handle.to_owned());
+        self.executor
+            .start_now(async move { host.exit(&handle).await })
     }
 
     /// An engine made again on the same ledger and fakes, as after a

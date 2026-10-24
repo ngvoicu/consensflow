@@ -3258,6 +3258,18 @@ file = "crates/cf-evals/src/long_run/play.rs"
 find = '    if state != "paused" && !hand.wait(|hand| Ok(hand.paused_by(number, None, killed_at)))? {'
 replace = '    if state != "paused" {'
 
+[[plant]]
+name = "long run: a member's cut note in the engine's words is no cut note"
+meant = "a_members_cut_note_in_the_words_the_engine_writes_is_judged"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/turns.rs"
+find = """
+    "ConsensFlow stopped while you were working on","""
+replace = """
+    "ConsensFlow quit while you were working on","""
+
 # The two 2-hour live runs of 2026-10-19 (round 18): turn-end's A4, a result that holds lines of
 # its turn's progress, is a known break (dip-agentos #5, 3.0.6) and nothing else under the fourth
 # is; B5 holds every header of a user's item, but in the summary Claude Code marks as its own by

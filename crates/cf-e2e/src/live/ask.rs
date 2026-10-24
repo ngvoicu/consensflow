@@ -273,6 +273,18 @@ pub fn interrupt(kind: &str) -> Result<Interrupt> {
     })
 }
 
+/// The keys the app empties the input box of a window of the harness kind `kind`
+/// with: none for a harness whose windows take what they are handed over a
+/// channel of their own.
+pub fn clearing(kind: &str) -> Result<Option<Vec<u8>>> {
+    let answer = question(&json!({ "op": "input", "kind": kind }))?;
+    Ok(answer["clear"].as_array().map(|keys| {
+        keys.iter()
+            .filter_map(|key| key.as_u64().and_then(|key| u8::try_from(key).ok()))
+            .collect()
+    }))
+}
+
 /// The settings file of a Claude window's launch (`launch`, a lowercase uuid),
 /// written in the ConsensFlow folder `env` names, and the arguments that load it
 /// (`--settings <file>`). `board_questions` has a member's question tool

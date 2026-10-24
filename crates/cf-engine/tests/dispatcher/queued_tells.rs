@@ -19,7 +19,7 @@ use crate::work_in_flight::looks_at;
 
 /// The chief tells the window of T-`number`, still queued, `body`: the id of the
 /// note that keeps the words.
-fn tell(context: &Context, project: i64, number: i64, body: &str) -> i64 {
+pub(crate) fn tell(context: &Context, project: i64, number: i64, body: &str) -> i64 {
     context
         .ledger
         .borrow_mut()
@@ -32,7 +32,7 @@ fn tell(context: &Context, project: i64, number: i64, body: &str) -> i64 {
 /// brief when the chief tells it "Use the v2 grammar"; then the window comes up
 /// with the brief and works on it. The staff, the session's handle and the
 /// note that keeps the words.
-fn told_on_its_way(context: &Context) -> (Tiers<'_>, String, i64) {
+pub(crate) fn told_on_its_way(context: &Context) -> (Tiers<'_>, String, i64) {
     let tiers = Tiers::new(context, &["zeus"]);
     tiers.open_body("Parser");
     context.pass().unwrap();

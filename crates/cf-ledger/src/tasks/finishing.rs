@@ -22,7 +22,10 @@ use super::pausing::shut_doors;
 use super::{
     carrier_body, delivery_body, own_steps, require_on_board, require_task_state, task_by_id,
 };
-use crate::messages::{fold, leave_pause_notes, tell_sent_back, told_waiting, Dropped};
+use crate::messages::{
+    fold, leave_pause_notes, say_again, tell_sent_back, told_waiting, warnings_on_their_way,
+    warnings_queued, Dropped,
+};
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
     MAX_BODY, MEMBER_ROLES,
@@ -418,13 +421,24 @@ pub(crate) fn call_off(
             .exists(params![task.id, assignee.id])?,
         _ => false,
     };
+    // A warning its pause notes say is kept before they go with the rest; one
+    // that says it on its way runs its course, and says it again only if it
+    // does not arrive (`withdrawn_on_its_way`).
+    let warnings = warnings_queued(store, &task)?;
+    let on_their_way = warnings_on_their_way(store, &task)?;
     store.db.execute(
         "UPDATE message SET state = 'cancelled', reason = ?
-       WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')",
-        params![format!("cancelled by @{by}"), task.id],
+       WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')
+         AND id NOT IN (SELECT value FROM json_each(?))",
+        params![
+            format!("cancelled by @{by}"),
+            task.id,
+            json!(on_their_way).to_string()
+        ],
     )?;
     // A note of several that names it, still queued, names it no more.
     leave_pause_notes(store, &task, "cancelled")?;
+    say_again(store, &task, "cancelled", warnings)?;
     store.move_task(&task, "cancelled", json!({ "by": by }))?;
     release_ready(store, project_id)?;
     Ok(CalledOff {

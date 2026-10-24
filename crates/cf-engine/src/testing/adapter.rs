@@ -23,7 +23,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, Interrupt, Launch, Prepared, Readiness, Skill, Waiting, Window, Work,
+    Adapter, Admission, Input, Interrupt, Launch, Prepared, Readiness, Skill, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, Quota, Role};
 use cf_proto::panes::Servers;
@@ -177,6 +177,10 @@ pub struct FakeAdapter {
     pub ready_holds: Holds,
     /// Deliveries the test holds.
     pub deliver_holds: Holds,
+    /// Its windows take their first message once they are up, as OpenCode's do
+    /// through its server, and only if the host admits it then: not with the
+    /// launch, as a message on a command line goes in.
+    pub seeds: Cell<bool>,
     /// Where its harness has the Specmint variant installed, when the test says
     /// it has: the `SKILL.md` it answers. Without, the copy ConsensFlow would
     /// keep for it, which is the same for every launch.
@@ -188,6 +192,10 @@ pub struct FakeAdapter {
     /// told the conversation as `[session]`: what the harness says is its own
     /// when the ask is let go. Node's dispatcher asked nothing of the kind.
     pub resumable_holds: Holds,
+    /// Whether the host said, at each delivery in order, that the engine emptied
+    /// the window's input box just before it (`PaneHost::cleared`). Not written
+    /// down in the traces: Node's dispatcher emptied no box.
+    pub cleared: RefCell<Vec<bool>>,
     /// Looks at a record with no window open that the test holds, told the
     /// conversation as `[session]`: one let go reads the record as it is then.
     /// Node's dispatcher suite held none.
@@ -249,9 +257,11 @@ impl FakeAdapter {
             start_holds: Holds::default(),
             ready_holds: Holds::default(),
             deliver_holds: Holds::default(),
+            seeds: Cell::new(false),
             specmint_installed: RefCell::new(None),
             specmint_asked: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
+            cleared: RefCell::new(Vec::new()),
             record_holds: Holds::default(),
             cut_holds: Holds::default(),
             wraps_pastes: Cell::new(false),
@@ -579,9 +589,13 @@ impl Asked {
             cannot_tell_a_cut: false,
             resumable: Some(true),
         };
+        let seeded = launch
+            .message
+            .filter(|_| fake.seeds.get())
+            .map(str::to_owned);
         if let Some(message) = launch
             .message
-            .filter(|_| !fake.forgets_first_messages.get())
+            .filter(|_| seeded.is_none() && !fake.forgets_first_messages.get())
         {
             agent.items.push(fake.item(Role::User, message));
             agent.settled = false;
@@ -593,6 +607,7 @@ impl Asked {
             id.clone(),
             native.clone(),
             Rc::clone(fake),
+            seeded,
         ));
         Box::pin(async move {
             // A test's own `prepare` is an async function that returns the
@@ -704,6 +719,23 @@ impl Adapter for Asked {
     /// traces.
     fn keeps_first_instructions(&self) -> bool {
         self.fake.keeps_first_instructions.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces. The fake posts its first message once up where the test says it
+    /// seeds, as OpenCode does.
+    fn first_message_once_up(&self) -> bool {
+        self.fake.seeds.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces. As the harness it answers for takes it: Claude Code and Devin
+    /// pasted, their boxes emptied with Control-C, the others over a channel.
+    fn input(&self) -> Input {
+        match self.harness.as_str() {
+            "claude-code" | "devin" => Input::Pasted { clear: &[0x03] },
+            _ => Input::Channel,
+        }
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the

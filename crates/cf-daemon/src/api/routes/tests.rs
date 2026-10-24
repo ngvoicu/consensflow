@@ -552,4 +552,15 @@ pub(super) mod support {
             .task
             .state
     }
+
+    /// The project is closed (`suspended`) or open again: its windows' tokens
+    /// stay, as a window the Close could not close keeps its own.
+    pub(in crate::api::routes) fn project_is(scene: &Scene, state: &str) {
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .set_project_state(scene.project.id, state)
+            .unwrap();
+    }
 }

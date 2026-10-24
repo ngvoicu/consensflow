@@ -11,9 +11,18 @@
 //! and stays as it was. The same goes for the other notes of a task's wait that
 //! ConsensFlow writes (a hold's, a release's, that it waits for a free member):
 //! they go when the task moves on, whichever way it does.
+//!
+//! But for a warning: a pause whose words say that its window's program could
+//! not be ended and may still run ([`MAY_STILL_RUN`]) warns of a program that
+//! outlives the pause, and whoever is told next opens a window beside it. When
+//! its note goes, the warning stays, in a note of its own. A note already on its
+//! way runs its course whatever its tasks do meanwhile (a cancel, a resume, a
+//! release, a reassignment), and only one that does not arrive says its warning
+//! again ([`withdrawn_on_its_way`]).
 
 use cf_proto::ledger::MessageView;
 use rusqlite::params;
+use serde_json::json;
 
 use super::holds::goes_on;
 use crate::model::LedgerError;
@@ -27,6 +36,11 @@ struct Paused {
     number: i64,
     because: String,
 }
+
+/// What the words of a pause say of a window's program the pane host could not
+/// end, after naming the program: the engine writes them into the pause, and a
+/// pause that says them is one whose warning stays when its note goes.
+pub const MAY_STILL_RUN: &str = "could not be ended and may still run";
 
 /// What follows the one task a note names.
 const ONE_TAIL: &str = "; its window comes back on its own conversation.";
@@ -221,25 +235,38 @@ pub(crate) fn tell_kept(
 /// of it and has not been given yet is withdrawn, if it was told of the task
 /// alone, or loses the task if it was told of several. What it was given
 /// stays. Only ConsensFlow's own notes, still queued, are looked at: whatever
-/// else was said of the task is not about its wait.
+/// else was said of the task is not about its wait. A pause that said its
+/// window's program may still run is said again, as what came before (`why`),
+/// in a note of its own that no wait of the task's takes back.
 pub(crate) fn leave_pause_notes(
-    store: &Store,
+    store: &mut Store,
     task: &TaskRow,
     why: &str,
 ) -> Result<(), LedgerError> {
     let reason = format!("T-{} {why}", task.number);
+    let mut warnings: Vec<String> = Vec::new();
+    let mut warn_of = |body: &str| warnings.extend(warning_in(body, task.number));
     // Whatever note of its own is queued for the requester about the task: a
     // stall's, a hold's, a refusal's, each says something about the pause. A
     // pause leaves what is queued for the task as it is, so one written
     // before the pause goes with the rest. All but the news that the task went
     // on after a hold: that corrects what its requester was given, and a pause
     // that comes after it does not take it back.
-    store.db.execute(
-        "UPDATE message SET state = 'cancelled', reason = ?
+    let withdrawn: Vec<String> = store
+        .db
+        .prepare(
+            "UPDATE message SET state = 'cancelled', reason = ?
        WHERE task_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
-         AND state = 'queued' AND body != ?",
-        params![reason, task.id, task.requester_id, goes_on(task.number)],
-    )?;
+         AND state = 'queued' AND body != ? RETURNING body",
+        )?
+        .query_map(
+            params![reason, task.id, task.requester_id, goes_on(task.number)],
+            |row| row.get(0),
+        )?
+        .collect::<rusqlite::Result<_>>()?;
+    for body in &withdrawn {
+        warn_of(body);
+    }
     let several = store
         .db
         .prepare(
@@ -260,11 +287,213 @@ pub(crate) fn leave_pause_notes(
         if paused.len() == before {
             continue;
         }
+        warn_of(&body);
         if paused.is_empty() {
             withdraw(store, id, &reason)?;
         } else {
             set(store, id, task.project_id, &paused)?;
         }
+    }
+    say_again(store, task, why, warnings)
+}
+
+/// What a pause note says of task `number` that is a warning: that its window's
+/// program may still run. None where the note does not name the task, or names it
+/// with no such words.
+fn warning_in(body: &str, number: i64) -> Option<String> {
+    read(body)?
+        .into_iter()
+        .find(|paused| paused.number == number)
+        .map(|paused| paused.because)
+        .filter(|because| because.contains(MAY_STILL_RUN))
+}
+
+/// The warnings the pause notes of `task` alone still queued for its requester
+/// say, for an operation that withdraws them before it leaves its pause notes
+/// ([`leave_pause_notes`]): a cancel takes every message of its task back first
+/// (both reviews of 2026-10-16, round 3).
+pub(crate) fn warnings_queued(store: &Store, task: &TaskRow) -> Result<Vec<String>, LedgerError> {
+    let bodies: Vec<String> = store
+        .db
+        .prepare(
+            "SELECT body FROM message
+             WHERE kind = 'note' AND sender_id IS NULL AND state = 'queued'
+               AND recipient_id = ? AND task_id = ? ORDER BY id",
+        )?
+        .query_map(params![task.requester_id, task.id], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(bodies
+        .iter()
+        .filter_map(|body| warning_in(body, task.number))
+        .collect())
+}
+
+/// The pause notes of `task` on their way to its requester (being pasted, or the
+/// first message of its window's launch) that say a warning of it. A cancel of the
+/// task leaves them on their way: the window may have one already, and only its
+/// arrival says it was given. One that does not arrive says its warning again
+/// ([`withdrawn_on_its_way`]): a warning a cancel withdraws is owed until a
+/// delivery of it is known to have arrived (both reviews of 2026-10-16, round 5).
+pub(crate) fn warnings_on_their_way(
+    store: &Store,
+    task: &TaskRow,
+) -> Result<Vec<i64>, LedgerError> {
+    let notes: Vec<(i64, String)> = store
+        .db
+        .prepare(
+            "SELECT id, body FROM message
+             WHERE kind = 'note' AND sender_id IS NULL AND state = 'delivering'
+               AND recipient_id = ? AND task_id = ? ORDER BY id",
+        )?
+        .query_map(params![task.requester_id, task.id], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(notes
+        .into_iter()
+        .filter(|(_, body)| warning_in(body, task.number).is_some())
+        .map(|(id, _)| id)
+        .collect())
+}
+
+/// `message`, on its way and not to arrive (it goes back to its queue, or is
+/// given up), if it is a pause note naming a task that moved on while it was on
+/// its way: one cancelled (a cancel leaves on their way the notes of its task
+/// alone that say a warning, [`warnings_on_their_way`], and every note that names
+/// others too), or resumed, taken back to the board or reassigned, which leave a
+/// note on its way as it is. Each such task leaves the note, as it leaves a note
+/// still queued, and a warning the note said of it is said again, in a note of its
+/// own: the warning is owed until a delivery of it is known to have arrived, and
+/// outlives the words of a pause that went stale, which would tell the requester
+/// to resume a task that is paused no more (both reviews of 2026-10-16, rounds 6
+/// and 7). What moved is what the log says moved since the note's delivery began
+/// ([`moved_on_its_way`]), not the state a task is in now: a resume and another
+/// pause leave it paused, the note's pause over and its words stale (both reviews
+/// of 2026-10-17). A note with no task left is withdrawn, which this says; one
+/// with tasks left names those, and goes back or is given up as any message
+/// does. Nothing is written for any other message.
+pub(crate) fn withdrawn_on_its_way(
+    store: &mut Store,
+    message: &MessageView,
+) -> Result<bool, LedgerError> {
+    if message.kind != "note" || message.sender.is_some() {
+        return Ok(false);
+    }
+    let Some(paused) = read(&message.body) else {
+        return Ok(false);
+    };
+    let mut left: Vec<Paused> = Vec::new();
+    let mut gone: Vec<(TaskRow, String)> = Vec::new();
+    for named in paused {
+        let task = store.task_row(message.project_id, named.number)?;
+        if task.state == "paused" && !moved_on_its_way(store, message, named.number)? {
+            left.push(named);
+        } else {
+            gone.push((task, named.because));
+        }
+    }
+    if gone.is_empty() {
+        return Ok(false);
+    }
+    for (task, because) in &gone {
+        if because.contains(MAY_STILL_RUN) {
+            say_again(store, task, &moved_on(task), vec![because.clone()])?;
+        }
+    }
+    if !left.is_empty() {
+        set(store, message.id, message.project_id, &left)?;
+        return Ok(false);
+    }
+    let numbers: Vec<String> = gone
+        .iter()
+        .map(|(task, _)| format!("T-{} {}", task.number, moved_on(task)))
+        .collect();
+    let reason = numbers.join(", ");
+    withdraw(store, message.id, &reason)?;
+    store.log(
+        message.project_id,
+        "delivery.cancelled",
+        json!({ "message": message.id, "reason": reason }),
+    )?;
+    Ok(true)
+}
+
+/// Whether task `number` moved while `message` was on its way: a move of it is
+/// logged after the message's last delivery began (a resume, a pause, a cancel,
+/// a release, an assignment: `task.state`, `task.released`, `task.assigned`).
+/// A note is begun only with tasks paused still: one that moved while it was
+/// queued left it then (`leave_pause_notes`).
+fn moved_on_its_way(
+    store: &Store,
+    message: &MessageView,
+    number: i64,
+) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM event e
+             WHERE e.project_id = ?1
+               AND e.kind IN ('task.state', 'task.released', 'task.assigned')
+               AND CASE WHEN json_valid(e.data) THEN json_extract(e.data, '$.task') END = ?3
+               AND e.id > (SELECT b.id FROM event b
+                           WHERE b.project_id = ?1 AND b.kind = 'delivery.begun'
+                             AND CASE WHEN json_valid(b.data)
+                                      THEN json_extract(b.data, '$.message') END = ?2
+                           ORDER BY b.id DESC LIMIT 1)",
+        )?
+        .exists(params![message.project_id, message.id, number])?)
+}
+
+/// What became of a task a pause note named that moved on, in the words its
+/// requester is told of it ([`say_again`]), as the operations that moved it say
+/// them when they leave a note still queued: the state it is in now, whichever
+/// it is, failure and the end of its work included (Astra's review of
+/// 2026-10-17: a task resumed, whose words were then given up, was said to be
+/// resumed). Each state the schema has is said in words of its own
+/// ([`moved_on_from`]); one it does not have is said as it is.
+fn moved_on(task: &TaskRow) -> String {
+    said_of(&task.state)
+}
+
+/// The words [`moved_on`] says of a task in `state`.
+fn said_of(state: &str) -> String {
+    moved_on_from(state).map_or_else(|| format!("is {state} now"), str::to_owned)
+}
+
+/// The words [`moved_on`] says of a task in `state`, a state of the schema's.
+fn moved_on_from(state: &str) -> Option<&'static str> {
+    Some(match state {
+        "queued" | "working" | "waiting" => "resumed",
+        "paused" => "was paused again",
+        "open" => "was taken back",
+        "done" => "was done",
+        "accepted" => "was accepted",
+        "failed" => "failed",
+        "cancelled" => "cancelled",
+        _ => return None,
+    })
+}
+
+/// Says each of `warnings` again to the task's requester, as what came before
+/// `why`, in a note of its own that no wait of the task's takes back.
+pub(crate) fn say_again(
+    store: &mut Store,
+    task: &TaskRow,
+    why: &str,
+    warnings: Vec<String>,
+) -> Result<(), LedgerError> {
+    let requester = store.participant_row(task.requester_id)?.handle;
+    for because in warnings {
+        send(
+            store,
+            task.project_id,
+            &Sent {
+                to: &requester,
+                body: &format!("T-{} {why}. Before that, {because}.", task.number),
+                kind: "note",
+                ..Sent::default()
+            },
+        )?;
     }
     Ok(())
 }
@@ -286,6 +515,49 @@ fn set(store: &Store, id: i64, project_id: i64, paused: &[Paused]) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The states the schema lets a task be in, as its check names them.
+    fn task_states() -> Vec<String> {
+        use crate::schema::{migrate, MIGRATIONS};
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        migrate(&db, &MIGRATIONS).unwrap();
+        let table: String = db
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name = 'task'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let check = table
+            .split("task_state_check CHECK (")
+            .nth(1)
+            .and_then(|rest| rest.split_once("state IN (")?.1.split_once(')'))
+            .map(|(states, _)| states)
+            .unwrap();
+        check
+            .split(',')
+            .map(|state| state.trim().trim_matches('\'').to_owned())
+            .collect()
+    }
+
+    /// Astra's review of 2026-10-17: every state a task can be in has words of its
+    /// own, so a new one is not said as a resume, and a failure is said as one.
+    #[test]
+    fn every_state_a_task_can_be_in_is_said_in_words_of_its_own() {
+        let states = task_states();
+        assert_eq!(states.len(), 9, "{states:?}");
+        for state in &states {
+            assert!(moved_on_from(state).is_some(), "{state}");
+        }
+        assert_eq!(said_of("failed"), "failed");
+        assert_eq!(said_of("done"), "was done");
+        assert_eq!(said_of("accepted"), "was accepted");
+        assert_eq!(
+            said_of("archived"),
+            "is archived now",
+            "a state the schema does not have is said as it is"
+        );
+    }
 
     fn paused(number: i64, because: &str) -> Paused {
         Paused {

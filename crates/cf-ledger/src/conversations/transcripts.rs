@@ -533,6 +533,33 @@ pub(crate) fn copied_items_with(
         .collect::<rusqlite::Result<_>>()?)
 }
 
+/// Every item ConsensFlow's copy of the participant's current conversation shows
+/// it was given that contains `text` and was first copied at `since` or after, in
+/// order: its id and its words. What the window was given from then on, never an
+/// earlier copy of the same words, or a header quoted before (Calliope's review of
+/// 2026-10-21, round 12); which of them is a paste is the reader's to tell, as of
+/// [`copied_items_with`]. An item copied again as it was keeps the time it was
+/// first copied.
+pub(crate) fn copied_items_since(
+    store: &Store,
+    participant_id: i64,
+    text: &str,
+    since: &str,
+) -> Result<Vec<(String, String)>, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT t.item_id, t.text FROM transcript t JOIN conversation c ON c.id = t.conversation_id
+       WHERE c.participant_id = ? AND c.ended_at IS NULL AND t.role = 'user'
+         AND instr(t.text, ?) > 0 AND t.copied_at >= ?
+       ORDER BY t.seq",
+        )?
+        .query_map(params![participant_id, text, since], |row| {
+            Ok((row.get("item_id")?, row.get("text")?))
+        })?
+        .collect::<rusqlite::Result<_>>()?)
+}
+
 /// Whether the participant's windows hold words the human typed after the
 /// delivery of message `after`, copied since `since` (when that message was
 /// queued): a user item no delivery made, which is one with no header of

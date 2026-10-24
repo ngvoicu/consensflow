@@ -1,0 +1,2365 @@
+# The work a Close paused goes on with the human's Resume (Gabriel, 2026-10-16: "on resume tasks
+# should resume, right?"). The engine pauses the task of a window it closed itself, and in a
+# suspended project the ledger marks that pause (`paused_with_project`, migration 0021): the
+# human's Close and the chief's window ending close every window of the project so. The write
+# that opens the project again has each marked task at work again (waiting, where its window's
+# question is unanswered), withdraws the note that told the chief it was paused, and leaves a
+# task whose session left; the chief's window opens first, then each window with work, on its
+# own conversation, told its turn was cut in words that say only that ConsensFlow stopped. Every
+# other pause stays: the human's, the chief's, a window that closed by itself, a hold, and any a
+# ledger made before the mark. A window that holds several tasks comes back for none: they stay
+# paused, for the chief to resume one by one, and no word tells it to go on. A word to go on goes
+# with any move of its task out of the work, and a reader of a closed project reads only what a
+# window was handed (migration 0022). The case on the rig is
+# `crates/cf-e2e/tests/regressions/tasks_left_paused_by_a_close_and_resume.rs`, which builds the
+# native `cf` from the sources as planted, so its plants say `builds`.
+#
+# Every name holds `resume tasks`, so `npm run plants:daemon -- "resume tasks"` runs them all.
+
+[run]
+# The ledger's tests of the pauses a suspension makes and its Resume ends.
+ledger-suspended = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "suspended::"]
+# What the players of Node's recordings hold apart of what only this ledger writes.
+ledger-testing-mark = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::"]
+# The engine's tests of a start, a Close and the human's Resume, on the fake windows.
+engine-resume-tasks = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::"]
+# The engine's tests of a window slow to come up, Node's trace of a Resume that comes
+# while a Close is still under way among them.
+engine-window-takes-long = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "window_takes_long::"]
+# The engine's tests that a closed project's windows are handed nothing, whatever
+# wait the Close comes in, and of the Resume that follows.
+engine-closed-given-nothing = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::"]
+# The hand-overs every adapter makes through the pane host: a paste, and a claim.
+harness-hand-overs = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::pane::"]
+# Each adapter's hand-over the host no longer admits, after the adapter's own waits.
+harness-admission = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "admit"]
+# A request to a peer on loopback over a real socket, its connection a wait of the system's.
+harness-net = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::net::"]
+# The ledger's tests of a question's door, which claims an answer for its harness.
+ledger-doors = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "doors::"]
+# The daemon's door, which waits for an answer and has the ledger claim it.
+daemon-door = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::door::"]
+# Every route of the agents' API: what a window of a closed project reads of a message.
+daemon-routes = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::"]
+# The ledger's continuations: withdrawn with any move of their task out of the work, and
+# never carried into the next window's brief.
+ledger-continuations = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "continuations::"]
+# What the transport let go to a window, as the ledger marks it, and what a reader reads of it.
+ledger-handed = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "handed::"]
+# A launch whose first message's task is paused while it waits.
+engine-launch-stops = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "launch_stops::"]
+# The words a pause note's reconciliation says of each state a task can be in.
+ledger-pause-words = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::pauses"]
+# Where each harness's window takes its first message.
+harness-first-message = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "first_message::"]
+# The words of a continuation, written and read back.
+ledger-continuation-words = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::continuations"]
+# The Enter pressed once more for a paste never sends words twice (round 11).
+engine-withheld-enter = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "withheld_enter::"]
+# What the live tools are told of each harness's windows.
+harness-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::"]
+# What the input box holds after a withheld Enter (round 12).
+engine-stale-box = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stale_box::"]
+# The owner's shape on the rig: two tasks at work and one the human paused, closed and resumed.
+rig-regression-resume-tasks = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "tasks_left_paused_by_a_close_and_resume::"]
+# Where the Resume's Enter meets main's field 3.0.6 (the merge of T-392): own steps, told words.
+engine-meeting-main = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "meeting_main::"]
+# What one task's route reads out, a closed project's brief among it.
+daemon-routes-task = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::task::"]
+
+# --- the Resume, as main had it ---
+
+[[plant]]
+name = "resume tasks: the human's Resume leaves the work the Close paused paused, as 3.0.4 did (the rig)"
+meant = "a_close_and_a_resume_bring_back_the_tasks_the_close_paused_in_their_own_windows_and_a_task_the_human_paused_stays_paused"
+runs = ["rig-regression-resume-tasks"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+            if state == "open" {
+                resume_with_project(store, id)?;
+            }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: the human's Resume leaves the work the Close paused paused, as 3.0.4 did"
+meant = "the_resume_of_a_project_has_the_work_its_suspension_paused_at_work_again_and_no_other_pause"
+runs = ["ledger-suspended", "engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+            if state == "open" {
+                resume_with_project(store, id)?;
+            }'''
+replace = ""
+
+# --- the mark ---
+
+[[plant]]
+name = "resume tasks: the engine never marks the pause of a window it closed with the project"
+meant = "a_resume_after_a_close_brings_back_the_chief_first_and_then_the_work_the_close_paused_and_not_a_task_the_human_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                self.stall(&project, &thread.task, &because, own)?;"
+replace = "                self.stall(&project, &thread.task, &because, false)?;"
+
+[[plant]]
+name = "resume tasks: a window that closed by itself in a suspended project is taken for one the Close closed"
+meant = "a_window_the_close_could_not_close_that_then_closes_by_itself_leaves_its_task_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                self.stall(&project, &thread.task, &because, own)?;"
+replace = "                self.stall(&project, &thread.task, &because, true)?;"
+
+[[plant]]
+name = "resume tasks: the ledger marks the pause of a window ConsensFlow closed in an open project too"
+meant = "the_resume_of_a_project_has_the_work_its_suspension_paused_at_work_again_and_no_other_pause"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "             WHERE id = ? AND (SELECT state FROM project WHERE id = task.project_id) = 'suspended'\","
+replace = "             WHERE id = ?\","
+
+[[plant]]
+name = "resume tasks: a move of the task leaves the mark, so a later pause is taken for the suspension's"
+meant = "a_task_the_suspension_paused_that_moved_since_is_no_longer_its_to_resume"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "held_until = NULL, paused_with_project = 0"
+replace = "held_until = NULL"
+
+[[plant]]
+name = "resume tasks: the migration marks every task a ledger before it paused"
+meant = "a_ledger_from_before_the_mark_keeps_every_paused_task_paused_through_a_resume"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0021.sql"
+find = "paused_with_project INTEGER NOT NULL DEFAULT 0 CONSTRAINT"
+replace = "paused_with_project INTEGER NOT NULL DEFAULT 1 CONSTRAINT"
+
+# --- what the Resume does with each task ---
+
+[[plant]]
+name = "resume tasks: the Resume leaves the note that told the chief the task was paused"
+meant = "the_resume_of_a_project_has_the_work_its_suspension_paused_at_work_again_and_no_other_pause"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+        let task = store.task_row(project_id, number)?;
+        leave_pause_notes(store, &task, "resumed")?;
+        store.move_task('''
+replace = '''
+        let task = store.task_row(project_id, number)?;
+        store.move_task('''
+
+[[plant]]
+name = "resume tasks: the Resume has a task at work whose window's question is unanswered"
+meant = "a_task_the_suspension_paused_while_its_window_waited_for_an_answer_waits_again"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+        reconcile(store, task.id)?;
+    }
+    withdraw_stale(store, project_id)'''
+replace = '''
+    }
+    withdraw_stale(store, project_id)'''
+
+[[plant]]
+name = "resume tasks: the Resume has a task at work whose session left while the project was closed"
+meant = "a_task_the_close_paused_whose_session_left_meanwhile_stays_paused_for_the_chief"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+               AND p.left_at IS NULL'''
+replace = ""
+
+# --- the order and the words ---
+
+[[plant]]
+name = "resume tasks: the Resume opens the windows with work before the chief's"
+meant = "a_resume_after_a_close_brings_back_the_chief_first_and_then_the_work_the_close_paused_and_not_a_task_the_human_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''
+        if let Some(chief) = resumed.participants.iter().find(|p| p.role == "chief") {
+            // The human asks for the chief now: a chief that failed before is tried at once.
+            self.record_of(chief.id).window.borrow_mut().relaunch = None;
+            self.open_soon(chief.id, Some(Coming::Chief)).await;
+        }
+        for (participant, coming) in at_work {
+            self.open_soon(participant, Some(coming)).await;
+        }'''
+replace = '''
+        for (participant, coming) in at_work {
+            self.open_soon(participant, Some(coming)).await;
+        }
+        if let Some(chief) = resumed.participants.iter().find(|p| p.role == "chief") {
+            // The human asks for the chief now: a chief that failed before is tried at once.
+            self.record_of(chief.id).window.borrow_mut().relaunch = None;
+            self.open_soon(chief.id, Some(Coming::Chief)).await;
+        }'''
+
+[[plant]]
+name = "resume tasks: a member the Close cut is told that ConsensFlow quit"
+meant = "a_resume_after_a_close_brings_back_the_chief_first_and_then_the_work_the_close_paused_and_not_a_task_the_human_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''const STOPPED: &str = "ConsensFlow stopped while you were working on ";'''
+replace = '''const STOPPED: &str = "ConsensFlow quit while you were working on ";'''
+
+[[plant]]
+name = "resume tasks: a cut note an earlier build left queued in its words is not known, and the window is told twice"
+meant = "a_cut_note_an_earlier_build_left_queued_in_its_words_is_the_one_the_window_is_given"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''const QUIT: &str = "ConsensFlow quit while you were working on ";'''
+replace = '''const QUIT: &str = "ConsensFlow quit while you worked on ";'''
+
+# --- the players of Node's recordings ---
+
+[[plant]]
+name = "resume tasks: the players keep the mark's column in the rows of the task table"
+meant = "takes_the_mark_column_and_its_values_out_of_the_task_table_and_nothing_else"
+runs = ["ledger-testing-mark"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''
+        .chain(paused_with_project::COLUMNS)'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: the players keep the mark's column in the text of the task table"
+meant = "takes_the_column_out_of_the_text_sqlite_wrote_for_the_task_table_and_of_no_other"
+runs = ["ledger-testing-mark"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''
+                    .replace(paused_with_project::COLUMN_LINES, "")'''
+replace = ""
+
+# --- the reviews of 2026-10-16 (GPT-6-Astra and GPT-6.1-Sol) ---
+
+[[plant]]
+name = "resume tasks: a tell that lands after the Close leaves the Close's mark"
+meant = "a_tell_that_lands_after_the_close_takes_its_pause_over_and_the_resume_leaves_it_paused"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "                take_over_pause(store, &task, from)?;"
+replace = ""
+
+[[plant]]
+name = "resume tasks: a pause by the chief or the human of a task the Close paused is refused"
+meant = "a_pause_by_the_chief_or_the_human_of_a_task_the_close_paused_takes_the_pause_over"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "            Some(author) => take_over_pause(store, &task, &author.handle)?,"
+replace = "            Some(_) => false,"
+
+[[plant]]
+name = "resume tasks: a pause of a task paused any other way is taken for a takeover"
+meant = "a_pause_by_the_chief_or_the_human_of_a_task_the_close_paused_takes_the_pause_over"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "         WHERE id = ? AND state = 'paused' AND paused_with_project = 1\","
+replace = "         WHERE id = ? AND state = 'paused'\","
+
+[[plant]]
+name = "resume tasks: a task the Close paused that is taken back to the board keeps its mark"
+meant = "a_task_the_close_paused_that_someone_takes_from_its_session_keeps_no_mark"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = "           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0"
+replace = "           taken_from_id = COALESCE(?, taken_from_id)"
+
+[[plant]]
+name = "resume tasks: a task the Close paused that its chief resumes after its session ended keeps its mark"
+meant = "a_task_the_close_paused_that_someone_takes_from_its_session_keeps_no_mark"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+                "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
+             paused_with_project = 0
+           WHERE id = ?",'''
+replace = '''
+                "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?
+           WHERE id = ?",'''
+
+[[plant]]
+name = "resume tasks: a refused kill leaves the mark an exit made while it was answered"
+meant = "a_window_that_ends_by_itself_while_its_kill_is_answered_and_whose_kill_fails_leaves_its_task_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+                if let Some((project, number)) = paused {
+                    self.seams
+                        .ledger
+                        .borrow_mut()
+                        .unmark_pause(project, number)?;
+                }'''
+replace = '''
+                let _ = paused;'''
+
+[[plant]]
+name = "resume tasks: an exit told while the kill is answered is not remembered for the answer"
+meant = "a_window_that_ends_by_itself_while_its_kill_is_answered_and_whose_kill_fails_leaves_its_task_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                    killing.paused = Some((project.id, thread.task.number));"
+replace = "                    let _ = killing;"
+
+[[plant]]
+name = "resume tasks: the ledger keeps the mark a refused kill takes back"
+meant = "a_window_that_ends_by_itself_while_its_kill_is_answered_and_whose_kill_fails_leaves_its_task_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "            \"UPDATE task SET paused_with_project = 0 WHERE id = ? AND state = 'paused'\","
+replace = "            \"UPDATE task SET paused_with_project = paused_with_project WHERE id = ? AND state = 'paused'\","
+
+[[plant]]
+name = "resume tasks: the Resume withdraws the warning that a program may still run with the pause note"
+meant = "the_resume_withdraws_the_pause_note_and_keeps_the_word_that_a_program_may_still_run"
+runs = ["ledger-suspended", "engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "        .filter(|because| because.contains(MAY_STILL_RUN))"
+replace = "        .filter(|_| false)"
+
+[[plant]]
+name = "resume tasks: the warning that a program may still run is kept from a note of one task only"
+meant = "the_resume_withdraws_the_pause_note_and_keeps_the_word_that_a_program_may_still_run"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''
+        warn_of(&body);
+        if paused.is_empty() {'''
+replace = '''
+        if paused.is_empty() {'''
+
+[[plant]]
+name = "resume tasks: the engine says a program may still run in words other than the ledger keeps"
+meant = "a_resume_keeps_for_the_chief_the_word_that_a_program_the_close_could_not_end_may_still_run"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        Some(format!(", but {program} {MAY_STILL_RUN}"))'''
+replace = '''        Some(format!(", but {program} could not be ended and may run on"))'''
+
+[[plant]]
+name = "resume tasks: a closed project's window that the Close could not close is given what waits for it"
+meant = "a_chief_window_the_close_could_not_close_is_given_nothing_while_closed_and_never_the_news_that_the_work_is_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        if idle && project.state == \"open\" {"
+replace = "        if idle {"
+
+# --- the reviews of 2026-10-16, round 3 ---
+
+[[plant]]
+name = "resume tasks: a Resume that comes while the Close waits for a kill overtakes it"
+meant = "a_resume_that_comes_while_the_close_waits_for_a_refused_kill_leaves_the_crashed_window_s_task_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = "        self.closings.ended(project).await;"
+replace = ""
+
+# Round 5: each window's close counts for the Resume until its kill is answered, and
+# the human's Close as a whole until it answers (Node's trace of a Resume that comes
+# while a Close is still under way, which this ledger's Resume follows).
+[[plant]]
+name = "resume tasks: the human's Close is over for a Resume before it answers"
+meant = "opens_the_chief_again_when_the_human_resumes_a_project_that_is_still_closing"
+runs = ["engine-window-takes-long"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        let _closing = self.closings.begin(project);"
+replace = "        drop(self.closings.begin(project));"
+
+[[plant]]
+name = "resume tasks: a window's close is over for a Resume before its kill is answered"
+meant = "a_resume_that_comes_while_the_chief_window_s_close_waits_for_a_kill_resumes_the_task_that_kill_pauses"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                let _part = part;"
+replace = "                drop(part);"
+
+[[plant]]
+name = "resume tasks: a Close that ends leaves the Resume that waits for it waiting"
+meant = "a_resume_that_comes_while_the_close_waits_for_a_kill_resumes_the_task_that_kill_pauses"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''
+            if *count == 0 {
+                under_way.remove(&self.project);
+            }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: a cancel keeps no warning that a program may still run"
+meant = "a_cancel_withdraws_the_pause_note_and_keeps_the_word_that_a_program_may_still_run"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    let warnings = warnings_queued(store, &task)?;"
+replace = "    let warnings = Vec::new();"
+
+[[plant]]
+name = "resume tasks: a delivery that waited for its window goes into a closed project's"
+meant = "a_delivery_that_waits_for_its_window_while_the_project_closes_is_not_pasted_and_waits_for_the_resume"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if !self.in_open_project(message.project_id)? {
+            return Ok(());
+        }'''
+replace = ""
+
+# Round 5 hands the check before the paste to the hand-over itself (the host that
+# admits it); main's own deliver hands the adapter a host that admits everything.
+[[plant]]
+name = "resume tasks: a paste about to go goes into a closed project's window"
+meant = "a_delivery_whose_paste_is_about_to_go_while_the_project_closes_goes_back_to_its_queue"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {"
+replace = "        let outcome = match returning(window.deliver(host, &pane, &text)).await {"
+
+[[plant]]
+name = "resume tasks: a switch that waited for the chief's turn goes in a closed project"
+meant = "a_switch_with_no_note_waiting_for_the_chief_s_turn_in_a_closed_project_opens_no_window"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_switch.rs"
+find = '        if !idle || project.state != "open" {'
+replace = "        if !idle {"
+
+[[plant]]
+name = "resume tasks: the switch of a chief out of quota goes in a closed project"
+meant = "a_switch_of_a_chief_out_of_quota_in_a_closed_project_waits_for_the_resume"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '        if let Some(to) = pending.filter(|_| project.state == "open") {'
+replace = "        if let Some(to) = pending {"
+
+# --- the reviews of 2026-10-16, round 4: nothing handed to a closed project's window ---
+
+[[plant]]
+name = "resume tasks: a launch whose project closed while its window was prepared opens it with its first message"
+meant = "a_chief_launch_prepared_while_the_project_closes_opens_no_window_and_its_handoff_goes_in_once_after_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+        if !self.in_open_project(participant.project_id)? {
+            if let Some(delivering) = delivering {'''
+replace = '''
+        if false {
+            if let Some(delivering) = delivering {'''
+
+[[plant]]
+name = "resume tasks: a window that takes its first message once it is up is given it in a closed project"
+meant = "a_first_message_a_window_takes_once_it_is_up_is_not_given_when_the_project_closes_first_and_goes_in_once_after_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        let started = caught(planned.window.started(&admitting)).await;"
+replace = "        let started = caught(planned.window.started(&*self.seams.host)).await;"
+
+[[plant]]
+name = "resume tasks: a first message the closed project kept from its window is a launch that failed"
+meant = "a_first_message_a_window_takes_once_it_is_up_is_not_given_when_the_project_closes_first_and_goes_in_once_after_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        if let Some(failed) = admitting.turned_away() {"
+replace = "        if let Some(failed) = admitting.turned_away().filter(|_| false) {"
+
+[[plant]]
+name = "resume tasks: an adapter that waits before its hand-over hands the text to a closed project's window"
+meant = "a_delivery_whose_adapter_still_waits_when_the_project_closes_hands_nothing_over_and_waits_for_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {"
+replace = "        let outcome = match returning(window.deliver(host, &pane, &text)).await {"
+
+[[plant]]
+name = "resume tasks: a hand-over the closed project turned away is a refusal, and costs its message an attempt"
+meant = "a_delivery_whose_adapter_still_waits_when_the_project_closes_hands_nothing_over_and_waits_for_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if let Some(failed) = admitting.turned_away() {
+            self.give_back(message.id, admitting.because())?;'''
+replace = '''
+        if let Some(failed) = admitting.turned_away().filter(|_| false) {
+            self.give_back(message.id, admitting.because())?;'''
+
+[[plant]]
+name = "resume tasks: the Enter for a paste left unsent goes into a closed project's window"
+meant = "a_paste_left_unsent_in_a_window_the_close_could_not_close_gets_no_enter_until_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        match self.enter_admitted(record, message)? {"
+replace = "        match self.enter_admitted(record, message).map(|_| Enter::Go)? {"
+
+[[plant]]
+name = "resume tasks: the Resume writes the note to go on for work paused while it read the record"
+meant = "a_task_the_human_pauses_while_the_resume_reads_whether_its_turn_was_cut_stays_paused_and_its_window_stays_closed"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = "        if !cut || !self.still_coming(participant, coming)? {"
+replace = "        if !cut {"
+
+[[plant]]
+name = "resume tasks: the Resume opens the window of work paused while it read the record"
+meant = "a_task_the_human_pauses_while_the_resume_reads_whether_its_turn_was_cut_stays_paused_and_its_window_stays_closed"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                    if !this.still_coming(&who, coming)? {"
+replace = "                    if false {"
+
+[[plant]]
+name = "resume tasks: the windows' closes end for a Resume when the first of them fails"
+meant = "a_resume_waits_for_every_kill_of_the_close_though_another_window_s_close_failed"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        for (participant, part) in participants.iter().zip(parts) {"
+replace = "        for participant in participants {"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                let _part = part;"
+replace = ""
+
+[[plant]]
+name = "resume tasks: a cancel withdraws a pause note on its way with the warning it says, as round 5 did"
+meant = "a_pause_note_on_its_way_when_its_task_is_cancelled_says_its_warning_again_if_it_goes_back"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "         AND id NOT IN (SELECT value FROM json_each(?))\","
+replace = "         AND ? IS NOT NULL\","
+
+[[plant]]
+name = "resume tasks: a pause note left on its way by its task's cancel goes back to its queue as any does"
+meant = "a_cancel_keeps_the_warning_of_a_pause_note_on_its_way_whose_hand_over_was_uncertain"
+runs = ["engine-closed-given-nothing", "ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
+            return known_message(store, message_id);
+        }
+        let riding'''
+replace = '''
+        if withdrawn_if_stale(store, &message)? {
+            return known_message(store, message_id);
+        }
+        let riding'''
+
+[[plant]]
+name = "resume tasks: a pause note left on its way by its task's cancel is given up as any is, its warning with it"
+meant = "a_pause_note_on_its_way_when_its_task_is_cancelled_says_its_warning_again_if_it_is_given_up"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
+            return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+        }
+        store.db.execute(
+            "UPDATE message SET state = 'failed','''
+replace = '''
+        if withdrawn_if_stale(store, &message)? {
+            return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+        }
+        store.db.execute(
+            "UPDATE message SET state = 'failed','''
+
+[[plant]]
+name = "resume tasks: the human hears that a pause note withdrawn at its last attempt did not reach the chief"
+meant = "a_cancel_keeps_the_warning_of_a_pause_note_whose_last_attempt_its_window_refused"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            GivenUp::Withdrawn => return Ok(()),"
+replace = "            GivenUp::Withdrawn => {}"
+
+[[plant]]
+name = "resume tasks: a pause note left on its way by its task's cancel says its warning again though it arrived"
+meant = "a_pause_note_on_its_way_when_its_task_is_cancelled_that_arrives_says_nothing_again"
+runs = ["engine-closed-given-nothing", "ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        let message = require_message(store, message_id, "delivering")?;
+        let at = store.at();'''
+replace = '''
+        let message = require_message(store, message_id, "delivering")?;
+        if withdrawn_on_its_way(store, &message)? {
+            return known_message(store, message_id);
+        }
+        let at = store.at();'''
+
+[[plant]]
+name = "resume tasks: a pause note its window was given has its warning said again"
+meant = "a_pause_note_its_window_was_given_keeps_nothing_when_its_task_is_cancelled"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "             WHERE kind = 'note' AND sender_id IS NULL AND state = 'queued'"
+replace = "             WHERE kind = 'note' AND sender_id IS NULL AND state IN ('queued', 'delivered')"
+
+[[plant]]
+name = "resume tasks: a warning that goes back to its queue says itself again though its task was not cancelled"
+meant = "a_message_on_its_way_that_says_no_warning_of_a_cancelled_task_goes_with_the_cancel"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''        if task.state == "paused" && !moved_on_its_way(store, message, named.number)? {'''
+replace = '''        if false {'''
+
+[[plant]]
+name = "resume tasks: a paste goes in whatever the host admits (Claude, Devin)"
+meant = "a_paste_the_host_no_longer_admits_is_refused_unwritten_and_never_asked_of_the_pane"
+runs = ["harness-hand-overs", "harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/pane.rs"
+find = '''
+    if !host.admits() {
+        return not_admitted();
+    }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: Pi renames its message into the inbox once its claim is answered, whatever the host admits"
+meant = "a_send_the_host_stops_admitting_while_its_claim_waits_never_reaches_the_inbox"
+runs = ["harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/channel/send.rs"
+find = "    if claimed.get(\"ok\") == Some(&Value::Bool(true)) && !target.host.admits() {"
+replace = "    if false {"
+
+[[plant]]
+name = "resume tasks: a claim asks the host whether it admits the send, before the send's own last wait"
+meant = "a_claim_returns_the_hosts_answer_and_asks_nothing_of_whether_it_admits"
+runs = ["harness-hand-overs"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/pane.rs"
+find = '''
+    match host.request("pane.claim", request).await {
+        Ok(answer) => answer,'''
+replace = '''
+    match host.request("pane.claim", request).await {
+        Ok(_) if !host.admits() => json!({ "ok": false, "error": "not-admitted", "cause": NOT_ADMITTED }),
+        Ok(answer) => answer,'''
+
+[[plant]]
+name = "resume tasks: a request over loopback asks whether it is admitted before its connection is up"
+meant = "a_send_is_asked_whether_it_is_admitted_once_its_connection_is_up"
+runs = ["harness-net"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/net.rs"
+find = '''
+    if !admits() {
+        return Err(Failed::NotAdmitted);
+    }
+    let mut asked = std::pin::pin!(sender.send_request(message));'''
+replace = '''
+    let mut asked = std::pin::pin!(sender.send_request(message));'''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/net.rs"
+find = '''
+    let url = Url::parse(&request.url).map_err(|_| Failed::Fetch)?;'''
+replace = '''
+    if !admits() {
+        return Err(Failed::NotAdmitted);
+    }
+    let url = Url::parse(&request.url).map_err(|_| Failed::Fetch)?;'''
+
+[[plant]]
+name = "resume tasks: Codex's broker is sent the message once its connection is up, whatever the host admits"
+meant = "a_send_the_host_stops_admitting_while_its_connection_is_made_never_reaches_the_broker"
+runs = ["harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/channel/send.rs"
+find = "        .bound(loopback.hand_over(request, target.host))"
+replace = "        .bound(loopback.send(request))"
+
+[[plant]]
+name = "resume tasks: a Codex send the host did not admit once its connection was up is uncertain"
+meant = "a_send_the_host_stops_admitting_while_its_connection_is_made_never_reaches_the_broker"
+runs = ["harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/channel/send.rs"
+find = '''
+        Some(Err(failed)) if failed == NOT_ADMITTED => {
+            return Answer::zero_bytes("failed-with-zero-bytes", Some(failed));
+        }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: OpenCode's plugin is posted the message once its connection is up, whatever the host admits"
+meant = "a_send_the_host_stops_admitting_while_its_connection_is_made_is_never_posted"
+runs = ["harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/channel/send.rs"
+find = "        .bound(wires.loopback.hand_over(request, target.host))"
+replace = "        .bound(wires.loopback.send(request))"
+
+[[plant]]
+name = "resume tasks: an OpenCode send the host did not admit once its connection was up is uncertain"
+meant = "a_send_the_host_stops_admitting_while_its_connection_is_made_is_never_posted"
+runs = ["harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/channel/send.rs"
+find = '''
+        Some(Err(failed)) if failed == NOT_ADMITTED => {
+            return Ok(claim_refused(&json!({ "cause": failed })));
+        }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: OpenCode posts the first message once its connection is up, whatever the host admits"
+meant = "posts_nothing_where_the_host_stops_admitting_the_first_message_while_its_connection_is_made"
+runs = ["harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/channel/seed.rs"
+find = "            .bound(self.wires.loopback.hand_over(request, host))"
+replace = "            .bound(self.wires.loopback.send(request))"
+
+[[plant]]
+name = "resume tasks: an OpenCode first message the host did not admit is uncertain"
+meant = "posts_nothing_where_the_host_stops_admitting_the_first_message_while_the_server_is_asked"
+runs = ["harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/channel/seed.rs"
+find = "            Some(Err(failed)) if failed == NOT_ADMITTED => return Err(failed),"
+replace = ""
+
+# --- a question's door ---
+
+[[plant]]
+name = "resume tasks: a door of a closed project claims the answer given while it was closed"
+meant = "a_door_of_a_closed_project_claims_nothing_and_its_answer_waits_for_the_resume"
+runs = ["ledger-doors", "daemon-door"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''
+                    if !open {
+                        return Ok(Claim::Waiting);
+                    }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: a door of a closed project is told nothing of a claim it made before the Close"
+meant = "a_claim_made_before_the_close_is_the_door_s_and_comes_again"
+runs = ["ledger-doors"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''
+            ("queued", None) => {
+                if claimed.is_none() {'''
+replace = '''
+            ("queued", None) => {
+                if claimed.is_none() || claimed.is_some() {'''
+
+# --- a window of several tasks comes back for none (round 8) ---
+
+[[plant]]
+name = "resume tasks: a window that holds several tasks comes back for those the Close paused"
+meant = "a_window_that_holds_several_tasks_the_close_paused_comes_back_for_none_and_the_chief_is_told_of_each"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+    leave_several_paused(store, project_id)?;'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: a window's task the human paused does not count among those it holds"
+meant = "a_window_that_holds_a_task_the_human_paused_beside_one_the_close_paused_comes_back_for_neither"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''    let held = sql_list(&[&HELD_TASK_STATES[..], &["paused"]].concat());'''
+replace = '''    let held = sql_list(&HELD_TASK_STATES);'''
+
+[[plant]]
+name = "resume tasks: the Close's pause of a task of a window of several stays the suspension's"
+meant = "a_window_that_holds_several_tasks_the_close_paused_comes_back_for_none_and_the_chief_is_told_of_each"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+                        "UPDATE task SET paused_with_project = 0
+                         WHERE id = ? AND paused_with_project = 1",'''
+replace = '''
+                        "UPDATE task SET paused_with_project = 1
+                         WHERE id = ? AND paused_with_project = 1",'''
+
+[[plant]]
+name = "resume tasks: the work a quit left at work in a window of several stays at work"
+meant = "a_window_that_holds_several_tasks_a_quit_left_at_work_has_them_paused_by_the_resume_and_the_chief_told_why"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''                "queued" | "working" | "waiting" => {'''
+replace = '''                "queued" => {'''
+
+[[plant]]
+name = "resume tasks: a queued task of a window of several stays queued through the Resume, as round 8 left it"
+meant = "a_window_that_holds_a_queued_task_beside_another_comes_back_for_neither_and_its_brief_waits"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''                "queued" | "working" | "waiting" => {'''
+replace = '''                "working" | "waiting" => {'''
+
+[[plant]]
+name = "resume tasks: the chief is told nothing of the work the Resume left paused in a window of several"
+meant = "a_window_that_holds_several_tasks_a_quit_left_at_work_has_them_paused_by_the_resume_and_the_chief_told_why"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+            if left {
+                tell_left_paused(store, &mut told, &task, &because)?;
+            }'''
+replace = '''
+            let _ = (left, &mut told);'''
+
+[[plant]]
+name = "resume tasks: the chief is told of the work the Resume paused, not of what the suspension paused"
+meant = "a_window_that_holds_several_tasks_the_close_paused_comes_back_for_none_and_the_chief_is_told_of_each"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+                    suspension
+                }'''
+replace = '''
+                    suspension && false
+                }'''
+
+[[plant]]
+name = "resume tasks: the suspension's notes of a window of several stay beside the Resume's"
+meant = "a_window_that_holds_several_tasks_the_close_paused_comes_back_for_none_and_the_chief_is_told_of_each"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''                        leave_pause_notes(store, &task, "stays paused")?;'''
+replace = '''                        let _ = leave_pause_notes;'''
+
+[[plant]]
+name = "resume tasks: the suspension's warning of a window of several is lost with its note"
+meant = "a_window_of_several_whose_close_could_not_end_its_program_keeps_the_warning_through_the_resume"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''                        leave_pause_notes(store, &task, "stays paused")?;'''
+replace = '''                        withdraw_pause_notes_silently(store, &task)?;'''
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+/// Tells `task`'s requester that the Resume left it paused, `because`: in the'''
+replace = '''
+fn withdraw_pause_notes_silently(store: &Store, task: &TaskRow) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE message SET state = 'cancelled' WHERE task_id = ? AND kind = 'note' AND sender_id IS NULL AND state = 'queued'",
+        [task.id],
+    )?;
+    Ok(())
+}
+
+/// Tells `task`'s requester that the Resume left it paused, `because`: in the'''
+
+[[plant]]
+name = "resume tasks: a window of several's note does not say to resume its tasks one at a time"
+meant = "a_window_that_holds_several_tasks_a_quit_left_at_work_has_them_paused_by_the_resume_and_the_chief_told_why"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = ''' and a window is told to go on only when it held one task: resume them one at a time",'''
+replace = ''' and a window is told to go on only when it held one task",'''
+
+[[plant]]
+name = "resume tasks: a note of the Resume's names only the first task of each requester"
+meant = "a_window_that_holds_several_tasks_a_quit_left_at_work_has_them_paused_by_the_resume_and_the_chief_told_why"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+        if join_pause_note(store, note, task.number, because)?.is_some() {
+            return Ok(());
+        }'''
+replace = '''
+        let _ = (note, join_pause_note);
+        return Ok(());'''
+
+# --- the chief follows its note (round 9) ---
+
+[[plant]]
+name = "resume tasks: a paused task of the session keeps its other paused task from being resumed, as main had it"
+meant = "the_chief_resumes_the_tasks_of_a_window_of_several_one_at_a_time_as_its_note_says"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''                sql_list(&HELD_TASK_STATES)
+            ),
+            params![participant_id, number],'''
+replace = '''                sql_list(&[&HELD_TASK_STATES[..], &["paused"]].concat())
+            ),
+            params![participant_id, number],'''
+
+[[plant]]
+name = "resume tasks: a paused task of a session is resumed into its window at work on another"
+meant = "the_chief_resumes_the_tasks_of_a_window_of_several_one_at_a_time_as_its_note_says"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''                sql_list(&HELD_TASK_STATES)
+            ),
+            params![participant_id, number],'''
+replace = '''                sql_list(&["never"])
+            ),
+            params![participant_id, number],'''
+
+# --- a continuation dies with its task (round 8) ---
+
+[[plant]]
+name = "resume tasks: a move of its task out of the work leaves a continuation queued"
+meant = "every_move_of_its_task_out_of_the_work_withdraws_a_continuation_still_queued_in_the_same_write"
+runs = ["ledger-continuations", "engine-closed-given-nothing", "engine-launch-stops"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = '''
+        if !ACTIVE_TASK_STATES.contains(&to) {
+            withdraw_continuations(self, task, to)?;
+        }'''
+replace = '''
+        let _ = withdraw_continuations;'''
+
+[[plant]]
+name = "resume tasks: a move of its task within the work withdraws a continuation"
+meant = "a_move_of_its_task_within_the_work_leaves_a_continuation_queued"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = '''        if !ACTIVE_TASK_STATES.contains(&to) {'''
+replace = '''        if !ACTIVE_TASK_STATES.is_empty() {'''
+
+[[plant]]
+name = "resume tasks: a continuation only begun stays on its way through a move of its task"
+meant = "a_continuation_only_begun_goes_with_a_pause_and_one_handed_over_stays_with_its_window"
+runs = ["ledger-continuations", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''        "state = 'queued' OR (state = 'delivering' AND handed_at IS NULL)",'''
+replace = '''        "state = 'queued'",'''
+
+[[plant]]
+name = "resume tasks: a continuation handed over goes with a move of its task"
+meant = "a_continuation_only_begun_goes_with_a_pause_and_one_handed_over_stays_with_its_window"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''        "state = 'queued' OR (state = 'delivering' AND handed_at IS NULL)",'''
+replace = '''        "state IN ('queued', 'delivering')",'''
+
+[[plant]]
+name = "resume tasks: an earlier build's continuation tied to no task stays through a move of the task it names"
+meant = "a_continuation_an_earlier_build_left_tied_to_no_task_goes_with_a_pause_of_the_task_it_names"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''               AND (task_id = ?2 OR recipient_id = ?3)'''
+replace = '''               AND (task_id = ?2 OR ?3 IS NULL)'''
+
+[[plant]]
+name = "resume tasks: a move of a task withdraws its window's continuation of another"
+meant = "a_continuation_an_earlier_build_left_tied_to_no_task_goes_with_a_pause_of_the_task_it_names"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''                .is_some_and(|named| *tied == Some(task.id) || named.contains(&task.number))'''
+replace = '''                .is_some_and(|_| *tied == Some(task.id) || tied.is_none())'''
+
+[[plant]]
+name = "resume tasks: a reassignment carries a continuation into the next brief"
+meant = "a_reassignment_never_carries_a_continuation_into_the_next_brief"
+runs = ["ledger-continuations", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''
+    drop_continuations(store, task, window.id)?;'''
+replace = '''
+    let _ = drop_continuations;'''
+
+[[plant]]
+name = "resume tasks: a reassignment carries a continuation handed over into the next brief"
+meant = "a_reassignment_never_carries_a_continuation_into_the_next_brief"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''continuations_of(store, task, "state IN ('queued', 'delivering')")?'''
+replace = '''continuations_of(store, task, "state = 'queued'")?'''
+
+[[plant]]
+name = "resume tasks: a launch begins a first message withdrawn while it waited"
+meant = "a_task_the_human_pauses_while_the_resume_s_launch_reads_its_record_stays_paused_and_its_window_stays_closed"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''            if message.is_none_or(|message| message.state != "queued") {'''
+replace = '''            if message.is_none() {'''
+
+# --- the Resume tells a window anew (round 8) ---
+
+[[plant]]
+name = "resume tasks: the Resume leaves queued what an earlier build left telling a window to go on"
+meant = "the_resume_withdraws_what_an_earlier_build_left_telling_a_window_to_go_on_with_several_tasks"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+    withdraw_stale(store, project_id)
+}'''
+replace = '''
+    let _ = withdraw_stale;
+    Ok(())
+}'''
+
+[[plant]]
+name = "resume tasks: the Resume leaves queued a continuation of a task its window holds that is not at work"
+meant = "the_resume_withdraws_what_an_earlier_build_left_telling_a_window_to_go_on_with_a_task_not_at_work"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''if number == holds && matches!(state.as_str(), "working" | "waiting")'''
+replace = '''if number == holds && !state.is_empty()'''
+
+[[plant]]
+name = "resume tasks: the Resume leaves queued a continuation of several whose window holds the first"
+meant = "the_resume_withdraws_what_an_earlier_build_left_telling_a_window_to_go_on_with_several_tasks"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''            ([number], [(holds, state)])
+                if'''
+replace = '''            ([number, ..], [(holds, state)])
+                if'''
+
+[[plant]]
+name = "resume tasks: the Resume keeps every continuation an earlier build left for the one task at work"
+meant = "the_resume_keeps_one_of_what_earlier_builds_left_telling_a_window_to_go_on_with_its_task"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''            Some(number) if !kept.contains(&(recipient, number)) => kept.push((recipient, number)),'''
+replace = '''            Some(_) => {}'''
+
+# --- what a window was handed (round 8) ---
+
+[[plant]]
+name = "resume tasks: a hand-over the transport lets go is not marked handed"
+meant = "a_hand_over_goes_while_the_project_is_open_and_marks_the_message_and_what_it_carries_handed"
+runs = ["ledger-handed", "daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''            "UPDATE message SET handed_at = ?1
+             WHERE id = ?2 OR (carried_by = ?2 AND state = 'queued')",'''
+replace = '''            "UPDATE message SET handed_at = NULLIF(?1, ?1)
+             WHERE id = ?2 OR (carried_by = ?2 AND state = 'queued')",'''
+
+[[plant]]
+name = "resume tasks: what a paste carries is not marked handed with it"
+meant = "a_hand_over_goes_while_the_project_is_open_and_marks_the_message_and_what_it_carries_handed"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''             WHERE id = ?2 OR (carried_by = ?2 AND state = 'queued')",'''
+replace = '''             WHERE id = ?2",'''
+
+[[plant]]
+name = "resume tasks: a paste goes whose carried row was withdrawn since it began"
+meant = "a_hand_over_whose_message_or_a_row_of_its_paste_was_withdrawn_since_it_began_goes_nowhere"
+runs = ["ledger-handed", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''        if message.state != "delivering" || begun_with.iter().any(|id| !riding.contains(id)) {'''
+replace = '''        if message.state != "delivering" || begun_with.iter().any(|id| riding.contains(id) && false) {'''
+
+[[plant]]
+name = "resume tasks: a message withdrawn since its delivery began is handed over"
+meant = "a_continuation_whose_task_is_paused_while_its_adapter_takes_it_is_withdrawn_and_handed_nothing"
+runs = ["ledger-handed", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''        if message.state != "delivering" || begun_with'''
+replace = '''        if message.state == "never" || begun_with'''
+
+[[plant]]
+name = "resume tasks: a closed project's hand-over is let go by the ledger"
+meant = "a_hand_over_of_a_closed_project_goes_nowhere_and_hands_nothing"
+runs = ["ledger-handed", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if !open {
+            return Ok(HandOver::Closed);
+        }'''
+replace = '''
+        let _ = open;'''
+
+[[plant]]
+name = "resume tasks: a hand-over sent back to its queue stays handed"
+meant = "a_hand_over_sent_back_to_its_queue_is_handed_no_more"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+            "UPDATE message SET state = 'queued', reason = ?, attempts = MAX(attempts - ?, 0),
+               handed_at = NULL
+         WHERE id = ?",'''
+replace = '''
+            "UPDATE message SET state = 'queued', reason = ?, attempts = MAX(attempts - ?, 0)
+         WHERE id = ?",'''
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''            "UPDATE message SET handed_at = NULL WHERE carried_by = ? AND state = 'queued'",'''
+replace = '''            "UPDATE message SET handed_at = handed_at WHERE carried_by = ? AND state = 'queued'",'''
+
+[[plant]]
+name = "resume tasks: told words kept for their task's resume stay handed"
+meant = "a_hand_over_sent_back_to_its_queue_is_handed_no_more"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = '''        "UPDATE message SET state = 'queued', reason = ?, carried_by = NULL, handed_at = NULL
+         WHERE id = ?",'''
+replace = '''        "UPDATE message SET state = 'queued', reason = ?, carried_by = NULL
+         WHERE id = ?",'''
+
+[[plant]]
+name = "resume tasks: what a carrier given up carried stays handed"
+meant = "what_a_paste_carried_is_handed_no_more_once_its_carrier_is_given_up"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''        "UPDATE message SET carried_by = NULL, handed_at = NULL
+         WHERE task_id = ?1'''
+replace = '''        "UPDATE message SET carried_by = NULL
+         WHERE task_id = ?1'''
+
+[[plant]]
+name = "resume tasks: what a start lets go of stays handed"
+meant = "what_a_start_lets_go_of_is_handed_no_more"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''
+                "UPDATE message SET carried_by = NULL, handed_at = NULL
+                 WHERE carried_by = ? AND state = 'queued'",'''
+replace = '''
+                "UPDATE message SET carried_by = NULL
+                 WHERE carried_by = ? AND state = 'queued'",'''
+
+[[plant]]
+name = "resume tasks: a message taken back that no transport marked is handed nothing, as round 8 left it"
+meant = "a_message_taken_back_was_handed_whether_or_not_its_transport_marked_it"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/taken_back.rs"
+find = '''
+            "UPDATE message SET state = 'queued', reason = ?, delivered_at = NULL, receipt = NULL,
+               handed_at = COALESCE(handed_at, delivered_at)
+         WHERE id = ?",'''
+replace = '''
+            "UPDATE message SET state = 'queued', reason = ?, delivered_at = NULL, receipt = NULL
+         WHERE id = ?",'''
+
+[[plant]]
+name = "resume tasks: what a message taken back carried and no transport marked is handed nothing"
+meant = "a_message_taken_back_was_handed_whether_or_not_its_transport_marked_it"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/taken_back.rs"
+find = '''
+            "UPDATE message SET state = 'queued', delivered_at = NULL, receipt = NULL,
+               handed_at = COALESCE(handed_at, delivered_at)
+         WHERE carried_by = ? AND state = 'delivered'",'''
+replace = '''
+            "UPDATE message SET state = 'queued', delivered_at = NULL, receipt = NULL
+         WHERE carried_by = ? AND state = 'delivered'",'''
+
+# --- a continuation is valid only while its task is at work (round 9) ---
+
+[[plant]]
+name = "resume tasks: a continuation sent back after its task moved goes back to its queue, as round 8 left it"
+meant = "a_continuation_handed_over_that_comes_back_after_its_task_moved_is_withdrawn"
+runs = ["ledger-continuations", "engine-closed-given-nothing", "daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
+            return known_message(store, message_id);
+        }
+        let riding'''
+replace = '''
+        if withdrawn_on_its_way(store, &message)? {
+            return known_message(store, message_id);
+        }
+        let riding'''
+
+[[plant]]
+name = "resume tasks: a continuation given up after its task moved fails"
+meant = "a_continuation_handed_over_that_comes_back_after_its_task_moved_is_withdrawn"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
+            return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+        }
+        store.db.execute(
+            "UPDATE message SET state = 'failed','''
+replace = '''
+        if withdrawn_on_its_way(store, &message)? {
+            return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+        }
+        store.db.execute(
+            "UPDATE message SET state = 'failed','''
+
+[[plant]]
+name = "resume tasks: the transport lets go of a continuation whose task is not at work"
+meant = "a_continuation_whose_task_is_not_at_work_is_withdrawn_by_the_transport_s_admission"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''        let mut stale = withdrawn_if_stale(store, &message)?;'''
+replace = '''        let mut stale = false;'''
+
+[[plant]]
+name = "resume tasks: the transport lets go of a paste that carries a continuation whose task is not at work"
+meant = "a_continuation_riding_in_a_carrier_that_comes_back_is_withdrawn_unless_its_task_is_at_work"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        for row in carried(store, message_id)? {
+            stale |= withdrawn_if_stale(store, &row)?;
+        }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: a carrier tried again keeps a continuation whose task is not at work"
+meant = "a_continuation_riding_in_a_carrier_that_comes_back_is_withdrawn_unless_its_task_is_at_work"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        withdraw_stale_among(store, &riding)?;'''
+replace = '''
+        let _ = riding;'''
+
+[[plant]]
+name = "resume tasks: a carrier taken back keeps a continuation whose task is not at work"
+meant = "a_continuation_riding_in_a_carrier_that_comes_back_is_withdrawn_unless_its_task_is_at_work"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/taken_back.rs"
+find = '''
+        withdraw_stale_among(store, &kept)?;'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: a carrier given up lets go of a continuation whose task is not at work"
+meant = "a_continuation_riding_in_a_carrier_that_comes_back_is_withdrawn_unless_its_task_is_at_work"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''
+        [task_id],
+    )?;
+    withdraw_stale_among(store, &released)
+}'''
+replace = '''
+        [task_id],
+    )?;
+    let _ = released;
+    Ok(())
+}'''
+
+[[plant]]
+name = "resume tasks: a start lets go of a continuation whose task is not at work"
+meant = "a_continuation_riding_in_a_carrier_that_comes_back_is_withdrawn_unless_its_task_is_at_work"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''
+            withdraw_stale_among(store, &released)?;'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: a continuation of a task paused, or ended, counts as at work"
+meant = "a_continuation_handed_over_that_comes_back_after_its_task_moved_is_withdrawn"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''            (!matches!(state.as_str(), "working" | "waiting"))'''
+replace = '''            (state == "never")'''
+
+[[plant]]
+name = "resume tasks: a continuation of a task that went to another window counts as at work"
+meant = "a_continuation_whose_task_is_not_at_work_is_withdrawn_by_the_transport_s_admission"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''        _ => Some(format!("T-{number} went from its window")),
+    })'''
+replace = '''        _ => None,
+    })'''
+
+[[plant]]
+name = "resume tasks: a continuation naming several tasks counts as at work"
+meant = "a_continuation_whose_task_is_not_at_work_is_withdrawn_by_the_transport_s_admission"
+runs = ["ledger-continuations"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''        return Ok(Some("it names several tasks".to_owned()));'''
+replace = '''        return Ok(None);'''
+
+[[plant]]
+name = "resume tasks: a continuation given or withdrawn already is withdrawn again"
+meant = "a_continuation_withdrawn_already_is_left_as_it_was_by_the_transport_s_admission"
+runs = ["ledger-continuations", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''
+        || !matches!(message.state.as_str(), "queued" | "delivering")'''
+replace = ""
+
+# --- a warning tracks every move (round 9) ---
+
+[[plant]]
+name = "resume tasks: a pause note's task resumed and paused again on its way keeps its place, as round 8 left it"
+meant = "a_pause_note_on_its_way_whose_task_moved_on_says_its_warning_again_if_it_goes_back_or_is_given_up"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''        if task.state == "paused" && !moved_on_its_way(store, message, named.number)? {'''
+replace = '''        if task.state == "paused" {'''
+
+[[plant]]
+name = "resume tasks: a pause note's task is taken to have moved by any move ever logged of it"
+meant = "a_message_on_its_way_that_says_no_warning_of_a_cancelled_task_goes_with_the_cancel"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''               AND e.id > (SELECT b.id FROM event b'''
+replace = '''               AND e.id > 0 * (SELECT b.id FROM event b'''
+
+[[plant]]
+name = "resume tasks: a pause note's task paused again on its way is said to have been resumed"
+meant = "a_pause_note_on_its_way_whose_task_moved_on_says_its_warning_again_if_it_goes_back_or_is_given_up"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''        "paused" => "was paused again",'''
+replace = ""
+
+# --- the Enter pressed once more, and the words of every state (round 10) ---
+
+[[plant]]
+name = "resume tasks: the Enter pressed once more asks whether the project is open alone, as round 9 left it"
+meant = "an_enter_sends_no_continuation_whose_task_was_paused_or_cancelled_while_the_screen_was_looked_at"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        let admitting = Admitting::new(self, project)
+            .handing(message, carried)
+            .again();'''
+replace = '''
+        let admitting = Admitting::new(self, project).again();
+        let _ = carried;'''
+
+[[plant]]
+name = "resume tasks: the Enter pressed once more is admitted without the rows its paste was begun with"
+meant = "an_enter_sends_no_paste_a_row_of_which_was_withdrawn_while_the_screen_was_looked_at"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''            .map(|delivering| delivering.carried.clone())'''
+replace = '''            .map(|_| Vec::new())'''
+
+[[plant]]
+name = "resume tasks: a paste keeps no word of the rows it was begun with"
+meant = "an_enter_sends_no_paste_a_row_of_which_was_withdrawn_while_the_screen_was_looked_at"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+            entered_again: false,
+            carried,'''
+replace = '''
+            entered_again: false,
+            carried: Vec::new(),'''
+
+[[plant]]
+name = "resume tasks: a paste whose Enter found a row of it withdrawn waits on its way"
+meant = "an_enter_sends_no_paste_a_row_of_which_was_withdrawn_while_the_screen_was_looked_at"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        self.give_back(message, because)?;
+        Ok(Enter::Withheld)'''
+replace = '''
+        let _ = because;
+        Ok(Enter::Withheld)'''
+
+[[plant]]
+name = "resume tasks: a paste admitted once is withdrawn when the Enter pressed once more admits it again"
+meant = "an_enter_sends_no_paste_a_row_of_which_was_withdrawn_while_the_screen_was_looked_at"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''.prepare("SELECT id FROM message WHERE carried_by = ? AND state = 'queued'")?'''
+replace = '''.prepare("SELECT id FROM message WHERE carried_by = ? AND state = 'queued' AND handed_at IS NULL")?'''
+
+[[plant]]
+name = "resume tasks: a pause note's task that failed on its way is said to have been resumed"
+meant = "a_pause_note_on_its_way_whose_task_moved_on_says_its_warning_again_if_it_goes_back_or_is_given_up"
+runs = ["ledger-suspended", "ledger-pause-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''        "failed" => "failed",'''
+replace = '''        "failed" => "resumed",'''
+
+[[plant]]
+name = "resume tasks: a pause note's task in a state of no words of its own is said to have been resumed"
+meant = "every_state_a_task_can_be_in_is_said_in_words_of_its_own"
+runs = ["ledger-pause-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''        _ => return None,'''
+replace = '''        _ => "resumed",'''
+
+[[plant]]
+name = "resume tasks: a pause note's task that is done, or accepted, falls through to the words of a state of no words"
+meant = "every_state_a_task_can_be_in_is_said_in_words_of_its_own"
+runs = ["ledger-pause-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''
+        "done" => "was done",
+        "accepted" => "was accepted",'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: an answer a door claimed is not handed over"
+meant = "an_answer_a_door_claimed_is_handed_over"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''(handed_at IS NOT NULL OR claimed_at IS NOT NULL)'''
+replace = '''(handed_at IS NOT NULL)'''
+
+[[plant]]
+name = "resume tasks: a reader of a closed project reads a delivery only begun, as round 7 did"
+meant = "a_message_whose_delivery_is_only_begun_waits_while_the_project_is_closed_and_one_handed_over_is_read"
+runs = ["daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''
+            && matches!(message.state.as_str(), "queued" | "delivering")
+            && !self.handed.contains(&message.id)'''
+replace = '''
+            && message.state == "queued"'''
+
+[[plant]]
+name = "resume tasks: a reader of a closed project is given nothing its window was handed"
+meant = "a_message_whose_delivery_is_only_begun_waits_while_the_project_is_closed_and_one_handed_over_is_read"
+runs = ["daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''
+            && !self.handed.contains(&message.id)'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: a launch's first message is not marked handed as its pane is asked for"
+meant = "a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_it_is_posted_once_the_window_is_up"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        )? || !self.handed_on_open(delivering.as_ref(), &planned)?'''
+replace = '''        )? || !self.handed_on_open(None, &planned)?'''
+
+[[plant]]
+name = "resume tasks: a first message a window takes once it is up is marked handed as its pane is asked for"
+meant = "a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_it_is_posted_once_the_window_is_up"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        let Some(first) = delivering.filter(|_| !planned.first_once_up) else {'''
+replace = '''        let Some(first) = delivering else {'''
+
+[[plant]]
+name = "resume tasks: a first message a window takes once it is up is posted with the project alone asked"
+meant = "a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_it_is_posted_once_the_window_is_up"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''            .filter(|_| planned.first_once_up);'''
+replace = '''            .filter(|_| false);'''
+
+[[plant]]
+name = "resume tasks: a delivery's hand-over asks whether the project is open alone"
+meant = "a_continuation_whose_task_is_paused_while_its_adapter_takes_it_is_withdrawn_and_handed_nothing"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        let admitting = Admitting::new(self, message.project_id)
+            .handing(message.id, carried.clone())
+            .cleared(cleared);'''
+replace = '''
+        let admitting = Admitting::new(self, message.project_id).cleared(cleared);'''
+
+[[plant]]
+name = "resume tasks: a paste that went back for a row withdrawn from it is said to have gone back for the Close"
+meant = "a_paste_whose_carried_row_was_withdrawn_before_its_hand_over_hands_nothing_over_and_goes_back"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        self.withdrawn.set(handed == HandOver::Withdrawn);'''
+replace = '''        self.withdrawn.set(false);'''
+
+[[plant]]
+name = "resume tasks: OpenCode takes its first message with its command line"
+meant = "opencode_takes_its_first_message_once_its_window_is_up_and_no_other_harness_does"
+runs = ["harness-first-message"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/adapter.rs"
+find = '''
+    fn first_message_once_up(&self) -> bool {
+        true
+    }'''
+replace = '''
+    fn first_message_once_up(&self) -> bool {
+        false
+    }'''
+
+[[plant]]
+name = "resume tasks: the players keep the handed column in the rows of the message table"
+meant = "takes_the_handed_column_and_its_values_out_of_the_message_table_and_nothing_else"
+runs = ["ledger-testing-mark"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''
+        .chain(handed::COLUMNS)'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: the players keep the handed column in the text of the message table"
+meant = "testing::handed::tests::takes_the_column_out_of_the_text_sqlite_wrote_for_the_message_table_and_of_no_other"
+runs = ["ledger-testing-mark"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''
+                    .replace(handed::COLUMN_LINES, "");'''
+replace = ";"
+
+# --- a pause note's warning, whatever its task does on the note's way (round 8) ---
+
+[[plant]]
+name = "resume tasks: a pause note on its way keeps a task resumed or taken back meanwhile, as round 7 did"
+meant = "a_pause_note_on_its_way_whose_task_moved_on_says_its_warning_again_if_it_goes_back_or_is_given_up"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''        if task.state == "paused" && !moved_on_its_way(store, message, named.number)? {'''
+replace = '''        if task.state != "cancelled" {'''
+
+[[plant]]
+name = "resume tasks: a task taken back on its pause note's way is said to have been resumed"
+meant = "a_pause_note_on_its_way_whose_task_moved_on_says_its_warning_again_if_it_goes_back_or_is_given_up"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''        "open" => "was taken back",'''
+replace = '''        "open" => "resumed",'''
+
+[[plant]]
+name = "resume tasks: a task resumed on its pause note's way is said to have been cancelled"
+meant = "a_resume_keeps_the_warning_of_a_pause_note_whose_last_attempt_its_window_refused"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''        "queued" | "working" | "waiting" => "resumed",'''
+replace = '''        "queued" | "working" | "waiting" => "cancelled",'''
+
+[[plant]]
+name = "resume tasks: a continuation's words are read in those of builds before 3.0.5 alone"
+meant = "what_is_written_reads_back_and_the_words_of_older_builds_are_read_too"
+runs = ["ledger-continuation-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = "    let (start, rest) = [STOPPED, QUIT]"
+replace = "    let (start, rest) = [QUIT]"
+
+# --- a note of several on its way (round 7) ---
+
+[[plant]]
+name = "resume tasks: a note of several on its way when one of its tasks is cancelled is given up whole"
+meant = "a_note_of_several_given_up_after_one_of_its_tasks_was_cancelled_says_that_task_s_warning_again"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "    let Some(paused) = read(&message.body) else {"
+replace = "    let Some(paused) = read(&message.body).filter(|_| message.task_number.is_some()) else {"
+
+[[plant]]
+name = "resume tasks: a note of several goes back to its queue naming a task cancelled on its way"
+meant = "a_note_of_several_that_goes_back_after_one_of_its_tasks_was_cancelled_names_the_rest_and_says_the_warning_apart"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "        set(store, message.id, message.project_id, &left)?;"
+replace = "        let _ = &left;"
+
+[[plant]]
+name = "resume tasks: the warning of a task cancelled on its way in a note of several is not said again"
+meant = "a_note_of_several_given_up_after_one_of_its_tasks_was_cancelled_says_that_task_s_warning_again"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "            say_again(store, task, &moved_on(task), vec![because.clone()])?;"
+replace = "            let _ = (task, because);"
+
+# --- reads while the project is closed (round 7) ---
+
+[[plant]]
+name = "resume tasks: a whole message no window was handed is read while the project is closed"
+meant = "a_message_no_window_was_handed_waits_while_the_project_is_closed_and_its_sender_reads_it_as_ever"
+runs = ["daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/message.rs"
+find = "        Some(message) if Waits::now(context, caller)?.holds(&message) => Err(Failure::refuse("
+replace = "        Some(message) if false && Waits::now(context, caller)?.holds(&message) => Err(Failure::refuse("
+
+[[plant]]
+name = "resume tasks: an inbox lists the text of what no window was handed while the project is closed"
+meant = "while_the_project_is_closed_a_message_no_window_was_handed_is_listed_with_none_of_its_text"
+runs = ["daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/inbox.rs"
+find = "        .map(|message| value(&waits.summary(message)))"
+replace = "        .map(|message| value(&crate::api::views::MessageSummary::from(message)))"
+
+[[plant]]
+name = "resume tasks: a task's thread holds what no window was handed while the project is closed"
+meant = "while_the_project_is_closed_a_message_no_window_was_handed_is_left_out_of_the_thread"
+runs = ["daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "            .retain(|message| message.state != \"gated\" && !waits.holds(message));"
+replace = "            .retain(|message| message.state != \"gated\");"
+
+[[plant]]
+name = "resume tasks: a brief no window was handed is read while the project is closed"
+meant = "while_the_project_is_closed_a_brief_no_window_was_handed_is_in_no_agent_s_view_but_its_writer_s"
+runs = ["daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "            _ if waits.holds(message) => held = true,"
+replace = ""
+
+[[plant]]
+name = "resume tasks: a receipt says back the answer it is about while the project is closed"
+meant = "while_the_project_is_closed_a_receipt_of_nothing_handed_says_none_of_the_answer"
+runs = ["daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/answers.rs"
+find = "            Some(answer) => value(&waits.summary(answer))?,"
+replace = "            Some(answer) => value(&MessageSummary::from(answer))?,"
+
+[[plant]]
+name = "resume tasks: the chief's history reads out what no window was handed while the project is closed"
+meant = "while_the_project_is_closed_a_page_reads_out_none_of_a_message_no_window_was_handed"
+runs = ["daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/history.rs"
+find = "            .map(|found| waits.shown(found)))"
+replace = "            .map(|found| { let _ = &waits; found }))"
+
+[[plant]]
+name = "resume tasks: what no window was handed waits whether the project is closed or not"
+meant = "a_message_no_window_was_handed_waits_while_the_project_is_closed_and_its_sender_reads_it_as_ever"
+runs = ["daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''
+        self.closed
+            && matches!'''
+replace = '''
+        true
+            && matches!'''
+
+[[plant]]
+name = "resume tasks: a window of a closed project may not read what it wrote itself"
+meant = "a_message_no_window_was_handed_waits_while_the_project_is_closed_and_its_sender_reads_it_as_ever"
+runs = ["daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/waits.rs"
+find = '''
+            && message.sender.as_deref() != Some(self.reader)'''
+replace = ""
+
+# --- round 11: the Enter pressed once more never sends words twice (both reviews of 2026-10-20) ---
+
+[[plant]]
+name = "resume tasks: the Enter pressed once more goes into a window its harness hands words to over a channel"
+meant = "an_uncertain_hand_over_to_codex_is_never_given_back_by_an_enter_and_arrives_once"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = """
+                && !delivering.entered_again
+                && self.pasted(record)"""
+replace = """
+                && !delivering.entered_again
+                && (self.pasted(record) || true)"""
+
+[[plant]]
+name = "resume tasks: an Enter withheld leaves nothing to empty from the box"
+meant = "a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_pasted_there"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = """
+                part.uncleared = Some(Uncleared {
+                    pane,
+                    message,
+                    carried,
+                    since,
+                    unquiet_since: None,
+                    unquiet_last: None,
+                });"""
+replace = """
+                let _ = (pane, carried, since);"""
+
+[[plant]]
+name = "resume tasks: a paste goes into a box whose keys the host did not take"
+meant = "a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_pasted_there"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+            && !self.clear_box(record, &pane).await
+        {"""
+replace = """
+            && !(self.clear_box(record, &pane).await || true)
+        {"""
+
+[[plant]]
+name = "resume tasks: a box emptied stays to be emptied again"
+meant = "a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_pasted_there"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+            if part
+                .uncleared
+                .as_ref()
+                .is_some_and(|stale| &stale.pane == pane)
+            {
+                part.uncleared = None;
+            }"""
+replace = ""
+
+[[plant]]
+name = "resume tasks: the adapter is not told the engine just emptied the box"
+meant = "a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_pasted_there"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+            .handing(message.id, carried.clone())
+            .cleared(cleared);"""
+replace = """
+            .handing(message.id, carried.clone())
+            .cleared(false && cleared);"""
+
+[[plant]]
+name = "resume tasks: Claude empties a box the engine just emptied, a second Control-C"
+meant = "a_box_the_engine_just_emptied_is_not_emptied_again_by_claude"
+runs = ["harness-launch-claude-stops"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            if self.restored.get() && !host.cleared() {"
+replace = "            if self.restored.get() {"
+
+[[plant]]
+name = "resume tasks: an Enter withheld for a closed project leaves the paste on its way in the box"
+meant = "a_paste_left_unsent_in_a_window_the_close_could_not_close_gets_no_enter_until_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+        self.give_back(message, because)?;
+        Ok(Enter::Withheld)"""
+replace = """
+        if admitting.withdrawn.get() {
+            self.give_back(message, because)?;
+        }
+        Ok(Enter::Withheld)"""
+
+[[plant]]
+name = "resume tasks: a row the window read since is taken for one withdrawn"
+meant = "a_paste_a_row_of_which_was_read_while_the_screen_was_looked_at_is_taken_for_arrived"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "             WHERE carried_by = ? AND state IN ('read', 'delivered') ORDER BY id\","
+replace = "             WHERE carried_by = ? AND state IN ('delivered') ORDER BY id\","
+
+[[plant]]
+name = "resume tasks: the Enter pressed once more asks nothing of what the window has"
+meant = "a_paste_a_row_of_which_was_read_while_the_screen_was_looked_at_is_taken_for_arrived"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+            .handing(message, carried)
+            .again();"""
+replace = """
+            .handing(message, carried);"""
+
+[[plant]]
+name = "resume tasks: a paste the window has is given back"
+meant = "a_paste_a_row_of_which_was_read_while_the_screen_was_looked_at_is_taken_for_arrived"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        if let Some(row) = admitting.received.get() {"
+replace = "        if let Some(row) = admitting.received.get().filter(|_| false) {"
+
+[[plant]]
+name = "resume tasks: Devin's box is emptied with Control-U"
+meant = "a_window_takes_what_it_is_handed_pasted_or_over_a_channel_as_the_harness_says"
+runs = ["harness-tooling"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "const CLEAR_INPUT: [u8; 1] = [0x03];"
+replace = "const CLEAR_INPUT: [u8; 1] = [0x15];"
+
+# --- round 12: what the box holds after a withheld Enter (Calliope's review of 2026-10-21) ---
+
+[[plant]]
+name = "resume tasks: a paste the human sent from the box is pasted again"
+meant = "words_the_human_sent_from_the_box_are_taken_for_arrived_and_never_pasted_again"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            if let Some(item) = copied {"
+replace = "            if let Some(item) = copied.filter(|_| false) {"
+
+[[plant]]
+name = "resume tasks: a paste the human sent is begun inside the carrier that took it since"
+meant = "words_the_human_sent_from_the_box_leave_the_carrier_that_took_them_since"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = """
+            "UPDATE message SET carried_by = NULL WHERE id = ?",
+            [message_id],"""
+replace = """
+            "UPDATE message SET carried_by = carried_by WHERE id = ?",
+            [message_id],"""
+
+[[plant]]
+name = "resume tasks: the rows a paste the human sent held are not put back in it"
+meant = "words_the_human_sent_from_the_box_are_taken_for_arrived_and_never_pasted_again"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "                 WHERE id = ?3 AND id != ?1 AND state IN ('queued', 'cancelled')\","
+replace = "                 WHERE id = ?3 AND id != ?1 AND state IN ('queued')\","
+
+[[plant]]
+name = "resume tasks: a withdrawn paste the human sent stays withdrawn"
+meant = "a_withdrawn_continuation_the_human_sent_from_the_box_is_never_pasted_again"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        if !withdrawn && !given_up && message.state != \"queued\" {"
+replace = "        if withdrawn || !given_up && message.state != \"queued\" {"
+
+[[plant]]
+name = "resume tasks: a row withdrawn after its paste was handed over stays withdrawn when the paste arrives"
+meant = "a_row_withdrawn_after_its_paste_was_handed_over_reads_delivered_once_the_paste_arrives"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "           AND handed_at >= (SELECT handed_at FROM message WHERE id = ?3)\","
+replace = "           AND handed_at < (SELECT handed_at FROM message WHERE id = ?3)\","
+
+[[plant]]
+name = "resume tasks: a paste taken back keeps a row it carried that was withdrawn after its hand-over"
+meant = "a_paste_taken_back_leaves_a_row_withdrawn_after_its_hand_over_withdrawn"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/taken_back.rs"
+find = "                        THEN json_extract(receipt, '$.cancelled') END IS NOT NULL\","
+replace = "                        THEN json_extract(receipt, '$.cancelled') END IS NULL AND 0\","
+
+[[plant]]
+name = "resume tasks: the key that empties the box goes into a window that prints or holds what the human typed"
+meant = "the_box_is_emptied_only_while_the_window_is_quiet_and_holds_nothing_typed"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            let quiet = self.may_press(&pane).await;"
+replace = "            let quiet = self.may_press(&pane).await || true;"
+
+[[plant]]
+name = "resume tasks: the key that empties the box goes into a window holding what the human typed"
+meant = "the_box_is_emptied_only_while_the_window_is_quiet_and_holds_nothing_typed"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+                && !js::truthy(snapshot.get("unsent"))"""
+replace = ""
+
+[[plant]]
+name = "resume tasks: a box emptied counts as empty only for the paste right after the key"
+meant = "a_box_emptied_counts_as_empty_until_a_paste_goes_in"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+        if !matches!(outcome, Admission::Refused { .. }) {
+            record.delivery.borrow_mut().emptied = None;
+        }"""
+replace = """
+        record.delivery.borrow_mut().emptied = None;"""
+
+[[plant]]
+name = "resume tasks: a key the host did not take spends no attempt"
+meant = "a_box_that_will_not_take_its_key_fails_its_delivery_as_a_refused_paste_does"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+            let delivering = self.delivering(record, message.id, carried);
+            return self.settle_failure(
+                delivering,
+                "its window's input box could not be emptied of a paste whose Enter was withheld",
+                true,
+            );"""
+replace = """
+            let _ = carried;
+            self.give_back(message.id, "its window's input box could not be emptied")?;
+            return Ok(());"""
+
+# --- round 13: Calliope's review of round 12 (2026-10-21) ---
+
+[[plant]]
+name = "resume tasks: a window that never goes quiet for the key holds its queue for good"
+meant = "a_window_that_never_goes_quiet_for_the_key_fails_its_delivery_in_the_end"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                if now - since <= self.seams.limits.arrival_ms {"
+replace = "                if now - since <= self.seams.limits.arrival_ms || true {"
+
+[[plant]]
+name = "resume tasks: an earlier copy of a withheld paste is taken for the human sending it"
+meant = "an_earlier_copy_of_a_withheld_paste_is_not_taken_for_the_human_sending_it"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = "         AND instr(t.text, ?) > 0 AND t.copied_at >= ?"
+replace = "         AND instr(t.text, ?) > 0 AND (t.copied_at >= ? OR 1)"
+
+[[plant]]
+name = "resume tasks: the mark of a paste the human sent goes before the ledger has it"
+meant = "a_failed_write_of_words_sent_from_the_box_leaves_them_to_be_taken_for_arrived_next_pass"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                let confirmed = self.seams.ledger.borrow_mut().confirm_sent_by_hand("
+replace = """                record.delivery.borrow_mut().uncleared = None;
+                let confirmed = self.seams.ledger.borrow_mut().confirm_sent_by_hand("""
+
+[[plant]]
+name = "resume tasks: words the human sent are begun in one write and confirmed in another"
+meant = "a_failed_write_of_words_sent_from_the_box_leaves_them_to_be_taken_for_arrived_next_pass"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = """
+        let mut receipt = receipt.clone();
+        if withdrawn {
+            receipt["cancelled"] = json!(WITHDRAWN_AFTER_HANDED);
+        }"""
+replace = """
+        store.db.execute_batch("COMMIT; BEGIN IMMEDIATE")?;
+        let mut receipt = receipt.clone();
+        if withdrawn {
+            receipt["cancelled"] = json!(WITHDRAWN_AFTER_HANDED);
+        }"""
+
+[[plant]]
+name = "resume tasks: words given back and withdrawn since that the human sent stay withdrawn"
+meant = "words_superseded_after_the_human_sent_them_from_the_box_read_delivered_with_their_note"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        let withdrawn = message.state == \"cancelled\";"
+replace = "        let withdrawn = message.state == \"cancelled\" && message.attempts < 0;"
+
+[[plant]]
+name = "resume tasks: the rows of words withdrawn on their way that the human sent stay withdrawn"
+meant = "words_withdrawn_on_their_way_that_the_human_sent_read_delivered_with_their_rows"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "                 WHERE id = ?3 AND id != ?1 AND state IN ('queued', 'cancelled')\","
+replace = "                 WHERE id = ?3 AND id != ?1 AND state IN ('queued')\","
+
+[[plant]]
+name = "resume tasks: a row handed with an earlier paste reads delivered when its carrier arrives"
+meant = "a_row_handed_with_an_earlier_paste_stays_withdrawn_when_its_carrier_arrives"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "                   AND handed_at >= (SELECT handed_at FROM message WHERE id = ?1)"
+replace = "                   AND handed_at IS NOT NULL"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "           AND handed_at >= (SELECT handed_at FROM message WHERE id = ?3)\","
+replace = "           AND handed_at IS NOT NULL AND ?3 = ?3\","
+
+[[plant]]
+name = "resume tasks: a box the human typed into since it was emptied counts as empty"
+meant = "a_box_the_human_typed_into_since_it_was_emptied_is_not_counted_empty"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+        if held == Some(Held::Unsent) {
+            record.delivery.borrow_mut().emptied = None;
+        }"""
+replace = ""
+
+# --- round 13's review (Calliope, 2026-10-21) ---
+
+[[plant]]
+name = "resume tasks: a paste given up that the human sent stays failed"
+meant = "a_paste_given_up_for_a_window_never_quiet_that_the_human_sent_reads_delivered"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        let given_up = message.state == \"failed\";"
+replace = "        let given_up = message.state == \"failed\" && message.attempts < 0;"
+
+[[plant]]
+name = "resume tasks: the wait for a quiet window counts on across a gap"
+meant = "the_wait_for_a_quiet_window_starts_again_after_a_gap_longer_than_the_arrival_window"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+                        .is_some_and(|last| now - last > arrival_ms)"""
+replace = """
+                        .is_some_and(|last| now - last > arrival_ms && false)"""
+
+[[plant]]
+name = "resume tasks: a box emptied before a Close counts as empty after the Resume"
+meant = "a_box_emptied_before_a_close_is_not_counted_empty_after_the_resume"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.record_of(participant.id).delivery.borrow_mut().emptied = None;"
+replace = "            let _ = participant;"
+
+# --- round 15: Calliope's review of the merge (T-81) ---
+
+[[plant]]
+name = "resume tasks: the chief's own exit leaves a box emptied counted empty"
+meant = "a_box_emptied_before_the_chiefs_window_ended_is_not_counted_empty_after_the_resume"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        for participant in participants {"
+replace = "        for participant in participants.iter().filter(|_| because.is_none()) {"
+
+# --- where the Resume's rules meet main's field 3.0.6 (the merge of T-392) ---
+
+[[plant]]
+name = "resume tasks: the Enter sends the brief of the chief's own step finished while the screen was looked at"
+meant = "a_brief_of_the_chiefs_own_step_finished_while_its_enter_looked_is_withheld_and_never_sent_again"
+runs = ["engine-meeting-main"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if let Some(task) = message_task(store, message_id)? {
+            if withdrawn_late(store, &message, &task)? {
+                return Ok(HandOver::Withdrawn);
+            }
+        }
+'''
+replace = "\n"
+
+[[plant]]
+name = "resume tasks: a pause note withdrawn at its last attempt is said to have failed"
+meant = "a_pause_note_on_its_way_when_its_task_is_cancelled_says_its_warning_again_if_it_is_given_up"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
+            return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+        }'''
+replace = '''
+        if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
+            return Ok((known_message(store, message_id)?, GivenUp::Failed));
+        }'''
+
+[[plant]]
+name = "resume tasks: a brief that waits is kept from all but its writer, as before the merge"
+meant = "while_the_project_is_closed_the_chief_reads_a_brief_the_human_wrote_and_its_window_does_not"
+runs = ["daemon-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "        if held_back && !may_move(caller, &task) {"
+replace = "        if held_back {"
+

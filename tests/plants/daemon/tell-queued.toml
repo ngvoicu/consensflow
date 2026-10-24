@@ -386,12 +386,12 @@ runs = ["engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "        let outcome = match returning(window.deliver(host, &pane, &text)).await {"
+find = "        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {"
 replace = '''
         if begun.message.kind == "result" {
-            let _ = returning(window.deliver(host, &pane, &text)).await;
+            let _ = returning(window.deliver(&admitting, &pane, &text)).await;
         }
-        let outcome = match returning(window.deliver(host, &pane, &text)).await {'''
+        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {'''
 
 # The flake found in the gate (2026-10-15): the case read a worker's process file as
 # soon as it was there, which under load was before its process was in it. The plant
