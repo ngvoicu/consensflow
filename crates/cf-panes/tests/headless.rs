@@ -692,6 +692,80 @@ fn parked_page_probe_stops_at_1024_then_drains_14400_bytes_via_wire_acks() {
     helper.close_input_and_wait();
 }
 
+/// A window whose page takes its output and never acknowledges it, as a page asleep
+/// behind a locked screen or a hidden window does, a crashed one that is not loaded again
+/// (Windows), or one that let go of a pane still open: its program goes on printing, and
+/// the screen the daemon reads keeps up with it. The window is opened as the daemon opens
+/// one, with the host's own backlog. The host stops reading a window once that backlog
+/// (1 MiB) is unacknowledged, and the program waits in its terminal's write for good.
+#[test]
+#[ignore = "known failure (T-454): the host stops reading a window once 1 MiB of its \
+            output is unacknowledged, and only the page acknowledges; issue page \
+            issues/a-window-stops-when-its-page-stops-acknowledging.md"]
+fn a_window_whose_page_never_acknowledges_goes_on_and_its_screen_keeps_up() {
+    const PRINTED: usize = 4 * 1024 * 1024;
+
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let done = std::env::temp_dir().join(format!("cf-unacked-{}", std::process::id()));
+    let _ = std::fs::remove_file(&done);
+    let script = format!(
+        "/usr/bin/head -c {PRINTED} /dev/zero | /usr/bin/tr '\\000' x; \
+         printf '\\nprinted all\\n'; : > '{}'; exec /bin/sleep 60",
+        done.display()
+    );
+    let opened = helper.request(
+        "pane.open",
+        json!({
+            "id":"pane-unacked",
+            "generation":1,
+            "cwd":"/tmp",
+            "argv":["/bin/sh","-c",script],
+            "env":{},
+            "size":{"rows":24,"cols":80},
+        }),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane = json!({"id":"pane-unacked","generation":1,"tail":2});
+
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut sent = 0;
+    let tail = loop {
+        let snapshot = helper.request("pane.snapshot", pane.clone(), &mut events);
+        sent += events
+            .drain(..)
+            .filter_map(|event| output_bytes(&event, "pane-unacked", 1))
+            .map(|(_, bytes)| bytes.len())
+            .sum::<usize>();
+        let tail = snapshot["tail"].clone();
+        let last = tail[1].as_str().unwrap_or_default();
+        if done.exists() && last == "printed all" {
+            break tail;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the program is still printing after 60 s with nothing acknowledged: \
+             {sent} bytes sent to the page, its mark {}, the screen's last line {} long",
+            if done.exists() { "made" } else { "not made" },
+            tail.as_array()
+                .and_then(|lines| lines.last())
+                .and_then(Value::as_str)
+                .map_or(0, str::len),
+        );
+        thread::sleep(Duration::from_millis(250));
+    };
+    assert_eq!(tail[1], "printed all", "{tail}");
+    let _ = std::fs::remove_file(&done);
+    helper.request(
+        "pane.kill",
+        json!({"id":"pane-unacked","generation":1}),
+        &mut events,
+    );
+    helper.close_input_and_wait();
+}
+
 #[test]
 fn stdin_eof_reaps_every_spawned_process() {
     let _pty_guard = serial_headless_test();
