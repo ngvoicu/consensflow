@@ -9,9 +9,9 @@
 //! goes on. A task the human gives the chief is no such step: its result is the
 //! human's to decide.
 
-use cf_ledger::{GivenUp, NewTask};
+use cf_ledger::{GivenUp, MessageView, NewTask};
 
-use crate::fixture::{world, World};
+use crate::fixture::{gated_world, ids, world, World};
 
 /// A task the chief is given by `from`, waiting for the tasks it `needs`.
 fn for_the_chief(w: &mut World, from: &str, needs: &[i64], body: &str) -> i64 {
@@ -214,4 +214,117 @@ fn a_task_the_human_gives_the_chief_puts_its_result_to_the_human_as_it_always_di
         (result.recipient.as_str(), result.state.as_str()),
         ("human", "queued")
     );
+}
+
+/// The id and kind of each message.
+fn kinds(messages: &[MessageView]) -> Vec<(i64, &str)> {
+    messages
+        .iter()
+        .map(|message| (message.id, message.kind.as_str()))
+        .collect()
+}
+
+#[test]
+fn everything_that_was_on_its_way_to_the_chief_when_it_finished_its_step_is_named() {
+    // A note about the step, queued for the chief, rides on the brief that
+    // waits. The finish withdraws both, and says which (T-270, round 2).
+    let mut w = world();
+    let parser = parser_done(&mut w);
+    let own = for_the_chief(&mut w, "chief", &[parser], "Check the parser");
+    w.ledger
+        .accept_task(w.project, parser, "chief")
+        .expect("accepted");
+    let brief = w.next("chief").expect("the step's brief");
+    let note = w.note("human", "chief", own, "Mind the tests").id;
+
+    let finished = w
+        .ledger
+        .record_result(w.project, own, "Checked: it holds")
+        .expect("done by its word");
+
+    assert_eq!(
+        kinds(&finished.withdrawn),
+        [(brief, "task"), (note, "note")]
+    );
+    assert_eq!(w.states(&[brief, note]), ["cancelled", "cancelled"]);
+    assert!(finished.landing.is_empty());
+}
+
+#[test]
+fn a_note_held_at_the_gate_about_the_step_is_withdrawn_and_named_too() {
+    // The gate holds a worker's word to the chief: the finish withdraws it with
+    // the rest, and names it.
+    let mut w = gated_world();
+    let own = for_the_chief(&mut w, "chief", &[], "Check the parser");
+    let brief = w.next("chief").expect("the step's brief");
+    let note = w.note("zeus", "chief", own, "The parser is the other way round");
+    assert_eq!(note.state, "gated", "held for the human");
+
+    let finished = w
+        .ledger
+        .record_result(w.project, own, "Checked: it holds")
+        .expect("done by its word");
+
+    assert_eq!(
+        kinds(&finished.withdrawn),
+        [(brief, "task"), (note.id, "note")]
+    );
+    assert_eq!(w.message(note.id).state, "cancelled");
+}
+
+#[test]
+fn a_step_with_nothing_on_its_way_names_nothing() {
+    let mut w = world();
+    let own = for_the_chief(&mut w, "chief", &[], "Check the parser");
+    let brief = w.next("chief").expect("the step's brief");
+    w.deliver(brief);
+
+    let finished = w
+        .ledger
+        .record_result(w.project, own, "Checked: it holds")
+        .expect("done by its word");
+
+    assert!(finished.withdrawn.is_empty() && finished.landing.is_empty());
+}
+
+#[test]
+fn a_brief_being_typed_in_when_the_step_was_finished_is_named_as_landing() {
+    // Its paste is under way, which the finish leaves to it (it goes no further
+    // if the paste is given back): the chief is told it may still land once.
+    let mut w = world();
+    let own = for_the_chief(&mut w, "chief", &[], "Check the parser");
+    let brief = w.next("chief").expect("the step's brief");
+    w.begin(brief);
+
+    let finished = w
+        .ledger
+        .record_result(w.project, own, "Checked: it holds")
+        .expect("done by its word");
+
+    assert_eq!(ids(&finished.landing), [brief], "it may still arrive once");
+    assert!(
+        finished.withdrawn.is_empty(),
+        "nothing queued was left to take back"
+    );
+    assert_eq!(w.message(brief).state, "delivering");
+}
+
+#[test]
+fn a_note_being_typed_in_when_the_step_was_finished_is_not_named_as_landing() {
+    // Only the brief is given up when its paste is given back, so only it is
+    // told to the chief as one that may land once and is not sent again.
+    let mut w = world();
+    let own = for_the_chief(&mut w, "chief", &[], "Check the parser");
+    let brief = w.next("chief").expect("the step's brief");
+    w.deliver(brief);
+    let note = w.note("human", "chief", own, "Mind the tests").id;
+    w.begin(note);
+
+    let finished = w
+        .ledger
+        .record_result(w.project, own, "Checked: it holds")
+        .expect("done by its word");
+
+    assert!(finished.landing.is_empty(), "a note is not the brief");
+    assert_eq!(w.message(note).state, "delivering");
 }

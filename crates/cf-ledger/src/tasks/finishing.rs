@@ -82,6 +82,8 @@ pub(crate) fn record_result(
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,
+            withdrawn: Vec::new(),
+            landing: Vec::new(),
         })
     })
 }
@@ -327,6 +329,8 @@ pub(crate) fn reopen_task(
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,
+            withdrawn: Vec::new(),
+            landing: Vec::new(),
         })
     })
 }

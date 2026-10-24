@@ -457,7 +457,8 @@ fn moved(
         }
         // The chief's own step is accepted with its words: nothing comes back to decide.
         "done" if task.get("state").and_then(Value::as_str) == Some("accepted") => format!(
-            "T-{number} is done and accepted: it was your own step, so nothing waits for your decision, and what needed it goes on."
+            "T-{number} is done and accepted: it was your own step, so nothing waits for your decision, and what needed it goes on.{}",
+            on_its_way(answer.value())
         ),
         "edit" => format!(
             "T-{number} has your new brief; no window had the old one, and the ledger keeps it. {}",
@@ -498,6 +499,49 @@ fn finishing(number: u64, task: &Value, jobs: Option<u64>, agents: Option<u64>) 
     format!(
         "T-{number} is finished: what @{who} said last is its result, which reaches your inbox. Finishing does not end what its turn left running ({left}): {they} may run on until its window closes, or past it where the host cannot tell what is the window's."
     )
+}
+
+/// What the board says of the chief's own step it finished, as a sentence to
+/// add: what was still on its way to the chief and was withdrawn (its brief, and
+/// any answer or note carried on it), and its brief if it was being typed in,
+/// which may still land once. Nothing when the answer names neither.
+fn on_its_way(said: &Value) -> String {
+    let mut sentences = String::new();
+    if let Some(withdrawn) = named(said.get("withdrawn")) {
+        sentences.push_str(&format!(
+            " Still on its way to you, and now withdrawn: {withdrawn}."
+        ));
+    }
+    if let Some(landing) = named(said.get("landing")) {
+        sentences.push_str(&format!(
+            " Being typed into your window as you finished: {landing}; it may still land once, and is not sent again."
+        ));
+    }
+    sentences
+}
+
+/// The messages in a JSON list as a sentence names them ("the brief m-3, a note
+/// m-5 and an answer m-6"); none when there is no list or it is empty.
+fn named(messages: Option<&Value>) -> Option<String> {
+    let names: Vec<String> = messages?
+        .as_array()?
+        .iter()
+        .map(|message| {
+            let kind = match message.get("kind").and_then(Value::as_str) {
+                Some("task") => "the brief",
+                Some("answer") => "an answer",
+                Some("note") => "a note",
+                _ => "a message",
+            };
+            format!("{kind} m-{}", js::text(message.get("id")))
+        })
+        .collect();
+    let (last, rest) = names.split_last()?;
+    Some(if rest.is_empty() {
+        last.clone()
+    } else {
+        format!("{} and {last}", rest.join(", "))
+    })
 }
 
 /// What a cancel says of the messages `ids`, the words you told the task's

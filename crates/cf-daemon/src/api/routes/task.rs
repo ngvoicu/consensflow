@@ -190,7 +190,10 @@ fn items_of(asked: Option<&str>) -> usize {
 }
 
 /// `POST /api/tasks/<n>/done`: the assignee's answer finishes the task. Only
-/// its assignee may finish it.
+/// its assignee may finish it. The chief's own step is accepted with it, and
+/// the answer names what was still on its way and is withdrawn (`withdrawn`:
+/// its brief, and any answer or note carried on it), and its brief if it was
+/// being typed in and may still land once (`landing`), each as a message.
 fn done(
     context: &Context,
     caller: &Caller,
@@ -214,9 +217,18 @@ fn done(
             .borrow_mut()
             .record_result(caller.project.id, task.task.number, words)?;
     (context.kick)();
-    Ok(Answer::ok(
-        json!({ "task": value(&TaskSummary::from(&done.task))? }),
-    ))
+    let mut answer = Map::new();
+    answer.insert("task".to_owned(), value(&TaskSummary::from(&done.task))?);
+    for (key, messages) in [("withdrawn", &done.withdrawn), ("landing", &done.landing)] {
+        if !messages.is_empty() {
+            let named: Result<Vec<_>, _> = messages
+                .iter()
+                .map(|message| value(&MessageSummary::from(message)))
+                .collect();
+            answer.insert(key.to_owned(), Value::Array(named?));
+        }
+    }
+    Ok(Answer::ok(Value::Object(answer)))
 }
 
 /// `POST /api/tasks/<n>/tell`: stop the task and put this to its window. The
