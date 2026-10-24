@@ -3,8 +3,8 @@
 //! stay as long as the app it started runs (an `xdg-open` that starts a browser
 //! in its own place). It is waited for a moment, for what it says when it fails
 //! at once; then it is let go, never ended: it leads a process group of its own
-//! on Unix, so nothing sent to this one's reaches it, and on Windows it stays
-//! out of the job that ends every child of this process with it.
+//! on Unix, so nothing sent to this one's reaches it, and on Windows it is put in
+//! no job (`job`), which would end it with this process.
 
 use std::process::Stdio;
 use std::time::Duration;
@@ -122,13 +122,17 @@ mod tests {
     }
 
     /// The opener that stays while the browser it started runs is let go at
-    /// the end of its moment, and goes on to its end: nothing ends it.
-    #[cfg(unix)]
+    /// the end of its moment, and goes on to its end: nothing ends it, on Windows
+    /// no job either, which would end it with the handing over.
     #[test]
     fn a_program_still_running_is_let_go_and_runs_on_to_its_end() {
         let folder = tempfile::tempdir().unwrap();
         let mark = folder.path().join("ended");
-        let script = format!("sleep 1; echo done > '{}'", mark.display());
+        let script = if cfg!(windows) {
+            format!("ping -n 3 127.0.0.1 >NUL & echo done> {}", mark.display())
+        } else {
+            format!("sleep 1; echo done > '{}'", mark.display())
+        };
         let started = std::time::Instant::now();
         let runtime = runtime();
         let handed = runtime.block_on(hand_over(
@@ -143,7 +147,7 @@ mod tests {
         while !mark.exists() && std::time::Instant::now() < until {
             std::thread::sleep(Duration::from_millis(50));
         }
-        assert_eq!(std::fs::read_to_string(&mark).unwrap(), "done\n");
+        assert_eq!(std::fs::read_to_string(&mark).unwrap().trim(), "done");
     }
 
     #[test]

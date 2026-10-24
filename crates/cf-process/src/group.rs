@@ -1,8 +1,9 @@
 //! What a program run to its end (`capture`, and `execute` with it) leads: on
 //! Unix a process group of its own, so that ending it ends what it started
 //! too (the children of Homebrew and of npm, which an update runs through),
-//! not the program alone. Windows has no groups: `taskkill /T` ends a tree,
-//! and the job ends every child this process has when this process ends.
+//! not the program alone. Windows has no groups: the program runs in a job
+//! of its own (`job`), which ends it and everything it started, those it
+//! starts as it is ended too, and ends with this process.
 //!
 //! The group is the program's to end until the program has been waited for,
 //! and not after: a program that is waited for is reaped, and the id it led
@@ -11,7 +12,7 @@
 //! group: this process's exit path (the [`Ender`] handed out), its time
 //! running out, and the wait for it dropped. What the program left running
 //! once it was waited for is let go of, as with a program that exited after
-//! it detached its children.
+//! it detached its children (on Windows its job is released).
 //!
 //! A program held whole (`capture_whole`) leads a session of its own on Unix,
 //! and its group with it: every process it starts is in that session, though it
@@ -36,13 +37,14 @@
 //! forced. Either is in no session of the run's, descended from it no more, and
 //! noted never: it is let go, and may write after the run.
 
-use std::cell::Cell;
 #[cfg(unix)]
 use std::cell::RefCell;
 use std::rc::Rc;
 #[cfg(unix)]
 use std::time::Duration;
 
+use crate::job::Job;
+use crate::live::Live;
 #[cfg(unix)]
 use crate::table::{self, Identity};
 use crate::terminate::{end, Reach};
@@ -59,7 +61,7 @@ pub(crate) fn lead(command: &mut tokio::process::Command) {
     command.process_group(0);
 }
 
-/// Windows has no groups: its job and `taskkill /T` hold the tree.
+/// Windows has no groups: the job of a program holds the tree (`job::start_in_job`).
 #[cfg(not(unix))]
 pub(crate) fn lead(_command: &mut tokio::process::Command) {}
 
@@ -81,23 +83,18 @@ pub(crate) fn lead_whole(command: &mut tokio::process::Command) {
     }
 }
 
-/// Starts `command` held whole on Windows: suspended, its window hidden, so that it
-/// is put in its job before it runs (`job::Job::of` lets it run).
-#[cfg(windows)]
-pub(crate) fn lead_whole(command: &mut tokio::process::Command) {
-    use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
-    command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
-}
+/// Windows holds a program whole by its job (`job::start_in_job`), whole or not.
+#[cfg(not(unix))]
+pub(crate) fn lead_whole(_command: &mut tokio::process::Command) {}
 
 /// The program a capture started, and the group it leads: the capture's to
 /// end until it has [released](Group::release) them, and ended by this one's
 /// drop before.
 pub(crate) struct Group {
     pid: Option<u32>,
-    /// Whether the program has been waited for: its pid, and the id of its
-    /// group, may be another's now. The enders hold it weakly, so that a
-    /// capture dropped is told to them as no program to end.
-    exited: Rc<Cell<bool>>,
+    /// Whether the program has been waited for, and its job. The enders hold it
+    /// weakly, so that a capture dropped is told to them as no program to end.
+    live: Rc<Live>,
     /// Whether it is held whole, the leader of a session of its own (Unix).
     #[cfg(unix)]
     whole: bool,
@@ -110,13 +107,13 @@ pub(crate) struct Group {
 }
 
 impl Group {
-    /// The group of the program `pid`, which has just started, held whole or not.
-    pub(crate) fn new(pid: Option<u32>, whole: bool) -> Self {
+    /// The group of the program `pid`, which has just started in `job`, held whole or not.
+    pub(crate) fn new(pid: Option<u32>, whole: bool, job: Job) -> Self {
         #[cfg(not(unix))]
         let _ = whole;
         Self {
             pid,
-            exited: Rc::default(),
+            live: Rc::new(Live::new(job)),
             #[cfg(unix)]
             whole,
             #[cfg(unix)]
@@ -128,18 +125,23 @@ impl Group {
 
     /// What ends the group later, should this process be ending.
     pub(crate) fn ender(&self) -> Ender {
-        Ender::new(self.pid, Reach::Group, &self.exited)
+        Ender::new(self.pid, Reach::Group, &self.live)
+    }
+
+    /// The job of the program: the one thing on Windows that holds what it started.
+    pub(crate) fn job(&self) -> &Job {
+        self.live.job()
     }
 
     /// Asks or forces the program, and what it started, to end: on Unix every
     /// process of the group gets the signal `how` names (SIGTERM is what
-    /// Node's `kill` sends, to the program alone); on Windows the whole tree
+    /// Node's `kill` sends, to the program alone); on Windows its whole job
     /// goes whatever `how` asks, where Node ends the program alone (and a
     /// `.cmd`'s own program, left running, keeps its streams open). Nothing
     /// is sent once it was waited for. Held whole on Unix, what it started is
     /// noted as it is asked, and forced with it (the module's doc).
     pub(crate) fn end(&self, how: Ending) {
-        let (Some(pid), false) = (self.pid, self.exited.get()) else {
+        let (Some(pid), false) = (self.pid, self.live.exited()) else {
             return;
         };
         #[cfg(unix)]
@@ -149,7 +151,7 @@ impl Group {
                 Ending::Forced => self.sweep(pid),
             }
         }
-        end(pid, how, Reach::Group, true);
+        end(pid, how, Reach::Group, true, self.live.job());
     }
 
     /// Notes the processes descended from the program `pid`, which it is about to be
@@ -227,7 +229,7 @@ impl Group {
         let Some(pid) = self.pid.and_then(|pid| libc::id_t::try_from(pid).ok()) else {
             return false;
         };
-        if self.exited.get() {
+        if self.live.exited() {
             return false;
         }
         #[allow(unsafe_code)]
@@ -247,9 +249,9 @@ impl Group {
     }
 
     /// The program has been waited for: nothing is sent to its pid, nor to
-    /// its group's id, after this.
+    /// its group's id, after this, and what it left running is let go of.
     pub(crate) fn release(&self) {
-        self.exited.set(true);
+        self.live.set_exited();
     }
 }
 
@@ -307,12 +309,12 @@ impl Drop for Group {
     /// child that holds the program (declared after it), the group is
     /// signalled while the program is not yet reaped. Held whole, it is asked
     /// first, and given a moment to end (`FORCE_AFTER`), the thread waiting. On
-    /// Windows the program alone goes, as `kill_on_drop` ends it (held whole, its
-    /// job takes the rest).
+    /// Windows the program's job is dropped with this, and ends it, and
+    /// everything it started, before `kill_on_drop` ends the program.
     fn drop(&mut self) {
         #[cfg(unix)]
         {
-            if self.whole && self.pid.is_some() && !self.exited.get() {
+            if self.whole && self.pid.is_some() && !self.live.exited() {
                 self.end(Ending::Asked);
                 let until = std::time::Instant::now() + crate::execute::FORCE_AFTER;
                 while !self.ended() && std::time::Instant::now() < until {
@@ -347,12 +349,12 @@ mod tests {
     #[test]
     fn what_a_group_holds_is_ended_by_its_end_and_by_its_drop() {
         let mut ended = sleeper();
-        Group::new(Some(ended.id()), false).end(Ending::Forced);
+        Group::new(Some(ended.id()), false, Job::unheld()).end(Ending::Forced);
         assert_eq!(ended.wait().unwrap().signal(), Some(libc::SIGKILL));
 
         // Dropped before it was released: the capture was cancelled.
         let mut dropped = sleeper();
-        drop(Group::new(Some(dropped.id()), false));
+        drop(Group::new(Some(dropped.id()), false, Job::unheld()));
         assert_eq!(dropped.wait().unwrap().signal(), Some(libc::SIGKILL));
     }
 
@@ -360,7 +362,7 @@ mod tests {
     fn once_released_nothing_is_sent_by_its_end_its_ender_or_its_drop() {
         let mut waited_for = sleeper();
         let _left = Survivors(vec![waited_for.id()]);
-        let group = Group::new(Some(waited_for.id()), false);
+        let group = Group::new(Some(waited_for.id()), false, Job::unheld());
         let ender = group.ender();
         assert!(ender.running());
         group.release();
@@ -381,7 +383,7 @@ mod tests {
     fn a_group_dropped_is_no_one_s_to_end() {
         let mut sleeper = sleeper();
         let _left = Survivors(vec![sleeper.id()]);
-        let ender = Group::new(Some(sleeper.id()), false).ender();
+        let ender = Group::new(Some(sleeper.id()), false, Job::unheld()).ender();
         // The group went with its drop, which ended the program: the ender
         // that outlives it has no program to end.
         assert_eq!(sleeper.wait().unwrap().signal(), Some(libc::SIGKILL));
