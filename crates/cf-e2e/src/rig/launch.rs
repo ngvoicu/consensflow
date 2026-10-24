@@ -18,6 +18,7 @@ use super::stranger::Stranger;
 use super::{Config, Rig};
 use crate::daemon::Daemon;
 use crate::daemon_log::{self, errors_with_cause, lines_of, StartLine};
+use crate::outcome::Verdict;
 use crate::process::{Run, Spawned};
 use crate::wire::{self, First};
 use crate::{cf, checkout, files, pattern, serial, Error, Result};
@@ -38,6 +39,15 @@ impl Rig {
     /// pane host under test if they are not built; refuses a daemon whose start
     /// line says it is not the native one.
     pub fn start(config: Config) -> Result<Self> {
+        // Before anything: what the case's thread has failed with so far is none of this
+        // rig's, and the case it names is the one that starts it.
+        let judged = config.judged.then(Verdict::start);
+        let case = config.case.clone().unwrap_or_else(|| {
+            std::thread::current()
+                .name()
+                .unwrap_or("an unnamed thread")
+                .to_owned()
+        });
         let turn = serial::turn();
         // A home of its own, which goes if the rig never starts; or the one it is
         // to resume on. In the machine's temp folder, whatever the rig is built for: the
@@ -95,6 +105,8 @@ impl Rig {
             forget: config.stand_in_records.map(Forget::new),
             masker: config.masker,
             reports: config.reports,
+            case,
+            judged,
             keep_root: false,
             closed: false,
             close_failed: false,

@@ -47,6 +47,7 @@ use serde_json::Value;
 use crate::daemon::Daemon;
 use crate::daemon_log::StartLine;
 use crate::live::members::Identity;
+use crate::outcome::{self, Verdict};
 use crate::process::{self, Ran, Run, Sink, Spawned};
 use crate::{cf, checkout, files, wire, Error, Result};
 
@@ -99,6 +100,8 @@ pub struct Config {
     masker: Option<Masker>,
     reports: Option<PathBuf>,
     homes: Option<PathBuf>,
+    case: Option<String>,
+    judged: bool,
 }
 
 /// What a rig passes what it says of itself through, where its owner gives it one
@@ -164,6 +167,8 @@ impl Config {
             masker: None,
             reports: None,
             homes: None,
+            case: None,
+            judged: false,
         }
     }
 
@@ -189,6 +194,27 @@ impl Config {
     #[must_use]
     pub fn reports_in(mut self, folder: impl Into<PathBuf>) -> Self {
         self.reports = Some(folder.into());
+        self
+    }
+
+    /// With the rig's report, and the line that says where it is, naming `case` as the case
+    /// that left it, where the rig is not started on a thread named for its case: a run
+    /// that is no test. A rig started on the thread of a test is that test's, by the
+    /// thread's name.
+    #[must_use]
+    pub fn case(mut self, case: impl Into<String>) -> Self {
+        self.case = Some(case.into());
+        self
+    }
+
+    /// With the rig's case judged by what it returns ([`Outcome`](crate::Outcome)): a rig
+    /// dropped unclosed in a case that has not failed was dropped by a case that passed,
+    /// and has no report to keep. A rig not judged, which is every rig whose case does not
+    /// return one (a live suite's, a run's), cannot tell and keeps its report for every
+    /// drop unclosed.
+    #[must_use]
+    pub fn judged_by_outcome(mut self) -> Self {
+        self.judged = true;
         self
     }
 
@@ -364,6 +390,11 @@ pub struct Rig {
     masker: Option<Masker>,
     /// Where its report is kept, where it is not beside its home ([`Config::reports_in`]).
     reports: Option<PathBuf>,
+    /// The case that started it, as its report names it ([`Config::case`]).
+    case: String,
+    /// Whether its case is judged by what it returns, and whether it has failed
+    /// ([`Config::judged_by_outcome`]); the failures of the thread it started on then.
+    judged: Option<Verdict>,
     /// Whether the home is left when the rig ends: it is not, unless a rig is
     /// to resume on it or a case asked to keep it ([`Rig::keep_home`]).
     keep_root: bool,
@@ -686,6 +717,24 @@ impl Rig {
         self.close_expected_to_fail.store(true, Ordering::Relaxed);
     }
 
+    /// What the drop of the rig says of itself. A panic in flight is a failed case's. A rig
+    /// closed, or whose close the case holds to fail, has nothing to say. Any other is
+    /// dropped unclosed: a case that is not judged by what it returns cannot say that it
+    /// passed, and the rig says it; one that is says it once the case is known to have
+    /// failed, whether that is already or comes later (`outcome::leave`).
+    fn drop_says(&self) -> DropSays {
+        if std::thread::panicking() {
+            return DropSays::Now;
+        }
+        let failure_expected =
+            self.close_failed && self.close_expected_to_fail.load(Ordering::Relaxed);
+        if self.closed || failure_expected {
+            return DropSays::Nothing;
+        }
+        self.judged
+            .map_or(DropSays::Now, DropSays::OnceItsCaseFails)
+    }
+
     /// Ends the rig, as [`Rig::close`] says. It is closed once that succeeded: a close
     /// that failed leaves the rig to be dropped unclosed, which keeps its report.
     fn shutdown(&mut self, exit: Duration) -> Result<()> {
@@ -738,16 +787,32 @@ impl Rig {
     }
 }
 
+/// What the drop of a rig does with the report of what it showed.
+enum DropSays {
+    /// Nothing: the case closed it, or holds its close to fail.
+    Nothing,
+    /// It says it now: a panic is in flight, or the rig's case cannot say that it passed.
+    Now,
+    /// It says it once the case has failed, as the verdict reads.
+    OnceItsCaseFails(Verdict),
+}
+
 impl Drop for Rig {
     /// A rig not closed (a case that failed on the way, by a check, by an error it
-    /// returned, or by a close that failed: every case that passes ends by closing it)
-    /// is ended all the same, saying what the windows showed first; and the home goes
-    /// unless it is to be kept.
+    /// returned, or by a close that failed) is ended all the same, saying what the
+    /// windows showed first; and the home goes unless it is to be kept. A rig whose case
+    /// passed says nothing: one dropped unclosed by a case that is judged by what it
+    /// returns ([`Config::judged_by_outcome`]) writes what it shows while it is up, and
+    /// that is said only if the case fails; the scan of the suites
+    /// (`tests/rig/reports.rs`) is what holds the cases to the close.
     fn drop(&mut self) {
-        let failure_expected =
-            self.close_failed && self.close_expected_to_fail.load(Ordering::Relaxed);
-        if std::thread::panicking() || (!self.closed && !failure_expected) {
-            report::say(self);
+        match self.drop_says() {
+            DropSays::Nothing => {}
+            DropSays::Now => report::left_by(self).say(),
+            DropSays::OnceItsCaseFails(verdict) => {
+                let left = report::left_by(self);
+                outcome::leave(verdict, move || left.say());
+            }
         }
         let _ = self.shutdown(EXIT);
         self.daemon.kill();

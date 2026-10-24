@@ -3084,10 +3084,10 @@ runs = ["e2e-lib-report"]
 file = "crates/cf-e2e/src/rig/report.rs"
 find = '''
         Ok(()) => format!(
-            "\n--- the rig, as the failed case left it, is kept in {}\n",'''
+            "\n--- the rig, as the failed case left it, is kept in {} (case: {case})\n",'''
 replace = '''
         Ok(()) => format!(
-            "\n--- the rig, as the failed case left it, is kept in {} {report}\n",'''
+            "\n--- the rig, as the failed case left it, is kept in {} (case: {case}) {report}\n",'''
 
 [[plant]]
 name = "the rig: a dropped rig writes its report on the error output whole"
@@ -3096,8 +3096,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/report.rs"
-find = '    eprint!("{where_kept}");'
-replace = '    eprint!("{}", tell.text(&report));'
+find = 'eprint!("{where_kept}");'
+replace = 'eprint!("{}", self.report);'
 
 # The long run, rounds 14 and 15 (both reviewers' looks at rounds 13 and 14): A1 judges a task's
 # rest at its look only, and what that look cannot tell (its window's own record not held to it,

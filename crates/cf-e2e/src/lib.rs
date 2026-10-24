@@ -23,7 +23,8 @@
 //!   it holds, for the stand-in that writes it and the cases that read it.
 //! - [`daemon`] is `cf ui` as a process, on a home of its own.
 //! - [`rig`] is the daemon and the pane host together, with stand-in agents in
-//!   the windows, driven as the page and the app drive them.
+//!   the windows, driven as the page and the app drive them. A case that returns
+//!   [`Outcome`] lets the rigs it started know that it failed.
 //! - [`daemon_log`] reads a daemon's log; [`agents_proof`] holds a daemon's
 //!   agents screens to what they must do; [`http`] asks a daemon's API. (The
 //!   packaged smoke uses all three, on the daemon the built app chose.)
@@ -97,6 +98,7 @@ mod error;
 pub mod files;
 pub mod http;
 pub mod live;
+mod outcome;
 pub mod pattern;
 pub mod png;
 pub mod process;
@@ -109,4 +111,5 @@ pub mod terminal;
 pub mod wire;
 
 pub use error::{Error, Result};
+pub use outcome::{Failed, Outcome};
 pub use scratch_home::ScratchHome;
