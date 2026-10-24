@@ -442,6 +442,19 @@ fn finish_is_refused_while_told_words_are_on_their_way_and_says_so_to_the_chief(
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(context.message(told).state, "delivered");
+    // In its window and not yet answered, they are the latest words to it: the answer to
+    // the brief before them is no result (T-405's Finish window of L2, closed by Finish's
+    // start, which moves past them, on the merge with Resume after Close).
+    let unanswered = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .unwrap_err();
+    assert_eq!(
+        unanswered.to_string(),
+        format!(
+            "cannot finish T-1: @{session} has written no complete answer since its latest message about it; wait for one, or cancel it"
+        )
+    );
+    assert_eq!(tiers.task(1).task.state, "working");
     context
         .adapter
         .answer("zeus", "Parser done, on the v2 grammar");

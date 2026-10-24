@@ -1862,7 +1862,7 @@ find = '                item.role == Role::User'
 replace = '                false && item.role == Role::User'
 
 [[plant]]
-name = "turn-end-min engine: a held task whose jobs the Resume retired takes no result"
+name = "turn-end-min engine: a held task whose jobs the Resume retired has its result say nothing of them"
 meant = "a_task_held_for_a_job_at_the_close_is_done_after_the_resume_with_its_answer_and_the_job_said_retired"
 runs = ["tem-engine-resume"]
 
@@ -1870,6 +1870,16 @@ runs = ["tem-engine-resume"]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '    if pending.retired > 0 {'
 replace = '    if pending.retired > 0 && false {'
+
+[[plant]]
+name = "turn-end-min engine: a held task whose jobs the Resume retired takes no result"
+meant = "a_task_held_for_a_job_at_the_close_is_done_after_the_resume_with_its_answer_and_the_job_said_retired"
+runs = ["tem-engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/reading.rs"
+find = '        self.agents.saturating_add(self.jobs)'
+replace = '        self.agents.saturating_add(self.jobs).saturating_add(self.retired)'
 
 [[plant]]
 name = "turn-end-min engine: a paste takes no rest before the turn it begins"
@@ -1893,3 +1903,16 @@ runs = ["tem-engine-role-members"]
 file = "crates/cf-engine/src/turn_end/finish.rs"
 find = '                    && header_id(&item.text).is_some_and(|id| !replacements.contains(&id))'
 replace = '                    && header_id(&item.text).is_some()'
+
+[[plant]]
+name = "turn-end-min engine: Finish takes a compaction summary that quotes a header for a message pasted since"
+meant = "finish_takes_the_answer_of_a_held_task_whose_worker_compacted_after_it_with_a_summary_that_quotes_its_brief"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = """
+                    && !item.compaction
+                    && header_id"""
+replace = """
+                    && header_id"""

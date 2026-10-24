@@ -2038,7 +2038,8 @@ fn a_task_held_for_a_job_at_the_close_is_done_after_the_resume_with_its_answer_a
 }
 
 /// L9's other half: where the reading after the Resume still counts the job (the host could
-/// not prove the program that started it gone), the task is held again, for that job.
+/// not prove the program that started it gone), the task is held again, for that job, and
+/// the chief is told so again: the Close ended the hold the window was in (`HeldPart`).
 #[test]
 fn a_task_held_for_a_job_at_the_close_whose_job_the_resume_could_not_retire_is_held_again() {
     let context = Context::new();
@@ -2055,6 +2056,14 @@ fn a_task_held_for_a_job_at_the_close_whose_job_the_resume_could_not_retire_is_h
         .adapter
         .answer_leaving("zeus", "The build runs; I will report when it ends", job);
     context.pass().unwrap();
+    let held = |tiers: &Tiers<'_>| {
+        tiers
+            .notes("chief")
+            .into_iter()
+            .filter(|note| note.starts_with("T-1 goes on in the background: @zeus-amber-pine ended its turn with 1 background job running"))
+            .count()
+    };
+    assert_eq!(held(&tiers), 1, "told of the hold before the Close");
     closed_and_resumed(&context, project);
     context.adapter.with("zeus", |agent| {
         agent.pending = job;
@@ -2065,11 +2074,7 @@ fn a_task_held_for_a_job_at_the_close_whose_job_the_resume_could_not_retire_is_h
     }
     assert_eq!(tiers.task(1).task.state, "working", "held again");
     assert_eq!(results(&tiers, 1), Vec::<String>::new());
-    let held: Vec<String> = given(&context, "chief")
-        .into_iter()
-        .filter(|text| text.contains("T-1 goes on in the background: @zeus-amber-pine ended its turn with 1 background job running"))
-        .collect();
-    assert_eq!(held.len(), 1, "the chief is told it is held: {held:?}");
+    assert_eq!(held(&tiers), 2, "told again, once, after the Resume");
     // A hold that ends only at Finish, which takes the answer and says the job may run on.
     let finished = context.finish_task(project, 1, "chief").expect("finished");
     assert_eq!(finished.task.state, "done");

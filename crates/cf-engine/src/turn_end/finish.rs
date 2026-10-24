@@ -173,12 +173,14 @@ impl Dispatcher {
         // A message ConsensFlow pasted into the window since (the Resume's word to go on,
         // which no start is taken from) is answered by what follows it, as at a turn's end;
         // the harness's own notifications, which wake a held task's turns, are none, nor is
-        // the note that says the role, whose word is the role's (the merge with Resume after
-        // Close, T-405's L10).
+        // the note that says the role, whose word is the role's, nor a compaction summary that
+        // restates a header (the merge with Resume after Close, T-405's L10, and Calliope's
+        // P2 on it, T-444).
         let start = items[start + 1..]
             .iter()
             .rposition(|item| {
                 item.role == Role::User
+                    && !item.compaction
                     && header_id(&item.text).is_some_and(|id| !replacements.contains(&id))
             })
             .map_or(start, |later| start + 1 + later);

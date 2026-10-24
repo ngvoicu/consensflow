@@ -250,6 +250,39 @@ fn finish_takes_the_last_complete_answer_of_a_held_task_once_and_ends_nothing() 
 }
 
 #[test]
+fn finish_takes_the_answer_of_a_held_task_whose_worker_compacted_after_it_with_a_summary_that_quotes_its_brief(
+) {
+    // Calliope on the merge with Resume after Close (T-444): Finish's start moves past a
+    // message ConsensFlow pasted since the latest, and a compaction summary that restates
+    // the brief's header is no such message, as it is no delivery and no message to answer.
+    let context = Context::new();
+    let (tiers, _) = session_kept_open(&context);
+    context
+        .adapter
+        .answer_leaving("zeus", "Serving the docs on 8000", A_JOB);
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    let mut summary = context.adapter.item(
+        Role::User,
+        "This session is being continued from an earlier one.\n[ConsensFlow m-1 · T-1 · task from @chief]\nServe the docs",
+    );
+    summary.compaction = true;
+    context
+        .adapter
+        .with("zeus", |agent| agent.items.push(summary));
+
+    let finished = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .expect("finished");
+    assert_eq!(finished.task.state, "done");
+    assert!(
+        results_of(&tiers, 1)[0].starts_with("Serving the docs on 8000\n\n"),
+        "{:?}",
+        results_of(&tiers, 1)
+    );
+}
+
+#[test]
 fn finish_takes_the_last_complete_answer_of_a_task_whose_record_says_its_turn_is_still_on() {
     // T-442's restart (poker-lab, 3.0.4): the reader read the turn at work for good, the
     // answer complete in the record; and any working task, held or not (the owner,
