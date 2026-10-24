@@ -238,6 +238,54 @@ mod on_a_claude_config_of_the_cases_own {
     }
 
     #[test]
+    fn a_rig_whose_home_is_kept_is_told_to_keep_the_records_of_its_claude_config_in_the_home_before_it_is_asked_what_the_run_came_to(
+    ) -> Outcome {
+        let machine = tempfile::tempdir()?;
+        let kept = tempfile::tempdir()?;
+        let folder = Kept::new(kept.path().join("claude-config"), None);
+        let shims = tempfile::tempdir()?;
+        let mut rig = started(machine.path(), shims.path(), &folder)?;
+        let home = rig.keep_home();
+        // Not before the windows are gone.
+        assert!(folder.asked().is_empty());
+        rig.close()?;
+        assert_eq!(
+            folder.asked(),
+            [
+                format!("keep {}", home.join("home").join(".claude").display()),
+                "finish".to_owned()
+            ]
+        );
+        std::fs::remove_dir_all(home)?;
+
+        // A rig that is dropped by a case that failed, its home kept, is told the same.
+        let dropped = Kept::new(kept.path().join("another"), None);
+        let mut rig = started(machine.path(), shims.path(), &dropped)?;
+        let home = rig.keep_home();
+        drop(rig);
+        assert_eq!(dropped.asked().len(), 2, "{:?}", dropped.asked());
+        assert!(
+            dropped.asked()[0].starts_with("keep "),
+            "{:?}",
+            dropped.asked()
+        );
+        std::fs::remove_dir_all(home)?;
+        Ok(())
+    }
+
+    #[test]
+    fn a_rig_whose_home_goes_with_it_is_told_to_keep_nothing() -> Outcome {
+        let machine = tempfile::tempdir()?;
+        let kept = tempfile::tempdir()?;
+        let folder = Kept::new(kept.path().join("claude-config"), None);
+        let shims = tempfile::tempdir()?;
+        let rig = started(machine.path(), shims.path(), &folder)?;
+        rig.close()?;
+        assert_eq!(folder.asked(), ["finish"]);
+        Ok(())
+    }
+
+    #[test]
     fn a_claude_config_that_cannot_be_made_stops_the_rig_before_anything_starts() -> Outcome {
         let machine = tempfile::tempdir()?;
         // A folder that is a file's child cannot be made.

@@ -9,9 +9,10 @@
 //! A Claude Code window of a run never runs on the owner's `~/.claude`: it runs on a
 //! config folder of the run's own, with a copy of the Keychain's login (the first
 //! run on a machine asks the owner once to allow the Keychain read), which is removed
-//! when the run is over, `--keep` or not. A run refuses to start when the login's
-//! access token expires within two hours (use Claude Code yourself for a moment, so
-//! that it refreshes it, and run again), and fails if the owner's `settings.json`
+//! when the run is over, `--keep` or not (`--keep` copies the conversations and sessions
+//! it kept into the kept home first, never the login). A run refuses to start when the login's
+//! access token expires within two hours (Claude Code refreshes it only when five minutes of
+//! it are left: run again after that), and fails if the owner's `settings.json`
 //! changed or `~/.claude.json`, `history.jsonl` or `projects` gained anything of its
 //! folders (`cf_e2e::live::login`).
 //!
@@ -58,7 +59,7 @@ use crate::process::{self, Invocation};
 pub const COMMANDS: &[Command] = &[Command {
     words: &["live"],
     about: "Run a live test of cf-e2e (the tests/live_<name>.rs files): it runs real harnesses on the machine's own logins and spends real quota, so it is ignored unless asked for and is no part of check",
-    usage: "<name> [harness ...] [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; --keep leaves the run's home and project where they are (never the Claude Code config folder, which holds a copy of a login); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests)",
+    usage: "<name> [harness ...] [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; --keep leaves the run's home and project where they are (the Claude Code config folder goes, for it holds a copy of a login: its conversations and sessions are copied into the kept home); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests)",
     run: Run::Native(live),
 }];
 

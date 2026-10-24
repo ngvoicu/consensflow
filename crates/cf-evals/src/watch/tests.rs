@@ -2,6 +2,7 @@
 
 use std::fs;
 
+use cf_e2e::files;
 use serde_json::json;
 
 use super::tokens::{used, Used};
@@ -58,6 +59,7 @@ fn looking_at(home: &tempfile::TempDir, project: &str) -> Asked {
         minutes: "60".to_owned(),
         tokens: false,
         home: home.path().to_path_buf(),
+        claude_config: home.path().join(".claude"),
     }
 }
 
@@ -241,6 +243,57 @@ fn a_member_out_of_quota_is_named_with_when_it_is_back_and_none_when_all_are_in(
 }
 
 #[test]
+fn the_tokens_are_read_in_the_claude_config_folder_the_watch_is_given_and_nowhere_else() {
+    let home = home(&[]);
+    let db = crate::ledger_file::open(&home.path().join("consensflow.db"), false).unwrap();
+    db.execute_batch(
+        "INSERT INTO conversation (participant_id, harness, native_session, started_at)
+         VALUES (3, 'claude-code', 'sess-1', '2026-10-08T10:00:00.000Z');",
+    )
+    .unwrap();
+    drop(db);
+    // An eval's throwaway folder, with the record of the session in some project's folder.
+    let config = tempfile::tempdir().unwrap();
+    let record = json!({
+        "type": "assistant",
+        "message": { "id": "m1", "usage": {
+            "cache_read_input_tokens": 100, "cache_creation_input_tokens": 50,
+            "input_tokens": 5, "output_tokens": 10,
+        } },
+    });
+    files::write(
+        &config.path().join("projects/-work-site/sess-1.jsonl"),
+        format!("{record}\n"),
+    )
+    .unwrap();
+    let mut asked = looking_at(&home, "poker-lab");
+    asked.tokens = true;
+    asked.claude_config = config.path().to_path_buf();
+    let say = |asked: &Asked| {
+        let mut out = Vec::new();
+        watch(asked, 60.0, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
+    };
+    let text = say(&asked);
+    let row = text
+        .lines()
+        .find(|line| line.trim_start().starts_with("zeus"))
+        .map(str::to_owned);
+    assert!(
+        row.is_some_and(|row| row.contains("155") && row.contains(" 1 ")),
+        "{text}"
+    );
+    // Another folder has no such record: the window has no row.
+    asked.claude_config = home.path().join(".claude");
+    let elsewhere = say(&asked);
+    let tokens = elsewhere
+        .split("Claude windows, as their records count tokens")
+        .nth(1)
+        .unwrap();
+    assert!(!tokens.contains("zeus"), "{elsewhere}");
+}
+
+#[test]
 fn a_flag_that_is_missing_or_unknown_is_the_humans_mistake_and_the_usage_says_so() {
     let failed = asked_of(&[]).unwrap_err();
     assert!(matches!(failed, Error::Usage(_)));
@@ -256,6 +309,8 @@ fn a_flag_that_is_missing_or_unknown_is_the_humans_mistake_and_the_usage_says_so
         "--tokens",
         "--home",
         "/h",
+        "--claude-config",
+        "/tmp/consensflow-live-claude-1-x",
     ])
     .unwrap();
     assert_eq!(
@@ -263,9 +318,23 @@ fn a_flag_that_is_missing_or_unknown_is_the_humans_mistake_and_the_usage_says_so
             asked.project.as_str(),
             asked.minutes.as_str(),
             asked.tokens,
-            asked.home
+            asked.home,
+            asked.claude_config
         ),
-        ("5", "30", true, PathBuf::from("/h"))
+        (
+            "5",
+            "30",
+            true,
+            PathBuf::from("/h"),
+            PathBuf::from("/tmp/consensflow-live-claude-1-x")
+        )
+    );
+    // Not named, the records are the user's own app's, where its windows keep them.
+    let own = asked_of(&["--project", "5"]).unwrap();
+    assert!(
+        own.claude_config.ends_with(".claude"),
+        "{:?}",
+        own.claude_config
     );
 }
 
