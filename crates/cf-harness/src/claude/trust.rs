@@ -57,10 +57,19 @@ const SERVER_YES: &str = "Use this MCP server";
 const SERVER_ALL: &str = "Use this and all future MCP servers in this project";
 const SERVER_NO: &str = "Continue without using this MCP server";
 
+/// The line that names the server the dialog of one new server asks of.
+const SERVER_TITLE: &str = "New MCP server found in this project:";
+
 /// The choice of the dialog of two new servers or more that uses the ticked ones, the
-/// line it draws below them, and the ticks of its boxes.
+/// line it draws below them (Claude Code's words for the `confirm:no` key, which a
+/// person's own key bindings word otherwise), the words of its frame, and the ticks of
+/// its boxes.
 const SERVERS_YES: &str = "Enable selected";
 const SERVERS_HINT: &str = "Esc to reject all";
+const SERVERS_FRAME: [&str; 2] = [
+    "new MCP servers found in this project",
+    "Select any you wish to enable.",
+];
 const TICKED: &str = "[✔]";
 const UNTICKED: &str = "[ ]";
 
@@ -109,7 +118,8 @@ pub(crate) fn toward_trust(screen: &[String]) -> Option<Question> {
 /// is unticked, which is the human's choice.
 fn toward_servers(screen: &[String]) -> Option<Question> {
     let one = offers(screen, SERVER_YES) && offers(screen, SERVER_NO);
-    let more = offers(screen, SERVERS_YES) && shows(screen, SERVERS_HINT);
+    let more = offers(screen, SERVERS_YES)
+        && (shows(screen, SERVERS_HINT) || SERVERS_FRAME.iter().any(|words| shows(screen, words)));
     if !(one || more) {
         return None;
     }
@@ -131,6 +141,31 @@ fn toward_servers(screen: &[String]) -> Option<Question> {
         Some(_) => return None,
         None => None,
     }))
+}
+
+/// The servers the dialog of new servers on `screen` would use, as its lines name them
+/// (a plugin's server as "name (from plugin X)"): the one its title names, or the
+/// ticked boxes of the dialog of several. None where its lines do not show them.
+pub(crate) fn servers_named(screen: &[String]) -> Vec<String> {
+    if !matches!(toward_servers(screen), Some(Question::Servers(_))) {
+        return Vec::new();
+    }
+    if let Some(named) = screen
+        .iter()
+        .find_map(|line| line.split_once(SERVER_TITLE).map(|(_, name)| name.trim()))
+    {
+        return vec![named.to_owned()];
+    }
+    screen
+        .iter()
+        .filter_map(|line| {
+            let choice = line.trim_matches(|at: char| at.is_whitespace() || at == '❯');
+            choice
+                .strip_prefix(TICKED)
+                .map(|name| name.trim().to_owned())
+        })
+        .filter(|name| !name.is_empty())
+        .collect()
 }
 
 /// `screen` with the no of the question asked of a trusted folder's grants in the
@@ -444,6 +479,49 @@ mod tests {
                 "{on}"
             );
         }
+    }
+
+    #[test]
+    fn the_dialog_of_new_servers_is_read_by_its_frame_whatever_key_rejects_all() {
+        // A person's own binding for `confirm:no` words the hint line otherwise (T-415).
+        let bound: Vec<String> = servers(0, true)
+            .iter()
+            .map(|line| line.replace("Esc to reject all", "ctrl+r to reject all"))
+            .collect();
+        assert_eq!(toward_trust(&bound), Some(Question::Servers(Some(DOWN))));
+        // Its title alone, or its subtitle alone, frames it.
+        let titled: Vec<String> = bound
+            .iter()
+            .filter(|line| !line.contains("Select any"))
+            .cloned()
+            .collect();
+        assert_eq!(toward_trust(&titled), Some(Question::Servers(Some(DOWN))));
+        let subtitled: Vec<String> = bound
+            .iter()
+            .filter(|line| !line.contains("servers found"))
+            .cloned()
+            .collect();
+        assert_eq!(
+            toward_trust(&subtitled),
+            Some(Question::Servers(Some(DOWN)))
+        );
+    }
+
+    #[test]
+    fn the_servers_the_dialog_would_use_are_named_as_its_lines_name_them() {
+        assert_eq!(servers_named(&server(2)), ["probe"]);
+        let plugin: Vec<String> = server(0)
+            .iter()
+            .map(|line| line.replace(": probe", ": probe (from plugin kit)"))
+            .collect();
+        assert_eq!(servers_named(&plugin), ["probe (from plugin kit)"]);
+        assert_eq!(servers_named(&servers(2, true)), ["probe", "probe2"]);
+        assert_eq!(servers_named(&servers(0, false)), ["probe"]);
+        // No dialog, no servers: a conversation that quotes the title.
+        assert_eq!(
+            servers_named(&lines(" ⏺ It said New MCP server found in this project: probe\n ❯ \n   ⏵⏵ bypass permissions on")),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

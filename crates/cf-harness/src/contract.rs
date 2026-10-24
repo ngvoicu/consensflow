@@ -230,14 +230,35 @@ pub struct Prepared {
 /// What a yes to a harness's question about trusting a window's folder trusts: the
 /// folder, as the system names it, and whether it is the project's folder or one
 /// below it, which ConsensFlow answers for; one outside it is the human's. And the
-/// nearest folder above the project's whose `.mcp.json` Claude Code reads as well,
-/// where there is one: its dialog of a new server asks of that file's servers as of
+/// nearest folder above the project's whose `.mcp.json` Claude Code reads as well and
+/// names a server the project's settings neither use nor leave out, where there is one: its dialog of a new server asks of that file's servers as of
 /// the project's own, and they are the human's ([`Question::Servers`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Trusts {
     pub folder: String,
     pub inside: bool,
     pub servers_above: Option<String>,
+}
+
+/// The servers of `.mcp.json` the settings of a window's folder say it uses, and those
+/// they say it leaves out, by name.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServersChosen {
+    pub used: Vec<String>,
+    pub left_out: Vec<String>,
+}
+
+/// Whether `key`, a key toward a yes ([`Question`]), may be pressed again into a screen
+/// that did not move after it: Down, which only moves a cursor. Enter answers whatever
+/// is under the cursor by then, the next question perhaps, and Up wraps from a
+/// dialog's first choice to its last (T-415).
+pub fn presses_again(key: &[u8]) -> bool {
+    key == crate::shared::trust::DOWN
+}
+
+/// Whether `key`, a key toward a yes ([`Question`]), answers the question: Enter.
+pub fn confirms(key: &[u8]) -> bool {
+    key == crate::shared::trust::ENTER
 }
 
 /// What a window's last lines show of its harness's question about trusting its
@@ -263,7 +284,8 @@ pub enum Question {
     /// toward using it where its choice is placed. Using one starts its command and is
     /// kept in the local settings of the window's folder; ConsensFlow approves it where
     /// the folder [`Trusts`] names is the project's and no folder above the project's
-    /// has servers of its own (the owner's decision of 2026-10-23).
+    /// has servers of its own the project never settled (the owner's decision of
+    /// 2026-10-23).
     Servers(Option<&'static [u8]>),
 }
 
@@ -305,6 +327,17 @@ pub trait Window {
     /// window is past any question it asks as it starts.
     fn shows_prompt(&self, _screen: &[String]) -> bool {
         false
+    }
+    /// The servers its harness's dialog of new servers on `screen` (the window's last
+    /// lines) would use, as its lines name them; none where they show none.
+    fn trust_servers(&self, _screen: &[String]) -> Vec<String> {
+        Vec::new()
+    }
+    /// The servers the settings of the window's folder say it uses and leaves out,
+    /// which its harness writes when its dialog of new servers is answered; none where
+    /// it keeps no such settings.
+    fn servers_chosen(&self) -> ServersChosen {
+        ServersChosen::default()
     }
     /// Whether `screen` (the window's last lines) names that question's choices, as
     /// the question does and a conversation that quotes it may: a screen at its

@@ -109,6 +109,10 @@ folder-trust-rig-servers = ["cargo", "test", "--offline", "-p", "cf-e2e", "--tes
 folder-trust-rig-servers-outside = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked_of_a_new_server_in_a_project_inside_a_repository"]
 folder-trust-rig-servers-above = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked_of_a_new_server_where_a_folder_above"]
 folder-trust-rig-servers-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_asked_of_a_new_server"]
+folder-trust-rig-servers-frozen = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_whose_screen_stays_on_the_folders_yes"]
+folder-trust-rig-servers-refused = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_whose_dialog_leaves_its_server_out"]
+folder-trust-rig-servers-six = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked_of_six_new_servers"]
+folder-trust-rig-servers-later = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_server_added_to_the_projects_mcp_json_later"]
 folder-trust-rig-servers-keys = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked_to_trust_the_projects_new_repository_then_of_its_server"]
 
 [[plant]]
@@ -163,8 +167,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "Question::Toward(key) if (inside || accepted) && asked_keys < MOST_KEYS => {"
-replace = "Question::Toward(key) if (inside || accepted && false) && asked_keys < MOST_KEYS => {"
+find = "Question::Toward(key) if inside || accepted => Some(key),"
+replace = "Question::Toward(key) if inside || accepted && false => Some(key),"
 
 [[plant]]
 name = "folder trust: the human's yes is never written down"
@@ -395,8 +399,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "            let activity = if record.window.borrow().trust == Trusting::Asked {"
-replace = "            let activity = if record.window.borrow().trust != Trusting::Past {"
+find = "            let activity = if trusting == Trusting::Asked {"
+replace = "            let activity = if trusting != Trusting::Past {"
 
 [[plant]]
 name = "folder trust: a screen not yet redrawn after a key is given another (round 1)"
@@ -406,8 +410,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "                            Some((on, looks)) if *on == lines => {"
-replace = "                            Some((on, looks)) if *on == lines && keys == usize::MAX => {"
+find = "                        Some((on, looks, key)) if *on == lines => {"
+replace = "                        Some((on, looks, key)) if *on == lines && keys == usize::MAX => {"
 
 [[plant]]
 name = "folder trust: Claude's prompt is never read"
@@ -516,8 +520,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "                                *looks >= PRESS_AGAIN_LOOKS"
-replace = "                                *looks >= u32::MAX"
+find = "                            Some((looks, _)) => looks >= PRESS_AGAIN_LOOKS,"
+replace = "                            Some((looks, _)) => looks >= u32::MAX,"
 
 [[plant]]
 name = "folder trust: the stand-in takes one key a read, and drops the human's Enter that came with their Down (main's Windows CI, 2026-10-21)"
@@ -1028,9 +1032,7 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
 find = '''
-                        Question::Grants(Some(key)) if inside && asked_keys < MOST_KEYS => {
-                            Some(key)
-                        }'''
+                        Question::Grants(Some(key)) if inside => Some(key),'''
 replace = ""
 
 [[plant]]
@@ -1041,8 +1043,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "                        Question::Grants(Some(key)) if inside && asked_keys < MOST_KEYS => {"
-replace = "                        Question::Grants(Some(key)) if asked_keys < MOST_KEYS => {"
+find = "                        Question::Grants(Some(key)) if inside => Some(key),"
+replace = "                        Question::Grants(Some(key)) => Some(key),"
 
 [[plant]]
 name = "folder trust: each key toward the grants' yes is pressed twice (T-354)"
@@ -1260,17 +1262,17 @@ replace = '''
 
 [[plant]]
 name = "folder trust: the project's own .mcp.json is a folder above's (T-383)"
-meant = "the_nearest_folder_above_the_project_whose_mcp_json_claude_reads_is_named"
+meant = "the_nearest_folder_above_the_project_whose_mcp_json_names_a_server_it_never_settled_is_named"
 runs = ["folder-trust-readers"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/trust.rs"
 find = '''
         .skip(1)
-        .find(|above| above.join(".mcp.json").is_file())'''
+        .find(|above| {'''
 replace = '''
         .skip(0)
-        .find(|above| above.join(".mcp.json").is_file())'''
+        .find(|above| {'''
 
 [[plant]]
 name = "folder trust: the dialog of a new server is read with Down toward using it (T-383)"
@@ -1294,9 +1296,7 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
 find = '''
-                        Question::Servers(Some(key))
-                            if inside && servers_above.is_none() && asked_keys < MOST_KEYS =>
-                        {
+                        Question::Servers(Some(key)) if inside && servers_above.is_none() => {
                             Some(key)
                         }
 '''
@@ -1312,9 +1312,9 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
 find = '''
-                            if inside && servers_above.is_none() && asked_keys < MOST_KEYS =>'''
+                        Question::Servers(Some(key)) if inside && servers_above.is_none() => {'''
 replace = '''
-                            if servers_above.is_none() && asked_keys < MOST_KEYS =>'''
+                        Question::Servers(Some(key)) if servers_above.is_none() => {'''
 
 [[plant]]
 name = "folder trust: the dialog of a new server is answered where a folder above has servers (T-383)"
@@ -1325,29 +1325,22 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
 find = '''
-                            if inside && servers_above.is_none() && asked_keys < MOST_KEYS =>'''
+                        Question::Servers(Some(key)) if inside && servers_above.is_none() => {'''
 replace = '''
-                            if inside && asked_keys < MOST_KEYS =>'''
+                        Question::Servers(Some(key)) if inside => {'''
 
 [[plant]]
-name = "folder trust: the dialog of a new server after the folder's question has only that question's keys left (T-383)"
-meant = "a_worker_asked_to_trust_the_projects_new_repository_then_of_its_server_has_both_answered_each_with_its_own_keys"
-runs = ["folder-trust-rig-servers-keys"]
+name = "folder trust: the dialog of a new server after a folder's question left to the human is left to the human too (T-415)"
+meant = "a_worker_whose_screen_stays_on_the_folders_yes_is_never_given_its_enter_again_and_its_server_is_used"
+runs = ["folder-trust-rig-servers-frozen"]
 builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
 find = '''
-                    if asks_now.replace(dialog(question)) != Some(dialog(question)) {
-                        asked_keys = 0;
-                        asking = 0;
-                        pressed_on = None;
-                    }'''
-replace = '''
-                    if asks_now.replace(dialog(question)) != Some(dialog(question)) {
-                        asking = 0;
-                        pressed_on = None;
-                    }'''
+                        stuck = false;
+'''
+replace = ""
 
 [[plant]]
 name = "folder trust: the dialog of a new server is told of at every look (T-383)"
@@ -1362,7 +1355,7 @@ find = '''
             .trust
             .told_servers
             .borrow_mut()
-            .insert((project.id, folder.to_owned(), answered))
+            .insert((project.id, folder.to_owned()))
         {
             return Ok(());
         }'''
@@ -1370,7 +1363,7 @@ replace = '''
         self.trust
             .told_servers
             .borrow_mut()
-            .insert((project.id, folder.to_owned(), answered));'''
+            .insert((project.id, folder.to_owned()));'''
 
 [[plant]]
 name = "folder trust: the live suite has no case of two servers (T-383)"
@@ -1390,3 +1383,110 @@ replace = '''
                     | Case::ServerAbove
             )
 }'''
+
+[[plant]]
+name = "folder trust: an Enter whose screen did not move is pressed again (T-415)"
+meant = "a_worker_whose_screen_stays_on_the_folders_yes_is_never_given_its_enter_again_and_its_server_is_used"
+runs = ["folder-trust-rig-servers-frozen"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''
+    key == crate::shared::trust::DOWN
+'''
+replace = '''
+    !key.is_empty()
+'''
+
+[[plant]]
+name = "folder trust: a server left out while ConsensFlow pressed is told of to nobody (T-415)"
+meant = "a_worker_whose_dialog_leaves_its_server_out_while_consensflow_pressed_toward_it_has_the_human_told"
+runs = ["folder-trust-rig-servers-refused"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = '''
+        if into_servers && !servers && !refused.is_empty() {'''
+replace = '''
+        if false && into_servers && !servers && !refused.is_empty() {'''
+
+[[plant]]
+name = "folder trust: a question is given six keys in all (T-415)"
+meant = "a_worker_asked_of_six_new_servers_has_them_all_used_a_key_each"
+runs = ["folder-trust-rig-servers-six"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = '''
+                            None if moves >= MOST_MOVES => {'''
+replace = '''
+                            None if moves >= MOST_KEYS => {'''
+
+[[plant]]
+name = "folder trust: a .mcp.json above that names no server holds the dialog (T-415)"
+meant = "a_worker_asked_of_a_new_server_where_a_folder_above_has_a_mcp_json_naming_none_has_it_used"
+runs = ["folder-trust-rig-servers-above"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/trust.rs"
+find = '''
+            servers_in(&above.join(".mcp.json"))
+                .iter()
+                .any(|name| !settled.contains(name))'''
+replace = '''
+            above.join(".mcp.json").is_file() || settled.contains("")'''
+
+[[plant]]
+name = "folder trust: the dialog of new servers is read by its key binding's words alone (T-415)"
+meant = "the_dialog_of_new_servers_is_read_by_its_frame_whatever_key_rejects_all"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = '''
+        && (shows(screen, SERVERS_HINT) || SERVERS_FRAME.iter().any(|words| shows(screen, words)));'''
+replace = '''
+        && (shows(screen, SERVERS_HINT) || SERVERS_FRAME.is_empty());'''
+
+[[plant]]
+name = "folder trust: the lane of a window that asks of new servers says it asks of its folder (T-415)"
+meant = "a_worker_asked_of_a_new_server_in_a_project_inside_a_repository_outside_it_is_held_and_the_human_told"
+runs = ["folder-trust-rig-servers-outside"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+            } else if trusting == Trusting::AskedServers {'''
+replace = '''
+            } else if trusting == Trusting::AskedServers && false {'''
+
+[[plant]]
+name = "folder trust: a server used is told of once a folder, not once a server (T-415)"
+meant = "a_server_added_to_the_projects_mcp_json_later_and_used_in_a_later_window_is_told_of_by_name"
+runs = ["folder-trust-rig-servers-later"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = '''
+                .insert((project.id, folder.to_owned(), name.clone()))'''
+replace = '''
+                .insert((project.id, folder.to_owned(), String::new()))'''
+
+[[plant]]
+name = "folder trust: a server used is told of by no name (T-415)"
+meant = "a_worker_asked_of_a_new_server_of_the_projects_mcp_json_has_it_used_once_and_does_its_tasks"
+runs = ["folder-trust-rig-servers"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = '''
+                format!("the MCP server {name}")'''
+replace = '''
+                format!("a new MCP server{}", &name[..0])'''

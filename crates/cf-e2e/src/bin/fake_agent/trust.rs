@@ -31,17 +31,25 @@
 //! repository the window's folder is in, or the folder itself out of one, as Claude Code
 //! records it, T-381) is not among the folders it trusts, its no "No, continue without
 //! these permissions", on which Enter, or Escape, goes on into the window with nothing
-//! written down, and a yes writes that folder down. With `CF_TEST_TRUST_SERVER` set to
-//! a server's name, once past that question (or where it asks none), it asks as Claude
-//! Code 2.1.309 asks of a server of the project's `.mcp.json` it was never told to use
-//! (T-383), wherever the `.claude/settings.local.json` of the window's folder names it
-//! neither used nor left out: "New MCP server found in this project:" and its name, its
-//! `❯` on the last of three choices, Up and Down moving it round as Claude Code's does;
-//! Enter on "Use this MCP server" writes its name in `enabledMcpjsonServers` there (and
-//! on the second choice `enableAllProjectMcpServers` too), Enter on "Continue without
-//! using this MCP server", or Escape, writes it in `disabledMcpjsonServers`, and either
-//! goes on into the window. Its keys are written down as the question's are; with
-//! `CF_TEST_TRUST_SERVER_DROPS_FIRST_KEY` set it ignores the first key it is given.
+//! written down, and a yes writes that folder down. With `CF_TEST_TRUST_FROZEN_AFTER_YES_MS`
+//! set, a yes leaves its screen as it was that long before anything else is drawn, as a
+//! screen the host shows late; what is typed meanwhile goes to what it asks next.
+//! With `CF_TEST_TRUST_SERVER` set to servers' names (a comma between two, or `mcp.json`
+//! for those of the `.mcp.json` of the window's folder), once past that question (or
+//! where it asks none), it asks as Claude Code 2.1.309 asks of servers of the project's
+//! `.mcp.json` it was never told to use (T-383), those the `.claude/settings.local.json`
+//! of the window's folder names neither used nor left out. One: "New MCP server found in
+//! this project:" and its name, its `❯` on the last of three choices, Up and Down moving
+//! it round as Claude Code's does; Enter on "Use this MCP server" writes its name in
+//! `enabledMcpjsonServers` there (and on the second choice `enableAllProjectMcpServers`
+//! too), Enter on "Continue without using this MCP server", or Escape, writes it in
+//! `disabledMcpjsonServers`. More: "N new MCP servers found in this project", a ticked
+//! box a server, its `❯` on the first, then "Enable selected", Up and Down stopping at
+//! the ends; Enter on a box unticks it, and on "Enable selected" uses the ticked ones
+//! and leaves out the rest. Either way the window goes on. Its keys are written down as
+//! the question's are; with `CF_TEST_TRUST_SERVER_DROPS_FIRST_KEY` set it ignores the
+//! first key it is given, and with `CF_TEST_TRUST_SERVER_REFUSES` an Enter leaves every
+//! server out, whatever the cursor is on.
 
 use std::fs;
 use std::io::{self, Write};
@@ -212,6 +220,25 @@ fn local_settings(folder: &Path) -> PathBuf {
     folder.join(".claude").join("settings.local.json")
 }
 
+/// The servers `CF_TEST_TRUST_SERVER` names, a comma between two: those of the
+/// `.mcp.json` of the window's `folder` where it says `mcp.json`.
+fn servers_named(folder: &Path) -> Vec<String> {
+    let named = own_var("CF_TEST_TRUST_SERVER").unwrap_or_default();
+    if named == "mcp.json" {
+        return fs::read_to_string(folder.join(".mcp.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|config| config["mcpServers"].as_object().cloned())
+            .map(|servers| servers.keys().cloned().collect())
+            .unwrap_or_default();
+    }
+    named
+        .split(',')
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The dialog of the new server `name`, its cursor on the choice `on`.
 fn draw_server(name: &str, on: usize) -> io::Result<()> {
     let choices: Vec<String> = SERVER_CHOICES
@@ -228,41 +255,80 @@ fn draw_server(name: &str, on: usize) -> io::Result<()> {
     out.flush()
 }
 
-/// Asks of the server `CF_TEST_TRUST_SERVER` names, where the window `wanted` opened
-/// in a folder whose local settings name it neither used nor left out, and reads the
-/// answer from its terminal: whatever it is, the window goes on.
+/// The dialog of the new servers `names`, those `ticked` ticked, its cursor on the line
+/// `on` (one a server, then "Enable selected").
+fn draw_servers(names: &[String], ticked: &[bool], on: usize) -> io::Result<()> {
+    let cursor = |at: usize| if at == on { '❯' } else { ' ' };
+    let mut choices: Vec<String> = names
+        .iter()
+        .enumerate()
+        .map(|(at, name)| {
+            let tick = if ticked[at] { "[✔]" } else { "[ ]" };
+            format!(" {} {tick} {name}", cursor(at))
+        })
+        .collect();
+    choices.push(format!(" {} Enable selected", cursor(names.len())));
+    let mut out = io::stdout().lock();
+    write!(
+        out,
+        "\u{1b}[2J\u{1b}[H {} new MCP servers found in this project\r\n Select any you wish to enable.\r\n\r\n MCP servers may execute code or access system resources. All tool calls require approval.\r\n\r\n{}\r\n\r\n Space to select · Esc to reject all\r\n",
+        names.len(),
+        choices.join("\r\n")
+    )?;
+    out.flush()
+}
+
+/// Asks of the servers `CF_TEST_TRUST_SERVER` names that the local settings of the
+/// window's folder name neither used nor left out, where the window `wanted`: one in
+/// the dialog of one, more in the dialog of several. Reads the answer from its
+/// terminal; whatever it is, the window goes on.
 pub fn ask_server(
     config: &Path,
     wanted: bool,
     terminal: &mut terminal::Keys,
 ) -> Result<(), String> {
     let failed = |cause: io::Error| cause.to_string();
-    let Some(name) = own_var("CF_TEST_TRUST_SERVER").filter(|_| wanted) else {
+    if !wanted {
         return Ok(());
-    };
+    }
     let folder = std::env::current_dir().map_err(failed)?;
     let file = local_settings(&folder);
     let mut settings: serde_json::Value = fs::read_to_string(&file)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_else(|| serde_json::json!({}));
-    let named = |list: &str| {
+    let named = |list: &str, name: &str| {
         settings[list]
             .as_array()
-            .is_some_and(|names| names.iter().any(|named| named == name.as_str()))
+            .is_some_and(|names| names.iter().any(|named| named == name))
     };
-    if named("enabledMcpjsonServers")
-        || named("disabledMcpjsonServers")
-        || settings["enableAllProjectMcpServers"] == true
-    {
+    let pending: Vec<String> = servers_named(&folder)
+        .into_iter()
+        .filter(|name| {
+            !named("enabledMcpjsonServers", name) && !named("disabledMcpjsonServers", name)
+        })
+        .collect();
+    if pending.is_empty() || settings["enableAllProjectMcpServers"] == true {
         return Ok(());
     }
     say("fake agent: reading the project's servers\r\n").map_err(failed)?;
     sleep(FIRST_FRAME);
-    let mut on = 2;
-    draw_server(&name, on).map_err(failed)?;
+    let one = pending.len() == 1;
+    // The cursor, and the boxes ticked: the dialog of one opens on its last choice, the
+    // dialog of several on its first box, every box ticked.
+    let mut on = if one { 2 } else { 0 };
+    let mut ticked = vec![true; pending.len()];
+    let draw = |on: usize, ticked: &[bool]| {
+        if one {
+            draw_server(&pending[0], on)
+        } else {
+            draw_servers(&pending, ticked, on)
+        }
+    };
+    draw(on, &ticked).map_err(failed)?;
     let mut drops = own_var("CF_TEST_TRUST_SERVER_DROPS_FIRST_KEY").is_some();
-    let chosen = 'asked: loop {
+    // Where it answers, which servers it uses; the rest it leaves out.
+    let using: Vec<bool> = 'asked: loop {
         let Some(given) = terminal.chunk() else {
             return Ok(());
         };
@@ -277,40 +343,63 @@ pub fn ask_server(
         let mut moved = false;
         for key in keys_in(&given) {
             match key {
+                // The dialog of one goes round; the dialog of several stops at its ends.
                 Key::Down => {
                     append(config, KEYS, "down").map_err(failed)?;
-                    on = (on + 1) % SERVER_CHOICES.len();
+                    on = if one {
+                        (on + 1) % SERVER_CHOICES.len()
+                    } else {
+                        (on + 1).min(pending.len())
+                    };
                     moved = true;
                 }
                 Key::Up => {
                     append(config, KEYS, "up").map_err(failed)?;
-                    on = (on + SERVER_CHOICES.len() - 1) % SERVER_CHOICES.len();
+                    on = if one {
+                        (on + SERVER_CHOICES.len() - 1) % SERVER_CHOICES.len()
+                    } else {
+                        on.saturating_sub(1)
+                    };
                     moved = true;
                 }
                 Key::Enter => {
                     append(config, KEYS, "enter").map_err(failed)?;
-                    break 'asked on;
+                    // A dialog that leaves them out whatever its cursor is on.
+                    if own_var("CF_TEST_TRUST_SERVER_REFUSES").is_some() {
+                        break 'asked vec![false; pending.len()];
+                    }
+                    if one {
+                        if on == 1 {
+                            settings["enableAllProjectMcpServers"] = serde_json::json!(true);
+                        }
+                        break 'asked vec![on != 2];
+                    }
+                    if on == pending.len() {
+                        break 'asked ticked.clone();
+                    }
+                    // Enter on a box unticks it, as a space does.
+                    ticked[on] = !ticked[on];
+                    moved = true;
                 }
                 Key::Escape => {
                     append(config, KEYS, "escape").map_err(failed)?;
-                    break 'asked 2;
+                    break 'asked vec![false; pending.len()];
                 }
             }
         }
         if moved {
-            draw_server(&name, on).map_err(failed)?;
+            draw(on, &ticked).map_err(failed)?;
         }
     };
-    let list = if chosen == 2 {
-        "disabledMcpjsonServers"
-    } else {
-        "enabledMcpjsonServers"
-    };
-    let mut names = settings[list].as_array().cloned().unwrap_or_default();
-    names.push(serde_json::json!(name));
-    settings[list] = serde_json::json!(names);
-    if chosen == 1 {
-        settings["enableAllProjectMcpServers"] = serde_json::json!(true);
+    for (name, used) in pending.iter().zip(using) {
+        let list = if used {
+            "enabledMcpjsonServers"
+        } else {
+            "disabledMcpjsonServers"
+        };
+        let mut names = settings[list].as_array().cloned().unwrap_or_default();
+        names.push(serde_json::json!(name));
+        settings[list] = serde_json::json!(names);
     }
     fs::create_dir_all(file.parent().unwrap_or(&folder)).map_err(failed)?;
     fs::write(&file, settings.to_string()).map_err(failed)?;
@@ -413,6 +502,9 @@ pub fn ask(
                         return no();
                     }
                     append(config, TRUSTED, &root.display().to_string()).map_err(failed)?;
+                    if let Some(frozen) = millis("CF_TEST_TRUST_FROZEN_AFTER_YES_MS") {
+                        sleep(frozen);
+                    }
                     let mut out = io::stdout().lock();
                     out.write_all(b"\x1b[2J\x1b[H").map_err(failed)?;
                     // One that starts slowly draws its prompt at once, and starts after.

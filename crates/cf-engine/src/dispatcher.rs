@@ -990,8 +990,11 @@ impl Dispatcher {
         // An out member's window says so, and nothing else, until the reset.
         if !self.is_out(&owner) {
             // The reason is given once the question is on its screen.
-            let activity = if record.window.borrow().trust == Trusting::Asked {
+            let trusting = record.window.borrow().trust;
+            let activity = if trusting == Trusting::Asked {
                 Activity::because(ActivityState::Starting, trust::HELD)
+            } else if trusting == Trusting::AskedServers {
+                Activity::because(ActivityState::Starting, trust::HELD_SERVERS)
             } else if starting {
                 Activity::of(ActivityState::Starting)
             } else if let Some(waiting) = &observed.waiting {

@@ -25,8 +25,11 @@
 //! (Claude Code shows the question after its launch has come up), a look every
 //! half second. A key is pressed only into a screen that moved since the last key,
 //! so that each press meets the question as the last look read it and a slow redraw
-//! is never given a second. The watch ends once the window is past the question:
-//! its harness's prompt on its screen, or its record grown since it opened (a window
+//! is never given a second; a Down that did not move it is pressed again after 5 s, and
+//! an Enter or an Up never is (T-415): the window may have taken it, its screen lagging,
+//! and a second one would answer what comes next. The question is then the human's.
+//! The watch ends once the window is past the question: its harness's prompt on its
+//! screen, or its record grown since it opened (a window
 //! opened again on its conversation has that conversation in its record from the
 //! first look); a window that never asked is let go after [`ASKS_WITHIN_MS`]. A look
 //! the host shows no screen for says nothing either way: a window that asked is held
@@ -42,9 +45,12 @@
 //! project's `.mcp.json` it was never told to use, asked once the folder is trusted
 //! ([`Question::Servers`]), is answered as the owner decided on 2026-10-23: the server
 //! is used, where the folder a yes to the first question records is the project's and
-//! no folder above the project's has a `.mcp.json` of its own (Claude Code asks of
-//! those servers in the same dialog); elsewhere, or where its choice cannot be placed,
-//! it is held and told of as the grants are. A launch that is to
+//! no folder above the project's has a `.mcp.json` that names a server the project's
+//! settings never used or left out (Claude Code asks of those servers in the same
+//! dialog); elsewhere, or where its choice cannot be placed, it is held and told of as
+//! the grants are. Each server used is told of once its window's folder says so, by the
+//! words the dialog named it in; one the folder left out while only ConsensFlow pressed
+//! is told of too, as no later window asks of it. A launch that is to
 //! say its role first never meets the question: only a harness that keeps the
 //! instructions its conversation began with is told its role so, and that is Codex,
 //! which never asks as ConsensFlow opens it.
@@ -54,7 +60,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
 
-use cf_harness::contract::{Pane, Question, Trusts, Window};
+use cf_harness::contract::{confirms, presses_again, Pane, Question, Trusts, Window};
 use cf_harness::records::Reading;
 use cf_ledger::{NewNote, ParticipantView, ProjectView};
 use cf_proto::panes::{SnapshotRequest, TAIL_LINES};
@@ -74,7 +80,9 @@ const LOOK: Duration = Duration::from_millis(500);
 pub(crate) const ASKS_WITHIN_MS: i64 = 30_000;
 
 /// How many looks a screen the last key went into may stay as it was before the key
-/// is pressed again: the window did not take it.
+/// is pressed again, where it may be ([`presses_again`]): the window did not take it.
+/// Where it may not, the question is the human's from then (T-415): a screen that lags
+/// may hide a key it took.
 const PRESS_AGAIN_LOOKS: u32 = 10;
 
 /// How many looks in a row a window that asked may show neither the question nor its
@@ -95,13 +103,20 @@ const TELL_LOOKS: u32 = 10;
 /// question no look has read.
 const UNREAD_MS: i64 = 30_000;
 
-/// How many keys are pressed toward a yes before the question goes to the human:
-/// a screen that is not moved by them is one the engine does not read right.
+/// How many keys a question is given again into a screen they did not move before it
+/// goes to the human: a screen that is not moved by them is one the engine does not
+/// read right. The keys that moved it are not counted: a dialog of new servers takes
+/// one a server (T-415).
 const MOST_KEYS: usize = 6;
 
+/// How many keys a question is given in all before it goes to the human: more than
+/// any dialog's choices, so that a reading that only ever moves never presses for good.
+const MOST_MOVES: usize = 64;
+
 /// Why the board reads a window starting while it asks: nothing goes into it then,
-/// nor while it may still ask.
+/// nor while it may still ask; and while it asks of new servers of `.mcp.json`.
 pub(crate) const HELD: &str = "the window asks whether to trust its folder";
+pub(crate) const HELD_SERVERS: &str = "the window asks whether to use the project's MCP servers";
 
 /// Where a window stands with its harness's question about trusting its folder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -113,6 +128,16 @@ pub(crate) enum Trusting {
     Looking,
     /// The window asks it: it is being answered, or the human is to.
     Asked,
+    /// The window asks whether to use new servers of `.mcp.json`, as it does once its
+    /// folder is trusted: as [`Trusting::Asked`].
+    AskedServers,
+}
+
+impl Trusting {
+    /// Whether the window asks one of its harness's questions.
+    pub(crate) fn asks(self) -> bool {
+        matches!(self, Trusting::Asked | Trusting::AskedServers)
+    }
 }
 
 /// What the engine keeps across windows: the folders each project's notes
@@ -121,13 +146,14 @@ pub(crate) enum Trusting {
 /// human said yes to in a window, which the project's other windows that ask of
 /// them are answered for. The question of a folder's grants is spoken of apart
 /// (`told_grants`), until the window it was told of is past it; so is the dialog of
-/// new servers (`told_servers`): once that ConsensFlow used them, and, until the
-/// window it was told of is past it, that the human is to answer it.
+/// new servers (`told_servers`), that the human is to answer it; and each server
+/// ConsensFlow used, once, by the words the dialog named it in (`used`).
 #[derive(Debug, Default)]
 pub(crate) struct TrustState {
     told: RefCell<HashSet<(i64, String, bool)>>,
     told_grants: RefCell<HashSet<(i64, String)>>,
-    told_servers: RefCell<HashSet<(i64, String, bool)>>,
+    told_servers: RefCell<HashSet<(i64, String)>>,
+    used: RefCell<HashSet<(i64, String, String)>>,
     accepted: RefCell<HashSet<(i64, String)>>,
 }
 
@@ -218,15 +244,25 @@ impl Dispatcher {
         // again on its conversation holds it all from the start, and a look that could
         // not read it says nothing of growth.
         let mut opened_with: Option<usize> = None;
-        // The keys pressed in the watch, and into the question it asks now.
+        // The keys pressed in the watch; into the question it asks now, in all and again
+        // into a screen they did not move; and whether that question is the human's now,
+        // its screen unmoved by a key that may not be pressed again.
         let mut keys = 0;
+        let mut moves = 0;
         let mut asked_keys = 0;
+        let mut stuck = false;
         let mut asks_now = None;
-        // The screen the last key was pressed on, and how many looks have found it
-        // since: a key goes into a screen that moved since the last one, so a slow
-        // redraw is never given a second, or into one that stayed as it was for
-        // [`PRESS_AGAIN_LOOKS`], whose window did not take the key.
-        let mut pressed_on: Option<(Vec<String>, u32)> = None;
+        // The screen the last key was pressed on, how many looks have found it since, and
+        // the key: a key goes into a screen that moved since the last one, so a slow
+        // redraw is never given a second, or, where it may be pressed again, into one
+        // that stayed as it was for [`PRESS_AGAIN_LOOKS`], whose window did not take it.
+        let mut pressed_on: Option<(Vec<String>, u32, &'static [u8])> = None;
+        // What the window's folder left out of the project's servers as the watch began;
+        // what it used; whether ConsensFlow pressed into the dialog of new servers, and the
+        // servers its Enter there would use, as the dialog named them.
+        let chosen = window.servers_chosen();
+        let mut into_servers = false;
+        let mut using: Option<Vec<String>> = None;
         // How many looks in a row found the question gone with no prompt on the screen,
         // and how many found the question.
         let mut gone = 0;
@@ -262,14 +298,36 @@ impl Dispatcher {
             }
             match seen {
                 Seen::Asks(question, lines) => {
-                    record.window.borrow_mut().trust = Trusting::Asked;
+                    record.window.borrow_mut().trust = if matches!(question, Question::Servers(_)) {
+                        Trusting::AskedServers
+                    } else {
+                        Trusting::Asked
+                    };
                     gone = 0;
                     self.changed();
                     // Another question than the last look's: its own keys, its own time.
                     if asks_now.replace(dialog(question)) != Some(dialog(question)) {
+                        moves = 0;
                         asked_keys = 0;
+                        stuck = false;
                         asking = 0;
                         pressed_on = None;
+                    }
+                    // The screen the last key went into, as it was: the key is pressed
+                    // again where it may be, and the question is the human's where not.
+                    let unmoved = match pressed_on.as_mut() {
+                        Some((on, looks, key)) if *on == lines => {
+                            *looks += 1;
+                            Some((*looks, *key))
+                        }
+                        _ => None,
+                    };
+                    if let Some((looks, key)) = unmoved {
+                        if looks >= PRESS_AGAIN_LOOKS
+                            && !(presses_again(key) && asked_keys < MOST_KEYS)
+                        {
+                            stuck = true;
+                        }
                     }
                     // A folder the human said yes to in another window of the
                     // project is answered as they answered it.
@@ -284,15 +342,10 @@ impl Dispatcher {
                     asking += 1;
                     sure |= matches!(question, Question::Toward(_));
                     let pressing = match question {
-                        Question::Toward(key) if (inside || accepted) && asked_keys < MOST_KEYS => {
-                            Some(key)
-                        }
-                        Question::Grants(Some(key)) if inside && asked_keys < MOST_KEYS => {
-                            Some(key)
-                        }
-                        Question::Servers(Some(key))
-                            if inside && servers_above.is_none() && asked_keys < MOST_KEYS =>
-                        {
+                        _ if stuck => None,
+                        Question::Toward(key) if inside || accepted => Some(key),
+                        Question::Grants(Some(key)) if inside => Some(key),
+                        Question::Servers(Some(key)) if inside && servers_above.is_none() => {
                             Some(key)
                         }
                         _ => None,
@@ -302,14 +355,8 @@ impl Dispatcher {
                     // and given a key toward a yes, which goes into its input box,
                     // and the human is told ConsensFlow answered (as since round 4).
                     if let Some(key) = pressing {
-                        if matches!(question, Question::Servers(_)) {
-                            self.tell_servers_once(project, &folder, true, || {
-                                format!(
-                                    "@{}'s window asked whether to use a new MCP server that the project's .mcp.json names; ConsensFlow said to use it, as the project's folder is trusted by choosing it. Claude Code starts the server's command, and keeps the choice in {folder}/.claude/settings.local.json.",
-                                    participant.handle
-                                )
-                            })?;
-                        } else if inside {
+                        // The servers' use is told of once the window is past the dialog.
+                        if inside && !matches!(question, Question::Servers(_)) {
                             self.tell_trust_once(project, &folder, true, || {
                                 if matches!(question, Question::Grants(_)) {
                                     format!(
@@ -324,17 +371,25 @@ impl Dispatcher {
                                 }
                             })?;
                         }
-                        let press = match pressed_on.as_mut() {
-                            Some((on, looks)) if *on == lines => {
-                                *looks += 1;
-                                *looks >= PRESS_AGAIN_LOOKS
+                        let press = match unmoved {
+                            Some((looks, _)) => looks >= PRESS_AGAIN_LOOKS,
+                            None if moves >= MOST_MOVES => {
+                                stuck = true;
+                                false
                             }
-                            _ => true,
+                            None => true,
                         };
                         if press && self.press_toward_trust(pane, key).await {
                             keys += 1;
-                            asked_keys += 1;
-                            pressed_on = Some((lines, 0));
+                            moves += 1;
+                            asked_keys += usize::from(unmoved.is_some());
+                            if matches!(question, Question::Servers(_)) {
+                                into_servers = true;
+                                if confirms(key) {
+                                    using = Some(window.trust_servers(&lines));
+                                }
+                            }
+                            pressed_on = Some((lines, 0, key));
                         }
                     } else if asking >= TELL_LOOKS && matches!(question, Question::Servers(_)) {
                         // Its servers are not the project's alone, or its choice cannot be
@@ -380,7 +435,7 @@ impl Dispatcher {
                     if grown {
                         break (false, false);
                     }
-                    let asked = record.window.borrow().trust == Trusting::Asked;
+                    let asked = record.window.borrow().trust.asks();
                     if asked {
                         // The question gone for good with no prompt to read (a prompt
                         // drawn otherwise than the harness's reader knows): past it.
@@ -400,7 +455,7 @@ impl Dispatcher {
                     if grown {
                         break (false, false);
                     }
-                    let asked = record.window.borrow().trust == Trusting::Asked;
+                    let asked = record.window.borrow().trust.asks();
                     if asked {
                         let since = *unread_since.get_or_insert(self.now());
                         let unseen = self.now() - since;
@@ -428,7 +483,7 @@ impl Dispatcher {
             }
             self.seams.time.sleep(LOOK).await;
         };
-        let asked = record.window.borrow().trust == Trusting::Asked;
+        let asked = record.window.borrow().trust.asks();
         // The question left a window now at its prompt, its choices gone from the
         // screen, and no key of ConsensFlow's answered it: the human said yes. Nothing
         // else says so: not the question's absence, which a No leaves on the way out,
@@ -461,7 +516,33 @@ impl Dispatcher {
             self.trust
                 .told_servers
                 .borrow_mut()
-                .remove(&(project.id, folder.clone(), false));
+                .remove(&(project.id, folder.clone()));
+        }
+        // A server the window's folder left out while only ConsensFlow pressed into the
+        // dialog: a key that answered what it was not pressed for (T-415). No later window
+        // asks of it, so the human is told.
+        let now = window.servers_chosen();
+        let refused: Vec<String> = now
+            .left_out
+            .into_iter()
+            .filter(|name| !chosen.left_out.contains(name))
+            .collect();
+        let used = now.used.iter().any(|name| !chosen.used.contains(name));
+        if into_servers && !servers && !refused.is_empty() {
+            self.note_to_human(
+                project,
+                format!(
+                    "@{}'s window left the MCP server {} out of the project's while ConsensFlow pressed toward using it: Claude Code wrote it in disabledMcpjsonServers of {folder}/.claude/settings.local.json, and no later window asks of it. If the project is to use it, take it out of that list.",
+                    participant.handle,
+                    refused.join(", ")
+                ),
+            )?;
+        }
+        // The servers ConsensFlow's Enter used, once the window's folder says it used them
+        // (the window may be gone by then, its task done): each told of once, in the words
+        // the dialog named it in.
+        if let (Some(named), true, true) = (using, used, refused.is_empty()) {
+            self.tell_used(project, &folder, participant, named)?;
         }
         if !self.shows(record, pane) {
             return Ok(());
@@ -602,39 +683,72 @@ impl Dispatcher {
             ),
             (true, None) => "ConsensFlow could not answer it.".to_owned(),
         };
-        self.tell_servers_once(project, folder, false, || {
-            format!(
-                "@{handle}'s window asks whether to use a new MCP server that its folder's .mcp.json, or a folder above it, names: a server it uses starts its command on this machine. {why} Answer it in that window: \"Use this MCP server\" uses it, \"Continue without using this MCP server\" goes on without it. What waits for @{handle} goes on by itself once you have.",
-                handle = participant.handle
-            )
-        })
-    }
-
-    /// A note to the human about the dialog of new servers that the project's windows
-    /// ask in `folder`: that ConsensFlow `answered` it, the first time; or that the human
-    /// is to, the first time since the last window it was told of was past it.
-    fn tell_servers_once(
-        &self,
-        project: &ProjectView,
-        folder: &str,
-        answered: bool,
-        body: impl FnOnce() -> String,
-    ) -> Result<(), EngineError> {
         if !self
             .trust
             .told_servers
             .borrow_mut()
-            .insert((project.id, folder.to_owned(), answered))
+            .insert((project.id, folder.to_owned()))
         {
             return Ok(());
         }
+        self.note_to_human(
+            project,
+            format!(
+                "@{handle}'s window asks whether to use a new MCP server that its folder's .mcp.json, or a folder above it, names: a server it uses starts its command on this machine. {why} Answer it in that window: \"Use this MCP server\" uses it, \"Continue without using this MCP server\" goes on without it. What waits for @{handle} goes on by itself once you have.",
+                handle = participant.handle
+            ),
+        )
+    }
+
+    /// Notes to the human that ConsensFlow had `participant`'s window use the servers
+    /// `named` (as the dialog of new servers named them, a plugin's with its plugin),
+    /// each the first time it was used in `folder`; one of a server it could not name.
+    fn tell_used(
+        &self,
+        project: &ProjectView,
+        folder: &str,
+        participant: &ParticipantView,
+        named: Vec<String>,
+    ) -> Result<(), EngineError> {
+        let named = if named.is_empty() {
+            vec![String::new()]
+        } else {
+            named
+        };
+        for name in named {
+            if !self
+                .trust
+                .used
+                .borrow_mut()
+                .insert((project.id, folder.to_owned(), name.clone()))
+            {
+                continue;
+            }
+            let server = if name.is_empty() {
+                "a new MCP server".to_owned()
+            } else {
+                format!("the MCP server {name}")
+            };
+            self.note_to_human(
+                project,
+                format!(
+                    "@{}'s window asked whether to use {server}, which the project's .mcp.json names; ConsensFlow said to use it, as the project's folder is trusted by choosing it. Claude Code starts the server's command, and keeps the choice in {folder}/.claude/settings.local.json.",
+                    participant.handle
+                ),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// A note to the human that says `body`.
+    fn note_to_human(&self, project: &ProjectView, body: String) -> Result<(), EngineError> {
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
                 from: None,
                 to: "human".to_owned(),
                 task: None,
-                body: body(),
+                body,
             },
         )?;
         self.changed();

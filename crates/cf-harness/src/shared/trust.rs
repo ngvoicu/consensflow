@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::directory::real_path;
-pub(crate) use crate::contract::Trusts;
+pub(crate) use crate::contract::{ServersChosen, Trusts};
 
 /// The keys a person answers a harness's question with.
 pub(crate) const DOWN: &[u8] = b"\x1b[B";
@@ -34,7 +34,8 @@ pub(crate) const ENTER: &[u8] = b"\r";
 /// folder is the project's folder or one below it, both as the system names them.
 /// Claude Code 2.1.309 reads the `.mcp.json` of the window's folder and of every
 /// folder above it, up to the root, as the project's servers, and asks of them in
-/// one dialog (T-383): the nearest folder above the project's that has one is named.
+/// one dialog (T-383): the nearest folder above the project's whose file names a
+/// server the project's settings neither use nor leave out is named ([`settled`]).
 pub(crate) fn trusts(directory: &str) -> Trusts {
     let project = real_path(directory).unwrap_or_else(|_| directory.to_owned());
     let folder = Path::new(&project)
@@ -42,15 +43,114 @@ pub(crate) fn trusts(directory: &str) -> Trusts {
         .find_map(root_of)
         .map_or_else(|| project.clone(), |root| plain(&root));
     let inside = Path::new(&folder).starts_with(&project);
+    let settled = settled(Path::new(&project));
     let servers_above = Path::new(&project)
         .ancestors()
         .skip(1)
-        .find(|above| above.join(".mcp.json").is_file())
+        .find(|above| {
+            servers_in(&above.join(".mcp.json"))
+                .iter()
+                .any(|name| !settled.contains(name))
+        })
         .map(|above| above.to_string_lossy().into_owned());
     Trusts {
         folder,
         inside,
         servers_above,
+    }
+}
+
+/// The servers a `.mcp.json` names: none where it is not there, or is no JSON, which
+/// Claude Code reads as naming none.
+fn servers_in(file: &Path) -> Vec<String> {
+    let servers = fs::read_to_string(file)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .map(|config| config["mcpServers"].clone());
+    servers
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
+        .map(|servers| servers.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// The settings of `folder` Claude Code keeps what it was told of the project's
+/// servers in: the shared ones and the local ones, where it writes a person's choice.
+fn settings_of(folder: &Path) -> Vec<serde_json::Value> {
+    ["settings.json", "settings.local.json"]
+        .iter()
+        .filter_map(|name| fs::read_to_string(folder.join(".claude").join(name)).ok())
+        .filter_map(|text| serde_json::from_str(&text).ok())
+        .collect()
+}
+
+/// The names in the list `list` of `settings`.
+fn listed(settings: &serde_json::Value, list: &str) -> Vec<String> {
+    settings[list]
+        .as_array()
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(|name| name.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The servers the settings of the project's `folder` say to use or to leave out, by
+/// name: Claude Code asks of no other. Every name, where they use them all
+/// (`enableAllProjectMcpServers`).
+fn settled(folder: &Path) -> Settled {
+    let settings = settings_of(folder);
+    if settings
+        .iter()
+        .any(|settings| settings["enableAllProjectMcpServers"] == true)
+    {
+        return Settled::All;
+    }
+    Settled::Named(
+        settings
+            .iter()
+            .flat_map(|settings| {
+                let mut names = listed(settings, "enabledMcpjsonServers");
+                names.extend(listed(settings, "disabledMcpjsonServers"));
+                names
+            })
+            .collect(),
+    )
+}
+
+/// What the settings of a project's folder say of its servers.
+enum Settled {
+    All,
+    Named(Vec<String>),
+}
+
+impl Settled {
+    fn contains(&self, name: &str) -> bool {
+        match self {
+            Settled::All => true,
+            Settled::Named(names) => names.iter().any(|named| named == name),
+        }
+    }
+}
+
+/// The servers the local settings of the window's `folder` use and leave out
+/// (`enabledMcpjsonServers`, `disabledMcpjsonServers`), as Claude Code writes them when
+/// the dialog of new servers is answered.
+pub(crate) fn chosen(folder: &str) -> ServersChosen {
+    let folder = real_path(folder).unwrap_or_else(|_| folder.to_owned());
+    let settings: serde_json::Value = fs::read_to_string(
+        Path::new(&folder)
+            .join(".claude")
+            .join("settings.local.json"),
+    )
+    .ok()
+    .and_then(|text| serde_json::from_str(&text).ok())
+    .unwrap_or_default();
+    ServersChosen {
+        used: listed(&settings, "enabledMcpjsonServers"),
+        left_out: listed(&settings, "disabledMcpjsonServers"),
     }
 }
 
@@ -228,23 +328,87 @@ mod tests {
         );
     }
 
+    /// A `.mcp.json` in `folder` that names `servers`.
+    fn naming(folder: &str, servers: &[&str]) {
+        let named: serde_json::Map<String, serde_json::Value> = servers
+            .iter()
+            .map(|name| ((*name).to_owned(), serde_json::json!({ "command": "true" })))
+            .collect();
+        fs::write(
+            Path::new(folder).join(".mcp.json"),
+            serde_json::json!({ "mcpServers": named }).to_string(),
+        )
+        .unwrap();
+    }
+
     #[test]
-    fn the_nearest_folder_above_the_project_whose_mcp_json_claude_reads_is_named() {
+    fn the_nearest_folder_above_the_project_whose_mcp_json_names_a_server_it_never_settled_is_named(
+    ) {
         let home = tempfile::tempdir().unwrap();
         let project = made(home.path(), "a/b/project");
-        fs::write(Path::new(&project).join(".mcp.json"), "{}").unwrap();
+        naming(&project, &["own"]);
         // The project's own file is the project's.
         assert_eq!(trusts(&project).servers_above, None);
         let a = made(home.path(), "a");
-        fs::write(Path::new(&a).join(".mcp.json"), "{}").unwrap();
+        naming(&a, &["far"]);
         assert_eq!(trusts(&project).servers_above, Some(a.clone()));
         let b = made(home.path(), "a/b");
-        fs::write(Path::new(&b).join(".mcp.json"), "{}").unwrap();
-        assert_eq!(trusts(&project).servers_above, Some(b));
+        naming(&b, &["near"]);
+        assert_eq!(trusts(&project).servers_above, Some(b.clone()));
+        // A file that names no server, or is no JSON, holds nothing (T-415).
+        naming(&b, &[]);
+        assert_eq!(trusts(&project).servers_above, Some(a.clone()));
+        fs::write(Path::new(&a).join(".mcp.json"), "not json").unwrap();
+        assert_eq!(trusts(&project).servers_above, None);
+        // A server above the project's settings use or leave out holds nothing.
+        naming(&a, &["far", "gone"]);
+        let settings = Path::new(&project).join(".claude");
+        fs::create_dir(&settings).unwrap();
+        fs::write(
+            settings.join("settings.local.json"),
+            r#"{"enabledMcpjsonServers":["far"]}"#,
+        )
+        .unwrap();
+        assert_eq!(trusts(&project).servers_above, Some(a.clone()));
+        fs::write(
+            settings.join("settings.json"),
+            r#"{"disabledMcpjsonServers":["gone"]}"#,
+        )
+        .unwrap();
+        assert_eq!(trusts(&project).servers_above, None);
+        naming(&a, &["far", "gone", "new"]);
+        assert_eq!(trusts(&project).servers_above, Some(a.clone()));
+        fs::write(
+            settings.join("settings.local.json"),
+            r#"{"enableAllProjectMcpServers":true}"#,
+        )
+        .unwrap();
+        assert_eq!(trusts(&project).servers_above, None);
         // A folder called so is no file of servers.
         let c = made(home.path(), "c/project");
         made(home.path(), "c/.mcp.json");
         assert_eq!(trusts(&c).servers_above, None);
+    }
+
+    #[test]
+    fn what_the_local_settings_use_and_leave_out_is_read_by_name() {
+        let home = tempfile::tempdir().unwrap();
+        let project = made(home.path(), "project");
+        assert_eq!(chosen(&project), ServersChosen::default());
+        let settings = Path::new(&project).join(".claude");
+        fs::create_dir(&settings).unwrap();
+        fs::write(
+            settings.join("settings.local.json"),
+            r#"{"disabledMcpjsonServers":["a","b"],"enabledMcpjsonServers":["c"]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            chosen(&project),
+            ServersChosen {
+                used: vec!["c".to_owned()],
+                left_out: vec!["a".to_owned(), "b".to_owned()],
+            }
+        );
     }
 
     #[test]

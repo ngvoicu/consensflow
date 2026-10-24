@@ -1688,7 +1688,11 @@ fn a_chief_whose_conversation_quotes_the_grants_dialog_cursor_and_all_is_told_of
 // ConsensFlow read it as no question: a worker sat on it till its launch failed, and what
 // went into a chief's window answered it. The owner's decision of 2026-10-23: in the
 // project's own folder ConsensFlow uses the server; elsewhere the window is held, the
-// human told, and nothing pressed.
+// human told, and nothing pressed. Calliope's review (T-415): a key that may answer what
+// comes next (Enter, or an Up that wraps) is never pressed again into a screen that did
+// not move; a dialog of many servers takes a key a server; a folder above holds only
+// where its `.mcp.json` names a server the project never settled; the lane says what the
+// window asks; and each server used is told of once it is, by name.
 
 /// The key toward using the server, from the choice the dialog opens on.
 const UP: &[u8] = b"\x1b[A";
@@ -1696,10 +1700,49 @@ const UP: &[u8] = b"\x1b[A";
 /// The rig, the windows of the participant `who` asking of the server `probe` of their
 /// folder's `.mcp.json`, once past any question about the folder.
 fn asking_of_a_server(who: &str) -> Config {
+    asking_of_servers(who, "probe")
+}
+
+/// The rig, the windows of the participant `who` asking of the servers `named` (a comma
+/// between two, or `mcp.json` for those of their folder's file).
+fn asking_of_servers(who: &str, named: &str) -> Config {
     config()
         .var("CF_TEST_TRUST", who)
-        .var("CF_TEST_TRUST_SERVER", "probe")
+        .var("CF_TEST_TRUST_SERVER", named)
         .var("CONSENSFLOW_LAUNCH_TIMEOUT_MS", "8000")
+}
+
+/// Why the lane of a window that asks of new servers says it is starting.
+const ASKS_OF_SERVERS: &str = "the window asks whether to use the project's MCP servers";
+
+/// The notes to the human that a window left a server out while ConsensFlow pressed.
+fn left_out_notes(project: &Project) -> cf_e2e::Result<Vec<String>> {
+    Ok(project
+        .inbox("human")?
+        .iter()
+        .filter_map(|message| message["body"].as_str())
+        .filter(|body| body.contains("out of the project's while ConsensFlow pressed"))
+        .map(str::to_owned)
+        .collect())
+}
+
+/// The notes to the human that ConsensFlow used a window's new server, once there are
+/// `count`: each is told of once its window is past the dialog, a look after it may be.
+fn used_told(rig: &Rig, project: &Project, count: usize) -> cf_e2e::Result<Vec<String>> {
+    rig.wait_for("the servers' use to be told of", secs(30), || {
+        Ok(used_notes(project)?.len() >= count)
+    })?;
+    used_notes(project)
+}
+
+/// T-1 done, failing the case where it failed.
+fn first_done(rig: &Rig, project: &Project, within: u64) -> Outcome {
+    rig.wait_for("T-1 to be done", secs(within), || {
+        let state = project.task(1)?["state"].clone();
+        assert_ne!(state, "failed", "T-1 failed at a question");
+        Ok(state == "done")
+    })?;
+    Ok(())
 }
 
 /// The notes to the human that a window asks of a new server.
@@ -1784,10 +1827,12 @@ fn a_worker_asked_of_a_new_server_of_the_projects_mcp_json_has_it_used_once_and_
         Value::Null,
         "{settings}"
     );
-    let used = used_notes(&project)?;
+    let used = used_told(&rig, &project, 1)?;
     assert_eq!(used.len(), 1, "the human is told once: {used:?}");
     assert!(
-        used[0].contains(&real(rig.workspace())) && used[0].contains("settings.local.json"),
+        used[0].contains("the MCP server probe,")
+            && used[0].contains(&real(rig.workspace()))
+            && used[0].contains("settings.local.json"),
         "{used:?}"
     );
     assert_eq!(
@@ -1804,42 +1849,162 @@ fn a_worker_asked_of_a_new_server_of_the_projects_mcp_json_has_it_used_once_and_
 }
 
 #[test]
-fn a_worker_asked_to_trust_the_projects_new_repository_then_of_its_server_has_both_answered_each_with_its_own_keys(
+fn a_worker_asked_to_trust_the_projects_new_repository_then_of_its_servers_has_both_answered_each_with_its_own_keys(
 ) -> Outcome {
     // T-383's probe: in a new repository Claude Code asks of the folder first, then of
-    // the server. Each window drops the first key of each, so the two take seven keys
-    // between them, more than one question is given.
+    // the servers. Each drops the first key it is given, a Down, which is pressed again.
     let rig = Rig::start(
-        asking_of_a_server("worker")
+        asking_of_servers("worker", "probe,probe2")
             .var("CF_TEST_TRUST_DROPS_FIRST_KEY", "1")
             .var("CF_TEST_TRUST_SERVER_DROPS_FIRST_KEY", "1"),
     )?;
     git_init(rig.workspace())?;
     let (project, _) = a_worker_asking_of_a_server(&rig, rig.workspace())?;
-    rig.wait_for("T-1 to be done", secs(90), || {
-        let state = project.task(1)?["state"].clone();
-        assert_ne!(state, "failed", "T-1 failed at a question");
-        Ok(state == "done")
-    })?;
+    first_done(&rig, &project, 90)?;
     assert_eq!(
         keys_given(&rig),
-        ["dropped", "down", "enter", "dropped", "up", "up", "enter"]
+        ["dropped", "down", "enter", "dropped", "down", "down", "enter"]
     );
     assert_eq!(
         local_settings(rig.workspace())["enabledMcpjsonServers"],
-        json!(["probe"])
+        json!(["probe", "probe2"])
     );
     assert_eq!(
         answered_notes(&project)?.len(),
         1,
         "the folder's yes told once"
     );
-    assert_eq!(used_notes(&project)?.len(), 1, "the server's use told once");
+    assert_eq!(
+        used_told(&rig, &project, 2)?.len(),
+        2,
+        "each server's use told once"
+    );
     assert_eq!(
         servers_notes(&project)?,
         Vec::<String>::new(),
         "told as held"
     );
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_worker_asked_of_six_new_servers_has_them_all_used_a_key_each() -> Outcome {
+    // Calliope's review (T-415): six servers take six Downs and an Enter, and the first
+    // key is dropped, pressed again; a budget of six keys a question refused the Enter.
+    let rig = Rig::start(
+        asking_of_servers("worker", "s1,s2,s3,s4,s5,s6")
+            .var("CF_TEST_TRUST_SERVER_DROPS_FIRST_KEY", "1"),
+    )?;
+    let (project, _) = a_worker_asking_of_a_server(&rig, rig.workspace())?;
+    first_done(&rig, &project, 90)?;
+    let mut keys = vec!["dropped"];
+    keys.extend(["down"; 6]);
+    keys.push("enter");
+    assert_eq!(keys_given(&rig), keys);
+    assert_eq!(
+        local_settings(rig.workspace())["enabledMcpjsonServers"],
+        json!(["s1", "s2", "s3", "s4", "s5", "s6"])
+    );
+    let used = used_told(&rig, &project, 6)?;
+    assert_eq!(used.len(), 6, "{used:?}");
+    for name in ["s1", "s6"] {
+        assert!(
+            used.iter()
+                .any(|note| note.contains(&format!("the MCP server {name},"))),
+            "{used:?}"
+        );
+    }
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_worker_whose_screen_stays_on_the_folders_yes_is_never_given_its_enter_again_and_its_server_is_used(
+) -> Outcome {
+    // Calliope's review (T-415): the screen stayed on the folder's question for 7 s after
+    // its yes, while the window had gone on to the dialog of the server, its cursor on
+    // "Continue without using this MCP server". An Enter pressed again went there, and
+    // left the server out for good, nobody told. Now the question is the human's after
+    // 5 s, and the dialog that comes next is answered as its own.
+    let rig =
+        Rig::start(asking_of_a_server("worker").var("CF_TEST_TRUST_FROZEN_AFTER_YES_MS", "7000"))?;
+    git_init(rig.workspace())?;
+    let (project, _) = a_worker_asking_of_a_server(&rig, rig.workspace())?;
+    first_done(&rig, &project, 90)?;
+    assert_eq!(keys_given(&rig), ["down", "enter", "up", "up", "enter"]);
+    let settings = local_settings(rig.workspace());
+    assert_eq!(
+        settings["enabledMcpjsonServers"],
+        json!(["probe"]),
+        "{settings}"
+    );
+    assert_eq!(
+        settings["disabledMcpjsonServers"],
+        Value::Null,
+        "{settings}"
+    );
+    assert_eq!(used_told(&rig, &project, 1)?.len(), 1);
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_worker_whose_dialog_leaves_its_server_out_while_consensflow_pressed_toward_it_has_the_human_told(
+) -> Outcome {
+    // Calliope's review (T-415): a key that answered what it was not pressed for leaves
+    // the server out, and no later window asks of it. The window's folder's settings say
+    // so once the watch is over.
+    let rig = Rig::start(asking_of_a_server("worker").var("CF_TEST_TRUST_SERVER_REFUSES", "1"))?;
+    let (project, _) = a_worker_asking_of_a_server(&rig, rig.workspace())?;
+    first_done(&rig, &project, 60)?;
+    assert_eq!(keys_given(&rig), ["up", "up", "enter"]);
+    assert_eq!(
+        local_settings(rig.workspace())["disabledMcpjsonServers"],
+        json!(["probe"])
+    );
+    rig.wait_for("the human to be told it was left out", secs(30), || {
+        Ok(left_out_notes(&project)?.len() == 1)
+    })?;
+    let notes = left_out_notes(&project)?;
+    assert!(
+        notes[0].contains("the MCP server probe out")
+            && notes[0].contains("disabledMcpjsonServers"),
+        "{notes:?}"
+    );
+    assert_eq!(
+        used_notes(&project)?,
+        Vec::<String>::new(),
+        "told it was used"
+    );
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_server_added_to_the_projects_mcp_json_later_and_used_in_a_later_window_is_told_of_by_name(
+) -> Outcome {
+    // Calliope's review (T-415): the note was once a project and folder, for good.
+    let rig = Rig::start(asking_of_servers("worker", "mcp.json"))?;
+    let file = rig.workspace().join(".mcp.json");
+    std::fs::write(&file, r#"{"mcpServers":{"probe":{"command":"true"}}}"#)?;
+    let (project, tier) = a_worker_asking_of_a_server(&rig, rig.workspace())?;
+    first_done(&rig, &project, 60)?;
+    std::fs::write(
+        &file,
+        r#"{"mcpServers":{"probe":{"command":"true"},"later":{"command":"true"}}}"#,
+    )?;
+    a_task(&rig, &project, &tier, 2, "LATER_DONE")?;
+    assert_eq!(keys_given(&rig), ["up", "up", "enter", "up", "up", "enter"]);
+    let used = used_told(&rig, &project, 2)?;
+    assert_eq!(used.len(), 2, "{used:?}");
+    for name in ["probe", "later"] {
+        assert!(
+            used.iter()
+                .any(|note| note.contains(&format!("the MCP server {name},"))),
+            "{used:?}"
+        );
+    }
     rig.close()?;
     Ok(())
 }
@@ -1860,10 +2025,7 @@ fn a_worker_held_at_the_server(rig: &Rig, folder: &Path, why: &str) -> Outcome {
         "a key went into the dialog"
     );
     let lane = project.lane("worker")?;
-    assert_eq!(
-        lane["activity"]["reason"], "the window asks whether to trust its folder",
-        "{lane}"
-    );
+    assert_eq!(lane["activity"]["reason"], ASKS_OF_SERVERS, "{lane}");
     assert_ne!(
         project.task(1)?["state"],
         "failed",
@@ -1917,17 +2079,44 @@ fn a_worker_asked_of_a_new_server_in_a_project_inside_a_repository_outside_it_is
 #[test]
 fn a_worker_asked_of_a_new_server_where_a_folder_above_the_project_has_servers_is_held_and_the_human_told(
 ) -> Outcome {
-    // A plain folder whose parent has a `.mcp.json` of its own, whose servers Claude Code
-    // asks of in the same dialog.
+    // A plain folder whose parent has a `.mcp.json` of its own that names a server,
+    // which Claude Code asks of in the same dialog.
     let rig = Rig::start(asking_of_a_server("worker"))?;
     let folder = rig.workspace().join("app");
     std::fs::create_dir(&folder)?;
-    std::fs::write(rig.workspace().join(".mcp.json"), r#"{"mcpServers":{}}"#)?;
+    std::fs::write(
+        rig.workspace().join(".mcp.json"),
+        r#"{"mcpServers":{"above":{"command":"true"}}}"#,
+    )?;
     a_worker_held_at_the_server(
         &rig,
         &folder,
         &format!("{}, above the project's folder", real(rig.workspace())),
     )?;
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_worker_asked_of_a_new_server_where_a_folder_above_has_a_mcp_json_naming_none_has_it_used(
+) -> Outcome {
+    // Calliope's review (T-415): a file above that names no server asks of nothing.
+    let rig = Rig::start(asking_of_a_server("worker"))?;
+    let folder = rig.workspace().join("app");
+    std::fs::create_dir(&folder)?;
+    std::fs::write(rig.workspace().join(".mcp.json"), r#"{"mcpServers":{}}"#)?;
+    let (project, _) = a_worker_asking_of_a_server(&rig, &folder)?;
+    first_done(&rig, &project, 60)?;
+    assert_eq!(keys_given(&rig), ["up", "up", "enter"]);
+    assert_eq!(
+        local_settings(&folder)["enabledMcpjsonServers"],
+        json!(["probe"])
+    );
+    assert_eq!(
+        servers_notes(&project)?,
+        Vec::<String>::new(),
+        "told as held"
+    );
     rig.close()?;
     Ok(())
 }
@@ -1949,6 +2138,8 @@ fn a_chief_asked_of_a_new_server_it_may_not_use_is_handed_nothing_till_the_human
         Ok(servers_notes(&project)?.len() == 1)
     })?;
     assert!(servers_notes(&project)?[0].contains("@chief"));
+    let chief = project.lane("chief")?;
+    assert_eq!(chief["activity"]["reason"], ASKS_OF_SERVERS, "{chief}");
     let tier = project.tiers()?.get("worker").cloned().unwrap_or_default();
     let window = chiefs(&rig, &project)[0].clone();
     let added = rig.cf_in_window(
