@@ -34,9 +34,11 @@
 use std::rc::Rc;
 
 use cf_base::refusal::Refusal;
+use cf_harness::records::Role;
 use cf_ledger::{ParticipantView, TaskThread, TaskView};
 
 use super::{leftovers, with_leftovers, words_of};
+use crate::delivery_text::header_id;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
@@ -167,6 +169,14 @@ impl Dispatcher {
                     ),
                 )
             })?;
+        // A message ConsensFlow pasted into the window since (the Resume's word to go on,
+        // which no start is taken from) is answered by what follows it, as at a turn's end;
+        // the harness's own notifications, which wake a held task's turns, are none (the
+        // merge with Resume after Close, T-405's L10).
+        let start = items[start + 1..]
+            .iter()
+            .rposition(|item| item.role == Role::User && header_id(&item.text).is_some())
+            .map_or(start, |later| start + 1 + later);
         let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
         let run = answers_to_the_task(&items[start + 1..], &replacements)
             .and_then(|answers| answers.complete_run)

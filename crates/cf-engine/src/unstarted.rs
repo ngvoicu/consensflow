@@ -168,6 +168,8 @@ impl Dispatcher {
             queued: false,
             free_since: None,
             entered_again: false,
+            // A launch's first message is never pressed for.
+            carried: Vec::new(),
         };
         // The window's exit is settled at its close, before what it was to be given:
         // the host answers a kill before the exit comes, so a member's task paused by

@@ -392,6 +392,12 @@ impl Rig {
         self.daemon.id()
     }
 
+    /// The pane host's process id: the process that holds the windows' terminals and
+    /// reads their output.
+    pub fn host_pid(&self) -> u32 {
+        self.host.id()
+    }
+
     /// The value of the variable `name` in the environment of the daemon and
     /// the windows it opens.
     pub fn var(&self, name: &str) -> Option<&str> {

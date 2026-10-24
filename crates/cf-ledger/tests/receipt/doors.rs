@@ -2,7 +2,7 @@
 //! it does, the answer is the ledger's to deliver as text, and a claim that
 //! no one acknowledged is voided at the first sign that its door is gone.
 
-use cf_ledger::Claim;
+use cf_ledger::{Claim, NewQuestion};
 use serde_json::json;
 
 use crate::fixture::{ids, world, World};
@@ -214,6 +214,85 @@ fn a_claim_nobody_acknowledged_is_voided_when_its_window_is_at_rest_and_when_the
     );
 }
 
+/// Both reviews of 2026-10-16, round 5: the Close could not end zeus's window,
+/// so its task was never paused and its door stayed open, and the answer the
+/// chief gave while the project was closed was claimed for it.
+#[test]
+fn a_door_of_a_closed_project_claims_nothing_and_its_answer_waits_for_the_resume() {
+    let mut w = world();
+    let (task, question, answer) = asked_through_a_door(&mut w);
+    let zeus = w.id("zeus");
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("closed");
+    assert_eq!(w.state(task), "waiting", "its window was never closed");
+
+    assert_eq!(
+        w.ledger.claim_answer(question, zeus).unwrap(),
+        Claim::Waiting
+    );
+    assert_eq!(w.states(&[answer]), ["queued"]);
+    assert_eq!(w.next("zeus"), Some(answer), "nothing claimed it");
+
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+    let claimed = w.ledger.claim_answer(question, zeus).unwrap();
+    assert!(matches!(&claimed, Claim::Answered(found) if found.id == answer));
+}
+
+/// Sol's shape of the same: a question about no task, which no pause shuts.
+#[test]
+fn a_door_of_a_closed_project_with_no_task_claims_nothing() {
+    let mut w = world();
+    let zeus = w.id("zeus");
+    let question = w
+        .ledger
+        .ask(
+            w.project,
+            &NewQuestion {
+                from: Some("zeus".into()),
+                to: "chief".into(),
+                questions: Some(json!([{
+                    "question": "Which colour?",
+                    "header": "Colour",
+                    "options": [{ "label": "red" }, { "label": "blue" }],
+                    "multiple": false,
+                }])),
+                ..NewQuestion::default()
+            },
+        )
+        .expect("a question about no task");
+    assert_eq!(question.task_number, None);
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("closed");
+    let answer = w.choose(question.id, "blue");
+
+    assert_eq!(
+        w.ledger.claim_answer(question.id, zeus).unwrap(),
+        Claim::Waiting
+    );
+    assert_eq!(w.states(&[answer.id]), ["queued"]);
+}
+
+/// A claim made before the Close was a hand-over begun: a door whose reply was
+/// lost on its way is given the same answer again, as a paste begun before a
+/// Close is the window's.
+#[test]
+fn a_claim_made_before_the_close_is_the_door_s_and_comes_again() {
+    let mut w = world();
+    let (_, question, answer) = asked_through_a_door(&mut w);
+    let zeus = w.id("zeus");
+    let claimed = w.ledger.claim_answer(question, zeus).unwrap();
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("closed");
+
+    assert_eq!(w.ledger.claim_answer(question, zeus).unwrap(), claimed);
+    assert!(matches!(&claimed, Claim::Answered(found) if found.id == answer));
+}
+
 #[test]
 fn an_answer_that_rides_in_a_paste_is_closed_to_the_door_and_comes_with_it() {
     let mut w = world();
@@ -283,4 +362,51 @@ fn an_acceptance_leaves_the_door_of_a_question_on_another_task_open() {
         Claim::Waiting,
         "a question of another window, on a task still at work, waits as before"
     );
+}
+
+/// Where the Resume's rules meet main's (T-392): while the project is closed, a door
+/// waits whatever came, its answer kept for the Resume; an acceptance meanwhile
+/// shuts it at once, as a pause does in a closed project. Telling the door its task
+/// is over hands the window no words the Resume holds: the answer kept is
+/// withdrawn with the task, never claimed.
+#[test]
+fn an_acceptance_while_the_project_is_closed_shuts_the_door_and_the_answer_kept_for_the_resume_goes(
+) {
+    let mut w = world();
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.expect("a brief").id);
+    w.deliver(brief);
+    let zeus = w.id("zeus");
+    let question = w.ask_with_options("zeus", task);
+    w.ledger
+        .record_result(w.project, task, "Done")
+        .expect("its result");
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("closed");
+    let answer = w.choose(question.id, "blue");
+    assert_eq!(
+        w.ledger.claim_answer(question.id, zeus).unwrap(),
+        Claim::Waiting,
+        "kept for the Resume"
+    );
+
+    w.ledger
+        .accept_task(w.project, task, "chief")
+        .expect("accepted");
+    assert_eq!(
+        w.ledger.claim_answer(question.id, zeus).unwrap(),
+        Claim::Closed,
+        "told at once that its task is over"
+    );
+    let kept = w.message(answer.id);
+    assert_eq!(kept.state, "cancelled", "{kept:?}");
+    let claims = w
+        .ledger
+        .events(w.project, 0, 500)
+        .unwrap()
+        .iter()
+        .filter(|event| event.kind == "delivery.claimed")
+        .count();
+    assert_eq!(claims, 0, "never claimed");
 }

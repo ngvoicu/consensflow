@@ -15,7 +15,8 @@
 //! and what a
 //! window is given while the words that were for it wait at the human's gate
 //! (`approval`), and the tester, which Node's staff never had (`testers`), and
-//! the human's Resume of what a start suspended (`resume`), the conversation its
+//! the human's Resume of what a start suspended (`resume`), and of what a Close
+//! suspended, whose windows are handed nothing meanwhile (`closed_given_nothing`), the conversation its
 //! harness holds nothing of, which a window opened again does not resume
 //! (`resumable`), and the arrival window counted in the time a window is at
 //! rest, so that a record that is late while its window is in a turn is waited
@@ -37,6 +38,7 @@ mod cancelled_task;
 mod carriers;
 mod chief_not_up;
 mod chiefs;
+mod closed_given_nothing;
 mod closing;
 mod decided_results;
 mod deleted_sessions;
@@ -50,6 +52,7 @@ mod lanes;
 mod launch_stops;
 mod launch_wait;
 mod looks;
+mod meeting_main;
 mod no_adapter;
 mod not_ready;
 mod out_of_quota;
@@ -75,6 +78,7 @@ mod sessions;
 mod several_roles;
 mod slow_records;
 mod specs;
+mod stale_box;
 mod stops;
 mod switched_conversation;
 mod switching;
@@ -104,6 +108,7 @@ mod window_traces;
 mod window_went_with_a_paste;
 mod windows;
 mod withdrawn;
+mod withheld_enter;
 mod work_in_flight;
 mod work_in_flight_launches;
 mod work_in_flight_pastes;

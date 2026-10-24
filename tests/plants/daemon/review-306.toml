@@ -303,8 +303,8 @@ runs = ["ledger-told-kept", "engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "    let requester = store.participant_row(task.requester_id)?.handle;"
-replace = "    if true { return Ok(()); }\n    let requester = store.participant_row(task.requester_id)?.handle;"
+find = "        return set(store, id, task.project_id, &paused);\n    }\n    let requester = store.participant_row(task.requester_id)?.handle;"
+replace = "        return set(store, id, task.project_id, &paused);\n    }\n    if true { return Ok(()); }\n    let requester = store.participant_row(task.requester_id)?.handle;"
 
 [[plant]]
 name = "review 306: a pause note says the why again for each word kept"

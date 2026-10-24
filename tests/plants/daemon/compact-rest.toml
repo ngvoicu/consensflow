@@ -277,3 +277,76 @@ replace = '''
             wrote("system/compact_boundary")
                 || seen
 '''
+
+[[plant]]
+name = "compact-rest: the live suite fails its run on the cancelled compaction, a finding left for 3.0.6"
+meant = "only_the_cancelled_compaction_is_a_finding_which_fails_nothing"
+runs = ["compact-rest-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = "        self == Command::Cancelled"
+replace = "        false"
+
+# Round b7 (Calliope's review of round 3): the cancelled command's finding holds only where it
+# ran, Claude held idle and the owner's settings were kept.
+[[plant]]
+name = "compact-rest: the cancelled finding passes whatever came of it, a changed settings file or a prep that never answered (round 3's gate)"
+meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
+runs = ["compact-rest-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = '        came.at_rest || finding,'
+replace = '        came.at_rest || command.finding(),'
+[[plant]]
+name = "compact-rest: the cancelled finding passes though Claude changed the owner's settings"
+meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
+runs = ["compact-rest-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = '            all_but_settled: done && outcome.read && kept,'
+replace = '            all_but_settled: done && outcome.read,'
+[[plant]]
+name = 'compact-rest: the cancelled finding passes though the command never ran or Claude never held idle'
+meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
+runs = ["compact-rest-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = '            all_but_settled: done && outcome.read && kept,'
+replace = '            all_but_settled: outcome.read && kept,'
+
+# Round b9 (the review of b7): the finding holds only where the daemon read the window, and
+# Claude held idle and kept the settings once what the box held was sent.
+
+[[plant]]
+name = 'compact-rest: the cancelled finding passes though the daemon could not read the window'
+meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
+runs = ["compact-rest-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = '            all_but_settled: done && outcome.read && kept,'
+replace = '            all_but_settled: done && kept,'
+
+[[plant]]
+name = 'compact-rest: the cancelled finding passes though Claude never held idle once the box was sent'
+meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
+runs = ["compact-rest-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = '        let done = outcome.done && idle;'
+replace = '        let done = outcome.done;'
+
+[[plant]]
+name = 'compact-rest: the cancelled finding passes though Claude changed the settings once the box was sent'
+meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
+runs = ["compact-rest-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = '        let kept = outcome.kept && still;'
+replace = '        let kept = outcome.kept;'

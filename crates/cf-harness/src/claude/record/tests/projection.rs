@@ -284,6 +284,30 @@ fn what_nothing_reads_of_a_record_changes_neither_how_it_waits_nor_the_reading()
 }
 
 #[test]
+fn the_records_claude_code_writes_of_a_request_are_no_item_of_the_conversation() {
+    // Claude Code 2.1.303 echoes the request it sent, the prompt as the user's message
+    // in it (the long run's chief on the Mac, 2026-10-19; made-up words here): the
+    // conversation's items are the same with them or without, and they begin no turn.
+    let prompt = "[ConsensFlow m-13 · note from @human]\nGo on.";
+    let echoes = [
+        of_session(json!({ "type": "api-request-blob", "hash": "h1",
+            "message": { "role": "user", "content": prompt } })),
+        of_session(json!({ "type": "api-request",
+            "message": { "role": "user", "content": [text(json!(prompt))] } })),
+    ];
+    for echo in &echoes {
+        assert_eq!(projected(echo, SESSION), Projected::Other, "{echo}");
+    }
+    let turn = [
+        user("u1", Value::Null, json!(prompt)),
+        answer("a1", "u1"),
+        duration("d1", "a1"),
+    ];
+    let echoed: Vec<Value> = turn.iter().chain(&echoes).cloned().collect();
+    assert_eq!(once(&echoed), once(&turn));
+}
+
+#[test]
 fn a_record_waits_as_little_as_its_reading_asks_of_it() {
     // What a record that says nothing of the turn waits as.
     for record in [

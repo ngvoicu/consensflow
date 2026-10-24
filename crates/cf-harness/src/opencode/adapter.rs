@@ -217,6 +217,11 @@ impl Adapter for OpenCodeAdapter {
     fn resumable<'a>(&'a self, _session: &'a str) -> Work<'a, Option<bool>> {
         Box::pin(async { Some(true) })
     }
+
+    /// Its first message is posted to its server once the window is up (`seed`).
+    fn first_message_once_up(&self) -> bool {
+        true
+    }
 }
 
 /// An OpenCode window, and the channel to its server and its plugin.
@@ -270,8 +275,9 @@ impl Window for OpenCodeWindow {
         session.clone_into(&mut self.session.borrow_mut());
     }
 
-    /// The first message goes in once the server is up, through the server.
-    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
+    /// The first message goes in once the server is up, through the server, if
+    /// `host` still admits it as it is posted.
+    fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
         Box::pin(async move {
             let Some(text) = &self.first_message else {
                 return Ok(None);
@@ -287,7 +293,7 @@ impl Window for OpenCodeWindow {
                 resume: self.resumed,
                 lifetime_ms: LIFETIME_MS,
             };
-            seed_session(self.wires(), &self.channel, &seed).await?;
+            seed_session(self.wires(), &self.channel, &seed, host).await?;
             Ok(None)
         })
     }

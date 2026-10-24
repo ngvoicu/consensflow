@@ -13,6 +13,7 @@ mod codex;
 mod coverage;
 mod devin;
 mod first_instructions;
+mod first_message;
 mod kept;
 mod opencode;
 mod pi;

@@ -150,7 +150,8 @@ pub(super) fn fail_for(
 /// it, and the words that resume the task carry them (the second review,
 /// 2026-10-16: they were given up, and the window resumed without them). They
 /// keep the attempts they had, and the task's requester hears why and which words
-/// wait ([`tell_kept`]). Whether they were kept.
+/// wait ([`tell_kept`]). Back in their queue they were handed nothing, as on every
+/// way back there (Calliope's review of the merge, T-408). Whether they were kept.
 pub(super) fn kept_for_resume(
     store: &mut Store,
     message: &MessageView,
@@ -161,7 +162,8 @@ pub(super) fn kept_for_resume(
         return Ok(false);
     }
     store.db.execute(
-        "UPDATE message SET state = 'queued', reason = ?, carried_by = NULL WHERE id = ?",
+        "UPDATE message SET state = 'queued', reason = ?, carried_by = NULL, handed_at = NULL
+         WHERE id = ?",
         params![
             format!("kept for T-{}'s resume: {reason}", task.number),
             message.id

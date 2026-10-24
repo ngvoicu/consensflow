@@ -288,13 +288,13 @@ replace = '''
 
 [[plant]]
 name = "codex role: the message column's text is not held apart from the schema of Node's recordings"
-meant = "takes_the_column_out_of_the_text_sqlite_wrote_for_the_message_table_and_of_no_other"
+meant = "testing::role_note::tests::takes_the_column_out_of_the_text_sqlite_wrote_for_the_message_table_and_of_no_other"
 runs = ["ledger-lib", "ledger-replay"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/testing.rs"
-find = '''                *sql = sql.replace(role_note::COLUMN_LINES, "");'''
-replace = '''                *sql = sql.replace(role_note::COLUMN_LINES, " ");'''
+find = '''                    .replace(role_note::COLUMN_LINES, "")'''
+replace = '''                    .replace(role_note::COLUMN_LINES, " ")'''
 
 # --- the harness ---
 
@@ -986,7 +986,7 @@ runs = ["engine-role-change"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''                Some(displaced) => {
-                    self.give_back(displaced, "its window is told its role first")?;
+                    self.give_back(displaced.message, "its window is told its role first")?;
                     None
                 }'''
 replace = '''                Some(_) => None,'''
@@ -1012,11 +1012,9 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''            stop,
-            prelude,
+find = '''            prelude,
             first_instructions:'''
-replace = '''            stop,
-            prelude: None,
+replace = '''            prelude: None,
             first_instructions:'''
 
 # What confirms a note that says a role records it in the same write; one too long to go whole
@@ -1056,8 +1054,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''        } else if goes_whole(message, &[]) {'''
-replace = '''        } else if goes_whole(message, &[]) || true {'''
+find = '''        Ok(says_a_role.then(|| goes_whole(message, &[])))'''
+replace = '''        Ok(says_a_role.then(|| goes_whole(message, &[]) || true))'''
 
 [[plant]]
 name = "codex role: the human is not told that a role went in part"
@@ -1066,8 +1064,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''                    to: "human".to_owned(),'''
-replace = '''                    to: "chief".to_owned(),'''
+find = '''                to: "human".to_owned(),'''
+replace = '''                to: "chief".to_owned(),'''
 
 [[plant]]
 name = "codex role: a message is cut at sixteen thousand units and not past them"

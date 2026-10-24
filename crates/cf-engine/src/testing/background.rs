@@ -11,6 +11,7 @@ use std::rc::Rc;
 use cf_harness::contract::{Pane, Work};
 use cf_proto::panes::Servers;
 
+use super::Gate;
 use crate::seams::{BackgroundWork, CommandsSeen};
 
 /// What a mark told the host of a window.
@@ -37,11 +38,21 @@ pub struct FakeBackground {
     /// The rests the engine asked the host to keep, in order, with the earlier rests each
     /// asked kept: each is given the number of its place, from 0.
     rests: RefCell<Vec<(Pane, Vec<u64>)>>,
+    /// The word that a turn begins waits for this gate before it is taken.
+    mark_hold: RefCell<Option<Gate>>,
 }
 
 impl FakeBackground {
     pub fn new() -> Rc<Self> {
         Rc::new(Self::default())
+    }
+
+    /// The host takes its time over the word that a turn begins: it is not taken
+    /// until the gate is opened.
+    pub fn hold_marks(&self) -> Gate {
+        let gate = Gate::default();
+        *self.mark_hold.borrow_mut() = Some(gate.clone());
+        gate
     }
 
     /// The panes the engine said a turn begins in, in order.
@@ -141,7 +152,12 @@ impl BackgroundWork for FakeBackground {
             servers,
             harness: harness.to_owned(),
         });
-        Box::pin(async {})
+        let held = self.mark_hold.borrow().clone();
+        Box::pin(async move {
+            if let Some(gate) = held {
+                gate.wait().await;
+            }
+        })
     }
 
     fn commands<'a>(

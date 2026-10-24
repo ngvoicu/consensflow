@@ -24,6 +24,7 @@ pub mod request;
 pub mod routes;
 mod server;
 pub mod views;
+pub mod waits;
 
 use std::io;
 use std::rc::Rc;

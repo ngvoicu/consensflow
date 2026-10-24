@@ -29,6 +29,7 @@ tem-panes-native = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pr
 tem-panes-clock = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::clock::"]
 tem-engine-queued-tells = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "queued_tells::"]
 tem-engine-own-steps = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "own_steps::"]
+tem-engine-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::"]
 tem-panes-headless-commands = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_look_at_the_commands_over_the_wire"]
 tem-e2e-mcp = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::mcp_server::"]
 tem-e2e-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::"]
@@ -1834,3 +1835,48 @@ find = """
 replace = """
                 participant.role != "human"
                     && Some(&participant.handle) == thread.task.assignee.as_ref()"""
+
+# The merge with Resume after Close (T-371: Calliope's L5-L10, T-405, and R1-R5, T-408).
+
+[[plant]]
+name = "turn-end-min engine: a reopened window's answer before its continuation is the result"
+meant = "a_window_the_resume_reopens_yields_no_result_before_the_turn_after_its_continuation"
+runs = ["tem-engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '            .filter(|answers| answers.last.is_some_and(|last| last.complete))'
+replace = '            .filter(|answers| answers.complete_run.is_some())'
+
+[[plant]]
+name = "turn-end-min engine: Finish takes the answer written before the Resume's word to go on"
+meant = "finish_of_a_task_the_resume_brought_back_waits_for_the_answer_to_its_continuation"
+runs = ["tem-engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = '            .rposition(|item| item.role == Role::User && header_id(&item.text).is_some())'
+replace = '            .rposition(|item| item.role == Role::User && header_id(&item.text).is_some() && false)'
+
+[[plant]]
+name = "turn-end-min engine: a held task whose jobs the Resume retired takes no result"
+meant = "a_task_held_for_a_job_at_the_close_is_done_after_the_resume_with_its_answer_and_the_job_said_retired"
+runs = ["tem-engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '    if pending.retired > 0 {'
+replace = '    if pending.retired > 0 && false {'
+
+[[plant]]
+name = "turn-end-min engine: a paste takes no rest before the turn it begins"
+meant = "a_monitor_of_the_turn_a_pasted_message_began_is_left_the_rest_before_the_paste"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        self.mark_turn(record, &pane).await;
+        record.held.borrow_mut().rests.pasted();'''
+replace = '''
+        self.mark_turn(record, &pane).await;'''
