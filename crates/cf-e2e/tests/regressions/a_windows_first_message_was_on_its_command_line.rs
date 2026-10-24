@@ -20,13 +20,18 @@
 #[cfg(unix)]
 use std::path::Path;
 
+#[cfg(unix)]
 use cf_e2e::files;
 #[cfg(unix)]
 use cf_e2e::process::Run;
 use cf_e2e::rig::{Project, Rig, OPEN};
-use serde_json::{json, Value};
+#[cfg(unix)]
+use serde_json::json;
+use serde_json::Value;
 
-use crate::{config, config_with_codex, secs, Outcome};
+#[cfg(unix)]
+use crate::config_with_codex;
+use crate::{config, secs, Outcome};
 
 /// A word that is in a brief and nowhere else on the machine.
 fn unique(case: &str) -> String {
