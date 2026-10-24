@@ -515,6 +515,15 @@ find = '''            let left_open = match launch.resume {
 replace = '''            let left_open = match launch.resume {
                 Some(thread) if launch.message.is_none() => {'''
 
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''                    LeftOpen::of(&before)
+                }
+                None => None,'''
+replace = '''                    LeftOpen::of(&before)
+                }
+                _ => None,'''
+
 # --- the engine ---
 
 [[plant]]

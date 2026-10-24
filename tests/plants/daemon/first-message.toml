@@ -122,7 +122,7 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = "            if !drawing && observed.settled && observed.waiting.is_none() && project.state == \"open\""
-replace = "            if (!drawing || asking) && observed.settled && observed.waiting.is_none() && project.state == \"open\""
+replace = "            if (!drawing || asking) && (observed.settled || asking) && observed.waiting.is_none() && project.state == \"open\""
 
 [[plant]]
 name = "first message: a window not ready for it is handed it all the same"
