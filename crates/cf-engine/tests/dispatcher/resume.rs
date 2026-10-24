@@ -2022,7 +2022,6 @@ fn a_task_held_for_a_job_at_the_close_is_done_after_the_resume_with_its_answer_a
     );
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "working", "held for its job");
-    context.adapter.forgets_first_messages.set(true);
     closed_and_resumed(&context, project);
     context.adapter.with("zeus", |agent| {
         agent.pending.retired = 1;
@@ -2035,5 +2034,47 @@ fn a_task_held_for_a_job_at_the_close_is_done_after_the_resume_with_its_answer_a
     assert_eq!(
         results(&tiers, 1),
         ["The build runs; I will report when it ends\n\n(ConsensFlow: no word came that the 1 background job an earlier window of @zeus-amber-pine's conversation started had ended; that window was closed, which ends what the host could tell was the window's, and may not have ended a job its shell detached.)"]
+    );
+}
+
+/// L9's other half: where the reading after the Resume still counts the job (the host could
+/// not prove the program that started it gone), the task is held again, for that job.
+#[test]
+fn a_task_held_for_a_job_at_the_close_whose_job_the_resume_could_not_retire_is_held_again() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let job = cf_harness::records::Pending {
+        agents: 0,
+        jobs: 1,
+        retired: 0,
+        noticed: 0,
+    };
+    context
+        .adapter
+        .answer_leaving("zeus", "The build runs; I will report when it ends", job);
+    context.pass().unwrap();
+    closed_and_resumed(&context, project);
+    context.adapter.with("zeus", |agent| {
+        agent.pending = job;
+        agent.settled = true;
+    });
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "working", "held again");
+    assert_eq!(results(&tiers, 1), Vec::<String>::new());
+    let held: Vec<String> = given(&context, "chief")
+        .into_iter()
+        .filter(|text| text.contains("T-1 goes on in the background: @zeus-amber-pine ended its turn with 1 background job running"))
+        .collect();
+    assert_eq!(held.len(), 1, "the chief is told it is held: {held:?}");
+    // A hold that ends only at Finish, which takes the answer and says the job may run on.
+    let finished = context.finish_task(project, 1, "chief").expect("finished");
+    assert_eq!(finished.task.state, "done");
+    assert_eq!(
+        results(&tiers, 1),
+        ["The build runs; I will report when it ends\n\n(ConsensFlow: Finished at @chief's word while @zeus-amber-pine's harness still counted 1 background job running, which finishing ends none of: it may run on until its window closes, or past it where the host cannot tell what is the window's.)"]
     );
 }
