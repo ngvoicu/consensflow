@@ -2099,6 +2099,21 @@ file = "crates/cf-process/src/hand_over.rs"
 find = "    match tokio::time::timeout(within, child.wait()).await {"
 replace = "    let _job = crate::job::Job::of(&child, false)?;\n    match tokio::time::timeout(within, child.wait()).await {"
 
+# The test of the opener let go reads its program's mark once the mark says what it was
+# written to say, never for being there: the program makes the mark and writes into it a
+# second on, as a shell's `>` does a moment apart where the machine is busy (T-425: once in
+# the gate, `""` read where `"done"` was written).
+
+[[plant]]
+name = "tooling (cf-process): the mark of an opener let go is read for being there, not for what it says"
+meant = "a_program_still_running_is_let_go_and_runs_on_to_its_end"
+runs = ["cf-process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/hand_over.rs"
+find = "            if held == words || Instant::now() >= until {\n"
+replace = "            if mark.exists() || Instant::now() >= until {\n"
+
 # A shim that names a native program alone (opencode-ai 1.19.4's: its package ships a program
 # where it shipped a script) starts that program; one that names a program that is not there, or
 # is not one, is cmd.exe's (T-353, found by `live finish opencode` on zeewin: no window opened).
