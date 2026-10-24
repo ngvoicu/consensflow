@@ -193,22 +193,71 @@ pub(crate) fn told_unreceived(
 }
 
 fn unreceived(store: &Store, task: &TaskRow) -> Result<Vec<MessageView>, LedgerError> {
+    unreceived_as(store, task, false)
+}
+
+/// The words told to T-`task`'s window that no window had: those [`unreceived`]
+/// names, or, as a window that leaves with the task takes them (a member's
+/// removal, `leaving`), those on their way too: riding in a paste or a launch
+/// under way, or being pasted on their own, which the removal ends in the same
+/// step, so no later call tells of them (Calliope's review of T-389, T-437).
+fn unreceived_as(
+    store: &Store,
+    task: &TaskRow,
+    leaving: bool,
+) -> Result<Vec<MessageView>, LedgerError> {
+    let (on_their_way, brief_on_its_way) = if leaving {
+        ("m.state IN ('queued', 'gated', 'delivering')", "")
+    } else {
+        (
+            "m.state IN ('queued', 'gated')
+                AND (m.carried_by IS NULL
+                     OR m.carried_by NOT IN (SELECT id FROM message WHERE state = 'delivering'))",
+            "'delivering', ",
+        )
+    };
     messages(
         store,
         &format!(
             "{MESSAGE_SELECT} WHERE m.task_id = ?1 AND {told} AND (
-               (m.recipient_id = ?2 AND m.state IN ('queued', 'gated')
-                AND (m.carried_by IS NULL
-                     OR m.carried_by NOT IN (SELECT id FROM message WHERE state = 'delivering')))
+               (m.recipient_id = ?2 AND {on_their_way})
                OR (m.state = 'cancelled' AND m.reason = ?3
                    AND NOT EXISTS (SELECT 1 FROM message b
                      WHERE b.task_id = ?1 AND b.kind = 'task' AND b.id > m.id
-                       AND b.state IN ('delivering', 'delivered', 'read'))))
+                       AND b.state IN ({brief_on_its_way}'delivered', 'read'))))
              ORDER BY m.id",
             told = told("m")
         ),
         params![task.id, task.assignee_id, carried_into(task.number)],
     )
+}
+
+/// The words told to `window` for its tasks that are paused, which a member's
+/// removal leaves kept, as the pause kept them: the resume of a task for a tier
+/// carries them into its next window's brief (`transfer`), and the cancel of one
+/// bound to the window that left tells of them (`Dropped`). One being pasted is
+/// given back, handed nothing, as a paste a pause stops is. Their ids, for the
+/// removal's sweep of what was on its way to the window to pass by (Calliope's
+/// review of T-389, T-437).
+pub(crate) fn kept_through_leaving(store: &Store, window: i64) -> Result<Vec<i64>, LedgerError> {
+    let paused = format!(
+        "recipient_id = ?1 AND {told} AND task_id IN (SELECT id FROM task WHERE state = 'paused')",
+        told = told("message")
+    );
+    store.db.execute(
+        &format!(
+            "UPDATE message SET state = 'queued', carried_by = NULL, handed_at = NULL
+             WHERE {paused} AND state = 'delivering'"
+        ),
+        [window],
+    )?;
+    Ok(store
+        .db
+        .prepare(&format!(
+            "SELECT id FROM message WHERE {paused} AND state IN ('queued', 'gated') ORDER BY id"
+        ))?
+        .query_map([window], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?)
 }
 
 /// A launch called off before its window opened: its first message, `carrier`,
@@ -254,6 +303,12 @@ impl Dropped {
     /// What of `task` is to go, read before it goes.
     pub(crate) fn of(store: &Store, task: &TaskRow) -> Result<Self, LedgerError> {
         Ok(Self(unreceived(store, task)?))
+    }
+
+    /// What of `task` goes with its window, which leaves the board with it, read
+    /// before it goes: with what is on its way ([`unreceived_as`]).
+    pub(crate) fn leaving(store: &Store, task: &TaskRow) -> Result<Self, LedgerError> {
+        Ok(Self(unreceived_as(store, task, true)?))
     }
 
     /// What tells `handle` which of its words went: nothing when none did.

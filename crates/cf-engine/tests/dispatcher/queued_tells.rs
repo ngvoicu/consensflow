@@ -388,12 +388,56 @@ fn words_still_on_their_way_when_the_harness_fails_the_task_are_said_to_have_gon
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "failed");
     assert_eq!(context.message(told).state, "cancelled");
-    // The words first, in the ledger's step; then the engine's word of the failure.
+    // One note: why, the words that went, and how to reopen it (Calliope's P3 of
+    // T-437: the words came in a note of their own, beside the engine's).
     assert_eq!(
         tiers.notes("chief"),
-        [
-            format!("T-1 failed: @{session}'s harness reported a failure. What you told its window, m-{told}, went with it: it never had it."),
-            format!("T-1 failed: @{session}'s harness reported a failure. Reopen it with: cf task reopen T-1 \"…\""),
-        ]
+        [format!("T-1 failed: @{session}'s harness reported a failure. What you told its window, m-{told}, went with it: it never had it. Reopen it with: cf task reopen T-1 \"…\"")]
+    );
+}
+
+#[test]
+fn words_that_never_reach_the_window_are_told_to_whoever_told_them_as_to_the_requester() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    // The human asked for it; the chief told its window while the brief was on
+    // its way (Calliope's P3 of T-437: only the requester heard).
+    context.create_task(
+        project.id,
+        NewTask {
+            from: "human".to_owned(),
+            to: Some("zeus".to_owned()),
+            body: "Parser".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    context.pass().unwrap();
+    let brief = context.task(project.id, 1).messages[0].id;
+    assert_eq!(context.message(brief).state, "delivering");
+    let told = tell(&context, project.id, 1, "Use the v2 grammar");
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    context.adapter.answer("zeus", "Parser done");
+    context.adapter.with("zeus", |agent| agent.admit = false);
+    for _ in 0..5 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(told).state, "failed");
+    assert_eq!(context.task(project.id, 1).task.state, "failed");
+    let said = format!(
+        "T-1 failed: what @chief told its window, m-{told}, did not reach it (refused by the test). Reopen it with: cf task reopen T-1 \"…\""
+    );
+    let chief = context.id(project.id, "chief");
+    assert!(
+        notes(&context, chief).contains(&said),
+        "{:?}",
+        notes(&context, chief)
+    );
+    let human = context.id(project.id, "human");
+    assert!(
+        notes(&context, human).contains(&said),
+        "{:?}",
+        notes(&context, human)
     );
 }

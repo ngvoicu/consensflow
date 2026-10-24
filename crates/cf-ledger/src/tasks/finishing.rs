@@ -384,7 +384,8 @@ pub(crate) enum Ending {
 }
 
 /// What a cancel called off: the task as it was, the member's window that had
-/// begun on it, if one had, and the words told to its window that it never had.
+/// begun on it, if one had and is still on the board, and the words told to its
+/// window that it never had.
 pub(crate) struct CalledOff {
     pub(crate) task: TaskRow,
     pub(crate) window: Option<ParticipantRow>,
@@ -448,7 +449,8 @@ pub(crate) fn call_off(
     release_ready(store, project_id)?;
     Ok(CalledOff {
         task,
-        window: assignee.filter(|_| began),
+        // A window that left the board with its member is no window to stop.
+        window: assignee.filter(|window| began && window.left_at.is_none()),
         dropped,
     })
 }
@@ -601,19 +603,43 @@ pub(crate) fn note_stranded_waits(store: &mut Store) -> Result<(), LedgerError> 
     })
 }
 
-/// The daemon gives up on a task: its pane died, or its launch never came up.
-/// Words told to its window that it never had go with what was queued, and
-/// whoever told them hears which, as a cancel tells it (T-389).
-/// The tasks that wait for it (a follow-up queued behind it, a task that
-/// needs it) stay on the board: they are released when it is accepted, which
-/// a reopening can still bring about. Each one's requester is told once that
-/// it waits for a failed task, and what to do: cancel the waiter, or reopen
-/// the task.
+/// A task fails: its pane died, or its launch never came up. Words told to its
+/// window that it never had go with what was queued, and whoever told them hears
+/// which, as a cancel tells it (T-389), but its requester: [`give_up_task`] tells
+/// it in the note that says why. The tasks that wait for it (a follow-up queued
+/// behind it, a task that needs it) stay on the board: they are released when it
+/// is accepted, which a reopening can still bring about. Each one's requester is
+/// told once that it waits for a failed task, and what to do: cancel the waiter,
+/// or reopen the task. This is Node's ledger's `failTask`, which its recordings
+/// call: the requester hears nothing of it here.
 pub(crate) fn fail_task(
     store: &mut Store,
     project_id: i64,
     number: i64,
     reason: &str,
+) -> Result<TaskView, LedgerError> {
+    fail(store, project_id, number, reason, false)
+}
+
+/// The daemon gives up on a task ([`fail_task`]), and its requester hears why in
+/// the same step, with which of the words it told the task's window went, and how
+/// to reopen it: one note (Calliope's review of T-389, T-437; it was the engine's,
+/// and the words came in a second).
+pub(crate) fn give_up_task(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    reason: &str,
+) -> Result<TaskView, LedgerError> {
+    fail(store, project_id, number, reason, true)
+}
+
+fn fail(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    reason: &str,
+    tells_requester: bool,
 ) -> Result<TaskView, LedgerError> {
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
@@ -624,9 +650,14 @@ pub(crate) fn fail_task(
         drop_queued(store, task.id)?;
         store.move_task(&task, "failed", json!({ "reason": reason }))?;
         release_ready(store, project_id)?;
-        // A reopening carries none of them. The engine's word to the requester
-        // says why it failed, never the words: each teller hears of its own.
-        dropped.tell_the_others(store, &task, &format!("T-{number} failed: {reason}."), &[])?;
+        // A reopening carries none of them.
+        let requester = store.participant_row(task.requester_id)?;
+        dropped.tell_the_others(
+            store,
+            &task,
+            &format!("T-{number} failed: {reason}."),
+            &[&requester.handle],
+        )?;
         for waiting in waiters(store, &task)? {
             let waiter = store.task_row(project_id, waiting)?;
             let requester = store.participant_row(waiter.requester_id)?;
@@ -639,6 +670,23 @@ pub(crate) fn fail_task(
                     kind: "note",
                     body: &format!(
                         "T-{waiting} waits for T-{number}, which failed: cancel T-{waiting}, or reopen T-{number} and let it finish."
+                    ),
+                    ..Sent::default()
+                },
+            )?;
+        }
+        // Last, where the engine's note was.
+        if tells_requester {
+            let words = dropped.said_to(&requester.handle);
+            send(
+                store,
+                project_id,
+                &Sent {
+                    to: &requester.handle,
+                    task: Some(number),
+                    kind: "note",
+                    body: &format!(
+                        "T-{number} failed: {reason}.{words} Reopen it with: cf task reopen T-{number} \"…\""
                     ),
                     ..Sent::default()
                 },

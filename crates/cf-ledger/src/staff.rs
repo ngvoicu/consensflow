@@ -12,7 +12,7 @@ use rusqlite::{params, params_from_iter, OptionalExtension};
 use serde_json::json;
 
 use crate::conversations::current_conversation;
-use crate::messages::Dropped;
+use crate::messages::{kept_through_leaving, Dropped};
 use crate::model::{self, sql_list, LedgerError, MEMBER_ROLES};
 use crate::projects::NewMember;
 use crate::queue::{drop_queued, send, Sent};
@@ -263,9 +263,11 @@ pub(crate) fn set_roles<S: AsRef<str>>(
 
 /// A member leaves the staff. Its open tasks are cancelled, with the
 /// messages still on their way to it and its unread questions; whoever
-/// asked for those tasks is told, if its window runs, and whoever told their
-/// windows words they never had hears which went, as a cancel tells it
-/// (`Dropped`; T-389). The tasks it holds are
+/// asked for those tasks is told, if its window runs, and then whoever told their
+/// windows words they never had hears which went, as a cancel tells it, those
+/// on their way included (`Dropped::leaving`; T-389), but the windows that left.
+/// The words told for a paused task stay kept for it (`kept_through_leaving`).
+/// The tasks it holds are
 /// the queued, working and waiting ones, and the open ones given to it or to
 /// one of its sessions that wait on the board for what they need (a follow-up
 /// behind its window's work): such a task has no pool and no other window, so
@@ -307,10 +309,11 @@ pub(crate) fn remove_member(
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let reason = format!("@{handle} left the staff");
-        // Read before they go, as a cancel reads them (`call_off`).
+        // Read before they go, as a cancel reads them (`call_off`), with what is
+        // on its way: the windows leave with the tasks, so no launch's end tells.
         let dropped = open
             .iter()
-            .map(|(task, _)| Dropped::of(store, task))
+            .map(|(task, _)| Dropped::leaving(store, task))
             .collect::<Result<Vec<_>, _>>()?;
         for (task, _) in &open {
             drop_queued(store, task.id)?;
@@ -319,18 +322,14 @@ pub(crate) fn remove_member(
         for (task, _) in &open {
             tell_stranded_waiters(store, project_id, task)?;
         }
-        for ((task, _), dropped) in open.iter().zip(&dropped) {
-            // The word to whoever asked names the tasks, never the words: each
-            // teller hears of its own, the requester too.
-            let lead = format!("T-{} was cancelled: {reason}.", task.number);
-            dropped.tell_the_others(store, task, &lead, &[])?;
-        }
         for id in &windows {
+            let kept = kept_through_leaving(store, *id)?;
             store.db.execute(
                 "UPDATE message SET state = 'cancelled'
-           WHERE (recipient_id = ? AND state IN ('queued', 'delivering', 'gated'))
-              OR (sender_id = ? AND kind = 'question' AND state IN ('queued', 'gated'))",
-                params![id, id],
+           WHERE ((recipient_id = ?1 AND state IN ('queued', 'delivering', 'gated'))
+              OR (sender_id = ?1 AND kind = 'question' AND state IN ('queued', 'gated')))
+             AND id NOT IN (SELECT value FROM json_each(?2))",
+                params![id, json!(kept).to_string()],
             )?;
         }
         for session in &sessions {
@@ -363,6 +362,15 @@ pub(crate) fn remove_member(
             for requester in requesters.into_iter().filter(|requester| *requester != "human") {
                 tell_if_running(store, project_id, requester, &body)?;
             }
+        }
+        // After that word, which names the tasks and never the words: each teller
+        // hears of its own, the requester too, but the windows that left.
+        let leaving: Vec<&str> = std::iter::once(handle)
+            .chain(sessions.iter().map(|session| session.handle.as_str()))
+            .collect();
+        for ((task, _), dropped) in open.iter().zip(&dropped) {
+            let lead = format!("T-{} was cancelled: {reason}.", task.number);
+            dropped.tell_the_others(store, task, &lead, &leaving)?;
         }
         Ok(RemovedMember {
             member: participant_view(&store.participant_row(member.id)?)?,
