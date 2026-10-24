@@ -410,7 +410,7 @@ fn a_disruption_whose_effect_was_not_seen_is_failed_and_a_break_of_the_tenth_wit
 
 #[test]
 fn a_notice_the_log_ties_to_no_result_is_said_unresolved_once_and_is_no_break() {
-    // The result m-100, T-14 sent back, and an ended notice after: the old attempt's,
+    // The result m-100, T-14 sent back, and a close note after: the old attempt's window,
     // late, or the next attempt's own. Said in the timeline, at every look still
     // unresolved, and said once.
     let mut ledger = ledger("working");
@@ -427,7 +427,7 @@ fn a_notice_the_log_ties_to_no_result_is_said_unresolved_once_and_is_no_break() 
         101,
         None,
         "note",
-        "T-14's turn left background work running. Ended: npx stryker run.",
+        "T-14's window closed with background work running, which its close ended: npx stryker run.",
         1,
         0,
     ));
@@ -454,7 +454,7 @@ fn a_notice_the_log_ties_to_no_result_is_said_unresolved_once_and_is_no_break() 
     assert_eq!(unresolved.len(), 1, "{unresolved:?}");
     assert!(
         unresolved[0].starts_with(
-            "3: T-14's ended notice m-101 came after its result m-100 and after T-14 was sent back"
+            "3: T-14's close note m-101 came while T-14 was working again, after it had ended and been sent back"
         ),
         "{}",
         unresolved[0]
@@ -887,9 +887,9 @@ fn the_run_waits_while_the_newest_result_is_younger_than_the_settle_time() {
 
 #[test]
 fn what_the_app_wrote_as_it_closed_is_held_in_the_last_look() {
-    // The last look while the app ran saw the result alone; the app wrote the ended
-    // notice as it closed, after the result. The result, a moment old, is not the
-    // worker's final answer.
+    // The last look while the app ran saw the result alone; the app wrote the close note
+    // of a task still working as it closed, after the result. The result, a moment old,
+    // is not the worker's final answer.
     let mut running = ledger("done");
     running.conversations.push(Conversation {
         id: 9,
@@ -939,14 +939,33 @@ fn what_the_app_wrote_as_it_closed_is_held_in_the_last_look() {
         ..Look::default()
     };
     let mut closed = running;
-    closed.messages.push(message(
-        132,
-        None,
-        "note",
-        "T-14's turn left background work running. Ended: npx stryker run.",
-        3,
-        1,
-    ));
+    closed.tasks.push(Task {
+        id: 41,
+        number: 15,
+        title: "Run the rest".to_owned(),
+        state: "working".to_owned(),
+        assignee: Some(3),
+        requester: 2,
+        updated_at: iso(2, 30),
+        deleted: false,
+    });
+    closed.events.push(Event {
+        id: 2,
+        at: iso(2, 30),
+        kind: "task.state".to_owned(),
+        data: serde_json::json!({ "task": 15, "from": "queued", "to": "working" }),
+    });
+    closed.messages.push(Message {
+        task: Some(41),
+        ..message(
+            132,
+            None,
+            "note",
+            "T-15's window closed with background work running, which its close ended: npx stryker run.",
+            3,
+            1,
+        )
+    });
     // Taken ten seconds after the result: the closed ledger is all it will be, and
     // a result is judged however young.
     let look = closed_look(
@@ -989,15 +1008,18 @@ fn the_timeline_says_the_records_were_read_once_more_after_the_close_and_how_man
         through: failed.is_none().then_some(at(6, 0)),
         failed: failed.map(str::to_owned),
     };
+    // Three conversations, one reading failed (Calliope's review of round b9, T-84): with one
+    // held and one failed, counting the held ones says the same.
     let readings: BTreeMap<i64, Reading> = [
         (7, reading(None)),
         (9, reading(Some("its record could not be read: denied"))),
+        (11, reading(None)),
     ]
     .into_iter()
     .collect();
     assert_eq!(
         read_again(&readings),
-        "the records were read once more after the close: 2 conversations, 1 reading failed"
+        "the records were read once more after the close: 3 conversations, 1 reading failed"
     );
     let one: BTreeMap<i64, Reading> = [(7, reading(None))].into_iter().collect();
     assert_eq!(
