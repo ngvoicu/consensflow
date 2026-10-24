@@ -264,3 +264,89 @@ fn the_daemon_stays_up_delivers_every_task_and_logs_nothing_wrong_while_several_
     rig.close()?;
     Ok(())
 }
+
+/// A window that prints as fast as it can, `CONSENSFLOW_LOAD_NOISE_MIB` of text (64 by
+/// default; 256 for a noisy window of the long run's two hours), and the rig that holds what it
+/// printed (T-139, the rig's capture was unbounded: every byte a window printed was kept
+/// for the rig's life, and a failure's report made a string of each of its lines). What
+/// this process holds once the window is done, and at its peak as the rig, dropped
+/// unclosed, makes its report, stays under [`CAPTURE_LIMIT_MB`]: zeewin has 7 GB.
+#[cfg(unix)]
+#[test]
+#[ignore = "opt-in: cargo xtask test load (npm run load)"]
+fn a_window_that_prints_for_hours_holds_the_rig_and_its_report_to_a_bound() -> Outcome {
+    use std::sync::atomic::AtomicU64;
+    use std::sync::Arc;
+
+    let mib = size("CONSENSFLOW_LOAD_NOISE_MIB", 64);
+    let own = std::process::id();
+    let peak = Arc::new(AtomicU64::new(0));
+    let sampling = Arc::new(AtomicBool::new(true));
+    let sampler = {
+        let (peak, sampling) = (Arc::clone(&peak), Arc::clone(&sampling));
+        thread::spawn(move || {
+            while sampling.load(Ordering::SeqCst) {
+                if let Ok(mb) = resident_mb(own) {
+                    peak.fetch_max(mb, Ordering::SeqCst);
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        })
+    };
+    let before = resident_mb(own)?;
+    let rig = Rig::start(Config::new(FAKE_AGENT))?;
+    let (daemon, host) = (rig.daemon_pid(), rig.host_pid());
+    let done = rig.workspace().join("noise-done");
+    let pane = json!({ "id": "noisy-1", "generation": 1 });
+    let opened = rig.host(
+        "pane.open",
+        json!({
+            "id": "noisy-1", "generation": 1, "cwd": rig.workspace(),
+            "argv": [FAKE_AGENT, "--noise", (mib * 1024 * 1024).to_string(), done],
+            "env": {}, "size": { "rows": 24, "cols": 80 },
+        }),
+    )?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    let begun = Instant::now();
+    let within = Duration::from_secs(60 + 2 * mib as u64);
+    // The host has drawn the window's last line once it is on the host's screen.
+    rig.wait_for("the window to print all it was asked to", within, || {
+        Ok(done.exists()
+            && rig
+                .snapshot(&pane, 3)
+                .is_some_and(|answer| answer["tail"].to_string().contains("the noise is over")))
+    })?;
+    let seconds = begun.elapsed().as_secs_f64();
+    thread::sleep(Duration::from_secs(2));
+    let held = resident_mb(own)?;
+    let (daemon, host) = (resident_mb(daemon)?, resident_mb(host)?);
+    let kept = rig.printed("noisy-1").len();
+    let home = rig.workspace().parent().map(std::path::Path::to_path_buf);
+    // A rig dropped unclosed makes its report of what its windows printed.
+    drop(rig);
+    thread::sleep(Duration::from_millis(300));
+    sampling.store(false, Ordering::SeqCst);
+    let _ = sampler.join();
+    let peak = peak.load(Ordering::SeqCst).max(held);
+    if let Some(home) = home {
+        let name = home
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let _ = std::fs::remove_file(home.with_file_name(format!("{name}-left.txt")));
+    }
+    println!(
+        "capture: a window printed {mib} MiB in {seconds:.0} s; the rig kept {} MiB of it; this process went from {before} MB to {held} MB, and peaked at {peak} MB with the report; the daemon was at {daemon} MB and the pane host at {host} MB",
+        kept / (1024 * 1024)
+    );
+    assert!(
+        peak < CAPTURE_LIMIT_MB,
+        "this process peaked at {peak} MB, past {CAPTURE_LIMIT_MB}"
+    );
+    Ok(())
+}
+
+/// How much this process may hold, a noisy window's rig and its report.
+#[cfg(unix)]
+const CAPTURE_LIMIT_MB: u64 = 128;

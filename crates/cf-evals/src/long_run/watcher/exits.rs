@@ -12,18 +12,24 @@ use crate::long_run::look::{ClosedBy, Exit, Process};
 /// What tells an exit's window and its closer: the mark every window of the
 /// project's id begins with (`p1-`), whose each window is by its id, the windows the
 /// run killed and those the daemon asked the host to close (`pane.kill`), by id and
-/// generation.
+/// generation; and when the app began to quit, where these are the exits of a rig that
+/// closed: what the host told from then on, the daemon gone, it ended as it stopped.
 pub struct Known<'a> {
     pub prefix: &'a str,
     pub panes: &'a BTreeMap<String, String>,
     pub killed: &'a [(String, i64)],
     pub kills: &'a [Value],
+    pub quit_from: Option<i64>,
 }
 
 /// The exit `body` the host told at `at`, of a window of the project: none for a
 /// window that is none of its (the rig's own, Claude's trust of the workspace). A
 /// window the board never showed (one that died as it opened) is named by its id,
-/// which is its participant's handle after the project's mark.
+/// which is its participant's handle after the project's mark. One told once the app
+/// began to quit and that the daemon did not close is the run's: the quit ended it (the
+/// dry run of T-413 and T-139 read the thirteen windows a restart ended, and the two a
+/// Devin cut ended, as windows that closed by themselves while their tasks were at
+/// work). A window that crashed by itself in those seconds is read so too.
 pub fn exit_of(body: &Value, at: i64, known: &Known<'_>) -> Option<Exit> {
     let pane = body["id"].as_str()?.to_owned();
     let own = pane.strip_prefix(known.prefix)?;
@@ -46,6 +52,8 @@ pub fn exit_of(body: &Value, at: i64, known: &Known<'_>) -> Option<Exit> {
             .is_some_and(|id| of(id, kill["generation"].as_i64()))
     }) {
         ClosedBy::Daemon
+    } else if known.quit_from.is_some_and(|from| at >= from) {
+        ClosedBy::Run
     } else {
         ClosedBy::Itself
     };
@@ -60,6 +68,22 @@ pub fn exit_of(body: &Value, at: i64, known: &Known<'_>) -> Option<Exit> {
         ended: processes(&body["background"]),
         pane,
     })
+}
+
+/// Whether the exit `body` proves its window's program gone, as the product takes it for the
+/// next launch on the window's conversation (`Shown::gone`, `Launch::previous_gone`): the
+/// host said how the window ended (its code, its signal or its screen's last lines) and named
+/// no program of it that it could not end (`survivor`). A field that is not what it should be
+/// was not said, as the product reads it.
+pub fn proved_gone(body: &Value) -> bool {
+    let screen_told = body["tail"]
+        .as_array()
+        .is_some_and(|rows| rows.iter().all(Value::is_string));
+    let survivor = body["survivor"]
+        .as_u64()
+        .is_some_and(|pid| u32::try_from(pid).is_ok());
+    let told = body["exitCode"].as_i64().is_some() || body["signal"].is_string() || screen_told;
+    told && !survivor
 }
 
 /// The processes a list of the host's names: `{ pid, command }` each.
@@ -101,6 +125,7 @@ mod tests {
             panes,
             killed,
             kills,
+            quit_from: None,
         }
     }
 
@@ -131,6 +156,34 @@ mod tests {
             }]
         );
         assert_eq!(exit.tail, ["Running npm test…"]);
+    }
+
+    #[test]
+    fn an_exit_proves_its_program_gone_where_it_says_how_it_ended_and_names_no_survivor() {
+        assert!(proved_gone(
+            &json!({ "id": "p1-w", "generation": 2, "exitCode": 0 })
+        ));
+        assert!(proved_gone(
+            &json!({ "id": "p1-w", "generation": 2, "signal": "SIGKILL" })
+        ));
+        assert!(proved_gone(
+            &json!({ "id": "p1-w", "generation": 2, "tail": [] })
+        ));
+        // A program the host could not end, or an exit that says nothing of how it ended.
+        assert!(!proved_gone(
+            &json!({ "id": "p1-w", "generation": 2, "exitCode": 0, "survivor": 4242 })
+        ));
+        assert!(!proved_gone(
+            &json!({ "id": "p1-w", "generation": 2, "survivor": 4242 })
+        ));
+        assert!(!proved_gone(&json!({ "id": "p1-w", "generation": 2 })));
+        // What is not what it should be was not said.
+        assert!(!proved_gone(
+            &json!({ "id": "p1-w", "generation": 2, "exitCode": "3", "signal": 9, "tail": ["a", 7] })
+        ));
+        assert!(proved_gone(
+            &json!({ "id": "p1-w", "generation": 2, "exitCode": 0, "survivor": "4242" })
+        ));
     }
 
     #[test]

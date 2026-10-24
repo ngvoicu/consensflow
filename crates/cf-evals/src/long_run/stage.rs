@@ -110,9 +110,14 @@ impl Stage {
             .take()
             .ok_or_else(|| Error::Refused("the app is not running".to_owned()))?;
         let home = rig.home();
+        let began = jiff::Timestamp::now().as_millisecond();
         let (last, unread) = last_word(rig)?;
-        self.watcher
-            .quit(&last, jiff::Timestamp::now().as_millisecond(), unread);
+        self.watcher.quit(
+            &last,
+            began,
+            jiff::Timestamp::now().as_millisecond(),
+            unread,
+        );
         let left = self.watcher.left_at_the_end(SETTLE);
         Ok(Closed {
             root: last.root,
@@ -213,11 +218,16 @@ impl Stagehand for Stage {
             .rig
             .take()
             .ok_or_else(|| Error::Refused("the app is not running".to_owned()))?;
+        let began = jiff::Timestamp::now().as_millisecond();
         rig.kill_daemon();
         rig.wait_for_daemon_exit(DAEMON_GONE)?;
         let (last, unread) = last_word(rig)?;
-        self.watcher
-            .quit(&last, jiff::Timestamp::now().as_millisecond(), unread);
+        self.watcher.quit(
+            &last,
+            began,
+            jiff::Timestamp::now().as_millisecond(),
+            unread,
+        );
         self.rig = Some(Rig::start(self.config.clone().existing_root(last.root))?);
         Ok(())
     }

@@ -22,6 +22,10 @@
 //!   nothing is delivered to. An Escape stops it, as it stops Claude's: the turn
 //!   ends there, and the window writes what Claude writes of a turn it was
 //!   interrupted in (`take_turn`).
+//! - A line `PRINT <bytes> <words>` is a turn that prints that many bytes of text to
+//!   its screen, as a harness does that streams its model's reasoning, then does what
+//!   the words say. A window whose terminal is not read on stops in the middle of it,
+//!   as a harness's write to its terminal does.
 //! - A line `HANG <seconds> <words>` is a turn hung that long, as a harness hung
 //!   in its model request is (Pi on zeewin's long run, 2026-10-19): an Escape does
 //!   nothing to it, and only the end of the window ends it before its time. Then it
@@ -221,10 +225,25 @@ fn shell(command: &str) -> Run {
         .raw_arg(format!("\"{command}\""))
 }
 
+/// Prints lines of text to the window's screen until they make `bytes`.
+fn print_lines(bytes: usize) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    let (mut printed, mut line) = (0, 0);
+    while printed < bytes {
+        line += 1;
+        let text = format!("reasoning, line {line:08}, as a harness streams its model's words\r\n");
+        out.write_all(text.as_bytes())?;
+        printed += text.len();
+    }
+    out.flush()
+}
+
 /// The answer to `text`.
 pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static SLEEP: OnceLock<Regex> = OnceLock::new();
     static HANG: OnceLock<Regex> = OnceLock::new();
+    static PRINT: OnceLock<Regex> = OnceLock::new();
     static JOB: OnceLock<Regex> = OnceLock::new();
     static BACKGROUND: OnceLock<Regex> = OnceLock::new();
     static AGENTS: OnceLock<Regex> = OnceLock::new();
@@ -255,6 +274,13 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
             return Ok(Reply::Stopped);
         }
         return reply_to(&slow[2], window);
+    }
+    if let Some(print) = pattern::once(&PRINT, r"(?m)^PRINT (\d+) (.+)$").captures(text) {
+        let bytes: usize = print[1]
+            .parse()
+            .map_err(|_| format!("PRINT {}", &print[1]))?;
+        print_lines(bytes).map_err(|failed| format!("PRINT {bytes}: {failed}"))?;
+        return reply_to(&print[2], window);
     }
     if let Some(hung) = pattern::once(&HANG, r"(?m)^HANG (\d+) (.+)$").captures(text) {
         let seconds: u64 = hung[1].parse().map_err(|_| format!("HANG {}", &hung[1]))?;

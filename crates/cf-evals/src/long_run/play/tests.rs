@@ -540,6 +540,71 @@ fn a_kill_whose_task_another_resumed_before_any_read_of_it_is_proven_by_consensf
     );
 }
 
+/// A watch written by hand ([`Looks`]) that counts its looks.
+#[derive(Default)]
+struct Counted {
+    looks: Looks,
+    ticks: usize,
+}
+
+impl Watch for Counted {
+    fn tick(&mut self, stage: &mut dyn Stagehand) {
+        self.ticks += 1;
+        self.looks.tick(stage);
+    }
+
+    fn last(&self) -> Option<&Look> {
+        self.looks.last()
+    }
+}
+
+#[test]
+fn a_kill_whose_task_another_resumed_to_working_before_any_read_ends_its_wait_at_consensflows_pause(
+) {
+    // T-139 (Astra's, round 16): the chief resumed the killed window's task straight to
+    // working (event 80) before the run read it. The first wait, for the task to leave
+    // working, read the board alone and waited out its whole time; ConsensFlow's pause in
+    // the ledger (event 75) ends it at the look that brings it.
+    let target = Target::Window {
+        handle: "long-devin-1".to_owned(),
+        task: Some(7),
+    };
+    let mut watch = Counted {
+        looks: Looks {
+            last: Some(moves_of_seven(&[BEFORE])),
+            then: Some(moves_of_seven(&[
+                BEFORE,
+                (75, "working", "paused", None, 1),
+                (80, "paused", "working", Some("chief"), 2),
+            ])),
+        },
+        ticks: 0,
+    };
+    let mut stage = Script::new(Resume::GoesOn);
+    stage.killed_then = Some("working");
+    let outcome = play(
+        &mut stage,
+        &mut watch,
+        Disruption::Kill,
+        &target,
+        &With {
+            within: Duration::from_secs(30),
+            ..with()
+        },
+    )
+    .unwrap();
+    assert!(matches!(outcome, Outcome::Played(_)), "{outcome:?}");
+    assert!(
+        said(&outcome).contains("by @chief (event 80)"),
+        "{}",
+        said(&outcome)
+    );
+    assert_eq!(
+        watch.ticks, 1,
+        "the look that brought the pause ended the wait"
+    );
+}
+
 #[test]
 fn a_pause_resumed_by_another_before_any_read_of_it_is_proven_by_its_move_to_paused() {
     // The chief resumed it before the run read it paused: the ledger's move proves it.

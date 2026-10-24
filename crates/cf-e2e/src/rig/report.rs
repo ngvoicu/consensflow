@@ -18,6 +18,12 @@ use crate::{files, pattern, process};
 /// How much of a window's screen a failure shows.
 const SCREEN: usize = 1_500;
 
+/// How much of the end of what a window printed a failure reads, from the start of a
+/// line, to show the end of its screen: a window may have printed hours of it (T-139),
+/// and what is read is told as one screen before it is cut ([`Tell`]), which a secret
+/// split at the start of what is read, far from the end shown, never reaches.
+const READ: usize = 64 * 1024;
+
 /// How many of the last lines of the daemon's log a failure shows.
 const LOG: usize = 30;
 
@@ -284,14 +290,14 @@ pub(super) fn say(rig: &Rig) {
         let seen = rig.shared.seen();
         let mut ids: Vec<&String> = seen.printed.keys().collect();
         ids.sort();
-        let windows: Vec<(String, String)> = ids
+        let windows: Vec<(String, Vec<u8>)> = ids
             .into_iter()
-            .map(|id| (id.clone(), plain(&seen.printed[id])))
+            .map(|id| (id.clone(), end_of(&seen.printed[id].kept, READ).to_vec()))
             .collect();
         (windows, seen.exits.clone(), seen.stray.clone())
     };
-    for (id, screen) in windows {
-        report.push_str(&window_line(&id, &screen, &tell));
+    for (id, printed) in windows {
+        report.push_str(&window_line(&id, &plain(&printed), &tell));
     }
     report.push_str(&exits_line(&exits, &tell));
     if !stray.is_empty() {
@@ -344,6 +350,19 @@ fn window_line(id: &str, screen: &str, tell: &Tell) -> String {
     let kept: Vec<char> = screen.chars().rev().take(SCREEN).collect();
     let tail: String = kept.into_iter().rev().collect();
     format!("--- {id}: {tail}\n")
+}
+
+/// The end of what a window printed, `printed`: its last `most` bytes, from the start of
+/// the first line that begins in them where one does (a line's start ends no character
+/// and no control sequence), all of it where it is no longer.
+fn end_of(printed: &[u8], most: usize) -> &[u8] {
+    if printed.len() <= most {
+        return printed;
+    }
+    let tail = &printed[printed.len() - most..];
+    tail.iter()
+        .position(|byte| *byte == b'\n')
+        .map_or(tail, |at| &tail[at + 1..])
 }
 
 /// Every exit the host told, each told as [`Tell::exit`] says.
@@ -560,6 +579,18 @@ mod tests {
             "{wrote}"
         );
         assert!(written(config.path(), &Tell(None)).contains("hunte"));
+    }
+
+    #[test]
+    fn the_end_of_what_a_window_printed_is_read_from_the_start_of_a_line() {
+        // T-139: a failure's report made a string of every line a window had printed.
+        assert_eq!(end_of(b"one\ntwo\nthree", 64), b"one\ntwo\nthree");
+        assert_eq!(end_of(b"one\ntwo\nthree", 9), b"three");
+        assert_eq!(
+            end_of(b"one\ntwo\nthree", 4),
+            b"hree",
+            "no line begins in it"
+        );
     }
 
     #[test]

@@ -34,6 +34,8 @@ evals-long-run = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "lon
 evals-lib-long-run = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "long_run"]
 # The rig's routing of the frames between the daemon and the pane host.
 e2e-lib-route = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::route"]
+# A worker's window that prints more than its budget, on a real daemon and pane host.
+rig-printed-output = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "printed_output::"]
 # The stand-in agent's answer to a message.
 fake-agent-reply = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "reply::"]
 # The stand-in agent's compaction.
@@ -883,8 +885,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/watcher.rs"
-find = "        self.take_exits(&last.exits, &last.kills);"
-replace = "        let _ = last;"
+find = "        self.take_exits_of(&last.exits, &last.kills, Some(began));"
+replace = "        let _ = (last, began);"
 
 [[plant]]
 name = "long run 6: a number its window shows again is not asked who it is, and a child begun under the number of the window's ended child is taken for that one"
@@ -3895,3 +3897,107 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/conduct.rs"
 find = '        .filter(|reading| reading.failed.is_some())'
 replace = '        .filter(|reading| reading.failed.is_none())'
+
+# T-139: the long run's filed debts (the rig's unbounded capture, which the rig's silence on what
+# a window printed hid: every window of a rig froze at 1 MiB; the replay's relaunch boundary; the
+# kill's first wait).
+
+[[plant]]
+name = "long run: the rig says nothing of what a window printed, and the host reads no more of it once 1 MiB waits"
+meant = "each_frame_a_pane_printed_is_taken_and_said_so_to_the_host_as_the_page_says_it"
+runs = ["e2e-lib-route"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = '            host.send(wire::request(&self.next_host_id(), "pane.ack", &body));'
+replace = '            let _ = body;'
+
+[[plant]]
+name = "long run: the rig says nothing of what a window printed, and a worker that prints 4 MiB never ends its turn"
+meant = "a_worker_whose_turn_prints_four_mib_to_its_screen_ends_it_and_the_chief_has_its_result"
+runs = ["rig-printed-output"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = '            host.send(wire::request(&self.next_host_id(), "pane.ack", &body));'
+replace = '            let _ = body;'
+
+[[plant]]
+name = "long run: the rig keeps every byte a window printed, for the rig's life"
+meant = "what_a_window_printed_is_kept_as_its_end_from_the_start_of_a_line_and_what_went_counted"
+runs = ["e2e-lib-route"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = "        if self.kept.len() <= kept + slack {"
+replace = "        if self.kept.len() <= usize::MAX - slack {"
+
+[[plant]]
+name = "long run: the rig's report reads all a window printed to show the end of its screen"
+meant = "the_end_of_what_a_window_printed_is_read_from_the_start_of_a_line"
+runs = ["e2e-lib-report"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = "    if printed.len() <= most {"
+replace = "    if printed.len() <= usize::MAX {"
+
+[[plant]]
+name = "long run: the stand-in prints nothing of a PRINT, and a window never prints its budget"
+meant = "a_worker_whose_turn_prints_four_mib_to_its_screen_ends_it_and_the_chief_has_its_result"
+runs = ["rig-printed-output"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = '        print_lines(bytes).map_err(|failed| format!("PRINT {bytes}: {failed}"))?;'
+replace = '        let _ = bytes;'
+
+[[plant]]
+name = "long run 1: what a process proved gone had queued still holds its turn (both reviewers of round 14)"
+meant = "what_a_process_proved_gone_had_queued_went_with_it_as_the_product_reads_a_relaunch"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/record.rs"
+find = "        self.gone.insert(at);"
+replace = "        let _ = at;"
+
+[[plant]]
+name = "long run 1: the watch tells no record that its window's program was proved gone"
+meant = "a_window_the_host_proved_gone_takes_its_queue_out_of_its_participants_records"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/watcher.rs"
+find = "                    grown.record.gone_at(*at);"
+replace = "                    let _ = (&grown, at);"
+
+[[plant]]
+name = "long run 1: an exit that names a program the host could not end proves its window's program gone"
+meant = "an_exit_proves_its_program_gone_where_it_says_how_it_ended_and_names_no_survivor"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/watcher/exits.rs"
+find = "    told && !survivor"
+replace = "    told || survivor"
+
+[[plant]]
+name = "long run 10: a kill's first wait reads the board alone, and a task resumed to working before it waits out its whole time"
+meant = "a_kill_whose_task_another_resumed_to_working_before_any_read_ends_its_wait_at_consensflows_pause"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = '        Ok(hand.stage.state_of(number)? != "working" || hand.paused_by(number, None, killed_at))'
+replace = '        Ok(hand.stage.state_of(number)? != "working")'
+
+[[plant]]
+name = "long run 6: a window the app's quit ended reads as one that closed by itself (T-413's dry run)"
+meant = "a_window_the_apps_quit_ended_is_the_runs_and_one_that_ended_before_it_its_own"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/watcher/exits.rs"
+find = "    } else if known.quit_from.is_some_and(|from| at >= from) {"
+replace = "    } else if known.quit_from.is_some_and(|from| at < from) {"

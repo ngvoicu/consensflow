@@ -188,7 +188,7 @@ fn takes_part(line: &str) -> bool {
 /// `last_lines`, which the chief's wait takes a window's last 40 lines with, a cut
 /// accepted as the pane host's is), a cut it does not know the word of, and whether a
 /// text it lists reaches the run's output at all. It reads lines, not meaning.
-const TAKEN: [(&str, &str, &str); 57] = [
+const TAKEN: [(&str, &str, &str); 60] = [
     (
         "long_run/stalls.rs",
         "self.prober.take(listed, pid, others, label)",
@@ -461,6 +461,21 @@ const TAKEN: [(&str, &str, &str); 57] = [
         "rig/report.rs",
         "told[\"tail\"] = json!(self.screen(&rows));",
         "the same, told",
+    ),
+    (
+        "long_run/watcher/exits.rs",
+        "let screen_told = body[\"tail\"]",
+        "whether an exit says its screen's last lines, which proves its program gone: none of them is read",
+    ),
+    (
+        "rig/report.rs",
+        "let tail = &printed[printed.len() - most..];",
+        "the end of what a window printed, read to be told as one screen and then cut to its last 1,500 characters (T-139): a secret split where it is read from is 64 KiB before them",
+    ),
+    (
+        "rig/report.rs",
+        ".map_or(tail, |at| &tail[at + 1..])",
+        "the same, from the start of a line",
     ),
 ];
 

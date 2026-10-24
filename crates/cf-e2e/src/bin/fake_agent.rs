@@ -51,6 +51,8 @@
 //! and with `CF_TEST_PLAIN_PROMPT` its first line does not say it is in
 //! full-permission mode, as a prompt drawn otherwise.
 //!
+//! Started with `--noise` first, it is a window that prints as fast as it can (`noise`).
+//!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
 //! `cf_e2e::process`, the one place a program starts and the environment is read.
@@ -65,6 +67,8 @@ mod args;
 mod background;
 #[path = "fake_agent/build.rs"]
 mod build;
+#[path = "fake_agent/noise.rs"]
+mod noise;
 #[path = "fake_agent/records.rs"]
 mod records;
 #[path = "fake_agent/reply.rs"]
@@ -121,6 +125,10 @@ fn main() -> ExitCode {
     // The build a turn's command runs, which leaves a daemon of its own.
     if args.first().map(String::as_str) == Some(build::BUILD) {
         return build::run(&args[1..]);
+    }
+    // A window that prints as fast as it can (`noise`).
+    if args.first().map(String::as_str) == Some(noise::NOISE) {
+        return noise::run(&args[1..]);
     }
     // The shell of a command a harness detaches, which a session of its own is made for.
     #[cfg(unix)]
