@@ -143,6 +143,28 @@ fn unwrapped(text: &str) -> &str {
         .map_or(inner, |end| inner[..end].trim_end())
 }
 
+/// How long a message's body may be before ConsensFlow cuts what it pastes
+/// (`delivery_text`'s `OPENING`, in UTF-16 units): the rest is read with `cf inbox read`.
+const OPENING: usize = 15_000;
+
+/// The body of the message `id` as ConsensFlow gives it to a window: whole, or its
+/// opening and where to read all of it, as it was given on a command line too.
+fn given_as(message: &str, id: i64) -> String {
+    let length = message.encode_utf16().count();
+    if length <= OPENING {
+        return message.to_owned();
+    }
+    let mut units = 0;
+    let opening: String = message
+        .chars()
+        .take_while(|character| {
+            units += character.len_utf16();
+            units <= OPENING
+        })
+        .collect();
+    format!("{opening}\n… ({length} characters; read all of it with: cf inbox read m-{id})")
+}
+
 /// What one task of a worker showed.
 #[derive(Debug, Default)]
 struct Seen {
@@ -152,6 +174,8 @@ struct Seen {
     /// The processes `pgrep -f` found by the word: their number and name.
     matched: Vec<String>,
     looks: usize,
+    /// The last lines of the worker's window at the last look it had one.
+    screen: String,
 }
 
 /// The names of the processes `pgrep -f word` finds: none where it finds none.
@@ -182,10 +206,28 @@ fn matching(word: &str) -> Vec<String> {
 /// of the worker's windows and the machine's processes held to `word` at each look.
 fn watch(members: &Members, agent: &str, number: i64, word: &str, log: &Log) -> Result<Seen> {
     let mut seen = Seen::default();
+    let mut said = String::new();
     find(log, &format!("T-{number} to end"), WORK, LOOK, || {
         let thread = members.task(number)?;
         seen.state = live::text(&thread["state"]);
         seen.looks += 1;
+        // How the worker's window is getting on, said as it changes.
+        let lane = members.lane(agent)?;
+        let activity = format!(
+            "T-{number} is {}; the worker's window is {}{}",
+            seen.state,
+            lane["activity"]["state"].as_str().unwrap_or("not there"),
+            lane["activity"]["reason"]
+                .as_str()
+                .map_or_else(String::new, |reason| format!(" ({reason})"))
+        );
+        if activity != said {
+            log.say(&activity);
+            said = activity;
+        }
+        if let Some(pane) = lane["pane"]["id"].as_str() {
+            seen.screen = members.tail(pane);
+        }
         for frame in members.windows_opened_for(agent) {
             for arg in frame["argv"].as_array().into_iter().flatten() {
                 let arg = arg.as_str().unwrap_or_default();
@@ -219,8 +261,9 @@ fn record(members: &Members, number: i64) -> Result<Vec<(String, String)>> {
         .unwrap_or_default())
 }
 
-/// The id of the message whose text holds `word`, among task `number`'s.
-fn message_with(members: &Members, number: i64, word: &str) -> Result<Option<i64>> {
+/// The id and the body of the message whose text holds `word`, among task `number`'s:
+/// the body as the ledger keeps it (a tier's preamble, `Critical work: …`, included).
+fn message_with(members: &Members, number: i64, word: &str) -> Result<Option<(i64, String)>> {
     let thread = members.task(number)?;
     Ok(thread["messages"]
         .as_array()
@@ -231,14 +274,13 @@ fn message_with(members: &Members, number: i64, word: &str) -> Result<Option<i64
                 .as_str()
                 .is_some_and(|body| body.contains(word))
         })
-        .and_then(|message| message["id"].as_i64()))
+        .and_then(|message| Some((message["id"].as_i64()?, live::text(&message["body"])))))
 }
 
 /// One step held to what the owner should have seen: the task done, its result at the
 /// chief with the word, the word on no command line and in no process, and the record
 /// holding the message once, whole, as a user's message; `first` where it is the first
 /// user message of the conversation.
-#[allow(clippy::too_many_arguments)]
 fn judge(
     account: &mut Account,
     step: &str,
@@ -246,7 +288,6 @@ fn judge(
     number: i64,
     seen: &Seen,
     word: &str,
-    message: &str,
     first: bool,
 ) -> Result {
     account.say(format!(
@@ -258,6 +299,12 @@ fn judge(
         seen.state == "done",
         &seen.state,
     );
+    if seen.state != "done" {
+        account.say(format!(
+            "{step}: the worker's window last showed: {}",
+            seen.screen
+        ));
+    }
     let result = if seen.state == "done" {
         find(
             &Log::new("first-message"),
@@ -298,8 +345,10 @@ fn judge(
         seen.matched.is_empty(),
         format!("{:?}", seen.matched),
     );
-    let id = message_with(members, number, word)?;
-    let marker = id.map(|id| format!("[ConsensFlow m-{id} "));
+    let stored = message_with(members, number, word)?;
+    let marker = stored
+        .as_ref()
+        .map(|(id, _)| format!("[ConsensFlow m-{id} "));
     let items = record(members, number)?;
     let users: Vec<&str> = items
         .iter()
@@ -319,11 +368,14 @@ fn judge(
         given.len() == 1,
         format!("{} of {} user messages", given.len(), users.len()),
     );
+    let expected = stored.as_ref().map(|(id, body)| given_as(body, *id));
     let whole = given.first().is_some_and(|text| {
         marker
             .as_deref()
             .is_some_and(|marker| text.contains(marker))
-            && text.contains(message)
+            && expected
+                .as_deref()
+                .is_some_and(|expected| text.contains(expected))
     });
     account.check(
         &format!("{step}: whole, its header and every line"),
@@ -378,16 +430,25 @@ fn steps(members: &mut Members, harness: Harness, log: &Log) -> Result<Account> 
         brief.len()
     ));
     let seen = watch(members, &agent, number, &fresh, log)?;
-    judge(
-        &mut account,
-        "fresh",
-        members,
-        number,
-        &seen,
-        &fresh,
-        &brief,
-        true,
-    )?;
+    judge(&mut account, "fresh", members, number, &seen, &fresh, true)?;
+    // Claude Code asks whether to trust a new repository before it starts, and the brief
+    // is pasted only once ConsensFlow has answered (it says so to the human once).
+    let answered = members
+        .inbox(None)?
+        .iter()
+        .filter_map(|message| message["body"].as_str())
+        .any(|body| body.contains("asked whether to trust") && body.contains("answered yes"));
+    if harness == Harness::Claude {
+        account.check(
+            "fresh: the window asked whether to trust the new repository, and was answered first",
+            answered,
+            answered,
+        );
+    } else {
+        account.say(format!(
+            "fresh: the window asked whether to trust the folder: {answered}"
+        ));
+    }
 
     // The task done, its window closes: the follow-up opens one on its conversation.
     find(log, "the worker's window to close", CLOSES, LOOK, || {
@@ -414,7 +475,6 @@ fn steps(members: &mut Members, harness: Harness, log: &Log) -> Result<Account> 
         number,
         &seen,
         &resumed,
-        &again,
         false,
     )?;
     Ok(account)
@@ -483,6 +543,19 @@ mod tests {
         assert_eq!(unwrapped(&wrapped), given);
         assert_eq!(unwrapped(given), given);
         assert_eq!(unwrapped("  plain  "), "plain");
+    }
+
+    #[test]
+    fn a_long_message_is_given_as_its_opening_and_where_to_read_all_of_it() {
+        assert_eq!(given_as("short", 4), "short");
+        let long = "x".repeat(OPENING + 5);
+        let given = given_as(&long, 4);
+        assert!(given.starts_with(&"x".repeat(OPENING)));
+        assert!(given.ends_with(&format!(
+            "\n… ({} characters; read all of it with: cf inbox read m-4)",
+            OPENING + 5
+        )));
+        assert!(!given.contains(&"x".repeat(OPENING + 1)));
     }
 
     #[test]
