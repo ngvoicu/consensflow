@@ -9,7 +9,14 @@
 //!
 //! What the chief should have seen: the task stays working while the run and its monitor
 //! run, each of the monitor's events wakes a turn that is no result, nothing is ended and
-//! the window stays, and the turn the monitor's end wakes gives the result, once.
+//! the window stays, the turn the run's end wakes leaves the monitor alone running, which
+//! the chief is told again (a hold's count that fell, Astraeus on 136a7158), and the turn
+//! the monitor's end wakes gives the result, once.
+//!
+//! The monitor ends once the case lets it (`Job::let_its_monitor_end`), after the chief was
+//! told the monitor alone runs: with the monitor ending half a second after the run, CI's
+//! macOS runner saw that turn at rest twice (8504697f) and the case, which expected it never
+//! seen, failed, while every run here missed it.
 //!
 //! The stand-in writes what Claude Code 2.1.305 writes (`CLAUDE-MONITOR` of the fake agent,
 //! the shapes of `monitor-wait.jsonl`, a live run's): the job's start, the monitor's
@@ -29,6 +36,9 @@ const WATCHING: &str = "The suite runs in the background; Monitor wakes me on it
 
 /// What it reported once the monitor's end woke it.
 const REPORT: &str = "The suite passed: 412 tests, 0 failures";
+
+/// What the turn the run's end woke answered (the stand-in's `MONITOR_WATCHES`).
+const MONITOR_WATCHES: &str = "The run ended; the monitor still watches it.";
 
 /// How long the run takes, and how many lines the monitor sees in it.
 const RUN_SECONDS: u64 = 16;
@@ -77,21 +87,47 @@ fn a_worker_that_armed_monitor_on_its_run_goes_on_until_the_monitor_ends_and_its
         "its window stays"
     );
 
-    // The run ends by itself, the monitor after it, and the turn the monitor's end wakes is
-    // the result.
+    // The run ends by itself: the turn its end wakes leaves the monitor alone running, and
+    // the chief is told again, by that count, with what the turn said.
     rig.wait_for("the run to end by itself", secs(60), || Ok(run.finished()))?;
+    rig.wait_for(
+        "the chief to be told the monitor alone runs",
+        secs(60),
+        || {
+            Ok(told(&project)?
+                .iter()
+                .any(|(kind, body)| kind == "note" && body.contains(MONITOR_WATCHES)))
+        },
+    )?;
+    assert_eq!(project.task(1)?["state"], "working");
+
+    // The monitor ends, and the turn its end wakes is the result.
+    run.let_its_monitor_end()?;
     rig.wait_for("T-1 to be done", secs(60), || {
         Ok(project.task(1)?["state"] == "done")
     })?;
     let thread = told(&project)?;
     let kinds: Vec<&str> = thread.iter().map(|(kind, _)| kind.as_str()).collect();
-    assert_eq!(kinds, ["note", "result"], "{thread:?}");
+    assert_eq!(kinds, ["note", "note", "result"], "{thread:?}");
     assert!(
-        thread[0].1.contains("2 background jobs"),
+        thread[0]
+            .1
+            .contains("ended its turn with 2 background jobs running"),
         "the run and its monitor: {}",
         thread[0].1
     );
-    assert_eq!(thread[1].1, REPORT);
+    assert!(
+        thread[1].1.starts_with("T-1 goes on in the background: @")
+            && thread[1]
+                .1
+                .contains("ended its turn with 1 background job running")
+            && thread[1]
+                .1
+                .ends_with(&format!("What it said:\n\n{MONITOR_WATCHES}")),
+        "the monitor alone: {}",
+        thread[1].1
+    );
+    assert_eq!(thread[2].1, REPORT);
     assert!(!run.released(), "the run ran to its end, and none ended it");
     rig.close()?;
     Ok(())
