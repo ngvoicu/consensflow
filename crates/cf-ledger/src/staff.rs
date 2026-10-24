@@ -323,7 +323,7 @@ pub(crate) fn remove_member(
             tell_stranded_waiters(store, project_id, task)?;
         }
         for id in &windows {
-            let kept = kept_through_leaving(store, *id)?;
+            let kept = kept_through_leaving(store, *id, &reason)?;
             store.db.execute(
                 "UPDATE message SET state = 'cancelled'
            WHERE ((recipient_id = ?1 AND state IN ('queued', 'delivering', 'gated'))

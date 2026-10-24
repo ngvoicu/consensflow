@@ -8,9 +8,9 @@
 //! 2026-10-16); words the window took back go in again with the words that
 //! resume it; and words in the first message of a launch called off before its
 //! window opened are said to have gone with it, as are those of a task whose
-//! member the human removes, or whose harness fails, before they went in
-//! (T-389). None of these tests is held to a Node recording: Node refused the
-//! tell.
+//! member the human removes before they went in (T-389); words still queued
+//! when the harness fails the task wait for its reopen (T-448). None of these
+//! tests is held to a Node recording: Node refused the tell.
 
 use cf_engine::delivery_text::marker_of;
 use cf_engine::testing::Context;
@@ -380,19 +380,20 @@ fn words_told_to_the_window_of_a_task_whose_member_the_human_removes_are_said_to
 }
 
 #[test]
-fn words_still_on_their_way_when_the_harness_fails_the_task_are_said_to_have_gone() {
+fn words_still_on_their_way_when_the_harness_fails_the_task_wait_for_its_reopen() {
     let context = Context::new();
     let (tiers, session, told) = told_on_its_way(&context);
     context.adapter.with("zeus", |agent| agent.failed = true);
     context.adapter.answer("zeus", "Parser, half done");
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "failed");
-    assert_eq!(context.message(told).state, "cancelled");
-    // One note: why, the words that went, and how to reopen it (Calliope's P3 of
-    // T-437: the words came in a note of their own, beside the engine's).
+    // Kept for the reopen, as words a failed delivery leaves are (the chief's
+    // decision on Calliope's P3-4 of T-446); one note says why, which words wait
+    // and how to reopen it (her P3 of T-437: the words came in a note of their own).
+    assert_eq!(context.message(told).state, "queued");
     assert_eq!(
         tiers.notes("chief"),
-        [format!("T-1 failed: @{session}'s harness reported a failure. What you told its window, m-{told}, went with it: it never had it. Reopen it with: cf task reopen T-1 \"…\"")]
+        [format!("T-1 failed: @{session}'s harness reported a failure; the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\"")]
     );
 }
 

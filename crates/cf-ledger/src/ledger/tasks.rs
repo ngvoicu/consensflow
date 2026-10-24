@@ -194,7 +194,8 @@ impl Ledger {
         tasks::cancel_task(&mut self.store, project_id, number, by)
     }
 
-    /// The daemon gives up on a task.
+    /// A task fails, as Node's ledger failed it: what its recordings call. The
+    /// daemon gives up on a task with [`Ledger::give_up_task`].
     pub fn fail_task(
         &mut self,
         project_id: i64,

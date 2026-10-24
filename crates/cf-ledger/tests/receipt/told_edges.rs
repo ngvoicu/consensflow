@@ -389,30 +389,48 @@ fn a_member_removed_takes_the_words_told_to_its_tasks_window_and_whoever_told_th
 }
 
 #[test]
-fn a_task_whose_harness_failed_takes_the_words_still_on_their_way_and_whoever_told_them_hears_which_went(
+fn a_task_whose_harness_failed_keeps_the_words_still_on_their_way_for_its_reopen_and_whoever_told_them_hears_they_wait(
 ) {
     let why = "@zeus's harness reported a failure";
     let reopen = |task: i64| format!(" Reopen it with: cf task reopen T-{task} \"…\"");
+    let wait = |ids: &[i64]| {
+        let named: Vec<String> = ids.iter().map(|id| format!("m-{id}")).collect();
+        format!(
+            "; the words told its window wait for the reopen: {}.",
+            named.join(", ")
+        )
+    };
 
     // Told while the brief was on its way, so they go in next; the harness fails
-    // first. The daemon gives up on it: the requester, which told them, hears it
-    // all in one note (Calliope's P3 of T-437).
+    // first. The daemon gives up on it: the words wait for the reopen, as words a
+    // failed delivery leaves do (the chief's decision on Calliope's P3-4 of T-446),
+    // and the requester, which told them, hears it all in one note.
     let mut w = world();
-    let (task, _, brief) = queued(&mut w);
+    let (task, session, brief) = queued(&mut w);
     w.begin(brief);
     let told = tell(&mut w, task, "Use the v2 grammar");
     w.confirm(brief);
     assert_eq!(w.state(task), "working");
     w.ledger.give_up_task(w.project, task, why).expect("failed");
-    assert_eq!(w.states(&[told.id]), ["cancelled"]);
+    assert_eq!(w.states(&[told.id]), ["queued"], "kept for the reopen");
     assert_eq!(
         notes_on(&w, "chief", task),
         [format!(
-            "T-{task} failed: {why}. {}{}",
-            went(&[told.id]),
+            "T-{task} failed: {why}{}{}",
+            wait(&[told.id]),
             reopen(task)
         )]
     );
+    let carrier = w
+        .ledger
+        .reopen_task(w.project, task, "chief", "Try again")
+        .expect("reopened")
+        .message
+        .expect("its words")
+        .id;
+    assert_eq!(w.next(&session), Some(carrier));
+    let begun = w.deliver(carrier);
+    assert_eq!(ids(&begun.carried), [told.id], "the reopen carries them");
 
     // Pasted already: the note says why, and nothing of them.
     let mut w = world();
@@ -427,29 +445,44 @@ fn a_task_whose_harness_failed_takes_the_words_still_on_their_way_and_whoever_to
         [format!("T-{task} failed: {why}.{}", reopen(task))]
     );
 
-    // Node's `failTask`, as its recordings call it: the requester hears nothing
-    // of it, and a teller that did not ask for the task hears which words went.
+    // A teller that did not ask for the task hears the same of its own words.
+    let human_task = |w: &mut World| {
+        let task = w
+            .ledger
+            .create_task(
+                w.project,
+                &NewTask {
+                    from: "human".into(),
+                    pool: Some("worker".into()),
+                    tier: Some("standard".into()),
+                    body: "Parser".into(),
+                    ..NewTask::default()
+                },
+            )
+            .expect("the human's task")
+            .task
+            .number;
+        let brief = w.assign(task, "zeus").message.expect("its brief").id;
+        w.begin(brief);
+        let told = tell(w, task, "Use the v2 grammar");
+        w.confirm(brief);
+        (task, told)
+    };
     let mut w = world();
-    let task = w
-        .ledger
-        .create_task(
-            w.project,
-            &NewTask {
-                from: "human".into(),
-                pool: Some("worker".into()),
-                tier: Some("standard".into()),
-                body: "Parser".into(),
-                ..NewTask::default()
-            },
-        )
-        .expect("the human's task")
-        .task
-        .number;
-    let brief = w.assign(task, "zeus").message.expect("its brief").id;
-    w.begin(brief);
-    let told = tell(&mut w, task, "Use the v2 grammar");
-    w.confirm(brief);
+    let (task, told) = human_task(&mut w);
+    w.ledger.give_up_task(w.project, task, why).expect("failed");
+    assert_eq!(w.states(&[told.id]), ["queued"]);
+    let said = format!("T-{task} failed: {why}{}{}", wait(&[told.id]), reopen(task));
+    assert_eq!(notes_on(&w, "chief", task), std::slice::from_ref(&said));
+    assert_eq!(notes_on(&w, "human", task), [said]);
+
+    // Node's `failTask`, as its recordings call it, keeps its shape: what was
+    // queued goes, the requester hears nothing of it, and a teller that did not
+    // ask for the task hears which words went.
+    let mut w = world();
+    let (task, told) = human_task(&mut w);
     w.ledger.fail_task(w.project, task, why).expect("failed");
+    assert_eq!(w.states(&[told.id]), ["cancelled"]);
     assert_eq!(
         notes_on(&w, "chief", task),
         [format!("T-{task} failed: {why}. {}", went(&[told.id]))]
@@ -600,6 +633,23 @@ fn a_paused_tasks_told_words_being_pasted_at_its_members_removal_are_given_back_
     assert_eq!(w.states(&[told.id]), ["delivering"]);
     w.ledger.remove_member(w.project, "zeus").expect("removed");
     assert_eq!(w.states(&[told.id]), ["queued"], "given back, kept");
+    // The ledger says why, and its log keeps it (Calliope's P3-5 of T-446).
+    assert_eq!(
+        w.message(told.id).reason.as_deref(),
+        Some(format!("kept for T-{task}'s resume: @zeus left the staff").as_str())
+    );
+    let kept: Vec<_> = w
+        .ledger
+        .events(w.project, 0, 500)
+        .expect("the events")
+        .into_iter()
+        .filter(|event| event.kind == "delivery.kept")
+        .map(|event| event.data)
+        .collect();
+    assert_eq!(
+        kept,
+        [serde_json::json!({ "message": told.id, "reason": "@zeus left the staff" })]
+    );
 
     w.resume(task, "Go on");
     let body = w.ledger.task(w.project, task).unwrap().unwrap().task.body;
@@ -695,4 +745,105 @@ fn a_removal_says_which_tasks_went_before_which_words_and_tells_the_leaving_memb
             .expect("a count");
     });
     assert_eq!(to_the_leaving, 0, "no word to the window that leaves");
+}
+
+/// T-`number`, its brief passed on by the human and in, and words the chief told
+/// its window while the brief was on its way held for the human; the human
+/// pauses it (Calliope's P3-2 of T-446). The words.
+fn paused_with_held_words(w: &mut World, number: i64) -> MessageView {
+    let brief = w.ledger.task(w.project, number).unwrap().unwrap().messages[0].id;
+    w.ledger.approve_message(brief, "human").expect("passed on");
+    w.begin(brief);
+    let told = tell(w, number, "Use the v2 grammar");
+    assert_eq!(told.state, "gated", "one agent's word to another");
+    w.confirm(brief);
+    w.ledger
+        .pause_task(w.project, number, Some("human"), None)
+        .expect("the human pauses");
+    told
+}
+
+#[test]
+fn held_words_of_a_paused_task_for_a_tier_outlive_its_members_removal_and_its_resumer_hears_they_were_withdrawn(
+) {
+    let mut w = gated_world();
+    let (task, _, _) = queued(&mut w);
+    let told = paused_with_held_words(&mut w, task);
+    w.ledger.remove_member(w.project, "zeus").expect("removed");
+    assert_eq!(w.states(&[told.id]), ["gated"], "still held, kept");
+
+    w.resume(task, "Go on");
+    assert_eq!(w.state(task), "open");
+    assert_eq!(w.states(&[told.id]), ["cancelled"], "withdrawn with it");
+    assert!(
+        notes_on(&w, "chief", task).contains(&format!(
+            "Withdrawn with it, still waiting for the human: m-{}.",
+            told.id
+        )),
+        "{:?}",
+        notes_on(&w, "chief", task)
+    );
+}
+
+#[test]
+fn held_words_of_a_paused_task_bound_to_a_removed_members_window_are_named_by_its_cancel() {
+    let mut w = gated_world();
+    let task = w.give("zeus", "Parser").task.number;
+    let told = paused_with_held_words(&mut w, task);
+    w.ledger.remove_member(w.project, "zeus").expect("removed");
+    assert_eq!(w.states(&[told.id]), ["gated"], "still held, kept");
+    w.ledger
+        .cancel_task(w.project, task, "human")
+        .expect("cancelled");
+    assert_eq!(
+        notes_on(&w, "chief", task),
+        [format!(
+            "@human cancelled T-{task} (Parser). {}",
+            went(&[told.id])
+        )]
+    );
+}
+
+#[test]
+fn words_kept_for_a_paused_task_through_its_members_removal_ride_in_no_carrier_it_cancelled() {
+    // Told while the brief was queued, so they ride in it; its launch had begun
+    // when the human paused the task (Calliope's P3-3 of T-446).
+    let mut w = world();
+    let (task, session, brief) = queued(&mut w);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    w.begin(brief);
+    w.ledger
+        .pause_task(w.project, task, Some("human"), None)
+        .expect("the human pauses");
+    let carrier = |w: &mut World| {
+        let mut carried_by = None;
+        w.edit(|db| {
+            carried_by = db
+                .query_row(
+                    "SELECT carried_by FROM message WHERE id = ?1",
+                    [told.id],
+                    |row| row.get::<_, Option<i64>>(0),
+                )
+                .expect("its row");
+        });
+        carried_by
+    };
+    assert_eq!(carrier(&mut w), Some(brief), "riding in the brief");
+    w.ledger.remove_member(w.project, "zeus").expect("removed");
+    assert_eq!(w.states(&[brief, told.id]), ["cancelled", "queued"]);
+    assert_eq!(
+        carrier(&mut w),
+        None,
+        "its own again, as a carrier cancelled leaves it"
+    );
+
+    w.resume(task, "Go on");
+    let body = w.ledger.task(w.project, task).unwrap().unwrap().task.body;
+    assert!(
+        body.contains(&format!(
+            "Kept from before, never delivered to @{session}:\n\n(note m-{} from @chief)",
+            told.id
+        )),
+        "{body}"
+    );
 }

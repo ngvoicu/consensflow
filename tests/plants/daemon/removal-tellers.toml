@@ -12,6 +12,12 @@
 # of words that fail hears it (the engine's `fail_delivery` in `crates/cf-engine/src/deliveries.rs`),
 # and the daemon's giving up on a task tells its requester in one note (`give_up_task`).
 #
+# Round 3 (T-448, Calliope's re-check T-446): the words told to the window of a task the daemon
+# gives up on wait for its reopen, and are said to (`give_up_task`, `drop_queued_but_told`); held
+# words of a paused task outlive a removal as queued ones do; what is kept rides in no carrier the
+# removal cancels; and the removal's give-back says why in its reason and the log
+# (`kept_through_leaving`).
+#
 # Each plant takes one rule out again. The names begin with `removal tellers`, so
 # `cargo xtask plants daemon "removal tellers"` runs them.
 
@@ -90,18 +96,18 @@ replace = ""
 
 [[plant]]
 name = "removal tellers: a task the daemon fails tells nobody but its requester which of the words told to its window went"
-meant = "a_task_whose_harness_failed_takes_the_words_still_on_their_way_and_whoever_told_them_hears_which_went"
+meant = "a_task_whose_harness_failed_keeps_the_words_still_on_their_way_for_its_reopen_and_whoever_told_them_hears_they_wait"
 runs = ["ledger-told-edges"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
-        dropped.tell_the_others(
-            store,
-            &task,
-            &format!("T-{number} failed: {reason}."),
-            &[&requester.handle],
-        )?;'''
+            told.tell_the_others(
+                store,
+                &task,
+                &format!("T-{number} failed: {reason}."),
+                &[&requester.handle],
+            )?;'''
 replace = ""
 
 [[plant]]
@@ -131,8 +137,8 @@ runs = ["ledger-told-edges"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/told.rs"
-find = "             WHERE {paused} AND state = 'delivering'\""
-replace = "             WHERE {paused} AND state = 'none'\""
+find = "             WHERE {paused} AND message.state = 'delivering' ORDER BY message.id\","
+replace = "             WHERE {paused} AND message.state = 'none' ORDER BY message.id\","
 
 [[plant]]
 name = "removal tellers: a member's removal says nothing of the words on their way to its windows"
@@ -206,7 +212,7 @@ replace = "false"
 
 [[plant]]
 name = "removal tellers: the engine tells the requester of a task it gives up on in a note of its own again"
-meant = "words_still_on_their_way_when_the_harness_fails_the_task_are_said_to_have_gone"
+meant = "words_still_on_their_way_when_the_harness_fails_the_task_wait_for_its_reopen"
 runs = ["engine-queued-tells"]
 
 [[plant.edit]]
@@ -220,10 +226,74 @@ replace = '''
 
 [[plant]]
 name = "removal tellers: the daemon gives up on a task and its requester hears nothing of it"
-meant = "a_task_whose_harness_failed_takes_the_words_still_on_their_way_and_whoever_told_them_hears_which_went"
+meant = "a_task_whose_harness_failed_keeps_the_words_still_on_their_way_for_its_reopen_and_whoever_told_them_hears_they_wait"
 runs = ["ledger-told-edges", "engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        if tells_requester {"
-replace = "        if false && tells_requester {"
+find = '''
+        // Last, where the engine's note was.
+        if given_up {'''
+replace = '''
+        // Last, where the engine's note was.
+        if false && given_up {'''
+
+[[plant]]
+name = "removal tellers: the daemon gives up on a task and the words told to its window go with what was queued"
+meant = "a_task_whose_harness_failed_keeps_the_words_still_on_their_way_for_its_reopen_and_whoever_told_them_hears_they_wait"
+runs = ["ledger-told-edges", "engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            drop_queued_but_told(store, task.id)?;"
+replace = "            drop_queued(store, task.id)?;"
+
+[[plant]]
+name = "removal tellers: the daemon gives up on a task and a teller that did not ask for it hears nothing of its words"
+meant = "a_task_whose_harness_failed_keeps_the_words_still_on_their_way_for_its_reopen_and_whoever_told_them_hears_they_wait"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            told.tell_each(store, &task, &[&requester.handle], |teller| {"
+replace = '            told.tell_each(store, &task, &[&requester.handle, "chief"], |teller| {'
+
+[[plant]]
+name = "removal tellers: a member's removal sweeps the held words of its paused task"
+meant = "held_words_of_a_paused_task_for_a_tier_outlive_its_members_removal_and_its_resumer_hears_they_were_withdrawn"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = """            "SELECT id FROM message WHERE {paused} AND state IN ('queued', 'gated') ORDER BY id""""
+replace = """            "SELECT id FROM message WHERE {paused} AND state IN ('queued') ORDER BY id""""
+
+[[plant]]
+name = "removal tellers: what a member's removal keeps for a paused task rides in a carrier the removal cancelled"
+meant = "words_kept_for_a_paused_task_through_its_members_removal_ride_in_no_carrier_it_cancelled"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "               AND carried_by IN (SELECT id FROM message WHERE recipient_id = ?1"
+replace = "               AND 1 = 0 AND carried_by IN (SELECT id FROM message WHERE recipient_id = ?1"
+
+[[plant]]
+name = "removal tellers: a member's removal gives back words being pasted for a paused task with no word of why"
+meant = "a_paused_tasks_told_words_being_pasted_at_its_members_removal_are_given_back_for_the_resume"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = """            params![id, format!("kept for T-{number}'s resume: {why}")],"""
+replace = """            params![id, Option::<String>::None],"""
+
+[[plant]]
+name = "removal tellers: a member's removal gives back words being pasted for a paused task and its log keeps nothing of it"
+meant = "a_paused_tasks_told_words_being_pasted_at_its_members_removal_are_given_back_for_the_resume"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = '''            json!({ "message": id, "reason": why }),'''
+replace = '''            json!({ "message": id }),'''
