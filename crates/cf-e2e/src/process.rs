@@ -446,17 +446,24 @@ fn drain(pipe: Option<impl Read + Send + 'static>) -> Drain {
     Drain { read, thread }
 }
 
+/// Waits for `thread` to end, until `by` at most: whether it did. One that ended
+/// is joined; one that did not is left to end of itself.
+fn ended_by(thread: JoinHandle<()>, by: Instant) -> bool {
+    while !thread.is_finished() && Instant::now() < by {
+        thread::sleep(POLL);
+    }
+    let ended = thread.is_finished();
+    if ended {
+        let _ = thread.join();
+    }
+    ended
+}
+
 /// What a [`drain`] read, as text, waited for until `by` at most; and whether its
 /// pipe was still held open then (by a process the program left), so that what came
 /// after is not read. The thread is left to end when the pipe does.
 fn collected(drain: Drain, by: Instant) -> (String, bool) {
-    while !drain.thread.is_finished() && Instant::now() < by {
-        thread::sleep(POLL);
-    }
-    let held = !drain.thread.is_finished();
-    if !held {
-        let _ = drain.thread.join();
-    }
+    let held = !ended_by(drain.thread, by);
     let bytes = drain
         .read
         .lock()

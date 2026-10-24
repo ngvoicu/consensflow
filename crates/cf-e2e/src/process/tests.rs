@@ -261,6 +261,36 @@ mod shell {
     }
 
     #[test]
+    fn a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output() {
+        // The daemon's refused second start ended with 1, its sentence on the pipe, and
+        // a case that read its error output the moment it was gone found none, the
+        // thread that keeps it not having run yet (2026-10-23). Here the program ends
+        // before the sentence is all in: a helper it left says it a moment later.
+        let mut program = sh("(sleep 0.3; printf 'cf: it is refused\\n' >&2) & exit 0")
+            .spawn()
+            .unwrap();
+        let status = program.wait(Duration::from_secs(10)).unwrap();
+        assert_eq!(status.and_then(|status| status.code()), Some(0));
+        assert_eq!(program.errors(), "cf: it is refused\n");
+    }
+
+    #[test]
+    fn a_spawned_program_that_left_a_process_holding_its_error_output_is_waited_for_a_while() {
+        let started = Instant::now();
+        let mut program = sh("printf 'said\\n' >&2; sleep 20 & exit 0")
+            .spawn()
+            .unwrap();
+        let status = program.wait(Duration::from_secs(10)).unwrap();
+        assert_eq!(status.and_then(|status| status.code()), Some(0));
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(program.errors(), "said\n");
+    }
+
+    #[test]
     fn a_spawned_program_is_given_the_input_it_was_told_first_and_its_error_output_is_kept() {
         let mut program = sh("read a; printf 'said %s' \"$a\" >&2; sleep 30")
             .input("first\n")

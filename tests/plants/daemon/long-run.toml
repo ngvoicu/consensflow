@@ -1736,8 +1736,8 @@ runs = ["e2e-lib-process"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/process.rs"
-find = "    while !drain.thread.is_finished() && Instant::now() < by {"
-replace = "    while !drain.thread.is_finished() {"
+find = "    while !thread.is_finished() && Instant::now() < by {"
+replace = "    while !thread.is_finished() {"
 
 [[plant]]
 name = "long run: a harness whose version left its output held says nothing of it"

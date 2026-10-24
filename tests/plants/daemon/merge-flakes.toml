@@ -1,0 +1,49 @@
+# Two flakes seen once each in T-358's merge of turn-end with main (2026-10-23), T-373.
+#
+# The daemon's refused second start: `core_daemon::touches_no_window_of_the_running_daemon_when_a_second_start_is_refused_its_ledger`
+# failed in a gate run under heavy parallel load, the second daemon having ended with 1 and
+# its log's `exit 1` and no sentence. The sentence is on its error output, written before
+# the exit; the rig's `Spawned::wait` returned the moment the program was gone, and the
+# thread that keeps the error output had not run yet. A 400 ms stall of that thread (the
+# plant by hand) failed this test and `ends_cf_ui_with_1_when_a_second_start_is_refused…`
+# alike. An end seen by `wait` now waits for the thread to read to the end of the pipe,
+# for `HELD` at most (`crates/cf-e2e/src/process/spawned.rs`, `process.rs`). The tests are
+# the rig's own, `crates/cf-e2e/src/process/tests.rs`.
+
+[run]
+process-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell"]
+
+[[plant]]
+name = "merge flakes: an end seen by wait does not wait for the program's error output to be all kept"
+meant = "a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output"
+runs = ["process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/spawned.rs"
+find = '''
+                Ok(Some(status)) => {
+                    self.settle_errors();
+'''
+replace = '''
+                Ok(Some(status)) => {
+'''
+
+[[plant]]
+name = "merge flakes: the wait for the error output's end gives up at once"
+meant = "a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output"
+runs = ["process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = "    while !thread.is_finished() && Instant::now() < by {"
+replace = "    while false && !thread.is_finished() && Instant::now() < by {"
+
+[[plant]]
+name = "merge flakes: an end seen waits for a pipe a process it left holds open for as long as that lives"
+meant = "a_spawned_program_that_left_a_process_holding_its_error_output_is_waited_for_a_while"
+runs = ["process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/spawned.rs"
+find = "            ended_by(reader, Instant::now() + HELD);"
+replace = "            ended_by(reader, Instant::now() + Duration::from_secs(60));"

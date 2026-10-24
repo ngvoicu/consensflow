@@ -5,14 +5,14 @@
 //! itself waiting for its output to be read; what it said on its error output
 //! is kept as it arrives; its output is the case's to read, a line at a time.
 
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Write};
 use std::process::{Child, ChildStdout, ExitStatus};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use super::{pid, Signal, POLL};
+use super::{drain, ended_by, pid, Drain, Signal, HELD, POLL};
 use crate::{Error, Result};
 
 /// What goes down the queue to a program's input.
@@ -50,7 +50,10 @@ pub struct Spawned {
     /// None when the input was never a pipe.
     input: Option<Sink>,
     output: Option<BufReader<ChildStdout>>,
-    errors: Arc<Mutex<String>>,
+    errors: Arc<Mutex<Vec<u8>>>,
+    /// The thread that keeps its error output, until an end of the program has
+    /// waited for it.
+    reader: Option<JoinHandle<()>>,
 }
 
 impl Spawned {
@@ -77,21 +80,10 @@ impl Spawned {
         if let (Some(sink), Some(bytes)) = (&input, first) {
             sink.send(bytes);
         }
-        let errors = Arc::new(Mutex::new(String::new()));
-        if let Some(mut pipe) = child.stderr.take() {
-            let said = Arc::clone(&errors);
-            thread::spawn(move || {
-                let mut chunk = [0_u8; 4096];
-                while let Ok(read) = pipe.read(&mut chunk) {
-                    if read == 0 {
-                        break;
-                    }
-                    said.lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push_str(&String::from_utf8_lossy(&chunk[..read]));
-                }
-            });
-        }
+        let Drain {
+            read: errors,
+            thread: reader,
+        } = drain(child.stderr.take());
         let output = child.stdout.take().map(BufReader::new);
         Self {
             child,
@@ -99,6 +91,7 @@ impl Spawned {
             input,
             output,
             errors,
+            reader: Some(reader),
         }
     }
 
@@ -132,26 +125,30 @@ impl Spawned {
         self.output.take()
     }
 
-    /// Everything it has said on its error output so far.
+    /// Everything it has said on its error output so far: all of it once
+    /// [`Spawned::wait`] has seen it end.
     pub fn errors(&self) -> String {
-        self.errors
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        String::from_utf8_lossy(&self.errors.lock().unwrap_or_else(PoisonError::into_inner))
+            .into_owned()
     }
 
-    /// Whether it has ended.
+    /// Whether it has ended. What it said on its error output may not all be kept
+    /// yet; [`Spawned::wait`] waits for that.
     pub fn has_exited(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(Some(_)))
     }
 
     /// Waits for it to end, up to `within`: how it ended, or none if it was
-    /// still running then.
+    /// still running then. An end is seen once what it said on its error output
+    /// is all kept ([`Spawned::settle_errors`]).
     pub fn wait(&mut self, within: Duration) -> Result<Option<ExitStatus>> {
         let started = Instant::now();
         loop {
             match self.child.try_wait() {
-                Ok(Some(status)) => return Ok(Some(status)),
+                Ok(Some(status)) => {
+                    self.settle_errors();
+                    return Ok(Some(status));
+                }
                 Ok(None) => {}
                 Err(source) => {
                     return Err(Error::Program {
@@ -165,6 +162,17 @@ impl Spawned {
                 return Ok(None);
             }
             thread::sleep(POLL);
+        }
+    }
+
+    /// Once it has ended, waits for the thread that keeps its error output to read
+    /// to the end of the pipe: what it said is in the pipe by then, but a thread the
+    /// system has not run yet has not kept it, and a case that read it at once found
+    /// it short. A process it left that holds the pipe open is waited for [`HELD`]
+    /// at most. Only the first end seen waits.
+    fn settle_errors(&mut self) {
+        if let Some(reader) = self.reader.take() {
+            ended_by(reader, Instant::now() + HELD);
         }
     }
 
