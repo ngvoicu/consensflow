@@ -54,8 +54,8 @@ find = """
             return DropSays::Nothing;
         }"""
 replace = """
-        if failure_expected || self.dropped_on_purpose {
-            return DropSays::Nothing;
+        if self.closed || failure_expected || self.dropped_on_purpose {
+            return DropSays::Now;
         }"""
 
 [[plant]]
