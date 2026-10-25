@@ -127,7 +127,9 @@ const MATRIX_USAGE: &str = "windows-matrix takes a --scenario <name> and a \
 
 /// The machine the words name: by `--machine`, one of [`NAMES`]; by `--host`, an ssh host
 /// reached as zeewin is (it is given to `ssh` and `scp` as a word, so it may not be one that
-/// they would take for an option); none when they name neither, and never both.
+/// they would take for an option), unless it is one of [`NAMES`], which is that machine with
+/// its guards and its Node (the laptop is poker-lab's too); none when they name neither, and
+/// never both.
 fn machine_of(words: &Words) -> Result<Option<Machine>, String> {
     match (words.one("machine"), words.one("host")) {
         (Some(_), Some(_)) => Err("--machine and --host name the same thing: give one".into()),
@@ -138,7 +140,9 @@ fn machine_of(words: &Words) -> Result<Option<Machine>, String> {
             "--host is an ssh host, not an option of ssh: {host}"
         )),
         (None, Some("")) => Err("--host is an ssh host, not an empty word".into()),
-        (None, Some(host)) => Ok(Some(Machine::at(host))),
+        (None, Some(host)) => Ok(Some(
+            Machine::named(host).unwrap_or_else(|| Machine::at(host)),
+        )),
         (None, None) => Ok(None),
     }
 }
