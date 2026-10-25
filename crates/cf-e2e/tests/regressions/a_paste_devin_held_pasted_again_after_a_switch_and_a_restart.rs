@@ -94,23 +94,21 @@ fn result_id(project: &Project) -> cf_e2e::Result<Option<i64>> {
         .and_then(|message| message["id"].as_i64()))
 }
 
-/// What the first run of the app left: the project, the result's id, Devin's store, the
-/// session the result went into and its words as the TUI submitted them, and the rig's
-/// root to start again on.
-struct Quit {
+/// What the first run of the app left on its way: the project, the result's id, Devin's
+/// store, and the session the result went into and its words as the TUI submitted them.
+struct Pasted {
     project: i64,
     id: i64,
     store: std::path::PathBuf,
     left: String,
     words: String,
-    root: std::path::PathBuf,
 }
 
-/// The chief's window is given the result into a silent turn, the human switches it to a
-/// new conversation, and the app quits, daemon first.
-fn pasted_switched_and_quit(mut rig: Rig) -> cf_e2e::Result<Quit> {
-    write_roster(&rig)?;
-    let project = Project::open(&rig, "chief", json!({}))?;
+/// The chief's window of `rig` is given the result into a silent turn, and the human
+/// switches it to a new conversation, the result still on its way.
+fn pasted_and_switched(rig: &Rig) -> cf_e2e::Result<Pasted> {
+    write_roster(rig)?;
+    let project = Project::open(rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
     let tier = added["member"]["tier"]
         .as_str()
@@ -133,7 +131,7 @@ fn pasted_switched_and_quit(mut rig: Rig) -> cf_e2e::Result<Quit> {
     })?;
     let id = result_id(&project)?.ok_or_else(|| Error::Daemon("no result".to_owned()))?;
     let marker = format!("[ConsensFlow m-{id} ");
-    let store = store_of(&rig);
+    let store = store_of(rig);
     rig.wait_for("Devin's TUI to take the result", secs(120), || {
         Ok(devin_store::history(&store)
             .unwrap_or_default()
@@ -168,17 +166,12 @@ fn pasted_switched_and_quit(mut rig: Rig) -> cf_e2e::Result<Quit> {
     assert!(on_its_way, "the result was settled before the app quit");
     assert_eq!(of_message(&rig.events(), "delivery.begun", id), 1);
 
-    let project = project.id();
-    rig.kill_daemon();
-    rig.wait_for_daemon_exit(secs(10))?;
-    let root = rig.close_keeping_the_root()?;
-    Ok(Quit {
-        project,
+    Ok(Pasted {
+        project: project.id(),
         id,
         store,
         left,
         words,
-        root,
     })
 }
 
@@ -186,13 +179,18 @@ fn pasted_switched_and_quit(mut rig: Rig) -> cf_e2e::Result<Quit> {
 /// the human resumes the project. A result the conversation left ran went in once; one
 /// it held queued goes in once more, saying it was sent again.
 fn after_the_restart(ran: Left) -> Outcome {
-    let quit = pasted_switched_and_quit(Rig::start(a_rig())?)?;
+    let mut rig = Rig::start(a_rig())?;
+    let quit = pasted_and_switched(&rig)?;
     let id = quit.id;
+    // The app quits, daemon first, with the result on its way.
+    rig.kill_daemon();
+    rig.wait_for_daemon_exit(secs(10))?;
+    let root = rig.close_keeping_the_root()?;
     // Written before the daemon starts, which settles what was on its way at once.
     if ran == Left::Ran {
         devin_store::append_user(&quit.store, &quit.left, &quit.words)?;
     }
-    let rig = Rig::start(a_rig().existing_root(quit.root))?;
+    let rig = Rig::start(a_rig().existing_root(root))?;
     let resumed = rig.page("project.resume", json!({ "project": quit.project }))?;
     assert_eq!(resumed["ok"], true, "{resumed}");
     let project = Project::new(&rig, quit.project);
