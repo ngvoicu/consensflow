@@ -72,7 +72,7 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
     })?;
     release.wait_for_feed(ALPHA_FEED, &version, run)?;
     // By the release it names, read as the one before was: a 404 is no change.
-    let stable_after = release.served_by(STABLE_FEED)?;
+    let stable_after = release.served_after(STABLE_FEED, run, &stable_before)?;
     if stable_after != stable_before {
         return Err(refused(format!(
             "{STABLE_FEED} serves {stable_after}, and served {stable_before} before {version} was released: \

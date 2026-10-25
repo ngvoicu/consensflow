@@ -90,6 +90,22 @@ impl Came {
     }
 }
 
+/// How long a gate waits for its file, in seconds: longer than the two minutes a case gives
+/// the runs to be ready.
+const GATE_SECONDS: u32 = 180;
+
+/// The PowerShell a gated run begins with: it makes `ready`, then waits for `go` in a tight
+/// loop (the runs it holds back must go together) and ends the run with 97 once `seconds` have
+/// gone without it. A case that ends before it makes `go` would otherwise leave the run
+/// spinning on the machine for good.
+fn gate_script(ready: &Path, go: &Path, seconds: u32) -> String {
+    format!(
+        "New-Item -ItemType File '{}' | Out-Null\n$watch = [Diagnostics.Stopwatch]::StartNew()\nwhile (-not (Test-Path '{}')) {{ if ($watch.Elapsed.TotalSeconds -gt {seconds}) {{ exit 97 }} }}\n",
+        ready.display(),
+        go.display()
+    )
+}
+
 /// A run of the bootstrap named `id` on `profile`, with `packed` as its tarball, started
 /// at once or, with a `gate`, when the file `go` is made (it makes `ready` first).
 fn start(
@@ -101,11 +117,7 @@ fn start(
     gate: Option<(&Path, &Path)>,
 ) -> Child {
     let before = match gate {
-        Some((ready, go)) => format!(
-            "New-Item -ItemType File '{}' | Out-Null\nwhile (-not (Test-Path '{}')) {{ }}\n",
-            ready.display(),
-            go.display()
-        ),
+        Some((ready, go)) => gate_script(ready, go, GATE_SECONDS),
         None => String::new(),
     };
     start_after(scratch, env, profile, id, packed, &before)
@@ -350,6 +362,45 @@ fn of_two_runs_started_together_on_one_folder_one_runs_and_the_other_is_refused_
         assert!(copy.join(LOCK).exists(), "{}", describe());
         assert!(!copy.join(RUNNING).exists(), "{}", describe());
         assert!(!copy.join(OWNER).exists(), "{}", describe());
+    }
+}
+
+#[test]
+fn a_gate_nobody_opens_ends_its_run_with_97_and_one_that_is_opened_lets_it_go_on() {
+    let case = Case::new();
+    for (opened, status) in [(true, 0), (false, 97)] {
+        let ready = case.scratch.path().join(format!("gate-ready-{opened}"));
+        let go = case.scratch.path().join(format!("gate-go-{opened}"));
+        if opened {
+            fs::write(&go, "").unwrap();
+        }
+        let file = case.scratch.path().join(format!("gate-{opened}.ps1"));
+        fs::write(&file, format!("{}exit 0\n", gate_script(&ready, &go, 2))).unwrap();
+        let start = Invocation::new("powershell", case.scratch.path())
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(&file);
+        let mut run = process::spawn(&start, &case.env, Stdio::null(), false).unwrap();
+        let until = Instant::now() + Duration::from_secs(60);
+        let ended = loop {
+            if let Some(ended) = run.try_wait().unwrap() {
+                break ended;
+            }
+            if Instant::now() >= until {
+                end(run);
+                panic!(
+                    "the gate (opened: {opened}) was still going a minute after its two seconds"
+                );
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        assert_eq!(ended.code(), Some(status), "opened: {opened}");
+        assert!(ready.exists(), "opened: {opened}");
     }
 }
 

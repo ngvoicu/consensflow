@@ -17,7 +17,7 @@ use rusqlite::{ffi, params, Connection};
 use serde_json::json;
 
 use super::old_logs::{of, version_18, AT};
-use super::reads::{ask, ids, ROOM};
+use super::reads::{ask, ids, LOADED_AT_MOST, ROOM};
 use super::{id_of, item, ledger_in, project};
 
 /// The reviewers' 32 MiB.
@@ -25,11 +25,18 @@ const LONG: usize = 32 << 20;
 
 /// How many pages more a read may take where the fields are long: a tree laid
 /// out a little otherwise. One long value gone through is some 8,200.
-const SLACK: i32 = 2;
+pub(super) const SLACK: i32 = 2;
 
 /// The pages SQLite's cache gave the ledger's connection since this was last
-/// asked: those it held, and those it read from the file.
-fn pages(ledger: &Ledger) -> i32 {
+/// asked: those it held, and those it read from the file. A long value's pages
+/// that lie in the database file itself, not in the write-ahead log, can be
+/// read straight from it past the cache, and then count for nothing: a read of
+/// the whole 24 MiB text counted 9 pages so, 6,159 with its pages in the log
+/// (`reads.rs` keeps what it writes there). The fixtures here end checkpointed,
+/// so their counts see a read that goes through a long value's chain to a
+/// field past it, and the value limit [`costs`] sets is what refuses a read
+/// that loads one whole.
+pub(super) fn fetched(ledger: &Ledger) -> i32 {
     let counted = |what: c_int| {
         let (mut now, mut most) = (0, 0);
         // SAFETY: the handle is the ledger's open connection's, which outlives
@@ -58,11 +65,13 @@ struct Costs {
 /// and message `message`'s opening: each read once first, so that what SQLite
 /// reads of its schema to make a statement is not counted.
 fn costs(ledger: &Ledger, project: i64, conversation: i64, message: i64) -> Costs {
+    // A read that loaded a field of 32 MiB whole would fail, the value too long.
+    ledger.limit_value_length(LOADED_AT_MOST).expect("held");
     let counted = |read: &dyn Fn()| {
         read();
-        pages(ledger);
+        fetched(ledger);
         read();
-        pages(ledger)
+        fetched(ledger)
     };
     let read = |find: Option<&'static str>, tools: bool| {
         move || {

@@ -82,8 +82,9 @@ pub struct Held {
 }
 
 /// What a take asks of the system once, for every window it takes: the list of every
-/// process, asked when the first window needs it; and a sample of the pane host, the look's
-/// (`host`), taken when the first window needs it and pointed at by every window after.
+/// process, asked when the first window needs it; and a sample of the pane host (`host`:
+/// the look's, where the stall is found; the running app's, at the end), taken when the
+/// first window needs it and pointed at by every window after.
 struct Taking<'p> {
     prober: &'p mut dyn Prober,
     listed: Option<Listing>,
@@ -125,7 +126,7 @@ impl Held {
     /// handle, which of that handle's stalls it is, and when), masked. The pane host is
     /// sampled beside a program that wrote bytes it has not read, and beside a window still
     /// reading working whose program the system lists no more (the pane host's own proof
-    /// that a program went).
+    /// that a program went), whatever else of its tree it lists.
     fn of(
         window: Option<&OpenWindow>,
         (label, state): (&str, &str),
@@ -143,8 +144,16 @@ impl Held {
             }
         };
         let unread = matches!(taken.unread, Ok(bytes) if bytes > 0);
-        let gone =
-            state == "working" && taken.processes.as_ref().is_ok_and(|lines| lines.is_empty());
+        // The pane host's proof that a program went is its own line missing: a job of its
+        // tree that outlived it, reparented, is still listed beside.
+        let gone = state == "working"
+            && window.and_then(|window| window.pid).is_some_and(|pid| {
+                let program = format!("{pid} ");
+                taken
+                    .processes
+                    .as_ref()
+                    .is_ok_and(|lines| !lines.iter().any(|line| line.starts_with(&program)))
+            });
         let host = (unread || gone).then(|| taking.host(label)).flatten();
         let masked = |why: String| cut(&why, 300, names);
         Self {
@@ -376,12 +385,13 @@ impl Stalls {
 
     /// What the system says, by `prober`, of the processes of each window that `last`, the
     /// last look before the app closes, still read stalled: once more, at the run's end.
-    fn take_at_end(&mut self, last: Option<&Look>, prober: &mut dyn Prober) {
+    /// `host` is the pane host of the app that runs now.
+    fn take_at_end(&mut self, last: Option<&Look>, host: Option<u32>, prober: &mut dyn Prober) {
         let Some(look) = last else {
             return;
         };
         let names = Names::of(look);
-        let mut taking = Taking::new(prober, look.host);
+        let mut taking = Taking::new(prober, host);
         let labels = self.labels(When::End);
         for (stall, label) in self
             .kept
@@ -404,9 +414,17 @@ impl Stalls {
 
     /// The windows of `last`, the last look before the app closes, kept for the end; and of
     /// each that still read stalled, what the system says of its processes by `prober`,
-    /// once more ([`Stalls::take_at_end`]).
-    pub fn before_close(&mut self, last: Option<&Look>, prober: &mut dyn Prober) {
-        self.take_at_end(last, prober);
+    /// once more ([`Stalls::take_at_end`]). The pane host sampled is `host`, the stage's:
+    /// the last look's may have been reaped by a restart of the app that did not come
+    /// back, or was replaced by one that answered no look; none where the app is not
+    /// running.
+    pub fn before_close(
+        &mut self,
+        last: Option<&Look>,
+        host: Option<u32>,
+        prober: &mut dyn Prober,
+    ) {
+        self.take_at_end(last, host, prober);
         let Some(look) = last else {
             return;
         };

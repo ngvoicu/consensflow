@@ -494,8 +494,8 @@ runs = ["release-commands"]
 
 [[plant.edit]]
 file = "tools/xtask/src/release/github.rs"
-find = "not a version to change; nothing was done, run again later"
-replace = "set a later version"
+find = "not a version to change; {}"
+replace = "set a later version; {}"
 
 [[plant]]
 name = "release: a green run with an unserved feed says nothing of the run"
@@ -621,3 +621,76 @@ find = '''
 no remote has it; delete it, `git branch -D {branch}`, and run again"'''
 replace = '''
 no remote has it"'''
+
+[[plant]]
+name = "release: a promotion asks gh nothing before its pushes"
+meant = "a_gh_that_fails_stops_a_promotion_before_any_push_in_the_dry_run_too"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    if options.dry_run {'''
+replace = '''
+    if options.dry_run {'''
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
+replace = '''
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
+
+[[plant]]
+name = "release: a promotion asks gh before its pushes in the dry run alone"
+meant = "a_gh_that_fails_stops_a_promotion_before_any_push_in_the_dry_run_too"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    if options.dry_run {'''
+replace = '''
+    if options.dry_run {
+        release.newest_run("release.yml", Some(&promoted), Some("push"))?;'''
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
+replace = '''
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
+
+[[plant]]
+name = "release: a promotion left is finished by hand by its branch's name"
+meant = "a_branch_a_promotion_left_is_refused_with_how_to_start_over_or_finish"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "`git tag -a {tag} -F <notes> {at} && git push origin {tag}"
+replace = "`git tag -a {tag} -F <notes> {branch} && git push origin {tag}"
+
+[[plant]]
+name = "release: a promotion left is finished by hand whatever its parent"
+meant = "a_branch_a_promotion_left_is_refused_with_how_to_start_over_or_finish"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "or, if its parent is {alpha_commit}, finish it by hand:"
+replace = "or finish it by hand:"
+
+[[plant]]
+name = "release: feed-stable unread after a green alpha run says nothing was done"
+meant = "a_feed_stable_that_answers_no_release_after_a_green_run_says_the_release_is_published"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "release.served_after(STABLE_FEED, run, &stable_before)?"
+replace = "release.served_by(STABLE_FEED)?"

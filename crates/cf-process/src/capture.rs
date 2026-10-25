@@ -17,7 +17,7 @@ use crate::execute::{command_line, hide_window, read_both, Read, FORCE_AFTER};
 #[cfg(unix)]
 use crate::group::ENDED_EVERY;
 use crate::group::{lead, lead_whole, Group};
-use crate::job::Job;
+use crate::job::{start_in_job, Job};
 use crate::{Ender, Ending, Limits, Run};
 
 /// How the message of a capture held whole (`capture_whole`) begins where what its
@@ -74,8 +74,10 @@ impl CaptureFailed {
 /// The program leads a process group of its own on Unix, and what ends it (a
 /// stop, its time running out, this future dropped) ends the group: the
 /// installer's children with it, which Node's `kill` left running (a
-/// difference kept). Windows ends the whole tree at a stop and at its time
-/// running out, as it does; a future dropped there ends the program alone.
+/// difference kept). On Windows it runs in a job of its own, which a stop, its
+/// time running out, and this future dropped end, whole and at once: the
+/// installer's children, and what they start as it ends. One that ended of itself
+/// is let go of, with what it left running.
 ///
 /// `started` is given the program's [`Ender`] once it has started, for
 /// whoever ends this process's children on its way out: the program, and the
@@ -164,6 +166,7 @@ async fn captured(
         Hold::Node => lead(&mut command),
         Hold::Whole => lead_whole(&mut command),
     }
+    start_in_job(&mut command);
     let mut child = command.spawn().map_err(|failed| {
         CaptureFailed::unstarted(format!(
             "spawn {} {}",
@@ -171,22 +174,16 @@ async fn captured(
             error_code(&failed)
         ))
     })?;
-    // Held whole, its own job (Windows), which it is put in before it runs and which
-    // ends whatever is left of it as the capture ends, however it ends; else the job
-    // of every child of this process. A program not put in its own, or not let run,
-    // is ended as the child is dropped.
-    let job = match hold {
-        Hold::Node => {
-            crate::job::adopt(&child);
-            None
-        }
-        Hold::Whole => Some(Job::of(&child).map_err(|why| {
-            CaptureFailed::unstarted(format!("spawn {} {why}", run.program.to_string_lossy()))
-        })?),
-    };
+    // In a job of its own (Windows), which it is put in before it runs and which ends
+    // whatever is left of it as the capture ends, however it ends, and with this process;
+    // one that ended of itself leaves what it left running (`release`), unless it is held
+    // whole. A program not put in its job, or not let run, is ended as the child is dropped.
+    let job = Job::of(&child, hold == Hold::Whole).map_err(|why| {
+        CaptureFailed::unstarted(format!("spawn {} {why}", run.program.to_string_lossy()))
+    })?;
     // Declared after the child, so it is dropped before it: a capture dropped
-    // ends the group while its leader is not yet reaped.
-    let group = Group::new(child.id(), hold == Hold::Whole);
+    // ends the group (and with it the job) while its leader is not yet reaped.
+    let group = Group::new(child.id(), hold == Hold::Whole, job);
     started(group.ender());
     let _input = child.stdin.take();
     let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
@@ -212,7 +209,6 @@ async fn captured(
             held_end(
                 &mut child,
                 &group,
-                job.as_ref(),
                 (stdout, stderr),
                 (&mut out, &mut err),
                 limits,
@@ -358,7 +354,6 @@ enum Held {
 async fn held_end(
     child: &mut tokio::process::Child,
     group: &Group,
-    job: Option<&Job>,
     (mut stdout, mut stderr): Streams,
     (out, err): Reads<'_>,
     limits: Limits,
@@ -396,7 +391,7 @@ async fn held_end(
     };
     match held {
         Held::Exited(status) => {
-            let mut left = end_the_rest(group, job);
+            let mut left = end_the_rest(group);
             // Streams still held once all it left was ended: something out of reach
             // holds them, and what was read of them is not all.
             if !read
@@ -419,11 +414,15 @@ async fn held_end(
         Held::Overflowed | Held::OutOfTime => {
             drop(reading);
             drop((stdout, stderr));
+            // On Windows its job is ended first, each process of it held before it is and
+            // waited for after (`Job::end`): ended by the group's ask, the job lists none of
+            // those that are still ending, and what is waited for after is nothing (T-363).
+            // Elsewhere there is no job, and the group is asked.
+            let job_ended = group.job().end();
             group.end(Ending::Asked);
-            // Forced before it is reaped on Unix, its session and descendants with it;
-            // on Windows its job is what is left.
+            // Forced before it is reaped on Unix, its session and descendants with it.
             let status = forced(child, group).await;
-            let left = job.map_or(Ok(()), Job::end).and(group.unpinned());
+            let left = job_ended.and(group.unpinned());
             (status, matches!(held, Held::OutOfTime), left)
         }
     }
@@ -456,11 +455,11 @@ async fn exited(
 /// yet); on Windows, where it was waited for and its pid may be another's, every process
 /// of its job, waited for until none is left. Why not all of it ended, where not all did
 /// (a process of the job, or one that could not be held to be forced, that outlived it).
-fn end_the_rest(group: &Group, job: Option<&Job>) -> Result<(), String> {
+fn end_the_rest(group: &Group) -> Result<(), String> {
     if cfg!(unix) {
         group.end(Ending::Forced);
     }
-    job.map_or(Ok(()), Job::end).and(group.unpinned())
+    group.job().end().and(group.unpinned())
 }
 
 #[cfg(test)]

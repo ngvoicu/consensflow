@@ -330,10 +330,11 @@ async function openChief(page) {
 async function openSession(page) {
   await page.locator('button.fold-sessions[aria-expanded="false"]').first().click()
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
-  await page
+  const history = page
     .locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
     .getByRole('button', { name: "Read everything kept of @zeus · amber-pine's conversations" })
-    .click()
+  await expect(history).toBeVisible()
+  await history.click()
   const viewer = page.getByRole('dialog', { name: 'History of @zeus · amber-pine' })
   await expect(viewer).toBeVisible()
   return viewer
@@ -506,6 +507,7 @@ test.describe('the history viewer', () => {
     const newer = viewer.getByRole('button', { name: 'Newer' })
     await expect(status).toHaveText('The most recent')
     await expect(newer).toBeDisabled()
+    await expect(older).toBeEnabled()
     const first = await texts(viewer)
     // Meanwhile the chief says more: a page already read is not moved by it.
     await page.evaluate(() => {

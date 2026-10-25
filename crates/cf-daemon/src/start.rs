@@ -216,6 +216,11 @@ async fn run(
         },
     )?;
     let ledger = Rc::new(RefCell::new(ledger));
+    // A wait the environment cut (a test's) is in the log: one left in a shell is seen there.
+    let limits = Limits::of(&env);
+    if let Some(cut) = limits.cut_by_the_environment() {
+        log.info(&cut);
+    }
     // No window survives a restart: what every launch left in the home goes.
     let swept = cf_harness::sweep_launches(&home.to_string_lossy())
         .map_err(|failed| StartError::System(failed.to_string()))?;
@@ -368,7 +373,7 @@ async fn run(
         log: Rc::clone(&log) as _,
         launch_files: Rc::new(LaunchFolders::new(home.clone(), Rc::clone(&errors))),
         spawn: Rc::clone(&spawn) as _,
-        limits: Limits::of(&env),
+        limits,
     };
     let dispatcher = Dispatcher::new(seams);
     // Set once, here: nothing asked of the engine before this has been given it.
