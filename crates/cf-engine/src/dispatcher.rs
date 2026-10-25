@@ -87,10 +87,12 @@ pub struct Dispatcher {
     /// The records of participants forgotten while their window was still
     /// open, until it exits.
     leaving: RefCell<Vec<Rc<Record>>>,
-    /// The last exit of each participant forgotten since, and whether the host proved its
-    /// program gone: a session the human deleted, brought back for a follow-up, opens
-    /// on its conversation by that word (`ownership`), in a record of its own.
-    left_exits: RefCell<HashMap<i64, (Pane, Option<bool>)>>,
+    /// The pane of the last window of each participant forgotten since: the host's word
+    /// on it, which may come after, is kept on the participant's conversation all the
+    /// same ([`Dispatcher::heard_exit`]), and a session the human deleted, brought back
+    /// for a follow-up, opens on that conversation by it (`ownership`), in a record of
+    /// its own.
+    left_exits: RefCell<HashMap<i64, Pane>>,
     listeners: RefCell<Vec<Rc<dyn Fn()>>>,
     transcript_listeners: RefCell<Vec<Rc<dyn Fn()>>>,
     /// What the windows keep across records (`windows`).
@@ -708,18 +710,23 @@ impl Dispatcher {
         };
         let Some(record) = record else {
             // The host's word on a window the engine's own close settled already.
-            self.heard_exit(pane, &shown);
-            return Ok(());
+            return self.heard_exit(pane, &shown);
         };
-        // Whether its program is gone, for the next launch on its conversation
-        // (`Launch::previous_gone`).
-        record.window.borrow_mut().last_exit = Some((pane.clone(), shown.gone()));
+        record.window.borrow_mut().last_exit = Some(pane.clone());
         // Still opening: its launch takes the exit once it has the window.
         if !ended(record.window.borrow().pane.as_ref()) {
             if let Some(opening) = record.window.borrow_mut().opening.as_mut() {
                 opening.exited = Some(shown);
             }
             return Ok(());
+        }
+        // Whether its program is gone, kept on its conversation for the next launch on
+        // it, after a restart too (`ownership`, `Launch::previous_gone`).
+        if let Some(gone) = shown.gone() {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .set_program_gone(record.id, gone)?;
         }
         let delivering = record.delivery.borrow_mut().delivering.take();
         // What a launch that was to say the role first still owed the window
@@ -909,26 +916,47 @@ impl Dispatcher {
     }
 
     /// What the host said of the end of `pane`, where its window was settled
-    /// before (the engine's own close, which knows nothing of how it ended): its
-    /// record learns whether the program is gone, where the host said.
-    fn heard_exit(&self, pane: &Pane, shown: &Shown) {
+    /// before (the engine's own close, which knows nothing of how it ended): the
+    /// conversation of the participant whose last window it was keeps whether its
+    /// program is gone, where the host said. Not where a window of that participant
+    /// has opened, or is opening, since: that window's program writes to it now, and
+    /// its own exit says whether it is gone.
+    fn heard_exit(&self, pane: &Pane, shown: &Shown) -> Result<(), EngineError> {
         let Some(gone) = shown.gone() else {
-            return;
+            return Ok(());
         };
-        for (last, said) in self.left_exits.borrow_mut().values_mut() {
-            if last == pane {
-                *said = Some(gone);
+        let mut whose: Vec<i64> = self
+            .left_exits
+            .borrow()
+            .iter()
+            .filter(|(_, last)| *last == pane)
+            .map(|(id, _)| *id)
+            .collect();
+        whose.extend(
+            self.records
+                .borrow()
+                .values()
+                .filter(|record| record.window.borrow().last_exit.as_ref() == Some(pane))
+                .map(|record| record.id),
+        );
+        for id in whose {
+            let windowed = {
+                let records = self.records.borrow();
+                let leaving = self.leaving.borrow();
+                records
+                    .values()
+                    .chain(leaving.iter())
+                    .filter(|record| record.id == id)
+                    .any(|record| {
+                        let window = record.window.borrow();
+                        window.pane.is_some() || window.opening.is_some()
+                    })
+            };
+            if !windowed {
+                self.seams.ledger.borrow_mut().set_program_gone(id, gone)?;
             }
         }
-        let records = self.records.borrow();
-        for record in records.values() {
-            let mut window = record.window.borrow_mut();
-            if let Some((last, said)) = window.last_exit.as_mut() {
-                if last == pane {
-                    *said = Some(gone);
-                }
-            }
-        }
+        Ok(())
     }
 
     /// One participant's step.

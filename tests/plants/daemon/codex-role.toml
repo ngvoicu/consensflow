@@ -141,8 +141,8 @@ runs = ["ledger-lib", "ledger-replay"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/testing.rs"
-find = '''                *sql = sql.replace(role_text::COLUMN_LINES, "");'''
-replace = '''                *sql = sql.replace(role_text::COLUMN_LINES, " ");'''
+find = '''                    .replace(role_text::COLUMN_LINES, "")'''
+replace = '''                    .replace(role_text::COLUMN_LINES, " ")'''
 
 [[plant]]
 name = "codex role: a note is confirmed and the role recorded in two writes, and one that fails leaves the other made"

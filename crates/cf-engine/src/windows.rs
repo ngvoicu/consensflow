@@ -194,10 +194,11 @@ pub(crate) struct WindowPart {
     /// The stop it ignored in every round, while it lasts.
     pub(crate) unstopped: Option<Unstopped>,
     pub(crate) activity: Activity,
-    /// The pane of the last window that ended, and whether the host proved its
-    /// program gone ([`Shown::gone`]): none until the host said, which it may
-    /// do after the engine's own close has settled the window.
-    pub(crate) last_exit: Option<(Pane, Option<bool>)>,
+    /// The pane of the last window that ended, which the host's word on how it
+    /// ended may come after, once the engine's own close has settled the window
+    /// ([`Dispatcher::heard_exit`]). Whether its program is gone is kept on the
+    /// participant's conversation ([`Shown::gone`], `ownership`).
+    pub(crate) last_exit: Option<Pane>,
     /// The task whose work the window holds, by its number (`ownership`): no other
     /// task's message goes into it.
     pub(crate) owner: Option<i64>,
@@ -561,6 +562,24 @@ impl Dispatcher {
             assign(&mut env, key, value);
         }
         assign(&mut env, "CONSENSFLOW_TOKEN", &token);
+        // The program of the window that opens will write to the conversation it goes
+        // on with: what was proven of the last one on it holds no more, kept so before
+        // anything of the new one runs, so that a restart while it is open does not
+        // take it for gone (`ownership`). A host that refuses the open ran nothing, and
+        // the proof is kept again; one whose answer never came may have.
+        let proven = match self
+            .seams
+            .ledger
+            .borrow()
+            .current_conversation(participant.id)?
+        {
+            Some(current) => self.seams.ledger.borrow().program_gone(current.id)?,
+            None => false,
+        };
+        self.seams
+            .ledger
+            .borrow_mut()
+            .set_program_gone(participant.id, false)?;
         // The host watches a window's process before it answers the open, so
         // an exit can come first, even in the same read: the exit finds it here.
         record.window.borrow_mut().opening = Some(Opening {
@@ -586,6 +605,12 @@ impl Dispatcher {
         let pid = match opened {
             Ok(Opened::Open { pid }) => pid,
             Ok(Opened::Refused { error }) => {
+                if proven {
+                    self.seams
+                        .ledger
+                        .borrow_mut()
+                        .set_program_gone(participant.id, true)?;
+                }
                 return self.not_opened(
                     record,
                     project,
@@ -816,7 +841,7 @@ impl Dispatcher {
             )? {
                 return Ok(None);
             }
-            self.kept_apart(project, participant, record, found, before.as_ref(), first)?
+            self.kept_apart(project, participant, found, before.as_ref(), first)?
         };
         // The task whose work the window holds: its first message's, or what its
         // conversation was last given where it goes on with one.
@@ -888,13 +913,12 @@ impl Dispatcher {
             Some(role) => role,
             None => self.role_text(project, participant, &*adapter)?,
         };
-        // Its last window's program was proven gone: nothing of it writes on.
-        let previous_gone = record
-            .window
-            .borrow()
-            .last_exit
-            .as_ref()
-            .is_some_and(|(_, gone)| *gone == Some(true));
+        // The program of the last window on its conversation was proven gone: nothing
+        // of it writes on.
+        let previous_gone = match &conversation {
+            Some(conversation) => self.seams.ledger.borrow().program_gone(conversation.id)?,
+            None => false,
+        };
         let launch = Launch {
             id: launch_id,
             project: project.id,
