@@ -1,11 +1,10 @@
 //! What a window's program started and left running. An agent can start work
 //! that outlives its turn (a job in the background, a monitor it armed) and
-//! end the turn. The turn's end is the task's result all the same (the owner's
-//! decision of 2026-10-13), and the daemon asks for what the turn left to be
-//! ended once it has taken the result (`pane.end_background`), the window
-//! staying open; closing the window ends the rest of what is the window's, on Unix
-//! once it was asked to end and given time to release what it holds, on Windows at
-//! once with no chance to (`pty::close` says why).
+//! end the turn. A turn ends nothing it left running (turn-end, the chief's decision of
+//! 2026-10-21): the daemon asks what it left (`pane.background`, and which of the
+//! harness's commands run, `pane.commands`), and closing the window ends what is the
+//! window's, on Unix once it was asked to end and given time to release what it holds,
+//! on Windows at once with no chance to (`pty::close` says why).
 //!
 //! The host looks at the window's **tree**: every process the window's program
 //! started that the platform still names ([`Member`]). On macOS that is its children
@@ -16,7 +15,7 @@
 //! bound), and leaves the rest running. On Windows
 //! it is the pane's job object: a process joins it when it is started and leaves it
 //! only by breaking away (`CREATE_BREAKAWAY_FROM_JOB`), which the job does not allow,
-//! and it is the job that is ended, and nothing outside it can be.
+//! and it is the job that a close ends, and nothing outside it can be.
 //!
 //! The host cannot tell a program from the work it started by anything the
 //! program is: an MCP server and a recording run are both children of the
@@ -28,7 +27,7 @@
 //! is not mistaken for it; everything the host does to a process it does to the one
 //! it chose, by that, never to the number a later look finds.
 //!
-//! **When in doubt the host ends less.** Of what began after the mark it calls the
+//! **When in doubt the host names less.** Of what began after the mark it calls the
 //! turn's only what a chain of processes that run proves it: a shell the harness
 //! started, and what descends from it ([`work`]). A process whose chain is broken (a
 //! job an agent detached with `nohup … &` or `Start-Process` from a shell that then
@@ -40,9 +39,8 @@
 //! ever the turn's, by where the harness keeps its servers or by the programs it is
 //! named for ([`harness`] says how); and what it has seen to be the harness's it keeps
 //! for its own as long as it runs ([`Baseline::turn_work`] remembers it), whatever
-//! becomes of the process that started it. So what is listed, ended and named is the
-//! turn's work and nothing of the rest, and a process that cannot be told is left as
-//! it is.
+//! becomes of the process that started it. So what is listed and named is the turn's
+//! work and nothing of the rest, and a process that cannot be told is not named.
 //!
 //! **A moment later.** A harness runs short commands of its own at any time, and the
 //! host cannot tell one from the agent's by anything it is. Claude Code runs its status
@@ -51,24 +49,15 @@
 //! look that comes while one runs finds a shell the harness started after the mark with
 //! a job under it, which is all the chain asks of the turn's work (seen in 3.0.3: a
 //! close named two runs of one, and the `git`, as work the window left running). So
-//! whatever the host names, at a window's close, at the exit of its program and at the
-//! end of a turn, it looks at again [`SETTLE`] after it first found it, and names (and
-//! ends) only what both looks find: a process that is still there ([`steady`]), by its
+//! whatever the host names, at a window's close and at the exit of its program, it looks
+//! at again [`SETTLE`] after it first found it, and names only what both looks find: a
+//! process that is still there ([`steady`]), by its
 //! number and when it began. A run of a status line that ended meanwhile is none of it,
 //! nor is the next run, which is another process. Where the first look finds nothing
 //! there is nothing to wait for, and no second look is made. The look the daemon asks
 //! for while a turn runs (`pane.background`) is one look, and says what it finds then;
 //! the closes of a quit make none, with no one left to tell. What lasts longer than the
 //! moment and is in no group of the window's is named all the same, as the agent's.
-//!
-//! An ending is bound to the turn it ends. What it ends is chosen once, when it
-//! begins, and is those processes and what they start while they end
-//! (`process_tree::Lineage`; `job_object`'s `end`): never what a later look of the
-//! whole tree takes for the turn's, which a new turn's work is, started in the window
-//! by a human or by a message that went in meanwhile. What it chose and the bound of
-//! the tree refused (nothing shows it is the window's: on the Mac, where the bound
-//! is) is not signalled and is not dropped: it is named as left where it still runs,
-//! and the chief is told it may.
 //!
 //! Only looking at the tree is the platform's: the macOS process tree and the
 //! Windows job object each list their members, with the program each runs and the
@@ -87,7 +76,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use cf_proto::panes::{
-    Background, BackgroundProcess, Ending, Servers, BACKGROUND_PROCESSES, COMMAND_CHARS,
+    Background, BackgroundProcess, Servers, BACKGROUND_PROCESSES, COMMAND_CHARS,
 };
 
 #[cfg(test)]
@@ -341,39 +330,6 @@ pub(crate) fn steady(earlier: &[Member], later: Vec<Member>) -> Vec<Member> {
         .into_iter()
         .filter(|member| named.contains(&member.key))
         .collect()
-}
-
-/// What a look of `tree` finds that `roots` started and that still runs: the processes
-/// of it that descend from one of `roots`, by the process each was started by, are none
-/// of them and are among `running`. `tree` may list processes that have ended, which a
-/// handle held keeps: each is still the parent it names to what it started, and none
-/// of what is found, for a process that ended by itself while the ending went on (a
-/// short run of the harness's own, in a shell that lasts) is not there to end, and an
-/// ending names as ended what it ended. The Windows job's ending asks it of the handles
-/// it holds; a Mac looks at what runs and has no such list, so only its tests ask it.
-#[cfg(any(windows, test))]
-pub(crate) fn started_by(
-    roots: &HashSet<ProcessKey>,
-    tree: &[Member],
-    running: &HashSet<ProcessKey>,
-) -> Vec<ProcessKey> {
-    descending_from(roots, tree)
-        .into_iter()
-        .filter(|key| !roots.contains(key) && running.contains(key))
-        .collect()
-}
-
-/// What an ending came to, once it was made: the processes it chose that are not
-/// among `alive`, the processes of the tree now, were ended; those that are were
-/// not, and are said so.
-pub(crate) fn report(chosen: Vec<Member>, alive: &HashSet<ProcessKey>) -> Ending {
-    let (left, ended): (Vec<Member>, Vec<Member>) = chosen
-        .into_iter()
-        .partition(|member| alive.contains(&member.key));
-    Ending {
-        ended: listed(ended),
-        left: listed(left),
-    }
 }
 
 /// `chosen`, the first of it as the daemon is told of it: how many, and the first

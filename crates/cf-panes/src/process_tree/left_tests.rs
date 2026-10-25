@@ -2,7 +2,7 @@
 //! ([`ProcessTree::possibly_left`]), on a machine made up (`testing`): a job a tool shell
 //! detached, which carries the window's marker, began after its program and is in a session
 //! whose leader has gone, and each of those taken away. And the bound refuses what is
-//! named: no close nor ending signals it, whatever a selection names (T-406).
+//! named: no close signals it, whatever a selection names (T-406).
 
 use super::testing::{a_window_among_strangers, identity_of, listed, Machine, PROGRAM};
 use super::*;
@@ -144,7 +144,7 @@ fn what_the_bound_allows_is_not_named_the_close_ends_it() {
 }
 
 #[test]
-fn the_bound_refuses_what_is_named_and_no_close_or_ending_signals_it() {
+fn the_bound_refuses_what_is_named_and_no_close_signals_it() {
     let table = a_window_with_a_detached_server((2, 0));
     let machine = Machine::new(table.clone()).marking(MARKER, &[SERVER]);
     let tree = tree_of(&table);
@@ -152,20 +152,14 @@ fn the_bound_refuses_what_is_named_and_no_close_or_ending_signals_it() {
     assert_eq!(named(&tree, &machine), [SERVER.unsigned_abs()]);
 
     // Looks at the tree (a close's, and turn-end's look at the window's commands, which must
-    // read all of it), then a close and an ending whose selection names every process.
+    // read all of it), then a close, and the force of one whose selection names every process.
     tree.members_by(&machine).expect("a look");
     tree.readable_members_by(&machine).expect("a look");
     assert!(!tree.bound.allows(&Table::of(&table), server));
-    let every = Lineage {
-        identities: table.iter().map(|process| process.identity).collect(),
-        members: Vec::new(),
-        unverified: Vec::new(),
-    };
-    tree.ask_by(&machine, Subject::Whole, None).expect("asked");
-    tree.ask_by(&machine, Subject::Lineage(&every), None)
-        .expect("asked");
-    tree.force_by(&machine, Subject::Whole, &[server]);
-    tree.force_by(&machine, Subject::Lineage(&every), &[server]);
+    let every: Vec<Identity> = table.iter().map(|process| process.identity).collect();
+    tree.ask_by(&machine, None).expect("asked");
+    tree.force_by(&machine, &[server]);
+    tree.force_by(&machine, &every);
 
     for signal in [libc::SIGTERM, libc::SIGHUP, libc::SIGSTOP, libc::SIGKILL] {
         assert!(

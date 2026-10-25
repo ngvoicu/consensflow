@@ -1,6 +1,5 @@
-//! What the tree is of the processes there are: the lineage of a turn and the session of a
-//! pane, told on a table written out, and the tree's look at real processes the tests
-//! start. What the tree signals, on a machine made up, is in `machine_tests`.
+//! What the tree is of the processes there are: the session of a pane, told on a table
+//! written out, and the tree's look at real processes the tests start. What the tree signals, on a machine made up, is in `machine_tests`.
 
 use super::machine_tests::every_process;
 use super::testing::{listed, Machine};
@@ -11,51 +10,6 @@ fn pids(found: &HashMap<i32, Identity>) -> Vec<i32> {
     let mut pids: Vec<i32> = found.keys().copied().collect();
     pids.sort_unstable();
     pids
-}
-
-#[test]
-fn a_lineage_is_its_processes_that_run_and_what_descends_from_them_or_from_one_that_has_gone() {
-    let lineage = Lineage {
-        identities: vec![
-            // A shell that runs, and one that has gone.
-            listed(40, 400, 1).identity,
-            listed(41, 410, 1).identity,
-        ],
-        members: Vec::new(),
-        unverified: Vec::new(),
-    };
-    let snapshot = [
-        listed(40, 400, 1),
-        // What the shell that runs started, and what that started.
-        listed(50, 500, 400),
-        listed(51, 510, 500),
-        // What the shell that has gone started, still parented by its identifier.
-        listed(52, 520, 410),
-        // The window's own new work: a shell its program started, and what that runs.
-        listed(60, 600, 1),
-        listed(61, 610, 600),
-        // A process that took the number of the one that has gone.
-        listed(41, 411, 1),
-    ];
-    assert_eq!(
-        pids(&lineage.found(&snapshot, &HashMap::new())),
-        [40, 50, 51, 52],
-        "the new work is no part of it, though a look of the tree would call it the turn's"
-    );
-}
-
-#[test]
-fn what_a_process_the_ending_found_started_is_found_whether_or_not_that_process_runs() {
-    let lineage = Lineage {
-        identities: vec![listed(40, 400, 1).identity],
-        members: Vec::new(),
-        unverified: Vec::new(),
-    };
-    // A handler of the shell's started a process and went; the ending knows it by
-    // the identity it found, and what that started is the lineage's too.
-    let found_before: HashMap<i32, Identity> = HashMap::from([(70, listed(70, 700, 400).identity)]);
-    let snapshot = [listed(71, 710, 700), listed(72, 720, 999)];
-    assert_eq!(pids(&lineage.found(&snapshot, &found_before)), [71]);
 }
 
 #[test]
@@ -148,12 +102,11 @@ fn a_selection_of_every_process_of_this_machine_would_signal_only_the_windows_ow
         ours
     };
 
-    tree.ask_by(&machine, Subject::Lineage(&wrong), None)
-        .expect("asked");
-    let forced = tree.force_by(&machine, Subject::Lineage(&wrong), &[]);
-    tree.force_by(&machine, Subject::Whole, &[]);
+    tree.ask_by(&machine, None).expect("asked");
+    let failure = tree.force_by(&machine, &wrong);
+    tree.force_by(&machine, &[]);
 
-    assert!(forced.failure.is_none(), "{:?}", forced.failure);
+    assert!(failure.is_none(), "{failure:?}");
     for signal in [libc::SIGTERM, libc::SIGHUP, libc::SIGSTOP, libc::SIGKILL] {
         assert_eq!(machine.sent(signal), ours, "signal {signal}");
     }

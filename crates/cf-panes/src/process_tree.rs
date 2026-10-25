@@ -1,11 +1,10 @@
 //! macOS pane ownership survives setsid and ordinary parent exit. Never match
 //! executable names, working directories, or arbitrary command-line substrings
 //! to say what is the pane's: the tree has no process that those add. A tree is
-//! looked at ([`ProcessTree::members`]), asked to end
-//! ([`ProcessTree::ask_to_exit`]) and, last, ended ([`ProcessTree::terminate`], and
-//! [`ProcessTree::finish`] for what a turn left), the whole of it when a window
-//! closes and only the turn's work, which the baseline proves, when that is what
-//! is ended ([`Subject`]).
+//! looked at ([`ProcessTree::members`]), and, when its window closes, asked to end
+//! ([`ProcessTree::ask_to_exit`]) and, last, ended ([`ProcessTree::terminate`]), the
+//! whole of it. Nothing ends a turn's work but that close (turn-end: a turn ends nothing
+//! it left running, and Finish ends no process).
 //!
 //! What is the pane's is found by the parent each process was started by, by its
 //! session and by the marker its environment carries where one shows it. The pane's
@@ -18,12 +17,6 @@
 //! is in a session no pane has. What the system says of a process is read in
 //! [`native`].
 //!
-//! An ending of a turn's work is bound to the turn: [`ProcessTree::lineage`] chooses
-//! what it ends once, by process identity, of what two looks a moment apart both find
-//! (a short run of the harness's own is gone by the second), and what the ending looks
-//! for after that is what those processes started, never what a look of the whole tree
-//! takes for the turn's work by the baseline, which a window's new work is.
-//!
 //! What is selected is not what is signalled. The selection reads the whole table of the
 //! machine's processes, and a wrong one (a bug, or a plant of one) would signal anyone's:
 //! every signal the tree sends, to a process or to the pane's group, is sent by [`bound`],
@@ -33,9 +26,8 @@
 //! number), nor seen so at a look before, is not signalled and is
 //! not named as ended; so a close ends no job that only the marker its environment
 //! carries says is the window's, which no look saw under the window's program, and leaves
-//! it running. What the bound refuses of what an ending chose (the turn's work, proved by a
-//! chain of processes that run) is not signalled but is not dropped either: the ending names
-//! it as left, unverified, where it still runs, and the chief is told it may.
+//! it running; the window's exit may name it as possibly the window's
+//! ([`ProcessTree::possibly_left`]), and never signals it.
 //!
 //! In every build that tests with real signals (this crate under `cfg(test)`, or with the
 //! `test-support` feature) the real system's senders ask [`guard`] first, which reads the
@@ -73,22 +65,16 @@ mod selection;
 #[cfg(test)]
 mod testing;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io;
-use std::time::{Duration, Instant};
 
-use crate::background::{report, Baseline, Member, ProcessKey};
+use crate::background::{Member, ProcessKey};
 use bound::{Bound, Native, System, Table};
-use cf_proto::panes::{Ending, PossiblyLeft};
+use cf_proto::panes::PossiblyLeft;
 use native::process;
 pub(crate) use native::{awake_start, clocks};
-pub(crate) use selection::Lineage;
 
 pub(crate) const OWNER_ENV: &str = "CF_PANE_PROCESS_OWNER";
-
-/// How long a process that was sent SIGKILL is given to be gone: the signal is
-/// delivered at once, and the process is gone when its system call returns.
-const AFTER_KILL: Duration = Duration::from_secs(2);
 
 /// How many times a look that must read all of the tree is made where a process was born
 /// while it looked ([`ProcessTree::readable_members`]).
@@ -120,17 +106,6 @@ pub(crate) enum Looked {
     Changed,
 }
 
-/// What a tree is asked to end, or ended.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum Subject<'a> {
-    /// All of it: a window closes. The pane's own process is part of it.
-    Whole,
-    /// The processes a turn's work was when its ending began, and what they start
-    /// while it goes on: what a turn left. The pane's own process is never part of
-    /// it, nor is any process a later look would take for the turn's.
-    Lineage(&'a Lineage),
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Identity {
     pid: i32,
@@ -153,9 +128,6 @@ struct Process {
 /// The processes of a tree that were asked to end, and are waited for.
 pub(crate) struct Asked {
     identities: Vec<Identity>,
-    /// What an ending chose and the bound refused: not asked, and named as left, where it
-    /// still runs, by what ends the ending. Nothing for a close.
-    unverified: Vec<Member>,
     /// Whether any of the signals could not be sent: a process that is ending, or
     /// that is not ours to signal.
     failed: bool,
@@ -174,15 +146,6 @@ impl Asked {
     pub fn failed(&self) -> bool {
         self.failed
     }
-}
-
-/// What forcing an ending made of the tree: the members it told the processes it
-/// stopped by, what it chose and the bound refused (still there when it was done), and the
-/// failure that last stopped it from doing all it was asked.
-struct Forced {
-    members: Vec<Member>,
-    unverified: Vec<Member>,
-    failure: Option<io::Error>,
 }
 
 #[derive(Clone)]
@@ -316,69 +279,20 @@ impl ProcessTree {
         Ok(Readable::Unsettled)
     }
 
-    /// The turn's work as `baseline` proves it, chosen once: what an ending of the
-    /// turn is bound to ([`Lineage`]). It is what one look at the tree finds and a look
-    /// `settle` after it finds too, by identity, and the choice is made of the second:
-    /// a look that finds nothing is not made again, and a short run of the harness's own
-    /// (its status line) has ended by the second.
-    pub fn lineage(&self, baseline: &Baseline, settle: Duration) -> io::Result<Lineage> {
-        let first = self.lineage_by(&Native, baseline)?;
-        if first.is_empty() {
-            return Ok(first);
-        }
-        std::thread::sleep(settle);
-        Ok(self.lineage_by(&Native, baseline)?.steady_since(&first))
+    /// Asks the tree to end as a closing terminal does: TERM, then HUP, to every process
+    /// of it outside `group`, the pane's own process group, which a close signals whole.
+    /// Nothing is stopped first: a stopped process cannot answer a signal. The processes
+    /// asked, which the close waits for, and whether some could not be. What the bound
+    /// refuses is not asked, and is none of what is kept.
+    pub fn ask_to_exit(&self, group: Option<i32>) -> io::Result<Asked> {
+        self.ask_by(&Native, group)
     }
 
-    /// [`ProcessTree::lineage`], less what the bound would refuse, which is kept apart
-    /// ([`Lineage`]): it is not signalled, and an ending names it as left, unverified.
-    fn lineage_by(&self, system: &impl System, baseline: &Baseline) -> io::Result<Lineage> {
+    fn ask_by(&self, system: &impl System, group: Option<i32>) -> io::Result<Asked> {
         let snapshot = system.processes()?;
         let table = Table::of(&snapshot);
         self.bound.observe(&table);
-        let tree = self.select(&snapshot, &HashMap::new());
-        let members = self.members_in(&snapshot, &tree);
-        let work = baseline.turn_work(&members);
-        let keys: HashSet<ProcessKey> = work.iter().map(|member| member.key).collect();
-        let identities: Vec<Identity> = snapshot
-            .iter()
-            .filter(|p| tree.get(&p.identity.pid) == Some(&p.identity))
-            .filter(|p| keys.contains(&key_of(p.identity)))
-            .map(|p| p.identity)
-            .filter(|identity| self.bound.allows(&table, *identity))
-            .collect();
-        let allowed: HashSet<ProcessKey> = identities.iter().map(|id| key_of(*id)).collect();
-        let (members, unverified) = work
-            .into_iter()
-            .partition(|member| allowed.contains(&member.key));
-        Ok(Lineage {
-            identities,
-            members,
-            unverified,
-        })
-    }
-
-    /// Asks `subject` to end as a closing terminal does: TERM, then HUP, to
-    /// every process of it outside `group`, the pane's own process group, which
-    /// a close signals whole (an ending has none). Nothing is stopped first: a
-    /// stopped process cannot answer a signal. The processes asked, which are kept
-    /// for the ending's end, and whether some could not be. What the bound refuses
-    /// is not asked, and is none of what is kept; of a turn's lineage it is kept apart,
-    /// for the ending to name.
-    pub fn ask_to_exit(&self, subject: Subject<'_>, group: Option<i32>) -> io::Result<Asked> {
-        self.ask_by(&Native, subject, group)
-    }
-
-    fn ask_by(
-        &self,
-        system: &impl System,
-        subject: Subject<'_>,
-        group: Option<i32>,
-    ) -> io::Result<Asked> {
-        let snapshot = system.processes()?;
-        let table = Table::of(&snapshot);
-        self.bound.observe(&table);
-        let chosen = self.chosen(subject, &snapshot, &HashMap::new());
+        let chosen = self.select(&snapshot, &HashMap::new());
         let outside: Vec<Identity> = snapshot
             .iter()
             .filter(|p| chosen.get(&p.identity.pid) == Some(&p.identity))
@@ -386,13 +300,10 @@ impl ProcessTree {
             .map(|p| p.identity)
             .collect();
         let mut asked = Vec::new();
-        let mut refused: HashMap<i32, Identity> = HashMap::new();
         let mut failed = false;
         for identity in outside {
             match self.bound.signal(system, &table, identity, libc::SIGTERM) {
-                Ok(false) => {
-                    refused.insert(identity.pid, identity);
-                }
+                Ok(false) => {}
                 Ok(true) => asked.push(identity),
                 Err(_) => {
                     failed = true;
@@ -408,24 +319,8 @@ impl ProcessTree {
         }
         Ok(Asked {
             identities: asked,
-            unverified: self.unverified(subject, &snapshot, &refused),
             failed,
         })
-    }
-
-    /// What the bound `refused` of what an ending of `subject` chose, as members of
-    /// `snapshot`: named by the ending as left, where it still runs. None for a close,
-    /// which names nothing it ended or left.
-    fn unverified(
-        &self,
-        subject: Subject<'_>,
-        snapshot: &[Process],
-        refused: &HashMap<i32, Identity>,
-    ) -> Vec<Member> {
-        match subject {
-            Subject::Lineage(_) => self.members_in(snapshot, refused),
-            Subject::Whole => Vec::new(),
-        }
     }
 
     /// Signals the pane's process group `group` with `signal`, as a close does: whole
@@ -442,96 +337,24 @@ impl ProcessTree {
         self.bound.signal_group(system, &table, group, signal)
     }
 
-    /// Ends `subject` by force. The pane's own process is ended with a `Whole`
-    /// tree and never with what an ending was asked for.
-    pub fn terminate(&self, subject: Subject<'_>) -> io::Result<()> {
-        match self.force_by(&Native, subject, &[]).failure {
+    /// Ends the tree by force, the pane's own process with it.
+    pub fn terminate(&self) -> io::Result<()> {
+        match self.force_by(&Native, &[]) {
             Some(error) => Err(error),
             None => Ok(()),
         }
     }
 
-    /// Ends what a turn left, by force, once `asked` has had the grace: the lineage,
-    /// and what it started while it was given the grace (a handler asked to end may
-    /// have started a process before it ended, whose parent is gone: it is still its
-    /// parent's), then waits for every process it ended to be gone. What it chose and
-    /// signalled, told by whether it is: ended, or not ended. What it chose and the bound
-    /// refused was not signalled and was not waited for, and is named as left where it
-    /// still runs: nothing shows it is the window's, and it may run on. What was gone
-    /// before it was asked is not named.
-    pub fn finish(&self, lineage: &Lineage, asked: Asked) -> Ending {
-        self.finish_by(&Native, lineage, asked)
-    }
-
-    fn finish_by(&self, system: &impl System, lineage: &Lineage, asked: Asked) -> Ending {
-        let forced = self.force_by(system, Subject::Lineage(lineage), &asked.identities);
-        let signalled: HashSet<ProcessKey> = asked
-            .identities
-            .iter()
-            .map(|identity| key_of(*identity))
-            .chain(forced.members.iter().map(|member| member.key))
-            .collect();
-        let mut unverified: Vec<Member> = Vec::new();
-        for member in lineage
-            .unverified
-            .iter()
-            .cloned()
-            .chain(asked.unverified)
-            .chain(forced.unverified)
-        {
-            // Named once, and none that a later look allowed and signalled.
-            if !signalled.contains(&member.key)
-                && !unverified.iter().any(|known| known.key == member.key)
-            {
-                unverified.push(member);
-            }
-        }
-        let mut chosen: Vec<Member> = lineage
-            .members
-            .iter()
-            .filter(|member| signalled.contains(&member.key))
-            .cloned()
-            .collect();
-        for member in forced.members {
-            if !chosen.iter().any(|known| known.key == member.key) {
-                chosen.push(member);
-            }
-        }
-        let deadline = Instant::now() + AFTER_KILL;
-        let mut alive = loop {
-            let alive: HashSet<ProcessKey> = chosen
-                .iter()
-                .filter(|member| system.runs(member.key))
-                .map(|member| member.key)
-                .collect();
-            if alive.is_empty() || Instant::now() >= deadline {
-                break alive;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        };
-        // What was never ended is not waited for: it is left, if it is still there.
-        for member in unverified {
-            if system.runs(member.key) {
-                alive.insert(member.key);
-                chosen.push(member);
-            }
-        }
-        report(chosen, &alive)
-    }
-
-    /// Stops what `subject` names, over and over until a look finds nothing of it
-    /// that is not stopped, and kills what it stopped: `seeds`, the processes already
-    /// asked, are parents of what it finds though they are gone. What a lineage
-    /// finds is its own and what descends from it, which a stopped process starts no
-    /// more of. What the bound refuses is not stopped nor killed, and not looked for
-    /// again: of a lineage, what is still there when it is done is kept apart, for the
-    /// ending to name.
-    fn force_by(&self, system: &impl System, subject: Subject<'_>, seeds: &[Identity]) -> Forced {
+    /// Stops the tree, over and over until a look finds nothing of it that is not
+    /// stopped, and kills what it stopped and the pane's own process: `seeds`, the
+    /// processes already asked, are parents of what it finds though they are gone. What
+    /// the bound refuses is not stopped nor killed, and not looked for again. The failure
+    /// that last stopped it from doing all it was asked, if one did.
+    fn force_by(&self, system: &impl System, seeds: &[Identity]) -> Option<io::Error> {
         let mut known: HashMap<i32, Identity> =
             seeds.iter().map(|seed| (seed.pid, *seed)).collect();
         let mut frozen: HashMap<i32, Identity> = HashMap::new();
         let mut refused: HashMap<i32, Identity> = HashMap::new();
-        let mut members: Vec<Member> = Vec::new();
         let mut failure = None;
         let mut snapshot: Vec<Process> = Vec::new();
         // Freeze proven parents before rescanning, so they cannot keep forking
@@ -546,7 +369,7 @@ impl ProcessTree {
             };
             let table = Table::of(&snapshot);
             self.bound.observe(&table);
-            let chosen = self.chosen(subject, &snapshot, &known);
+            let chosen = self.select(&snapshot, &known);
             let fresh: HashMap<i32, Identity> = chosen
                 .into_iter()
                 .filter(|(pid, identity)| {
@@ -571,9 +394,6 @@ impl ProcessTree {
                     }
                 }
             }
-            if matches!(subject, Subject::Lineage(_)) {
-                members.extend(self.members_in(&snapshot, &stopping));
-            }
             for (pid, identity) in stopping {
                 frozen.insert(pid, identity);
                 known.insert(pid, identity);
@@ -589,16 +409,12 @@ impl ProcessTree {
             }
         }
         // A failed process enumeration must still stop the exact root we own.
-        if let (Subject::Whole, Some(root)) = (subject, self.root) {
+        if let Some(root) = self.root {
             if let Err(error) = self.bound.signal(system, &table, root, libc::SIGKILL) {
                 failure = Some(error);
             }
         }
-        Forced {
-            members,
-            unverified: self.unverified(subject, &snapshot, &refused),
-            failure,
-        }
+        failure
     }
 }
 

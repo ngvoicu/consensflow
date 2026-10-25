@@ -22,8 +22,8 @@ use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::panes::{
-    BackgroundProcess, CommandsRequest, EndRequest, MarkRequest, PaneExit, PossiblyLeft, Rest,
-    RestRequest, SnapshotRequest, TAIL_LINES,
+    BackgroundProcess, CommandsRequest, MarkRequest, PaneExit, PossiblyLeft, Rest, RestRequest,
+    SnapshotRequest, TAIL_LINES,
 };
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
@@ -280,19 +280,6 @@ pub fn register_pane_handlers(
             .rest(&key, &request.keep)
             .map_err(|error| error.to_string())?;
         Ok(json!({"ok":true,"rest":rest}))
-    });
-
-    // What the window's turn left running ends, the window staying open: it is
-    // asked to end, and given the table's grace, as a close gives one. The host
-    // chooses what, from all it can prove the turn's.
-    let end_panes = Arc::clone(&panes);
-    builder.on("pane.end_background", move |_bridge, body| {
-        let request: EndRequest = parse_body(body)?;
-        let key = pane_key(&request.id, request.generation)?;
-        let ending = end_panes
-            .end_background(&key)
-            .map_err(|error| error.to_string())?;
-        Ok(json!({"ok":true,"ended":ending.ended,"left":ending.left}))
     });
 
     let list_panes = Arc::clone(&panes);

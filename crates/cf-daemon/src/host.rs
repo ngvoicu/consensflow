@@ -2,9 +2,9 @@
 //! opened and killed by a request to the host, an adapter's own requests
 //! (`pane.snapshot`, `pane.input`, `pane.write_paste`, `pane.claim`) go
 //! straight through, where a window's turn begins is told to it and what the turn
-//! left running is ended by it (`pane.mark`, `pane.end_background`:
-//! [`BackgroundWork`]), and the host's `pane.exit` events are told to the engine
-//! where they are read.
+//! left running is asked of it (`pane.mark`, `pane.commands`,
+//! `pane.rest`: [`BackgroundWork`]; it ends none of it, a window's close does), and the
+//! host's `pane.exit` events are told to the engine where they are read.
 //!
 //! The protocol is the app's (`crates/cf-panes/src/pane_handlers.rs`); this
 //! adds no rules of its own, only the Windows shim a window's program may be

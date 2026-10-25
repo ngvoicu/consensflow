@@ -27,7 +27,7 @@ const SEAM_SENDERS: [&str; 3] = [".send(", ".send_group(", "native::signal"];
 
 /// Where a signal may be sent: the file (from `src/`), a piece of the line that sends it, and
 /// why it may.
-const SENDERS: [(&str, &str, &str); 14] = [
+const SENDERS: [(&str, &str, &str); 13] = [
     (
         "process_tree/bound.rs",
         "native::signal(to, signal)",
@@ -92,11 +92,6 @@ const SENDERS: [(&str, &str, &str); 14] = [
         "job_object.rs",
         "TerminateJobObject(self.handle, 1)",
         "Windows: the pane's own job, in which nothing else is",
-    ),
-    (
-        "job_object.rs",
-        "TerminateProcess(self.0, 1)",
-        "Windows: a member of the pane's job, by the handle it was admitted by",
     ),
 ];
 
@@ -294,8 +289,8 @@ fn the_files_of_tests_are_told_from_the_rest() {
     for test_code in [
         "process_tree/tests.rs",
         "process_tree/bound/tests.rs",
-        "pty/turn/ending_tests.rs",
-        "pty/turn/ending_tests/programs.rs",
+        "pty/turn/leaving_tests.rs",
+        "pty/turn/leaving_tests/programs.rs",
         "pty/turn/support.rs",
         "process_tree/testing.rs",
         "pty/keys.rs",

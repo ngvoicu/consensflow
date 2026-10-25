@@ -12,32 +12,19 @@
 //! processes of the window's tree that began after the turn did and that it can
 //! tell are the turn's work, which `pane.mark` fixes the start of
 //! ([`MarkRequest`]) and `pane.background` answers ([`BackgroundProcess`]), and
-//! which `pane.exit` lists for a window that closed with some of it running. It
-//! ends them without closing the window when asked (`pane.end_background`:
-//! [`EndRequest`], answered by [`Ending`]), and chooses what to end itself, from
-//! the whole of what it can tell: the daemon names no process, so no number crosses
-//! from one look to the next. A process it cannot tell the turn's from the
-//! harness's it leaves alone, and says nothing of; nor does it end what it cannot
-//! prove the turn's by a chain of processes that run to a shell the harness started.
-//! What it ends it chooses once, when the ending begins, and answers within
-//! [`ENDING_BOUND`]. It says too which commands of the window's harness run in its tree
+//! which `pane.exit` lists for a window that closed with some of it running: the window's
+//! close ends them, and nothing else does (a turn ends nothing it left running). It chooses
+//! what it names itself, from the whole of what it can tell: the daemon names no process.
+//! A process it cannot tell the turn's from the harness's it says nothing of, nor does it
+//! name what it cannot prove the turn's by a chain of processes that run to a shell the
+//! harness started. It says too which commands of the window's harness run in its tree
 //! now, where it can tell them (`pane.commands`, answered by [`Background`] or by nothing).
-
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 /// The most lines of a screen the host sends as its tail, and so the most a
 /// request for it gets. Empty lines are not counted: they are not sent.
 pub const TAIL_LINES: usize = 12;
-
-/// The most the host takes to end what a turn left, and to answer that it has: the
-/// moment it waits before it looks again at what it found (two seconds), the grace a
-/// close gives what it asks to end (ten), what it waits after it has killed what
-/// ignored the request (two) and its looks between, with room; on Windows the whole of
-/// its passes is held to less than this. The daemon waits for the answer by this and a
-/// margin, and holds the window until it has it.
-pub const ENDING_BOUND: Duration = Duration::from_secs(20);
 
 /// The most processes the host names when it says what a window left running
 /// (it says how many there are besides): a note quotes a few, and a frame is
@@ -200,30 +187,6 @@ pub struct RestRequest {
 /// under, now that the daemon says the window is at rest, for a later `pane.commands` to
 /// name; `null` where it tells no commands of the window.
 pub type Rest = Option<u64>;
-
-/// A `pane.end_background` request: the pane's turn is over and the daemon has
-/// taken its answer for the task's result, so what the turn left running is
-/// to end, the window staying open. It names no process: the host chooses, from all
-/// of what it can tell is the turn's, and keeps what it chose by what each process
-/// is (its number and when it began), not by a number a later look could find
-/// another process at.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct EndRequest {
-    pub id: String,
-    pub generation: u64,
-}
-
-/// `pane.end_background`'s answer: what the host ended of the turn's work, and what
-/// of it it could not end. Each is listed as `pane.background` lists its answer:
-/// how many, and the first. A process the host could not tell the turn's from the
-/// harness's is left alone and is in neither.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Ending {
-    pub ended: Background,
-    pub left: Background,
-}
 
 /// `pane.exit`'s body: the pane that ended, and what the host kept of its end.
 /// The pane must be named; a field of the rest that is not what it should be
@@ -507,56 +470,6 @@ mod tests {
                 "{refused}"
             );
         }
-    }
-
-    #[test]
-    fn an_end_names_its_pane_and_no_process_and_refuses_what_it_does_not_know() {
-        let body = json!({ "id": "p1-zeus", "generation": 4 });
-        let asked: EndRequest = serde_json::from_value(body.clone()).unwrap();
-        assert_eq!(
-            asked,
-            EndRequest {
-                id: "p1-zeus".to_owned(),
-                generation: 4,
-            }
-        );
-        assert_eq!(serde_json::to_value(&asked).unwrap(), body);
-
-        for refused in [
-            json!({ "generation": 4 }),
-            json!({ "id": "p" }),
-            json!({ "id": "p", "generation": "4" }),
-            // The host chooses what it ends: a daemon that names processes asks for
-            // what this one does not do.
-            json!({ "id": "p", "generation": 4, "pids": [4242] }),
-            json!({ "id": "p", "generation": 4, "all": true }),
-        ] {
-            assert!(
-                serde_json::from_value::<EndRequest>(refused.clone()).is_err(),
-                "{refused}"
-            );
-        }
-    }
-
-    #[test]
-    fn an_ending_says_what_was_ended_and_what_was_left_and_a_word_that_is_missing_says_none() {
-        let answer = json!({
-            "ok": true,
-            "ended": { "total": 2, "processes": [
-                { "pid": 4242, "command": "python3 lock.py record --run 7" },
-                { "pid": 4243, "command": "tail -f run.log" },
-            ] },
-            "left": { "total": 1, "processes": [{ "pid": 4300, "command": "node server.js" }] },
-        });
-        let ending: Ending = serde_json::from_value(answer).unwrap();
-        assert_eq!(ending.ended.total, 2);
-        assert_eq!(ending.ended.processes[1].command, "tail -f run.log");
-        assert_eq!(ending.left.processes[0].pid, 4300);
-
-        // A host that says no more than that it answered ended nothing and left nothing.
-        let said: Ending = serde_json::from_value(json!({ "ok": true })).unwrap();
-        assert_eq!(said, Ending::default());
-        assert_eq!(said.ended.total, 0);
     }
 
     #[test]

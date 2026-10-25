@@ -3,12 +3,10 @@
 //! which is there for some milliseconds after the `sleep` is: a look in those finds a parent
 //! that is a process, and a chain whole without the repair, which is tried below as its own
 //! state, T-375), and the job gives it the parent Git Bash says ([`repair_cygwin_parents`],
-//! [`ps_w`]); and an
-//! ending, which looks at the job again and again, asks `ps -W` once for it (T-194, P3-2 and
-//! P3-7). Git Bash is where Git for Windows puts it; a machine without it has nothing to try
-//! this on, and the tests say so and end. The program is put in the job after it starts, here:
-//! how a process joined a job is not what the repair reads. A pane's, which is in its job from
-//! its first instruction, is tried in `pty`'s `ending_tests`.
+//! [`ps_w`]) (T-194, P3-7). Git Bash is where Git for Windows puts it; a machine without it
+//! has nothing to try this on, and the tests say so and end. The program is put in the job
+//! after it starts, here: how a process joined a job is not what the repair reads. A pane's,
+//! which is in its job from its first instruction, is tried in `pty`'s `leaving_tests`.
 #![allow(clippy::disallowed_methods)] // A test's own programs.
 
 use std::os::windows::io::AsRawHandle;
@@ -16,7 +14,7 @@ use std::os::windows::process::CommandExt;
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::sleep;
+use std::thread::{self, sleep};
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::HANDLE;
@@ -169,40 +167,11 @@ fn the_sleep_of_a_script_has_the_script_for_its_parent_once_git_bash_has_said_so
     );
 }
 
-#[test]
-fn a_look_again_asks_ps_for_what_it_does_not_hold_and_not_for_what_it_does() {
-    let Some(bash) = git_bash() else {
-        eprintln!("no Git Bash here: nothing to try the repair on");
-        return;
-    };
-    let window = Window::open(&bash, "asks-once");
-    window.until_the_sleep_is_an_orphan();
-
-    // An ending's looks: the first holds the job, and `ps` is asked once, for the folder Git
-    // Bash's programs are in; the looks after it hold nothing new, and ask nothing.
-    let asked = AtomicUsize::new(0);
-    let counting = |folder: &Path| {
-        asked.fetch_add(1, Ordering::SeqCst);
-        ps_w(folder)
-    };
-    let mut held = HashMap::new();
-    window.job.hold_into_with(&mut held, &counting).unwrap();
-    assert_eq!(asked.load(Ordering::SeqCst), 1);
-    for _ in 0..3 {
-        window.job.hold_into_with(&mut held, &counting).unwrap();
-    }
-    assert_eq!(asked.load(Ordering::SeqCst), 1, "a look again asked again");
-    // And the one it held was mended: the members it makes of what it holds have the parent.
-    let members = members_of(held.values());
-    let sleep = members.iter().find(|one| is_the_sleep(one)).unwrap();
-    assert!(sleep.parent.is_some(), "{members:?}");
-}
-
 /// The chain from a script's sleep up to the window's program is whole at the first look that
 /// finds the sleep, when the forked shell that started it is still there (some milliseconds,
 /// every time on zeewin: the state the two tests above wait out) and the sleep's parent is a
 /// process of the job, with no repair; and once that shell has gone, with the parent Git Bash
-/// says. Both are what a stop follows to say the sleep is the window's (T-375).
+/// says. Both are what the host follows to name the sleep as the turn's work (T-375).
 #[test]
 fn the_chain_from_a_scripts_sleep_to_the_windows_program_is_whole_with_its_starter_there_and_without_it(
 ) {
@@ -277,7 +246,7 @@ fn size_from_the_environment(name: &str, default: usize) -> usize {
 }
 
 /// Whether the chain of parents from `from` up, among `members`, ends at the process
-/// `program`: the chain a stop follows to say the sleep is the window's.
+/// `program`: the chain the host follows to name the sleep as the turn's work.
 fn reaches(members: &[Member], from: &Member, program: u32) -> bool {
     let mut at = from;
     for _ in 0..=members.len() {

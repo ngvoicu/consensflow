@@ -5,8 +5,8 @@
 //! with no `JOB_OBJECT_LIMIT_BREAKAWAY_OK` refuses (this one has only kill-on-close),
 //! and a job object made inside it holds its processes in this one too: a job an
 //! agent detached from a shell that ended (`Start-Process`, `start`) is in the job
-//! still, with no parent, which the window's close ends and an ending of the turn does
-//! not: a job with no parent is no proof of whose work it is
+//! still, with no parent, which the window's close ends and the host does not name as
+//! the turn's work: a job with no parent is no proof of whose work it is
 //! ([`crate::background`]). What the job does not hold, and a close does not end:
 //! - what another program starts for the harness: a service (`schtasks`, a WMI
 //!   `Win32_Process.Create`), the shell or COM activating a program, UAC starting one
@@ -26,14 +26,9 @@
 //! list of processes is never consulted for what a number is: a number another
 //! process takes is another process's, and a handle that is held keeps its
 //! number (the system gives it to none while the process object is there, gone
-//! or not), so a parent named by number is the process held under it. What a job
-//! cannot do is end some of its tree: [`JobObject::end`] ends the processes the
-//! baseline proves the turn's, each by itself, by the handle it holds, and waits for
-//! each to be gone. It chooses them once, when it begins, and goes on to what they
-//! started, which the handles it holds name as their parent whether or not that
-//! process ran on: never to what a later look takes for the turn's work, which a new
-//! turn's is. The whole of it is held to [`BUDGET`], inside what the daemon waits for
-//! ([`cf_proto::panes::ENDING_BOUND`]).
+//! or not), so a parent named by number is the process held under it. Nothing ends some
+//! of the tree: a turn ends nothing it left running (turn-end), and the window's close
+//! ends the job whole ([`JobObject::terminate`]).
 //!
 //! A program of Git Bash's own kind that a script started (`sleep`, `grep`) names a parent that
 //! has gone, a forked copy of the shell (it goes a few milliseconds after the program has
@@ -42,11 +37,11 @@
 //! repair, and `ps` is asked for none): the parent
 //! `ps -W` of Git Bash says it has is given instead ([`repair_cygwin_parents`],
 //! [`crate::cygwin`]), so that the chain up from it to the
-//! shell the harness started is whole and a stop ends it with the script. That is not a matter
+//! shell the harness started is whole and the host names it as the turn's work. That is not a matter
 //! of the job: the program is a member of it (whatever a job holds, its descendants too), and
 //! it is the parent it names that is no process. The harness being in the job from its first
 //! instruction changes none of it (a real pane, with the job in its attributes, has the same
-//! sleep with the same dead parent: `pty`'s `ending_tests`).
+//! sleep with the same dead parent: `pty`'s `leaving_tests`).
 //!
 //! The harness is in the job from its first instruction: it is started with the job
 //! in its attributes ([`crate::pty`]'s `conpty`), so nothing it starts itself, however
@@ -56,10 +51,8 @@ use std::io;
 use std::mem::{offset_of, size_of, size_of_val};
 use std::path::{Path, PathBuf};
 use std::ptr;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use cf_proto::panes::{Ending, ENDING_BOUND};
 use windows_sys::Wdk::System::Threading::{
     NtQueryInformationProcess, ProcessBasicInformation, ProcessCommandLineInformation,
 };
@@ -73,29 +66,12 @@ use windows_sys::Win32::System::JobObjects::{
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::{
-    GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
-    WaitForSingleObject, PROCESS_BASIC_INFORMATION, PROCESS_NAME_WIN32,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+    GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject,
+    PROCESS_BASIC_INFORMATION, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_SYNCHRONIZE,
 };
 
-use crate::background::{report, started_by, steady, Baseline, Member, ProcessKey};
-
-/// How many times an ending looks again for what the processes it ended had
-/// started: a process that is ended starts no more, and none of them is ended
-/// faster than the next can start one.
-const PASSES: usize = 16;
-
-/// How long the processes of one pass of an ending are waited for to be gone, in all:
-/// the system ends a process at once, and says it has when its last thread is gone.
-const EXIT_WAIT: Duration = Duration::from_secs(5);
-
-/// How long an ending lasts in all, whatever the passes it makes and the moment it waits
-/// before it looks again: what is not gone by then is said to be left. It is less than
-/// the bound the daemon waits for the answer by, which is the host's word that it
-/// answers in it.
-const BUDGET: Duration = Duration::from_secs(15);
-
-const _: () = assert!(BUDGET.as_secs() < ENDING_BOUND.as_secs());
+use crate::background::{Member, ProcessKey};
 
 /// What says `ps -W` of a folder ([`ps_w`]; a test gives its own, which counts what it is asked).
 pub(crate) type Ps<'a> = &'a dyn Fn(&Path) -> Option<String>;
@@ -161,126 +137,29 @@ impl JobObject {
     /// [`JobObject::members`], with `ps` saying what `ps -W` says: a look at the job as
     /// Windows names the parents is `&|_| None`.
     pub(crate) fn members_with(&self, ps: Ps) -> io::Result<Vec<Member>> {
-        Ok(members_of(self.hold_new(&HashMap::new(), ps)?.iter()))
-    }
-
-    /// Ends what `baseline` proves the turn's work, each process by itself and
-    /// the rest of the job staying as it is. The processes are held open for as long
-    /// as this lasts: a number is one process while a handle to it is open, so what
-    /// an earlier look learned of a process is learned of that one, a process that
-    /// was ended and gone is still the parent it names to what it started, and a
-    /// process is not ended on what was said of another that had its number. What it
-    /// ends is chosen once, before it ends anything, and then only what those processes
-    /// started (a process that is ended starts nothing, but another that is not yet
-    /// may have started one): each pass ends what is fresh, waits for it to be gone,
-    /// and looks again for what it started that runs ([`started_by`]: one that ended by
-    /// itself meanwhile, which a handle held keeps as the parent it names, is none of
-    /// it). Never what a look of the whole job takes for the turn's work by the
-    /// baseline once the ending has begun, which a human's or a message's new work is.
-    /// The choice is of what two looks, `settle` apart, both find the turn's work and
-    /// running (a look that finds none is not made again): a short run of the
-    /// harness's own has ended by the second, and is none of it. What was chosen, told
-    /// by whether it is gone: ended, or not.
-    pub fn end(&self, baseline: &Baseline, settle: Duration) -> io::Result<Ending> {
-        let deadline = Instant::now() + BUDGET;
-        let mut held: HashMap<u32, Held> = HashMap::new();
-        self.hold_into(&mut held)?;
-        let mut work = baseline.turn_work(&members_of(held.values()));
-        if !work.is_empty() {
-            thread::sleep(settle);
-            self.hold_into(&mut held)?;
-            // What runs now: a process that has ended is held still, to be the parent
-            // it names, and is not there.
-            let there = members_of(held.values().filter(|one| one.runs()));
-            work = steady(&work, baseline.turn_work(&there));
-        }
-        let mut fresh: Vec<ProcessKey> = work.into_iter().map(|member| member.key).collect();
-        let mut chosen: Vec<ProcessKey> = Vec::new();
-        for _ in 0..PASSES {
-            if fresh.is_empty() {
-                break;
-            }
-            let in_time = Instant::now() < deadline;
-            if in_time {
-                for key in &fresh {
-                    if let Some(held) = held.get(&key.pid) {
-                        held.process.end();
-                    }
-                }
-                let until = deadline.min(Instant::now() + EXIT_WAIT);
-                for key in &fresh {
-                    if let Some(held) = held.get(&key.pid) {
-                        held.process.wait_until(until);
-                    }
-                }
-            }
-            chosen.append(&mut fresh);
-            if !in_time {
-                break;
-            }
-            self.hold_into(&mut held)?;
-            let roots: HashSet<ProcessKey> = chosen.iter().copied().collect();
-            let running: HashSet<ProcessKey> = held
-                .values()
-                .filter(|one| one.runs())
-                .map(|one| one.member.key)
-                .collect();
-            fresh = started_by(&roots, &members_of(held.values()), &running);
-        }
-        // What was found and not ended, for the passes or the time ran out, is said
-        // to be left.
-        chosen.append(&mut fresh);
-        let alive: HashSet<ProcessKey> = chosen
-            .iter()
-            .filter(|key| held.get(&key.pid).is_some_and(Held::runs))
-            .copied()
-            .collect();
-        let members: Vec<Member> = members_of(held.values())
-            .into_iter()
-            .filter(|member| chosen.contains(&member.key))
-            .collect();
-        Ok(report(members, &alive))
+        Ok(members_of(self.hold(ps)?.iter()))
     }
 
     /// The processes of the job, each held open, and each the one the job holds: the
     /// number the system lists may be another's by the time it is opened, and the
-    /// handle is asked, not the number.
-    ///
-    /// Only what `held` does not hold is opened: a process that is held keeps its number, so
-    /// the one the job lists under it is the one held, and what was read of it is read. The
-    /// parents of Git Bash's programs are mended for what is new alone ([`repair_cygwin_parents`]),
-    /// so an ending asks `ps -W` once for a process and not at every look it makes again
-    /// (T-194, P3-2: an ending looks up to eighteen times, a slow `ps` waits 3 s).
-    fn hold_new(&self, held: &HashMap<u32, Held>, ps: Ps) -> io::Result<Vec<Held>> {
-        let mut fresh: Vec<Held> = self
+    /// handle is asked, not the number. The parents of Git Bash's programs are mended
+    /// ([`repair_cygwin_parents`]).
+    fn hold(&self, ps: Ps) -> io::Result<Vec<Held>> {
+        let mut held: Vec<Held> = self
             .process_ids()?
             .into_iter()
-            .filter(|pid| !held.contains_key(pid))
             .filter_map(|pid| self.hold_one(pid))
             .collect();
-        repair_cygwin_parents(&mut fresh, held, ps);
-        Ok(fresh)
-    }
-
-    /// Holds what the job has now that `held` has not.
-    fn hold_into(&self, held: &mut HashMap<u32, Held>) -> io::Result<()> {
-        self.hold_into_with(held, &ps_w)
-    }
-
-    /// [`JobObject::hold_into`], `ps` saying what `ps -W` says.
-    fn hold_into_with(&self, held: &mut HashMap<u32, Held>, ps: Ps) -> io::Result<()> {
-        for now in self.hold_new(held, ps)? {
-            held.entry(now.member.key.pid).or_insert(now);
-        }
-        Ok(())
+        repair_cygwin_parents(&mut held, ps);
+        Ok(held)
     }
 
     fn hold_one(&self, pid: u32) -> Option<Held> {
-        // SAFETY: the rights a look at a process, and its end and the wait for it,
+        // SAFETY: the rights a look at a process, and the wait that says it has gone,
         // need; the handle is closed by `Process`.
         let handle = unsafe {
             OpenProcess(
-                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE,
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
                 0,
                 pid,
             )
@@ -319,7 +198,7 @@ impl JobObject {
                 parent: None,
             },
             parent: parent_of(&process),
-            process,
+            _process: process,
         })
     }
 
@@ -380,36 +259,24 @@ impl Drop for JobObject {
 /// A process of the job, held open: what was read of it is of the process the handle
 /// is for.
 struct Held {
-    process: Process,
+    /// Open for as long as what was read of it is: a number is this process's while its
+    /// handle is, so a parent named by number in the same look is the process held under it.
+    _process: Process,
     member: Member,
     /// The number of the process that started it, as the system names it.
     parent: Option<u32>,
 }
 
-impl Held {
-    /// Whether the process runs. A process that has ended is a process object still
-    /// while a handle to it is open, and a look of what is held lists it, to be the
-    /// parent it names to what it started: it is not a process that is there.
-    fn runs(&self) -> bool {
-        !self.process.gone()
-    }
-}
-
 /// A program of Git Bash's own kind that a script started names a parent that has gone (a
 /// forked copy of the shell, which started it): the parent Git Bash says it has, a shell of
 /// the job, is given instead, so that the chain from it to the shell the harness started is
-/// whole ([`crate::cygwin`]). `fresh` is what a look has just held that was not held before,
-/// and `held` what was: a parent is a member of either. `ps -W` is asked (`ps`) only where a
-/// process of `fresh` is such and a `ps` is in the folder of its program with the Cygwin layer
-/// it runs on (Git Bash's); a process it says nothing of, or whose parent is no member, keeps
-/// the parent it named.
-fn repair_cygwin_parents(fresh: &mut [Held], held: &HashMap<u32, Held>, ps: Ps) {
-    let members: HashSet<u32> = fresh
-        .iter()
-        .map(|one| one.member.key.pid)
-        .chain(held.keys().copied())
-        .collect();
-    let orphans: Vec<(u32, PathBuf)> = fresh
+/// whole ([`crate::cygwin`]). `held` is what a look has held: a parent is a member of it.
+/// `ps -W` is asked (`ps`) only where a process of `held` is such and a `ps` is in the folder
+/// of its program with the Cygwin layer it runs on (Git Bash's); a process it says nothing of,
+/// or whose parent is no member, keeps the parent it named.
+fn repair_cygwin_parents(held: &mut [Held], ps: Ps) {
+    let members: HashSet<u32> = held.iter().map(|one| one.member.key.pid).collect();
+    let orphans: Vec<(u32, PathBuf)> = held
         .iter()
         .filter(|one| one.parent.is_some_and(|parent| !members.contains(&parent)))
         .filter_map(|one| {
@@ -425,7 +292,7 @@ fn repair_cygwin_parents(fresh: &mut [Held], held: &HashMap<u32, Held>, ps: Ps) 
         if !members.contains(&parent) {
             continue;
         }
-        if let Some(one) = fresh.iter_mut().find(|one| one.member.key.pid == pid) {
+        if let Some(one) = held.iter_mut().find(|one| one.member.key.pid == pid) {
             one.parent = Some(parent);
         }
     }
@@ -461,14 +328,9 @@ fn ps_w(folder: &Path) -> Option<String> {
 }
 
 /// How long a look waits for `ps -W`, and how much of it is read: a list of every process of the
-/// machine, a line each. The wait was set against [`BUDGET`], which an ending shares with
-/// everything it does, and the bound the daemon waits by ([`ENDING_BOUND`]): an ending asks once for
-/// a process ([`JobObject::hold_new`]), so a `ps` that does not answer costs it this and no more,
-/// and four such waits would still be a part of the budget and not all of it.
+/// machine, a line each. A `ps` that does not answer costs a look this and no more.
 const PS_TIME: Duration = Duration::from_secs(3);
 const PS_BYTES: usize = 8 * 1024 * 1024;
-
-const _: () = assert!(PS_TIME.as_secs() * 4 <= BUDGET.as_secs());
 
 /// The members of `held`, each with the process that started it where that is one
 /// of them and began first: a number a process took after its parent went is not its
@@ -498,25 +360,10 @@ fn members_of<'a>(held: impl Iterator<Item = &'a Held> + Clone) -> Vec<Member> {
 struct Process(HANDLE);
 
 impl Process {
-    /// Ends the process, which the system does in its own time: whether it has is for
-    /// [`Process::wait_until`] and [`Process::gone`] to say. One that has gone cannot
-    /// be ended again, and is not an error.
-    fn end(&self) {
-        // SAFETY: the handle is open, and was opened with the right to this.
-        unsafe { TerminateProcess(self.0, 1) };
-    }
-
-    /// Waits until the process is gone, or `until`.
-    fn wait_until(&self, until: Instant) {
-        let left = until.saturating_duration_since(Instant::now());
-        let millis = u32::try_from(left.as_millis()).unwrap_or(u32::MAX);
-        // SAFETY: the handle is open, and was opened with the right to wait on it.
-        unsafe { WaitForSingleObject(self.0, millis) };
-    }
-
     /// Whether the process is gone: its handle is signalled once its last thread is.
     fn gone(&self) -> bool {
-        // SAFETY: as above; a wait of no time only asks.
+        // SAFETY: the handle is open, and was opened with the right to wait on it; a wait
+        // of no time only asks.
         unsafe { WaitForSingleObject(self.0, 0) == WAIT_OBJECT_0 }
     }
 }

@@ -2653,15 +2653,14 @@ fn a_mark_that_says_the_servers_are_in_the_group_leaves_what_stays_in_it_out_of_
     let _ = std::fs::remove_file(&job);
 }
 
-/// The daemon asks the host to end what the turn left running, once it has taken
-/// the turn's answer for its result: the host ends what it proves the turn's (a
-/// command's shell and its job), says what it ended, and the window stays open, its
-/// program and what its harness keeps as they were, and with nothing left for its
-/// exit to list. A job detached from a shell that ended runs on, unnamed, until the
-/// window closes with it: it is in the session the window's program leads.
+/// The host ends no work a turn left running while its window is open (turn-end: a turn ends
+/// nothing it left running, and Finish ends no process): `pane.end_background`, which the daemon
+/// asked as a result was taken before turn-end, is a request it no longer knows, and asking it
+/// ends nothing. What the turn left runs on, and is listed, until the window's close ends what
+/// is the window's.
 #[cfg(target_os = "macos")]
 #[test]
-fn an_ending_asked_over_the_wire_ends_what_the_turn_left_and_the_window_stays_open() {
+fn the_host_ends_no_work_a_turn_left_while_its_window_is_open_and_its_close_ends_it() {
     let _pty_guard = serial_headless_test();
     let mut outsider = Sentinel::start();
     let mut helper = Headless::spawn();
@@ -2686,10 +2685,24 @@ fn an_ending_asked_over_the_wire_ends_what_the_turn_left_and_the_window_stays_op
     background_with(&mut helper, &mut events, &pane, "sleep 32");
     let detached = detached_job(&job);
 
-    let ended = helper.request("pane.end_background", pane.clone(), &mut events);
+    let asked = helper.request("pane.end_background", pane.clone(), &mut events);
 
-    assert_eq!(ended["ok"], true, "{ended}");
-    let said: Vec<&str> = ended["ended"]["processes"]
+    assert_eq!(
+        asked,
+        json!({"ok":false,"error":"unknown-op"}),
+        "no request ends a turn's work"
+    );
+    let left = background_with(&mut helper, &mut events, &pane, "sleep 32");
+    assert!(left["total"].as_u64() >= Some(2), "it runs on: {left}");
+    assert!(process_exists(detached), "the detached job runs on");
+    assert!(outsider.runs(), "a process outside the window");
+
+    assert_eq!(
+        helper.request("pane.kill", pane, &mut events),
+        json!({"ok":true})
+    );
+    let exit = exit_of(&helper, &mut events, &opened);
+    let listed: Vec<&str> = exit["background"]
         .as_array()
         .map(|work| {
             work.iter()
@@ -2698,37 +2711,8 @@ fn an_ending_asked_over_the_wire_ends_what_the_turn_left_and_the_window_stays_op
         })
         .unwrap_or_default();
     assert!(
-        said.iter().any(|command| command.contains("sleep 32")),
-        "{ended}"
-    );
-    for kept in ["sleep 31", "sleep 33"] {
-        assert!(
-            !said.iter().any(|command| command.contains(kept)),
-            "{kept} is not ended, nor named: {ended}"
-        );
-    }
-    assert_eq!(ended["left"]["total"], 0, "{ended}");
-    assert!(process_exists(detached), "the detached job runs on");
-    assert!(outsider.runs(), "a process outside the window");
-    assert_eq!(
-        helper.request("pane.background", pane.clone(), &mut events)["total"],
-        0,
-        "what was ended is not listed after"
-    );
-    let panes = helper.request("pane.list", json!({}), &mut events);
-    assert_eq!(
-        panes["panes"][0]["alive"], true,
-        "the window stays open: {panes}"
-    );
-
-    assert_eq!(
-        helper.request("pane.kill", pane, &mut events),
-        json!({"ok":true})
-    );
-    let exit = exit_of(&helper, &mut events, &opened);
-    assert!(
-        exit.get("background").is_none(),
-        "the close has nothing left to list: {exit}"
+        listed.iter().any(|command| command.contains("sleep 32")),
+        "the close ended it, and its exit says so: {exit}"
     );
     let deadline = Instant::now() + Duration::from_secs(5);
     while process_exists(detached) && Instant::now() < deadline {
@@ -3098,10 +3082,6 @@ fn a_mark_that_names_the_harness_leaves_its_programs_and_what_they_run_out_of_wh
                 0,
                 "the helper is the harness's, and so is the shell it runs"
             );
-            assert_eq!(
-                helper.request("pane.end_background", pane.clone(), &mut events)["ended"]["total"],
-                0
-            );
         } else {
             let left = background_with(&mut helper, &mut events, &pane, "sleep 31");
             assert!(left["total"].as_u64() >= Some(2), "{left}");
@@ -3114,41 +3094,6 @@ fn a_mark_that_names_the_harness_leaves_its_programs_and_what_they_run_out_of_wh
         assert!(outsider.runs(), "a process outside the window");
     }
     let _ = std::fs::remove_dir_all(&bins);
-}
-
-/// An ending names its pane and no process, which it chooses itself; one that does
-/// otherwise is refused as a request that is not one, and a window that is not open
-/// has nothing to end.
-#[test]
-fn an_ending_that_says_more_or_otherwise_than_what_it_asks_to_end_is_refused() {
-    let _pty_guard = serial_headless_test();
-    let mut helper = Headless::spawn();
-    let mut events = Vec::new();
-    for body in [
-        json!({"id":"nobody","generation":"1"}),
-        json!({"id":"nobody","generation":1,"pids":[1]}),
-        json!({"id":"nobody","generation":1,"all":true}),
-        json!({"generation":1}),
-    ] {
-        let refused = helper.request("pane.end_background", body.clone(), &mut events);
-        assert_eq!(refused["ok"], false, "{body}: {refused}");
-        assert!(
-            refused["error"]
-                .as_str()
-                .is_some_and(|error| error.contains("invalid")),
-            "it is the request that is refused: {refused}"
-        );
-    }
-    let nobody = json!({"id":"nobody","generation":1});
-    let refused = helper.request("pane.end_background", nobody, &mut events);
-    assert_eq!(refused["ok"], false, "{refused}");
-    assert!(
-        refused["error"]
-            .as_str()
-            .is_some_and(|error| !error.contains("invalid")),
-        "it is the pane that is not there: {refused}"
-    );
-    helper.close_input_and_wait();
 }
 
 /// A mark names its pane and says no more than how its harness keeps its servers,

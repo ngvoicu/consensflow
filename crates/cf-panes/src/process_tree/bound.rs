@@ -45,11 +45,10 @@
 //! gone is let go of.
 //!
 //! The bound only permits: it chooses nothing, and what it allows is not what is signalled.
-//! A close attempts what the selection names, and an ending what the turn's lineage names,
-//! so a job a look saw under the program that then left its session (`setsid`), whose shell
-//! has gone, is permitted here and is no candidate of a close unless the selection names it
-//! (by the process that started it, the session or the marker): it is left running, which
-//! ends less, and is the limit written down in [`super`].
+//! A close attempts what the selection names, so a job a look saw under the program that then
+//! left its session (`setsid`), whose shell has gone, is permitted here and is no candidate of
+//! a close unless the selection names it (by the process that started it, the session or the
+//! marker): it is left running, which ends less, and is the limit written down in [`super`].
 //!
 //! The pane's process group, which a close signals whole, is the pane's program's own
 //! while the program runs ([`Bound::signal_group`]); once it has gone its number may have
