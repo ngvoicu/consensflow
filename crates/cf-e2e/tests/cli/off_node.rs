@@ -214,6 +214,11 @@ fn named(root: &Path, listed: &[String]) -> Found<Vec<String>> {
         if file == SELF || said_on_purpose.iter().any(|says| says.is_match(file)) {
             continue;
         }
+        // A link is listed as the link and not read through: a copy without git (the
+        // commit gate's) holds links to folders, which no one reads as a text.
+        if !checkout::is_plain_file(&under(root, file)) {
+            continue;
+        }
         let bytes = files::read(&under(root, file))?;
         if bytes.contains(&0) {
             continue;
@@ -426,6 +431,33 @@ mod what_the_checks_are_for_planted_in_a_tree_of_their_own {
             (".git/HEAD", ""),
         ])?;
         assert_eq!(walked(root.path())?, wanted);
+        Ok(())
+    }
+
+    // The commit gate's exported copy is no repository and holds what a work tree
+    // links in (T-71, 2026-10-21): the walk lists each link as the link, and no
+    // look reads through one.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_a_folder_in_a_copy_without_git_is_listed_as_the_link_and_not_read() -> Outcome {
+        let (root, _) = on_tree(&[(
+            "tests/revived.mjs",
+            "export const cf = join(root, 'bin/cf.mjs')\n",
+        )])?;
+        let linked = tempfile::tempdir()?;
+        let links = ["node_modules", "app/.cache", "app/src-tauri/resources"];
+        for link in links {
+            let folder = linked.path().join(link.replace('/', "_"));
+            files::write(&folder.join("held.js"), "export {}\n")?;
+            let at = under(root.path(), link);
+            files::make_dir(at.parent().unwrap())?;
+            std::os::unix::fs::symlink(&folder, &at)?;
+        }
+        let listed = tree(root.path())?;
+        for link in links {
+            assert!(listed.iter().any(|file| file == link), "{link}: {listed:?}");
+        }
+        assert_eq!(named(root.path(), &listed)?, ["tests/revived.mjs:1"]);
         Ok(())
     }
 

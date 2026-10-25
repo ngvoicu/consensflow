@@ -17,7 +17,8 @@
 //! with their task when it is called off first, and whoever told them hears so
 //! ([`Dropped`]): at the cancel, or, for words in the first message of a launch
 //! still being prepared, once the launch is over with no window opened
-//! ([`launch_called_off`]).
+//! ([`launch_called_off`]); and once more if the human sends them from the
+//! window's input box after all ([`arrived_after_all`]).
 
 use cf_proto::ledger::MessageView;
 use rusqlite::params;
@@ -150,7 +151,8 @@ pub(super) fn fail_for(
 /// it, and the words that resume the task carry them (the second review,
 /// 2026-10-16: they were given up, and the window resumed without them). They
 /// keep the attempts they had, and the task's requester hears why and which words
-/// wait ([`tell_kept`]). Whether they were kept.
+/// wait ([`tell_kept`]). Back in their queue they were handed nothing, as on every
+/// way back there (Calliope's review of the merge, T-408). Whether they were kept.
 pub(super) fn kept_for_resume(
     store: &mut Store,
     message: &MessageView,
@@ -161,7 +163,8 @@ pub(super) fn kept_for_resume(
         return Ok(false);
     }
     store.db.execute(
-        "UPDATE message SET state = 'queued', reason = ?, carried_by = NULL WHERE id = ?",
+        "UPDATE message SET state = 'queued', reason = ?, carried_by = NULL, handed_at = NULL
+         WHERE id = ?",
         params![
             format!("kept for T-{}'s resume: {reason}", task.number),
             message.id
@@ -241,22 +244,117 @@ pub(crate) fn told_unreceived(
 }
 
 fn unreceived(store: &Store, task: &TaskRow) -> Result<Vec<MessageView>, LedgerError> {
+    unreceived_as(store, task, false)
+}
+
+/// The words told to T-`task`'s window that no window had: those [`unreceived`]
+/// names, or, as a window that leaves with the task takes them (a member's
+/// removal, `leaving`), those on their way too: riding in a paste or a launch
+/// under way, or being pasted on their own, which the removal ends in the same
+/// step, so no later call tells of them (Calliope's review of T-389, T-437).
+fn unreceived_as(
+    store: &Store,
+    task: &TaskRow,
+    leaving: bool,
+) -> Result<Vec<MessageView>, LedgerError> {
+    let (on_their_way, brief_on_its_way) = if leaving {
+        ("m.state IN ('queued', 'gated', 'delivering')", "")
+    } else {
+        (
+            "m.state IN ('queued', 'gated')
+                AND (m.carried_by IS NULL
+                     OR m.carried_by NOT IN (SELECT id FROM message WHERE state = 'delivering'))",
+            "'delivering', ",
+        )
+    };
     messages(
         store,
         &format!(
             "{MESSAGE_SELECT} WHERE m.task_id = ?1 AND {told} AND (
-               (m.recipient_id = ?2 AND m.state IN ('queued', 'gated')
-                AND (m.carried_by IS NULL
-                     OR m.carried_by NOT IN (SELECT id FROM message WHERE state = 'delivering')))
+               (m.recipient_id = ?2 AND {on_their_way})
                OR (m.state = 'cancelled' AND m.reason = ?3
                    AND NOT EXISTS (SELECT 1 FROM message b
                      WHERE b.task_id = ?1 AND b.kind = 'task' AND b.id > m.id
-                       AND b.state IN ('delivering', 'delivered', 'read'))))
+                       AND b.state IN ({brief_on_its_way}'delivered', 'read'))))
              ORDER BY m.id",
             told = told("m")
         ),
         params![task.id, task.assignee_id, carried_into(task.number)],
     )
+}
+
+/// The words told to `window` for its tasks that are paused, which a member's
+/// removal leaves kept, as the pause kept them: the resume of a task for a tier
+/// carries them into its next window's brief (`transfer`), and the cancel of one
+/// bound to the window that left tells of them (`Dropped`). One being pasted is
+/// given back, handed nothing, as a paste a pause stops is, and says why, `why`,
+/// in its reason and the log, as [`kept_for_resume`] does; one riding in a carrier
+/// to the window, which the removal's sweep cancels, is its own again, as
+/// `release_carried` leaves it. Their ids, for the sweep to pass by (Calliope's
+/// reviews of T-389, T-437 and T-446).
+pub(crate) fn kept_through_leaving(
+    store: &mut Store,
+    window: i64,
+    why: &str,
+) -> Result<Vec<i64>, LedgerError> {
+    let paused = format!(
+        "recipient_id = ?1 AND {told} AND task_id IN (SELECT id FROM task WHERE state = 'paused')",
+        told = told("message")
+    );
+    let given_back: Vec<(i64, i64, i64)> = store
+        .db
+        .prepare(&format!(
+            "SELECT message.id, message.project_id, task.number FROM message
+               JOIN task ON task.id = message.task_id
+             WHERE {paused} AND message.state = 'delivering' ORDER BY message.id",
+            paused = paused.replace("recipient_id", "message.recipient_id")
+        ))?
+        .query_map([window], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    for (id, project_id, number) in given_back {
+        store.db.execute(
+            "UPDATE message SET state = 'queued', reason = ?2, carried_by = NULL, handed_at = NULL
+             WHERE id = ?1",
+            params![id, format!("kept for T-{number}'s resume: {why}")],
+        )?;
+        store.log(
+            project_id,
+            "delivery.kept",
+            json!({ "message": id, "reason": why }),
+        )?;
+    }
+    store.db.execute(
+        &format!(
+            "UPDATE message SET carried_by = NULL, handed_at = NULL
+             WHERE {paused} AND state IN ('queued', 'gated')
+               AND carried_by IN (SELECT id FROM message WHERE recipient_id = ?1
+                                  AND state IN ('queued', 'delivering', 'gated'))"
+        ),
+        [window],
+    )?;
+    Ok(store
+        .db
+        .prepare(&format!(
+            "SELECT id FROM message WHERE {paused} AND state IN ('queued', 'gated') ORDER BY id"
+        ))?
+        .query_map([window], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?)
+}
+
+/// A failed task's queued messages are never delivered, but the words told to its
+/// window, which wait for its reopen, which carries them (`fold`), as the words a
+/// delivery given up for good leaves do (the chief's decision on Calliope's P3-4
+/// of T-446).
+pub(crate) fn drop_queued_but_told(store: &Store, task_id: i64) -> Result<(), LedgerError> {
+    store.db.execute(
+        &format!(
+            "UPDATE message SET state = 'cancelled'
+             WHERE task_id = ? AND state IN ('queued', 'gated') AND NOT ({told})",
+            told = told("message")
+        ),
+        [task_id],
+    )?;
+    Ok(())
 }
 
 /// A launch called off before its window opened: its first message, `carrier`,
@@ -294,14 +392,100 @@ pub(crate) fn launch_called_off(store: &mut Store, carrier: i64) -> Result<(), L
     })
 }
 
+/// Told words of a task called off whose paste sat in its window's input box, its
+/// Enter withheld, so that they were back in their queue and the cancel told whoever
+/// told them that the window never had them; then the human sent what the box held,
+/// and they arrived (Calliope's review of the merge, T-408). Of `pasted`, the rows of
+/// a paste sent by hand as they were before it was confirmed, each that was told
+/// words withdrawn with its cancelled task and reads delivered now is told to whoever
+/// told it, in a note about the task: the window had it after all. Once: a paste is
+/// confirmed once, and its rows leave their withdrawal with it.
+pub(super) fn arrived_after_all(
+    store: &mut Store,
+    pasted: &[MessageView],
+) -> Result<(), LedgerError> {
+    let mut told_to: Vec<(TaskRow, String, Vec<String>)> = Vec::new();
+    for row in pasted.iter().filter(|row| row.state == "cancelled") {
+        let (Some(task), Some(sender)) = (message_task(store, row.id)?, row.sender.as_deref())
+        else {
+            continue;
+        };
+        let arrived = store
+            .message(row.id)?
+            .is_some_and(|now| now.state == "delivered");
+        if task.state != "cancelled"
+            || !arrived
+            || !is_told(row, assignee_of(store, &task)?.as_deref())
+        {
+            continue;
+        }
+        let id = format!("m-{}", row.id);
+        match told_to
+            .iter_mut()
+            .find(|(of, to, _)| of.id == task.id && to == sender)
+        {
+            Some((_, _, ids)) => ids.push(id),
+            None => told_to.push((task, sender.to_owned(), vec![id])),
+        }
+    }
+    for (task, sender, ids) in told_to {
+        let body = format!(
+            "T-{} was cancelled, but the human sent what its window's input box held: \
+             the window had what you told it, {}, after all.",
+            task.number,
+            ids.join(", ")
+        );
+        send(
+            store,
+            task.project_id,
+            &Sent {
+                to: &sender,
+                task: Some(task.number),
+                kind: "note",
+                body: &body,
+                ..Sent::default()
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// What tells which of the words `told` a failed task's window wait for its reopen,
+/// queued or held for the human, of `handle`'s, or of anyone's when it is none:
+/// nothing when none do. One fate, said in these words wherever a task fails: the
+/// ledger's give-up ([`Dropped::waiting_for_the_reopen`]) and the engine's note of a
+/// delivery that failed its task (T-414 P3-4, T-446 P3-4).
+pub fn waiting_for_the_reopen(told: &[MessageView], handle: Option<&str>) -> String {
+    let ids: Vec<String> = told
+        .iter()
+        .filter(|told| matches!(told.state.as_str(), "queued" | "gated"))
+        .filter(|told| handle.is_none() || told.sender.as_deref() == handle)
+        .map(|told| format!("m-{}", told.id))
+        .collect();
+    if ids.is_empty() {
+        return String::new();
+    }
+    format!(
+        "; the words told its window wait for the reopen: {}",
+        ids.join(", ")
+    )
+}
+
 /// What a task called off took with it of the words told to its windows, which
 /// no window ever had.
 pub(crate) struct Dropped(Vec<MessageView>);
 
 impl Dropped {
-    /// What of `task` is to go, read before it goes.
+    /// What of `task` is to go, read before it goes, or, for a task that fails,
+    /// to wait for its reopen ([`Dropped::waiting_for_the_reopen`]).
     pub(crate) fn of(store: &Store, task: &TaskRow) -> Result<Self, LedgerError> {
         Ok(Self(unreceived(store, task)?))
+    }
+
+    /// What of `task` goes with its window, which leaves the board with it, read
+    /// before it goes: with what is on its way ([`unreceived_as`]).
+    pub(crate) fn leaving(store: &Store, task: &TaskRow) -> Result<Self, LedgerError> {
+        Ok(Self(unreceived_as(store, task, true)?))
     }
 
     /// What tells `handle` which of its words went: nothing when none did.
@@ -322,6 +506,12 @@ impl Dropped {
         }
     }
 
+    /// What tells which of the words wait for the task's reopen, of `handle`'s, or of
+    /// anyone's when it is none ([`waiting_for_the_reopen`]).
+    pub(crate) fn waiting_for_the_reopen(&self, handle: Option<&str>) -> String {
+        waiting_for_the_reopen(&self.0, handle)
+    }
+
     /// Tells each one who told words that went, but those `told` already (who
     /// called the task off, and whom the step tells in a note of its own, with
     /// [`Dropped::said_to`]): a note about the task, `lead` saying what became
@@ -333,6 +523,20 @@ impl Dropped {
         lead: &str,
         told: &[&str],
     ) -> Result<(), LedgerError> {
+        self.tell_each(store, task, told, |sender| {
+            format!("{lead}{}", self.said_to(sender))
+        })
+    }
+
+    /// Tells each one who told these words, but those `told` already, a note
+    /// about the task in the words `body` has for it.
+    pub(crate) fn tell_each(
+        &self,
+        store: &mut Store,
+        task: &TaskRow,
+        told: &[&str],
+        body: impl Fn(&str) -> String,
+    ) -> Result<(), LedgerError> {
         let mut senders: Vec<&str> = Vec::new();
         for sender in self.0.iter().filter_map(|told| told.sender.as_deref()) {
             if !told.contains(&sender) && !senders.contains(&sender) {
@@ -340,7 +544,7 @@ impl Dropped {
             }
         }
         for sender in senders {
-            let body = format!("{lead}{}", self.said_to(sender));
+            let body = body(sender);
             send(
                 store,
                 task.project_id,

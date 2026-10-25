@@ -84,9 +84,6 @@ app-test-quitting = ["cargo", "xtask", "app", "test", "quitting"]
 # daemon and the pane host in real terminals, a case for each rule, found by the start of
 # its name.
 rig-background-result = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "background_work::a_workers_answer"]
-rig-background-kept = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "background_work::a_window_the_human_keeps_open"]
-rig-background-servers = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "background_work::a_job_the_agent_leaves"]
-rig-background-before-the-turn = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "background_work::work_the_window_had_before"]
 rig-background-cancel = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "background_close::cancelling_a_task"]
 rig-background-pause = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "background_close::pausing_a_task"]
 rig-background-grace = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "background_work::a_job_that_ignores"]
@@ -96,6 +93,8 @@ rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "
 e2e-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger::"]
 # What a project of the live checks that does not end in time says it left.
 rig-members-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_members::a_project_that_does_not_end_in_time"]
+rig-members-close-begun = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_members::a_close_begun_ends_the_daemon"]
+rig-members-held-up = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_members::a_close_says_which_were_left_though_the_pane_host_was_held_up"]
 # How what such a project left is listed, on processes made up.
 e2e-lib-closing = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::closing::"]
 # T-15's shape: a command that never exits, and the final answer of the worker that left it.
@@ -110,158 +109,6 @@ regression-build-daemon = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test
 # The result is the turn's end, whatever the turn left running.
 
 [[plant]]
-name = "background: a turn whose work the host cannot end is no task’s result"
-meant = "what_of_the_turns_work_the_host_could_not_end_is_said_to_still_run_beside_what_it_ended"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '            } else if let Some(task) = self.collect(project, participant, &observed)? {'
-replace = '''
-            } else if let Some(task) = ({
-                // Held for the work the turn left, as before 2026-10-13: no result while any runs.
-                let pane = record.window.borrow().pane.clone();
-                let left = match pane {
-                    Some(pane) => self
-                        .seams
-                        .background
-                        .end(&pane)
-                        .await
-                        .map_or(0, |ending| ending.left.total),
-                    None => 0,
-                };
-                if left > 0 {
-                    None
-                } else {
-                    self.collect(project, participant, &observed)?
-                }
-            }) {'''
-
-[[plant]]
-name = "background: the result waits for the host to end the work the turn left"
-meant = "the_ending_is_the_windows_own_work_apart_from_the_pass_and_holds_the_window_meanwhile"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '            } else if let Some(task) = self.collect(project, participant, &observed)? {'
-replace = '''
-            } else if let Some(task) = ({
-                // Ended before the result is recorded, so that the result waits for it.
-                let pane = record.window.borrow().pane.clone();
-                if let Some(pane) = pane {
-                    self.seams.background.end(&pane).await;
-                }
-                self.collect(project, participant, &observed)?
-            }) {'''
-
-[[plant]]
-name = "background: the ending is awaited inside the pass, as every other window’s look waits for it"
-meant = "the_ending_is_the_windows_own_work_apart_from_the_pass_and_holds_the_window_meanwhile"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '        self.act(record, async move {'
-replace = '        let _: Result<(), EngineError> = (async move {'
-
-[[plant]]
-name = "background: the window being ended is closed before it is, and looked at again"
-meant = "the_ending_is_the_windows_own_work_apart_from_the_pass_and_holds_the_window_meanwhile"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '''
-                self.end_work_apart(project, record, task, observed.agents_pending())
-                    .await;
-                return Ok(());'''
-replace = '''
-                self.end_work_apart(project, record, task, observed.agents_pending())
-                    .await;'''
-
-[[plant]]
-name = "background: what the turn left running is not asked to end"
-meant = "what_the_turn_left_running_is_ended_with_the_result_and_the_requester_is_told_what"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '''
-            if let Some(ending) = self.seams.background.end(&pane).await {
-                return ending;
-            }'''
-replace = '''
-            let _ = &pane;
-            if let Some(ending) = None::<Ending> {
-                return ending;
-            }'''
-
-[[plant]]
-name = "background: the requester is told nothing of what was ended"
-meant = "what_the_turn_left_running_is_ended_with_the_result_and_the_requester_is_told_what"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '        let Some(body) = left_note(task.number, &ending, agents) else {'
-replace = '        let Some(body) = left_note(task.number, &ending, agents).filter(|_| false) else {'
-
-[[plant]]
-name = "background: a chief’s window is asked to end what its turn left"
-meant = "a_chiefs_window_is_not_touched"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '''
-        let free = record.delivery.borrow().delivering.is_none()
-            && observed.settled'''
-replace = '''
-        if participant.role == "chief" && observed.settled {
-            let pane = record.window.borrow().pane.clone();
-            if let Some(pane) = pane {
-                self.seams.background.end(&pane).await;
-            }
-        }
-        let free = record.delivery.borrow().delivering.is_none()
-            && observed.settled'''
-
-[[plant]]
-name = "background: the work a failed turn left is ended with its failure"
-meant = "a_turn_that_failed_is_the_tasks_failure_and_nothing_is_ended_for_it"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = '''
-            self.fail_task(project, &thread.task, &because)?;
-            return Ok(None);'''
-replace = '''
-            self.fail_task(project, &thread.task, &because)?;
-            return Ok(Some(thread.task.clone()));'''
-
-[[plant]]
-name = "background: the requester is not told what of the turn’s work the host could not end"
-meant = "what_of_the_turns_work_the_host_could_not_end_is_said_to_still_run_beside_what_it_ended"
-runs = ["engine-dispatcher-background", "engine-lib-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '    if left.total > 0 {'
-replace = '    if false {'
-
-[[plant]]
-name = "background: a note counts only what the host named of what it ended"
-meant = "what_the_note_names_is_a_few_commands_and_what_is_ended_is_all_of_them"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '            quote_of(&ended.processes, ended.total)'
-replace = '            quote_of(&ended.processes, ended.processes.len())'
-
-[[plant]]
 name = "background: a note quotes more than a few commands of the work"
 meant = "a_note_quotes_the_first_commands_and_says_how_many_it_leaves_out"
 runs = ["engine-lib-background"]
@@ -273,7 +120,7 @@ replace = '    if total > QUOTED + 1_000 {'
 
 [[plant]]
 name = "background: a note quotes a key or a token of a command as it is"
-meant = "what_a_note_quotes_of_the_work_has_its_secrets_hidden_and_is_held_to_a_line"
+meant = "what_a_close_note_quotes_of_the_work_has_its_secrets_hidden_and_is_held_to_a_line"
 runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
@@ -289,55 +136,6 @@ replace = '''
 # where it gave no answer.
 
 [[plant]]
-name = "background: a host that gave no answer is asked again at once, the window not held for it"
-meant = "a_host_that_gives_no_answer_to_an_ending_is_asked_again_with_the_window_held_until_it_does"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '            if asked < ENDING_ASKS {'
-replace = '            if false && asked < ENDING_ASKS {'
-
-[[plant]]
-name = "background: a host that gave no answer is not asked again"
-meant = "a_host_that_gives_no_answer_to_an_ending_is_asked_again_with_the_window_held_until_it_does"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '        for asked in 1..=ENDING_ASKS {'
-replace = '        for asked in 1..=1 {'
-
-[[plant]]
-name = "background: a host that gave no answer is asked for ever"
-meant = "a_host_that_gives_no_answer_to_three_asks_is_taken_to_have_gone_and_nothing_is_said_of_it"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = 'const ENDING_ASKS: usize = 3;'
-replace = 'const ENDING_ASKS: usize = 4;'
-
-[[plant]]
-name = "background: a host that refuses an ending is asked again"
-meant = "a_host_that_refuses_an_ending_has_ended_nothing_and_none_is_made_up"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '            if let Some(ending) = self.seams.background.end(&pane).await {'
-replace = '''
-            if let Some(ending) = self
-                .seams
-                .background
-                .end(&pane)
-                .await
-                .filter(|ending| ending.ended.total + ending.left.total > 0)
-            {'''
-
-# What the engine tells the pane host, and what it hears.
-
-[[plant]]
 name = "background: a message goes into a window with no mark of where its turn begins"
 meant = "marks_the_window_where_a_turn_begins_and_again_as_each_message_goes_in"
 runs = ["engine-dispatcher-background"]
@@ -345,7 +143,7 @@ runs = ["engine-dispatcher-background"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        // A turn begins with this message: what the window's tree runs now came before it.
+        // and so did the rest the window was seen at, as every monitor of the turn will.
         self.mark_turn(record, &pane).await;'''
 replace = ""
 
@@ -393,8 +191,8 @@ runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '                self.tell_left_running(&project, &participant, left)?;'
-replace = '                self.tell_left_running(&project, &participant, &[])?;'
+find = '                self.tell_left_running(&project, given.as_ref(), left)?;'
+replace = '                self.tell_left_running(&project, given.as_ref(), &[])?;'
 
 [[plant]]
 name = "background: the pause note of a window that went leaves out the work it ended"
@@ -407,46 +205,6 @@ find = '                let besides = if left.is_empty() {'
 replace = '                let besides = if true {'
 
 # What the daemon makes of the host's answer to an ending, and how long it waits for it.
-
-[[plant]]
-name = "background: a host that gave no answer to an ending is taken to have ended nothing"
-meant = "a_host_that_refuses_an_ending_has_ended_nothing_and_one_that_gives_no_answer_has_said_nothing"
-runs = ["daemon-lib-host"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/host.rs"
-find = '    let answer = answer?;'
-replace = '    let answer = answer.unwrap_or_default();'
-
-[[plant]]
-name = "background: the bridge’s deadline is taken for a host that refused"
-meant = "a_host_that_refuses_an_ending_has_ended_nothing_and_one_that_gives_no_answer_has_said_nothing"
-runs = ["daemon-lib-host"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/host.rs"
-find = '        Some(Value::String(error)) if error == "deadline" => None,'
-replace = '        Some(Value::String(error)) if error == "deadline" && false => None,'
-
-[[plant]]
-name = "background: an ending is waited for no longer than a request that answers at once"
-meant = "an_ending_is_waited_for_past_the_default_wait_and_one_the_host_never_answers_is_no_answer"
-runs = ["daemon-lib-host"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/host.rs"
-find = '        Box::pin(self.ending_within(pane, END_DEADLINE))'
-replace = '        Box::pin(self.ending_within(pane, Duration::from_secs(30)))'
-
-[[plant]]
-name = "background: the wait for an ending has no margin on the bound the host keeps to"
-meant = "an_ending_is_waited_for_past_the_default_wait_and_one_the_host_never_answers_is_no_answer"
-runs = ["daemon-lib-host"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/host.rs"
-find = 'pub const END_DEADLINE: Duration = Duration::from_secs(ENDING_BOUND.as_secs() + 20);'
-replace = 'pub const END_DEADLINE: Duration = Duration::from_secs(ENDING_BOUND.as_secs());'
 
 [[plant]]
 name = "background: a mark never tells the host which harness the window is"
@@ -1253,8 +1011,8 @@ runs = ["rig-members-left"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/closing.rs"
-find = '    let said = ended(|| rig.shut_down_within(within), listing, LOOK);'
-replace = '    let said = ended(move || rig.close_within(within), listing, LOOK);'
+find = '    let said = ended(|| shut_down(&mut rig), listing, LOOK);'
+replace = '    let said = ended(move || { let mut rig = rig; shut_down(&mut rig) }, listing, LOOK);'
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/closing.rs"
@@ -1747,109 +1505,6 @@ replace = 'finish_before_deadline(SHUTDOWN_DRAIN, move || reap_all(&panes))'
 # nothing is the turn's (the positive cases hold that); the case of the servers the window
 # opened with is held by an ending that asks for the whole tree.
 [[plant]]
-name = "background rig: a turn whose job the host does not end holds its task"
-meant = "a_workers_answer_is_its_result_at_once_the_job_it_left_is_ended_and_the_chief_is_told"
-runs = ["rig-background-result"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '            } else if let Some(task) = self.collect(project, participant, &observed)? {'
-replace = '''
-            } else if let Some(task) = ({
-                // Held for the work the turn left, as before 2026-10-13: no result while any runs.
-                let pane = record.window.borrow().pane.clone();
-                let left = match pane {
-                    Some(pane) => self
-                        .seams
-                        .background
-                        .end(&pane)
-                        .await
-                        .map_or(0, |ending| ending.left.total),
-                    None => 0,
-                };
-                if left > 0 {
-                    None
-                } else {
-                    self.collect(project, participant, &observed)?
-                }
-            }) {'''
-
-[[plant.edit]]
-file = "crates/cf-panes/src/pty/turn.rs"
-find = '        Ok(tree.end(&baseline, self.close_grace)?)'
-replace = '''
-        let _ = self.close_grace;
-        Ok(Ending {
-            left: baseline.left_running(&tree.members()?),
-            ..Ending::default()
-        })'''
-
-[[plant]]
-name = "background rig: what the turn left running is not asked to end"
-meant = "a_workers_answer_is_its_result_at_once_the_job_it_left_is_ended_and_the_chief_is_told"
-runs = ["rig-background-result"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '''
-            if let Some(ending) = self.seams.background.end(&pane).await {
-                return ending;
-            }'''
-replace = '''
-            let _ = &pane;
-            if let Some(ending) = None::<Ending> {
-                return ending;
-            }'''
-
-[[plant]]
-name = "background rig: the host ends nothing it is asked to end"
-meant = "a_window_the_human_keeps_open_stays_open_with_its_job_ended_and_its_program_untouched"
-runs = ["rig-background-kept"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-panes/src/pty/turn.rs"
-find = '        Ok(tree.end(&baseline, self.close_grace)?)'
-replace = '''
-        let _ = (&tree, self.close_grace);
-        Ok(Ending::default())'''
-
-[[plant]]
-name = "background rig: an ending ends the window’s program, its servers and what it had with the job"
-meant = "a_job_the_agent_leaves_is_ended_beside_the_harnesss_server_which_runs_on"
-runs = ["rig-background-servers"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-panes/src/pty/turn.rs"
-find = '            let asked = self.tree.ask_to_exit(Subject::Lineage(&lineage), None)?;'
-replace = '            let asked = self.tree.ask_to_exit(Subject::Whole, None)?;'
-
-[[plant]]
-name = "background rig: an ending kills a job that is not given its grace"
-meant = "a_job_that_ignores_the_signals_that_ask_it_to_end_is_killed_once_the_grace_of_ten_seconds_is_over_and_the_result_did_not_wait_for_it"
-runs = ["rig-background-grace"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-panes/src/pty/turn.rs"
-find = '            close::wait_until_gone(Instant::now() + grace, || !asked.any_alive());'
-replace = '            let _ = (&asked, grace);'
-
-[[plant]]
-name = "background rig: an ending asks for what the window had before its turn"
-meant = "work_the_window_had_before_its_turn_is_not_the_turns_a_server_the_harness_started_with_it_holds_nothing"
-runs = ["rig-background-before-the-turn"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-panes/src/pty/turn.rs"
-find = '            let asked = self.tree.ask_to_exit(Subject::Lineage(&lineage), None)?;'
-replace = '            let asked = self.tree.ask_to_exit(Subject::Whole, None)?;'
-
-[[plant]]
 name = "background rig: a cancelled task’s window closes and says nothing of the work it ended"
 meant = "cancelling_a_task_whose_job_still_runs_asks_the_job_to_end_first_and_tells_whoever_gave_the_task"
 runs = ["rig-background-cancel"]
@@ -1857,8 +1512,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '                self.tell_left_running(&project, &participant, left)?;'
-replace = '                self.tell_left_running(&project, &participant, &[])?;'
+find = '                self.tell_left_running(&project, given.as_ref(), left)?;'
+replace = '                self.tell_left_running(&project, given.as_ref(), &[])?;'
 
 [[plant]]
 name = "background rig: a window’s exit leaves out the work it left running"
@@ -1910,57 +1565,6 @@ replace = '''
     terminate_asked(pane)'''
 
 # T-15 (2026-10-13): a worker left a command that never exits and gave its final answer.
-[[plant]]
-name = "background regression: a command that never exits holds the worker’s task"
-meant = "a_worker_that_leaves_a_command_that_never_exits_running_gives_the_chief_its_result_and_the_chief_accepts_it"
-runs = ["regression-never-exits"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '            } else if let Some(task) = self.collect(project, participant, &observed)? {'
-replace = '''
-            } else if let Some(task) = ({
-                // Held for the work the turn left, as before 2026-10-13: no result while any runs.
-                let pane = record.window.borrow().pane.clone();
-                let left = match pane {
-                    Some(pane) => self
-                        .seams
-                        .background
-                        .end(&pane)
-                        .await
-                        .map_or(0, |ending| ending.left.total),
-                    None => 0,
-                };
-                if left > 0 {
-                    None
-                } else {
-                    self.collect(project, participant, &observed)?
-                }
-            }) {'''
-
-[[plant.edit]]
-file = "crates/cf-panes/src/pty/turn.rs"
-find = '        Ok(tree.end(&baseline, self.close_grace)?)'
-replace = '''
-        let _ = self.close_grace;
-        Ok(Ending {
-            left: baseline.left_running(&tree.members()?),
-            ..Ending::default()
-        })'''
-
-# The harness's own short runs (T-42, 3.0.3, 2026-10-14): Claude Code runs its status line, a
-# `bash` that runs `git … branch --show-current` and ends a moment later, in a group of its own,
-# so a look that comes while one runs finds a shell the harness started after the mark with a job
-# under it, and a close named two runs and the `git` as work its window left running. Two rules
-# keep it out: what is in the window's group is the harness's (Claude and Pi, on Unix), and what
-# the host names it finds at two looks a moment apart, so a run that has ended by the second is
-# none of it, nor is the next run, which is another process.
-#
-# The crates' own tests hold each part of the second look apart: what is still there
-# (`steady`), what a lineage keeps of two looks (`steady_since`), and what a close and an ending
-# of real processes name.
-
 [[plant]]
 name = "background second look: what the second look finds is all of it, whether or not the first found it"
 meant = "a_run_of_the_harnesss_status_line_is_the_turns_work_to_one_look_and_none_of_it_to_two"
@@ -2151,21 +1755,6 @@ replace = '''
         Ok(first)'''
 
 [[plant]]
-name = "background regression: an ending ends and names what its first look found, a run of the status line among it"
-meant = "a_claude_workers_status_line_in_a_group_of_its_own_is_no_work_its_turn_left_at_its_end_or_at_its_windows_close"
-runs = ["regression-status-line"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-panes/src/process_tree.rs"
-find = '''
-        std::thread::sleep(settle);
-        Ok(self.lineage_by(&Native, baseline)?.steady_since(&first))'''
-replace = '''
-        let _ = settle;
-        Ok(first)'''
-
-[[plant]]
 name = "background regression: what is in the window’s group is taken for the turn’s work, a helper of the harness’s among it"
 meant = "a_claude_workers_helper_in_its_windows_group_is_never_told_however_long_it_runs"
 runs = ["regression-status-line"]
@@ -2213,30 +1802,6 @@ replace = '''
         Ok(first)'''
 
 [[plant]]
-name = "background regression: what the worker left is not ended and the chief is told nothing"
-meant = "a_worker_that_leaves_a_command_that_never_exits_running_gives_the_chief_its_result_and_the_chief_accepts_it"
-runs = ["regression-never-exits"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '''
-            if let Some(ending) = self.seams.background.end(&pane).await {
-                return ending;
-            }'''
-replace = '''
-            let _ = &pane;
-            if let Some(ending) = None::<Ending> {
-                return ending;
-            }'''
-
-# A1 of the field reports of 2026-10-15 (3.0.3): a worker's build left its daemon running, a child
-# of the build's that outlives it, and the worker's task stayed working after it had finished. The
-# daemon is no work of the turn: no chain of processes that run leads from it to a shell the harness
-# started, its build and the build's shell having ended (`crates/cf-e2e/tests/regressions/
-# a_builds_daemon_held_a_workers_task.rs`). What the plants widen the turn's work to is what the
-# window's tree holds, under the bound: the rig's own processes.
-[[plant]]
 name = "background regression: a build's daemon, its build ended, is taken for the turn's work and told as left"
 meant = "a_workers_build_that_leaves_its_daemon_running_has_its_task_done_and_the_daemon_is_neither_waited_for_nor_ended"
 runs = ["regression-build-daemon"]
@@ -2246,50 +1811,6 @@ builds = true
 file = "crates/cf-panes/src/background/work.rs"
 find = '            None => return at.parent.is_some() && runs_a_shell(at),'
 replace = '            None => return at.parent.is_none() || runs_a_shell(at),'
-
-[[plant]]
-name = "background regression: a build's daemon holds the worker's task, as on 3.0.3"
-meant = "a_workers_build_that_leaves_its_daemon_running_has_its_task_done_and_the_daemon_is_neither_waited_for_nor_ended"
-runs = ["regression-build-daemon"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-panes/src/background/work.rs"
-find = '            None => return at.parent.is_some() && runs_a_shell(at),'
-replace = '            None => return at.parent.is_none() || runs_a_shell(at),'
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '            } else if let Some(task) = self.collect(project, participant, &observed)? {'
-replace = '''
-            } else if let Some(task) = ({
-                // Held for the work the turn left, as before 2026-10-13: no result while any runs.
-                let pane = record.window.borrow().pane.clone();
-                let left = match pane {
-                    Some(pane) => self
-                        .seams
-                        .background
-                        .end(&pane)
-                        .await
-                        .map_or(0, |ending| ending.left.total),
-                    None => 0,
-                };
-                if left > 0 {
-                    None
-                } else {
-                    self.collect(project, participant, &observed)?
-                }
-            }) {'''
-
-[[plant.edit]]
-file = "crates/cf-panes/src/pty/turn.rs"
-find = '        Ok(tree.end(&baseline, self.close_grace)?)'
-replace = '''
-        let _ = self.close_grace;
-        Ok(Ending {
-            left: baseline.left_running(&tree.members()?),
-            ..Ending::default()
-        })'''
 
 # A program of Git Bash's own kind that a script started names a parent that has gone (a forked
 # copy of the shell), so the chain from it to the shell the harness started is broken and a stop
@@ -2361,3 +1882,31 @@ find = '''
             .any(|layer| exists(&folder.join(layer)))
 '''
 replace = ""
+
+# Round T-118: the live members close margin. A gate under load holds the pane host, whose two
+# looks at the window's tree and request to end come late, so a close given four seconds from its
+# start was read before the window had left: the time is counted from the window's leaving.
+
+[[plant]]
+name = "background rig: the close is given its four seconds from its start, not from the window's leaving"
+meant = "a_close_says_which_were_left_though_the_pane_host_was_held_up_before_it_asked_the_window_to_end"
+runs = ["rig-members-held-up"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = "        rig.wait_for(what, EVENT, || Ok(happened(rig)))?;"
+replace = "        let _ = (what, &happened);"
+
+[[plant]]
+name = "background rig: a close begun ends neither the daemon's input nor the pane host's"
+meant = "a_close_begun_ends_the_daemon_without_the_case_waiting_for_it"
+runs = ["rig-members-close-begun"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = """    pub fn begin_close(&self) {
+        self.daemon.end_input();
+        self.host.end_input();
+"""
+replace = """    pub fn begin_close(&self) {
+"""

@@ -212,6 +212,20 @@ const drawer = new TaskDrawer($('#task-drawer'), {
         `T-${task.number} is back on the board for another ${task.pool === 'designer' ? 'image designer' : `${task.tier} ${task.pool}`}.`,
       )
     }),
+  onFinish: (task) =>
+    act(async () => {
+      const { jobs = 0, agents = 0 } = await daemon('task.finish', {
+        project: task.projectId,
+        task: task.number,
+      })
+      // Finishing ends nothing the turn left: it runs until its window closes, or past it
+      // where the host cannot tell what is the window's.
+      const left =
+        jobs + agents === 0
+          ? 'Nothing it left running was ended.'
+          : `What it waits on is not ended: ${jobs + agents === 1 ? 'it may run' : 'they may run'} on until its window closes, or past it where the host cannot tell what is the window's.`
+      note(`T-${task.number} is finished: what its worker said last is its result. ${left}`)
+    }),
   onResume: (task) =>
     act(async () => {
       const { task: resumed } = await daemon('task.resume', {
@@ -323,7 +337,22 @@ async function openTask(project, number) {
   ])
   if (state.selected !== project) return
   state.openTask = { project, number, total }
-  drawer.show(task, { total, closed: closedProject(project), terminal: terminalOf(task) })
+  drawer.show(task, {
+    total,
+    closed: closedProject(project),
+    terminal: terminalOf(task),
+    held: heldOf(task),
+  })
+}
+
+/**
+ * What the worker of `task` is waited for on in the background (`{jobs, agents}`), on
+ * the board shown: its lane says, and only while the task works. Null when it waits
+ * on nothing.
+ */
+function heldOf(task) {
+  const lane = state.board?.lanes.find((l) => l.participant.handle === task.assignee)
+  return task.state === 'working' && lane?.held?.task === task.number ? lane.held : null
 }
 
 /**
@@ -366,6 +395,7 @@ async function rereadTask() {
       total: opened.total,
       closed: closedProject(project),
       terminal: terminalOf(task),
+      held: heldOf(task),
     })
   } catch (cause) {
     closeTask()

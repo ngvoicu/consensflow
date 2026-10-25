@@ -9,7 +9,9 @@
 //! locale that draws its screen, and the user's name, which a harness may ask
 //! the system's keychain by; and never the `CLAUDE_CONFIG_DIR` the rig sets for
 //! the stand-in, which makes a real Claude Code look for its login in a folder
-//! that holds none and open on its first-run dialog.
+//! that holds none and open on its first-run dialog. A run given a Claude config
+//! folder of its own (`--claude-config`) has its windows keep their config there:
+//! its caller made it and copied the login into it.
 //!
 //! Claude Code has two programs of ours in front of it: [`isolated_claude`] adds
 //! the flags that shut the human's MCP servers and browser out, and
@@ -278,11 +280,23 @@ const REPORTS: &str = "app/src-tauri/target/live-reports";
 /// folder, and Node's where it is another, are on their `PATH` (in the order
 /// given, none twice), and the variables they read their logins by are the
 /// machine's. Claude Code reads its config where `CLAUDE_CONFIG_DIR` does not
-/// point, so a rig that has it has the variable unset. The windows have a
+/// point, so a rig that has it has the variable unset, but where the run was given a
+/// folder of its own for it (`--claude-config`: one its caller made and copied a login
+/// into, which keeps the owner's own config out of the run). The windows have a
 /// locale that draws their screens, and the user's name, which a harness may
 /// ask the system's keychain by; on Windows they also have the machine's own
 /// folders for settings and programs ([`WINDOWS`]).
 pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
+    rig_keeping_claude_in(installs, stand_in, super::option("claude-config"))
+}
+
+/// [`rig`], whose Claude windows keep their config in `claude_config` where it names a
+/// folder.
+fn rig_keeping_claude_in(
+    installs: &[Installed],
+    stand_in: impl Into<PathBuf>,
+    claude_config: Option<String>,
+) -> Config {
     let machine = |name: &str| own_var(name);
     let mut config = Config::new(stand_in)
         .var("LANG", "en_US.UTF-8")
@@ -307,7 +321,10 @@ pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
             config = config.var(&name, value);
         }
         if install.harness == Harness::Claude {
-            config = config.unset("CLAUDE_CONFIG_DIR");
+            config = match &claude_config {
+                Some(folder) => config.var("CLAUDE_CONFIG_DIR", folder.clone()),
+                None => config.unset("CLAUDE_CONFIG_DIR"),
+            };
         }
     }
     config

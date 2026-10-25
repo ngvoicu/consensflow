@@ -67,11 +67,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_repositorys_list_is_read_and_holds_a3s_ended_note() {
+    fn the_repositorys_list_is_read_and_holds_a4s_progress_lines_alone_for_turn_end_fixed_a3() {
         let known = KNOWN.as_ref().unwrap();
-        let a3 = known.iter().find(|entry| entry.invariant == 3).unwrap();
-        assert_eq!(a3.shape, "ended-note");
-        assert!(a3.issue.contains("3.0.6"), "{}", a3.issue);
+        // Turn-end ends nothing at a turn's end, so a release carries no A3: the list holds
+        // none of the third, in any shape.
+        assert!(known.iter().all(|entry| entry.invariant != 3), "{known:?}");
+        let a4: Vec<&Known> = known.iter().filter(|entry| entry.invariant == 4).collect();
+        assert_eq!(a4.len(), 1, "{a4:?}");
+        assert_eq!(a4[0].shape, "progress-lines");
+        assert!(
+            a4[0].issue.contains("dip-agentos #5") && a4[0].issue.contains("3.0.6"),
+            "{}",
+            a4[0].issue
+        );
         // Said whole wherever the run says it: nothing in it has a token's shape.
         let names = crate::long_run::mask::Names::default();
         for entry in known {
@@ -85,39 +93,36 @@ mod tests {
     #[test]
     fn a_break_is_known_by_its_invariant_and_its_shape_both() {
         let known = [Known {
-            invariant: 3,
-            shape: "ended-note".to_owned(),
+            invariant: 4,
+            shape: "progress-lines".to_owned(),
             issue: "3.0.6".to_owned(),
         }];
-        let a3 = |shape| {
-            Break::new(
-                3,
-                "3:m-20",
-                "T-2's ended notice m-20 came after its result m-18",
-            )
-            .with_shape(shape)
+        let a4 = |shape| {
+            Break::new(4, "4:m-20", "m-20 holds 1 line of its turn's progress").with_shape(shape)
         };
-        assert_eq!(of(&a3("ended-note"), &known), Some(&known[0]));
-        // An A3 of another notice, a break of another invariant in the same shape, and a
+        assert_eq!(of(&a4("progress-lines"), &known), Some(&known[0]));
+        // An A4 of another shape, a break of another invariant in the same shape, and a
         // break of no shape are none of it.
-        assert_eq!(of(&a3("let-go-note"), &known), None);
+        assert_eq!(of(&a4("answer-cut"), &known), None);
         assert_eq!(
             of(
-                &Break::new(4, "4:m-20", "not its answer").with_shape("ended-note"),
+                &Break::new(3, "3:m-20", "closed under work").with_shape("progress-lines"),
                 &known
             ),
             None
         );
-        assert_eq!(of(&Break::new(3, "3:m-20", "late"), &known), None);
+        assert_eq!(of(&Break::new(4, "4:m-20", "late"), &known), None);
     }
 
     #[test]
     fn a_list_that_cannot_be_read_says_why() {
         assert!(read("{").unwrap_err().starts_with("it is no JSON"));
         assert_eq!(read("{}").unwrap_err(), "it has no list of known breaks");
-        assert!(read(r#"{"known":[{"invariant":3,"shape":"ended-note"}]}"#)
-            .unwrap_err()
-            .starts_with("an entry has no issue"));
+        assert!(
+            read(r#"{"known":[{"invariant":4,"shape":"progress-lines"}]}"#)
+                .unwrap_err()
+                .starts_with("an entry has no issue")
+        );
         assert_eq!(read(r#"{"known":[]}"#), Ok(Vec::new()));
     }
 }

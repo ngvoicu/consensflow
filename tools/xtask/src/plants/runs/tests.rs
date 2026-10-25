@@ -1755,6 +1755,7 @@ fn driven_within(
         limit,
         rebuild: None,
         plants: plants.to_vec(),
+        known_unapplied: Vec::new(),
     };
     let chosen: Vec<&crate::plants::kit::Plant> = family.plants.iter().collect();
     let mut out = Vec::new();
@@ -2959,6 +2960,7 @@ fn no_plant_is_tried_in_a_checkout_git_says_nothing_of_and_one_is_checked_there(
         limit: Duration::from_secs(600),
         rebuild: None,
         plants: vec![plant],
+        known_unapplied: Vec::new(),
     };
     let chosen: Vec<&crate::plants::kit::Plant> = family.plants.iter().collect();
     let mut out = Vec::new();
@@ -2980,9 +2982,14 @@ fn no_plant_is_tried_in_a_checkout_git_says_nothing_of_and_one_is_checked_there(
     assert!(out.is_empty(), "no plant was tried");
     assert_eq!(fs::read_to_string(checkout.path("a.rs")).unwrap(), "one\n");
     let mut out = Vec::new();
-    let checked =
-        crate::plants::driver::check(&checkout, &chosen, &mut runner_in(&checkout.root), &mut out)
-            .unwrap();
+    let checked = crate::plants::driver::check(
+        &checkout,
+        &family,
+        &chosen,
+        &mut runner_in(&checkout.root),
+        &mut out,
+    )
+    .unwrap();
     assert_eq!(checked, 0, "{}", String::from_utf8_lossy(&out));
 }
 

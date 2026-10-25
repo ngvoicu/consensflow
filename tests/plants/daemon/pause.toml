@@ -17,11 +17,11 @@ runs = ["ledger-receipt"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
-        pause(store, &task, detail)?;
+        pause(store, &task, detail, false)?;
         store.db.execute(
             "UPDATE task SET held_until = ? WHERE id = ?",'''
 replace = '''
-        pause(store, &task, detail)?;
+        pause(store, &task, detail, false)?;
         store.db.execute(
             "UPDATE message SET state = 'cancelled', reason = 'held' WHERE task_id = ? AND state IN ('queued', 'gated')",
             [task.id],
@@ -315,8 +315,8 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = '        task.messages.retain(|message| message.state != "gated");'
-replace = "        task.messages.retain(|_| true);"
+find = '            .retain(|message| message.state != "gated" && !waits.holds(message));'
+replace = "            .retain(|message| !waits.holds(message));"
 
 [[plant]]
 name = "pause: a lane says nothing of a stop its window ignores"

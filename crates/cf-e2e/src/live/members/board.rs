@@ -101,12 +101,12 @@ pub fn delivered_result(inbox: &[Value]) -> Option<String> {
         .map(|message| text(&message["body"]))
 }
 
-/// The notes of a chief's `inbox` that say T-`task`'s turn left work: what the daemon
-/// tells whoever gave a task, beside its result, when its worker's turn left background
-/// work or agents running (what was ended, what could not be, and that agents were left),
-/// oldest first. None where the turn left nothing.
+/// The notes of a chief's `inbox` that say T-`task`'s window left work: what the daemon
+/// tells whoever gave a task when the window that worked on it closed with background
+/// work still running, which the close ends (a turn's end ends nothing since turn-end's
+/// smallest rule of 2026-10-21), oldest first. None where it left nothing.
 pub fn notes_of_work(inbox: &[Value], task: i64) -> Vec<String> {
-    let opening = format!("T-{task}'s turn left background ");
+    let opening = format!("T-{task}'s window closed with background work");
     inbox
         .iter()
         .filter(|message| message["kind"] == "note")

@@ -154,8 +154,12 @@ runs = ["ledger-approval"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''AND state IN ('queued', 'delivering', 'gated')",'''
-replace = '''AND state IN ('queued', 'delivering')",'''
+find = '''
+       WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')
+         AND id NOT IN'''
+replace = '''
+       WHERE task_id = ? AND state IN ('queued', 'delivering')
+         AND id NOT IN'''
 
 [[plant]]
 name = "approval: the chief’s pause leaves its words at the gate"
@@ -375,10 +379,10 @@ find = '''
         for result in &record.results {
             self.tool_result(result, at, seq)?;
         }
-        if record.interrupt {'''
+        if let Some((call, job)) = &record.job {'''
 replace = '''
         let _ = &record.results;
-        if record.interrupt {'''
+        if let Some((call, job)) = &record.job {'''
 
 # --- end to end: through the real daemon and pane host ---
 
@@ -401,8 +405,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = '        task.messages.retain(|message| message.state != "gated");'
-replace = ''
+find = '            .retain(|message| message.state != "gated" && !waits.holds(message));'
+replace = '            .retain(|message| !waits.holds(message));'
 
 # --- the stand-in agent: how long it waits, as its variables tell it ---
 # (the knob a case sets to have a turn cut by the app's quit, on any machine; the

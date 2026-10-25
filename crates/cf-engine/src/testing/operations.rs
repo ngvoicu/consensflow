@@ -21,6 +21,7 @@ use super::executor::Answer;
 use crate::chief_switch::SwitchTo;
 use crate::dispatcher::{Dispatcher, SwitchWhen};
 use crate::seams::EngineError;
+use crate::turn_end::Finished;
 use crate::windows::Activity;
 
 /// What a Switch chief is asked, as `switchChief` is given it.
@@ -108,11 +109,25 @@ impl Context {
 
     /// The human's Resume (`resumeProject`).
     pub fn resume_project(&self, project: i64) -> Result<Option<ProjectView>, EngineError> {
+        self.run(self.resuming(project))
+    }
+
+    /// The human's Resume, begun where it is called.
+    pub fn begin_resume_project(
+        &self,
+        project: i64,
+    ) -> Answer<Result<Option<ProjectView>, EngineError>> {
+        self.executor.start_now(self.resuming(project))
+    }
+
+    fn resuming(
+        &self,
+        project: i64,
+    ) -> impl Future<Output = Result<Option<ProjectView>, EngineError>> + 'static {
         let dispatcher = Rc::clone(&self.dispatcher);
-        let resume = self.operation("resumeProject", json!([project]), answer, async move {
+        self.operation("resumeProject", json!([project]), answer, async move {
             dispatcher.resume_project(project).await
-        });
-        self.run(resume)
+        })
     }
 
     /// The human's Close (`closeProject`).
@@ -184,6 +199,31 @@ impl Context {
             dispatcher.open_window(project, &handle).await
         });
         self.run(opening)
+    }
+
+    /// `by` (the chief's handle, or `human`) finishes T-`number` (`cf task finish`, the
+    /// board's Finish): an operation Node's dispatcher had none of.
+    pub fn finish_task(
+        &self,
+        project: i64,
+        number: i64,
+        by: &str,
+    ) -> Result<Finished, EngineError> {
+        let (dispatcher, by) = (Rc::clone(&self.dispatcher), by.to_owned());
+        let finishing = self.operation(
+            "finishTask",
+            json!([project, number, by]),
+            |finished: &Finished| {
+                json!({
+                    "task": finished.task.number,
+                    "state": finished.task.state,
+                    "jobs": finished.jobs,
+                    "agents": finished.agents,
+                })
+            },
+            async move { dispatcher.finish_task(project, number, &by).await },
+        );
+        self.run(finishing)
     }
 
     /// The human hides a session's terminal (`hideWindow`).
@@ -276,6 +316,13 @@ impl Context {
     pub fn exit(&self, handle: &str) {
         let (host, handle) = (Rc::clone(&self.host), handle.to_owned());
         self.run(async move { host.exit(&handle).await });
+    }
+
+    /// The same, begun where it is called: what the exit does may wait on the test.
+    pub fn begin_exit(&self, handle: &str) -> Answer<()> {
+        let (host, handle) = (Rc::clone(&self.host), handle.to_owned());
+        self.executor
+            .start_now(async move { host.exit(&handle).await })
     }
 
     /// An engine made again on the same ledger and fakes, as after a
@@ -376,6 +423,30 @@ impl Restarted<'_> {
         self.context.run(self.resuming(project))
     }
 
+    /// `by` finishes T-`number` with this engine ([`Context::finish_task`]).
+    pub fn finish_task(
+        &self,
+        project: i64,
+        number: i64,
+        by: &str,
+    ) -> Result<Finished, EngineError> {
+        let (engine, by) = (self.engine(), by.to_owned());
+        let finishing = self.context.operation(
+            "finishTask",
+            json!([project, number, by]),
+            |finished: &Finished| {
+                json!({
+                    "task": finished.task.number,
+                    "state": finished.task.state,
+                    "jobs": finished.jobs,
+                    "agents": finished.agents,
+                })
+            },
+            async move { engine.finish_task(project, number, &by).await },
+        );
+        self.context.run(finishing)
+    }
+
     /// The human's Resume, begun where it is called.
     pub fn begin_resume_project(
         &self,
@@ -393,5 +464,19 @@ impl Restarted<'_> {
             .operation("resumeProject", json!([project]), answer, async move {
                 engine.resume_project(project).await
             })
+    }
+
+    /// The human's Close, of a project this engine resumed, begun where it is called.
+    pub fn begin_close_project(
+        &self,
+        project: i64,
+    ) -> Answer<Result<Option<ProjectView>, EngineError>> {
+        let engine = self.engine();
+        let closing =
+            self.context
+                .operation("closeProject", json!([project]), answer, async move {
+                    engine.close_project(project).await
+                });
+        self.context.executor.start_now(closing)
     }
 }

@@ -17,6 +17,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use cf_base::env::Env;
+use cf_base::refusal::Refusal;
 use cf_daemon::api::context::{AgentRows, Closing, Context};
 use cf_daemon::api::credentials::Credentials;
 use cf_daemon::api::Api;
@@ -49,6 +50,14 @@ impl Front {
             ledger,
             credentials: Rc::new(Credentials::new()),
             kick: kicks.waker(),
+            finish: Rc::new(|_, _, _| {
+                Box::pin(async {
+                    Err(Refusal::new(
+                        "not-asked",
+                        "the requests of this test finish nothing",
+                    ))
+                })
+            }),
             closing: Closing::new(),
             roster,
             log,

@@ -14,12 +14,14 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use cf_base::js;
+use cf_base::{js, time};
 use serde_json::{Map, Value};
 
+use super::jobs::Watch;
 use super::patterns::OUTPUT;
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
+use crate::shared::record::reading::Source;
 
 /// What Claude Code says, in a message of its own, as it closes the turn it
 /// found cut when it resumed the conversation.
@@ -33,6 +35,10 @@ pub(super) enum Projected {
     Other,
     /// What a `UserPromptSubmit` hook added to the prompt.
     Hook(Box<Hook>),
+    /// Claude Code's own notification of a job's event or end, brought into a turn
+    /// under way (an attachment, `queued_command` of
+    /// `"commandMode":"task-notification"`): its text, and the time its record says.
+    Notified(String, Option<Arc<str>>),
     /// An operation on Claude Code's queue of messages, with the content it
     /// names where it names one.
     Enqueue(Result<String, String>),
@@ -54,10 +60,10 @@ pub(super) enum Projected {
 pub(super) struct Boundary {
     /// The record's uuid, when that is text.
     pub(super) uuid: Option<Arc<str>>,
-    /// Whether the record says background agents or workflows are still running:
-    /// none for a record that says nothing of them (a stop hook's summary), as a
-    /// `turn_duration` says by its counts.
-    pub(super) agents: Option<bool>,
+    /// How many background agents and workflows the record says are still
+    /// running: none for a record that says nothing of them (a stop hook's
+    /// summary), as a `turn_duration` says by its counts.
+    pub(super) agents: Option<usize>,
 }
 
 /// An attachment that holds a hook's context.
@@ -92,10 +98,20 @@ pub(super) struct Assistant {
 /// A block of an assistant's content that opens or closes a call.
 #[derive(Debug, PartialEq)]
 pub(super) enum Block {
-    /// A `tool_use` or `server_tool_use`, by the id it says.
-    Use(Option<Value>),
+    /// A `tool_use` or `server_tool_use`, by the id it says, and what call of the main
+    /// conversation it is, where the reader reads its result.
+    Use(Option<Value>, Call),
     /// A `tool_result` or `advisor_tool_result`.
     Result(ToolResult),
+}
+
+/// A call of the main conversation whose result the reader reads: a TaskStop's names the
+/// job it stopped, and a Monitor's the monitor it armed, which its input says.
+#[derive(Debug, PartialEq)]
+pub(super) enum Call {
+    TaskStop,
+    Monitor(Watch),
+    Other,
 }
 
 /// The result of a tool in a block: the call it answers, as the block says
@@ -126,14 +142,29 @@ pub(super) struct User {
     /// conversation: Claude Code's own words, which end the command's turn
     /// where they follow it.
     pub(super) output_of: Option<Arc<str>>,
+    /// The turn Claude Code begins by itself for a notification of a job's event or
+    /// end: from the system (`promptSource`), for a notification (`turnOrigin`, and
+    /// `origin.kind`; 2.1.241 has only the second, 2.1.277 on both).
+    pub(super) notification: bool,
+    /// Claude Code wrote it to the transcript alone (`queueTranscriptOnly`), and runs no
+    /// turn for it: 2.1.292's notification of the jobs a resumed session's last process
+    /// left, after which it waits at its prompt.
+    pub(super) transcript_only: bool,
+    /// The job a tool result of the record says it started (see [`job`]), where the record
+    /// is of the main conversation (a subagent's jobs are its own, and its end wakes it):
+    /// the call the record's first result answers, as the block says it, and the job.
+    pub(super) job: Option<(Option<Value>, Arc<str>)>,
+    /// What a TaskStop result of the record says it stopped, of the main conversation:
+    /// the call it answers, as the block says it, and the job's id.
+    pub(super) stopped: Option<(Option<Value>, Arc<str>)>,
 }
 
 /// The record `record` of the session `session`, as replay reads it.
 pub(super) fn project(record: &Value, session: &str) -> Projected {
     match kind(record) {
-        Some("attachment") => hook(record, session),
+        Some("attachment") => notified(record, session).unwrap_or_else(|| hook(record, session)),
         Some("queue-operation") => queue(record),
-        Some("assistant") => assistant(record),
+        Some("assistant") => assistant(record, session),
         Some("user") => user(record, session),
         Some("system") => system(record, session),
         _ => Projected::Other,
@@ -219,6 +250,26 @@ fn hook(record: &Value, session: &str) -> Projected {
     }))
 }
 
+/// The attachment that brings Claude Code's own notification of a job into a turn under
+/// way (2.1.277: the queued notification is taken back, `"reason": "absorbed_mid_turn"`,
+/// and the turn reads it as this), in the main conversation: its text. None for
+/// any other attachment, a human's message brought in so among them
+/// (`"commandMode":"prompt"`).
+fn notified(record: &Value, session: &str) -> Option<Projected> {
+    let attachment = record.get("attachment");
+    let says =
+        |name: &str, wanted: &str| field(attachment, name).and_then(Value::as_str) == Some(wanted);
+    let ours = of_main_conversation(record, session)
+        && says("type", "queued_command")
+        && says("commandMode", "task-notification");
+    let text = field(attachment, "prompt").and_then(Value::as_str)?;
+    let at = record
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .map(Arc::from);
+    ours.then(|| Projected::Notified(text.to_owned(), at))
+}
+
 /// An operation on the queue. `String(record.content ?? '')` is what each
 /// that names a content reads, or the failure V8 threw.
 fn queue(record: &Value) -> Projected {
@@ -235,15 +286,22 @@ fn queue(record: &Value) -> Projected {
     }
 }
 
-fn assistant(record: &Value) -> Projected {
+fn assistant(record: &Value, session: &str) -> Projected {
     // `record.message ?? {}`: none and null hold no field.
     let message = record.get("message").filter(|message| !message.is_null());
     let in_message = |name: &str| field(message, name);
     let content = in_message("content");
+    let main = of_main_conversation(record, session);
+    let made = record
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(time::parse);
     let blocks = blocks(content)
         .iter()
         .filter_map(|block| match kind(block) {
-            Some("tool_use" | "server_tool_use") => Some(Block::Use(said(block.get("id")))),
+            Some("tool_use" | "server_tool_use") => {
+                Some(Block::Use(said(block.get("id")), call(block, main, made)))
+            }
             Some("advisor_tool_result" | "tool_result") => Some(Block::Result(tool_result(block))),
             _ => None,
         })
@@ -296,7 +354,110 @@ fn user(record: &Value, session: &str) -> Projected {
         queued: record.get("promptSource").and_then(Value::as_str) == Some("queued"),
         summary: record.get("isCompactSummary") == Some(&Value::Bool(true)),
         output_of,
+        notification: is_notification(record),
+        transcript_only: record.get("queueTranscriptOnly") == Some(&Value::Bool(true)),
+        job: of_main_conversation(record, session)
+            .then(|| job(record))
+            .flatten()
+            .map(|job| (first_call(content), job)),
+        stopped: of_main_conversation(record, session)
+            .then(|| stopped(record, content))
+            .flatten(),
     }))
+}
+
+/// Whether a user's record is the turn Claude Code begins by itself for a notification
+/// of a job, by what the record says of where it came from: no words of it make it one,
+/// as a message that quotes a notification is none.
+fn is_notification(record: &Value) -> bool {
+    let says = |value: Option<&Value>, wanted: &str| value.and_then(Value::as_str) == Some(wanted);
+    says(record.get("promptSource"), "system")
+        && (says(record.get("turnOrigin"), "task_notification")
+            || says(field(record.get("origin"), "kind"), "task-notification"))
+}
+
+/// The job a tool's result says it started, by its id: a command run in the background
+/// (`backgroundTaskId`), or a monitor, whose start says its task and its time (2.1.305:
+/// `taskId`, and `timeoutMs`, a number: 0 for one that is `persistent`).
+fn job(record: &Value) -> Option<Arc<str>> {
+    let result = record.get("toolUseResult");
+    if let Some(id) = text_id(field(result, "backgroundTaskId")) {
+        return Some(id);
+    }
+    field(result, "timeoutMs").and_then(Value::as_i64)?;
+    text_id(field(result, "taskId"))
+}
+
+/// The call the first tool result of a user's `content` answers, as its block says it.
+fn first_call(content: Option<&Value>) -> Option<Value> {
+    blocks(content)
+        .iter()
+        .find(|block| kind(block) == Some("tool_result"))
+        .and_then(|block| said(block.get("tool_use_id")))
+}
+
+/// What call of the main conversation (`main`) a `tool_use` block makes, by its tool's
+/// name: a Monitor's input says what it is called (`description`) and what it watches
+/// ([`source`]), and its record when it was made (`made`, milliseconds since the epoch).
+fn call(block: &Value, main: bool, made: Option<i64>) -> Call {
+    if !main || kind(block) != Some("tool_use") {
+        return Call::Other;
+    }
+    let input = block.get("input");
+    match block.get("name").and_then(Value::as_str) {
+        Some("TaskStop") => Call::TaskStop,
+        Some("Monitor") => Call::Monitor(Watch {
+            called: made,
+            description: field(input, "description")
+                .and_then(Value::as_str)
+                .map_or_else(|| Arc::from(""), Arc::from),
+            source: source(input),
+        }),
+        _ => Call::Other,
+    }
+}
+
+/// What a Monitor's `input` watches, as Claude Code chooses it (2.1.307, 2.1.308: it takes
+/// exactly one source that is truthy, and runs a socket where `ws` is one, whatever
+/// `command` says, `"command":""` among it: Astraeus on 472b1d96). A command only where
+/// `command` is a text that is not empty and nothing else is a source; a socket where `ws`
+/// is one; and where neither, a monitor with no process of the window to look for, which no
+/// Claude Code this reader knows starts (`Source::Server`).
+fn source(input: Option<&Value>) -> Source {
+    let truthy = |value: Option<&Value>| match value {
+        None | Some(Value::Null | Value::Bool(false)) => false,
+        Some(Value::String(text)) => !text.is_empty(),
+        Some(Value::Number(number)) => number.as_f64().is_some_and(|number| number != 0.0),
+        Some(_) => true,
+    };
+    if truthy(field(input, "ws")) {
+        Source::Socket
+    } else if field(input, "command")
+        .and_then(Value::as_str)
+        .is_some_and(|command| !command.is_empty())
+    {
+        Source::Command
+    } else {
+        Source::Server
+    }
+}
+
+/// What a TaskStop call's result says it stopped: the call it answers and the job, where
+/// the record holds that one result alone, whose result is no error (2.1.305:
+/// `toolUseResult.task_id`, and its message says it stopped it).
+fn stopped(record: &Value, content: Option<&Value>) -> Option<(Option<Value>, Arc<str>)> {
+    let id = text_id(field(record.get("toolUseResult"), "task_id"))?;
+    let results: Vec<&Value> = blocks(content)
+        .iter()
+        .filter(|block| kind(block) == Some("tool_result"))
+        .collect();
+    let [result] = results.as_slice() else {
+        return None;
+    };
+    if result.get("is_error") == Some(&Value::Bool(true)) {
+        return None;
+    }
+    Some((said(result.get("tool_use_id")), id))
 }
 
 /// A system record: what a command typed at the prompt printed, or the
@@ -332,7 +493,7 @@ fn system(record: &Value, session: &str) -> Projected {
     }
 }
 
-fn boundary(record: &Value, agents: Option<bool>) -> Projected {
+fn boundary(record: &Value, agents: Option<usize>) -> Projected {
     Projected::Boundary(Boundary {
         uuid: text_id(record.get("uuid")),
         agents,
@@ -375,14 +536,14 @@ fn is_count(count: f64) -> bool {
 /// Whether a `turn_duration` is the root conversation's, which is the end of its
 /// turn: in the main conversation, with a duration and a message count that are
 /// numbers, and counts of the background agents and workflows pending that are
-/// counts where it has them. Says whether it names any pending.
+/// counts where it has them. Says how many it names pending, of both.
 ///
 /// Departs from Node's reader on purpose (the owner's decision of 2026-10-11):
 /// Node asked the counts to be none or 0, and read a record that named any as no
 /// end of the turn, which then stayed in flight until the last agent finished.
 /// A count that is no count (a string, a fraction, a number below 0) is still no
 /// end of the turn here.
-fn root_duration(record: &Value) -> Option<bool> {
+fn root_duration(record: &Value) -> Option<usize> {
     // `Number.isFinite`, `>= 0`: a number alone, a JSON one always finite here.
     let duration = record.get("durationMs").and_then(Value::as_f64);
     let count = record.get("messageCount").and_then(Value::as_f64);
@@ -392,13 +553,17 @@ fn root_duration(record: &Value) -> Option<bool> {
     if !root {
         return None;
     }
-    let mut running = false;
+    let mut running = 0_usize;
     for name in ["pendingBackgroundAgentCount", "pendingWorkflowCount"] {
         match record.get(name) {
             None => {}
             Some(Value::Number(pending)) => {
                 let pending = pending.as_f64().filter(|pending| is_count(*pending))?;
-                running |= pending > 0.0;
+                // A whole number from 0 to 2^53 - 1, which `as` saturates for a
+                // machine whose `usize` is smaller.
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let pending = pending as usize;
+                running = running.saturating_add(pending);
             }
             Some(_) => return None,
         }

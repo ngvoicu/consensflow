@@ -905,70 +905,112 @@ fn entity(meant: &str) -> Option<&str> {
     })
 }
 
-/// Whether each of `plants` applies, which plants nothing: the status is 0 where
-/// every one does. The commands a plant needs first are run. A meant name that holds
-/// an XML entity is refused, and so is a run that cannot be run as it is written (an
-/// option of `cargo test` that nextest has no word for). A plant for other systems is
-/// said SKIPPED (platform), its names checked (the table's data was), nothing of it
-/// prepared or applied.
+/// What `check` finds of one plant.
+enum Fare {
+    /// It applies to the sources as they are.
+    Applies,
+    /// It does not, for the reason `check` says.
+    NotApplies(String),
+    /// It is for another system: said, and not prepared or applied.
+    Skipped,
+    /// The run was stopped before it was checked.
+    Stopped,
+}
+
+/// How `plant` fares against the sources as they are. A meant name that holds an XML
+/// entity, and a run that cannot be run as it is written, are plants that do not apply
+/// (they are refused before anything is prepared). A plant for another system is
+/// skipped, and any other has what it needs first run and is then planted in memory
+/// only.
+fn fare(context: &Context, plant: &Plant, runner: &mut dyn Runner) -> Result<Fare, Failure> {
+    if let Some(entity) = entity(&plant.meant) {
+        return Ok(Fare::NotApplies(format!(
+            "{}: its meant name holds {entity}, a report's escape and no part of a test's name: write the name as the test does",
+            plant.name
+        )));
+    }
+    let refused = plant
+        .runs
+        .iter()
+        .find_map(|run| super::runs::refused(&run.command, context));
+    if let Some(why) = refused {
+        return Ok(Fare::NotApplies(format!("{}: {why}", plant.name)));
+    }
+    // What it needs first may be of its own system, and what it plants of that one.
+    if !plant.runs_on(HERE) {
+        return Ok(Fare::Skipped);
+    }
+    Ok(match prepare(plant, runner)? {
+        Prepared::Stopped => Fare::Stopped,
+        Prepared::Failed(unready) => Fare::NotApplies(unready.to_string()),
+        Prepared::Done => match plant.planted(context) {
+            Ok(_) => Fare::Applies,
+            Err(cause) => Fare::NotApplies(cause.to_string()),
+        },
+    })
+}
+
+/// Whether each of `plants` applies, which plants nothing: the status is 0 where every
+/// one does, or does not and is listed in `family`'s `known_unapplied` (said as known,
+/// and counted apart). A listed plant that applies again fails the check, so the list
+/// is emptied as its plants are mended. The commands a plant needs first are run. A
+/// meant name that holds an XML entity is refused, and so is a run that cannot be run as
+/// it is written (an option of `cargo test` that nextest has no word for). A plant for
+/// other systems is said SKIPPED (platform), its names checked (the table's data was),
+/// nothing of it prepared or applied.
 pub fn check(
     context: &Context,
+    family: &Family,
     plants: &[&Plant],
     runner: &mut dyn Runner,
     out: &mut dyn Write,
 ) -> Result<i32, Failure> {
-    let mut unapplied = 0;
-    let mut skipped = 0;
+    let (mut unapplied, mut known, mut stale, mut skipped) = (0, 0, 0, 0);
     for plant in plants {
-        if let Some(entity) = entity(&plant.meant) {
-            unapplied += 1;
-            writeln!(
-                out,
-                "{}: its meant name holds {entity}, a report's escape and no part of a test's name: write the name as the test does",
-                plant.name
-            )?;
-            continue;
-        }
-        let refused = plant
-            .runs
-            .iter()
-            .find_map(|run| super::runs::refused(&run.command, context));
-        if let Some(why) = refused {
-            unapplied += 1;
-            writeln!(out, "{}: {why}", plant.name)?;
-            continue;
-        }
-        // What it needs first may be of its own system, and what it plants of that one.
-        if !plant.runs_on(HERE) {
-            skipped += 1;
-            writeln!(
-                out,
-                "{}",
-                report::skipped(&plant.name, &plant.platforms, HERE)
-            )?;
-            continue;
-        }
-        let applied = match prepare(plant, runner)? {
-            Prepared::Stopped => return Ok(STOPPED),
-            Prepared::Failed(unready) => Err(unready),
-            Prepared::Done => plant.planted(context).map(drop),
-        };
-        if let Err(cause) = applied {
-            unapplied += 1;
-            writeln!(out, "{cause}")?;
+        let listed = family.known_unapplied.contains(&plant.name);
+        match fare(context, plant, runner)? {
+            Fare::Stopped => return Ok(STOPPED),
+            Fare::Skipped => {
+                skipped += 1;
+                writeln!(
+                    out,
+                    "{}",
+                    report::skipped(&plant.name, &plant.platforms, HERE)
+                )?;
+            }
+            Fare::Applies if listed => {
+                stale += 1;
+                writeln!(
+                    out,
+                    "{}: applies, so it is not known not to apply: take it off known_unapplied in kit.toml",
+                    plant.name
+                )?;
+            }
+            Fare::Applies => {}
+            Fare::NotApplies(cause) if listed => {
+                known += 1;
+                writeln!(out, "known not to apply: {cause}")?;
+            }
+            Fare::NotApplies(cause) => {
+                unapplied += 1;
+                writeln!(out, "{cause}")?;
+            }
         }
     }
     let checked = plants.len() - skipped;
-    let mut said = if unapplied == 0 {
+    let mut said = if unapplied == 0 && known == 0 {
         format!("{checked} plants apply")
     } else {
-        format!("{} of {checked} plants apply", checked - unapplied)
+        format!("{} of {checked} plants apply", checked - unapplied - known)
     };
+    if known > 0 {
+        said.push_str(&format!(", {known} known not to apply"));
+    }
     if skipped > 0 {
         said.push_str(&format!(", {skipped} skipped (platform)"));
     }
     writeln!(out, "{said}")?;
-    Ok(i32::from(unapplied != 0))
+    Ok(i32::from(unapplied + stale != 0))
 }
 
 #[cfg(test)]

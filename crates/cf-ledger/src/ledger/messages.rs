@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use super::Ledger;
 use crate::{
-    messages, Begun, Claim, GivenUp, LedgerError, MessageView, NewNote, NewQuestion, Read,
+    messages, Begun, Claim, GivenUp, HandOver, LedgerError, MessageView, NewNote, NewQuestion, Read,
 };
 
 impl Ledger {
@@ -213,6 +213,13 @@ impl Ledger {
         messages::last_pasted(&self.store, participant_id, task_id)
     }
 
+    /// The receipt of a delivered message is forgotten, as Node's ledger left one
+    /// (`null`): for the engine's tests of a delivery whose arrival nothing names.
+    #[cfg(feature = "test-support")]
+    pub fn forget_receipt(&mut self, message_id: i64) -> Result<(), LedgerError> {
+        messages::forget_receipt(&mut self.store, message_id)
+    }
+
     /// The first task message a participant's window received about a task on
     /// its own, with what its paste carried.
     pub fn first_received(
@@ -243,6 +250,46 @@ impl Ledger {
         messages::confirm_delivery_telling(&mut self.store, message_id, receipt)
     }
 
+    /// The transport lets a hand-over begun go to its window now, after every wait
+    /// of its own, if the project is open, the message still on its way, and each
+    /// row of `carried` (what its paste was begun with) still riding in it: then
+    /// they are the window's, marked handed in this write.
+    pub fn admit(&mut self, message_id: i64, carried: &[i64]) -> Result<HandOver, LedgerError> {
+        messages::admit(&mut self.store, message_id, carried)
+    }
+
+    /// The first row of `carried` (what the paste of `message_id`, handed over
+    /// already, was begun with) that its window has since, read or delivered: a
+    /// sign the window took the paste. None while it has none of them.
+    pub fn received_of(
+        &self,
+        message_id: i64,
+        carried: &[i64],
+    ) -> Result<Option<i64>, LedgerError> {
+        messages::received_of(&self.store, message_id, carried)
+    }
+
+    /// The window's record shows a paste whose Enter the engine withheld: the human
+    /// sent what the box held. The message, waiting again or withdrawn since, is
+    /// begun and confirmed in one write, `receipt` its receipt, with the rows of
+    /// `held` riding in it again; with `telling`, its conversation is recorded as
+    /// told the role it says.
+    pub fn confirm_sent_by_hand(
+        &mut self,
+        message_id: i64,
+        held: &[i64],
+        receipt: &Value,
+        telling: bool,
+    ) -> Result<Option<MessageView>, LedgerError> {
+        messages::confirm_sent_by_hand(&mut self.store, message_id, held, receipt, telling)
+    }
+
+    /// The messages of a project whose hand-over has begun at their window and is
+    /// not over: let go by their transport, or claimed by a question's door.
+    pub fn handed_over(&self, project_id: i64) -> Result<Vec<i64>, LedgerError> {
+        messages::handed_over(&self.store, project_id)
+    }
+
     /// A message not yet delivered that no longer applies.
     pub fn cancel_message(
         &mut self,
@@ -252,7 +299,9 @@ impl Ledger {
         messages::cancel_message(&mut self.store, message_id, reason)
     }
 
-    /// A delivery queued again; `refund` gives back its attempt.
+    /// A delivery queued again; `refund` gives back its attempt. A pause note
+    /// naming a task that moved on while it was on its way leaves it, and says
+    /// its warning again.
     pub fn retry_delivery(
         &mut self,
         message_id: i64,
@@ -275,7 +324,9 @@ impl Ledger {
 
     /// A delivery given up. A task message that fails takes its task with it;
     /// an answer that fails leaves its question to be answered again, and the
-    /// one who was asked is told so.
+    /// one who was asked is told so. A pause note naming a task that moved on
+    /// while it was on its way leaves it, and says its warning again; one with
+    /// no task left is withdrawn instead.
     pub fn fail_delivery(
         &mut self,
         message_id: i64,

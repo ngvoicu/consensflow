@@ -82,12 +82,28 @@ const STATE_LABEL = {
   cancelled: 'Cancelled',
 }
 /**
+ * What a task that goes on in the background waits on, in a few words: the jobs its
+ * worker started, which its harness wakes it for as each ends, and the agents it
+ * started. A job that never ends keeps the task here until the chief or the human
+ * finishes it.
+ */
+export const heldWords = ({ jobs, agents }) => {
+  if (agents === 0) return jobs === 1 ? 'a background job' : `${jobs} background jobs`
+  if (jobs === 0) return agents === 1 ? 'a background agent' : `${agents} background agents`
+  return 'background jobs and agents'
+}
+/**
  * How a card says its state: a task that waits for an answer while its window
  * goes on working (it asked, and kept at it) is at work, with a question
- * pending, and sits in Working.
+ * pending, and sits in Working; one whose worker ended its turn with a job or an
+ * agent running is at work, waiting on it, and sits in Working too.
  */
 export const stateLabel = (task) =>
-  task.questionPending ? 'Working, question pending' : STATE_LABEL[task.state]
+  task.questionPending
+    ? 'Working, question pending'
+    : task.held
+      ? `Working, waiting on ${heldWords(task.held)}`
+      : STATE_LABEL[task.state]
 const ACTIVITY_LABEL = {
   working: 'Working',
   idle: 'Idle',
@@ -140,15 +156,20 @@ const roleOf = (task, roles) => task.pool ?? roles[0]
  * before one had it, or of a member who left the staff), each `laneless` and
  * in the column of its state. A task of its own that waits while its window
  * is at work has a question pending, and says so: the board keeps it
- * `waiting`, and the window's activity is what tells the two apart.
+ * `waiting`, and the window's activity is what tells the two apart. A working
+ * task that its lane says is held (its worker ended its turn with a job or an
+ * agent running) carries what it waits on, and says so, though its window is idle.
  */
 export const rowTasks = (lane, board) =>
   [
-    ...lane.tasks.map((task) =>
-      task.state === 'waiting' && lane.activity?.state === 'working'
-        ? { ...task, questionPending: true }
-        : task,
-    ),
+    ...lane.tasks.map((task) => {
+      if (task.state === 'waiting' && lane.activity?.state === 'working') {
+        return { ...task, questionPending: true }
+      }
+      return task.state === 'working' && lane.held?.task === task.number
+        ? { ...task, held: lane.held }
+        : task
+    }),
     ...board.open
       .filter((task) => task.requester === lane.participant.handle)
       .map((task) => ({ ...task, laneless: true })),
@@ -349,6 +370,8 @@ export function laneStatus(lane, board, now) {
   }
   const state = activity?.state ?? 'closed'
   if (state === 'waiting' && activity.reason) return [state, `Waiting: ${activity.reason}`]
+  // Its task goes on in the background: the window rests, and that is not idleness.
+  if (lane.held && state === 'idle') return ['held', `Waiting on ${heldWords(lane.held)}`]
   if (resting(participant, activity)) {
     const note = sessionsNote(lane, board)
     return note === null ? null : [state, note]
@@ -903,14 +926,20 @@ export class BoardView {
     card.dataset.task = String(task.number)
     card.dataset.state = task.state
     if (task.questionPending) card.dataset.pending = 'question'
+    if (task.held) card.dataset.pending = 'background'
     card.setAttribute(
       'aria-label',
       `T-${task.number}, ${task.title}, ${stateLabel(task)}, from ${who(task.requester)}`,
     )
+    const where = element('span', 'card-route', route(task))
+    // What it waits on is said on the card itself: the window's lamp says it rests.
+    if (task.held) {
+      where.append(' · ', element('span', 'card-held', `waiting on ${heldWords(task.held)}`))
+    }
     card.append(
       element('span', 'card-number', `T-${task.number}`),
       element('span', 'card-title', task.title),
-      element('span', 'card-route', route(task)),
+      where,
       element('span', 'card-state', stateLabel(task)),
     )
     // A result reads by its first line: its drawer has it whole.
@@ -974,9 +1003,10 @@ export class TaskDrawer {
    * place: each step of its story and its fold open or shut, and the drawer
    * where it was scrolled. `terminal`: the participant whose window works on
    * the task, whether that window is closed and whether the human hid it, or
-   * null when it has none.
+   * null when it has none. `held`: what the task waits on in the background
+   * (`{jobs, agents}`), or null when it waits on nothing: the drawer says it.
    */
-  show(task, { total, closed = false, now = Date.now(), terminal = null }) {
+  show(task, { total, closed = false, now = Date.now(), terminal = null, held = null }) {
     const same = this.#drawn(task)
     const changed = !this.shows(task)
     const head = element('header', 'drawer-head')
@@ -992,7 +1022,7 @@ export class TaskDrawer {
     const meta = element(
       'p',
       'drawer-meta',
-      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)} · ${STATE_LABEL[task.state]}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
+      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)} · ${stateLabel({ ...task, held })}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
     const sections = [head, meta, this.#story(task, same, now)]
     // What its window wrote is read only when asked for, folded until then.
@@ -1134,6 +1164,21 @@ export class TaskDrawer {
           'quiet-button',
           on(this.#actions.onReassign),
           `Reassign T-${task.number} to another member of its tier`,
+        ),
+      )
+    }
+    // Any working task of a member's: what its worker said last becomes the result, at the
+    // human's word (the chief has the same in `cf task finish`), whatever the window's
+    // reader says of its turn. It ends nothing the turn left running, which ends with
+    // its window, or outlives it where the host cannot tell what is the window's: the
+    // button promises no end of it.
+    if (task.state === 'working' && task.assignee !== null && task.assignee !== 'chief') {
+      actions.push(
+        button(
+          'Finish',
+          'quiet-button',
+          on(this.#actions.onFinish),
+          `Finish T-${task.number}: what its worker said last is its result; nothing it left running is ended`,
         ),
       )
     }

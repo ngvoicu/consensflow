@@ -14,7 +14,8 @@ use crate::decided_result::results;
 use crate::{after, rig, secs, session_of, Outcome};
 
 /// What a worker is told when the quit cut its turn on T-1.
-const WORKER_CUT: &str = "ConsensFlow quit while you were working on T-1. Go on where you stopped.";
+const WORKER_CUT: &str =
+    "ConsensFlow stopped while you were working on T-1. Go on where you stopped.";
 
 /// What the stand-in chief says when it dispatched a task.
 const DISPATCHED: &str = "\"text\":\"dispatched:";

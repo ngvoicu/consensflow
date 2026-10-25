@@ -17,8 +17,10 @@ use cf_base::file::error_code;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdin, ChildStdout};
 
+use crate::job::Job;
+use crate::live::Live;
 use crate::terminate::{end, Reach};
-use crate::{terminate, Ending, Run};
+use crate::{Ending, Run};
 
 /// What a child's streams are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,8 +42,9 @@ pub struct Child {
     /// Waits until it has exited and its error stream has closed; none once
     /// it has.
     closing: RefCell<Option<Pin<Box<dyn Future<Output = ()>>>>>,
-    /// Whether it has exited and been waited for: its pid is no longer its.
-    exited: Rc<Cell<bool>>,
+    /// Whether it has exited and been waited for (its pid is no longer its), and the
+    /// job that holds it and what it started.
+    live: Rc<Live>,
     /// Whether it was asked or forced to end.
     asked: Cell<bool>,
 }
@@ -65,7 +68,7 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
-    crate::execute::hide_window(&mut command);
+    crate::job::start_in_job(&mut command);
     let mut process = command.spawn().map_err(|failed| {
         format!(
             "spawn {} {}",
@@ -73,24 +76,28 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
             error_code(&failed)
         )
     })?;
-    crate::job::adopt(&process);
+    // In a job of its own before it runs, which ends it and all it starts with the child, and
+    // with this process. A program that could not be let run did not start.
+    let job = match Job::of(&process, false) {
+        Ok(job) => job,
+        Err(why) => {
+            let _ = process.start_kill();
+            return Err(format!("spawn {} {why}", run.program.to_string_lossy()));
+        }
+    };
     // Read and let go while the child lives, whoever waits on it: one that
     // fills its error stream would otherwise stop, as Node's never does.
     let drained = process
         .stderr
         .take()
         .map(|errors| tokio::spawn(drain(errors)));
-    let exited = Rc::new(Cell::new(false));
+    let live = Rc::new(Live::new(job));
     Ok(Child {
         pid: process.id(),
         input: RefCell::new(process.stdin.take()),
         output: RefCell::new(process.stdout.take().map(BufReader::new)),
-        closing: RefCell::new(Some(Box::pin(closing(
-            drained,
-            process,
-            Rc::clone(&exited),
-        )))),
-        exited,
+        closing: RefCell::new(Some(Box::pin(closing(drained, process, Rc::clone(&live))))),
+        live,
         asked: Cell::new(false),
     })
 }
@@ -101,12 +108,12 @@ async fn drain(mut errors: ChildStderr) {
     while matches!(errors.read(&mut sink).await, Ok(count) if count > 0) {}
 }
 
-/// Until `process` has exited (then `exited` is set) and its error stream,
-/// drained apart, has closed.
+/// Until `process` has exited (then `live` says so, and lets go of what it left running)
+/// and its error stream, drained apart, has closed.
 async fn closing(
     drained: Option<tokio::task::JoinHandle<()>>,
     mut process: tokio::process::Child,
-    exited: Rc<Cell<bool>>,
+    live: Rc<Live>,
 ) {
     let drain = async {
         if let Some(drained) = drained {
@@ -115,7 +122,7 @@ async fn closing(
     };
     let wait = async {
         let _ = process.wait().await;
-        exited.set(true);
+        live.set_exited();
     };
     tokio::join!(drain, wait);
 }
@@ -159,7 +166,7 @@ impl Child {
     /// Whether it has exited, as Node's `exitCode` says once it has.
     pub fn exited(&self) -> bool {
         let _ = self.poll_closing(&mut Context::from_waker(Waker::noop()));
-        self.exited.get()
+        self.live.exited()
     }
 
     /// Waits until it has exited and its streams have closed.
@@ -168,20 +175,19 @@ impl Child {
     }
 
     /// Asks or forces it to end, not waiting: on Unix the signal `how` names,
-    /// on Windows its whole tree at once whatever `how` asks. Nothing is sent
-    /// to one that has exited and been waited for: its pid may be another's
-    /// now.
+    /// on Windows its whole job at once, everything in it, whatever `how` asks. Nothing is
+    /// sent to one that has exited and been waited for: its pid may be another's now.
     pub fn terminate(&self, how: Ending) {
         self.asked.set(true);
         if let (Some(pid), false) = (self.pid, self.exited()) {
-            terminate(pid, how);
+            end(pid, how, Reach::Process, true, self.live.job());
         }
     }
 
     /// What ends it later, should this process be ending: the forcing of it
     /// while it runs.
     pub fn ender(&self) -> Ender {
-        Ender::new(self.pid, Reach::Process, &self.exited)
+        Ender::new(self.pid, Reach::Process, &self.live)
     }
 
     fn poll_closing(&self, context: &mut Context<'_>) -> Poll<()> {
@@ -212,34 +218,38 @@ impl Drop for Child {
 pub struct Ender {
     pid: Option<u32>,
     reach: Reach,
-    exited: Weak<Cell<bool>>,
+    live: Weak<Live>,
 }
 
 impl Ender {
-    /// The end of the program `pid`, which is still there while `exited` is
-    /// held and not set: once it is set (the program has been waited for, and
-    /// its pid, and the id of the group it led, may be another's) or dropped
+    /// The end of the program `pid`, which is still there while `live` is
+    /// held and does not say it has exited: once it does (the program has been waited for,
+    /// and its pid, and the id of the group it led, may be another's) or is dropped
     /// (the program is no one's to end), nothing is sent. `reach` is what
     /// the end is sent to: the program alone, or the group it leads.
-    pub(crate) fn new(pid: Option<u32>, reach: Reach, exited: &Rc<Cell<bool>>) -> Self {
+    pub(crate) fn new(pid: Option<u32>, reach: Reach, live: &Rc<Live>) -> Self {
         Self {
             pid,
             reach,
-            exited: Rc::downgrade(exited),
+            live: Rc::downgrade(live),
         }
     }
 
     /// Whether the child is still there to be ended.
     pub fn running(&self) -> bool {
-        self.exited.upgrade().is_some_and(|exited| !exited.get())
+        self.live.upgrade().is_some_and(|live| !live.exited())
     }
 
     /// Forces the child to end, and the group it leads with it, if it is
-    /// still there, and waits for nothing (on Windows `taskkill` is started
-    /// and let go): this is the end of a process on its way out.
+    /// still there, and waits for nothing (on Windows its job is ended, and a program
+    /// with none has `taskkill` started and let go): this is the end of a process on
+    /// its way out.
     pub fn force(&self) {
-        if let (Some(pid), true) = (self.pid, self.running()) {
-            end(pid, Ending::Forced, self.reach, false);
+        let Some(live) = self.live.upgrade() else {
+            return;
+        };
+        if let (Some(pid), false) = (self.pid, live.exited()) {
+            end(pid, Ending::Forced, self.reach, false, live.job());
         }
     }
 }
@@ -479,5 +489,102 @@ mod tests {
             assert!(crate::alive(pid), "still ending as it was asked");
             tokio::time::sleep(Duration::from_millis(1500)).await;
         });
+    }
+
+    /// What is running of a program that keeps starting programs, ended as `end` says once
+    /// it has started some: `end` is given the child, and may keep it for the check by
+    /// returning it. The programs it started that are running 5 s after, and how many it
+    /// wrote down.
+    #[cfg(windows)]
+    fn left_after(end: impl FnOnce(Child) -> Option<Child>) -> (Vec<u32>, usize) {
+        use crate::testing::{
+            keeps_starting_programs, left_running, pids_so_far, Recorded, STARTS_WITHIN,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("pids");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _left = Recorded(&file);
+        let left = runtime.block_on(async {
+            let child = spawn(
+                &keeps_starting_programs(dir.path()),
+                None,
+                &system_env(),
+                Streams::Quiet,
+            )
+            .unwrap();
+            let until = std::time::Instant::now() + STARTS_WITHIN;
+            while pids_so_far(&file).len() < 4 {
+                assert!(std::time::Instant::now() < until, "it started none");
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            let kept = end(child);
+            let left = left_running(&file, Duration::from_secs(5)).await;
+            drop(kept);
+            left
+        });
+        // Not waited for: a program that is left holds the streams a read waits on.
+        runtime.shutdown_timeout(Duration::from_secs(10));
+        (left, pids_so_far(&file).len())
+    }
+
+    // Windows ends the tree whatever it is asked; Unix signals the process alone.
+    #[cfg(windows)]
+    #[test]
+    fn a_child_that_is_starting_programs_is_ended_with_everything_it_started() {
+        for how in [Ending::Asked, Ending::Forced] {
+            let (left, started) = left_after(|child| {
+                child.terminate(how);
+                Some(child)
+            });
+            assert!(
+                left.is_empty(),
+                "{how:?}: {} of the {started} processes it started are still running: {left:?}",
+                left.len()
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_child_let_go_while_it_is_starting_programs_is_ended_with_everything_it_started() {
+        let (left, started) = left_after(|child| {
+            drop(child);
+            None
+        });
+        assert!(
+            left.is_empty(),
+            "{} of the {started} processes it started are still running: {left:?}",
+            left.len()
+        );
+    }
+
+    #[test]
+    fn a_child_that_exits_of_itself_leaves_what_it_started_running() {
+        use crate::testing::{leaves_a_writer, Survivors};
+        let dir = tempfile::tempdir().unwrap();
+        let (file, marked) = (dir.path().join("pids"), dir.path().join("late"));
+        block_on(async {
+            let child = spawn(
+                &leaves_a_writer(&file, &marked, 2),
+                None,
+                &Env::from_process(),
+                Streams::Quiet,
+            )
+            .unwrap();
+            child.closed().await;
+        });
+        let pids = crate::testing::pids_in(&file, 2).expect("written before it ended");
+        let _left = Survivors(pids);
+        let until = std::time::Instant::now() + Duration::from_secs(15);
+        while !marked.exists() && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            marked.exists(),
+            "what it left running was let go of, and wrote"
+        );
     }
 }

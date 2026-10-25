@@ -42,6 +42,8 @@ engine-dispatcher-window-closes = ["cargo", "test", "--offline", "-p", "cf-engin
 engine-dispatcher-approval = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "approval::"]
 engine-lib-stalls = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "stalls::"]
 engine-lib-windows = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "windows::"]
+engine-dispatcher-stale-box = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stale_box::"]
+ledger-receipt-suspended = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "suspended::"]
 
 # B4: a brief on its way when the chief's own step is done.
 
@@ -544,7 +546,7 @@ replace = '''            self.close_own(record, pane).await?;'''
 [[plant]]
 name = "review 306: the words that resume a paused task fail it when its window never had them"
 meant = "a_resume_whose_window_never_comes_up_pauses_its_task_again_and_the_note_it_carried_waits_for_the_next"
-runs = ["engine-dispatcher-resume", "ledger-receipt-carrying"]
+runs = ["engine-dispatcher-resume", "ledger-receipt-carrying", "engine-dispatcher-stale-box", "ledger-receipt-suspended"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
@@ -648,8 +650,8 @@ runs = ["engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''        let waiting = if waiting.is_empty() {'''
-replace = '''        let waiting = if waiting.is_empty() || !waiting.is_empty() {'''
+find = '''        let waiting = waiting_for_the_reopen(told, of);'''
+replace = '''        let waiting = String::new();'''
 
 [[plant]]
 name = "review 306: a resume's pause is told past the stalls of its burst"
@@ -707,3 +709,68 @@ runs = ["engine-dispatcher-resume"]
 file = "crates/cf-engine/src/windows.rs"
 find = '''        self.own_exit.as_ref().filter(|own| own.pane == *pane)'''
 replace = '''        self.own_exit.as_ref().filter(|own| own.pane.id == pane.id)'''
+
+# The alpha.3 merge (T-509): where give-up-paths' rules meet main's turn-end, Resume after Close
+# and removal-tellers.
+
+[[plant]]
+name = "review 306: a resume's words given up in a suspended project are paused again for the project's resume"
+meant = "a_resume_whose_words_are_given_up_in_a_suspended_project_is_paused_again_for_its_requester"
+runs = ["ledger-receipt-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''    pause(store, task, detail, false)?;
+    Ok(true)'''
+replace = '''    pause(store, task, detail, true)?;
+    Ok(true)'''
+
+[[plant]]
+name = "review 306: a later window's kill under way is taken for the earlier one's"
+meant = "a_kill_of_an_earlier_window_refused_at_last_leaves_a_later_windows_close_its_own"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                    .position(|killing| killing.pane == *pane);'''
+replace = '''                    .position(|_| true);'''
+
+[[plant]]
+name = "review 306: a give-up's pause in an open project is taken back as a suspension's"
+meant = "a_kill_of_an_earlier_window_refused_at_last_leaves_a_later_windows_close_its_own"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''                    .find(|killing| marked && killing.pane == *pane)'''
+replace = '''                    .find(|killing| killing.pane == *pane)'''
+
+[[plant]]
+name = "review 306: a give-up's exit after a Close is the window's own, not the Close's"
+meant = "a_give_up_whose_kill_is_taken_after_a_close_pauses_its_task_once_for_the_resume"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''                let is_own = own.is_some();'''
+replace = '''                let is_own = own.is_some() && project.state == "open";'''
+
+[[plant]]
+name = "review 306: the teller of words that never reach the window hears of everyone's that wait"
+meant = "the_teller_of_words_that_never_reach_the_window_hears_which_of_its_own_wait_for_the_reopen"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                    self.tell_failed(&project, task, teller, &because, &told, Some(teller))?;'''
+replace = '''                    self.tell_failed(&project, task, teller, &because, &told, None)?;'''
+
+[[plant]]
+name = "review 306: the teller of words that never reach the window hears nothing of its own that wait"
+meant = "the_teller_of_words_that_never_reach_the_window_hears_which_of_its_own_wait_for_the_reopen"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                    self.tell_failed(&project, task, teller, &because, &told, Some(teller))?;'''
+replace = '''                    self.tell_failed(&project, task, teller, &because, &[], Some(teller))?;'''

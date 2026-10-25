@@ -7,7 +7,9 @@
 //! report it keeps, with the timeline and the run's log in it (each text of the JSON, a
 //! window's screen as one text, and the Markdown: [`Edge::keep`]); what stopped the run,
 //! kept in a file, of which `cf-evals` writes where it is on its error output
-//! ([`Edge::failure`]); and what the rig says of itself when it is dropped unclosed
+//! ([`Edge::failure`]); the ledger, copied beside the report where a window stalled or
+//! the project did not reach its end ([`Edge::keep_ledger`], said only by where it is);
+//! and what the rig says of itself when it is dropped unclosed
 //! (the masker its configuration is given: [`Edge::masker`]). Nothing of the long run
 //! writes around it: `tests/long_run/edge.rs` holds that.
 //!
@@ -32,6 +34,7 @@ use cf_e2e::rig::Masker;
 use serde_json::Value;
 
 use super::mask::{mask, screen, Names};
+use crate::measure::on_copy;
 use crate::run::floor::Floor;
 use crate::{Error, Result};
 
@@ -109,6 +112,34 @@ impl Edge {
         files::write(&json_file, format!("{pretty}\n"))?;
         files::write(&text_file, self.shown(text))?;
         Ok((json_file, text_file))
+    }
+
+    /// Keeps a copy of the ledger `file` (a closed app's) in `folder`, as
+    /// `<name>-ledger.db`: where it is. The file and its write-ahead log made one database
+    /// (`VACUUM INTO`), whole and unmasked, as no ledger can be masked: it stays on the
+    /// machine the run ran on, as the report beside it does, and leaves the run only by
+    /// where it is (its name the run's own from then).
+    pub fn keep_ledger(&self, folder: &Path, name: &str, file: &Path) -> Result<PathBuf> {
+        let kept = folder.join(format!("{name}-ledger.db"));
+        self.knows_files(&[&kept]);
+        files::make_dir(folder)?;
+        on_copy(file, |db| {
+            db.execute("VACUUM INTO ?1", [kept.to_string_lossy()])?;
+            Ok(())
+        })?;
+        Ok(kept)
+    }
+
+    /// Where a sample of a stalled window's program is kept: `<name>-<label>-sample.txt` in
+    /// `folder` (the reports'), the folder made and the file the run's own, said only by
+    /// where it is. The system's `sample` writes it.
+    pub fn sample_file(&self, folder: &Path, name: &str, label: &str) -> Result<PathBuf> {
+        // One extension: what the edge masks is a name up to its first dot, known as the
+        // file's stem.
+        let file = folder.join(format!("{name}-{label}-sample.txt"));
+        self.knows_files(&[&file]);
+        files::make_dir(folder)?;
+        Ok(file)
     }
 
     /// What stopped the run before it kept its report, as it leaves it for `cf-evals` to

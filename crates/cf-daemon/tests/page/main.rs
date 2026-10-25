@@ -59,7 +59,7 @@ const UNREACHED: &str =
 
 /// The operations this build added to Node's: no recording of Node's asks
 /// them, and the page's own unit tests (`src/page/tests`) do.
-const ADDED: [PageOperation; 13] = [
+const ADDED: [PageOperation; 14] = [
     PageOperation::WakeUpGet,
     PageOperation::WakeUpSet,
     PageOperation::ProjectSpecs,
@@ -71,6 +71,7 @@ const ADDED: [PageOperation; 13] = [
     PageOperation::SpecsFile,
     PageOperation::SpecsPresent,
     PageOperation::SpecsOpen,
+    PageOperation::TaskFinish,
     PageOperation::HistoryGet,
     PageOperation::HistoryPart,
 ];

@@ -81,6 +81,30 @@ impl Dispatcher {
     /// is settled by the look that comes before any message goes in
     /// ([`Dispatcher::watch_prelude`]).
     pub(crate) fn next_in_line(&self, record: &Record) -> Result<Option<MessageView>, EngineError> {
+        let head = self.head_of_line(record)?;
+        // A message of another task than the one whose work the window holds waits for a
+        // window of its own (`ownership`): what is of the window's task goes before it.
+        let owner = record.window.borrow().owner;
+        let (Some(owner), Some(other)) = (owner, head.as_ref()) else {
+            return Ok(head);
+        };
+        if other.task_number.is_none_or(|number| number == owner) {
+            return Ok(head);
+        }
+        let ledger = self.seams.ledger.borrow();
+        for waiting in ledger.pending(record.id)? {
+            if waiting.state == "queued"
+                && waiting.task_number == Some(owner)
+                && ledger.next_delivery_of(record.id, waiting.id)?.is_some()
+            {
+                return Ok(Some(waiting));
+            }
+        }
+        Ok(head)
+    }
+
+    /// The head of `record`'s queue, the prelude a launch put ahead of it first.
+    fn head_of_line(&self, record: &Record) -> Result<Option<MessageView>, EngineError> {
         let ledger = self.seams.ledger.borrow();
         let prelude = record.delivery.borrow().prelude.clone();
         let Some(prelude) = prelude else {
@@ -172,6 +196,7 @@ impl Dispatcher {
             queued: false,
             free_since: None,
             entered_again: false,
+            carried: Vec::new(),
         })
     }
 

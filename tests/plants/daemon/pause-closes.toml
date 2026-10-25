@@ -17,7 +17,11 @@
 #   queued for another window (Astra on round 1);
 # - a window whose member is out of quota is never closed;
 # - the rig's case reads the close by sampling the lane for its closed pane, which a
-#   look that comes after the window came back never sees (both reviewers on round 1).
+#   look that comes after the window came back never sees (both reviewers on round 1);
+# - the live suite's cases against the stand-in agent (`crates/cf-e2e/tests/live_stops/
+#   midturn/`) read the lane over the stop as working and then closed, at whatever look
+#   the first came: held to "+0.0 s" they failed when the daemon answered the pause late
+#   (T-403), and a lane that never closed must still fail them.
 #
 # Every name holds `pause closes`, so `cargo xtask plants daemon "pause closes"` runs
 # them all.
@@ -27,6 +31,14 @@
 rig-regression-hung-pause = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_pause_a_hung_worker_ignored_stranded_its_task::"], builds = true }
 # The engine's own tests of the stops.
 engine-lib-stops = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "stops::"]
+# The rig's process support, whole: the stop and the continue of a program are tested there.
+cf-e2e-lib-process = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::"]
+# The live suite's case of a pause the daemon answers late (the daemon is stopped for a moment).
+live-stops-late = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::stand_in::a_pause_the_daemon_answers_a_fifth"]
+# The live suite's judge, whole: the reader of the lane over the stop is one of its tests.
+live-stops-judge = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::judge::"]
+# The live suite's case of a stand-in that ignores every round, against the native `cf`.
+live-stops-ignored = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::stand_in::a_stand_in_that_goes_on_through_three_rounds"], builds = true }
 
 [[plant]]
 name = "pause closes: a window that ignores every round is left open"
@@ -135,3 +147,81 @@ replace = '''
     )?;
     let state = if at_once { "queued" } else { "paused" };
     assert_eq!(project.task(1)?["state"], state);'''
+
+[[plant]]
+name = "pause closes: the lane over the stop is taken for a closed one whether or not the window closed"
+meant = "a_lane_that_never_closed_or_that_closed_without_working_is_not_that"
+runs = ["live-stops-judge"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/midturn/judge.rs"
+find = 'words.starts_with(&["working", "closed"])'
+replace = 'words.starts_with(&["working"])'
+
+[[plant]]
+name = "pause closes: the first look at the lane over the stop is held to +0.0 s"
+meant = "a_lane_that_read_working_and_then_closed_did_so_whenever_it_was_first_looked_at"
+runs = ["live-stops-judge"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/midturn/judge.rs"
+find = '    lane_words(said).is_some_and(|words| words.starts_with(&["working", "closed"]))'
+replace = '    said.contains("     the lane over the stop: working at +0.0 s, closed at +")'
+
+[[plant]]
+name = "pause closes: a window that ignores every round is left open, on the live suite's case"
+meant = "a_stand_in_that_goes_on_through_three_rounds_is_a_stop_the_case_fails_and_says_each_round_of"
+runs = ["live-stops-ignored"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "                if self.retire(record).await? {"
+replace = "                if false {"
+
+[[plant]]
+name = "pause closes: a program told to stall is never stopped"
+meant = "a_stalled_program_is_stopped_at_once_and_goes_on_by_itself_after_its_span"
+runs = ["cf-e2e-lib-process"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/pid.rs"
+find = '''
+    signal(pid, Signal::Stop)?;
+    std::thread::spawn(move || {'''
+replace = '''
+    std::thread::spawn(move || {'''
+
+[[plant]]
+name = "pause closes: a program that was stalled never goes on"
+meant = "a_stalled_program_is_stopped_at_once_and_goes_on_by_itself_after_its_span"
+runs = ["cf-e2e-lib-process"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/pid.rs"
+find = "        let _ = signal(pid, Signal::Continue);"
+replace = "        let _ = pid;"
+
+[[plant]]
+name = "pause closes: the signal to continue stops the program again"
+meant = "a_stopped_program_answers_what_it_was_sent_meanwhile_once_it_is_continued"
+runs = ["cf-e2e-lib-process"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/pid.rs"
+find = "        Signal::Continue => Sent::SIGCONT,"
+replace = "        Signal::Continue => Sent::SIGSTOP,"
+
+[[plant]]
+name = "pause closes: the late case never stalls the daemon"
+meant = "a_pause_the_daemon_answers_a_fifth_of_a_second_late_is_the_same_stop_through_three_rounds"
+runs = ["live-stops-late"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/midturn/stand_in.rs"
+find = "        stall(members.rig().daemon_pid(), Duration::from_millis(200)).unwrap();"
+replace = "        let _ = (members, stall);"

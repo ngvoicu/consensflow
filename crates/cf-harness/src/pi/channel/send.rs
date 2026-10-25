@@ -2,8 +2,9 @@
 //! envelope. The inbox record is strictly bounded `{id, type, launchId,
 //! session, text, expiresAt}`, with a unique `m-<hex>` id, the launch's
 //! immutable id, the target's conversation and one absolute expiry. Native
-//! admission is gated by the pane's claim immediately before the inbox rename,
-//! the hand-over: a failed claim, or any failure before the rename, is known to
+//! admission is gated by the pane's claim and the pane host's word that it still
+//! admits the message, immediately before the inbox rename, the hand-over: a
+//! failed claim, or any failure before the rename, is known to
 //! have written nothing ([`before`]). From the rename on, Pi may have taken the
 //! message, so a missing acknowledgement or any failure is uncertain and Pi's
 //! own record decides ([`after`]); the message is never retried automatically.
@@ -17,7 +18,7 @@ use cf_base::{js, path};
 use serde_json::{json, Value};
 
 use super::hex;
-use crate::contract::{Pane, PaneHost};
+use crate::contract::{Pane, PaneHost, NOT_ADMITTED};
 use crate::seams::{Entropy, Time};
 use crate::shared::admission::Sent;
 use crate::shared::pane::claim;
@@ -234,7 +235,13 @@ async fn before(
         return Err(before_the_rename(failed.to_string()));
     }
     pane_named(target.pane).map_err(before_the_rename)?;
-    let claimed = claim(target.host, target.pane).await;
+    let mut claimed = claim(target.host, target.pane).await;
+    // The claim is the last wait before the rename, the hand-over, which follows
+    // in this poll: the pane host is asked then whether it still admits the
+    // message, and one it does not is a claim refused (`PaneHost::admits`).
+    if claimed.get("ok") == Some(&Value::Bool(true)) && !target.host.admits() {
+        claimed = json!({ "ok": false, "error": "not-admitted", "cause": NOT_ADMITTED });
+    }
     if claimed.get("ok") != Some(&Value::Bool(true)) {
         return Err(match rm_force(Path::new(&temporary)) {
             Ok(()) => Failed::Answered(Answer::claim_refused(&claimed)),

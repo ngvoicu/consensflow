@@ -23,9 +23,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, Interrupt, Launch, Prepared, Readiness, Skill, Waiting, Window, Work,
+    Adapter, Admission, Input, Interrupt, Launch, Prepared, Readiness, Skill, Waiting, Window, Work,
 };
-use cf_harness::records::{Item, Quota, Role};
+use cf_harness::records::{Item, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::{json, Value};
@@ -44,8 +44,10 @@ pub struct FakeAgent {
     pub native: String,
     pub items: Vec<Item>,
     pub settled: bool,
-    /// The settled turn left background agents running (the reading says so).
-    pub agents_pending: bool,
+    /// The settled turn left background agents or jobs running (the reading says so).
+    pub pending: Pending,
+    /// The monitors among those jobs, as the reading says them.
+    pub monitors: Vec<Monitor>,
     pub waiting: Option<Waiting>,
     pub quota: Option<Arc<Quota>>,
     /// Whether a delivery is taken.
@@ -85,6 +87,9 @@ pub struct FakeAgent {
     /// asked), it holds nothing (`Some(false)`: Codex's thread before its first
     /// turn), or the record cannot tell (none).
     pub resumable: Option<bool>,
+    /// Its record cannot be read at a look (`Reading::Unknown`), as when the reader's
+    /// read of the transcript fails.
+    pub unread: bool,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -177,6 +182,10 @@ pub struct FakeAdapter {
     pub ready_holds: Holds,
     /// Deliveries the test holds.
     pub deliver_holds: Holds,
+    /// Its windows take their first message once they are up, as OpenCode's do
+    /// through its server, and only if the host admits it then: not with the
+    /// launch, as a message on a command line goes in.
+    pub seeds: Cell<bool>,
     /// Where its harness has the Specmint variant installed, when the test says
     /// it has: the `SKILL.md` it answers. Without, the copy ConsensFlow would
     /// keep for it, which is the same for every launch.
@@ -188,6 +197,10 @@ pub struct FakeAdapter {
     /// told the conversation as `[session]`: what the harness says is its own
     /// when the ask is let go. Node's dispatcher asked nothing of the kind.
     pub resumable_holds: Holds,
+    /// Whether the host said, at each delivery in order, that the engine emptied
+    /// the window's input box just before it (`PaneHost::cleared`). Not written
+    /// down in the traces: Node's dispatcher emptied no box.
+    pub cleared: RefCell<Vec<bool>>,
     /// Looks at a record with no window open that the test holds, told the
     /// conversation as `[session]`: one let go reads the record as it is then.
     /// Node's dispatcher suite held none.
@@ -249,9 +262,11 @@ impl FakeAdapter {
             start_holds: Holds::default(),
             ready_holds: Holds::default(),
             deliver_holds: Holds::default(),
+            seeds: Cell::new(false),
             specmint_installed: RefCell::new(None),
             specmint_asked: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
+            cleared: RefCell::new(Vec::new()),
             record_holds: Holds::default(),
             cut_holds: Holds::default(),
             wraps_pastes: Cell::new(false),
@@ -326,25 +341,85 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(item);
             agent.settled = true;
-            agent.agents_pending = false;
+            agent.pending = Pending::default();
+            agent.monitors.clear();
             agent.took_back = false;
         });
     }
 
-    /// The agent answers, and its turn ends with background agents still
-    /// running: its harness lets it take input, and an agent's end wakes a turn.
-    pub fn answer_leaving_agents(&self, handle: &str, text: &str) {
+    /// The agent answers, and its turn ends with `pending` still running: its
+    /// harness lets it take input, and the end of each wakes a turn.
+    pub fn answer_leaving(&self, handle: &str, text: &str, pending: Pending) {
         self.answer(handle, text);
-        self.with(handle, |agent| agent.agents_pending = true);
+        self.with(handle, |agent| agent.pending = pending);
+    }
+
+    /// The agent answers, and its turn ends with `pending` still running, `monitors` among
+    /// it as the reading says them.
+    pub fn answer_leaving_monitors(
+        &self,
+        handle: &str,
+        text: &str,
+        pending: Pending,
+        monitors: Vec<Monitor>,
+    ) {
+        self.answer_leaving(handle, text, pending);
+        self.with(handle, |agent| agent.monitors = monitors);
+    }
+
+    /// The agent answers, and its turn ends with a background agent still running.
+    pub fn answer_leaving_agents(&self, handle: &str, text: &str) {
+        self.answer_leaving(
+            handle,
+            text,
+            Pending {
+                agents: 1,
+                ..Pending::default()
+            },
+        );
+    }
+
+    /// The agent answers, and its turn ends with a job it started in the background
+    /// (a command, a monitor) still running.
+    pub fn answer_leaving_a_job(&self, handle: &str, text: &str) {
+        self.answer_leaving(
+            handle,
+            text,
+            Pending {
+                jobs: 1,
+                ..Pending::default()
+            },
+        );
+    }
+
+    /// The harness wakes the agent for the end of a job or an agent it left running: a
+    /// turn of its own begins with the harness's notification, `said`, as the user's item
+    /// Claude Code writes it as.
+    pub fn wake(&self, handle: &str, said: &str) {
+        let item = self.item(Role::User, said);
+        self.with(handle, |agent| {
+            agent.items.push(item);
+            agent.settled = false;
+            agent.pending = Pending::default();
+            agent.monitors.clear();
+            agent.took_back = false;
+        });
     }
 
     /// The agent is at work on a turn.
     pub fn busy(&self, handle: &str) {
         self.with(handle, |agent| {
             agent.settled = false;
-            agent.agents_pending = false;
+            agent.pending = Pending::default();
+            agent.monitors.clear();
             agent.took_back = false;
         });
+    }
+
+    /// The agent's record cannot be read from now on (`unread`), or can again: its
+    /// window is as it was.
+    pub fn unread(&self, handle: &str, unread: bool) {
+        self.with(handle, |agent| agent.unread = unread);
     }
 
     /// The agent is at work on a turn it stops, at once and writing nothing,
@@ -399,7 +474,8 @@ impl FakeAdapter {
             agent.quota = Some(Arc::new(quota));
             agent.failed = true;
             agent.settled = true;
-            agent.agents_pending = false;
+            agent.pending = Pending::default();
+            agent.monitors.clear();
         });
     }
 
@@ -421,7 +497,8 @@ impl FakeAdapter {
             agent.items = agent.records.get(native).cloned().unwrap_or_default();
             agent.shows = Some(native.to_owned());
             agent.settled = true;
-            agent.agents_pending = false;
+            agent.pending = Pending::default();
+            agent.monitors.clear();
         });
     }
 
@@ -489,7 +566,8 @@ impl FakeAdapter {
                 };
                 agent.items.push(self.item(Role::User, &recorded));
                 agent.settled = false;
-                agent.agents_pending = false;
+                agent.pending = Pending::default();
+                agent.monitors.clear();
                 // A message that arrives starts a turn: the one before it ended as it did.
                 agent.failed = false;
                 agent.took_back = false;
@@ -560,7 +638,8 @@ impl Asked {
             native: native.clone(),
             items: resumed.unwrap_or_default(),
             settled: true,
-            agents_pending: false,
+            pending: Pending::default(),
+            monitors: Vec::new(),
             waiting: None,
             quota: None,
             admit: true,
@@ -578,10 +657,15 @@ impl Asked {
             took_back: false,
             cannot_tell_a_cut: false,
             resumable: Some(true),
+            unread: false,
         };
+        let seeded = launch
+            .message
+            .filter(|_| fake.seeds.get())
+            .map(str::to_owned);
         if let Some(message) = launch
             .message
-            .filter(|_| !fake.forgets_first_messages.get())
+            .filter(|_| seeded.is_none() && !fake.forgets_first_messages.get())
         {
             agent.items.push(fake.item(Role::User, message));
             agent.settled = false;
@@ -593,6 +677,7 @@ impl Asked {
             id.clone(),
             native.clone(),
             Rc::clone(fake),
+            seeded,
         ));
         Box::pin(async move {
             // A test's own `prepare` is an async function that returns the
@@ -704,6 +789,23 @@ impl Adapter for Asked {
     /// traces.
     fn keeps_first_instructions(&self) -> bool {
         self.fake.keeps_first_instructions.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces. The fake posts its first message once up where the test says it
+    /// seeds, as OpenCode does.
+    fn first_message_once_up(&self) -> bool {
+        self.fake.seeds.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces. As the harness it answers for takes it: Claude Code and Devin
+    /// pasted, their boxes emptied with Control-C, the others over a channel.
+    fn input(&self) -> Input {
+        match self.harness.as_str() {
+            "claude-code" | "devin" => Input::Pasted { clear: &[0x03] },
+            _ => Input::Channel,
+        }
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the
