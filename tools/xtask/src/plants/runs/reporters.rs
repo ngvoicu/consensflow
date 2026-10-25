@@ -411,9 +411,7 @@ fn nextest_words(args: &[OsString]) -> Result<Vec<OsString>, String> {
     while let Some(word) = rest.next() {
         let text = word.to_string_lossy();
         if text == "--" {
-            words.push(word.clone());
-            words.extend(rest.cloned());
-            break;
+            return after_the_dashes(words, rest.cloned());
         }
         if !text.starts_with('-') || text == "-" {
             words.push(word.clone());
@@ -445,6 +443,40 @@ fn nextest_words(args: &[OsString]) -> Result<Vec<OsString>, String> {
         }
         words.extend(next);
     }
+    Ok(words)
+}
+
+/// The words of nextest's that `words` (the words before a `--`, as nextest names them)
+/// and `after` (libtest's, after it) are: libtest's threads (`--test-threads N` or
+/// `--test-threads=N`) are nextest's own option before the `--`, which nextest takes
+/// nowhere else (0.9.148 emulates `--ignored`, `--include-ignored`, `--skip`, `--exact`
+/// and `--nocapture` there), and the rest stays after it.
+fn after_the_dashes(
+    mut words: Vec<OsString>,
+    after: impl Iterator<Item = OsString>,
+) -> Result<Vec<OsString>, String> {
+    let mut libtest = Vec::new();
+    let mut after = after.peekable();
+    while let Some(word) = after.next() {
+        let text = word.to_string_lossy().into_owned();
+        let threads = match text.strip_prefix("--test-threads") {
+            Some("") => Some(
+                after
+                    .next_if(|value| !value.to_string_lossy().starts_with('-'))
+                    .ok_or_else(|| {
+                        "cargo test -- --test-threads: --test-threads is given no value".to_owned()
+                    })?,
+            ),
+            Some(joined) => joined.strip_prefix('=').map(OsString::from),
+            None => None,
+        };
+        match threads {
+            Some(threads) => words.extend([OsString::from("--test-threads"), threads]),
+            None => libtest.push(word),
+        }
+    }
+    words.push(OsString::from("--"));
+    words.extend(libtest);
     Ok(words)
 }
 

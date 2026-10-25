@@ -38,8 +38,10 @@ libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }
-# The page's WebView2, told to load the page again when its process fails (page_crash.rs);
-# the version tauri-runtime-wry is built with.
+# The page's WebView2, told to load the page again when its process fails (page_crash.rs).
+# Its version moves with Tauri's: it is the one tauri-runtime-wry and wry are built with
+# (Cargo.lock holds one copy), and a Tauri that takes another needs this one moved with it,
+# or Windows builds two and `platform.controller()` no longer has this crate's types.
 webview2-com = "0.38.2"
 
 [dev-dependencies]

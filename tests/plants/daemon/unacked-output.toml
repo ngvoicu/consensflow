@@ -4,7 +4,8 @@
 # the page writes each message to its terminal as it comes and acknowledges up to
 # the last one drawn (app/ui/terminal-link.js), acknowledges the output of a pane
 # it let go of while it still runs, and on Windows a page whose process failed is
-# loaded again (app/src-tauri/src/page_crash.rs). What a throttled page gains is
+# loaded again (app/src-tauri/src/page_crash.rs), kept apart and given up on when it
+# fails as fast as it loads (page_reloads.rs, T-499). What a throttled page gains is
 # shown on a built app only (crates/cf-e2e/tests/smoke/hidden.rs, its plants in
 # release/packaged.toml), and macOS's throttling switched off on an app built
 # with the plant, by hand.
@@ -12,6 +13,7 @@
 [run]
 page-acks = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "writes each message to its terminal|acknowledges what comes for a window"]
 app-page-crash = ["cargo", "xtask", "app", "test", "page_crash"]
+app-page-reloads = ["cargo", "xtask", "app", "test", "page_reloads"]
 
 [[plant]]
 name = "page acks: each message waits for the one before it to be drawn"
@@ -72,3 +74,45 @@ file = "app/src-tauri/src/page_crash.rs"
 find = '''    kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED
         || kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE'''
 replace = '''    kind.0 <= COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE.0'''
+
+[[plant]]
+name = "page crash: two kinds of failure are said in the same words (Windows)"
+meant = "every_failure_is_said_by_its_kind_and_with_what_is_done_with_it"
+runs = ["app-page-crash"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/page_crash.rs"
+find = '''        COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED => "the GPU's process ended",
+'''
+replace = ""
+
+[[plant]]
+name = "page reloads: a failed page is loaded again as fast as it fails"
+meant = "a_page_that_fails_as_it_loads_is_loaded_five_s_apart_and_given_up_on_after_five_in_a_minute"
+runs = ["app-page-reloads"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/page_reloads.rs"
+find = "let at = self.at.back().map_or(now, |last| now.max(*last + APART));"
+replace = "let at = now;"
+
+[[plant]]
+name = "page reloads: a page that fails as it loads is never given up on"
+meant = "a_page_that_fails_as_it_loads_is_loaded_five_s_apart_and_given_up_on_after_five_in_a_minute"
+runs = ["app-page-reloads"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/page_reloads.rs"
+find = "        if self.at.len() >= AT_MOST {"
+replace = "        if self.at.len() >= usize::MAX {"
+
+[[plant]]
+name = "page reloads: a load more than a minute ago is counted still"
+meant = "the_loads_of_more_than_a_minute_ago_are_not_counted"
+runs = ["app-page-reloads"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/page_reloads.rs"
+find = ".is_some_and(|first| now.saturating_duration_since(*first) >= WITHIN)"
+replace = ".is_some_and(|first| now.saturating_duration_since(*first) > WITHIN * 60)"

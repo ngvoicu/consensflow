@@ -766,6 +766,78 @@ fn a_window_whose_page_never_acknowledges_goes_on_and_its_screen_keeps_up() {
     helper.close_input_and_wait();
 }
 
+/// Why a window that is no longer read stops its agent, not only its screen: Node, the
+/// runtime of Pi, stops dead once its terminal is not read. A program on a terminal that
+/// nobody reads ticks a file on a timer every 100 ms and writes 8 KiB to the terminal
+/// every 10 ms: once the terminal's buffer is full its writes block the event loop, and
+/// its timers stop with them, until the terminal is read again (T-454: 0 ticks in 8 s
+/// unread, on Node 24 on macOS). A probe of the harness's runtime, not of ConsensFlow:
+/// it passes, and is run by name (`cargo test -p cf-panes --test headless --
+/// --ignored a_node_program_stops_while_its_terminal_is_not_read`) with `node` on the
+/// PATH, beside the known failure above, whose program waits the same way.
+#[test]
+#[ignore = "a probe of Node on a terminal nobody reads (T-454), run by name with node on the PATH"]
+fn a_node_program_stops_while_its_terminal_is_not_read() {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+    let ticks = std::env::temp_dir().join(format!("cf-node-ticks-{}", std::process::id()));
+    let _ = std::fs::remove_file(&ticks);
+    let script = format!(
+        "const fs = require('fs'); let ticks = 0; \
+         setInterval(() => fs.writeFileSync({path:?}, String(++ticks)), 100); \
+         setInterval(() => process.stdout.write('x'.repeat(8191) + '\\n'), 10);",
+        path = ticks.display().to_string()
+    );
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+    let mut node = CommandBuilder::new("node");
+    node.args(["-e", &script]);
+    let mut child = match pair.slave.spawn_command(node) {
+        Ok(child) => child,
+        Err(error) => panic!("node could not be started (is it on the PATH?): {error}"),
+    };
+    drop(pair.slave);
+    let read = || {
+        std::fs::read_to_string(&ticks)
+            .ok()
+            .and_then(|said| said.trim().parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+
+    // Unread: a second for the buffer to fill, then seven more in which nothing ticks.
+    thread::sleep(Duration::from_secs(1));
+    let filled = read();
+    thread::sleep(Duration::from_secs(7));
+    let unread = read() - filled;
+
+    // Read: the program goes on.
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    thread::spawn(move || {
+        let mut buffer = [0u8; 65536];
+        while matches!(std::io::Read::read(&mut reader, &mut buffer), Ok(read) if read > 0) {}
+    });
+    thread::sleep(Duration::from_secs(4));
+    let after = read() - filled - unread;
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_file(&ticks);
+
+    assert!(
+        unread <= 1,
+        "node ticked {unread} times in 7 s on a terminal nobody read: its writes did not block"
+    );
+    assert!(
+        after >= 10,
+        "node ticked {after} times in the 4 s its terminal was read: it did not go on"
+    );
+}
+
 #[test]
 fn stdin_eof_reaps_every_spawned_process() {
     let _pty_guard = serial_headless_test();

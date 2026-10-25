@@ -10,6 +10,7 @@
 //! words before the case starts (`cargo xtask smoke`, tools/xtask/src/screen.rs): every
 //! page sleeps behind it, hidden or not, and the case would measure the lock.
 
+use std::io::Write;
 use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -40,8 +41,17 @@ const SETTLE: Duration = Duration::from_secs(10);
 /// even shown that page took 6 to 7 s for half the flood, so it never reads it in under
 /// about 14 s. Hidden for minutes on a loaded Mac the first took 5 to 50 s, the second 15
 /// to over 300 s (T-454); this case hides the app for less than a minute, where the
-/// first's time is the page's own.
+/// first's time is the page's own. That this bound is red on main's page is the
+/// measurement recorded with the change (T-454's commit), not a run of this case: a run
+/// is held to the bound alone. The smoke's cases run one at a time (`cargo xtask smoke`,
+/// `--test-threads=1`), so the flood never lands while the other case floods an app of
+/// its own, which on a release's runner (3 cores) would take the time of both.
 const DRAIN: Duration = Duration::from_secs(10);
+
+/// How many times AppKit is asked whether the app is hidden before its answer is taken,
+/// and how long apart: right after a flood `osascript` can answer late or not at all.
+const ASKED: usize = 5;
+const ASKED_APART: Duration = Duration::from_millis(500);
 
 #[test]
 #[ignore = "opt-in, on a built app: cargo xtask smoke (npm run smoke)"]
@@ -50,7 +60,28 @@ fn the_built_app_reads_its_windows_while_it_is_hidden() -> Outcome {
         own_var("CONSENSFLOW_SMOKE_APP").as_deref(),
     ))?;
     let patience = patience_of(own_var("CONSENSFLOW_SMOKE_TIMEOUT_MS").as_deref())?;
+    // A failed run leaves its machine behind, as the other case's does: a check that does
+    // not hold says where it is as the machine goes (`Machine`'s drop), and a step that
+    // could not be taken says it here.
     let machine = Machine::with_harness(Path::new(PASTE_READER), patience, HARNESS)?;
+    let outcome = drive(&bundle, &machine, patience, &mut std::io::stdout());
+    let keep = own_var("CONSENSFLOW_SMOKE_KEEP").as_deref() == Some("1");
+    machine.say_where_kept(&mut std::io::stderr(), outcome.is_err() || keep);
+    outcome?;
+    if !keep {
+        machine.cleanup()?;
+    }
+    Ok(())
+}
+
+/// The case, on the app of `bundle` started on `machine`: how long the flood took is said
+/// to `out`.
+fn drive(
+    bundle: &bundle::Bundle,
+    machine: &Machine,
+    patience: Duration,
+    out: &mut impl Write,
+) -> Outcome {
     let (go, count) = (machine.root.join("go"), machine.root.join("count"));
     let mut app = App::start(
         Run::new(&bundle.binary)
@@ -67,69 +98,105 @@ fn the_built_app_reads_its_windows_while_it_is_hidden() -> Outcome {
     // An app still coming up shows itself again once it is active: it is hidden a few
     // seconds after its page drew the window, and found hidden still when its window prints.
     thread::sleep(SETTLE);
-    assert!(hide(app.pid(), true), "the app was not hidden");
-    thread::sleep(HIDDEN_FOR);
+    let hidden = hide(app.pid(), true);
     assert!(
-        is_hidden(app.pid()),
-        "the app showed itself again while hidden"
+        hidden == Ok(true),
+        "the app was not hidden: {}",
+        said(&hidden)
+    );
+    thread::sleep(HIDDEN_FOR);
+    let hidden = is_hidden(app.pid());
+    assert!(
+        hidden == Ok(true),
+        "the app showed itself again while hidden: {}",
+        said(&hidden)
     );
 
     files::write(&go, "")?;
     let started = Instant::now();
     let printed = loop {
-        let said = files::read_string(&count).unwrap_or_default();
-        if let Some(lines) = said.trim().strip_suffix(" done") {
+        let counted = files::read_string(&count).unwrap_or_default();
+        if let Some(lines) = counted.trim().strip_suffix(" done") {
             break lines.to_owned();
         }
         assert!(
             started.elapsed() < DRAIN,
             "the hidden app read {} of the {FLOOD_LINES} lines its window printed in {} s",
-            if said.trim().is_empty() {
+            if counted.trim().is_empty() {
                 "none"
             } else {
-                said.trim()
+                counted.trim()
             },
             DRAIN.as_secs(),
         );
         thread::sleep(Duration::from_millis(250));
     };
-    println!(
+    writeln!(
+        out,
         "a hidden app read {printed} lines ({:.1} MiB) in {:.1} s",
         (FLOOD_LINES * 131) as f64 / f64::from(1 << 20),
         started.elapsed().as_secs_f64()
-    );
+    )?;
     assert_eq!(printed, FLOOD_LINES.to_string());
+    let hidden = is_hidden(app.pid());
     assert!(
-        is_hidden(app.pid()),
-        "the app showed itself again while its window printed"
+        hidden == Ok(true),
+        "the app showed itself again while its window printed: {}",
+        said(&hidden)
     );
 
-    hide(app.pid(), false);
+    let _ = hide(app.pid(), false);
     app.quit();
     let ended = app.exit()?;
     assert!(ended.is_some(), "the app did not end once its input ended");
-    machine.cleanup()?;
     Ok(())
 }
 
-/// Whether the app of `pid` is hidden, as AppKit says.
-fn is_hidden(pid: u32) -> bool {
-    asked(&format!("{}.isHidden", running(pid)))
+/// What AppKit answered, in words for a failure: that the app is not hidden, or why it
+/// could not be asked.
+fn said(answer: &Result<bool, String>) -> String {
+    match answer {
+        Ok(true) => "AppKit says it is hidden".into(),
+        Ok(false) => "AppKit says it is not hidden".into(),
+        Err(why) => why.clone(),
+    }
+}
+
+/// Whether the app of `pid` is hidden, as AppKit says: asked again a few times while it
+/// says not, or cannot be asked, and its last answer taken.
+fn is_hidden(pid: u32) -> Result<bool, String> {
+    settled(true, ASKED, ASKED_APART, || {
+        asked(&format!("{}.isHidden", running(pid)))
+    })
 }
 
 /// Hides the app of `pid`, or shows it again, as a person does; whether it is hidden
 /// after, once it is as asked or a few seconds have passed.
-fn hide(pid: u32, hidden: bool) -> bool {
+fn hide(pid: u32, hidden: bool) -> Result<bool, String> {
     let verb = if hidden { "hide" } else { "unhide" };
-    asked(&format!("{}.{verb}; true", running(pid)));
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let is = is_hidden(pid);
-        if is == hidden || Instant::now() > deadline {
-            return is;
+    asked(&format!("{}.{verb}; true", running(pid)))?;
+    settled(hidden, 50, Duration::from_millis(100), || {
+        asked(&format!("{}.isHidden", running(pid)))
+    })
+}
+
+/// What `ask` answers once it answers `wanted`, asked up to `times` times `apart` apart:
+/// its last answer, whatever it was, when it never did.
+fn settled(
+    wanted: bool,
+    times: usize,
+    apart: Duration,
+    mut ask: impl FnMut() -> Result<bool, String>,
+) -> Result<bool, String> {
+    let mut answer = ask();
+    for _ in 1..times {
+        if answer == Ok(wanted) {
+            break;
         }
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(apart);
+        answer = ask();
     }
+    answer
 }
 
 /// AppKit's running application of `pid`, in JavaScript for Automation.
@@ -137,11 +204,76 @@ fn running(pid: u32) -> String {
     format!("$.NSRunningApplication.runningApplicationWithProcessIdentifier({pid})")
 }
 
-/// Whether `script`, run by `osascript` with AppKit, says `true`.
-fn asked(script: &str) -> bool {
-    Run::new("/usr/bin/osascript")
+/// What `script`, run by `osascript` with AppKit, says: `true` or `false`, or why it said
+/// neither, in its own words.
+fn asked(script: &str) -> Result<bool, String> {
+    let ran = Run::new("/usr/bin/osascript")
         .args(["-l", "JavaScript", "-e"])
         .arg(format!("ObjC.import('AppKit'); {script}"))
         .run()
-        .is_ok_and(|ran| ran.stdout.trim() == "true")
+        .map_err(|error| format!("osascript could not be run: {error}"))?;
+    match ran.stdout.trim() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        out => Err(format!(
+            "osascript answered {out:?} ({}), and said {:?}",
+            ran.code
+                .map_or_else(|| "no exit code".into(), |code| format!("exit {code}")),
+            ran.stderr.trim()
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An asker that gives `answers` in turn, and counts how often it was asked.
+    fn answering(
+        answers: Vec<Result<bool, String>>,
+    ) -> (
+        impl FnMut() -> Result<bool, String>,
+        std::rc::Rc<std::cell::Cell<usize>>,
+    ) {
+        let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+        let counted = asked.clone();
+        let mut answers = answers.into_iter();
+        let ask = move || {
+            counted.set(counted.get() + 1);
+            answers
+                .next()
+                .unwrap_or_else(|| Err("asked once too often".into()))
+        };
+        (ask, asked)
+    }
+
+    #[test]
+    fn whether_the_app_is_hidden_is_asked_again_while_it_says_not_or_cannot_say() {
+        let failed =
+            || Err::<bool, String>("osascript answered \"\" (exit 1), and said \"x\"".into());
+        // Not hidden once, then unanswered, then hidden: taken as hidden, on the third asking.
+        let (ask, asked) = answering(vec![Ok(false), failed(), Ok(true), Ok(false)]);
+        assert_eq!(settled(true, 5, Duration::ZERO, ask), Ok(true));
+        assert_eq!(asked.get(), 3);
+        // Hidden at once: asked once.
+        let (ask, asked) = answering(vec![Ok(true)]);
+        assert_eq!(settled(true, 5, Duration::ZERO, ask), Ok(true));
+        assert_eq!(asked.get(), 1);
+        // Never as wanted: asked as often as it may be, and its last answer is the one said.
+        let (ask, asked) = answering(vec![Ok(false), Ok(false), failed()]);
+        assert_eq!(settled(true, 3, Duration::ZERO, ask), failed());
+        assert_eq!(asked.get(), 3);
+        // Shown again is wanted as well as hidden.
+        let (ask, _) = answering(vec![Ok(true), Ok(false)]);
+        assert_eq!(settled(false, 5, Duration::ZERO, ask), Ok(false));
+    }
+
+    #[test]
+    fn a_failure_says_what_appkit_answered_or_why_it_could_not_be_asked() {
+        assert_eq!(said(&Ok(false)), "AppKit says it is not hidden");
+        assert_eq!(
+            said(&Err("osascript said why".into())),
+            "osascript said why"
+        );
+    }
 }

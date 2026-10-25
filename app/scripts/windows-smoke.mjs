@@ -13,7 +13,8 @@
  *
  * It runs beside an installed ConsensFlow: its own home, its own WebView2
  * data folder, and the page reached over WebView2's remote debugging port.
- * It needs a desktop session (over SSH, start it from a scheduled task).
+ * It needs a desktop session: over SSH, run it with windows-smoke-desktop.mjs, which
+ * runs it from a scheduled task on the user's desktop.
  */
 import { execFileSync, spawn } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -190,7 +191,10 @@ try {
       return ''
     }
   })()
-  check(/the page's process failed \(kind \d\): loading it again/.test(log), "the app's log says it loaded the page again")
+  check(
+    /the page's process (ended|stopped answering) \(kind \d\): loading it again/.test(log),
+    "the app's log says it loaded the page again",
+  )
 } catch (cause) {
   check(false, cause.message)
 } finally {

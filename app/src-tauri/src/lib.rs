@@ -21,6 +21,9 @@ mod file_drop;
 mod launcher;
 #[cfg(windows)]
 mod page_crash;
+// Only the Windows app loads a failed page again; tested everywhere.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod page_reloads;
 // Only the Windows app reads a runtime from its own exe; tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod portable;
@@ -477,7 +480,7 @@ pub fn run() {
         }
         let window = window.build()?;
         #[cfg(windows)]
-        page_crash::load_again_when_it_fails(&window)?;
+        page_crash::load_again_when_it_fails(&window);
         #[cfg(not(windows))]
         let _ = window;
         Ok(())
