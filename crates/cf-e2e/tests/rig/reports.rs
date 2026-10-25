@@ -955,8 +955,8 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
     }
     let pinned = Regex::new(r"^uses: actions/upload-artifact@[0-9a-f]{40} # v\d+\.\d+\.\d+$")?;
     for (upload, name) in [
-        (temp_upload, "name: rig-reports-${{ matrix.os }}"),
-        (live_upload, "name: live-rig-reports-${{ matrix.os }}"),
+        (temp_upload, "name: rig-reports-${{ matrix.os }}-${{ strategy.job-index }}"),
+        (live_upload, "name: live-rig-reports-${{ matrix.os }}-${{ strategy.job-index }}"),
     ] {
         assert!(
             upload.iter().any(|line| pinned.is_match(line)),

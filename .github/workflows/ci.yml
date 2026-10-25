@@ -181,20 +181,22 @@ jobs:
       # line of the first's path, since the action roots an artifact at the common
       # ancestor of its paths and Windows' temp folder and workspace share none (C:, D:).
       # On a runner no real harness runs, so that folder holds stand-in output only.
+      # Each shard's uploads are named for it (`strategy.job-index`): the action refuses
+      # a second artifact of a name in a run, and two shards of a platform can fail.
       - name: Where the rig keeps the reports of its failed cases
         if: failure()
         run: echo "RIG_TEMP=$(node -p "require('os').tmpdir()")" >> "$GITHUB_ENV"
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: rig-reports-${{ matrix.os }}
+          name: rig-reports-${{ matrix.os }}-${{ strategy.job-index }}
           path: ${{ env.RIG_TEMP }}/consensflow-integration-*-left.txt
           if-no-files-found: ignore
           retention-days: 7
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: live-rig-reports-${{ matrix.os }}
+          name: live-rig-reports-${{ matrix.os }}-${{ strategy.job-index }}
           path: app/src-tauri/target/live-reports/consensflow-integration-*-left.txt
           if-no-files-found: ignore
           retention-days: 7
