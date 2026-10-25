@@ -64,7 +64,7 @@ pub(super) async fn reassign(page: &Page, body: Body<'_>) -> Result<Fields, Said
     merged(released)
 }
 
-/// `task.finish`: what the worker of a working task said last is its result, and
+/// `task.finish`: what the worker of a working or paused task said last is its result, and
 /// nothing it left running is ended. `jobs` and `agents` count what its harness still
 /// counted running.
 pub(super) async fn finish(page: &Page, body: Body<'_>) -> Result<Fields, Said> {

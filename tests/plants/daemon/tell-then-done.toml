@@ -1,0 +1,157 @@
+# The final answer a tell's turn ends with while its task is paused (T-442; T-429 on 3.0.5, T-534's live
+# runs on 3.0.6-alpha.2): `cf tell` pauses the task and puts the chief's words to the window as a question;
+# the window answered with `cf answer`, went on in the same turn and ended it with its complete answer,
+# and nobody had it. The rule (`crates/cf-engine/src/turn_end/paused.rs`): a turn that ends with a
+# complete answer after the tell's paste, while the task is paused and nothing is pending, is put to
+# whoever gave the task, once, in a note with the words; the task stays paused; Finish takes a paused
+# task's last complete answer as its result (`crates/cf-engine/src/turn_end/finish.rs`,
+# `record_finished` of `crates/cf-ledger/src/tasks/finishing.rs`), and a window's own `cf task done`
+# stays refused for it.
+#
+# Each plant takes one rule out again. The names begin with `tell then done`, so
+# `cargo xtask plants daemon "tell then done"` runs them.
+
+[run]
+engine-paused-answers = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_answers::"]
+rig-regression-tell-then-done = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_final_answer_written_in_a_tells_turn"]
+
+[[plant]]
+name = "tell then done: a turn that ends on a paused task is never looked at for an answer to a tell"
+meant = "the_final_answer_a_window_ends_the_turn_of_a_tell_with_is_put_to_the_chief_once_and_the_task_stays_paused"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            self.tell_paused_answer(project, participant, observed)?;\n"
+replace = ""
+
+[[plant]]
+name = "tell then done: the rig's window answers its tell and goes on, and its final answer reaches nobody"
+meant = "the_final_answer_a_worker_ends_the_turn_of_a_tell_with_reaches_the_chief_and_finish_makes_it_the_result"
+runs = ["rig-regression-tell-then-done"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            self.tell_paused_answer(project, participant, observed)?;\n"
+replace = ""
+
+[[plant]]
+name = "tell then done: the answer is told again at every pass"
+meant = "the_final_answer_a_window_ends_the_turn_of_a_tell_with_is_put_to_the_chief_once_and_the_task_stays_paused"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = "                && message.body == body\n"
+replace = "                && message.body == WITHOUT_ANSWER\n"
+
+[[plant]]
+name = "tell then done: the note is about no task, so the thread does not hold it and a resume does not withdraw it"
+meant = "a_resume_withdraws_the_note_the_chief_has_not_read_and_the_resumed_turn_is_the_result"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = "                task: Some(number),\n"
+replace = "                task: None,\n"
+
+[[plant]]
+name = "tell then done: an answer after any message, not the tell's, is put to the chief"
+meant = "a_pause_after_a_resume_with_no_tell_since_tells_nothing_of_a_turn_that_ended_before_the_stop"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = "header_id(&items[start].text).filter(|id| tells.contains(id))"
+replace = "header_id(&items[start].text)"
+
+[[plant]]
+name = "tell then done: a turn that left work its harness wakes it for is taken for over"
+meant = "a_turn_that_ends_with_work_its_harness_wakes_it_for_is_not_over_and_says_nothing_yet"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = " || observed.pending().total() > 0"
+replace = ""
+
+[[plant]]
+name = "tell then done: words that are no complete answer are put to the chief"
+meant = "a_turn_whose_last_words_are_progress_and_no_complete_answer_says_nothing"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = "            .filter(|answers| answers.last.is_some_and(|last| last.complete))\n"
+replace = ""
+
+[[plant]]
+name = "tell then done: a complete answer of no words is put to the chief"
+meant = "a_complete_answer_of_no_words_says_nothing_either"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = "        if words == WITHOUT_ANSWER {"
+replace = "        if false {"
+
+[[plant]]
+name = "tell then done: a task the human gave is told to resume in the chief's words"
+meant = "a_task_the_human_gave_is_put_to_the_human_in_the_words_of_the_drawer"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = "thread.task.requester == \"human\""
+replace = "false"
+
+[[plant]]
+name = "tell then done: Finish refuses a paused task"
+meant = "finish_takes_the_final_answer_of_a_paused_task_as_its_result"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = "\"working\" | \"paused\""
+replace = "\"working\""
+
+[[plant]]
+name = "tell then done: the ledger records no result for a paused task at the chief's word"
+meant = "finish_takes_the_final_answer_of_a_paused_task_as_its_result"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "[\"working\", \"waiting\", \"paused\"]"
+replace = "[\"working\", \"waiting\", \"waiting\"]"
+
+[[plant]]
+name = "tell then done: finishing a paused task leaves the note the chief has not read"
+meant = "finishing_a_paused_task_withdraws_the_note_the_chief_has_not_read"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if task.state == \"paused\" {\n            leave_pause_notes(store, &task, \"finished\")?;\n        }\n"
+replace = ""
+
+[[plant]]
+name = "tell then done: a window's own result is recorded for a paused task"
+meant = "a_worker_cannot_record_the_result_of_a_paused_task_itself"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    record(store, project_id, number, body, &ACTIVE_TASK_STATES)\n"
+replace = "    record(store, project_id, number, body, &FINISHABLE_TASK_STATES)\n"
+
+[[plant]]
+name = "tell then done: a window's answer is looked for after its brief and not after the tell"
+meant = "the_final_answer_a_window_ends_the_turn_of_a_tell_with_is_put_to_the_chief_once_and_the_task_stays_paused"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                .map_or(start, |later| start + 1 + later),"
+replace = "                .map_or(start, |_| start),"

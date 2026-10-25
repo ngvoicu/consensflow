@@ -44,6 +44,11 @@
 //! is known of the work the record no longer waits on, and how much of it is not known
 //! to have ended, is said in the result itself ([`leftovers`]).
 //!
+//! **A tell's turn on a paused task** (T-442): a task paused by `cf tell` takes no result,
+//! but the complete answer its window's turn ends with, after answering the tell, is not
+//! lost: whoever gave the task is told it once, with the words, and Finish takes it as the
+//! result ([`paused`]).
+//!
 //! **A window has one task** (`ownership`): no other task's message goes into a window
 //! once one task's has, whatever ended that task; so no later task's turn is woken by
 //! what an earlier one left, and no later task is given an earlier task's words.
@@ -57,7 +62,7 @@ use cf_harness::records::{End, Item, Monitor, Pending, Reading, Role, Source};
 use cf_ledger::{NewNote, ParticipantView, ProjectView, TaskThread};
 use serde_json::Value;
 
-use crate::delivery_text::is_paste_of;
+use crate::delivery_text::{header_id, is_paste_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
@@ -206,6 +211,7 @@ impl Dispatcher {
             .active_task(participant.id, false)?;
         let Some(thread) = task.filter(|thread| thread.task.state == "working") else {
             record.held.borrow_mut().reset();
+            self.tell_paused_answer(project, participant, observed)?;
             return Ok(Turn::Open);
         };
         let items = observed.items();
@@ -330,6 +336,36 @@ impl Dispatcher {
                 && !item.compaction
                 && is_paste_of(&item.text, latest.id, first.as_deref())
         }))
+    }
+
+    /// The place among `items` of the latest message about the task that was pasted into
+    /// the window: [`Dispatcher::delivered_at`]'s, or a later one ConsensFlow pasted since
+    /// (the Resume's word to go on, a question the chief put to the window), which no start is
+    /// taken from at a turn's end and is answered by what follows it. The harness's own
+    /// notifications, which wake a held task's turns, are none, nor is the note that says
+    /// the role (`replacements`, whose word is the role's), nor a compaction summary that
+    /// restates a header (the merge with Resume after Close, T-405's L10, and Calliope's P2
+    /// on it, T-444). None where `delivered_at` finds none.
+    pub(crate) fn latest_message_at(
+        &self,
+        thread: &TaskThread,
+        participant: &ParticipantView,
+        items: &[Item],
+        replacements: &[i64],
+    ) -> Result<Option<usize>, EngineError> {
+        let Some(start) = self.delivered_at(participant.id, thread, items)? else {
+            return Ok(None);
+        };
+        Ok(Some(
+            items[start + 1..]
+                .iter()
+                .rposition(|item| {
+                    item.role == Role::User
+                        && !item.compaction
+                        && header_id(&item.text).is_some_and(|id| !replacements.contains(&id))
+                })
+                .map_or(start, |later| start + 1 + later),
+        ))
     }
 
     /// What the monitors a worker's turn left that said they ended come to, at this pass
@@ -762,6 +798,7 @@ pub(crate) fn words_of(final_run: &[&Item]) -> String {
 }
 
 mod finish;
+mod paused;
 
 pub use finish::Finished;
 

@@ -47,13 +47,40 @@ pub(crate) fn record_result(
     number: i64,
     body: &str,
 ) -> Result<TaskMoved, LedgerError> {
+    record(store, project_id, number, body, &ACTIVE_TASK_STATES)
+}
+
+/// The chief or the human takes what the worker said last as the result (Finish):
+/// of a task at work, or of a paused one, whose worker's turn ended with its
+/// answer after the tell that paused it (`turn_end`'s paused answer). The pause
+/// is the finisher's own to end: the notes it left queued for the requester go
+/// ([`leave_pause_notes`]), as a resume's do.
+pub(crate) fn record_finished(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    body: &str,
+) -> Result<TaskMoved, LedgerError> {
+    record(store, project_id, number, body, &FINISHABLE_TASK_STATES)
+}
+
+/// The states a task can be finished at the word of the chief or the human.
+const FINISHABLE_TASK_STATES: [&str; 3] = ["working", "waiting", "paused"];
+
+fn record(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    body: &str,
+    states: &[&str],
+) -> Result<TaskMoved, LedgerError> {
     model::require_text(body, "body", MAX_BODY)?;
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
         if own_steps::is_own_step(store, &task)? {
             return own_steps::finish(store, project_id, &task, body);
         }
-        require_task_state(&task, &ACTIVE_TASK_STATES, "record a result for")?;
+        require_task_state(&task, states, "record a result for")?;
         if let Some(assignee) = task.assignee_id {
             if told_waiting(store, assignee, task.id)? {
                 return Err(LedgerError::refused_with(
@@ -64,6 +91,10 @@ pub(crate) fn record_result(
                     409,
                 ));
             }
+        }
+        // A refusal above writes nothing, this withdrawal with it.
+        if task.state == "paused" {
+            leave_pause_notes(store, &task, "finished")?;
         }
         let message_id = queue(
             store,

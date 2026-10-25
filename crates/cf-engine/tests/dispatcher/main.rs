@@ -60,6 +60,7 @@ mod own_steps;
 mod participant_leaves;
 mod paste_shapes;
 mod pause_notes;
+mod paused_answers;
 mod pending_agents;
 mod queued_tells;
 mod quota;

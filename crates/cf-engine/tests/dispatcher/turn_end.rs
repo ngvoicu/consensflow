@@ -426,7 +426,8 @@ fn finish_is_refused_where_no_complete_answer_follows_the_latest_message_of_the_
 }
 
 #[test]
-fn finish_is_refused_for_a_task_that_is_not_working_or_that_no_open_window_of_a_member_works_on() {
+fn finish_is_refused_for_a_task_that_is_neither_working_nor_paused_or_that_no_open_window_of_a_member_works_on(
+) {
     let context = Context::new();
     let tiers = zeus_at_work(&context);
     docs_for_zeus(&context, &tiers);
@@ -438,11 +439,25 @@ fn finish_is_refused_for_a_task_that_is_not_working_or_that_no_open_window_of_a_
         .finish_task(tiers.project.id, 9, "chief")
         .unwrap_err();
     assert_eq!(refused.to_string(), "no task T-9 in this project");
+    // A paused task is finished like a working one (T-442), and is refused for what a working
+    // one is: its worker has written no complete answer since its latest message.
     context.pause_task(tiers.project.id, 1);
     let refused = context
         .finish_task(tiers.project.id, 1, "chief")
         .unwrap_err();
-    assert_eq!(refused.to_string(), "cannot finish T-1: it is paused");
+    assert!(
+        refused.to_string().contains("no complete answer"),
+        "{refused}"
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(tiers.project.id, 1, "chief")
+        .unwrap();
+    let refused = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .unwrap_err();
+    assert_eq!(refused.to_string(), "cannot finish T-1: it is cancelled");
 }
 
 /// How T-1 is released from its window, with its job and its agent still running.

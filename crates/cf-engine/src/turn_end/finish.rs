@@ -1,6 +1,8 @@
 //! Finish: the chief (`cf task finish T-n`, the API's `POST /api/tasks/<n>/finish`) or the
 //! human (Finish in the task's drawer) takes what the worker of a working task said last
 //! as its result (the owner's decision of 2026-10-18: the chief can finish any working task).
+//! A paused task is finished the same way, when the chief is told its worker's turn ended
+//! with an answer after its tell (`paused`): it is how that answer becomes the result.
 //!
 //! It is the way out of a wait that has no end, and of a reader that reads a turn at work
 //! that is not (T-442, dip-agentos's T-20): a job that runs for ever (a dev server, a
@@ -18,8 +20,8 @@
 //! complete answer the worker wrote after the task's latest message pasted into its window
 //! (`answers_to_the_task`'s `complete_run`), records it once as the result, with a line of
 //! what it knows still runs, and ends nothing. It is refused, with the reason, where there is no such answer, where
-//! the task is not working, and where no member's open window works on it; cancel is the
-//! way out then.
+//! the task is neither working nor paused, and where no member's open window works on it;
+//! cancel is the way out then.
 //!
 //! **Finishing ends nothing.** The host cannot prove a process a job's: what still runs
 //! goes on, and the window's close ends what the host can tell is the window's, as a
@@ -34,11 +36,9 @@
 use std::rc::Rc;
 
 use cf_base::refusal::Refusal;
-use cf_harness::records::Role;
 use cf_ledger::{ParticipantView, TaskThread, TaskView};
 
 use super::{leftovers, with_leftovers, words_of};
-use crate::delivery_text::header_id;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
@@ -61,8 +61,8 @@ pub struct Finished {
 
 impl Dispatcher {
     /// `by` (the chief's handle, or the human's) finishes T-`number` of `project`: what its
-    /// worker said last is its result (see above). Refused for a task that is not working,
-    /// that no member's open window works on, whose worker wrote no complete answer
+    /// worker said last is its result (see above). Refused for a task that is neither working
+    /// nor paused, that no member's open window works on, whose worker wrote no complete answer
     /// after its latest message, or whose window has words told to it on their way.
     pub async fn finish_task(
         self: &Rc<Self>,
@@ -77,7 +77,7 @@ impl Dispatcher {
     }
 
     /// The task, its worker and the record of the window that works on it, where it is one
-    /// to finish: working, a member's, its window open.
+    /// to finish: working or paused, a member's, its window open.
     fn finishable(
         &self,
         project: i64,
@@ -90,7 +90,7 @@ impl Dispatcher {
                 format!("no task T-{number} in this project"),
             ));
         };
-        if thread.task.state != "working" {
+        if !matches!(thread.task.state.as_str(), "working" | "paused") {
             return Err(refused(
                 "invalid-transition",
                 format!("cannot finish T-{number}: it is {}", thread.task.state),
@@ -158,8 +158,9 @@ impl Dispatcher {
             )
         };
         let items = observed.items();
+        let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
         let start = self
-            .delivered_at(participant.id, &thread, items)?
+            .latest_message_at(&thread, &participant, items, &replacements)?
             .ok_or_else(|| {
                 refused(
                     "no-delivery",
@@ -169,21 +170,6 @@ impl Dispatcher {
                     ),
                 )
             })?;
-        let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
-        // A message ConsensFlow pasted into the window since (the Resume's word to go on,
-        // which no start is taken from) is answered by what follows it, as at a turn's end;
-        // the harness's own notifications, which wake a held task's turns, are none, nor is
-        // the note that says the role, whose word is the role's, nor a compaction summary that
-        // restates a header (the merge with Resume after Close, T-405's L10, and Calliope's
-        // P2 on it, T-444).
-        let start = items[start + 1..]
-            .iter()
-            .rposition(|item| {
-                item.role == Role::User
-                    && !item.compaction
-                    && header_id(&item.text).is_some_and(|id| !replacements.contains(&id))
-            })
-            .map_or(start, |later| start + 1 + later);
         let run = answers_to_the_task(&items[start + 1..], &replacements)
             .and_then(|answers| answers.complete_run)
             .ok_or_else(none)?;
@@ -213,7 +199,7 @@ impl Dispatcher {
             .seams
             .ledger
             .borrow_mut()
-            .record_result(project, number, &body)?;
+            .record_finished(project, number, &body)?;
         record.held.borrow_mut().reset();
         self.changed();
         Ok(Finished {

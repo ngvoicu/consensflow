@@ -313,10 +313,11 @@ fn tell(
 
 /// `POST /api/tasks/<n>/finish`: what the worker of a working task said last is its result,
 /// and what its turn left running is not ended (the owner's decision of 2026-10-18: the
-/// chief can finish any working task). Only the engine reads the window, so it is asked,
-/// and answers with the task done, or with why it is not one to finish (not working, no
-/// member's open window works on it, no complete answer since its latest message). `jobs`
-/// and `agents` count what the worker's harness still counted running.
+/// chief can finish any working task; a paused one too, whose worker's turn ended with an
+/// answer after the tell that paused it). Only the engine reads the window, so it is asked,
+/// and answers with the task done, or with why it is not one to finish (neither working nor
+/// paused, no member's open window works on it, no complete answer since its latest message).
+/// `jobs` and `agents` count what the worker's harness still counted running.
 async fn finish(context: &Context, caller: &Caller, task: &TaskThread) -> Result<Answer, Failure> {
     let asked = (context.finish)(
         caller.project.id,
