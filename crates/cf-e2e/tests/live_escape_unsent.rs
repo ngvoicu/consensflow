@@ -247,10 +247,6 @@ struct Pane<'r> {
 }
 
 impl Pane<'_> {
-    fn rig(&self) -> &Rig {
-        self.rig
-    }
-
     fn id(&self) -> &str {
         &self.id
     }
@@ -261,7 +257,7 @@ impl Pane<'_> {
 
     /// Types `keys` as the human does, one write.
     fn types(&self, keys: &[u8]) -> Result {
-        self.rig().types(&self.named(), keys)
+        self.rig.types(&self.named(), keys)
     }
 
     /// Types `text` one character at a time: the longest one took to be drawn.
@@ -300,16 +296,16 @@ impl Pane<'_> {
     fn snapshot(&self) -> Result<Value> {
         let mut request = self.named();
         request["bottom"] = json!(BOTTOM);
-        self.rig().host("pane.snapshot", request)
+        self.rig.host("pane.snapshot", request)
     }
 
     /// Until the screen holds still for [`STILL`], or [`SETTLE`] passed.
     fn settle(&self) {
         let started = Instant::now();
-        let (mut last, mut since) = (self.rig().screen(self.id()), Instant::now());
+        let (mut last, mut since) = (self.rig.screen(self.id()), Instant::now());
         while started.elapsed() < SETTLE {
             sleep(LOOK);
-            let now = self.rig().screen(self.id());
+            let now = self.rig.screen(self.id());
             if now == last {
                 if since.elapsed() >= STILL {
                     return;
