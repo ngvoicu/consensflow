@@ -207,7 +207,7 @@ replace = '''
 
 [[plant]]
 name = "quota wait: Anthropic's spent extra usage, a 400 in Claude Code's words, is a failure"
-meant = "anthropics_400_for_spent_extra_usage_is_a_refusal_for_quota_that_names_no_reset"
+meant = "claude::record::tests::refusals::anthropics_400_for_spent_extra_usage_is_a_refusal_for_quota_that_names_no_reset"
 runs = ["quota-wait-claude"]
 
 [[plant.edit]]
@@ -223,7 +223,7 @@ replace = '''
 
 [[plant]]
 name = "quota wait: Anthropic's spent extra usage, a 400 in OpenCode's words, is a failure"
-meant = "anthropics_400_for_spent_extra_usage_is_a_refusal_for_quota_that_names_no_reset"
+meant = "opencode::record::tests::answers::anthropics_400_for_spent_extra_usage_is_a_refusal_for_quota_that_names_no_reset"
 runs = ["quota-wait-opencode"]
 
 [[plant.edit]]
