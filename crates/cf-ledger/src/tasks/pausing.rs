@@ -3,6 +3,14 @@
 //! that send it on. A pause stops the window and keeps what it was kept
 //! for it: nothing is cancelled for it but what the chief wrote and now
 //! takes back. What the window keeps goes in with the words that resume it.
+//!
+//! A task whose window closed with its project (the human's Close, or the
+//! chief's window ending, suspends it) is paused with a mark of that
+//! (`paused_with_project`), and goes on by itself with the human's Resume of
+//! the project ([`resume_with_project`]), unless its window holds other tasks
+//! too. Every other pause stays until the chief or the human resumes it, or the
+//! daemon does at a hold's end: so does a pause a ledger made before the mark,
+//! which has none.
 
 use cf_base::time;
 use cf_proto::ledger::{HeldTask, Stop, TaskMoved, TaskThread, TaskView};
@@ -14,9 +22,10 @@ use super::{
     RESUME_WORDS,
 };
 use crate::messages::{
-    cancel_message, fold, leave_pause_notes, reconcile, release_carried, tell_goes_on, transfer,
+    cancel_message, fold, join_pause_note, leave_pause_notes, note_pause, reconcile,
+    release_carried, tell_goes_on, transfer, withdraw_stale,
 };
-use crate::model::{self, LedgerError, ACTIVE_TASK_STATES, MAX_BODY};
+use crate::model::{self, sql_list, LedgerError, ACTIVE_TASK_STATES, HELD_TASK_STATES, MAX_BODY};
 use crate::queue::{queue, send, Queued, Sent};
 use crate::staff::{require_free, Giving};
 use crate::store::Store;
@@ -37,6 +46,33 @@ pub(crate) fn pause_task(
     by: Option<&str>,
     because: Option<&str>,
 ) -> Result<TaskView, LedgerError> {
+    pause_task_as(store, project_id, number, by, because, false)
+}
+
+/// ConsensFlow pauses a worker's task whose window it closed itself, as it
+/// pauses one whose window went away. In a suspended project the window closed
+/// with the project, and the pause is marked for the human's Resume of the
+/// project, which resumes the task ([`resume_with_project`]); in an open one
+/// it is as any other pause of ConsensFlow's.
+pub(crate) fn pause_with_project(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    because: &str,
+) -> Result<TaskView, LedgerError> {
+    pause_task_as(store, project_id, number, None, Some(because), true)
+}
+
+/// A pause by `by` (none: ConsensFlow), marked as its project's suspension's
+/// when `with_project` says so and the project is suspended.
+fn pause_task_as(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    by: Option<&str>,
+    because: Option<&str>,
+    with_project: bool,
+) -> Result<TaskView, LedgerError> {
     if let Some(because) = because {
         model::require_text(because, "because", 1000)?;
     }
@@ -45,8 +81,16 @@ pub(crate) fn pause_task(
             .map(|by| store.participant_by_handle(project_id, by))
             .transpose()?;
         let task = store.task_row(project_id, number)?;
+        // A pause of the chief's or the human's that lands on a task its project's
+        // suspension paused (sent as the Close began) takes that pause over.
+        let taken = match &author {
+            Some(author) => take_over_pause(store, &task, &author.handle)?,
+            None => false,
+        };
         let pausable = [&["open", "queued"], &ACTIVE_TASK_STATES[..]].concat();
-        require_task_state(&task, &pausable, "pause")?;
+        if !taken {
+            require_task_state(&task, &pausable, "pause")?;
+        }
         if let Some(assignee) = task.assignee_id {
             if store.participant_row(assignee)?.role == "chief" {
                 return Err(LedgerError::refused_with(
@@ -73,26 +117,74 @@ pub(crate) fn pause_task(
             )?;
             release_carried(store, task.id)?;
         }
-        let mut detail = Map::new();
-        detail.insert("by".into(), json!(by));
-        if let Some(because) = because {
-            detail.insert("because".into(), json!(because));
+        if !taken {
+            let mut detail = Map::new();
+            detail.insert("by".into(), json!(by));
+            if let Some(because) = because {
+                detail.insert("because".into(), json!(because));
+            }
+            pause(store, &task, detail, with_project)?;
         }
-        pause(store, &task, detail)?;
         task_by_id(store, task.id)
     })
+}
+
+/// The window of a task the engine paused with its project ended by itself after
+/// all: its exit came while the engine's kill of it waited for its answer, and the
+/// kill was refused. The task stays paused, as any whose window closed by itself,
+/// and no Resume of its project resumes it.
+pub(crate) fn unmark_pause(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+) -> Result<(), LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        store.db.execute(
+            "UPDATE task SET paused_with_project = 0 WHERE id = ? AND state = 'paused'",
+            [task.id],
+        )?;
+        Ok(())
+    })
+}
+
+/// The chief or the human (`by`) takes over the pause of a task its project's
+/// suspension paused: their tell or their pause, sent as the Close began, lands
+/// after it. The task stays paused, and the pause is theirs from then on: no
+/// Resume of its project resumes it. Whether there was such a pause to take; a
+/// task paused any other way is theirs to resume already, and is left alone.
+pub(crate) fn take_over_pause(
+    store: &mut Store,
+    task: &TaskRow,
+    by: &str,
+) -> Result<bool, LedgerError> {
+    let taken = store.db.execute(
+        "UPDATE task SET paused_with_project = 0
+         WHERE id = ? AND state = 'paused' AND paused_with_project = 1",
+        [task.id],
+    )? > 0;
+    if taken {
+        store.log(
+            task.project_id,
+            "task.pause-taken",
+            json!({ "task": task.number, "by": by }),
+        )?;
+    }
+    Ok(taken)
 }
 
 /// The move to paused, which is a stop of its own: the task counts it, so two
 /// pauses in one millisecond are two. Its time is kept as the task's last
 /// pause (a tell that reaches the window from then on counts,
-/// `told_since_paused`). Its window's questions have their doors shut before
-/// anything presses a key, and what a door claimed and nobody acknowledged
-/// is the ledger's again.
+/// `told_since_paused`), and, `with_project`, that its project's suspension
+/// paused it, while the project is suspended. Its window's questions have their
+/// doors shut before anything presses a key, and what a door claimed and nobody
+/// acknowledged is the ledger's again.
 fn pause(
     store: &mut Store,
     task: &TaskRow,
     mut detail: Map<String, Value>,
+    with_project: bool,
 ) -> Result<(), LedgerError> {
     detail.insert("stop".into(), json!(task.stop_seq + 1));
     store.move_task(task, "paused", Value::Object(detail))?;
@@ -100,14 +192,17 @@ fn pause(
         "UPDATE task SET paused_at = updated_at, stop_seq = stop_seq + 1 WHERE id = ?",
         [task.id],
     )?;
+    if with_project {
+        store.db.execute(
+            "UPDATE task SET paused_with_project = 1
+             WHERE id = ? AND (SELECT state FROM project WHERE id = task.project_id) = 'suspended'",
+            [task.id],
+        )?;
+    }
     let Some(window) = task.assignee_id else {
         return Ok(());
     };
-    store.db.execute(
-        "UPDATE message SET door_closed_at = (SELECT updated_at FROM task WHERE id = ?1)
-         WHERE task_id = ?1 AND sender_id = ?2 AND kind = 'question' AND door_closed_at IS NULL",
-        params![task.id, window],
-    )?;
+    shut_doors(store, task, window)?;
     let claimed: Vec<i64> = store
         .db
         .prepare(
@@ -127,6 +222,20 @@ fn pause(
             json!({ "message": answer, "because": format!("T-{} was paused", task.number) }),
         )?;
     }
+    Ok(())
+}
+
+/// The doors of the questions `window` asked on `task` through its harness's own
+/// tool are shut, from the time the task last moved (so the move comes first):
+/// the next poll of each is told so, and the window's question ends at once
+/// rather than waiting on an answer that cannot come. A pause does it before
+/// anything presses a key, and so does the acceptance of the task.
+pub(super) fn shut_doors(store: &Store, task: &TaskRow, window: i64) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE message SET door_closed_at = (SELECT updated_at FROM task WHERE id = ?1)
+         WHERE task_id = ?1 AND sender_id = ?2 AND kind = 'question' AND door_closed_at IS NULL",
+        params![task.id, window],
+    )?;
     Ok(())
 }
 
@@ -157,7 +266,7 @@ pub(crate) fn hold_task(
         detail.insert("by".into(), Value::Null);
         detail.insert("because".into(), json!(because));
         detail.insert("until".into(), json!(until));
-        pause(store, &task, detail)?;
+        pause(store, &task, detail, false)?;
         store.db.execute(
             "UPDATE task SET held_until = ? WHERE id = ?",
             params![until, task.id],
@@ -455,6 +564,8 @@ pub(crate) fn resume_task(
             return Ok(TaskMoved {
                 task: task_by_id(store, task.id)?,
                 message: None,
+                withdrawn: Vec::new(),
+                landing: Vec::new(),
             });
         };
         if assignee.left_at.is_some() {
@@ -469,8 +580,10 @@ pub(crate) fn resume_task(
             }
             let carried = transfer(store, &task, &assignee, &delivery_body(&task))?;
             let at = store.at();
+            // Taken from its session: no Resume of its project is to resume it.
             store.db.execute(
-                "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?
+                "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
+             paused_with_project = 0
            WHERE id = ?",
                 params![
                     format!(
@@ -509,6 +622,8 @@ pub(crate) fn resume_task(
             return Ok(TaskMoved {
                 task: task_by_id(store, task.id)?,
                 message: None,
+                withdrawn: Vec::new(),
+                landing: Vec::new(),
             });
         }
         require_free(store, &assignee, Giving::Resumed(number))?;
@@ -534,6 +649,145 @@ pub(crate) fn resume_task(
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,
+            withdrawn: Vec::new(),
+            landing: Vec::new(),
         })
     })
+}
+
+/// The human's Resume of a project, in the write that opens it: each task its
+/// suspension paused ([`pause_with_project`]) is at work again, as a quit leaves
+/// a task (waiting, where its window asked a question nobody has answered), so
+/// its window comes back with the project on its own conversation, as each
+/// window with a task at work or waiting does. The words that told its requester
+/// of the pause were never given (a suspended project delivers nothing): they
+/// are withdrawn, as they are when it is resumed. A task whose session left the
+/// project meanwhile has no window to come back in, and stays paused, for its
+/// requester to resume or call off.
+///
+/// A window that holds more than one task comes back for none of them
+/// ([`leave_several_paused`]), and what an earlier build or an earlier Resume left
+/// queued telling a window to go on goes where it is not for the one task its
+/// window holds at work (`continuations`): the windows are told anew as they come
+/// back.
+pub(crate) fn resume_with_project(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {
+    leave_several_paused(store, project_id)?;
+    let numbers: Vec<i64> = store
+        .db
+        .prepare(
+            "SELECT t.number FROM task t JOIN participant p ON p.id = t.assignee_id
+             WHERE t.project_id = ? AND t.state = 'paused' AND t.paused_with_project = 1
+               AND p.left_at IS NULL
+             ORDER BY t.id",
+        )?
+        .query_map([project_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for number in numbers {
+        let task = store.task_row(project_id, number)?;
+        leave_pause_notes(store, &task, "resumed")?;
+        store.move_task(
+            &task,
+            "working",
+            json!({ "by": null, "because": "the project was resumed" }),
+        )?;
+        reconcile(store, task.id)?;
+    }
+    withdraw_stale(store, project_id)
+}
+
+/// The Resume's part of a window that holds more than one task (a session a
+/// ledger wrote before the rule of one, or a member's own lane, which holds to
+/// none): no word tells it to go on, as none could tell it which of its tasks
+/// still stand (the lead's design of 2026-10-17, after both reviews of four
+/// rounds found a continuation naming several tasks escaping one check or
+/// another). Each of its tasks is its requester's to resume, task by task, and
+/// none goes on by itself (both reviews of 2026-10-17: a queued one was handed its
+/// window by the next pass):
+/// - one its project's suspension paused stays paused, the pause its requester's
+///   from now on;
+/// - one queued or at work (a quit leaves it so) is paused now;
+/// - one paused any other way stays as it was, its pause told already.
+///
+/// The requester is told of the first two in one note of all it is told of,
+/// which says to resume them one at a time: the session goes on with one, and
+/// takes the next once that one has its result (`staff`'s `require_free`). What
+/// the suspension's note said of a task goes, but for a warning, which is said
+/// again (`leave_pause_notes`).
+fn leave_several_paused(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {
+    let held = sql_list(&[&HELD_TASK_STATES[..], &["paused"]].concat());
+    let lanes: Vec<(i64, String)> = store
+        .db
+        .prepare(&format!(
+            "SELECT p.id, p.handle FROM participant p
+             WHERE p.project_id = ? AND p.role NOT IN ('chief', 'human')
+               AND (SELECT COUNT(*) FROM task t
+                    WHERE t.assignee_id = p.id AND t.state IN ({held})) > 1
+             ORDER BY p.id"
+        ))?
+        .query_map([project_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut told: Vec<(i64, i64)> = Vec::new();
+    for (lane, handle) in lanes {
+        let numbers: Vec<i64> = store
+            .db
+            .prepare(&format!(
+                "SELECT number FROM task WHERE assignee_id = ? AND state IN ({held}) ORDER BY number"
+            ))?
+            .query_map([lane], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let named: Vec<String> = numbers.iter().map(|number| format!("T-{number}")).collect();
+        let because = format!(
+            "@{handle}'s window held {}, and a window is told to go on only when it held one task: resume them one at a time",
+            named.join(", ")
+        );
+        for number in numbers {
+            let task = store.task_row(project_id, number)?;
+            let left = match task.state.as_str() {
+                "paused" => {
+                    let suspension = store.db.execute(
+                        "UPDATE task SET paused_with_project = 0
+                         WHERE id = ? AND paused_with_project = 1",
+                        [task.id],
+                    )? > 0;
+                    if suspension {
+                        leave_pause_notes(store, &task, "stays paused")?;
+                    }
+                    suspension
+                }
+                "queued" | "working" | "waiting" => {
+                    pause_task_as(store, project_id, number, None, Some(&because), false)?;
+                    true
+                }
+                _ => false,
+            };
+            if left {
+                tell_left_paused(store, &mut told, &task, &because)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Tells `task`'s requester that the Resume left it paused, `because`: in the
+/// note of this Resume it was told in already (`told`, by requester), or in one
+/// of its own.
+fn tell_left_paused(
+    store: &mut Store,
+    told: &mut Vec<(i64, i64)>,
+    task: &TaskRow,
+    because: &str,
+) -> Result<(), LedgerError> {
+    let earlier = told
+        .iter()
+        .find(|(requester, _)| *requester == task.requester_id)
+        .map(|(_, note)| *note);
+    if let Some(note) = earlier {
+        if join_pause_note(store, note, task.number, because)?.is_some() {
+            return Ok(());
+        }
+    }
+    let to = store.participant_row(task.requester_id)?.handle;
+    let note = note_pause(store, task.project_id, &to, task.number, because)?;
+    told.push((task.requester_id, note.id));
+    Ok(())
 }

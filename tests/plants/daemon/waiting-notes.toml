@@ -34,8 +34,8 @@ runs = ["waiting-notes-ledger", "waiting-notes-engine"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = '''         AND state = 'queued' AND body != ?",'''
-replace = '         AND body != ?",'
+find = '''         AND state = 'queued' AND body != ? RETURNING body",'''
+replace = '         AND body != ? RETURNING body",'
 
 [[plant]]
 name = "waiting notes: a take-over withdraws a note the chief wrote"
@@ -54,13 +54,13 @@ runs = ["waiting-notes-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = '''         AND state = 'queued' AND body != ?",'''
-replace = '''         AND state = 'queued'",'''
+find = '''         AND state = 'queued' AND body != ? RETURNING body",'''
+replace = '''         AND state = 'queued' RETURNING body",'''
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "        params![reason, task.id, task.requester_id, goes_on(task.number)],"
-replace = "        params![reason, task.id, task.requester_id],"
+find = "            params![reason, task.id, task.requester_id, goes_on(task.number)],"
+replace = "            params![reason, task.id, task.requester_id],"
 
 [[plant]]
 name = "waiting notes: a task taken or taken back stays in a note of several that named it"

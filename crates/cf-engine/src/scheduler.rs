@@ -13,15 +13,15 @@ use std::sync::Arc;
 use cf_base::refusal::Refusal;
 use cf_base::time;
 use cf_harness::contract::Observed;
-use cf_harness::records::{Item, Level, Quota, Role};
+use cf_harness::records::{Level, Quota, Role};
 use cf_ledger::{
-    Candidate, HeldTask, LedgerError, MessageView, NewNote, ParticipantView, ProjectView, TaskCard,
+    Candidate, HeldTask, LedgerError, NewNote, ParticipantView, ProjectView, TaskCard,
     TaskThread, RESUME_WORDS,
 };
 use serde_json::Value;
 
 use crate::deliveries::Delivering;
-use crate::delivery_text::{header_id, marker_of};
+use crate::delivery_text::header_id;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::seams::{EngineError, SavedAgent};
@@ -441,9 +441,10 @@ impl Dispatcher {
             .ledger
             .borrow()
             .active_task(participant.id, false)?;
-        let Some(TaskThread { task, .. }) = task else {
+        let Some(thread) = task else {
             return Ok(());
         };
+        let task = &thread.task;
         let latest = self
             .seams
             .ledger
@@ -461,7 +462,7 @@ impl Dispatcher {
             return Ok(());
         }
         let items = observed.items();
-        let Some(pasted) = self.pasted_at(&latest, items) else {
+        let Some(pasted) = self.delivered_at(participant.id, &thread, items)? else {
             return Ok(());
         };
         // Through, with no refusal since: its answer is complete, as a turn of the
@@ -491,14 +492,6 @@ impl Dispatcher {
         record.quota.borrow_mut().told_going_on = Some(latest.id);
         self.changed();
         Ok(())
-    }
-
-    /// Where among a window's `items` the message `latest` was pasted: the
-    /// first item that holds its marker. Turn-end's `delivered_at` is to take
-    /// its place, so that every reading of the task's turn starts at one item.
-    fn pasted_at(&self, latest: &MessageView, items: &[Item]) -> Option<usize> {
-        let marker = marker_of(latest.id);
-        items.iter().position(|item| item.text.contains(&marker))
     }
 
     /// The human is told, once for a task, that the account of the member its
@@ -695,8 +688,8 @@ impl Dispatcher {
     /// about the task, and an answer follows them; a failed turn, or one refused
     /// again, is none. The task goes on with no words, or with the daemon's bare
     /// words that resume it withdrawn (`go_on_in_window`, which tells its
-    /// requester it goes on), and the turn is its turn (`collect`, which reads
-    /// the task's turn from the last user's words after its paste).
+    /// requester it goes on), and the turn is its turn: turn-end's `collect`
+    /// takes its final answer, what the window wrote after the last user's words.
     pub(crate) fn went_on_by_itself(
         &self,
         project: &ProjectView,
@@ -710,25 +703,18 @@ impl Dispatcher {
         if participant.role == "chief" || observed.failed || refused {
             return Ok(());
         }
-        let Some(TaskThread { task, .. }) =
-            self.seams.ledger.borrow().task_in_hand(participant.id)?
-        else {
+        let Some(thread) = self.seams.ledger.borrow().task_in_hand(participant.id)? else {
             return Ok(());
         };
+        let task = &thread.task;
         let held = task.state == "paused" && task.held_until.is_some();
         if !held && task.state != "queued" {
             return Ok(());
         }
-        let latest = self
-            .seams
-            .ledger
-            .borrow()
-            .last_pasted(participant.id, task.id)?;
-        let Some(latest) = latest else {
-            return Ok(());
-        };
+        // Where the latest words the window was given about the task went in, as
+        // turn-end finds them for the task's result (`delivered_at`).
         let items = observed.items();
-        let Some(pasted) = self.pasted_at(&latest, items) else {
+        let Some(pasted) = self.delivered_at(participant.id, &thread, items)? else {
             return Ok(());
         };
         let after = &items[pasted + 1..];

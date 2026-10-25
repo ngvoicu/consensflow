@@ -11,6 +11,7 @@ pub mod record;
 mod stale_hooks;
 mod status;
 mod stopped;
+pub(crate) mod trust;
 
 pub use adapter::ClaudeAdapter;
 pub use question_hook::question_hook;

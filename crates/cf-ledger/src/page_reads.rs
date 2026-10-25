@@ -427,6 +427,7 @@ mod tests {
             text,
             complete: true,
             at: None,
+            compaction: false,
         }
     }
 

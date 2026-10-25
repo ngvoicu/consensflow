@@ -284,7 +284,8 @@ async function open(page, data = model()) {
     window.__calls = []
     window.__model = data
     // Every listener of each event, as the app keeps them: one registered twice hears it
-    // twice. `__listeners.get(name)` says the event to all of them.
+    // twice. `__listeners.get(name)` says the event to all of them; an event no listener
+    // is there for is heard by none, as the app says it.
     window.__handlers = new Map()
     window.__listeners = new Map()
     // The drops the app keeps for the page to ask of, by their numbers, as file_drop.rs keeps
@@ -301,7 +302,7 @@ async function open(page, data = model()) {
         window.__drops.set(id, paths)
         if (window.__drops.size > 16) window.__drops.delete(window.__drops.keys().next().value)
       }
-      window.__listeners.get('file-drop')({
+      window.__listeners.get('file-drop')?.({
         event: 'file-drop',
         id: 0,
         payload: { id, paths, position },
@@ -472,6 +473,13 @@ async function open(page, data = model()) {
         const found = data.tasks[`${project}:${task}`]
         return answer({ task: { ...found, state: found.resumesOpen ? 'open' : 'queued' } })
       },
+      // Finish answers with the jobs and agents the turn left, which it ends none of (a test
+      // says how many with `finishLeaves`, `{ jobs, agents }`).
+      'task.finish': ({ project, task }) =>
+        answer({
+          task: { ...data.tasks[`${project}:${task}`], state: 'done' },
+          ...(data.finishLeaves ?? { jobs: 1, agents: 0 }),
+        }),
       // The last `limit` items, as the daemon gives them, and how many came.
       'task.transcript': ({ project, task, limit = Number.POSITIVE_INFINITY }) => {
         const { items, total } = data.transcripts?.[`${project}:${task}`] ?? { items: [], total: 0 }
@@ -1711,6 +1719,159 @@ test("reassigns a task given by tier from its drawer, working or paused, never t
   await expect(named.getByRole('button', { name: /^Reassign/ })).toHaveCount(0)
 })
 
+/** A board whose worker rests, its task T-12 going on in the background as its lane says. */
+function heldModel(held = { task: 12, jobs: 1, agents: 0 }) {
+  const data = model()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.tasks.push(
+    task(12, 'Serve the docs', 'working', 'chief', 'zeus', 3, { pool: 'worker', tier: 'standard' }),
+  )
+  // The worker's turn ended with a job running that never ends: its window is at rest.
+  lane.activity = { state: 'idle' }
+  lane.held = held
+  data.tasks['1:12'] = { ...lane.tasks.at(-1), messages: [] }
+  return data
+}
+
+test('says on the card of a task that goes on in the background what it waits on, and on its lane that the window waits and does not idle', async ({
+  page,
+}) => {
+  await open(page, heldModel())
+  const card = page.locator('button.card[data-task="12"]')
+  await expect(card).toHaveAttribute('data-pending', 'background')
+  await expect(card.locator('.card-held')).toHaveText('waiting on a background job')
+  await expect(card).toHaveAttribute('aria-label', /Working, waiting on a background job/)
+  const lane = page.locator('tr[data-handle="zeus"] .row-status')
+  await expect(lane).toHaveText('Waiting on a background job')
+  await expect(lane).toHaveAttribute('data-state', 'held')
+  // A card of the same lane that waits on nothing says nothing of it.
+  await expect(page.locator('button.card[data-task="2"] .card-held')).toHaveCount(0)
+  await expect(page.locator('button.card[data-task="2"]')).not.toHaveAttribute('data-pending')
+})
+
+for (const [held, words] of [
+  [{ task: 12, jobs: 3, agents: 0 }, 'waiting on 3 background jobs'],
+  [{ task: 12, jobs: 0, agents: 1 }, 'waiting on a background agent'],
+  [{ task: 12, jobs: 0, agents: 2 }, 'waiting on 2 background agents'],
+  [{ task: 12, jobs: 1, agents: 2 }, 'waiting on background jobs and agents'],
+]) {
+  test(`says "${words}" on the card of a task whose lane counts ${held.jobs} jobs and ${held.agents} agents`, async ({
+    page,
+  }) => {
+    await open(page, heldModel(held))
+    await expect(page.locator('button.card[data-task="12"] .card-held')).toHaveText(words)
+  })
+}
+
+test('finishes a task that goes on in the background from its drawer, for the human: Finish asks the daemon and says what follows', async ({
+  page,
+}) => {
+  await open(page, heldModel())
+  await page.locator('button.card[data-task="12"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-12' })
+  await expect(drawer.locator('.drawer-meta')).toContainText('Working, waiting on a background job')
+  await drawer
+    .getByRole('button', {
+      name: 'Finish T-12: what its worker said last is its result; nothing it left running is ended',
+    })
+    .click()
+  await expect.poll(() => calls(page, 'task.finish')).toEqual([{ project: 1, task: 12 }])
+  await expect(page.locator('#status')).toHaveText(
+    "T-12 is finished: what its worker said last is its result. What it waits on is not ended: it may run on until its window closes, or past it where the host cannot tell what is the window's.",
+  )
+})
+
+for (const [held, words] of [
+  [{ jobs: 0, agents: 1 }, 'it may run on'],
+  [{ jobs: 0, agents: 2 }, 'they may run on'],
+  [{ jobs: 1, agents: 2 }, 'they may run on'],
+]) {
+  test(`says on Finish that the ${held.jobs} jobs and ${held.agents} agents its turn left are not ended and may run on`, async ({
+    page,
+  }) => {
+    // Both reviews of rounds 3 and 4: what the turn left ran on after the result, in a
+    // window the human had open or one kept for another task, and Finish had said it would
+    // end. Both of round 6: nor does the close end all of it.
+    const data = heldModel({ task: 12, ...held })
+    data.finishLeaves = held
+    await open(page, data)
+    await page.locator('button.card[data-task="12"]').click()
+    // The button promises no end of it either.
+    await expect(finishOf(page, 'Task T-12')).toHaveAccessibleName(
+      'Finish T-12: what its worker said last is its result; nothing it left running is ended',
+    )
+    await finishOf(page, 'Task T-12').click()
+    await expect(page.locator('#status')).toHaveText(
+      `T-12 is finished: what its worker said last is its result. What it waits on is not ended: ${words} until its window closes, or past it where the host cannot tell what is the window's.`,
+    )
+  })
+}
+
+/** The Finish button of the drawer of the task `name` (`Task T-12`) names, as the human reads it. */
+const finishOf = (page, name) =>
+  page.getByRole('complementary', { name }).getByRole('button', { name: /^Finish/ })
+
+test('offers Finish for any working task of a member, held or not, and for none that is not working', async ({
+  page,
+}) => {
+  // The owner's decision of 2026-10-18: the chief and the human can finish any working
+  // task, whatever its window's reader says of its turn.
+  const data = heldModel()
+  data.finishLeaves = { jobs: 0, agents: 0 }
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.tasks.push(task(13, 'Add the lexer', 'working', 'chief', 'zeus', 4))
+  data.tasks['1:13'] = { ...lane.tasks.at(-1), messages: [] }
+  await open(page, data)
+  await page.locator('button.card[data-task="13"]').click()
+  await expect(page.getByRole('complementary', { name: 'Task T-13' })).toBeVisible()
+  await expect(page.locator('button.card[data-task="13"] .card-held')).toHaveCount(0)
+  await finishOf(page, 'Task T-13').click()
+  await expect.poll(() => calls(page, 'task.finish')).toEqual([{ project: 1, task: 13 }])
+  await expect(page.locator('#status')).toHaveText(
+    'T-13 is finished: what its worker said last is its result. Nothing it left running was ended.',
+  )
+  // A task that is done is none to finish.
+  await page.locator('button.card[data-task="2"]').click()
+  await expect(page.getByRole('complementary', { name: 'Task T-2' })).toBeVisible()
+  await expect(finishOf(page, 'Task T-2')).toHaveCount(0)
+})
+
+test('says nothing of waiting on a task that is paused, though its lane is held for it, and offers no Finish', async ({
+  page,
+}) => {
+  // A pause leaves the window and the job (the owner's decision): the task is paused first,
+  // and resumed before it is finished.
+  const data = heldModel()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.tasks.find((t) => t.number === 12).state = 'paused'
+  data.tasks['1:12'].state = 'paused'
+  await open(page, data)
+  await expect(page.locator('button.card[data-task="12"] .card-held')).toHaveCount(0)
+  await expect(page.locator('button.card[data-task="12"]')).not.toHaveAttribute('data-pending')
+  // The window still holds its job, whatever the task is, and its lane says so.
+  await expect(page.locator('tr[data-handle="zeus"] .row-status')).toHaveText(
+    'Waiting on a background job',
+  )
+  await page.locator('button.card[data-task="12"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-12' })
+  await expect(drawer).toBeVisible()
+  await expect(drawer.locator('.drawer-meta')).toContainText('Paused')
+  await expect(drawer.locator('.drawer-meta')).not.toContainText('waiting on')
+  await expect(finishOf(page, 'Task T-12')).toHaveCount(0)
+})
+
+test('offers no Finish on a closed project, where nothing acts, though its task is held', async ({
+  page,
+}) => {
+  const data = heldModel()
+  data.boards[1].project.state = 'suspended'
+  data.projects[0].state = 'suspended'
+  await open(page, data)
+  await page.locator('button.card[data-task="12"]').click()
+  await expect(page.getByRole('complementary', { name: 'Task T-12' })).toBeVisible()
+  await expect(finishOf(page, 'Task T-12')).toHaveCount(0)
+})
+
 test('deletes a finished task from its drawer once the human confirms, and closes the drawer', async ({
   page,
 }) => {
@@ -2088,6 +2249,40 @@ test("shows what a task's window wrote, from ConsensFlow's own copy, under the t
   ])
   await expect(items.nth(2).locator('.transcript-body')).toHaveText('Parser done, 14 tests.')
   await expect(items.nth(2)).toHaveAttribute('data-role', 'assistant')
+})
+
+test("names a compaction's summary in what a window wrote as one, never as what was sent to it", async ({
+  page,
+}) => {
+  const data = model()
+  data.transcripts = {
+    '1:2': {
+      total: 2,
+      items: [
+        { id: 'u1', role: 'user', text: 'Write the parser', complete: true, at: null },
+        {
+          id: 's1',
+          role: 'user',
+          text: 'This session is being continued.',
+          complete: true,
+          at: null,
+          compaction: true,
+        },
+      ],
+    },
+  }
+  await open(page, data)
+  await page.locator('button.card[data-task="2"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-2' })
+  await drawer.locator('details[data-section="transcript"] summary').click()
+  const items = drawer
+    .getByRole('list', { name: "What T-2's window wrote" })
+    .locator('.transcript-item')
+  await expect(items.locator('.transcript-head')).toHaveText([
+    'Sent to the window',
+    'Compaction summary',
+  ])
+  await expect(items.nth(1)).toHaveAttribute('data-compaction', 'true')
 })
 
 /** T-2 with a long answer in what its window wrote. */
@@ -2788,6 +2983,14 @@ test('adds a saved agent to the staff as a tester, or as one more role of a memb
   await expect(dialog.locator('.dialog-help')).toContainText(
     'a tester checks it by running it when the chief asks',
   )
+  // The tester has its place among the roles, after the reviewer.
+  await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
+    'Worker',
+    'Advisor',
+    'Reviewer',
+    'Tester',
+    'Image designer',
+  ])
   // Any agent may test but the image agent, which only draws.
   await dialog.getByLabel('Role').selectOption('tester')
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
@@ -6826,10 +7029,11 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
   await expect
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
-  // The chief's window opens and closes with the project: its card has no Open, only Switch chief.
+  // The chief's window opens and closes with the project: its card has no Open, only its
+  // History and Switch chief.
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['Switch chief'])
+    .toEqual(['History', 'Switch chief'])
 })
 
 /**
@@ -6905,11 +7109,11 @@ test("keeps a session's terminal out of the dock until the human shows it, and t
     reviewer.getByRole('button', { name: "Show @zeus · brisk-birch's terminal" }),
   ).toBeVisible()
   // The chief's terminal has nothing to show or hide, on its row or its card:
-  // its row has no tools, and its card switches the chief.
+  // its row has no tools, and its card reads its history and switches the chief.
   await expect(page.locator('tr[data-handle="chief"] .row-head button')).toHaveCount(0)
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['Switch chief'])
+    .toEqual(['History', 'Switch chief'])
   // Out of the dock, a session's window is fed all the same: what it prints
   // is taken and acknowledged, so it never waits for a reader.
   expect(await page.evaluate(() => window.__emulators.length)).toBe(3)
@@ -7039,8 +7243,9 @@ test("offers Hide alone on a session's card, which tells the daemon: the window 
   const row = page.locator('tr[data-handle="zeus-amber-pine"]')
   const card = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
   await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
-  // An icon, named by its tip like the row's tools; nothing on the card ends the window.
-  await expect.poll(() => named(card.locator('button'))).toEqual(['Hide terminal'])
+  // Its History, and Hide: an icon, named by its tip like the row's tools; nothing on the
+  // card ends the window.
+  await expect.poll(() => named(card.locator('button'))).toEqual(['History', 'Hide terminal'])
   await expect(card.getByRole('button', { name: /^Close/ })).toHaveCount(0)
   await card.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }).click()
   await expect.poll(() => docked(page)).toEqual(['chief'])
@@ -7063,7 +7268,7 @@ test("keeps a shown session's card head on one line, Hide in it, at the default 
   await unfold(page)
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   const card = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
-  await expect.poll(() => named(card.locator('button'))).toEqual(['Hide terminal'])
+  await expect.poll(() => named(card.locator('button'))).toEqual(['History', 'Hide terminal'])
   // Every part of the head inside its 30px: a name wrapped onto three lines ran out of it.
   const outside = () =>
     card.evaluate((card) => {

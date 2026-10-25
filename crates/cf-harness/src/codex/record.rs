@@ -35,7 +35,7 @@ use cf_base::env::Env;
 use cf_base::{js, time};
 use serde_json::Value;
 
-use self::fields::{content_text, field, is_whole, nullish_or, or_empty};
+use self::fields::{content_text, field, is_whole, or_empty};
 use self::images::output_text;
 use self::inputs::{Inputs, Telling};
 use super::paths::transcript;
@@ -217,9 +217,7 @@ impl Rollout {
                 self.answered_in(&turn, place);
             }
             (Some("function_call" | "custom_tool_call"), _) => {
-                let call = self
-                    .keys
-                    .of(nullish_or(field(payload, "call_id"), field(payload, "id")));
+                let call = self.keys.of(field(payload, "call_id"));
                 if call.truthy() && turn.truthy() {
                     if let Some(open) = self.turn(&turn) {
                         open.tools.insert(call.clone());
@@ -425,26 +423,11 @@ impl Rollout {
                 }
                 // `String(output)`, where V8 throws on an object with a
                 // `toString` of its own.
-                let output = match nullish_or(
-                    field(native, "aggregated_output"),
-                    field(native, "formatted_output"),
-                ) {
-                    Some(output) if !output.is_null() => {
-                        js::string(Some(output)).map_err(Stop::Failed)?.into_owned()
-                    }
-                    _ => format!(
-                        "{}{}",
-                        or_empty(field(native, "stdout"))?,
-                        or_empty(field(native, "stderr"))?
-                    ),
-                };
+                let output = or_empty(field(native, "aggregated_output"))?;
                 self.add_item(field(native, "id"), Role::Tool, output, true, at, seq)?;
             }
             Some("SubAgentActivity") => {
-                let agent = self.keys.of(nullish_or(
-                    field(native, "agent_thread_id"),
-                    field(native, "id"),
-                ));
+                let agent = self.keys.of(field(native, "agent_thread_id"));
                 if !agent.truthy() {
                     return Ok(());
                 }
@@ -518,6 +501,7 @@ impl Rollout {
                 complete,
                 at: Some(at),
                 commentary: false,
+                compaction: false,
             },
             final_text: None,
         });

@@ -8,8 +8,8 @@ use serde_json::Value;
 
 use super::body::Body;
 use super::{
-    app_specs, board, messages, projects, sessions, specs, staff, tasks, viewer, wake_ups, Page,
-    Served,
+    app_specs, board, history, messages, projects, sessions, specs, staff, tasks, viewer, wake_ups,
+    Page, Served,
 };
 
 /// Serves `operation`, asked with `body` (an object the page sent, or `{}`).
@@ -47,6 +47,7 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         PageOperation::TaskCancel => tasks::cancel(page, body).await,
         PageOperation::TaskPause => tasks::pause(page, body).await,
         PageOperation::TaskReassign => tasks::reassign(page, body).await,
+        PageOperation::TaskFinish => tasks::finish(page, body).await,
         PageOperation::TaskResume => tasks::resume(page, body).await,
         PageOperation::TasksDelete => tasks::delete(page, body).await,
         PageOperation::MessageRead => messages::read(page, body).await,
@@ -64,6 +65,9 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         PageOperation::SpecsFile => viewer::file(page, body).await,
         PageOperation::SpecsPresent => viewer::present(page, body).await,
         PageOperation::SpecsOpen => viewer::open(page, body).await,
+        // A participant's whole history, for the viewer of its window's History button.
+        PageOperation::HistoryGet => history::get(page, body).await,
+        PageOperation::HistoryPart => history::part(page, body).await,
     };
     served.map_err(|said| said.0)
 }

@@ -18,7 +18,7 @@ use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
-use crate::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
+use crate::records::{Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement};
 
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -90,6 +90,21 @@ pub trait Adapter {
         false
     }
 
+    /// Whether a window's first message goes in once the window is up, through
+    /// the harness's own server, which asks [`PaneHost::admits`] then
+    /// ([`Window::started`]): OpenCode's. Every other harness's goes in with the
+    /// command line its window opens with ([`Launch::message`]), handed over as
+    /// the window's pane is asked for.
+    fn first_message_once_up(&self) -> bool {
+        false
+    }
+
+    /// How its windows take the words they are handed: over a channel of the
+    /// harness's own, or pasted into the window's input box ([`Input`]).
+    fn input(&self) -> Input {
+        Input::Channel
+    }
+
     /// Where the window of a chief given specs finds the Specmint skill of
     /// `variant`, asked before the window is prepared, as its role text names
     /// the file. The copy the human installed where this harness looks for
@@ -139,6 +154,20 @@ pub struct Specs<'a> {
 pub struct Interrupt {
     pub presses: u8,
     pub close_after: Option<Duration>,
+}
+
+/// How a harness's windows take the words they are handed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Input {
+    /// Over a channel of the harness's own (Codex's broker, OpenCode's server,
+    /// Pi's inbox): nothing handed over waits in the window's input box, and no
+    /// key the engine presses sends it.
+    #[default]
+    Channel,
+    /// Pasted into the window's input box, and sent by an Enter (Claude Code,
+    /// Devin): what an Enter withheld leaves in the box, `clear` takes out, the
+    /// keys that empty the box and do no harm to an empty one.
+    Pasted { clear: &'static [u8] },
 }
 
 /// A window to launch (`adapter.prepare`'s argument).
@@ -227,6 +256,15 @@ pub struct Prepared {
     pub window: Rc<dyn Window>,
 }
 
+/// What a yes to a harness's question about trusting a window's folder trusts: the
+/// folder, as the system names it, and whether it is the project's folder or one
+/// below it, which ConsensFlow answers for; one outside it is the human's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Trusts {
+    pub folder: String,
+    pub inside: bool,
+}
+
 /// A window open on its harness.
 pub trait Window {
     /// Its pane opened, the window's own process `pid` when the host knew it.
@@ -237,8 +275,10 @@ pub trait Window {
     /// The conversation the window started on, where its harness says it
     /// itself; none where ConsensFlow named it. A window that waits for its
     /// harness to say it gives up by [`Launch::first_message_ms`], if not
-    /// before.
-    fn started(&self) -> Work<'_, Result<Option<String>, String>>;
+    /// before. A window whose first message goes in once it is up (OpenCode's,
+    /// through its server) hands it over only if `host` admits it then
+    /// ([`PaneHost::admits`]).
+    fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>>;
     /// Once [`Window::started`] gave up, and right before the engine closes the
     /// window: whether its harness says it came up since, with the conversation it
     /// started on where it says that itself (`Some(None)` where ConsensFlow named
@@ -246,6 +286,24 @@ pub trait Window {
     /// default): a window that came up in that last moment is kept.
     fn came_up(&self) -> Work<'_, Option<Option<String>>> {
         Box::pin(async { None })
+    }
+    /// What a yes to its harness's question about trusting the window's folder would
+    /// trust, where the harness may ask one before it starts (Claude Code does in a
+    /// git repository: the repository's root). None where it never asks (the
+    /// default).
+    fn trusts(&self) -> Option<&Trusts> {
+        None
+    }
+    /// The key a person presses next to answer yes to that question, where the
+    /// window's last screen lines `screen` show it (Down, or Enter once the choice
+    /// is on yes); none where they show no such question.
+    fn toward_trust(&self, _screen: &[String]) -> Option<&'static [u8]> {
+        None
+    }
+    /// Whether `screen` (the window's last lines) is its harness's prompt: the
+    /// window is past any question it asks as it starts.
+    fn shows_prompt(&self, _screen: &[String]) -> bool {
+        false
     }
     /// Whether a delivery may go in now, or why that could not be told.
     fn ready<'a>(
@@ -312,7 +370,44 @@ pub struct Pane {
 /// through. Opening and ending panes are the engine's.
 pub trait PaneHost {
     fn request<'a>(&'a self, op: &'a str, body: Value) -> Work<'a, Result<Value, HostError>>;
+
+    /// Whether text may be handed to the window now, asked at the moment of the
+    /// hand-over, after every wait before it: a paste as it is asked for (after
+    /// Claude's keys that clear its input box), Pi's inbox rename once the pane's
+    /// claim is answered, and a request to a peer on loopback (a Codex or OpenCode
+    /// send, OpenCode's first message) inside the send, once its connection is up
+    /// ([`Loopback::hand_over`](crate::seams::loopback::Loopback::hand_over)). The
+    /// engine's host for a window says no once the window's project is closed (the
+    /// human's Close, or the chief's window ending), and the text goes back to wait
+    /// for the Resume, never handed over ([`NOT_ADMITTED`]); and once what it was
+    /// to hand over was withdrawn since it was begun. A yes is the hand-over's
+    /// moment: the engine counts the text the window's from then on. A host that
+    /// says nothing admits everything.
+    ///
+    /// What an adapter must keep: no wait comes between the answer and the moment
+    /// the text is the transport's, so nothing else of the engine runs in between.
+    /// The bridge queues a paste's frame where the paste is asked for; the rename
+    /// is a call; a request is handed to its connection, which writes it as it is
+    /// next driven, in the same poll. A send's work polled in the same poll as the
+    /// answer is not enough: it may wait inside, as a connection is made (Astra's
+    /// review of 2026-10-16, round 5). A hand-over begun is the window's, whatever
+    /// comes while it is on its way.
+    fn admits(&self) -> bool {
+        true
+    }
+
+    /// Whether the engine emptied the window's input box just before this
+    /// hand-over, with the keys of its [`Input::Pasted`]: an adapter that would
+    /// empty it itself presses nothing more (a second Control-C in a row ends
+    /// Claude Code). A host that says nothing emptied nothing.
+    fn cleared(&self) -> bool {
+        false
+    }
 }
+
+/// What a hand-over the pane host did not admit ([`PaneHost::admits`]) says:
+/// nothing of it reached the window.
+pub const NOT_ADMITTED: &str = "the window is handed nothing while its project is closed";
 
 /// A request the pane host never answered: the bridge ended first, `error` its
 /// word for it (`eof`). A passed deadline and a frame too large are answers
@@ -425,11 +520,28 @@ impl Observed {
         last_word(self.items())
     }
 
+    /// What the conversation's turn ended and left running: the window takes
+    /// input between turns, and its agent is woken as each ends.
+    pub fn pending(&self) -> Pending {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => record.pending,
+            Some(Reading::Unknown(_)) | None => Pending::default(),
+        }
+    }
+
+    /// The monitors among what the conversation's turn left running, as its record says
+    /// them: none where it could not be read.
+    pub fn monitors(&self) -> Vec<Monitor> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => record.monitors.clone(),
+            Some(Reading::Unknown(_)) | None => Vec::new(),
+        }
+    }
+
     /// Whether the conversation's turn ended and left background agents or
-    /// workflows running: the window takes input between turns, and its agent
-    /// is woken when they end.
+    /// workflows running.
     pub fn agents_pending(&self) -> bool {
-        matches!(self.reading.as_deref(), Some(Reading::Known(record)) if record.agents_pending)
+        self.pending().agents > 0
     }
 }
 

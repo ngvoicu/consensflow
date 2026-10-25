@@ -52,6 +52,22 @@
 # `cargo xtask windows --host zeewin -- cargo xtask plants daemon "windows close: the host
 # tells"`, and so on for the other two.
 #
+# - the windows a pane host still has open when its peer ends its input are ended with it, and it
+#   tells the exit of each, with what the window left running, before it closes its own output
+#   (`crates/cf-panes/src/headless.rs`, `shut_down`; the bridge keeps its output past the end of its
+#   input for it, `crates/cf-bridge/src/lib.rs`): the long run's final drain learns what each window
+#   left from them, as it learns of a window that ended before. The host waits for the exits it owes
+#   three seconds at most (`FAREWELL`) and for what it told to be written two (`FLUSH`), and a peer
+#   that reads nothing is not waited for any longer (3.0.6, item 8). The daemon is not told: both
+#   ends of a stop end the daemon's input first, and a daemon whose input has ended handles no event.
+#   The case of the rig is `crates/cf-e2e/tests/rig/last_exits.rs`, which builds the pane host from
+#   the sources as planted, so its plants say `builds`.
+#
+# - the stand-in Codex's plugin servers and workers write their process whole from the moment their
+#   file is there (`crates/cf-e2e/src/bin/fake_codex/servers.rs`), and the case that waits for the
+#   file waits for a number (`stand_ins::pid_in`): the flake of `ParseIntError`, an empty file read
+#   between its making and its writing (3.0.6, item 8).
+#
 # Every name holds `windows close`, so `npm run plants:daemon -- "windows close"` runs them all.
 
 [run]
@@ -67,6 +83,18 @@ headless-cleans-up = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", 
 panes-output-end = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::output_end::"]
 panes-handlers-windows = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::windows_tests::"]
 rig-regression-devin-window-closed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "devin_window_closed_mid_task::"]
+# A host shut down with windows open, its peer's input ended: it tells their exits before its output ends.
+headless-shut-down = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_host_shut_down_with_windows_open"]
+# A host whose peer reads nothing, or is gone, shuts down within its bounds.
+headless-peer-reads-nothing = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_host_whose_peer_reads_nothing"]
+# The exits a table owes, and is waited on for.
+panes-lib-owed = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::owed::"]
+# The bridge that keeps its output past the end of its input, and the one that does not.
+bridge-lib-kept-output = ["cargo", "test", "--offline", "-p", "cf-bridge", "--lib", "--", "keeps_its_output", "does_not_keep_its_output", "reads_nothing_gives_up", "an_output_the_bridge_kept"]
+# The last word of a closed rig: every exit the pane host told, the windows open as it closed among them.
+rig-last-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "last_exits::"]
+# The stand-in Codex's servers and workers, and the pid files they write.
+rig-stand-in-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stand_in_codex::"]
 
 [[plant]]
 name = "windows close: the pause note of a window that ended under its task says only that it closed"
@@ -167,8 +195,8 @@ runs = ["engine-closing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "self.close_windows(&others, Some(&shown.after(&with)))"
-replace = "self.close_windows(&others, None)"
+find = "self.close_windows(project.id, &others, Some(&shown.after(&with)))"
+replace = "self.close_windows(project.id, &others, None)"
 
 [[plant]]
 name = "windows close: a window the engine closed quotes how the kill ended its program"
@@ -218,9 +246,10 @@ runs = ["engine-shown", "engine-windows", "engine-closing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown.rs"
-find = '''            ", but {program} could not be ended and may still run"'''
-replace = '''            ", but {program} could not be ended and may still run: no window opens on its \
-             conversation until it has gone"'''
+find = '''        Some(format!(", but {program} {MAY_STILL_RUN}"))'''
+replace = '''        Some(format!(
+            ", but {program} {MAY_STILL_RUN}: no window opens on its conversation until it has gone"
+        ))'''
 
 [[plant]]
 name = "windows close: an end of the output is taken for the window's while its program runs"
@@ -385,3 +414,167 @@ replace = '''        told(Handed {
             ended_by_host: false,
         });
         if matches!(panes.retire_exited(&key), Ok(true)) {'''
+
+# The windows a pane host ends as it stops tell their exits (3.0.6, item 8; `issues/the-pane-host-
+# says-nothing-of-windows-it-reaps-at-shutdown.md`).
+
+[[plant]]
+name = "windows close: a host that stops ends its windows without telling what they left"
+meant = "a_host_shut_down_with_windows_open_tells_the_exit_of_each_before_it_closes_its_output"
+runs = ["headless-shut-down"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/headless.rs"
+find = '''
+    end_all(panes);
+    let _ = panes.exits_told_within(FAREWELL);'''
+replace = "    reap_all(panes);"
+
+[[plant]]
+name = "windows close: a host that stops closes its output without waiting for the exits it owes"
+meant = "a_host_shut_down_with_windows_open_tells_the_exit_of_each_before_it_closes_its_output"
+runs = ["headless-shut-down"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/headless.rs"
+find = "    let _ = panes.exits_told_within(FAREWELL);"
+replace = ""
+
+[[plant]]
+name = "windows close: a host that stops has no output left when its peer ends its input"
+meant = "the_last_word_of_a_closed_rig_holds_the_exit_of_a_window_the_pane_host_ended_as_it_stopped"
+runs = ["rig-last-exits", "headless-shut-down"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/headless.rs"
+find = "    builder.keep_output_after_eof();"
+replace = ""
+
+[[plant]]
+name = "windows close: a table asked whether its exits are told says so without looking"
+meant = "a_host_shut_down_with_windows_open_tells_the_exit_of_each_before_it_closes_its_output"
+runs = ["headless-shut-down"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = "        self.exits.paid_within(within)"
+replace = '''
+        let _ = within;
+        true'''
+
+[[plant]]
+name = "windows close: the wait for the exits owed gives up at once"
+meant = "the_wait_ends_when_the_last_exit_owed_is_paid"
+runs = ["panes-lib-owed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/owed.rs"
+find = "            if left.is_zero() {"
+replace = "            if true {"
+
+[[plant]]
+name = "windows close: a host waits for the exits it owes for as long as it takes"
+meant = "a_host_whose_peer_reads_nothing_shuts_down_within_its_bounds"
+runs = ["headless-peer-reads-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/headless.rs"
+find = "pub const FAREWELL: Duration = Duration::from_secs(3);"
+replace = "pub const FAREWELL: Duration = Duration::from_secs(3600);"
+
+[[plant]]
+name = "windows close: a host waits for a peer that reads nothing to take what it told"
+meant = "a_host_whose_peer_reads_nothing_shuts_down_within_its_bounds"
+runs = ["headless-peer-reads-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/headless.rs"
+find = "const FLUSH: Duration = Duration::from_secs(2);"
+replace = "const FLUSH: Duration = Duration::from_secs(3600);"
+
+# The bridge that keeps its output past the end of its input.
+
+[[plant]]
+name = "windows close: a bridge that keeps its output refuses what it is told after its input ends"
+meant = "a_bridge_that_keeps_its_output_says_what_is_left_after_its_input_ends_and_ends_it_on_request"
+runs = ["bridge-lib-kept-output", "headless-shut-down"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = "            && (!self.keeps_output || self.output_ended.load(Ordering::Acquire))"
+replace = "            && true"
+
+[[plant]]
+name = "windows close: a bridge that does not keep its output keeps it"
+meant = "a_bridge_that_does_not_keep_its_output_ends_it_with_its_input"
+runs = ["bridge-lib-kept-output"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = "self.close_transport(BridgeError::Eof, false, self.inner.keeps_output);"
+replace = "self.close_transport(BridgeError::Eof, false, true);"
+
+[[plant]]
+name = "windows close: a bridge that ends its output waits for a peer that reads nothing"
+meant = "ending_the_output_of_a_peer_that_reads_nothing_gives_up_after_its_time"
+runs = ["bridge-lib-kept-output"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = '''
+        let flushed = self.wait_for_the_writer(deadline);
+        self.cut_output();
+        flushed'''
+replace = '''
+        let flushed = self.wait_for_the_writer(deadline);
+        flushed'''
+
+[[plant]]
+name = "windows close: a failed write leaves the output a bridge kept open"
+meant = "a_failed_write_ends_an_output_the_bridge_kept"
+runs = ["bridge-lib-kept-output"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = '''
+            drop(lifecycle);
+            if !keeps_output {
+                self.cut_output();
+            }
+            return;'''
+replace = '''
+            drop(lifecycle);
+            return;'''
+
+# The stand-in Codex's pid files.
+
+[[plant]]
+name = "windows close: the stand-in Codex's file is there before it holds the process"
+meant = "the_stand_in_codexs_plugin_server_and_worker_write_their_process_whole_or_not_at_all"
+runs = ["rig-stand-in-codex"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex/servers.rs"
+find = '''
+    let writing = format!("{file}.pid.writing");
+    fs::write(&writing, std::process::id().to_string())?;
+    fs::rename(writing, format!("{file}.pid"))'''
+replace = '''
+    let mut made = fs::File::create(format!("{file}.pid"))?;
+    thread::sleep(Duration::from_millis(300));
+    made.write_all(std::process::id().to_string().as_bytes())'''
+
+[[plant]]
+name = "windows close: the stand-in Codex's worker never says its process"
+meant = "the_stand_in_codexs_plugin_server_leads_a_group_of_its_own_and_starts_its_workers_when_a_tool_is_called"
+runs = ["rig-stand-in-codex"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex/servers.rs"
+find = '''
+    if let Err(failed) = say_its_process(file) {
+        return refuse(&failed.to_string());
+    }
+    thread::sleep(Duration::from_secs(seconds));'''
+replace = "    thread::sleep(Duration::from_secs(seconds));"

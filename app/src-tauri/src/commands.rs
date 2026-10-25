@@ -220,6 +220,7 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "task.cancel",
     "task.pause",
     "task.reassign",
+    "task.finish",
     "task.resume",
     "tasks.delete",
     "message.read",
@@ -238,6 +239,8 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "specs.file",
     "specs.present",
     "specs.open",
+    "history.get",
+    "history.part",
 ];
 
 #[tauri::command]

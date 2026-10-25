@@ -5,6 +5,7 @@
 //! than a harness shows its model (`cut`) says nothing.
 
 use std::cell::Cell;
+use std::ffi::OsString;
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -67,7 +68,7 @@ struct Ran {
 fn cf_with(words: &[&str], json: bool, replies: Vec<Reply>, fails: Option<io::ErrorKind>) -> Ran {
     let api = scripted(replies);
     let board = Board::new(Some(&api.url), "tok");
-    let words: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
     let mut out = Output::new(&api);
     out.fails = fails;
     let mut err = Vec::new();
@@ -356,6 +357,127 @@ fn the_thread_and_what_it_carried_whole() -> Vec<(String, String)> {
         ("GET".to_owned(), "/api/tasks/3".to_owned()),
         ("POST".to_owned(), "/api/answers/read".to_owned()),
     ]
+}
+
+/// A brief as a person writes it, with the things a shell would change in it.
+const BRIEF: &str = "Parser\nRun `echo $HOME` and \"$(date)\" as written.\nKeep the last line.";
+
+/// Task 17 as the board gives an open one: its brief whole, no window, no thread.
+fn open_task(brief: &str) -> Value {
+    json!({ "task": {
+        "number": 17, "state": "open", "assignee": null, "requester": "chief",
+        "title": "Parser", "blockedBy": [], "pool": "worker", "tier": "standard",
+        "deletedAt": null, "body": brief, "messages": [],
+    } })
+}
+
+#[test]
+fn an_open_task_prints_its_whole_brief_under_its_header() {
+    let ran = cf(&["task", "get", "T-17"], vec![reply(200, open_task(BRIEF))]);
+    assert_eq!(ran.code.unwrap(), 0);
+    assert_eq!(
+        ran.out,
+        format!("T-17 [open] for a standard worker ← @chief: Parser\n\n{BRIEF}\n")
+    );
+    assert_eq!(asked(&ran), [("GET", "/api/tasks/17")]);
+}
+
+#[test]
+fn an_open_task_as_json_carries_its_brief_and_an_empty_thread() {
+    let ran = cf_with(
+        &["task", "get", "T-17"],
+        true,
+        vec![reply(200, open_task(BRIEF))],
+        None,
+    );
+    let got: Value = serde_json::from_str(&ran.out).unwrap();
+    assert_eq!(got["body"], BRIEF);
+    assert_eq!(got["messages"], json!([]));
+}
+
+#[test]
+fn a_given_task_prints_its_brief_once_in_the_message_that_carries_it() {
+    let mut task = open_task(BRIEF);
+    task["task"]["state"] = json!("working");
+    task["task"]["assignee"] = json!("zeus");
+    task["task"]["messages"] = json!([
+        { "id": 12, "kind": "task", "state": "delivered", "sender": "chief", "recipient": "zeus",
+          "task": 17, "body": BRIEF },
+        { "id": 30, "kind": "result", "state": "queued", "sender": "zeus", "recipient": "chief",
+          "task": 17, "body": "Done." },
+    ]);
+    let ran = cf(&["task", "get", "T-17"], vec![reply(200, task)]);
+    assert_eq!(
+        ran.out,
+        format!(
+            "T-17 [working] @zeus ← @chief: Parser\n\nm-12 [delivered] task T-17 from @chief\n{BRIEF}\n\nm-30 [queued] result T-17 from @zeus\nDone.\n"
+        )
+    );
+}
+
+#[test]
+fn an_open_task_given_before_prints_the_brief_it_has_now_and_its_old_messages_after_it() {
+    // Taken back to the board: its brief grew after the window it had ended.
+    let now = format!("{BRIEF}\n\nResumed: the lexer too.");
+    let mut task = open_task(&now);
+    task["task"]["messages"] = json!([
+        { "id": 12, "kind": "task", "state": "read", "sender": "chief", "recipient": "zeus",
+          "task": 17, "body": BRIEF },
+    ]);
+    let ran = cf(&["task", "get", "T-17"], vec![reply(200, task)]);
+    assert_eq!(
+        ran.out,
+        format!(
+            "T-17 [open] for a standard worker ← @chief: Parser\n\n{now}\n\nm-12 [read] task T-17 from @chief\n{BRIEF}\n"
+        )
+    );
+}
+
+#[test]
+fn a_task_its_window_has_no_message_of_prints_its_brief_under_its_header() {
+    // A task given by name to @zeus while it is blocked on its needs: the ledger queues no
+    // message for its window until they are accepted and the window is free (giving.rs,
+    // finishing.rs's release_ready). `working` is only what the header prints here: a
+    // blocked task is `open`.
+    let mut task = open_task(BRIEF);
+    task["task"]["state"] = json!("working");
+    task["task"]["assignee"] = json!("zeus");
+    let ran = cf(&["task", "get", "T-17"], vec![reply(200, task)]);
+    assert_eq!(
+        ran.out,
+        format!("T-17 [working] @zeus ← @chief: Parser\n\n{BRIEF}\n")
+    );
+}
+
+#[test]
+fn a_task_whose_only_task_message_went_to_another_window_prints_its_brief_under_its_header() {
+    // Given to @zeus, which has no task message of its own: @athena's copy is not one.
+    let mut task = open_task(BRIEF);
+    task["task"]["assignee"] = json!("zeus");
+    task["task"]["messages"] = json!([
+        { "id": 12, "kind": "task", "state": "read", "sender": "chief", "recipient": "athena",
+          "task": 17, "body": "Parser, the first draft" },
+    ]);
+    let ran = cf(&["task", "get", "T-17"], vec![reply(200, task)]);
+    assert_eq!(
+        ran.out,
+        format!(
+            "T-17 [open] @zeus ← @chief: Parser\n\n{BRIEF}\n\nm-12 [read] task T-17 from @chief\nParser, the first draft\n"
+        )
+    );
+}
+
+#[test]
+fn a_brief_the_board_withholds_prints_no_brief_block() {
+    // The daemon sends an empty body only to a member reading an assigned task whose brief
+    // waits at the human's gate; the chief and whoever gave the task read the brief, and the
+    // message itself is left out for all (routes/task.rs:60-67). This test models the CLI's
+    // rule for an empty body on an open task, which the daemon never serves.
+    let ran = cf(&["task", "get", "T-17"], vec![reply(200, open_task(""))]);
+    assert_eq!(
+        ran.out,
+        "T-17 [open] for a standard worker ← @chief: Parser\n\n\n"
+    );
 }
 
 #[test]

@@ -247,9 +247,19 @@ pub fn conversation<R: AsRef<str>, T: AsRef<str>>(
                 text: text.as_ref().to_owned(),
                 complete: true,
                 at: None,
+                compaction: false,
             })
             .collect(),
     }
+}
+
+/// `conversation` with its item at `index` the summary a compaction wrote in
+/// the user's place: a `user` item, marked.
+pub fn compacted_at(mut conversation: ChiefConversation, index: usize) -> ChiefConversation {
+    let item = &mut conversation.items[index];
+    item.role = "user".to_owned();
+    item.compaction = true;
+    conversation
 }
 
 /// A conversation as a golden row holds it.
@@ -273,6 +283,7 @@ pub fn conversation_of(row: &Value) -> ChiefConversation {
                 text: expand(&item["text"]),
                 complete: item["complete"].as_bool().unwrap(),
                 at: text(item, "at"),
+                compaction: false,
             })
             .collect(),
     }

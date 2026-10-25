@@ -129,8 +129,16 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
         let finish = message.get("finish").and_then(Value::as_str);
         let closes_turn = completed && (matches!(finish, Some("stop" | "length")) || is_failure);
         let complete = completed && finish == Some("stop") && !js::truthy(error_name);
+        // The summary a compaction writes is an assistant's message of OpenCode's own
+        // (1.19.3: `summary: true`, its mode and agent `compaction`): no answer of the
+        // member's, and never joined into one (Calliope on 0eec91d2).
+        let compaction = message.get("summary") == Some(&Value::Bool(true))
+            || message.get("mode").and_then(Value::as_str) == Some("compaction");
         items.push(Placed {
-            item: item(row, Role::Assistant, text, complete, at)?,
+            item: Item {
+                compaction,
+                ..item(row, Role::Assistant, text, complete, at)?
+            },
             seq,
         });
         for (part_row, part) in parts {
@@ -308,6 +316,7 @@ fn item(
         complete,
         at,
         commentary: false,
+        compaction: false,
     })
 }
 

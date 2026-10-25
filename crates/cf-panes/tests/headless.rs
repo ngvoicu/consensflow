@@ -6,9 +6,9 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -28,6 +28,10 @@ struct Headless {
     child: Child,
     input: Option<ChildStdin>,
     frames: Receiver<Result<Value, String>>,
+    /// The thread that reads the helper's output, which holds the pipe.
+    reading: Option<thread::JoinHandle<()>>,
+    /// Whether that thread has stopped taking what it reads (but holds the pipe).
+    stalled: Arc<AtomicBool>,
     next_id: u64,
     pub handle: Value,
 }
@@ -58,8 +62,13 @@ impl Headless {
         let handle = serde_json::from_str(handle_line.trim_end()).expect("parse helper handle");
 
         let (sender, frames) = mpsc::channel();
-        thread::spawn(move || {
+        let stalled = Arc::new(AtomicBool::new(false));
+        let stalling = Arc::clone(&stalled);
+        let reading = thread::spawn(move || {
             for line in reader.lines() {
+                while stalling.load(Ordering::Acquire) {
+                    thread::sleep(Duration::from_millis(10));
+                }
                 let frame = line.map_err(|error| error.to_string()).and_then(|line| {
                     serde_json::from_str(&line).map_err(|error| error.to_string())
                 });
@@ -73,8 +82,45 @@ impl Headless {
             child,
             input: Some(input),
             frames,
+            reading: Some(reading),
+            stalled,
             next_id: 0,
             handle,
+        }
+    }
+
+    /// Stops reading the helper's output but holds its pipe, as a peer that hangs does:
+    /// what the helper writes fills the pipe, and its next write waits for a reader.
+    fn stop_reading(&self) {
+        self.stalled.store(true, Ordering::Release);
+    }
+
+    /// Stops reading the helper's output and lets its pipe go, as a peer that has
+    /// died does: the helper's next write fails. The helper answers a list once
+    /// more, which the reading thread takes as its cue to stop.
+    fn lose_output(&mut self) {
+        let (_, unread) = mpsc::channel();
+        drop(std::mem::replace(&mut self.frames, unread));
+        self.send_request("pane.list", json!({}));
+        if let Some(reading) = self.reading.take() {
+            reading.join().expect("the reading thread ends");
+        }
+    }
+
+    /// Every frame the helper writes until its output ends, which it does with its
+    /// end; its end is waited for until `timeout`.
+    fn frames_to_the_end(&self, timeout: Duration) -> Vec<Value> {
+        let deadline = Instant::now() + timeout;
+        let mut frames = Vec::new();
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.receive_timeout(left) {
+                Ok(frame) => frames.push(frame),
+                Err(mpsc::RecvTimeoutError::Disconnected) => return frames,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    panic!("the helper's output did not end: {frames:?}")
+                }
+            }
         }
     }
 
@@ -152,6 +198,7 @@ impl Headless {
 
 impl Drop for Headless {
     fn drop(&mut self) {
+        self.stalled.store(false, Ordering::Release);
         if self.child.try_wait().ok().flatten().is_none() {
             let _ = self.child.kill();
             let _ = self.child.wait();
@@ -803,6 +850,150 @@ fn stdin_eof_kills_a_pane_before_draining_its_blocked_paste_handler() {
         exited_before_cleanup.expect("helper waited for the blocked paste before killing its pane");
     assert!(status.success(), "helper exited unsuccessfully: {status}");
     assert!(pids.iter().all(|pid| !process_exists(*pid)));
+}
+
+/// The daemon ends the helper's input to stop it, and a window still open is ended with
+/// it. The helper tells the exit of each, with what the window left running, as it
+/// tells a window's close, before it ends its own output: the daemon reads that to
+/// its end (the rig's last word), and what a window ran was otherwise known only from
+/// earlier looks. (Where the helper cannot look at a window's tree, it has no
+/// processes to name.)
+#[test]
+fn a_host_shut_down_with_windows_open_tells_the_exit_of_each_before_it_closes_its_output() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let mut windows = Vec::new();
+    for job in ["sleep 61", "sleep 62"] {
+        let script =
+            format!("printf ready; read go; /bin/sh -c '{job} & wait' & printf started; wait");
+        let opened = helper.request("pane.open", open_body(&script, 4096), &mut events);
+        assert_eq!(opened["ok"], true, "{opened}");
+        let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+        let generation = opened["generation"].as_u64().expect("opened generation");
+        let pane = json!({"id":pane_id,"generation":generation});
+        output_until(&helper, &mut events, &pane_id, generation, b"ready");
+        // The turn begins, and the window starts its job.
+        assert_eq!(
+            helper.request("pane.mark", pane.clone(), &mut events),
+            json!({"ok":true})
+        );
+        helper.request(
+            "pane.input",
+            json!({"id":pane_id,"generation":generation,"bytes":[103,111,10]}),
+            &mut events,
+        );
+        output_until(&helper, &mut events, &pane_id, generation, b"started");
+        #[cfg(target_os = "macos")]
+        background_with(&mut helper, &mut events, &pane, job);
+        windows.push((pane_id, generation, job));
+    }
+
+    drop(helper.input.take());
+    let said = helper.frames_to_the_end(Duration::from_secs(20));
+    let status = helper
+        .wait_for_exit(FRAME_TIMEOUT)
+        .expect("the helper did not exit when its output had ended");
+    assert!(status.success(), "helper exited unsuccessfully: {status}");
+
+    for (pane_id, generation, job) in windows {
+        let exits: Vec<&Value> = said
+            .iter()
+            .chain(events.iter())
+            .filter(|frame| frame["op"] == "pane.exit" && frame["body"]["id"] == pane_id.as_str())
+            .map(|frame| &frame["body"])
+            .collect();
+        assert_eq!(exits.len(), 1, "{pane_id} has one exit: {exits:?}");
+        assert_eq!(exits[0]["generation"], generation);
+        // The job it left is named in its own exit and no other's.
+        #[cfg(target_os = "macos")]
+        {
+            let named = |exit: &Value, command: &str| {
+                exit["background"]
+                    .as_array()
+                    .is_some_and(|work| work.iter().any(|process| process["command"] == command))
+            };
+            assert!(named(exits[0], job), "{job} is named: {:?}", exits[0]);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = job;
+    }
+}
+
+/// The helper's peer is gone, as when the daemon died: the exits it tells have no one
+/// to read them, and shutting down does not wait for one.
+#[test]
+fn a_host_whose_output_is_gone_shuts_down_without_hanging() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let mut spawned = Vec::new();
+    for _ in 0..2 {
+        let opened = helper.request(
+            "pane.open",
+            open_body("printf 'PID:%s\\n' $$; exec /bin/sleep 1000", 4096),
+            &mut events,
+        );
+        assert_eq!(opened["ok"], true, "{opened}");
+        let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+        let generation = opened["generation"].as_u64().expect("opened generation");
+        let said = output_until(&helper, &mut events, &pane_id, generation, b"\n");
+        let pid: i32 = String::from_utf8_lossy(&said)
+            .trim()
+            .trim_start_matches("PID:")
+            .parse()
+            .expect("the window's number");
+        spawned.push(pid);
+    }
+    helper.lose_output();
+
+    drop(helper.input.take());
+    let status = helper
+        .wait_for_exit(Duration::from_secs(20))
+        .expect("the helper hung with no one to hear its exits");
+    assert!(status.success(), "helper exited unsuccessfully: {status}");
+    let gone = Instant::now() + Duration::from_secs(2);
+    while spawned.iter().any(|pid| process_exists(*pid)) && Instant::now() < gone {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        spawned.iter().all(|pid| !process_exists(*pid)),
+        "a window outlived the helper: {spawned:?}"
+    );
+}
+
+/// A peer that holds its end of the pipe and reads nothing (hung, not dead): the exits the
+/// helper has to tell cannot be written, and the helper does not wait for them for ever. It
+/// waits for the exits as long as it can afford (`FAREWELL`) and for what it told to be
+/// written as long again at most (`FLUSH`), and ends.
+#[test]
+fn a_host_whose_peer_reads_nothing_shuts_down_within_its_bounds() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    for _ in 0..2 {
+        let opened = helper.request(
+            "pane.open",
+            open_body("exec yes", 8 * 1024 * 1024),
+            &mut events,
+        );
+        assert_eq!(opened["ok"], true, "{opened}");
+    }
+    // The windows print without end, and the peer takes no more of it: the pipe fills.
+    helper.stop_reading();
+    thread::sleep(Duration::from_secs(1));
+
+    drop(helper.input.take());
+    let began = Instant::now();
+    let status = helper
+        .wait_for_exit(Duration::from_secs(20))
+        .expect("the helper waited for a peer that reads nothing");
+    assert!(status.success(), "helper exited unsuccessfully: {status}");
+    assert!(
+        began.elapsed() < Duration::from_secs(15),
+        "the helper took {:?} to stop",
+        began.elapsed()
+    );
 }
 
 /// A paste says whether anything of it reached the window: one refused before
@@ -2403,4 +2594,83 @@ fn a_mark_or_a_look_at_a_window_that_is_not_open_is_refused() {
         assert_eq!(refused["ok"], false, "{op}: {refused}");
     }
     helper.close_input_and_wait();
+}
+
+/// A worker's window, as the bridge's looks at its commands meet it: a server that leaves
+/// the window's group (`setsid`) before the window is at rest, then, told to go, a command
+/// in a group of its own.
+#[cfg(target_os = "macos")]
+const LEFT_GROUP: &str = "/usr/bin/python3 -c 'import os, time; os.setsid(); time.sleep(40)' & \
+     echo $! > $JOB; sleep 0.5; printf ready; read go; \
+     /usr/bin/python3 -c 'import os; os.setpgrp(); os.execv(\"/bin/sleep\", [\"sleep\", \"41\"])' & \
+     sleep 0.3; printf started; wait";
+
+/// `pane.commands` over the wire leaves out what ran at the rest it names (`since`, which
+/// `pane.rest` answered), and what began before the time it names (`after`, milliseconds
+/// since the epoch: T-301, a worker's first turn, which no rest comes before); a look
+/// that names neither counts the server that left the group.
+#[cfg(target_os = "macos")]
+#[allow(clippy::disallowed_methods)] // The time of the monitor's call, as its record would say it.
+#[test]
+fn a_look_at_the_commands_over_the_wire_leaves_out_the_rest_and_what_began_before_the_time_it_names(
+) {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    static MADE: AtomicU64 = AtomicU64::new(0);
+    let job = std::env::temp_dir().join(format!(
+        "cf-headless-server-{}-{}",
+        std::process::id(),
+        MADE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_file(&job);
+    let mut body = open_body(LEFT_GROUP, 4096);
+    body["env"] = json!({ "JOB": job });
+    let opened = helper.request("pane.open", body, &mut events);
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let pane = json!({"id":pane_id,"generation":generation});
+    output_until(&helper, &mut events, &pane_id, generation, b"ready");
+    let server = detached_job(&job);
+    let mut mark = pane.clone();
+    mark["servers"] = json!("inGroup");
+    mark["harness"] = json!("claude");
+    helper.request("pane.mark", mark, &mut events);
+    let rest = helper.request("pane.rest", pane.clone(), &mut events);
+    assert_eq!(rest["ok"], true, "{rest}");
+    let called = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("after the epoch")
+            .as_millis(),
+    )
+    .expect("a time");
+    helper.request(
+        "pane.input",
+        json!({"id":pane_id,"generation":generation,"bytes":[103,111,10]}),
+        &mut events,
+    );
+    output_until(&helper, &mut events, &pane_id, generation, b"started");
+    let mut total = |asked: Value| {
+        let mut body = pane.clone();
+        for (name, value) in asked.as_object().into_iter().flatten() {
+            body[name] = value.clone();
+        }
+        let answer = helper.request("pane.commands", body, &mut events);
+        assert_eq!(answer["ok"], true, "{answer}");
+        answer["commands"]["total"].clone()
+    };
+    assert_eq!(total(json!({})), 2, "the server and the command");
+    assert_eq!(total(json!({ "since": rest["rest"] })), 1, "the command");
+    assert_eq!(total(json!({ "after": called })), 1, "the command");
+
+    // The server is the test's to end, before the window's close looks at it.
+    kill_process_group(server);
+    assert_eq!(
+        helper.request("pane.kill", pane, &mut events),
+        json!({"ok":true})
+    );
+    helper.close_input_and_wait();
+    let _ = std::fs::remove_file(&job);
 }

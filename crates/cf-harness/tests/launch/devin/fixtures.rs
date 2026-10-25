@@ -351,6 +351,7 @@ pub(super) fn settled(session: &str) -> Record {
             complete: true,
             at: None,
             commentary: false,
+            compaction: false,
         }],
         in_flight: false,
         asking: false,
@@ -358,7 +359,8 @@ pub(super) fn settled(session: &str) -> Record {
         failure: None,
         quota: None,
         settlement: Settlement::Settled,
-        agents_pending: false,
+        pending: Default::default(),
+        monitors: Vec::new(),
     }
 }
 

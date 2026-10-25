@@ -65,8 +65,8 @@ use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
-    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
-    Skill, Waiting, Window, Work,
+    Adapter, Admission, Held, Input, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
+    Records, Skill, Trusts, Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
@@ -75,6 +75,7 @@ use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::switched_to;
 use crate::shared::resumable::transcript_kept;
+use crate::shared::trust;
 use crate::shared::{pane, specmint, window_args};
 
 /// Claude Code, as the engine launches its windows.
@@ -186,6 +187,7 @@ impl Adapter for ClaudeAdapter {
                     restored: Cell::new(false),
                     left_open: RefCell::new(left_open),
                     relaunched,
+                    trusts: trust::trusts(launch.directory),
                 }),
             })
         })
@@ -209,6 +211,13 @@ impl Adapter for ClaudeAdapter {
             Servers::Unknown
         } else {
             Servers::InGroup
+        }
+    }
+
+    /// Pasted, and its box cleared with Control-C ([`stopped::CLEAR_INPUT`]).
+    fn input(&self) -> Input {
+        Input::Pasted {
+            clear: &stopped::CLEAR_INPUT,
         }
     }
 
@@ -249,6 +258,8 @@ struct ClaudeWindow {
     /// transcript held then, the window it was on closed: where the program
     /// the window runs began writing.
     relaunched: Option<(String, u64)>,
+    /// What a yes to Claude Code's question about the window's folder trusts.
+    trusts: Trusts,
 }
 
 /// What a look at `session` is told: where the window's program began writing,
@@ -322,8 +333,20 @@ impl Window for ClaudeWindow {
         *self.left_open.borrow_mut() = None;
     }
 
-    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
+    fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
         Box::pin(async { Ok(None) })
+    }
+
+    fn trusts(&self) -> Option<&Trusts> {
+        Some(&self.trusts)
+    }
+
+    fn toward_trust(&self, screen: &[String]) -> Option<&'static [u8]> {
+        super::trust::toward_trust(screen)
+    }
+
+    fn shows_prompt(&self, screen: &[String]) -> bool {
+        super::trust::shows_prompt(screen)
     }
 
     /// A paste waits for the window to be readable, on its conversation,
@@ -370,8 +393,9 @@ impl Window for ClaudeWindow {
         Box::pin(async move {
             // A window read at rest by an interrupt of ours has the message it
             // was given in its input box again, and this one would be pasted
-            // after it, to go as one: the box is cleared first.
-            if self.restored.get() {
+            // after it, to go as one: the box is cleared first, unless the engine
+            // just cleared it.
+            if self.restored.get() && !host.cleared() {
                 if let Err(cause) = pane::write_keys(host, pane, &stopped::CLEAR_INPUT).await {
                     let reason = format!("the window's input box could not be cleared: {cause}");
                     return Ok(Admission::Refused { reason });
@@ -407,7 +431,7 @@ impl Window for ClaudeWindow {
                     record.settlement == Settlement::Settled,
                     record.failed,
                     record.quota.clone(),
-                    record.agents_pending,
+                    record.pending.agents > 0,
                 ),
                 Reading::Unknown(_) => (true, false, false, None, false),
             };

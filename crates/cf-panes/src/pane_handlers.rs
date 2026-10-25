@@ -22,7 +22,8 @@ use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::panes::{
-    BackgroundProcess, EndRequest, MarkRequest, PaneExit, SnapshotRequest, TAIL_LINES,
+    BackgroundProcess, CommandsRequest, EndRequest, MarkRequest, PaneExit, Rest, RestRequest,
+    SnapshotRequest, TAIL_LINES,
 };
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
@@ -254,6 +255,33 @@ pub fn register_pane_handlers(
         Ok(json!({"ok":true,"total":background.total,"processes":background.processes}))
     });
 
+    // Which commands of the window's harness run in its tree now, less what ran at the
+    // rest the request names, where the host can tell them: `null` where it cannot, said
+    // `unreadable` where a process of the window cannot be read.
+    let commands_panes = Arc::clone(&panes);
+    builder.on("pane.commands", move |_bridge, body| {
+        let request: CommandsRequest = parse_body(body)?;
+        let key = pane_key(&request.id, request.generation)?;
+        let answer = commands_panes
+            .commands(&key, request.since, request.after)
+            .map_err(|error| error.to_string())?;
+        let mut body = serde_json::to_value(&answer).map_err(|error| error.to_string())?;
+        body["ok"] = json!(true);
+        Ok(body)
+    });
+
+    // The window is at rest: what its tree runs now is kept, under the number answered,
+    // for a look at its commands to leave out; `null` where the host tells none of them.
+    let rest_panes = Arc::clone(&panes);
+    builder.on("pane.rest", move |_bridge, body| {
+        let request: RestRequest = parse_body(body)?;
+        let key = pane_key(&request.id, request.generation)?;
+        let rest: Rest = rest_panes
+            .rest(&key, &request.keep)
+            .map_err(|error| error.to_string())?;
+        Ok(json!({"ok":true,"rest":rest}))
+    });
+
     // What the window's turn left running ends, the window staying open: it is
     // asked to end, and given the table's grace, as a close gives one. The host
     // chooses what, from all it can prove the turn's.
@@ -346,6 +374,8 @@ fn stream_to_page(
             output: stream,
             screen,
             ended,
+            // Paid, with this thread's end, once the exit is told.
+            owed: _owed,
         } = streamed;
         for message in stream {
             printed.note();

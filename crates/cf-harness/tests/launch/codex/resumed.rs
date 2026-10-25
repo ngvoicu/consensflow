@@ -28,6 +28,7 @@ fn item(id: &str, role: Role, text: &str, complete: bool) -> Item {
         complete,
         at: None,
         commentary: false,
+        compaction: false,
     }
 }
 
@@ -40,7 +41,8 @@ fn reading(items: Vec<Item>, settlement: Settlement) -> Arc<Reading> {
         failure: None,
         quota: None,
         settlement,
-        agents_pending: false,
+        pending: Default::default(),
+        monitors: Vec::new(),
     }))
 }
 

@@ -148,6 +148,10 @@ fn launches_a_worker_with_its_task_as_the_first_message_and_records_its_answer_a
     );
 }
 
+// Node kept everything a member wrote in its turn, and this engine did until the owner's
+// decision of 2026-10-15 (after T-14 and T-15, whose results began with ten to twenty lines
+// of progress): the result is the member's final answer, what it wrote after its last tool
+// call. The sentence is the test's key to Node's trace, which it departs from (`DEPARTED`).
 #[test]
 fn keeps_everything_a_member_wrote_in_its_turn_not_only_its_last_message() {
     let context = Context::new();
@@ -172,11 +176,9 @@ fn keeps_everything_a_member_wrote_in_its_turn_not_only_its_last_message() {
     context.pass().unwrap();
     let task = context.task(project.id, 1);
     let result = task.messages.iter().find(|m| m.kind == "result").unwrap();
-    assert!(result.body.contains(&report), "the report, whole");
-    assert!(result.body.contains("Committed."), "and the last word");
-    assert!(
-        !result.body.contains("git commit: 1 file changed"),
-        "a tool's output is not the member's words"
+    assert_eq!(
+        result.body, "Committed.",
+        "the final answer alone: what came before its last tool call stays in the transcript"
     );
     held_to(
         context.close(),

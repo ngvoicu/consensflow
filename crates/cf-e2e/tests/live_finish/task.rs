@@ -9,10 +9,11 @@
 //! - It is found in the folders every window has on its `PATH` on both machines
 //!   (`/bin` on macOS, `System32` on Windows). `git`, which both machines have, is on
 //!   it on macOS (`/usr/bin`) and not on Windows: the `PATH` the rig gives a window
-//!   there is the stand-in's folder, the harness's and Node's, and `System32`
-//!   (`rig/install.rs`), and Git for Windows' folder is none of them, so `git
-//!   --version` would be "not recognized" by a worker's shell on zeewin, and the check
-//!   would fail for a reason that is no finding.
+//!   there is the stand-in's folder, the harness's and Node's, and the folders every
+//!   Windows install has (`System32`, the Windows folder, `Wbem` and Windows PowerShell's:
+//!   `rig/install.rs`, which the second step's brief relies on, T-379), and Git for
+//!   Windows' folder is none of them, so `git --version` would be "not recognized" by a
+//!   worker's shell on zeewin, and the check would fail for a reason that is no finding.
 //! - It prints the machine's own name, which only a run of it tells (a worker that
 //!   never ran the command cannot say it, and a pass of the check would prove nothing
 //!   of a turn that left no process because it ran none). The check learns it by

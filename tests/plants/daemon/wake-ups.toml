@@ -3,9 +3,12 @@
 # that stopped while work is left carries on). A wake-up is a note from the human to the
 # chief, queued when the interval has passed since the latest of the last wake-up, the last
 # Resume and the last change of the setting; never while one is on its way, never to a
-# chief in a turn, waiting, out of quota or held for words the human typed; a quiet board
-# is not asked twice, and the first after an enable or a Resume always goes. One plant takes
-# one rule out; a test of it fails. The ledger's plants run its own tests
+# chief in a turn, waiting, out of quota or held for words the human typed, and never while a
+# task is queued, working, waiting for an answer on its way (or at the gate), held for its member's
+# quota or open behind one of those (a question the chief has not answered, a task the chief holds
+# itself, and what it paused are the chief's own and are woken for;
+# a skip is logged and the interval counts from it); a quiet board is not asked twice, and the
+# first after an enable or a Resume always goes. One plant takes one rule out; a test of it fails. The ledger's plants run its own tests
 # (`crates/cf-ledger/tests/wake_ups/` and the unit tests of `wake_ups`), the engine's the
 # dispatcher's (`tests/dispatcher/wake_ups.rs` and `wake_ups/ending.rs`), the page's the operations'
 # (`crates/cf-daemon/src/page/tests/wake_up.rs`) and the dialog's the browser's; the
@@ -194,6 +197,286 @@ find = '        if !begun_since(store, project_id, last)? && !changed_since(stor
 replace = '        if false {'
 
 [[plant]]
+name = "wake-up: a task queued for its window is no work on its way"
+meant = "a_task_queued_for_its_window_holds_the_wake_up_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "const WITH_ITS_WINDOW: [&str; 2] = [\"queued\", \"working\"];"
+replace = "const WITH_ITS_WINDOW: [&str; 2] = [\"working\", \"working\"];"
+
+[[plant]]
+name = "wake-up engine: a task queued for its window is no work on its way"
+meant = "a_task_queued_for_its_window_holds_the_wake_up_back"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "const WITH_ITS_WINDOW: [&str; 2] = [\"queued\", \"working\"];"
+replace = "const WITH_ITS_WINDOW: [&str; 2] = [\"working\", \"working\"];"
+
+[[plant]]
+name = "wake-up: a task working is no work on its way"
+meant = "a_task_working_holds_the_wake_up_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "const WITH_ITS_WINDOW: [&str; 2] = [\"queued\", \"working\"];"
+replace = "const WITH_ITS_WINDOW: [&str; 2] = [\"queued\", \"queued\"];"
+
+[[plant]]
+name = "wake-up engine: a task working is no work on its way"
+meant = "a_task_working_holds_the_wake_up_back_and_it_is_not_owed_when_the_work_is_over"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "const WITH_ITS_WINDOW: [&str; 2] = [\"queued\", \"working\"];"
+replace = "const WITH_ITS_WINDOW: [&str; 2] = [\"queued\", \"queued\"];"
+
+[[plant]]
+name = "wake-up: a question the chief has not answered holds the wake-up back"
+meant = "a_question_the_chief_has_not_answered_is_the_chiefs_to_answer_and_gets_a_wake_up"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'waiting'"
+replace = "OR t.state = 'waiting' OR (t.state = 'waiting'"
+
+[[plant]]
+name = "wake-up: an answer on its way to the window is the chief's still"
+meant = "a_question_answered_and_the_answer_not_yet_received_holds_the_wake_up_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'waiting'"
+replace = "OR (t.state = 'never'"
+
+[[plant]]
+name = "wake-up engine: a question the chief has not answered holds the wake-up back"
+meant = "a_question_the_chief_has_not_answered_is_the_chiefs_to_answer_and_gets_a_wake_up"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'waiting'"
+replace = "OR t.state = 'waiting' OR (t.state = 'waiting'"
+
+[[plant]]
+name = "wake-up engine: an answer on its way to the window is the chief's still"
+meant = "a_question_answered_and_the_answer_not_yet_received_holds_the_wake_up_back"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'waiting'"
+replace = "OR (t.state = 'never'"
+
+[[plant]]
+name = "wake-up: a task open behind one on its way is no work on its way"
+meant = "a_task_open_behind_one_on_its_way_holds_the_wake_up_back_and_so_does_a_chain_of_them"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "WHERE w.project_id = ?1 AND w.state = 'open'"
+replace = "WHERE w.project_id = ?1 AND w.state = 'never'"
+
+[[plant]]
+name = "wake-up: a task open behind an open one holds whatever is at the bottom of the chain"
+meant = "tasks_open_in_a_chain_behind_one_done_and_undecided_get_a_wake_up_too"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "JOIN on_its_way o ON o.id = n.needs_id"
+replace = "JOIN task o ON o.id = n.needs_id AND o.state NOT IN ('done', 'accepted', 'failed', 'cancelled')"
+
+[[plant]]
+name = "wake-up: a task open behind one done and undecided is work on its way"
+meant = "a_task_open_behind_one_done_and_undecided_waits_for_the_chief_too_and_gets_a_wake_up"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "JOIN on_its_way o ON o.id = n.needs_id"
+replace = "JOIN task o ON o.id = n.needs_id AND o.state != 'accepted'"
+
+[[plant]]
+name = "wake-up engine: a task open behind one done and undecided is work on its way"
+meant = "a_task_done_and_undecided_is_the_chiefs_own_and_so_is_one_open_behind_it"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "JOIN on_its_way o ON o.id = n.needs_id"
+replace = "JOIN task o ON o.id = n.needs_id AND o.state != 'accepted'"
+
+[[plant]]
+name = "wake-up engine: a task open behind an open one holds whatever is at the bottom of the chain"
+meant = "a_task_done_and_undecided_is_the_chiefs_own_and_so_is_one_open_behind_it"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "JOIN on_its_way o ON o.id = n.needs_id"
+replace = "JOIN task o ON o.id = n.needs_id AND o.state NOT IN ('done', 'accepted', 'failed', 'cancelled')"
+
+[[plant]]
+name = "wake-up: a task open behind one that failed or was called off is work on its way"
+meant = "a_task_open_behind_one_that_failed_or_was_called_off_is_the_chiefs_to_settle"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "JOIN on_its_way o ON o.id = n.needs_id"
+replace = "JOIN task o ON o.id = n.needs_id AND o.state NOT IN ('done', 'accepted')"
+
+[[plant]]
+name = "wake-up: a task held for its member's quota is the chief's to wake"
+meant = "a_task_held_for_its_members_quota_goes_on_by_itself_and_holds_the_wake_up_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+replace = "OR (t.state = 'paused' AND t.state = 'working'))"
+
+[[plant]]
+name = "wake-up engine: a task held for its member's quota is the chief's to wake"
+meant = "a_task_held_for_its_members_quota_holds_the_wake_up_back_until_the_hold_ends"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+replace = "OR (t.state = 'paused' AND t.state = 'working'))"
+
+[[plant]]
+name = "wake-up: a task the chief paused goes on by itself"
+meant = "a_task_the_chief_paused_is_the_chiefs_to_resume_and_so_is_one_open_behind_it"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+replace = "OR (t.state = 'paused'))"
+
+[[plant]]
+name = "wake-up: a hold the daemon ended goes on by itself"
+meant = "a_hold_the_daemon_ended_without_resuming_the_task_is_the_chiefs_again_and_gets_a_wake_up"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+replace = "OR (t.state = 'paused'))"
+
+[[plant]]
+name = "wake-up engine: a hold the daemon ended goes on by itself"
+meant = "a_task_held_for_its_members_quota_holds_the_wake_up_back_until_the_hold_ends"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+replace = "OR (t.state = 'paused'))"
+
+[[plant]]
+name = "wake-up: a task the chief holds itself holds the wake-up back"
+meant = "a_task_the_chief_holds_itself_and_works_on_is_the_chiefs_own_and_gets_a_wake_up"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "WHERE c.id = t.assignee_id AND c.role = 'chief')"
+replace = "WHERE c.id = t.assignee_id AND c.role = 'never')"
+
+[[plant]]
+name = "wake-up engine: a task the chief holds itself holds the wake-up back"
+meant = "a_task_the_chief_holds_itself_is_the_chiefs_own_and_its_turn_that_ended_in_the_middle_of_it_is_woken"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "WHERE c.id = t.assignee_id AND c.role = 'chief')"
+replace = "WHERE c.id = t.assignee_id AND c.role = 'never')"
+
+[[plant]]
+name = "wake-up: the staff's tasks are the chief's own too"
+meant = "a_task_the_chief_holds_itself_does_not_let_the_staffs_work_go_unprotected"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "AND c.role = 'chief')"
+replace = "AND c.role IS NOT NULL)"
+
+[[plant]]
+name = "wake-up: an answer the gate holds for the human is the chief's still"
+meant = "an_answer_the_gate_holds_for_the_human_is_on_its_way_and_holds_the_wake_up_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "AND a.state IN ('gated', 'queued', 'delivering')))"
+replace = "AND a.state IN ('queued', 'delivering')))"
+
+[[plant]]
+name = "wake-up: the first after the calls are turned on goes into work on its way"
+meant = "the_first_wake_up_after_the_calls_are_turned_on_is_held_back_by_work_on_its_way_too"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    if !tasks.is_empty() {'
+replace = '    if last.is_some() && !tasks.is_empty() {'
+
+[[plant]]
+name = "wake-up: work in another project holds this project's wake-up back"
+meant = "work_on_its_way_in_another_project_holds_nothing_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "SELECT t.id FROM task t WHERE t.project_id = ?1"
+replace = "SELECT t.id FROM task t WHERE ?1 = ?1"
+
+[[plant]]
+name = "wake-up: a skipped wake-up is owed the moment the board clears"
+meant = "a_wake_up_skipped_is_not_owed_and_the_next_comes_an_interval_after_the_skip"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "           AND (kind IN ('project.wake_up', 'project.wake_up_skipped', 'project.wake_up_setting')"
+replace = "           AND (kind IN ('project.wake_up', 'project.wake_up_setting')"
+
+[[plant]]
+name = "wake-up engine: a skipped wake-up is owed the moment the board clears"
+meant = "a_task_working_holds_the_wake_up_back_and_it_is_not_owed_when_the_work_is_over"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "           AND (kind IN ('project.wake_up', 'project.wake_up_skipped', 'project.wake_up_setting')"
+replace = "           AND (kind IN ('project.wake_up', 'project.wake_up_setting')"
+
+[[plant]]
+name = "wake-up: a skip is not logged"
+meant = "a_skip_is_logged_once_for_an_interval_however_often_it_is_asked_and_again_at_the_next"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '                "project.wake_up_skipped",'
+replace = '                "project.wake_up_skipped.never",'
+
+[[plant]]
 name = "wake-up: the first after the calls are turned on again waits for the board to move"
 meant = "the_first_wake_up_after_the_calls_are_turned_on_again_goes_though_the_board_is_quiet"
 runs = ["ledger-wake-ups"]
@@ -240,8 +523,10 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/transcripts.rs"
-find = '         WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete",'
-replace = '         WHERE 1",'
+find = '''         WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete
+       RETURNING rowid, compaction",'''
+replace = '''         WHERE 1
+       RETURNING rowid, compaction",'''
 
 [[plant]]
 name = "wake-up: the count does not restart at the Resume"
@@ -316,7 +601,7 @@ runs = ["engine-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''        if idle {
+find = '''        if idle && project.state == "open" {
             // A chief at rest may be due a wake-up: queued here, it is the next
             // message of its queue, delivered by the rules of every message.
             if participant.role == "chief" {
@@ -326,7 +611,7 @@ find = '''        if idle {
 replace = '''        if participant.role == "chief" {
             self.queue_wake_up_if_due(project, participant)?;
         }
-        if idle {
+        if idle && project.state == "open" {
             let next = self.next_in_line(record)?;'''
 
 [[plant]]
@@ -361,9 +646,9 @@ runs = ["daemon-wake-up-page", "proto-page"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/page.rs"
-find = '''                | Self::SpecsGet
+find = '''                | Self::HistoryPart
         )'''
-replace = '''                | Self::SpecsGet
+replace = '''                | Self::HistoryPart
                 | Self::WakeUpSet
         )'''
 
@@ -532,7 +817,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''        if idle {
+find = '''        if idle && project.state == "open" {
             // A chief at rest may be due a wake-up: queued here, it is the next
             // message of its queue, delivered by the rules of every message.
             if participant.role == "chief" {
@@ -542,7 +827,7 @@ find = '''        if idle {
 replace = '''        if participant.role == "chief" {
             self.queue_wake_up_if_due(project, participant)?;
         }
-        if idle {
+        if idle && project.state == "open" {
             let next = self.next_in_line(record)?;'''
 
 [[plant]]

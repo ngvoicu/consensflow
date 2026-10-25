@@ -113,10 +113,10 @@ runs = ["runnable"]
 [[plant.edit]]
 file = "crates/cf-process/src/runnable.rs"
 find = '''
-    on_path("node", env)
+    own().or_else(|| on_path_as_program("node", env))
 }'''
 replace = '''
-    on_path("node", env).or_else(|| env.path("CONSENSFLOW_NODE").map(Path::to_path_buf))
+    own().or_else(|| on_path_as_program("node", env)).or_else(|| env.path("CONSENSFLOW_NODE").map(Path::to_path_buf))
 }'''
 
 [[plant]]
@@ -126,8 +126,8 @@ runs = ["runnable"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/runnable.rs"
-find = "        Shim::NeedsNode => return Err(needs_node(executable)),"
-replace = "        Shim::NeedsNode => {}"
+find = "        Shim::NeedsNode { bare } => return Err(needs_node(executable, bare)),"
+replace = "        Shim::NeedsNode { .. } => {}"
 
 [[plant]]
 name = "deletion: a window is opened on an npm shim with no Node as on one that cannot be read"
@@ -136,9 +136,9 @@ runs = ["runnable"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/runnable.rs"
-find = "        Shim::NeedsNode => return Err(needs_node(Path::new(executable))),"
+find = "        Shim::NeedsNode { bare } => return Err(needs_node(Path::new(executable), bare)),"
 replace = '''
-        Shim::NeedsNode => {
+        Shim::NeedsNode { .. } => {
             return Err(format!(
                 "{executable} is not an npm shim, and only cmd.exe could run it in a window"
             ));
@@ -157,6 +157,39 @@ find = '''
     }
 '''
 replace = ""
+
+# The `pi.cmd` Pi's own Windows installer writes, `node "%~dp0pi-launcher.js" %*`: a bare node.
+[[plant]]
+name = "deletion: a bare node before a shim's script is not read as a Node"
+meant = "pis_own_installers_shim_runs_its_launcher_on_a_node_found_as_for_an_npm_shim"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''
+        [script] if is_bare_node(script.before) => (None, Some(script.text)),
+'''
+replace = ""
+
+[[plant]]
+name = "deletion: a bare node before a shim's script is run as the name node, not the one found"
+meant = "pis_own_installers_shim_runs_its_launcher_on_a_node_found_as_for_an_npm_shim"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "        None => Program::BareNode,"
+replace = '        None => Program::Named(PathBuf::from("node")),'
+
+[[plant]]
+name = "deletion: any program before a shim's lone quoted script is read as a Node"
+meant = "a_program_before_the_script_other_than_a_bare_node_is_still_no_shim_to_read"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '    before.trim().eq_ignore_ascii_case("node") && before.ends_with(char::is_whitespace)'
+replace = "    true"
 
 [[plant]]
 name = "deletion: the refusal does not say the Node can be made visible"
@@ -340,3 +373,107 @@ find = "const CONSOLE_ASCII = new Map("
 replace = '''
 import { join } from 'node:path'
 const CONSOLE_ASCII = new Map('''
+
+# The Node a bare `node` runs on, for an app started before Pi's installer put its own on the
+# PATH (T-34, P3-1), what follows a shim's script (P3-2) and what a Node is (P3-4).
+[[plant]]
+name = "deletion: the Node Pi's installer put is not looked for"
+meant = "pis_shim_finds_the_node_pis_installer_put_though_the_app_started_before_it_was_on_the_path"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "bare.then(|| pi_node(env)).flatten()"
+replace = "None"
+
+[[plant]]
+name = "deletion: an npm shim is run on the Node Pi's installer put"
+meant = "the_node_pis_installer_put_is_for_a_bare_node_and_never_an_npm_shims"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "bare.then(|| pi_node(env)).flatten()"
+replace = "pi_node(env)"
+
+[[plant]]
+name = "deletion: a word after a shim's script is read over"
+meant = "a_word_after_the_script_makes_a_line_no_shim_to_read_but_for_the_arguments"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '    if after.trim() != "%*" {'
+replace = '    if after.is_empty() && false {'
+
+[[plant]]
+name = "deletion: a node.cmd is a Node a window can start"
+meant = "a_node_cmd_first_on_the_path_is_passed_over_for_a_node_a_window_can_start"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''
+    own().or_else(|| on_path_as_program("node", env))
+}'''
+replace = '''
+    own().or_else(|| crate::search::on_path("node", env))
+}'''
+
+# What stands between a shim's program and its script, and a bare node glued to it (T-141, P3-2); the Node's
+# order (P3-1); the words of the refusal for Pi's own installer's shim (P3-6).
+[[plant]]
+name = "deletion: a word between a shim's program and its script is read over"
+meant = "a_word_between_the_program_and_the_script_makes_a_line_no_shim_to_read"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "        [.., program, script] if script.before.trim().is_empty() => {"
+replace = "        [.., program, script] => {"
+
+[[plant]]
+name = "deletion: a bare node glued to the script's quote is read as a Node"
+meant = "a_word_between_the_program_and_the_script_makes_a_line_no_shim_to_read"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '    before.trim().eq_ignore_ascii_case("node") && before.ends_with(char::is_whitespace)'
+replace = '    before.trim().eq_ignore_ascii_case("node")'
+
+[[plant]]
+name = "deletion: the Node on the PATH comes before the one Pi's installer put"
+meant = "pis_shim_finds_the_node_pis_installer_put_though_the_app_started_before_it_was_on_the_path"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "    own().or_else(|| on_path_as_program(\"node\", env))"
+replace = "    on_path_as_program(\"node\", env).or_else(own)"
+
+[[plant]]
+name = "deletion: Pi's own installer's shim is refused in npm's words"
+meant = "pis_shim_finds_the_node_pis_installer_put_though_the_app_started_before_it_was_on_the_path"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "    if bare {"
+replace = "    if bare && false {"
+
+# T-194's P3-7: the refusal for Pi's own installer's shim names the places in the order they are
+# looked in (beside it, Pi's installer's folder, the PATH).
+[[plant]]
+name = "deletion: the refusal for Pi's own shim names the PATH before Pi's installer's folder"
+meant = "pis_shim_finds_the_node_pis_installer_put_though_the_app_started_before_it_was_on_the_path"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''none is beside it, none is \
+             in %LOCALAPPDATA%\\pi-node\\current, where Pi's installer puts one, and none is on \
+             the PATH ConsensFlow runs with. Install'''
+replace = '''none is beside it, none is \
+             on the PATH ConsensFlow runs with, and none is in %LOCALAPPDATA%\\pi-node\\current, \
+             where Pi's installer puts one. Install'''

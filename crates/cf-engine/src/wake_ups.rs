@@ -4,13 +4,14 @@
 //! to be at rest and for the human's unsent words in its window like any note.
 //!
 //! The ledger says when a wake-up is due (`cf_ledger::Ledger::queue_wake_up_if_due`:
-//! the interval, what moved since the last, never two on their way); the
-//! engine adds what only it knows. A wake-up is queued when the chief's window
-//! is at rest (not in a turn, not waiting on a question, not out of quota),
-//! so a wake-up that fell due during a long turn is not pasted in stale right
-//! after it, and not while a message already waits for the human's unsent
-//! words. Whether the chief then has the words is the delivery's: a window
-//! that holds them for text the human typed holds the wake-up too.
+//! the interval, what moved since the last, never two on their way, and none
+//! while work is on its way on the board); the engine adds what only it knows.
+//! A wake-up is queued when the chief's window is at rest (not in a turn, not
+//! waiting on a question, not out of quota), so a wake-up that fell due during
+//! a long turn is not pasted in stale right after it, and not while a message
+//! already waits for the human's unsent words. Whether the chief then has the
+//! words is the delivery's: a window that holds them for text the human typed
+//! holds the wake-up too.
 
 use cf_ledger::{ParticipantView, ProjectView};
 

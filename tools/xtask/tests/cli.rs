@@ -142,6 +142,8 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "smoke",
         "smoke-updater",
         "candidate",
+        "release alpha",
+        "release promote",
     ] {
         let mut words: Vec<&str> = command.split(' ').collect();
         words.push("--help");
@@ -172,6 +174,15 @@ fn check_steps() -> Vec<String> {
                 .join("xtask-check"),
         )
         .display();
+    // The families the checkout's data has, as the gate finds them: the folders of tests/plants
+    // that hold a kit.
+    let mut families: Vec<String> = fs::read_dir(checkout().join("tests").join("plants"))
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.path().join("kit.toml").is_file())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    families.sort();
     let for_windows = "cargo clippy --offline --target x86_64-pc-windows-msvc --all-targets \
                        --workspace --exclude app -- -D warnings";
     let mut steps = vec![
@@ -186,6 +197,13 @@ fn check_steps() -> Vec<String> {
         "cargo test --workspace --exclude app --exclude xtask".to_string(),
         own_tests,
         "cargo test --offline --".to_string(),
+    ]);
+    steps.extend(
+        families
+            .into_iter()
+            .map(|family| format!("cargo xtask plants {family} --check")),
+    );
+    steps.extend([
         "npm run lint".to_string(),
         "cargo xtask build-cf --offline".to_string(),
         "npm test".to_string(),

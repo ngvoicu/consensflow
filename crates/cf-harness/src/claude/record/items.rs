@@ -44,6 +44,14 @@ impl Items {
         self.list.push(Entry::new(id, role, text, true, at, seq));
     }
 
+    /// The summary a compaction wrote in the user's place: a user's item, as Node read
+    /// it, that says it is the harness's own.
+    pub(super) fn summary(&mut self, id: Arc<str>, text: &str, at: &Value, seq: usize) {
+        let mut entry = Entry::new(id, Role::User, text, true, at, seq);
+        entry.item.compaction = true;
+        self.list.push(entry);
+    }
+
     /// `addAssistant`: the message `id` names, made when it is the first
     /// record of it; its time and place are the latest record's. Its place in
     /// the list is where it was first pushed.
@@ -150,6 +158,7 @@ impl Entry {
                 // `record.timestamp ?? seq`: a Claude item's time is never undefined.
                 at: Some(at.clone()),
                 commentary: false,
+                compaction: false,
             },
             seq,
             fragments: Fragments::default(),

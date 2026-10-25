@@ -189,3 +189,38 @@ fn another_harness_is_read_from_the_copy_its_turn_at_rest_or_at_work() {
     );
     assert!(found(&scene.look(ms(11, 0)), 5).is_empty());
 }
+
+/// Calliope's review of 2026-10-21 (T-81): the member's cut note the engine writes
+/// says "ConsensFlow stopped while you were working on T-7. Go on where you
+/// stopped." (`cf_ledger::continuation`), which the check did not read as a cut
+/// note, so a false cut to a member went unseen. Read as one: a false cut where the
+/// window's record ended at rest, none where it was at work.
+#[test]
+fn a_members_cut_note_in_the_words_the_engine_writes_is_judged() {
+    const NOTE: &str =
+        "ConsensFlow stopped while you were working on T-7. Go on where you stopped.";
+    for (at_work, breaks) in [(false, 1), (true, 0)] {
+        let scene = Scene::new(&[("long-worker", "codex")]);
+        let conversation = scene.conversation(3, "codex", "thread-1");
+        let task = scene.task(7, 3, "working", &t(0, 0));
+        scene.item(
+            conversation,
+            0,
+            "user",
+            "[ConsensFlow m-1 · T-7 · task from @chief]\nBuild",
+            true,
+            &t(0, 0),
+        );
+        if at_work {
+            scene.item(conversation, 1, "tool", "npm run build", true, &t(1, 0));
+        } else {
+            scene.item(conversation, 1, "assistant", "Built.", true, &t(2, 0));
+        }
+        scene.message(90, (3, None), "note", Some(task), NOTE, &t(10, 0));
+        assert_eq!(
+            found(&scene.look(ms(11, 0)), 5).len(),
+            breaks,
+            "at work {at_work}"
+        );
+    }
+}

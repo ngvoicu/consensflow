@@ -6,7 +6,10 @@ use std::sync::Arc;
 
 use cf_harness::contract::Observed;
 use cf_harness::records::{Item, Reading, Record, Role, Settlement};
-use cf_ledger::{NewProject, ParticipantView};
+use cf_ledger::{
+    HistoryAsk, HistoryEntry, HistoryFrom, NewProject, ParticipantView, HISTORY_SCAN_BYTES,
+    PAGE_BYTES,
+};
 use serde_json::json;
 
 use crate::testing::Context;
@@ -53,6 +56,7 @@ fn item(id: &str, role: Role, text: &str, complete: bool) -> Item {
         complete,
         at: None,
         commentary: false,
+        compaction: false,
     }
 }
 
@@ -67,7 +71,8 @@ fn look(items: Vec<Item>) -> Observed {
             failure: None,
             quota: None,
             settlement: Settlement::Unknown,
-            agents_pending: false,
+            pending: Default::default(),
+            monitors: Vec::new(),
         }))),
         settled: true,
         waiting: None,
@@ -133,6 +138,48 @@ fn a_look_copies_what_is_new_and_the_last_item_again_and_says_so_when_it_wrote()
             ("i-3".to_owned(), "ls".to_owned()),
         ]
     );
+}
+
+#[test]
+fn a_compaction_s_summary_is_copied_marked_as_one_where_its_reading_says_nothing_of_it() {
+    let (context, chief, _) = chief_talking();
+    let record = context.dispatcher.record_of(chief.id);
+    let mut summary = item("s-1", Role::User, "This session is being continued.", true);
+    summary.compaction = true;
+    let items = vec![item("u-1", Role::User, "Ship it", true), summary];
+    // The reading is the one Node wrote: the summary is a user's item there.
+    let read = serde_json::to_value(&items[1]).expect("written");
+    assert_eq!(read.get("compaction"), None);
+    context
+        .dispatcher
+        .copy(&chief, &record, &look(items))
+        .expect("copied");
+    let ask = HistoryAsk {
+        from: HistoryFrom::Newest,
+        find: None,
+        tools: false,
+        room: PAGE_BYTES,
+        scan: HISTORY_SCAN_BYTES,
+    };
+    let history = context
+        .ledger
+        .borrow()
+        .read_history(chief.project_id, "chief", &ask)
+        .expect("its history");
+    let marks: Vec<(&str, &str, bool)> = history
+        .entries
+        .iter()
+        .rev()
+        .filter_map(|entry| match entry {
+            HistoryEntry::Item(row) => Some((
+                row.item.id.as_str(),
+                row.item.role.as_str(),
+                row.item.compaction,
+            )),
+            HistoryEntry::Heading(_) => None,
+        })
+        .collect();
+    assert_eq!(marks, [("u-1", "user", false), ("s-1", "user", true)]);
 }
 
 #[test]

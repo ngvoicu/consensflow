@@ -85,7 +85,8 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
             } else {
                 Settlement::InFlight
             },
-            agents_pending: false,
+            pending: Default::default(),
+            monitors: Vec::new(),
         }),
     }
 }
@@ -136,7 +137,9 @@ impl Records for FakeRecords {
 
     /// Whether the agent of `session` was never answered, and none where the
     /// fake has no record of it. Asked where Node's dispatcher asked nothing, so
-    /// it is no call of the adapter in a trace.
+    /// it is no call of the adapter in a trace. A read the test holds
+    /// (`record_holds`, told `[{ conversation: { nativeSession } }, "cut"]`)
+    /// answers once it is let go.
     fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<bool>> {
         let Some(fake) = self.adapters.fake(harness.kind()) else {
             return Box::pin(async { None });

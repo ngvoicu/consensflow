@@ -9,9 +9,14 @@
 //! words, or none for the default's); only the human changes it, and each
 //! change is logged (`project.wake_up_setting`). A project the human opens with
 //! calls set has them kept in the write that makes it. Each wake-up queued is
-//! logged too (`project.wake_up`), and that log is all `due` reads: when the
-//! last one went, whether it is still on its way, and whether anything moved
-//! since.
+//! logged too (`project.wake_up`), and that log is, with the board, all `due`
+//! reads: when the last one went, whether it is still on its way, whether
+//! anything moved since, and whether the chief has work on its way that the
+//! call would only interrupt (a task queued or working, one waiting for an
+//! answer on its way, one held for its member's quota, one open behind those).
+//! What waits for the chief, a question it has not answered among it, is no
+//! such work. A call held back for work is logged (`project.wake_up_skipped`)
+//! and is not owed.
 
 mod due;
 

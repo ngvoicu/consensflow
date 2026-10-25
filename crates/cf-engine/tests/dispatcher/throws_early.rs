@@ -17,6 +17,9 @@ const SUITES: &[&str] = &["work that throws before its first await"];
 fn lets_go_of_its_participant_its_next_step_runs_the_failure_is_written_down_and_an_operation_waiting_on_it_ends(
 ) {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: a follow-up,
+    // another task, goes on with the session's conversation (`ownership`).
+    context.host.exits_showing(Some(0), None, None);
     let tiers = Tiers::new(&context, &["zeus"]);
     tiers.open();
     context.pass().unwrap();
@@ -28,6 +31,8 @@ fn lets_go_of_its_participant_its_next_step_runs_the_failure_is_written_down_and
         "done",
         "the session's window closed with its task"
     );
+    // The exits after it say nothing of the program, as the recording's do.
+    context.host.exits_showing(None, None, None);
     // One read of the ledger fails, in the work that opens the session's window.
     let fail = Rc::new(Cell::new(true));
     let failing = Rc::clone(&fail);

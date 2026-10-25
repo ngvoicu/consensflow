@@ -7,7 +7,7 @@
 
 [[plant]]
 name = "publish: the old latest.json is deleted before the new one is uploaded"
-meant = "leaves_the_old_latest_json_where_it_was_when_the_upload"
+meant = "leaves_the_old_latest_json_where_it_was_when_the_upload_of_the_new_one_fails"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -44,7 +44,7 @@ replace = "if let Err(again) = Ok::<(), Failure>(drop(aside)) {"
 
 [[plant]]
 name = "publish: a rename of a file that is not there is tried all the same"
-meant = "says_what_is_missing_when_the_live_latest_json_is_gone"
+meant = "says_what_is_missing_when_the_live_latest_json_is_gone_before_it_can_be_set_aside"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -74,7 +74,7 @@ replace = "if differs || true {"
 
 [[plant]]
 name = "publish: a previous latest.json left by a cut swap is not put back first"
-meant = "puts_the_previous_latest_json_back_first"
+meant = "puts_the_previous_latest_json_back_first_when_the_feed_has_none_so_it_is_served_again_at_once"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -108,7 +108,7 @@ replace = '''
 
 [[plant]]
 name = "publish: a draft is published without looking at its files"
-meant = "does_not_publish_a_draft_whose_file_is_short"
+meant = "does_not_publish_a_draft_whose_file_is_short_and_says_so"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -118,7 +118,7 @@ replace = "if false {"
 
 [[plant]]
 name = "publish: a draft left by a run that died is not emptied"
-meant = "empties_a_draft_that_holds_some_of_the_files"
+meant = "empties_a_draft_that_holds_some_of_the_files_a_short_one_among_them_and_fills_it_again"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -128,7 +128,7 @@ replace = "let _ = args;"
 
 [[plant]]
 name = "publish: a published release that lacks a file is kept as it is"
-meant = "adds_what_a_published_release_lacks"
+meant = "adds_what_a_published_release_lacks_and_holds_what_it_has_to_the_files_built"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -138,7 +138,7 @@ replace = "if true {"
 
 [[plant]]
 name = "publish: a published release's files are not held to the files built"
-meant = "refuses_a_published_release_whose_file_is_not_the_one_built"
+meant = "refuses_a_published_release_whose_file_is_not_the_one_built_and_moves_no_feed"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -148,7 +148,7 @@ replace = "if false {"
 
 [[plant]]
 name = "publish: the rule is not asked before anything moves"
-meant = "is_refused_while_the_old_feed_still_serves_the_release_before_the_bridge"
+meant = "is_refused_while_the_old_feed_still_serves_the_release_before_the_bridge_and_nothing_is_moved"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -164,7 +164,7 @@ replace = '''
 
 [[plant]]
 name = "publish: a failure to look at a release is taken for its absence"
-meant = "stops_where_gh_cannot_tell_whether_a_release_is_there"
+meant = "stops_where_gh_cannot_tell_whether_a_release_is_there_and_makes_nothing"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -178,7 +178,7 @@ replace = "        Ok(None)"
 
 [[plant]]
 name = "publish: the old feed is not marked as pinned"
-meant = "marks_the_old_feed_as_pinned_to_the_bridge"
+meant = "marks_the_old_feed_as_pinned_to_the_bridge_and_the_new_one_is_only_the_feed"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -188,7 +188,7 @@ replace = "if false {"
 
 [[plant]]
 name = "publish: a hand run on a tag publishes: only the ref type is asked"
-meant = "refuses_a_hand_run_though_it_is_on_a_tag"
+meant = "refuses_a_hand_run_though_it_is_on_a_tag_before_it_asks_gh_anything"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -198,7 +198,7 @@ replace = 'if env.ref_type.as_deref() != Some("tag") {'
 
 [[plant]]
 name = "publish: any run publishes"
-meant = "refuses_a_push_of_a_branch_a_run_outside_a_workflow"
+meant = "refuses_a_push_of_a_branch_a_run_outside_a_workflow_and_a_tag_that_is_not_the_one_pushed"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -208,7 +208,7 @@ replace = "if false {"
 
 [[plant]]
 name = "publish: a tag other than the one pushed is published"
-meant = "refuses_a_push_of_a_branch_a_run_outside_a_workflow"
+meant = "refuses_a_push_of_a_branch_a_run_outside_a_workflow_and_a_tag_that_is_not_the_one_pushed"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -219,7 +219,7 @@ replace = "if false {"
 # No feed is moved backward: a run again after a later release went out leaves its feed at that release.
 [[plant]]
 name = "publish: a feed is swapped whatever release it names: the feed is not asked"
-meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81s_failed_publish_is_run_again_and_finishes_what_is_left"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -229,7 +229,7 @@ replace = "if let Some(later) = later.filter(|_| false) {"
 
 [[plant]]
 name = "publish: a feed that names a later release fails the run instead of being left alone"
-meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81s_failed_publish_is_run_again_and_finishes_what_is_left"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -239,7 +239,7 @@ replace = 'return Err(Failure::new("superseded"));'
 
 [[plant]]
 name = "publish: a feed that was left alone is said to be kept"
-meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81s_failed_publish_is_run_again_and_finishes_what_is_left"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -249,7 +249,7 @@ replace = "did = FeedDone::Kept;"
 
 [[plant]]
 name = "publish: a feed that is left alone is not said to be, in the log"
-meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81s_failed_publish_is_run_again_and_finishes_what_is_left"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -263,7 +263,7 @@ replace = "            let _ = runner;"
 
 [[plant]]
 name = "publish: a feed that cannot be read is swapped all the same"
-meant = "changes_no_feed_it_cannot_read"
+meant = "changes_no_feed_it_cannot_read_which_may_name_a_later_release_and_says_so_run_again_it_finishes"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -273,7 +273,7 @@ replace = "if false {"
 
 [[plant]]
 name = "publish: a feed that is listed and not served is left as it is, not mended"
-meant = "swaps_a_latest_json_that_is_listed_and_not_served_at_all"
+meant = "reads_a_feed_again_past_a_blip_and_swaps_a_latest_json_that_is_listed_and_not_served_at_all"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -283,7 +283,7 @@ replace = "if true {"
 
 [[plant]]
 name = "publish: a feed that is listed and not served is taken for one that names a later release"
-meant = "swaps_a_latest_json_that_is_listed_and_not_served_at_all"
+meant = "reads_a_feed_again_past_a_blip_and_swaps_a_latest_json_that_is_listed_and_not_served_at_all"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -301,7 +301,7 @@ replace = '''
 
 [[plant]]
 name = "publish: a feed is read once, not again past a blip"
-meant = "reads_a_feed_again_past_a_blip"
+meant = "reads_a_feed_again_past_a_blip_and_swaps_a_latest_json_that_is_listed_and_not_served_at_all"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -312,7 +312,7 @@ replace = 'let served = reads.once(&format!("{}/{feed}/{LATEST}", run.base));'
 # What the check that follows is left to hold the new feeds to.
 [[plant]]
 name = "publish: the check is left no record of what the feeds named"
-meant = "leaves_the_check_a_record_of_what_each_new_feed_named"
+meant = "leaves_the_check_a_record_of_what_each_new_feed_named_before_the_run_changed_it_and_none_of_the_old_feed"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -327,7 +327,7 @@ replace = "    let _ = before;"
 
 [[plant]]
 name = "publish: the record says what the run publishes, not what the feed named"
-meant = "leaves_the_check_a_record_of_what_each_new_feed_named"
+meant = "leaves_the_check_a_record_of_what_each_new_feed_named_before_the_run_changed_it_and_none_of_the_old_feed"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -337,7 +337,7 @@ replace = "named = Some(run.version.clone());"
 
 [[plant]]
 name = "publish: the record holds the old feed too"
-meant = "leaves_the_check_a_record_of_what_each_new_feed_named"
+meant = "leaves_the_check_a_record_of_what_each_new_feed_named_before_the_run_changed_it_and_none_of_the_old_feed"
 runs = ["publish"]
 
 [[plant.edit]]

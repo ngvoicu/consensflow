@@ -3,6 +3,7 @@ import { initializeUpdates } from '../updates.js'
 import { BoardView, TaskDrawer } from './board.js'
 import { NewProjectDialog, ProjectSettingsDialog, SwitchChiefDialog } from './dialogs.js'
 import { listenForFileDrops } from './file-drop.js'
+import { HistoryViewer } from './history-viewer.js'
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
 import { SpecsSettings } from './specs-settings.js'
@@ -211,6 +212,20 @@ const drawer = new TaskDrawer($('#task-drawer'), {
         `T-${task.number} is back on the board for another ${task.pool === 'designer' ? 'image designer' : `${task.tier} ${task.pool}`}.`,
       )
     }),
+  onFinish: (task) =>
+    act(async () => {
+      const { jobs = 0, agents = 0 } = await daemon('task.finish', {
+        project: task.projectId,
+        task: task.number,
+      })
+      // Finishing ends nothing the turn left: it runs until its window closes, or past it
+      // where the host cannot tell what is the window's.
+      const left =
+        jobs + agents === 0
+          ? 'Nothing it left running was ended.'
+          : `What it waits on is not ended: ${jobs + agents === 1 ? 'it may run' : 'they may run'} on until its window closes, or past it where the host cannot tell what is the window's.`
+      note(`T-${task.number} is finished: what its worker said last is its result. ${left}`)
+    }),
   onResume: (task) =>
     act(async () => {
       const { task: resumed } = await daemon('task.resume', {
@@ -295,6 +310,8 @@ const terminals = new TerminalsView(stage, {
   onChange: () => render(),
   // The chief is switched from its card in the dock, and tried again there when out of quota.
   onSwitchChief: (chief) => act(() => switchChief.open(chief)),
+  // Every card reads its participant's whole history.
+  onHistory: (participant) => void historyViewer.open(participant),
   onTryAgain: (chief) => tryAgain(chief),
   // A session's terminal is hidden from its card as from its lane.
   onHideTerminal: (participant) => hideSession(participant),
@@ -320,7 +337,22 @@ async function openTask(project, number) {
   ])
   if (state.selected !== project) return
   state.openTask = { project, number, total }
-  drawer.show(task, { total, closed: closedProject(project), terminal: terminalOf(task) })
+  drawer.show(task, {
+    total,
+    closed: closedProject(project),
+    terminal: terminalOf(task),
+    held: heldOf(task),
+  })
+}
+
+/**
+ * What the worker of `task` is waited for on in the background (`{jobs, agents}`), on
+ * the board shown: its lane says, and only while the task works. Null when it waits
+ * on nothing.
+ */
+function heldOf(task) {
+  const lane = state.board?.lanes.find((l) => l.participant.handle === task.assignee)
+  return task.state === 'working' && lane?.held?.task === task.number ? lane.held : null
 }
 
 /**
@@ -363,6 +395,7 @@ async function rereadTask() {
       total: opened.total,
       closed: closedProject(project),
       terminal: terminalOf(task),
+      held: heldOf(task),
     })
   } catch (cause) {
     closeTask()
@@ -666,6 +699,9 @@ const projectMenu = new ProjectMenu(
 // The specs viewer: the specs folder of the project asked for, read through the daemon. The
 // button asks for the project the board shows; the menu for its own, shown first.
 const specsViewer = new SpecsViewer($('#specs-viewer-dialog'), { daemon })
+
+// The history viewer: everything kept of a participant's conversations, read through the daemon.
+const historyViewer = new HistoryViewer($('#history-dialog'), { daemon })
 specsButton.addEventListener('click', () => {
   const { project } = state.board
   void specsViewer.open(project.id, project.name)

@@ -2,11 +2,11 @@
 //! up, and a record of the signals the tree would have sent. What the tests prove of
 //! what the tree signals they prove on it, with no signal sent to any process.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::io;
 
 use super::bound::System;
-use super::{key_of, Identity, Process};
+use super::{key_of, Identity, Looked, Process};
 use crate::background::ProcessKey;
 
 /// A process of a table, started by the process whose identifier is `parent`, in a
@@ -100,9 +100,27 @@ pub(super) fn identity_of(table: &[Process], pid: i32) -> Identity {
         .expect("a process of the table")
 }
 
+/// The numbers above which the children a churning process starts are.
+const CHURNED: i32 = 5_000_000;
+
 /// A made-up machine: the processes it has, and the signals sent to them and to groups.
 pub(super) struct Machine {
     processes: Vec<Process>,
+    /// Processes it has that no look can read (another user's): each by the number of
+    /// the process that started it, and its own.
+    unreadable: Vec<(i32, i32)>,
+    /// Processes that ended and were not reaped, which their parent still names.
+    zombies: Vec<(i32, i32)>,
+    /// Processes born after its table was read, named by their parent once: the next look
+    /// finds them in it.
+    born: RefCell<Vec<(i32, i32)>>,
+    /// Processes of ours that changed while a look read them, named by their parent once:
+    /// the next look does not find them.
+    changed: RefCell<Vec<(i32, i32)>>,
+    /// A process that starts a child at every listing of its children, none of which a
+    /// later table has: a tree that changes at every look. Its number, and how many it
+    /// started.
+    churning: Option<(i32, Cell<i32>)>,
     sent: RefCell<Vec<(i32, i32)>>,
     sent_to_groups: RefCell<Vec<(i32, i32)>>,
 }
@@ -111,9 +129,46 @@ impl Machine {
     pub fn new(processes: Vec<Process>) -> Self {
         Self {
             processes,
+            unreadable: Vec::new(),
+            zombies: Vec::new(),
+            born: RefCell::default(),
+            changed: RefCell::default(),
+            churning: None,
             sent: RefCell::default(),
             sent_to_groups: RefCell::default(),
         }
+    }
+
+    /// The machine, with a process `pid` that `parent` started and no look can read.
+    pub fn with_unreadable(mut self, parent: i32, pid: i32) -> Self {
+        self.unreadable.push((parent, pid));
+        self
+    }
+
+    /// The machine, with a process `pid` that `parent` started and that ended unreaped.
+    pub fn with_zombie(mut self, parent: i32, pid: i32) -> Self {
+        self.zombies.push((parent, pid));
+        self
+    }
+
+    /// The machine, with a process `pid` that `parent` started while a look read its table.
+    pub fn with_born(self, parent: i32, pid: i32) -> Self {
+        self.born.borrow_mut().push((parent, pid));
+        self
+    }
+
+    /// The machine, with a process `pid` that `parent` started and that changed while a look
+    /// read it (it ended between the look's two reads of it).
+    pub fn with_changed(self, parent: i32, pid: i32) -> Self {
+        self.changed.borrow_mut().push((parent, pid));
+        self
+    }
+
+    /// The machine, where `parent` starts a child at every look, which the table read
+    /// before it never has.
+    pub fn with_churning(mut self, parent: i32) -> Self {
+        self.churning = Some((parent, Cell::new(0)));
+        self
     }
 
     /// The numbers of the groups sent `signal` whole, each once, in order of number.
@@ -165,6 +220,65 @@ impl System for Machine {
                 .borrow()
                 .iter()
                 .any(|(pid, signal)| u32::try_from(*pid) == Ok(key.pid) && *signal == libc::SIGKILL)
+    }
+
+    fn children(&self, pid: i32) -> io::Result<Vec<i32>> {
+        let unique = self
+            .processes
+            .iter()
+            .find(|process| process.identity.pid == pid)
+            .map(|process| process.identity.unique);
+        Ok(self
+            .processes
+            .iter()
+            .filter(|process| unique.is_some_and(|unique| process.parent == unique))
+            .map(|process| process.identity.pid)
+            .chain(
+                self.unreadable
+                    .iter()
+                    .chain(&self.zombies)
+                    .chain(self.born.borrow().iter())
+                    .chain(self.changed.borrow().iter())
+                    .filter(|(parent, _)| *parent == pid)
+                    .map(|(_, child)| *child),
+            )
+            .chain(self.churning.as_ref().and_then(|(parent, started)| {
+                (*parent == pid).then(|| {
+                    started.set(started.get() + 1);
+                    CHURNED + started.get()
+                })
+            }))
+            .collect())
+    }
+
+    fn looked(&self, pid: i32) -> Looked {
+        {
+            let mut changed = self.changed.borrow_mut();
+            let before = changed.len();
+            changed.retain(|(_, child)| *child != pid);
+            if changed.len() < before {
+                return Looked::Changed;
+            }
+        }
+        let born = {
+            let mut born = self.born.borrow_mut();
+            let before = born.len();
+            born.retain(|(_, child)| *child != pid);
+            born.len() < before
+        };
+        if born
+            || (self.churning.is_some() && pid > CHURNED)
+            || self
+                .processes
+                .iter()
+                .any(|process| process.identity.pid == pid)
+        {
+            Looked::Readable
+        } else if self.unreadable.iter().any(|(_, child)| *child == pid) {
+            Looked::Unreadable
+        } else {
+            Looked::Ended
+        }
     }
 
     fn send(&self, to: Identity, signal: i32) -> io::Result<()> {

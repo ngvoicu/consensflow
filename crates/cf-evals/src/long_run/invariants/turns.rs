@@ -17,9 +17,12 @@ use crate::long_run::look::Look;
 use crate::long_run::mask::Names;
 use crate::long_run::record::Stood;
 
-/// What a cut note says: the chief's, and a member's.
-pub const CUT: [&str; 2] = [
+/// What a cut note says: the chief's, a member's as the engine writes it
+/// (`cf_ledger::continuation`), and a member's as 3.0.5 and the builds before it
+/// wrote it, which a ledger of theirs holds.
+pub const CUT: [&str; 3] = [
     "stopped in the middle of your turn, which was cut",
+    "ConsensFlow stopped while you were working on",
     "ConsensFlow quit while you were working on",
 ];
 

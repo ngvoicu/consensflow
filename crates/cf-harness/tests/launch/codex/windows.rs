@@ -11,7 +11,7 @@ use std::sync::Arc;
 use cf_harness::contract::{Held, Readiness, Work};
 use cf_harness::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
 use cf_harness::seams::Time;
-use cf_harness::testing::{finished, AnsweringHost, Driver, FIRST_MESSAGE_MS};
+use cf_harness::testing::{finished, AnsweringHost, Driver, ScriptedHost, FIRST_MESSAGE_MS};
 use cf_proto::agents::Harness;
 
 use super::*;
@@ -60,7 +60,10 @@ fn learns_the_thread_from_its_broker() {
     );
     let mut driver = Driver::default();
     let started = Rc::clone(&window);
-    driver.begin(0, async move { started.started().await });
+    driver.begin(
+        0,
+        async move { started.started(&ScriptedHost::default()).await },
+    );
     assert!(driver.run().is_empty(), "waits to ask again");
     assert_eq!(fakes.time.waits(0), [250]);
     assert!(fakes.time.fire_next(fakes.time.wall_ms() + 250));
@@ -69,7 +72,7 @@ fn learns_the_thread_from_its_broker() {
     assert!(fakes.time.fire_next(fakes.time.wall_ms() + 250));
     assert_eq!(driver.run(), [(0, Ok(Some(THREAD.to_owned())))]);
     // The thread is now the window's own: it has nothing more to learn.
-    assert_eq!(finished(window.started()), Ok(None));
+    assert_eq!(finished(window.started(&ScriptedHost::default())), Ok(None));
 }
 
 /// How many milliseconds a window opened on `request` waits for its broker to
@@ -79,7 +82,10 @@ fn waits_for_the_thread(request: &Request, said: &str) -> i64 {
     let (adapter, fakes) = adapter(&home);
     let window = prepare(&adapter, request).unwrap().window;
     let mut driver = Driver::default();
-    driver.begin(0, async move { window.started().await });
+    driver.begin(
+        0,
+        async move { window.started(&ScriptedHost::default()).await },
+    );
     let began = fakes.time.wall_ms();
     let mut settled = driver.run();
     while settled.is_empty() {
@@ -102,7 +108,10 @@ fn started_with(
 ) -> (Result<Option<String>, String>, i64) {
     fakes.loopback.serve("GET /session", served);
     let mut driver = Driver::default();
-    driver.begin(0, async move { window.started().await });
+    driver.begin(
+        0,
+        async move { window.started(&ScriptedHost::default()).await },
+    );
     let began = fakes.time.wall_ms();
     let mut settled = driver.run();
     while settled.is_empty() {
@@ -216,7 +225,7 @@ fn a_window_whose_start_was_given_up_has_come_up_if_its_broker_names_a_thread_wh
         "on the thread its launch named"
     );
     assert_eq!(
-        finished(window.started()),
+        finished(window.started(&ScriptedHost::default())),
         Ok(None),
         "nothing more to learn"
     );
@@ -280,7 +289,10 @@ fn a_window_opened_on_a_thread_is_up_once_its_broker_names_it_and_its_launch_fai
     );
     let mut driver = Driver::default();
     let started = Rc::clone(&window);
-    driver.begin(0, async move { started.started().await });
+    driver.begin(
+        0,
+        async move { started.started(&ScriptedHost::default()).await },
+    );
     assert!(driver.run().is_empty(), "the broker names none yet");
     assert_eq!(fakes.time.waits(0), [250]);
     assert!(fakes.time.fire_next(fakes.time.wall_ms() + 250));
@@ -290,7 +302,7 @@ fn a_window_opened_on_a_thread_is_up_once_its_broker_names_it_and_its_launch_fai
         "named: the thread is the launch's, nothing new"
     );
     assert_eq!(
-        finished(window.started()),
+        finished(window.started(&ScriptedHost::default())),
         Ok(None),
         "nothing more to learn"
     );
@@ -302,7 +314,7 @@ fn a_window_opened_on_a_thread_is_up_once_its_broker_names_it_and_its_launch_fai
     fakes
         .loopback
         .serve("GET /session", [shows(Some(NEXT), true)]);
-    assert_eq!(finished(other.started()), Ok(None));
+    assert_eq!(finished(other.started(&ScriptedHost::default())), Ok(None));
 
     let resuming = |first_message_ms| {
         waits_for_the_thread(
@@ -347,7 +359,8 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         failure: None,
         quota,
         settlement,
-        agents_pending: false,
+        pending: Default::default(),
+        monitors: Vec::new(),
     }))
 }
 
@@ -360,6 +373,7 @@ fn settled_record(thread: &str) -> Arc<Reading> {
         complete: true,
         at: None,
         commentary: false,
+        compaction: false,
     };
     reading(vec![item], Settlement::Settled, None)
 }

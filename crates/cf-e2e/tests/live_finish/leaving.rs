@@ -1,7 +1,8 @@
 //! A worker that leaves a long command running and answers (the owner's decision of
-//! 2026-10-13, after T-7 and T-15 on Windows): its answer is its task's result at
-//! once, what its turn left running is ended, and the chief is told what was ended in a
-//! note beside the result. The worker is asked to start a long command in the
+//! 2026-10-13, after T-7 and T-15 on Windows; turn-end's smallest rule of 2026-10-21): its
+//! answer is its task's result at once, and its turn's end ends nothing; its window,
+//! free, closes after the result as any does, the close ends what the window's tree runs,
+//! and the chief is told what was still running. The worker is asked to start a long command in the
 //! background, `sleep 4711` (`ping -n 4711 127.0.0.1` on Windows, which has no `sleep`
 //! that every one of its shells knows), not to wait for it, and to answer. The run
 //! looks, once a second, at the task, the worker's lane of the board and what the pane
@@ -9,23 +10,26 @@
 //! process (its command line holds `4711`, and no other process of the machine's does);
 //! and holds what it saw to the brief ([`judge`]):
 //!
-//! - the task is done, and its result reached the chief;
+//! - the task is done, and its result reached the chief; where the worker's harness wakes
+//!   it for the command (Claude Code runs it as a job of its own, and the reader counts it:
+//!   turn-end's A2), the task is held for it and its chief told it goes on, and the run,
+//!   as the chief, finishes it (`cf task finish`), as T-15's chief would: the command never
+//!   ends within the run;
 //! - the host listed the command as running, or the command is nowhere on the machine
 //!   once the task is done: Codex and Devin end what a tool started when the tool call
 //!   ends (live, 2026-10-14), and their run says so; a command the host never listed
 //!   that still runs on the machine escaped the ending, and fails: the agent detached it
 //!   from the shell that started it (`nohup … &`, `setsid`, `disown`, `Start-Process`)
 //!   and that shell ended, so no chain of processes that run leads from it to a shell the
-//!   harness started, and the host ends only what such a chain proves the turn's. The run
+//!   harness started, and the host names only what such a chain proves the turn's. The run
 //!   then looks again once the window has closed, and says whether the window's close
 //!   found it (it ends what its tree finds) or it runs on, and ends what it saw of the
 //!   command in the window's own tree and the jobs the rig's stand-in wrote it started
 //!   ([`choose`]): never a process by what its command line says, so a command a harness
 //!   detached before any look saw it runs on until its seconds are out;
-//! - the command is gone once the task is done;
-//! - and the chief was told, in the note beside the result, that the turn left work
-//!   and that it was ended: a note that says part of what the host proved the turn's still
-//!   runs, and was not ended, fails.
+//! - the command is gone once the window has closed;
+//! - and the chief was told, in the note of the window's close, that it closed with the
+//!   work still running.
 //!
 //! Whatever the verdict, the run says what the host listed at the turn's end, what it
 //! said the window left when it closed, and what the chief was told.
@@ -145,10 +149,13 @@ pub struct Left {
     pub listed: Vec<Proc>,
     /// The result the chief was given, if it was.
     pub result: Option<String>,
+    /// The task was held for the command, its chief told it goes on, and the run finished
+    /// it as the chief.
+    pub finished: bool,
     /// What the chief was told of work the turn left, the notes that say so.
     pub notes: Vec<String>,
     /// The processes of `listed` that were still there when the run last looked, once
-    /// the task was done and the chief told.
+    /// the task was done, the window closed and the chief told.
     pub alive: Vec<u64>,
     /// The command lines of the machine's processes that run the command, looked at once
     /// the task was done and the chief told: what escaped the ending, where the host
@@ -160,18 +167,9 @@ pub struct Left {
     pub after_close: Option<Vec<String>>,
 }
 
-impl Left {
-    /// What the chief's notes say of the turn: that it was told work was ended, and that
-    /// it was told some was not.
-    fn told(&self) -> (bool, bool) {
-        let said = |words: &str| self.notes.iter().any(|note| note.contains(words));
-        (said(" Ended: "), said(" Still running, not ended: "))
-    }
-}
-
 /// The task is done, its result reached the chief, the host listed the command as
-/// running, it is gone, and the chief was told that it was ended: or every way it was
-/// not.
+/// running, it is gone, and the chief was told the window closed with it running: or
+/// every way it was not.
 pub fn judge(left: &Left) -> Result<(), Vec<String>> {
     let mut problems = Vec::new();
     if left.state != "done" {
@@ -228,20 +226,9 @@ pub fn judge(left: &Left) -> Result<(), Vec<String>> {
             }
             problems.push(said);
         }
-        let (ended, not_ended) = left.told();
         if left.notes.is_empty() {
-            problems.push("the chief was told nothing of the work the turn left".to_owned());
-        } else if !ended {
-            problems.push(format!(
-                "the chief was told the turn left work, but not that any of it was ended: {}",
-                left.notes.join(" | ")
-            ));
-        }
-        if not_ended {
-            problems.push(format!(
-                "the chief was told part of what the turn left was not ended, and still runs: {}",
-                left.notes.join(" | ")
-            ));
+            problems
+                .push("the chief was told nothing of the work the window closed with".to_owned());
         }
     }
     if problems.is_empty() {
@@ -279,8 +266,8 @@ fn after_the_close(left: &Left) -> Option<String> {
     })
 }
 
-/// The run in a line, for the table that ends it: that the command was ended and the
-/// chief told, and else the first thing that was wrong with it.
+/// The run in a line, for the table that ends it: that the command was ended by the
+/// window's close and the chief told, and else the first thing that was wrong with it.
 pub fn summary(left: &Left, verdict: &Result<(), Vec<String>>) -> String {
     match verdict {
         Ok(()) if left.listed.is_empty() => format!(
@@ -288,8 +275,13 @@ pub fn summary(left: &Left, verdict: &Result<(), Vec<String>>) -> String {
             secs(left.took)
         ),
         Ok(()) => format!(
-            "T-1 done after {} s; the command ({}) was ended and the chief told: {}",
+            "T-1 done after {} s{}; the command ({}) was ended by the window's close and the chief told: {}",
             secs(left.took),
+            if left.finished {
+                ", held for it and finished by the chief"
+            } else {
+                ""
+            },
             left.listed
                 .iter()
                 .map(|process| process.pid.to_string())
@@ -320,7 +312,7 @@ fn at_the_chief(left: &Left) -> String {
 
 /// Runs the worker `who` on the project `plan` opens, with the task [`brief`] gives:
 /// what it came to, which holds when the task was done, the command left running was
-/// ended and the chief told so.
+/// ended by the window's close and the chief told so.
 pub fn run(who: Who, plan: &Plan, stand_in: &Path, log: &Log) -> Fallible<Finished> {
     run_asked(who, plan, stand_in, &brief(who), log)
 }
@@ -409,9 +401,23 @@ fn observe(
                 }
             }
         }
-        Ok(is_over(&thread).then_some(()))
+        Ok((is_over(&thread) || goes_on(members, number)?).then_some(()))
     })?
     .is_some();
+    // Held for the command, which never ends within the run: the chief finishes the task.
+    if ended && left.state == "working" {
+        let finish = format!("T-{number}");
+        let ran = members.as_chief(["task", "finish", finish.as_str()])?;
+        case.say(format!(
+            "T-{number} was held for the command and its chief told it goes on; the run finished it as the chief: {}",
+            cut(&ran.stdout, 160)
+        ));
+        left.finished = ran.code == Some(0);
+        find(log, "the finished task to be done", DELIVERS, LOOK, || {
+            left.state = text(&members.task(number)?["state"]);
+            Ok((left.state == "done").then_some(()))
+        })?;
+    }
     if left.state == "done" {
         find(
             log,
@@ -423,10 +429,11 @@ fn observe(
                 Ok(left.result.is_some().then_some(()))
             },
         )?;
-        // The chief is told what was ended beside the result, once it has ended it.
+        // The chief is told what the window still ran when its close, after the result,
+        // ended it.
         find(
             log,
-            "the chief to be told what the turn left",
+            "the chief to be told what the window closed with",
             waits.told,
             LOOK,
             || {
@@ -479,7 +486,7 @@ fn observe(
     });
     match &verdict {
         Ok(()) => case.check(
-            "the command was ended with the result, and the chief told",
+            "the command was ended by the window's close after the result, and the chief told",
             true,
             summary(&left, &verdict),
         ),
@@ -496,6 +503,18 @@ fn observe(
         case,
         summary: summary(&left, &verdict),
     })
+}
+
+/// The chief of `number` was told its worker goes on in the background: the task is
+/// held for what its turn left running.
+fn goes_on(members: &Members, number: i64) -> Fallible<bool> {
+    let opening = format!("T-{number} goes on in the background: ");
+    Ok(members.inbox(Some(members.chief()))?.iter().any(|message| {
+        message["kind"] == "note"
+            && message["body"]
+                .as_str()
+                .is_some_and(|body| body.starts_with(&opening))
+    }))
 }
 
 /// What the turn left, looked for whatever came of the task: one that failed or ran out of

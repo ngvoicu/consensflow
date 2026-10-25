@@ -74,6 +74,25 @@ impl Ledger {
         tasks::pause_task(&mut self.store, project_id, number, by, because)
     }
 
+    /// ConsensFlow pauses a worker's task whose window it closed itself; in a
+    /// suspended project, the human's Resume of the project resumes it.
+    pub fn pause_with_project(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        because: &str,
+    ) -> Result<TaskView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("pause_task", Some(number))?;
+        tasks::pause_with_project(&mut self.store, project_id, number, because)
+    }
+
+    /// The window of a task the engine paused with its project ended by itself
+    /// after all (its kill was refused): no Resume of the project resumes it.
+    pub fn unmark_pause(&mut self, project_id: i64, number: i64) -> Result<(), LedgerError> {
+        tasks::unmark_pause(&mut self.store, project_id, number)
+    }
+
     /// The daemon holds a task while its member is out of quota, until `until`.
     pub fn hold_task(
         &mut self,
@@ -172,6 +191,18 @@ impl Ledger {
         tasks::reopen_task(&mut self.store, project_id, number, by, body)
     }
 
+    /// The brief of a task not yet given to a window is replaced; the old one
+    /// is kept in the log.
+    pub fn edit_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: &str,
+        body: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::edit_task(&mut self.store, project_id, number, by, body)
+    }
+
     /// A task is called off, its requester told.
     pub fn cancel_task(
         &mut self,
@@ -182,7 +213,8 @@ impl Ledger {
         tasks::cancel_task(&mut self.store, project_id, number, by)
     }
 
-    /// The daemon gives up on a task.
+    /// A task fails, as Node's ledger failed it: what its recordings call. The
+    /// daemon gives up on a task with [`Ledger::give_up_task`].
     pub fn fail_task(
         &mut self,
         project_id: i64,
@@ -190,6 +222,17 @@ impl Ledger {
         reason: &str,
     ) -> Result<TaskView, LedgerError> {
         tasks::fail_task(&mut self.store, project_id, number, reason)
+    }
+
+    /// The daemon gives up on a task, and tells its requester why, with the
+    /// words it told the task's window that went with it.
+    pub fn give_up_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        reason: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::give_up_task(&mut self.store, project_id, number, reason)
     }
 
     /// The human takes finished tasks off the board for good, all or none.

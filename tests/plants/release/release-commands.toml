@@ -1,0 +1,696 @@
+# The release commands (tools/xtask/src/release): `release alpha` and `release promote`,
+# every check and step held by the module's own tests, on a checkout with real remotes and a
+# GitHub that is a script (src/release/tests/fake.rs). Their library tests build no program.
+
+[run]
+release-commands = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "release::"]
+
+[[plant]]
+name = "release: a pre-release that is not alpha.N is taken for an alpha"
+meant = "an_alpha_is_x_y_z_alpha_n_and_nothing_else_the_workflow_would_take"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = '''
+if prerelease.strip_prefix("alpha.").is_some_and(number)'''
+replace = "if !prerelease.is_empty()"
+
+[[plant]]
+name = "release: release alpha takes sources whose version is no alpha"
+meant = "sources_whose_version_is_not_an_alpha_are_refused_before_anything_runs"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "    plain_of(&version)?;"
+replace = "    let _ = plain_of(&version);"
+
+[[plant]]
+name = "release: notes whose first line is blank are taken"
+meant = "notes_are_a_file_whose_first_line_is_a_title"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = ".is_none_or(|title| title.trim().is_empty())"
+replace = ".is_none()"
+
+[[plant]]
+name = "release: a checkout with changes is taken"
+meant = "a_checkout_with_changes_is_refused"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = "if !changes.is_empty() {"
+replace = '''
+if changes.contains("never") {'''
+
+[[plant]]
+name = "release: a checkout on another branch is taken"
+meant = "a_checkout_on_another_branch_is_refused"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = '''
+if branch != "main" {'''
+replace = '''
+if branch == "never" {'''
+
+[[plant]]
+name = "release: main that is not upstream's is taken"
+meant = "main_that_is_not_upstreams_is_refused"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = "if head != upstream {"
+replace = '''
+if head == "never" {'''
+
+[[plant]]
+name = "release: a tag in the checkout is not looked for"
+meant = "a_tag_in_the_checkout_or_on_origin_alone_is_refused_with_how_to_push_or_delete_it"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = '''
+&["rev-parse", "-q", "--verify", &reference]'''
+replace = '''
+&["rev-parse", "-q", "--verify", "refs/tags/never"]'''
+
+[[plant]]
+name = "release: a tag on origin is not looked for"
+meant = "a_tag_in_the_checkout_or_on_origin_alone_is_refused_with_how_to_push_or_delete_it"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = '''
+.git(&["ls-remote", "--tags", "origin", &reference])?'''
+replace = '''
+.git(&["ls-remote", "--tags", "origin", "refs/tags/never"])?'''
+
+[[plant]]
+name = "release: a tag on upstream is not looked for"
+meant = "a_tag_on_upstream_is_refused_with_its_release_run_to_rerun"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = '''
+let on_upstream = self.git(&["ls-remote", "--tags", "upstream", &reference])?;'''
+replace = "let on_upstream = String::new();"
+
+[[plant]]
+name = "release: an alpha feed-alpha already serves is released again"
+meant = "a_version_feed_alpha_does_not_come_before_is_refused_before_ci_is_asked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "if served >= ours {"
+replace = "if served > ours {"
+
+[[plant]]
+name = "release: an alpha before what feed-alpha serves is released"
+meant = "a_version_feed_alpha_does_not_come_before_is_refused_before_ci_is_asked"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "if served >= ours {"
+replace = "if served.as_str().is_empty() {"
+
+[[plant]]
+name = "release: a run that did not end green is taken"
+meant = "a_dry_run_that_fails_stops_it_before_the_tag"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+if ended.conclusion != "success" {'''
+replace = '''
+if ended.conclusion == "cancelled" {'''
+
+[[plant]]
+name = "release: CI green on one platform is taken"
+meant = "ci_that_is_not_green_on_both_platforms_stops_it_before_the_dry_run"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "if watched.both_platforms {"
+replace = '''
+if watched.both_platforms && watched.label == "never" {'''
+
+[[plant]]
+name = "release: the run newest before is taken for the new one"
+meant = "an_older_dry_run_of_the_same_commit_is_not_taken_for_the_new_one"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "if newest.is_some() && newest != watched.before {"
+replace = "if newest.is_some() {"
+
+[[plant]]
+name = "release: a run is taken as it is before it ends"
+meant = "an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+if status.status == "completed" {'''
+replace = "if !status.status.is_empty() {"
+
+[[plant]]
+name = "release: release alpha asks for no dry run"
+meant = "an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = '''
+    release.dispatch("release.yml", "main")?;
+'''
+replace = '''
+
+'''
+
+[[plant]]
+name = "release: release alpha's dry run tags"
+meant = "a_dry_run_does_everything_up_to_the_tag_and_tags_nothing"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "if options.dry_run {"
+replace = "if options.dry_run && version.is_empty() {"
+
+[[plant]]
+name = "release: a feed is taken as serving whatever it serves"
+meant = "a_feed_alpha_that_never_serves_the_alpha_after_a_green_run_says_the_release_is_published"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "self.read_until(name, |served| served.as_str() == version)?"
+replace = "self.read_until(name, |_| true)?"
+
+[[plant]]
+name = "release: a feed-stable an alpha moved is taken"
+meant = "a_feed_stable_the_alpha_moved_fails_the_release"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "if stable_after != stable_before {"
+replace = "if stable_after.as_str().is_empty() {"
+
+[[plant]]
+name = "release: the tag's message is not the notes"
+meant = "an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = '''
+"-a", tag, "-F", &notes, commit'''
+replace = '''
+"-a", tag, "-m", &notes, commit'''
+
+[[plant]]
+name = "release: the tag goes to upstream alone"
+meant = "an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = '''
+self.push("origin", tag, |said| {'''
+replace = '''
+self.push("upstream", tag, |said| {'''
+
+[[plant]]
+name = "release: an alpha feed-alpha does not serve is promoted"
+meant = "an_alpha_feed_alpha_does_not_serve_is_refused"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "if alpha_served.as_str() != alpha {"
+replace = "if alpha_served.as_str().is_empty() {"
+
+[[plant]]
+name = "release: a plain version feed-stable serves is promoted again"
+meant = "a_version_already_released_is_refused"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "if stable_served >= ours {"
+replace = "if stable_served > ours {"
+
+[[plant]]
+name = "release: a promotion looks for no tag of the plain version"
+meant = "a_version_already_released_is_refused"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "    release.tag_is_new(&tag)?;"
+replace = "    let _ = release.tag_is_new(&tag);"
+
+[[plant]]
+name = "release: an alpha tag the checkout alone has is promoted"
+meant = "an_alpha_that_was_never_released_is_refused"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+.git(&["ls-remote", "--tags", "upstream", &reference])?
+        .is_empty()'''
+replace = '''
+.git(&["tag", "-l", &alpha_tag])?
+        .is_empty()'''
+
+[[plant]]
+name = "release: an alpha tag on a commit of another version is promoted"
+meant = "an_alpha_tag_on_a_commit_of_another_version_is_refused"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "if source != alpha {"
+replace = "if source.is_empty() {"
+
+[[plant]]
+name = "release: a version file that says the version another number of times is changed"
+meant = "a_version_file_that_says_the_version_another_number_of_times_is_refused"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "if found != times {"
+replace = "if found == 0 {"
+
+[[plant]]
+name = "release: a path beyond the version files is taken"
+meant = "a_lockfile_or_a_file_cargo_changed_beyond_the_version_is_refused_and_nothing_goes_out"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "if !VERSION_FILES.contains(&path) {"
+replace = "if path.is_empty() {"
+
+[[plant]]
+name = "release: a version file changed beyond its version is taken"
+meant = "a_version_file_changed_beyond_its_version_is_refused"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "if expected != *after {"
+replace = "if expected.is_empty() {"
+
+[[plant]]
+name = "release: a version file that does not say the alpha is taken"
+meant = "a_version_file_that_does_not_say_the_alpha_is_refused"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "if expected == *before {"
+replace = "if expected.is_empty() {"
+
+[[plant]]
+name = "release: a branch a promotion left is taken"
+meant = "a_branch_a_promotion_left_is_refused_with_how_to_start_over_or_finish"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "let Some(at) = at else {"
+replace = "let Some(at) = at.filter(|_| false) else {"
+
+[[plant]]
+name = "release: feed-stable is not waited for"
+meant = "a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_never_written"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    release.wait_for_feed(STABLE_FEED, &plain, run)?;
+'''
+replace = '''
+
+'''
+
+[[plant]]
+name = "release: the promotion's tree is left"
+meant = "a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_never_written"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+let removed = release.git(&["worktree", "remove", "--force", &tree_text]);'''
+replace = "let removed: Result<String, Error> = Ok(tree_text);"
+
+[[plant]]
+name = "release: release promote's dry run pushes and tags"
+meant = "a_promotion_dry_run_makes_the_commit_and_pushes_and_tags_nothing"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "    if options.dry_run {"
+replace = "    if options.dry_run && plain.is_empty() {"
+
+[[plant]]
+name = "release: a tag on upstream names no run to rerun"
+meant = "a_tag_on_upstream_is_refused_with_its_release_run_to_rerun"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = '''
+let run = self.newest_run("release.yml", Some(&commit), Some("push"))?;'''
+replace = "let run = None;"
+
+[[plant]]
+name = "release: an annotated tag on upstream is named by its tag object, not its commit"
+meant = "a_tag_on_upstream_is_refused_with_its_release_run_to_rerun"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = "if peeled.is_empty() {"
+replace = "if !peeled.is_empty() || peeled.is_empty() {"
+
+[[plant]]
+name = "release: a tag on origin alone is said to be deleted from the checkout"
+meant = "a_tag_in_the_checkout_or_on_origin_alone_is_refused_with_how_to_push_or_delete_it"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = '''
+(false, true) => ("on origin", format!("git push origin --delete {tag}")),'''
+replace = '''
+(false, true) => ("on origin", format!("git tag -d {tag}")),'''
+
+[[plant]]
+name = "release: a tag in the checkout alone is taken"
+meant = "a_tag_in_the_checkout_or_on_origin_alone_is_refused_with_how_to_push_or_delete_it"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = '''
+(true, false) => ("in the checkout", format!("git tag -d {tag}")),'''
+replace = "(true, false) => return Ok(()),"
+
+[[plant]]
+name = "release: a push a remote refuses says only git's words"
+meant = "a_tag_origin_refuses_reaches_no_remote_and_says_to_delete_it"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = "Err(Error::Program { said, .. }) => Err(refused(then(&said))),"
+replace = "Err(Error::Program { said, .. }) => Err(refused(said)),"
+
+[[plant]]
+name = "release: a tag upstream refuses says nothing of what origin holds"
+meant = "a_tag_upstream_refuses_says_what_origin_holds_and_a_run_again_says_how_to_finish"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release.rs"
+find = '''
+`git tag -d {tag} && git push origin --delete {tag}`, and run again"'''
+replace = '''
+`git tag -d {tag}`, and run again"'''
+
+[[plant]]
+name = "release: a release run that fails says nothing to do"
+meant = "a_release_run_that_fails_says_to_rerun_it_and_a_run_again_says_the_same"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+|tag| format!("{tag} stays on upstream; {}", rerun_advice(tag, Some(id))),'''
+replace = '''
+|tag| format!("{tag} stays on upstream; {}", rerun_advice(tag, None)),'''
+
+[[plant]]
+name = "release: a release run that never appears says nothing to do"
+meant = "a_tag_whose_release_run_never_appears_says_what_to_do_with_the_tag"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+|tag| format!("{tag} is on upstream; {}", rerun_advice(tag, None)),'''
+replace = '''
+|_| "nothing after it was done".to_owned(),'''
+
+[[plant]]
+name = "release: a feed read that cannot reach the feed ends the run"
+meant = "a_feed_that_answers_404_or_no_network_for_a_while_is_read_again_and_is_no_alarm"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+code => Read::Unreachable(format!("curl ended {code}: {}", answered.stderr.trim())),'''
+replace = "code => return Err(Error::Program { command: invocation.display(), code, said: answered.stderr.trim().to_owned() }),"
+
+[[plant]]
+name = "release: a feed is read once"
+meant = "a_feed_that_answers_404_or_no_network_for_a_while_is_read_again_and_is_no_alarm"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "for attempt in 0..self.pace.feed_attempts {"
+replace = "for attempt in 0..1 {"
+
+[[plant]]
+name = "release: a feed that answers no release is said to want a later version"
+meant = "a_feed_alpha_that_answers_no_release_is_an_outage_not_a_version_to_change"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "not a version to change; {}"
+replace = "set a later version; {}"
+
+[[plant]]
+name = "release: a green run with an unserved feed says nothing of the run"
+meant = "a_feed_alpha_that_never_serves_the_alpha_after_a_green_run_says_the_release_is_published"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+"release run {run} ended green, its own check of the feeds with it, yet {name} \'''
+replace = '''
+"release run {run} ended, yet {name} \'''
+
+[[plant]]
+name = "release: a fetch of the alpha that fails is read as never released"
+meant = "a_fetch_of_the_alpha_that_fails_is_gits_error_never_not_released"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    release.git(&["fetch", "-q", "--no-tags", "upstream", &fetch])?;
+'''
+replace = '''
+    if !release.git_says_yes(&["fetch", "-q", "--no-tags", "upstream", &fetch])? {
+        return Err(refused(format!("{alpha_tag} is not on upstream: {alpha} was never released")));
+    }
+'''
+
+[[plant]]
+name = "release: a promotion asks main to be upstream's"
+meant = "a_promotion_asks_nothing_of_the_checkouts_own_branch_or_changes"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    let notes = notes_at(&options.notes)?;
+
+    let alpha_tag'''
+replace = '''
+    let notes = notes_at(&options.notes)?;
+    release.main_as_upstream_has_it()?;
+
+    let alpha_tag'''
+
+[[plant]]
+name = "release: a promotion writes main"
+meant = "a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_never_written"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    release.git(&["branch", &branch, &promoted])?;
+'''
+replace = '''
+    release.git(&["branch", &branch, &promoted])?;
+    release.git(&["push", "-q", "upstream", &format!("{promoted}:refs/heads/main")])?;
+'''
+
+[[plant]]
+name = "release: a promotion starts CI by hand"
+meant = "a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_never_written"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+'''
+replace = '''
+    release.dispatch("ci.yml", &branch)?;
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+'''
+
+[[plant]]
+name = "release: a branch on upstream alone is not looked for"
+meant = "a_branch_a_promotion_left_is_refused_with_how_to_start_over_or_finish"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    for remote in ["origin", "upstream"] {
+        let said = release.git(&["ls-remote", "--heads"'''
+replace = '''
+    for remote in ["origin"] {
+        let said = release.git(&["ls-remote", "--heads"'''
+
+[[plant]]
+name = "release: a branch in the checkout alone is not looked for"
+meant = "a_branch_a_promotion_left_is_refused_with_how_to_start_over_or_finish"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+if release.git_says_yes(&["rev-parse", "-q", "--verify", &heads])? {'''
+replace = '''
+if release.git_says_yes(&["rev-parse", "-q", "--verify", "refs/heads/never"])? {'''
+
+[[plant]]
+name = "release: a branch upstream refuses is said to be deleted from the checkout alone"
+meant = "a_branch_upstream_refuses_says_what_to_delete_and_once_deleted_a_run_again_promotes"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+`git push origin --delete {branch} && git branch -D {branch}`, and run again"'''
+replace = '''
+`git branch -D {branch}`, and run again"'''
+
+[[plant]]
+name = "release: a branch origin refuses says nothing to delete"
+meant = "a_branch_origin_refuses_reaches_no_remote_and_says_to_delete_the_checkouts"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+no remote has it; delete it, `git branch -D {branch}`, and run again"'''
+replace = '''
+no remote has it"'''
+
+[[plant]]
+name = "release: a promotion asks gh nothing before its pushes"
+meant = "a_gh_that_fails_stops_a_promotion_before_any_push_in_the_dry_run_too"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    if options.dry_run {'''
+replace = '''
+    if options.dry_run {'''
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
+replace = '''
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
+
+[[plant]]
+name = "release: a promotion asks gh before its pushes in the dry run alone"
+meant = "a_gh_that_fails_stops_a_promotion_before_any_push_in_the_dry_run_too"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    if options.dry_run {'''
+replace = '''
+    if options.dry_run {
+        release.newest_run("release.yml", Some(&promoted), Some("push"))?;'''
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
+replace = '''
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
+
+[[plant]]
+name = "release: a promotion left is finished by hand by its branch's name"
+meant = "a_branch_a_promotion_left_is_refused_with_how_to_start_over_or_finish"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "`git tag -a {tag} -F <notes> {at} && git push origin {tag}"
+replace = "`git tag -a {tag} -F <notes> {branch} && git push origin {tag}"
+
+[[plant]]
+name = "release: a promotion left is finished by hand whatever its parent"
+meant = "a_branch_a_promotion_left_is_refused_with_how_to_start_over_or_finish"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = "or, if its parent is {alpha_commit}, finish it by hand:"
+replace = "or finish it by hand:"
+
+[[plant]]
+name = "release: feed-stable unread after a green alpha run says nothing was done"
+meant = "a_feed_stable_that_answers_no_release_after_a_green_run_says_the_release_is_published"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = "release.served_after(STABLE_FEED, run, &stable_before)?"
+replace = "release.served_by(STABLE_FEED)?"

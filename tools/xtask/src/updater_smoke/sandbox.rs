@@ -122,7 +122,7 @@ impl Sandbox {
 
     /// The stand-in of the harness `name`, a program on the box's PATH.
     fn stand_in(&self, name: &str) -> Result {
-        let version = if name == "claude" { "2.1.266" } else { "0.0.0" };
+        let version = if name == "claude" { "2.1.305" } else { "0.0.0" };
         let script = STAND_IN
             .replace("@VERSION@", version)
             .replace("@PIDS@", &self.pids.join(name).to_string_lossy());

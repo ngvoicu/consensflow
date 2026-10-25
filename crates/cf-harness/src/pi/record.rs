@@ -8,8 +8,9 @@
 //! The session's last assistant step decides the turn. It is settled when
 //! that step stopped or was aborted (an Escape: a pause, a tell, the human),
 //! no tool call is open, and either the extension's evidence names it, or the
-//! file has been quiet for 120 seconds (`QUIET_MS`): Pi's provider backoff is
-//! capped at 60 seconds, so two of them without an append say no retry is
+//! file has been quiet for 120 seconds (`QUIET_MS`): Pi's agent retry is
+//! capped at 60 seconds (`retry.maxAgentDelayMs`, since Pi 0.86.0 and still in
+//! 1.3.0, the newest seen), so two of them without an append say no retry is
 //! coming.
 //!
 //! Pi's reader is no `TranscriptReader`: its answer also rests on the
@@ -164,6 +165,7 @@ impl Session {
             complete,
             at: Some(at),
             commentary: false,
+            compaction: false,
         });
     }
 

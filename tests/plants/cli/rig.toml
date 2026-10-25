@@ -141,3 +141,96 @@ builds = true
 file = "crates/cf-codex-session/src/supervisor.rs"
 find = "    match std::fs::remove_dir_all(folder) {"
 replace = "    match Ok::<(), io::Error>(()) {"
+
+# T-404: on Windows the window's supervisor ended the Codex server by its id alone (`taskkill /T`):
+# what the server started as it was ended lived on (zeewin, T-322), and what had lost its parent was
+# never found. The server and the TUI are programs of their own jobs now, and ending one ends the job.
+
+[[plant]]
+name = "rig (Windows: zeewin): a Codex window's server is ended with a walk of its tree, not its job, and loses what it starts as it is ended"
+meant = "ends_every_program_codexs_server_started_when_its_tui_ends_what_it_starts_as_it_is_ended_included"
+runs = ["rig-codex-session"]
+platforms = ["windows"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "            end(pid, how, Reach::Process, true, &self.job);"
+replace = "            end(pid, how, Reach::Process, true, &Job::unheld());"
+
+[[plant]]
+name = "rig (Windows: zeewin): a Codex window's server is ended with a walk of its tree, and loses what has lost its parent"
+meant = "ends_a_program_codexs_server_started_that_has_lost_its_parent_when_its_tui_ends"
+runs = ["rig-codex-session"]
+platforms = ["windows"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "            end(pid, how, Reach::Process, true, &self.job);"
+replace = "            end(pid, how, Reach::Process, true, &Job::unheld());"
+
+[[plant]]
+name = "rig (Windows: zeewin): a Codex window's server is held in a job that is closed as it starts"
+meant = "ends_a_program_codexs_server_started_that_has_lost_its_parent_when_its_tui_ends"
+runs = ["rig-codex-session"]
+platforms = ["windows"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "        Ok(job) => Ok(Owned { child, job }),"
+replace = "        Ok(_) => Ok(Owned {\n            child,\n            job: Job::unheld(),\n        }),"
+
+# T-424's P3-2: a window whose programs the system gave no job says which when it has ended (the
+# system gives a job to every program that a test can start, so a test says it refuses one).
+
+[[plant]]
+name = "rig: a window does not say which of its programs the system gave no job"
+meant = "a_window_whose_programs_the_system_gave_no_job_says_which_once_it_has_ended_and_goes_on_as_before"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = "            say(note);"
+replace = "            let _ = (note, say);"
+
+[[plant]]
+name = "rig: a window does not note that its TUI has no job"
+meant = "a_window_whose_programs_the_system_gave_no_job_says_which_once_it_has_ended_and_goes_on_as_before"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = "        self.note_if_in_no_job(\"Codex's TUI\", (plan.refusal)(&tui));"
+replace = "        let _ = (plan.refusal)(&tui);"
+
+[[plant]]
+name = "rig: a window does not note that its server has no job"
+meant = "a_server_that_could_not_start_in_a_window_that_gave_it_no_job_is_said_all_the_same"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = "        self.note_if_in_no_job(\"Codex's server\", (plan.refusal)(&backend));"
+replace = "        let _ = (plan.refusal)(&backend);"
+
+[[plant]]
+name = "rig: a window says its programs have no job where they have"
+meant = "a_window_whose_programs_have_their_jobs_says_nothing_of_them"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = "            refusal: |program| program.refusal().map(str::to_owned),"
+replace = "            refusal: |_| Some(String::from(\"no job\")),"
+
+[[plant]]
+name = "rig: the line a window says of a program the system gave no job leaves out why"
+meant = "a_program_the_system_gave_no_job_is_told_in_a_line_that_names_it_and_the_reason"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = "the system gave it none ({why}); it was ended"
+replace = "the system gave it none; it was ended"

@@ -41,6 +41,7 @@ fn reading(scene: &Scene, file: &str) -> (Rc<Context>, Rc<Asked>, tempfile::Temp
         ledger: Rc::clone(&scene.context.ledger),
         credentials: Rc::clone(&scene.context.credentials),
         kick: Rc::clone(&scene.context.kick),
+        finish: Rc::clone(&scene.context.finish),
         closing: scene.context.closing.clone(),
         roster: Rc::clone(&asked) as Rc<dyn AgentRows>,
         log: Rc::clone(&scene.context.log),

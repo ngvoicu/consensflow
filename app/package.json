@@ -9,7 +9,7 @@
     "prepare:app": "npm run bundle:ui && npm run prepare-sidecar",
     "smoke:windows": "node scripts/windows-smoke.mjs",
     "portable": "cargo xtask portable pack",
-    "test:ui": "npm run bundle:ui && playwright test tests/core-page.spec.mjs tests/updates.spec.mjs tests/harnesses.spec.mjs tests/specs-viewer.spec.mjs",
+    "test:ui": "npm run bundle:ui && playwright test tests/core-page.spec.mjs tests/updates.spec.mjs tests/harnesses.spec.mjs tests/specs-viewer.spec.mjs tests/history-viewer.spec.mjs",
     "build": "tauri build",
     "dev": "tauri dev"
   },

@@ -621,7 +621,9 @@ fn an_entrys_words_are_masked_whole_before_they_are_cut_and_matched_whole() {
 #[test]
 fn the_products_late_ancestor_fixture_reads_at_rest_as_the_product_reads_it() {
     // Claude Code 2.1.268 wrote the turn's prompt after its answer and its boundary:
-    // the answer's parents, attachments all, lead to it. It begins no turn.
+    // the answer's parents, attachments all, lead to it. It begins no turn. A
+    // capture of 2.1.268; no later version, up to 2.1.305, was seen to write an
+    // answer whose parent comes after it.
     let fixture = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../tests/engine/fixtures/completion/claude-code/v268-late-ancestors.jsonl"
@@ -655,6 +657,56 @@ fn a_users_record_with_no_words_begins_no_turn() {
             json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "image" }] } }),
         ),
     ];
+    assert_eq!(record(&lines).stood_at(at(30)).unwrap().0, Stood::AtRest);
+}
+
+#[test]
+fn a_summary_of_a_compaction_is_known_by_its_records_flag_and_never_by_its_words() {
+    let words = "This session is being continued from a previous conversation.";
+    let record = record(&[
+        line(
+            1,
+            json!({ "type": "user", "uuid": "u-flagged", "isCompactSummary": true,
+                "message": { "role": "user", "content": words } }),
+        ),
+        line(
+            2,
+            json!({ "type": "user", "uuid": "u-words",
+                "message": { "role": "user", "content": words } }),
+        ),
+        line(
+            3,
+            json!({ "type": "assistant", "uuid": "a-flagged", "isCompactSummary": true,
+                "message": { "role": "assistant", "content": [{ "type": "text", "text": words }] } }),
+        ),
+    ]);
+    assert!(record.is_summary("u-flagged"));
+    assert!(!record.is_summary("u-words"));
+    assert!(!record.is_summary("a-flagged"));
+    assert!(!record.is_summary("u-none"));
+}
+
+#[test]
+fn the_rows_claude_code_writes_of_a_request_are_no_prompt() {
+    // Claude Code 2.1.303 writes beside the prompt rows that echo the request it sent:
+    // `api-request-blob` with the prompt as the user's message (made-up words here),
+    // `api-request`, and `last-prompt`. None is a prompt, nor anything else.
+    let header = "[ConsensFlow m-13 · note from @human]\nDo you still have work to do?";
+    let echoes = [
+        json!({ "type": "api-request-blob", "sessionId": "s-1", "hash": "h-1",
+            "message": { "role": "user", "content": header } }),
+        json!({ "type": "api-request", "sessionId": "s-1",
+            "message": { "role": "user", "content": [{ "type": "text", "text": header }] } }),
+        json!({ "type": "last-prompt", "sessionId": "s-1", "lastPrompt": header }),
+    ];
+    for echo in &echoes {
+        assert!(
+            record(&[line(0, echo.clone())]).entries.is_empty(),
+            "{echo}"
+        );
+    }
+    let mut lines = vec![answer(5, "Done.", "end_turn"), duration(5)];
+    lines.extend(echoes.iter().map(|echo| line(9, echo.clone())));
     assert_eq!(record(&lines).stood_at(at(30)).unwrap().0, Stood::AtRest);
 }
 

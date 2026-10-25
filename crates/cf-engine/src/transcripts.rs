@@ -5,12 +5,14 @@
 //! copied.
 
 use cf_harness::contract::Observed;
+use cf_harness::records::Item;
 use cf_ledger::ParticipantView;
 use serde_json::Value;
 
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::seams::EngineError;
+use crate::turn_end::Rests;
 
 /// What the looks at a window copied: which conversation, and how many of
 /// its items.
@@ -53,10 +55,7 @@ impl Dispatcher {
             copied.saturating_sub(1)
         };
         if items.len() > from {
-            let new: Vec<Value> = items[from..]
-                .iter()
-                .map(|item| serde_json::to_value(item).unwrap_or(Value::Null))
-                .collect();
+            let new: Vec<Value> = items[from..].iter().map(to_copy).collect();
             let changed = self.seams.ledger.borrow_mut().copy_transcript(
                 conversation.id,
                 &new,
@@ -93,9 +92,24 @@ impl Dispatcher {
             window.follow(session);
         }
         *record.copied.borrow_mut() = None;
+        // The rests were the other conversation's: a monitor of this one was never seen
+        // missing at them (Calliope on 136a7158).
+        record.held.borrow_mut().rests = Rests::default();
         self.changed();
         Ok(())
     }
+}
+
+/// An item as the ledger copies it: as its reading writes it, and marked when
+/// it is a compaction's summary, which a reading never says.
+fn to_copy(item: &Item) -> Value {
+    let mut value = serde_json::to_value(item).unwrap_or(Value::Null);
+    if item.compaction {
+        if let Value::Object(fields) = &mut value {
+            fields.insert("compaction".to_owned(), Value::Bool(true));
+        }
+    }
+    value
 }
 
 #[cfg(test)]

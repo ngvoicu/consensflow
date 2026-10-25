@@ -12,6 +12,8 @@
 //! - `seed`: the first message of an OpenCode window, through its own server;
 //! - `create`: the conversation an OpenCode window opens on, made on a
 //!   throwaway `opencode serve` (`fake-opencode`).
+//! - `load`: the two-call case of `create`, run again and again by threads
+//!   beside each other, ignored, by hand (macOS).
 //!
 //! Each case is one of Node's delivery-contract, Codex channel and OpenCode
 //! launch suites, which ran these channels through test binaries, ported under
@@ -23,6 +25,7 @@
 mod codex;
 mod contract;
 mod create;
+mod load;
 mod pi_window;
 mod seed;
 mod support;

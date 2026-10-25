@@ -1,0 +1,45 @@
+# What the commits of a ledger made for a test wait for: nothing, where the product's wait for the
+# disk (`crates/cf-ledger/src/ledger.rs`, `synchronous`), and the ledger files the evals' tests
+# make (`crates/cf-evals/src/ledger_file.rs`). A commit waited for is a flush on Windows: on zeewin
+# the daemon's `pages_through_thousands_of_conversations`, which writes 20,000, took 63 s, and 14 s
+# without the wait (T-221, 2026-10-22).
+
+[run]
+ledger-sync = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-ledger", "--lib", "ledger::tests"]
+evals-ledger-file = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-evals", "--lib", "ledger_file::"]
+
+[[plant]]
+name = "test disks: the product's ledger waits for no disk"
+meant = "the_product_waits_for_its_disk_at_each_commit_and_a_ledger_for_tests_waits_for_none"
+runs = ["ledger-sync"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''
+    } else {
+        "FULL"
+    }'''
+replace = '''
+    } else {
+        "OFF"
+    }'''
+
+[[plant]]
+name = "test disks: a ledger a test opens waits for the disk"
+meant = "a_ledger_opened_with_the_test_support_waits_for_no_disk"
+runs = ["ledger-sync"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''synchronous(cfg!(feature = "test-support"))'''
+replace = "synchronous(false)"
+
+[[plant]]
+name = "test disks: a ledger file made to be read waits for the disk"
+meant = "a_ledger_file_made_to_be_read_waits_for_no_disk_at_a_commit_whether_or_not_it_is_in_wal_mode"
+runs = ["evals-ledger-file"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/ledger_file.rs"
+find = '''db.execute_batch("PRAGMA synchronous = OFF")?;'''
+replace = '''db.execute_batch("PRAGMA synchronous = FULL")?;'''
