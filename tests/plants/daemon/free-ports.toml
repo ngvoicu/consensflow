@@ -1,0 +1,56 @@
+# The port the seam names (`LoopbackPorts`, crates/cf-harness/src/seams/mod.rs) is one a program
+# has not been left a listener of (T-366, 3.0.6). On macOS a listener is made close-on-exec in a
+# second call, and a program another thread starts between the two keeps it: the port stays
+# listened on after the seam lets go, and the next to bind it is refused. It was seen as
+# `seams::tests::a_free_port_on_loopback_is_one_a_listener_may_take` failing once on a busy Mac
+# (T-349), and as `create::mints_distinct_ids_on_two_calls` failing with "opencode serve exited
+# early" twice (T-302, T-330): the stand-in that was to serve could not bind its port. The
+# tests are in the seam's own module; what is not planted here is the one line that gives the
+# seam its look at a port (`free_loopback_from(drawn, listened_on)`), which only
+# `crates/cf-harness/tests/ports.rs` shows, under load, by hand.
+
+[run]
+seams = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "seams::tests::"]
+
+[[plant]]
+name = "free ports: a port a program listens on is named all the same"
+meant = "a_port_a_program_was_left_a_listener_of_is_not_the_one_named"
+runs = ["seams"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/mod.rs"
+find = "        if !held(port) {"
+replace = "        if true || !held(port) {"
+
+[[plant]]
+name = "free ports: a look at a port says a listener is none"
+meant = "a_port_is_looked_at_by_a_connection_to_it"
+runs = ["seams"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/mod.rs"
+find = "TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)), LOOK).is_ok()"
+replace = "TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)), LOOK).is_err()"
+
+[[plant]]
+name = "free ports: the draws for a port that is free are not bounded by more than one"
+meant = "no_port_is_named_when_every_one_drawn_is_held"
+runs = ["seams"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/mod.rs"
+find = "    for _ in 0..DRAWS {"
+replace = "    for _ in 0..1 {"
+
+[[plant]]
+name = "free ports: a draw the system refuses is tried again"
+meant = "a_draw_the_system_refuses_is_the_failure"
+runs = ["seams"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/mod.rs"
+find = "        let port = draw()?;"
+replace = '''        let Ok(port) = draw() else {
+            continue;
+        };'''

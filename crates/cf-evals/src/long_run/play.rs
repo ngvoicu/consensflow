@@ -2,15 +2,17 @@
 //! owner pauses a task and resumes it, a window's process dies, the owner types
 //! `/compact` into the chief, quits the app and starts it again, switches the chief,
 //! closes the project and resumes it. Each ends where the owner would leave it: a task
-//! the disruption paused is resumed, a project it suspended is resumed.
+//! the disruption paused is resumed, a project it suspended is resumed (the tasks its
+//! Close paused go on with it by themselves).
 //!
 //! A disruption is played only when its effect is seen: the paused task paused and on
 //! again; the window killed and its task paused, then on again; a compaction boundary
 //! in the chief's own record that is new since the keys (one more than before, written
 //! after them); the project open again with its chief's window, and for a Devin worker
 //! cut mid-tool, that worker's window opened again; the new chief's window open on
-//! the agent it was switched to; the tasks a close paused out of `paused` once the
-//! owner resumed them. An effect not seen within the time a disruption waits is a
+//! the agent it was switched to; the tasks a Close paused out of `paused` by themselves
+//! once the owner resumed the project, each window back on its own conversation and
+//! told once that its turn was cut. An effect not seen within the time a disruption waits is a
 //! failure, said with its evidence (the rows of the board, the window's screen, the
 //! record); a refusal of what the owner asked is a failure too, unless the task had
 //! ended by then, or another had resumed it first. A moment that passed before it could be played (the task ended
@@ -27,7 +29,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use super::disruptions::{Disruption, Target};
-use super::invariants::Evidence;
+use super::invariants::{Evidence, CUT};
 use super::look::Look;
 use super::record::Kind;
 use super::stage::lane_of;
@@ -69,6 +71,9 @@ pub trait Stagehand {
     fn exited(&self, pane: &str, generation: i64) -> bool;
     /// Whether the app, since it last started, opened a window with the id `pane`.
     fn opened(&self, pane: &str) -> bool;
+    /// The command line of each window with the id `pane` the app opened since it last
+    /// started, the oldest first.
+    fn opened_with(&self, pane: &str) -> Vec<Vec<String>>;
     /// The app quits and starts again on the same home.
     fn restart(&mut self) -> Result;
     /// A look at the project.
@@ -616,14 +621,25 @@ fn switch(hand: &mut Hand<'_>, to: Option<&str>) -> Result<Outcome> {
     Ok(Outcome::Played(said))
 }
 
-/// The owner closes the project, leaves it `hold`, and resumes it; then resumes each
-/// task the close paused, as a person does at the board (a Close pauses the tasks of
-/// the windows it closes, and a task the system paused stays so after the Resume; a
-/// quit leaves them at work, and the Resume brings them back). Played once the project
-/// read suspended, came back open with its chief's window, and every task the close
-/// paused left `paused` (or had ended, its resume refused for that).
+/// The owner closes the project, leaves it `hold`, and resumes it. A Close pauses the
+/// tasks of the windows it closes, and the Resume brings them back by itself: a window
+/// that held one task opens again on its own conversation, told once that its turn was
+/// cut where the Close cut it; a window that held several (with any other task given
+/// it or paused) comes back for none, its tasks left paused for the chief, who is told
+/// to resume them one at a time. Played once the project read suspended and came back
+/// open with its chief's window, and of each task the Close paused, in a window of its
+/// own: it left `paused` by itself, its window was opened again naming the conversation
+/// it had at the Close (each harness says it its own way: `--resume`, `resume`,
+/// `--session-id`, `--session`; one with no conversation yet, a Codex window before
+/// its first turn, opens afresh), and the window was told its turn was cut once, where
+/// it was at work at the Close, and never twice; and of each task of a window that held
+/// several: it was still paused after the Resume. The tasks the Close paused are those
+/// at work or waiting before it that read paused once the Close is over.
 fn suspend(hand: &mut Hand<'_>, hold: Duration) -> Result<Outcome> {
-    let at_work = tasks_in(&hand.stage.board()?, &["working", "waiting"]);
+    let board = hand.stage.board()?;
+    let at_work = tasks_in(&board, &["working", "waiting"]);
+    let windows = Window::all(&board);
+    let closed_at = jiff::Timestamp::now().as_millisecond();
     if let Some(why) = refusal(hand.stage.page("project.close", json!({})))? {
         return Ok(hand.failed(
             format!("the owner's Close was refused: {why}"),
@@ -638,11 +654,26 @@ fn suspend(hand: &mut Hand<'_>, hold: Duration) -> Result<Outcome> {
             "chief",
         ));
     }
+    // The Close is over once none of the work it closed reads at work.
+    hand.wait(|hand| {
+        let board = hand.stage.board()?;
+        Ok(!tasks_in(&board, &["working", "waiting"])
+            .iter()
+            .any(|number| at_work.contains(number)))
+    })?;
+    let paused: Vec<i64> = tasks_in(&hand.stage.board()?, &["paused"])
+        .into_iter()
+        .filter(|number| at_work.contains(number))
+        .collect();
     hand.hold(hold)?;
     let said = format!(
         "the owner closed the project, and resumed it {} s later",
         hold.as_secs()
     );
+    let opened_before: Vec<usize> = windows
+        .iter()
+        .map(|window| hand.stage.opened_with(&window.pane).len())
+        .collect();
     if let Some(why) = refusal(hand.stage.page("project.resume", json!({})))? {
         return Ok(hand.failed(
             format!("{said}; the Resume was refused: {why}"),
@@ -657,27 +688,39 @@ fn suspend(hand: &mut Hand<'_>, hold: Duration) -> Result<Outcome> {
             "chief",
         ));
     }
-    let paused: Vec<i64> = tasks_in(&hand.stage.board()?, &["paused"])
-        .into_iter()
-        .filter(|number| at_work.contains(number))
+    // A window that held several: the Resume leaves its tasks paused, read before the
+    // chief, told of them, resumes one.
+    let several: Vec<(&Window, i64)> = paused
+        .iter()
+        .filter_map(|number| {
+            let window = windows
+                .iter()
+                .find(|window| window.tasks.contains(number))?;
+            (window.tasks.len() > 1).then_some((window, *number))
+        })
         .collect();
     let mut unresolved = Vec::new();
-    let mut asked = Vec::new();
-    for number in &paused {
-        match refusal(hand.stage.page("task.resume", json!({ "task": number })))? {
-            None => asked.push(*number),
-            Some(why) => {
-                let state = hand.stage.state_of(*number)?;
-                if !ENDED.contains(&state.as_str()) {
-                    unresolved.push(format!(
-                        "the resume of T-{number}, {state}, was refused: {why}"
-                    ));
-                }
-            }
+    for (window, number) in &several {
+        match hand.stage.state_of(*number)?.as_str() {
+            "paused" => {}
+            state => unresolved.push(format!(
+                "T-{number} went on, {state}, though @{}'s window held {}",
+                window.handle,
+                named(&window.tasks)
+            )),
         }
     }
+    let single: Vec<(usize, i64)> = paused
+        .iter()
+        .filter_map(|number| {
+            let at = windows
+                .iter()
+                .position(|window| window.tasks == [*number])?;
+            Some((at, *number))
+        })
+        .collect();
     let went_on = hand.wait(|hand| {
-        for number in &asked {
+        for (_, number) in &single {
             if hand.stage.state_of(*number)? == "paused" {
                 return Ok(false);
             }
@@ -685,33 +728,194 @@ fn suspend(hand: &mut Hand<'_>, hold: Duration) -> Result<Outcome> {
         Ok(true)
     })?;
     if !went_on {
-        for number in &asked {
+        for (_, number) in &single {
             if hand.stage.state_of(*number)? == "paused" {
-                unresolved.push(format!("T-{number} stayed paused after the owner's resume"));
+                unresolved.push(format!("T-{number} stayed paused after the Resume"));
             }
         }
     }
-    let tasks: Vec<String> = paused.iter().map(|number| format!("T-{number}")).collect();
+    let mut afresh = Vec::new();
+    for (at, number) in single.iter().filter(|_| went_on) {
+        let (window, before) = (&windows[*at], opened_before[*at]);
+        match window.came_back(hand, *number, before, closed_at)? {
+            Back::Resumed => {}
+            Back::Afresh => afresh.push(format!("@{}", window.handle)),
+            Back::Not(why) => unresolved.push(why),
+        }
+    }
+    let tasks = named(&paused);
     if !unresolved.is_empty() {
         return Ok(hand.failed(
             format!(
-                "{said}; the close paused {}, and {}",
-                tasks.join(", "),
+                "{said}; the close paused {tasks}, and {}",
                 unresolved.join("; ")
             ),
             paused.first().copied(),
             "chief",
         ));
     }
-    let resumed_tasks = if paused.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "; the close paused {}, and the owner resumed them",
-            tasks.join(", ")
-        )
-    };
-    Ok(Outcome::Played(format!("{said}{resumed_tasks}")))
+    let mut outcome = said;
+    if !single.is_empty() {
+        let numbers: Vec<i64> = single.iter().map(|(_, number)| *number).collect();
+        outcome.push_str(&format!(
+            "; the close paused {}, and they went on with the Resume, each window on its own conversation",
+            named(&numbers)
+        ));
+    }
+    if !afresh.is_empty() {
+        outcome.push_str(&format!(
+            " (opened afresh, with no conversation yet: {})",
+            afresh.join(", ")
+        ));
+    }
+    if !several.is_empty() {
+        let numbers: Vec<i64> = several.iter().map(|(_, number)| *number).collect();
+        outcome.push_str(&format!(
+            "; {} stayed paused for the chief, their windows holding several tasks",
+            named(&numbers)
+        ));
+    }
+    Ok(Outcome::Played(outcome))
+}
+
+/// A worker's window as the board read it before a Close: its participant, its
+/// window's id, the tasks it held (given it, at work, waiting or paused), and whether
+/// a turn of it was at work.
+struct Window {
+    handle: String,
+    pane: String,
+    tasks: Vec<i64>,
+    working: bool,
+}
+
+/// How a window the Resume was to bring back came back.
+enum Back {
+    /// On the conversation it had at the Close, told once its turn was cut where it was.
+    Resumed,
+    /// Afresh: it had no conversation to go on with.
+    Afresh,
+    /// Not as it should: why.
+    Not(String),
+}
+
+impl Window {
+    /// The workers' windows of `board` that held a task.
+    fn all(board: &Value) -> Vec<Self> {
+        board["lanes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|lane| lane["participant"]["role"] != "chief")
+            .filter_map(|lane| {
+                let tasks: Vec<i64> = lane["tasks"]
+                    .as_array()?
+                    .iter()
+                    .filter(|task| {
+                        task["state"].as_str().is_some_and(|state| {
+                            ["queued", "working", "waiting", "paused"].contains(&state)
+                        })
+                    })
+                    .filter_map(|task| task["number"].as_i64())
+                    .collect();
+                let pane = lane["pane"]["id"].as_str()?;
+                (!tasks.is_empty()).then(|| Window {
+                    handle: lane["participant"]["handle"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                    pane: pane.to_owned(),
+                    tasks,
+                    working: lane["activity"]["state"] == "working",
+                })
+            })
+            .collect()
+    }
+
+    /// Whether the window, which held T-`number` alone and had been opened `before`
+    /// times when the owner resumed the project closed at `closed_at`, came back: opened
+    /// again, naming the conversation it had then, and told its turn was cut, once, where
+    /// it was at work, and never twice.
+    fn came_back(
+        &self,
+        hand: &mut Hand<'_>,
+        number: i64,
+        before: usize,
+        closed_at: i64,
+    ) -> Result<Back> {
+        let reopened = hand.wait(|hand| Ok(hand.stage.opened_with(&self.pane).len() > before))?;
+        if !reopened {
+            return Ok(Back::Not(format!(
+                "@{}'s window {} was not opened again",
+                self.handle, self.pane
+            )));
+        }
+        let argv = hand
+            .stage
+            .opened_with(&self.pane)
+            .into_iter()
+            .nth(before)
+            .unwrap_or_default();
+        let since = closed_at - CLOCKS;
+        let session = hand.watch.last().and_then(|look| {
+            let participant = look.ledger.by_handle(&self.handle)?;
+            let conversation = look.conversation_open_at(participant.id, since)?;
+            look.ledger
+                .conversations
+                .iter()
+                .find(|row| row.id == conversation)?
+                .session
+                .clone()
+        });
+        let Some(session) = session else {
+            return Ok(Back::Afresh);
+        };
+        if !argv.contains(&session) {
+            return Ok(Back::Not(format!(
+                "@{}'s window opened again on {argv:?}, not on its conversation {session}",
+                self.handle
+            )));
+        }
+        let words = format!("{} T-{number}.", CUT[1]);
+        let cut_notes = |hand: &Hand<'_>| {
+            hand.watch.last().map_or(0, |look| {
+                let Some(participant) = look.ledger.by_handle(&self.handle) else {
+                    return 0;
+                };
+                look.ledger
+                    .messages
+                    .iter()
+                    .filter(|message| {
+                        message.recipient == participant.id
+                            && message.sender.is_none()
+                            && message.kind == "note"
+                            && message.body.contains(&words)
+                            && crate::clock::millis(&message.created_at)
+                                .is_some_and(|at| at >= since)
+                    })
+                    .count()
+            })
+        };
+        if self.working && !hand.wait(|hand| Ok(cut_notes(hand) > 0))? {
+            return Ok(Back::Not(format!(
+                "@{}'s window, at work on T-{number} at the Close, was never told its turn was cut",
+                self.handle
+            )));
+        }
+        let told = cut_notes(hand);
+        if told > 1 {
+            return Ok(Back::Not(format!(
+                "@{}'s window was told {told} times that its turn on T-{number} was cut",
+                self.handle
+            )));
+        }
+        Ok(Back::Resumed)
+    }
+}
+
+/// Tasks as a disruption says them: `T-1, T-2`.
+fn named(numbers: &[i64]) -> String {
+    let named: Vec<String> = numbers.iter().map(|number| format!("T-{number}")).collect();
+    named.join(", ")
 }
 
 /// The numbers of the tasks of `board` in one of `states`.

@@ -434,6 +434,8 @@ pub(crate) fn assign_task(
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,
+            withdrawn: Vec::new(),
+            landing: Vec::new(),
         })
     })
 }
@@ -468,7 +470,8 @@ pub(crate) fn release_task(
             None => None,
         };
         // One statement: the row is never without an assignee in a working
-        // state. It remembers the member it was taken from (a session's member).
+        // state. It remembers the member it was taken from (a session's member),
+        // and is no pause of its project's suspension now, for a Resume to resume.
         let body = match (&member, &carried) {
             (Some(member), Some(carried)) => format!(
                 "{}{}\n\nReassigned from @{} ({because}); check the working tree for partial changes.",
@@ -479,7 +482,7 @@ pub(crate) fn release_task(
         let at = store.at();
         store.db.execute(
             "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
-           taken_from_id = COALESCE(?, taken_from_id)
+           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0
          WHERE id = ?",
             params![
                 body,

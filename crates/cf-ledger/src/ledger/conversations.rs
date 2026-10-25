@@ -162,6 +162,23 @@ impl Ledger {
         conversations::copied_item_with(&self.store, participant_id, text)
     }
 
+    /// Every item of the participant's current conversation it was given that
+    /// contains `text`, first copied at `since` or after ([`Ledger::now`]), in
+    /// order: its id and its words.
+    pub fn copied_items_since(
+        &self,
+        participant_id: i64,
+        text: &str,
+        since: &str,
+    ) -> Result<Vec<(String, String)>, LedgerError> {
+        conversations::copied_items_since(&self.store, participant_id, text, since)
+    }
+
+    /// The time now, as the ledger writes it (a transcript item's `copied_at`).
+    pub fn now(&mut self) -> String {
+        self.store.at()
+    }
+
     /// Every item of the participant's current conversation it was given that contains
     /// `text`, in order: its id and its words.
     pub fn copied_items_with(

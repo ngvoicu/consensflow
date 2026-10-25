@@ -23,7 +23,8 @@
 //!   it holds, for the stand-in that writes it and the cases that read it.
 //! - [`daemon`] is `cf ui` as a process, on a home of its own.
 //! - [`rig`] is the daemon and the pane host together, with stand-in agents in
-//!   the windows, driven as the page and the app drive them.
+//!   the windows, driven as the page and the app drive them. A case that returns
+//!   [`Outcome`] lets the rigs it started know that it failed.
 //! - [`daemon_log`] reads a daemon's log; [`agents_proof`] holds a daemon's
 //!   agents screens to what they must do; [`http`] asks a daemon's API. (The
 //!   packaged smoke uses all three, on the daemon the built app chose.)
@@ -36,6 +37,8 @@
 //!   waits, and the variables `cargo xtask live` sets from its flags.
 //! - [`rollout`] reads a Codex thread's rollout, what it began with and was told,
 //!   in the rig's Codex home and the machine's.
+//! - [`ports`] names a port on loopback for a program to listen on, one that no
+//!   program listens on once the case has let go of it.
 //! - [`serial`] has the cases that start a daemon take turns; [`pattern`] builds
 //!   the patterns the support reads text by; [`png`] reads the structure of a PNG
 //!   file, to say that an image a harness saved is a whole one.
@@ -54,7 +57,8 @@
 //! `live_agent` a catalog agent answering as its model, `live_asks` Claude
 //! stopping for a removal it should, `live_input_box` what clears its input
 //! box, `live_terminal` Devin's terminal on Windows, `live_door` a member's
-//! question received once at the door of its harness, `live_stops` the stops
+//! question received once at the door of its harness, `live_harnesses` the Admin
+//! page's look at the machine's CLIs and its update of a managed Pi, `live_stops` the stops
 //! the daemon presses, `live_codex_resume` and `live_codex_interrupt` Codex's
 //! thread and its interrupted question, `live_resume_cut` and
 //! `live_restart_cut` a window and a chief that a quit cut, `live_devin_resume` a
@@ -97,8 +101,10 @@ mod error;
 pub mod files;
 pub mod http;
 pub mod live;
+mod outcome;
 pub mod pattern;
 pub mod png;
+pub mod ports;
 pub mod process;
 pub mod rig;
 pub mod rollout;
@@ -109,4 +115,5 @@ pub mod terminal;
 pub mod wire;
 
 pub use error::{Error, Result};
+pub use outcome::{Failed, Outcome};
 pub use scratch_home::ScratchHome;

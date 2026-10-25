@@ -4,14 +4,14 @@
 //! broker, and nothing left behind once the window ends. The native `cf` runs
 //! here; the broker's own tests are its crate's.
 
-use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_e2e::http::server::{Answer, Response, Server};
-use cf_e2e::process::{is_alive, Run, Signal, Spawned};
+use cf_e2e::ports;
+use cf_e2e::process::{alive_among, end_all, is_alive, Run, Signal, Spawned};
 use cf_e2e::{cf, files, serial, wire, Error, Result};
 use regex::Regex;
 use serde_json::{json, Value};
@@ -48,11 +48,6 @@ struct Supervised {
     log: PathBuf,
 }
 
-/// A port nobody listens on.
-fn free_port() -> std::io::Result<u16> {
-    Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
-}
-
 impl Supervised {
     /// The supervisor as a Codex window runs it: `cf codex-session <codex>
     /// <args>`, with the session bridge the channel configured, in a window's
@@ -72,7 +67,7 @@ impl Supervised {
                 source,
             })?;
         let program = codex.map_or_else(|| PathBuf::from(FAKE_CODEX), |named| named(root.path()));
-        let port = free_port().map_err(|source| Error::File {
+        let port = ports::free().map_err(|source| Error::File {
             action: "find a port on",
             path: PathBuf::from("127.0.0.1"),
             source,
@@ -196,6 +191,11 @@ fn opens_codex_as_its_server_on_a_private_socket_and_its_tui_through_the_broker_
         None,
     )?;
     assert_eq!(s.exit()?, Some(7), "{}", s.stderr());
+    assert!(
+        !s.stderr().contains("no job"),
+        "a window whose programs have jobs says nothing of them: {}",
+        s.stderr()
+    );
     let runs = s.runs();
     let (server_runs, tui_runs) = (of(&runs, "server"), of(&runs, "tui"));
     // On Unix a socket in a private folder of the home; on Windows loopback, on
@@ -477,4 +477,107 @@ fn ends_the_tui_when_codexs_server_dies_under_it_so_the_window_does_not_hang() -
         assert!(!socket_folder(&of(&runs, "server")[0]).exists());
     }
     Ok(())
+}
+
+/// The programs a stand-in Codex's server started, the pids it wrote to the log.
+fn started_programs(runs: &[Value]) -> Vec<u32> {
+    of(runs, "child")
+        .iter()
+        .filter_map(|run| {
+            run["child"]
+                .as_u64()
+                .and_then(|pid| u32::try_from(pid).ok())
+        })
+        .collect()
+}
+
+/// Ends, as the case ends, whatever the log names that is still running: the server and the TUI,
+/// so that no more are started, then every program the server started. A case that fails with them
+/// running must not leave them; one that has passed has found them gone.
+struct EndsWhatTheLogNames(PathBuf);
+
+impl Drop for EndsWhatTheLogNames {
+    fn drop(&mut self) {
+        let runs: Vec<Value> = files::read_string(&self.0)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect();
+        let window: Vec<u32> = ["server", "tui"]
+            .iter()
+            .flat_map(|kind| of(&runs, kind))
+            .map(|run| pid(&run))
+            .collect();
+        end_all(&alive_among(&window));
+        end_all(&alive_among(&started_programs(&runs)));
+    }
+}
+
+/// A window whose server starts programs as `backend` says (`CF_TEST_CODEX_BACKEND`) once its TUI has
+/// started a thread, and whose TUI is ended once `enough` of them are in the log: the window ends the
+/// server, and every program the server started is gone. On Windows a process is ended by its id
+/// with `taskkill /T`, which reads the tree of the process and ends what it read.
+fn ends_every_program_codexs_server_started(backend: &str, enough: usize) -> Outcome {
+    let _turn = serial::turn();
+    let mut s = Supervised::start(
+        &[],
+        &[
+            ("CF_TEST_CODEX_BACKEND", backend.to_owned()),
+            ("CF_TEST_CODEX_TUI", "wait".to_owned()),
+        ],
+        None,
+    )?;
+    let _left = EndsWhatTheLogNames(s.log.clone());
+    let seen = s.until(|runs| started_programs(runs).len() >= enough)?;
+    let tui = of(&seen, "tui")[0].clone();
+    cf_e2e::process::signal(pid(&tui), Signal::Terminate)?;
+    assert!(
+        s.child.wait(secs(30))?.is_some(),
+        "the window did not end with its TUI: {}",
+        s.stderr()
+    );
+    let runs = s.runs();
+    assert!(
+        of(&runs, "children").is_empty(),
+        "the server had started all it would before the window ended it: nothing was started as it ended"
+    );
+    let started = started_programs(&runs);
+    // Ending a job returns before its processes have gone; a moment is given them.
+    let until = Instant::now() + secs(10);
+    let mut left = alive_among(&started);
+    while !left.is_empty() && Instant::now() < until {
+        thread::sleep(Duration::from_millis(50));
+        left = alive_among(&started);
+    }
+    assert!(
+        left.is_empty(),
+        "{} of the {} programs the server started are still running after the window ended it: {left:?}",
+        left.len(),
+        started.len()
+    );
+    Ok(())
+}
+
+/// The window's TUI ends while the server is starting programs: what the server starts as it is
+/// ended is not in what `taskkill /T` read of its tree, and lives on with a dead parent (zeewin, T-322:
+/// 21 to 50 programs of a loop outlived each of 26 ends).
+#[test]
+#[cfg_attr(
+    not(windows),
+    ignore = "a Windows shape: elsewhere the window signals the server's process, and no tree is read"
+)]
+fn ends_every_program_codexs_server_started_when_its_tui_ends_what_it_starts_as_it_is_ended_included(
+) -> Outcome {
+    ends_every_program_codexs_server_started("spawns", 6)
+}
+
+/// A program the server started whose parent has ended (a shell command that leaves a background
+/// program): `taskkill /T` finds a tree by its parents, and never finds this one.
+#[test]
+#[cfg_attr(
+    not(windows),
+    ignore = "a Windows shape: elsewhere the window signals the server's process, and no tree is read"
+)]
+fn ends_a_program_codexs_server_started_that_has_lost_its_parent_when_its_tui_ends() -> Outcome {
+    ends_every_program_codexs_server_started("orphans", 1)
 }

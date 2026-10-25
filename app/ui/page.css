@@ -384,6 +384,8 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 .terminal-about .try-again { margin: 0 0 0 8px; }
 :is(.row-status, .terminal-status)[data-state="working"] { color: var(--seafoam); }
 :is(.row-status, .terminal-status)[data-state="waiting"] { color: var(--amber); }
+/* A window at rest whose task goes on in the background: waiting, not idle. */
+:is(.row-status, .terminal-status)[data-state="held"] { color: var(--amber); }
 :is(.row-status, .terminal-status):is([data-state="out"], [data-state="missing"], [data-state="unstopped"]) { color: var(--buoy); }
 .row-tools { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 /* A button stays in its column: a label too long for it wraps. */
@@ -459,6 +461,8 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
   overflow: hidden;
 }
 .card-route { grid-area: route; font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+/* What a task that goes on in the background waits on, on its card. */
+.card-held { color: var(--amber); font-weight: 600; }
 .card-state { display: none; }
 .card-result {
   grid-area: result;

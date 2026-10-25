@@ -259,12 +259,19 @@ fn a_task_taken_back_from_a_window_that_had_its_brief_is_not_edited() {
         .release_task(w.project, task, "out of quota")
         .expect("taken back");
     assert_eq!(w.state(task), "open");
-    let (code, said) = refused(&mut w, task);
-    assert_eq!(code, "already-given");
-    assert!(
-        said.starts_with(&format!("cannot edit T-{task}: it was given to a window")),
-        "{said}"
+    // Its next window is told as soon as the task is queued for it (B3), not once
+    // it has begun (Calliope's P3 of T-367).
+    assert_eq!(
+        refused(&mut w, task),
+        (
+            "already-given",
+            format!("cannot edit T-{task}: it was given to a window, which has the brief; tell its next window once the task is queued for it: cf tell T-{task} \"…\"")
+        )
     );
+    w.assign(task, "diana");
+    w.ledger
+        .tell_queued(w.project, task, "chief", "Parse it the new way")
+        .expect("the words are kept for its next window");
 }
 
 #[test]

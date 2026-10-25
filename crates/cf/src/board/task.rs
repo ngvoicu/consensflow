@@ -42,8 +42,8 @@ const GET: Shape = Shape {
 };
 
 /// The commands that move a task, which stands first among their words.
-const MOVES: [&str; 7] = [
-    "done", "accept", "cancel", "reopen", "edit", "pause", "resume",
+const MOVES: [&str; 8] = [
+    "done", "accept", "cancel", "reopen", "edit", "pause", "resume", "finish",
 ];
 
 /// `cf task` with `words`, the last of those `given` spells as the system gave them.
@@ -89,7 +89,7 @@ pub fn command(
             input,
         ),
         other => Err(Failure::Usage(format!(
-            "unknown task command {}: use add, list, get, done, accept, reopen, edit, cancel, pause or resume",
+            "unknown task command {}: use add, list, get, done, accept, reopen, edit, cancel, pause, resume or finish",
             quoted(other.unwrap_or_default())
         ))),
     }
@@ -227,10 +227,59 @@ fn waits_for_a_member(task: &Value) -> bool {
     js::text(task.get("state")) == "open" && matches!(task.get("assignee"), Some(Value::Null))
 }
 
+/// The states of a task that is over: nothing is left to do on it, by its
+/// member or by the chief. A failed task is not over: the chief reopens it,
+/// cancels it or adds it again.
+const OVER: [&str; 2] = ["accepted", "cancelled"];
+
+/// The flags of `cf task list`.
+const LIST: Shape = Shape {
+    switches: &["--all"],
+    valued: &[],
+    leading: 0,
+};
+
+/// Whether a lane is an idle session: it has tasks on the board, and every
+/// one is over. The chief's lane never is, and a lane with no task, which the
+/// list never prints, is none either.
+fn is_idle(lane: &Value, tasks: &[Value]) -> bool {
+    js::text(lane.get("role")) != "chief"
+        && !tasks.is_empty()
+        && tasks
+            .iter()
+            .all(|task| OVER.contains(&js::text(task.get("state")).as_ref()))
+}
+
+/// `data`, the board's answer, with its `lanes` as given and the idle ones
+/// under `idle`, which stands right after them.
+fn idle_apart(data: Value, lanes: Vec<Value>, idle: Vec<Value>) -> Value {
+    let Value::Object(fields) = data else {
+        return data;
+    };
+    let mut apart = Map::new();
+    for (key, value) in fields {
+        let lanes_key = key == "lanes";
+        apart.insert(
+            key,
+            if lanes_key {
+                Value::Array(lanes.clone())
+            } else {
+                value
+            },
+        );
+        if lanes_key {
+            apart.insert("idle".to_owned(), Value::Array(idle.clone()));
+        }
+    }
+    Value::Object(apart)
+}
+
 /// `cf task list`: what waits for a member, the other tasks no lane has, then
-/// each lane's.
+/// the lanes with something to look at, and how many idle sessions there are
+/// besides; `--all` lists those too, as the board always did.
 fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
-    if split(rest, Shape::TEXT).asks_for_help() {
+    let words = split(rest, LIST);
+    if words.asks_for_help() {
         return Ok(help_of(&["task", "list"]));
     }
     let answer = board.get("/api/tasks")?;
@@ -245,8 +294,14 @@ fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
             lines.extend(group.into_iter().map(task_line));
         }
     }
+    let (mut kept, mut idle) = (Vec::new(), Vec::new());
     for lane in answer.list(answer.value().get("lanes"), "lanes")? {
         let lane_tasks = answer.list(lane.get("tasks"), "tasks")?;
+        if !words.on("--all") && is_idle(lane, lane_tasks) {
+            idle.push(lane);
+            continue;
+        }
+        kept.push(lane);
         if !lane_tasks.is_empty() {
             lines.push(format!(
                 "@{} ({})",
@@ -256,12 +311,28 @@ fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
             lines.extend(lane_tasks.iter().map(task_line));
         }
     }
+    if !idle.is_empty() {
+        lines.push(format!(
+            "and {} idle session{} (`cf task list --all`)",
+            idle.len(),
+            if idle.len() == 1 { "" } else { "s" }
+        ));
+    }
     let text = if lines.is_empty() {
         "No tasks yet.".to_string()
     } else {
         lines.join("\n")
     };
-    Ok(Said::new(answer.into_value(), text))
+    let data = if words.on("--all") {
+        answer.into_value()
+    } else {
+        let (kept, idle) = (
+            kept.into_iter().cloned().collect(),
+            idle.into_iter().cloned().collect(),
+        );
+        idle_apart(answer.into_value(), kept, idle)
+    };
+    Ok(Said::new(data, text))
 }
 
 /// The brief `cf task get` prints under the header, or nothing. A window that was
@@ -380,9 +451,14 @@ fn moved(
             a_pool(task.get("pool"), task.get("tier"))
         ),
         "resume" => format!("T-{number} resumes in @{} with your words.", js::text(task.get("assignee"))),
+        "finish" => {
+            let count = |field: &str| answer.value().get(field).and_then(Value::as_u64);
+            finishing(number, &task, count("jobs"), count("agents"))
+        }
         // The chief's own step is accepted with its words: nothing comes back to decide.
         "done" if task.get("state").and_then(Value::as_str) == Some("accepted") => format!(
-            "T-{number} is done and accepted: it was your own step, so nothing waits for your decision, and what needed it goes on."
+            "T-{number} is done and accepted: it was your own step, so nothing waits for your decision, and what needed it goes on.{}",
+            on_its_way(answer.value())
         ),
         "edit" => format!(
             "T-{number} has your new brief; no window had the old one, and the ledger keeps it. {}",
@@ -391,6 +467,81 @@ fn moved(
         _ => format!("{}{dropped}", task_line(&task)),
     };
     Ok(Said::new(task, format!("{said}{sent}")))
+}
+
+/// What `cf task finish` says: the result is recorded, and nothing is ended. The `jobs` and
+/// `agents` the worker's harness still counted are said to run on until its window closes,
+/// or past it where the host cannot tell what is the window's (on Windows a program runs
+/// before its Job Object holds it, and on the Mac what left the window's session is not
+/// found, so the close does not end all of it).
+fn finishing(number: u64, task: &Value, jobs: Option<u64>, agents: Option<u64>) -> String {
+    let who = js::text(task.get("assignee"));
+    let (jobs, agents) = (jobs.unwrap_or(0), agents.unwrap_or(0));
+    let plural = |count: u64, one: &str, many: &str| match count {
+        1 => format!("1 {one}"),
+        _ => format!("{count} {many}"),
+    };
+    let jobs_said = plural(jobs, "background job", "background jobs");
+    let agents_said = plural(
+        agents,
+        "background agent or workflow",
+        "background agents or workflows",
+    );
+    let left = match (jobs, agents) {
+        (0, 0) => return format!(
+            "T-{number} is finished: what @{who} said last is its result, which reaches your inbox. Finishing ends nothing its turn left running."
+        ),
+        (_, 0) => jobs_said,
+        (0, _) => agents_said,
+        _ => format!("{jobs_said} and {agents_said}"),
+    };
+    let they = if jobs + agents == 1 { "it" } else { "they" };
+    format!(
+        "T-{number} is finished: what @{who} said last is its result, which reaches your inbox. Finishing does not end what its turn left running ({left}): {they} may run on until its window closes, or past it where the host cannot tell what is the window's."
+    )
+}
+
+/// What the board says of the chief's own step it finished, as a sentence to
+/// add: what was still on its way to the chief and was withdrawn (its brief, and
+/// any answer or note carried on it), and its brief if it was being typed in,
+/// which may still land once. Nothing when the answer names neither.
+fn on_its_way(said: &Value) -> String {
+    let mut sentences = String::new();
+    if let Some(withdrawn) = named(said.get("withdrawn")) {
+        sentences.push_str(&format!(
+            " Still on its way to you, and now withdrawn: {withdrawn}."
+        ));
+    }
+    if let Some(landing) = named(said.get("landing")) {
+        sentences.push_str(&format!(
+            " Being typed into your window as you finished: {landing}; it may still land once, and is not sent again."
+        ));
+    }
+    sentences
+}
+
+/// The messages in a JSON list as a sentence names them ("the brief m-3, a note
+/// m-5 and an answer m-6"); none when there is no list or it is empty.
+fn named(messages: Option<&Value>) -> Option<String> {
+    let names: Vec<String> = messages?
+        .as_array()?
+        .iter()
+        .map(|message| {
+            let kind = match message.get("kind").and_then(Value::as_str) {
+                Some("task") => "the brief",
+                Some("answer") => "an answer",
+                Some("note") => "a note",
+                _ => "a message",
+            };
+            format!("{kind} m-{}", js::text(message.get("id")))
+        })
+        .collect();
+    let (last, rest) = names.split_last()?;
+    Some(if rest.is_empty() {
+        last.clone()
+    } else {
+        format!("{} and {last}", rest.join(", "))
+    })
 }
 
 /// What a cancel says of the messages `ids`, the words you told the task's
@@ -423,12 +574,42 @@ mod tests {
         })
     }
 
+    /// What `cf task list words…` said of a board that answered `answer`.
+    fn said(words: &[&str], answer: &Value) -> Said {
+        let api = scripted(vec![reply(200, answer.clone())]);
+        let words: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+        board_list(&words, &Board::new(Some(&api.url), "tok")).unwrap()
+    }
+
     /// What `cf task list` prints of a board with these open tasks and lanes.
     fn listed(open: &[Value], lanes: &Value) -> String {
-        let api = scripted(vec![reply(200, json!({ "open": open, "lanes": lanes }))]);
-        board_list(&[], &Board::new(Some(&api.url), "tok"))
-            .unwrap()
-            .text
+        said(&[], &json!({ "open": open, "lanes": lanes })).text
+    }
+
+    fn lane(handle: &str, role: &str, tasks: &[Value]) -> Value {
+        json!({ "handle": handle, "role": role, "tasks": tasks })
+    }
+
+    /// A board with members at work in every state that needs a look, the
+    /// chief's lane, a session with nothing on it, and idle sessions: the
+    /// ones whose tasks are all over.
+    fn a_board_with_idle_sessions() -> Value {
+        json!({
+            "open": [card(10, "open", None)],
+            "lanes": [
+                lane("chief", "chief", &[card(1, "accepted", Some("chief"))]),
+                lane("zeus", "worker", &[card(2, "accepted", Some("zeus")), card(9, "working", Some("zeus"))]),
+                lane("hera", "reviewer", &[card(3, "accepted", Some("hera"))]),
+                lane("athena", "worker", &[card(4, "cancelled", Some("athena")), card(5, "accepted", Some("athena"))]),
+                lane("ares", "tester", &[card(6, "done", Some("ares"))]),
+                lane("eos", "designer", &[]),
+                lane("apollo", "worker", &[card(7, "queued", Some("apollo"))]),
+                lane("hermes", "worker", &[card(8, "paused", Some("hermes"))]),
+                lane("demeter", "worker", &[card(11, "waiting", Some("demeter"))]),
+                lane("hades", "advisor", &[card(12, "open", Some("hades"))]),
+                lane("hebe", "worker", &[card(13, "failed", Some("hebe"))]),
+            ],
+        })
     }
 
     #[test]
@@ -460,6 +641,154 @@ mod tests {
             ]
             .join("\n")
         );
+    }
+
+    /// `cf task list` of `a_board_with_idle_sessions`, every lane with a task
+    /// as the board always listed them.
+    const WHOLE_LIST: &str = "Waiting for a member
+T-10 [open] for a standard worker ← @chief: Task 10
+@chief (chief)
+T-1 [accepted] @chief ← @chief: Task 1
+@zeus (worker)
+T-2 [accepted] @zeus ← @chief: Task 2
+T-9 [working] @zeus ← @chief: Task 9
+@hera (reviewer)
+T-3 [accepted] @hera ← @chief: Task 3
+@athena (worker)
+T-4 [cancelled] @athena ← @chief: Task 4
+T-5 [accepted] @athena ← @chief: Task 5
+@ares (tester)
+T-6 [done] @ares ← @chief: Task 6
+@apollo (worker)
+T-7 [queued] @apollo ← @chief: Task 7
+@hermes (worker)
+T-8 [paused] @hermes ← @chief: Task 8
+@demeter (worker)
+T-11 [waiting] @demeter ← @chief: Task 11
+@hades (advisor)
+T-12 [open] @hades ← @chief: Task 12
+@hebe (worker)
+T-13 [failed] @hebe ← @chief: Task 13";
+
+    /// The same without Hera and Athena, whose tasks are all over, and with their line.
+    const WITHOUT_THE_IDLE: &str = "Waiting for a member
+T-10 [open] for a standard worker ← @chief: Task 10
+@chief (chief)
+T-1 [accepted] @chief ← @chief: Task 1
+@zeus (worker)
+T-2 [accepted] @zeus ← @chief: Task 2
+T-9 [working] @zeus ← @chief: Task 9
+@ares (tester)
+T-6 [done] @ares ← @chief: Task 6
+@apollo (worker)
+T-7 [queued] @apollo ← @chief: Task 7
+@hermes (worker)
+T-8 [paused] @hermes ← @chief: Task 8
+@demeter (worker)
+T-11 [waiting] @demeter ← @chief: Task 11
+@hades (advisor)
+T-12 [open] @hades ← @chief: Task 12
+@hebe (worker)
+T-13 [failed] @hebe ← @chief: Task 13
+and 2 idle sessions (`cf task list --all`)";
+
+    #[test]
+    fn the_sessions_with_nothing_to_look_at_are_one_line_and_the_members_with_work_stay_listed() {
+        let board = a_board_with_idle_sessions();
+        assert_eq!(said(&[], &board).text, WITHOUT_THE_IDLE);
+        // The chief's lane stays whatever its tasks say, and a session with
+        // nothing on it was never listed: neither is one of the idle.
+        let text = said(&[], &board).text;
+        assert!(text.contains("@chief (chief)\nT-1 [accepted]"), "{text}");
+        assert!(!text.contains("@eos"), "{text}");
+    }
+
+    #[test]
+    fn a_session_with_one_task_left_to_look_at_stays_listed_whatever_the_rest_say() {
+        for (state, shown) in [
+            ("open", true),
+            ("queued", true),
+            ("working", true),
+            ("waiting", true),
+            ("paused", true),
+            ("done", true),
+            ("accepted", false),
+            ("cancelled", false),
+            ("failed", true),
+        ] {
+            let lanes = json!([lane(
+                "zeus",
+                "worker",
+                &[
+                    card(1, "accepted", Some("zeus")),
+                    card(2, state, Some("zeus"))
+                ]
+            )]);
+            let text = listed(&[], &lanes);
+            assert_eq!(text.contains("@zeus (worker)"), shown, "{state}: {text}");
+            assert_eq!(text.contains("idle session"), !shown, "{state}: {text}");
+        }
+    }
+
+    #[test]
+    fn all_lists_every_session_with_a_task_as_the_board_always_did() {
+        let board = a_board_with_idle_sessions();
+        let all = said(&["--all"], &board);
+        assert_eq!(all.text, WHOLE_LIST);
+        // And the JSON is the board's answer, as it was.
+        assert_eq!(all.data, board);
+    }
+
+    #[test]
+    fn the_json_holds_the_idle_sessions_under_a_key_of_their_own() {
+        let mut board = a_board_with_idle_sessions();
+        board["counts"] = json!({ "tasks": 12 });
+        let data = said(&[], &board).data;
+        let handles = |key: &str| -> Vec<String> {
+            data[key]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|lane| lane["handle"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(
+            handles("lanes"),
+            ["chief", "zeus", "ares", "eos", "apollo", "hermes", "demeter", "hades", "hebe"]
+        );
+        // Whole lanes, as the board gave them.
+        assert_eq!(handles("idle"), ["hera", "athena"]);
+        assert_eq!(data["idle"][0], board["lanes"][2]);
+        assert_eq!(data["idle"][1]["tasks"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            data.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["open", "lanes", "idle", "counts"]
+        );
+        // A board with none says so in the same key.
+        let none = said(&[], &json!({ "open": [], "lanes": [] })).data;
+        assert_eq!(none, json!({ "open": [], "lanes": [], "idle": [] }));
+    }
+
+    #[test]
+    fn one_idle_session_is_said_in_the_singular_and_a_board_of_nothing_else_says_only_that() {
+        let lanes = json!([lane(
+            "hera",
+            "reviewer",
+            &[card(3, "accepted", Some("hera"))]
+        )]);
+        assert_eq!(
+            listed(&[], &lanes),
+            "and 1 idle session (`cf task list --all`)"
+        );
+        let lanes = json!([
+            lane("hera", "reviewer", &[card(3, "accepted", Some("hera"))]),
+            lane("athena", "worker", &[card(4, "cancelled", Some("athena"))]),
+        ]);
+        assert_eq!(
+            listed(&[], &lanes),
+            "and 2 idle sessions (`cf task list --all`)"
+        );
+        assert_eq!(listed(&[], &json!([])), "No tasks yet.");
     }
 
     /// What `cf task add words…` posted and printed, the board answering with `answer`.
@@ -636,6 +965,61 @@ mod tests {
             said,
             "T-5 continues in @zeus-pale, the window that did T-3; its result arrives in your inbox. It waits until T-3 is accepted.\nSent: 5 characters, ending \"Tests\"."
         );
+    }
+
+    /// What `cf task finish T-7` says, the board answering with `answer`, and what it asked.
+    fn finished(answer: Value) -> (Said, Vec<cf_board::scripted::Received>) {
+        let api = scripted(vec![reply(200, answer)]);
+        let words = ["finish".to_owned(), "T-7".to_owned()];
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let said = command(
+            &words,
+            &given,
+            &Board::new(Some(&api.url), "tok"),
+            &mut std::io::empty(),
+        )
+        .unwrap();
+        (said, api.received())
+    }
+
+    #[test]
+    fn finish_asks_the_board_to_finish_the_task_with_no_words_and_says_what_follows() {
+        let (said, asked) = finished(json!({ "task": card(7, "done", Some("zeus-amber-pine")) }));
+        assert_eq!(asked.len(), 1);
+        assert_eq!(
+            (asked[0].method.as_str(), asked[0].path.as_str()),
+            ("POST", "/api/tasks/7/finish")
+        );
+        assert_eq!(asked[0].json(), Some(json!({})));
+        assert_eq!(
+            said.text,
+            "T-7 is finished: what @zeus-amber-pine said last is its result, which reaches your inbox. Finishing ends nothing its turn left running."
+        );
+    }
+
+    #[test]
+    fn finish_promises_no_ending_and_says_the_jobs_and_agents_its_harness_counted_may_run_on() {
+        for (jobs, agents, words) in [
+            (1, 0, "(1 background job): it may run on"),
+            (2, 0, "(2 background jobs): they may run on"),
+            (0, 1, "(1 background agent or workflow): it may run on"),
+            (
+                1,
+                2,
+                "(1 background job and 2 background agents or workflows): they may run on",
+            ),
+        ] {
+            let (said, _) = finished(json!({
+                "task": card(7, "done", Some("zeus-amber-pine")),
+                "jobs": jobs,
+                "agents": agents,
+            }));
+            assert_eq!(
+                said.text,
+                format!("T-7 is finished: what @zeus-amber-pine said last is its result, which reaches your inbox. Finishing does not end what its turn left running {words} until its window closes, or past it where the host cannot tell what is the window's."),
+                "{jobs} {agents}"
+            );
+        }
     }
 
     #[test]

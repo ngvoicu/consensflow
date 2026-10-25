@@ -153,6 +153,10 @@ fn a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output_whe
 /// The runs that need a shell to be told what to do.
 #[cfg(unix)]
 mod shell {
+    use std::io::BufRead;
+    use std::sync::mpsc;
+    use std::time::Instant;
+
     use super::*;
 
     fn sh(script: &str) -> Run {
@@ -409,6 +413,67 @@ mod shell {
         assert!(!is_alive(program.id()));
         program.signal(Signal::Kill);
         program.kill();
+    }
+
+    #[test]
+    fn a_stopped_program_answers_what_it_was_sent_meanwhile_once_it_is_continued() {
+        let mut program = sh("exec cat").spawn().unwrap();
+        let output = program.take_output().unwrap();
+        let (lines, heard) = mpsc::channel();
+        thread::spawn(move || {
+            for line in output.lines().map_while(|line| line.ok()) {
+                let _ = lines.send(line);
+            }
+        });
+        program.send("before\n");
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(10)).unwrap(),
+            "before"
+        );
+        program.signal(Signal::Stop);
+        program.send("meanwhile\n");
+        assert!(
+            heard.recv_timeout(Duration::from_millis(300)).is_err(),
+            "a stopped program answered"
+        );
+        program.signal(Signal::Continue);
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(10)).unwrap(),
+            "meanwhile"
+        );
+    }
+
+    #[test]
+    fn a_stalled_program_is_stopped_at_once_and_goes_on_by_itself_after_its_span() {
+        let mut program = sh("exec cat").spawn().unwrap();
+        let output = program.take_output().unwrap();
+        let (lines, heard) = mpsc::channel();
+        thread::spawn(move || {
+            for line in output.lines().map_while(|line| line.ok()) {
+                let _ = lines.send(line);
+            }
+        });
+        let span = Duration::from_millis(500);
+        let stalled = Instant::now();
+        stall(program.id(), span).unwrap();
+        program.send("meanwhile\n");
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(10)).unwrap(),
+            "meanwhile"
+        );
+        assert!(
+            stalled.elapsed() >= span,
+            "answered after {:?}, in a stall of {span:?}",
+            stalled.elapsed()
+        );
+        // And it runs as before once it has gone on.
+        program.send("after\n");
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(10)).unwrap(),
+            "after"
+        );
+        // A number that is no process id is refused, and nothing is signalled for it.
+        assert!(stall(u32::MAX, span).is_err());
     }
 
     #[test]

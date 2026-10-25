@@ -1,0 +1,12 @@
+-- When a message's hand-over was let go to its window by the transport (the paste
+-- asked of the pane host, the inbox rename made, the request given to its
+-- connection, the command line its window opens with), as the engine asks it at the
+-- moment of the hand-over: a reader of a closed project reads only the text of what
+-- a window was handed. A delivery begun and not yet let go holds a NULL, and so does
+-- one sent back to its queue: it is handed again or not at all. Every row a ledger
+-- before this column wrote holds a NULL: one delivered or read was handed by its
+-- state. Added in place, as 0018 added its own column: nothing of the table moves,
+-- and no view of a message holds it.
+-- The column is one line: the test players that hold a database this ledger left
+-- to what Node's did read the line to know what Node's schema never had.
+  ALTER TABLE message ADD COLUMN handed_at TEXT;

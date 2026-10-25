@@ -21,15 +21,16 @@ use crate::views::{message_view, task_view, TaskRow, MESSAGE_SELECT, TASK_SELECT
 
 pub(crate) use editing::edit_task;
 pub(crate) use finishing::{
-    accept_task, call_off, cancel_task, delete_tasks, fail_task, note_stranded_waits,
+    accept_task, call_off, cancel_task, delete_tasks, fail_task, give_up_task, note_stranded_waits,
     record_result, release_ready, reopen_task, tell_stranded_waiters, Ending,
 };
 pub use giving::NewTask;
 pub(crate) use giving::{assign_task, check_release, create_task, release_task};
 pub(crate) use own_steps::withdrawn_late;
 pub(crate) use pausing::{
-    clear_hold, held_tasks_due, hold_task, pause_task, paused_task, resume_task, stop_of,
-    task_in_hand, told_since_paused,
+    clear_hold, held_tasks_due, hold_task, pause_task, pause_with_project, paused_task,
+    resume_task, resume_with_project, stop_of, take_over_pause, task_in_hand, told_since_paused,
+    unmark_pause,
 };
 
 /// What a paused task's window is told when it goes on: the human's Resume

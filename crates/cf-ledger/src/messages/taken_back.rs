@@ -6,6 +6,7 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::carrying::adopt;
+use super::continuations::withdraw_stale_among;
 use super::told::{assignee_of, is_told};
 use super::{known_message, message_task, require_message};
 use crate::model::{self, LedgerError};
@@ -22,11 +23,16 @@ use crate::store::Store;
 ///   delivery tried again does (`adopt`).
 ///
 /// What its paste carried was in the window's conversation no longer than it
-/// was, so each row it carried is kept again too, and rides with it. The
+/// was, so each row it carried is kept again too, and rides with it, but for a
+/// continuation whose task is no longer at work (`continuations`). The
 /// receipt it was given is no receipt: the carrier's will be. The task's state
 /// is not moved: it is paused, or queued behind the words that resume it.
 /// Words told to the window (`told`), pasted on their own, are taken back the
-/// same way, and the words that resume the task carry them.
+/// same way, and the words that resume the task carry them. It and its rows
+/// were handed to the window, which holds them in its input box: a reader of a
+/// closed project reads them still, whether or not their transport marked them
+/// so (one delivered before migration 0022 has no mark, and its delivery is its
+/// mark; Astra's review of 2026-10-17).
 pub(crate) fn take_back(
     store: &mut Store,
     message_id: i64,
@@ -54,9 +60,19 @@ pub(crate) fn take_back(
             ));
         }
         store.db.execute(
-            "UPDATE message SET state = 'queued', reason = ?, delivered_at = NULL, receipt = NULL
+            "UPDATE message SET state = 'queued', reason = ?, delivered_at = NULL, receipt = NULL,
+               handed_at = COALESCE(handed_at, delivered_at)
          WHERE id = ?",
             params![reason, message_id],
+        )?;
+        // A row that read delivered only because the paste that carried it arrived
+        // after it was withdrawn is withdrawn again, not kept (`confirm_delivery`).
+        store.db.execute(
+            "UPDATE message SET state = 'cancelled', delivered_at = NULL, receipt = NULL
+             WHERE carried_by = ? AND state = 'delivered'
+               AND CASE WHEN json_valid(receipt)
+                        THEN json_extract(receipt, '$.cancelled') END IS NOT NULL",
+            [message_id],
         )?;
         let kept: Vec<i64> = store
             .db
@@ -66,7 +82,8 @@ pub(crate) fn take_back(
             .query_map([message_id], |row| row.get(0))?
             .collect::<rusqlite::Result<_>>()?;
         store.db.execute(
-            "UPDATE message SET state = 'queued', delivered_at = NULL, receipt = NULL
+            "UPDATE message SET state = 'queued', delivered_at = NULL, receipt = NULL,
+               handed_at = COALESCE(handed_at, delivered_at)
          WHERE carried_by = ? AND state = 'delivered'",
             [message_id],
         )?;
@@ -75,6 +92,7 @@ pub(crate) fn take_back(
             "delivery.taken-back",
             json!({ "message": message_id, "reason": reason, "kept": kept }),
         )?;
+        withdraw_stale_among(store, &kept)?;
         adopt(store, message_id)?;
         known_message(store, message_id)
     })

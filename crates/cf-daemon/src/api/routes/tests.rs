@@ -98,6 +98,7 @@ fn a_task_route_is_the_task_and_the_word_after_it_whatever_the_method() {
         ("cancel", TaskAction::Cancel),
         ("pause", TaskAction::Pause),
         ("resume", TaskAction::Resume),
+        ("finish", TaskAction::Finish),
         ("tell", TaskAction::Tell),
         ("transcript", TaskAction::Transcript),
     ] {
@@ -551,5 +552,16 @@ pub(super) mod support {
             .unwrap()
             .task
             .state
+    }
+
+    /// The project is closed (`suspended`) or open again: its windows' tokens
+    /// stay, as a window the Close could not close keeps its own.
+    pub(in crate::api::routes) fn project_is(scene: &Scene, state: &str) {
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .set_project_state(scene.project.id, state)
+            .unwrap();
     }
 }

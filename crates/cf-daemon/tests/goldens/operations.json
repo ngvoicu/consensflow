@@ -39,6 +39,7 @@
     "specs.file",
     "specs.present",
     "specs.open",
+    "task.finish",
     "history.get",
     "history.part"
   ],

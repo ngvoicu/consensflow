@@ -5,8 +5,16 @@
 //! a close that failed (the rig is closed once a close succeeded, and not before).
 //! It keeps what its windows showed in a file beside its home (`<home>-left.txt`,
 //! `rig/report.rs`) for the person who reads the failure, and says where in the
-//! output of that case. A case that passes ends by closing its rig, and the rig has
-//! nothing to tell of it; a case that holds its close to fail says so
+//! output of that case, and which case it was. A case that passes ends by closing its
+//! rig, and the rig has nothing to tell of it; one that passes and forgets the close
+//! has nothing to tell either. A rig whose case returns `cf_e2e::Outcome`
+//! (`Config::judged_by_outcome`) writes its report as it is dropped, while it is up, and
+//! says it once the case is known to have failed: the case's `?` made a `Failed` (before
+//! the drop, or after it, for a rig a helper owned that returned its error), or a check
+//! panicked. A drop that no failure follows on its thread was a case that passed, and
+//! says nothing. A rig whose case returns nothing of the kind (the live suites', a run's)
+//! cannot tell and says its report for every drop unclosed. A case that holds its close to
+//! fail says so
 //! (`Rig::expect_the_close_to_fail`), and a failure it holds to is no report either.
 //! The report of a rig built for the real harnesses (`live::rig`), whose windows
 //! show what a real harness drew with the person's login, is kept under the
@@ -21,22 +29,22 @@
 //!
 //! CI's run of 2026-10-21 said it "kept in" fourteen files for as many cases that
 //! had passed: thirteen of the folder-trust regression's and the follow-up's one
-//! ended without closing their rigs. The rig cannot tell a case that returned `Ok`
-//! and forgot the close from one that returned an error, so the cases are held to
-//! the close here, as they are written: each function that starts a rig, or calls a
-//! helper of its file that hands one on, closes it. What that reads is text, and it
-//! does not see: a rig inside another type (`Members`, which the live members' cases
-//! close through `members.close()`, a close it counts but whose start it does not), a
-//! helper called as a method (a name after a dot is none of the helpers'), and a
-//! function whose head its pattern does not match (`async`, `const`, in a trait: the
-//! two folders have none). A case that goes outside these takes its own care.
+//! ended without closing their rigs. Those cases close them now, and are held to it
+//! here, as they are written, for every suite's file (the live ones' too, whose rigs cannot
+//! tell a pass from a failure): each function that starts a rig, or calls a helper of its
+//! file that hands one on, closes it. What that reads is text, and it does not see: a
+//! rig inside another type (`Members`, which the live members' cases close through
+//! `members.close()`, a close it counts but whose start it does not), a helper called as
+//! a method (a name after a dot is none of the helpers'), and a function whose head its
+//! pattern does not match (`async`, `const`, in a trait: the suites have none). A
+//! case that goes outside these takes its own care, and the rig does not report it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cf_e2e::process::{signal, Run, Signal};
-use cf_e2e::rig::Rig;
+use cf_e2e::rig::{Config, Rig};
 use cf_e2e::{checkout, live};
 use regex::Regex;
 
@@ -127,6 +135,226 @@ fn a_case_whose_check_fails_after_a_shutdown(home: &mut Option<PathBuf>) {
     *home = Some(home_of(&rig));
     assert!(rig.shut_down_within(Duration::from_secs(10)).is_ok());
     panic!("a check of the case that does not hold");
+}
+
+/// A case that passes and forgets to close its rig: the rig is dropped as the case
+/// returns. `home` is where its rig's home was.
+fn a_case_that_passes_without_closing_its_rig(home: &mut Option<PathBuf>) -> Outcome {
+    let rig = crate::rig()?;
+    *home = Some(home_of(&rig));
+    Ok(())
+}
+
+/// A step of a case that owns a rig and returns the error that ends it, which is no
+/// `Failed` yet: the rig is dropped as the step returns, before the case's `?` sees it.
+fn a_step_whose_rig_is_dropped_by_its_own_error(home: &mut Option<PathBuf>) -> cf_e2e::Result<()> {
+    let rig = crate::rig()?;
+    *home = Some(home_of(&rig));
+    rig.wait_for("what no window does", Duration::from_millis(200), || {
+        Ok(false)
+    })?;
+    rig.close()?;
+    Ok(())
+}
+
+/// A case that returns the error of such a step.
+fn a_case_that_returns_the_error_of_its_step(home: &mut Option<PathBuf>) -> Outcome {
+    a_step_whose_rig_is_dropped_by_its_own_error(home)?;
+    Ok(())
+}
+
+/// A case that fails a check on the error of such a step.
+fn a_case_that_fails_a_check_on_the_error_of_its_step(home: &mut Option<PathBuf>) {
+    assert!(
+        a_step_whose_rig_is_dropped_by_its_own_error(home).is_ok(),
+        "the step ended well"
+    );
+}
+
+/// A case that goes on from the error of such a step, and passes.
+fn a_case_that_goes_on_from_the_error_of_its_step(home: &mut Option<PathBuf>) -> Outcome {
+    let went_on = a_step_whose_rig_is_dropped_by_its_own_error(home);
+    assert!(went_on.is_err(), "the step ended well");
+    Ok(())
+}
+
+/// A case that fails by a check with its rig up, never closed or shut down.
+fn a_case_whose_check_fails_with_its_rig_up(home: &mut Option<PathBuf>) {
+    let Ok(rig) = crate::rig() else {
+        panic!("no rig to fail with");
+    };
+    *home = Some(home_of(&rig));
+    panic!("a check of the case that does not hold");
+}
+
+/// A case that passes and forgets to close its rig, which is not judged by what the
+/// case returns (it is started as a live suite's is, which returns another kind of
+/// result).
+fn a_case_that_passes_without_closing_a_rig_that_is_not_judged(
+    home: &mut Option<PathBuf>,
+) -> Outcome {
+    let rig = Rig::start(Config::new(crate::FAKE_AGENT))?;
+    *home = Some(home_of(&rig));
+    Ok(())
+}
+
+/// A case that fails as most do, its rig given the name of a case that is no test's.
+fn a_case_given_a_name_that_waits_for_what_never_comes(home: &mut Option<PathBuf>) -> Outcome {
+    let rig = Rig::start(crate::config().case("a run that is no test"))?;
+    *home = Some(home_of(&rig));
+    rig.wait_for("what no window does", Duration::from_millis(200), || {
+        Ok(false)
+    })?;
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_rig_dropped_unclosed_by_a_case_that_passed_keeps_no_report() -> Outcome {
+    let mut home = None;
+
+    let passed = a_case_that_passes_without_closing_its_rig(&mut home);
+
+    assert!(passed.is_ok(), "the case did not pass");
+    let home = home.ok_or("the case never started its rig")?;
+    assert!(
+        !report_beside(&home).exists(),
+        "a report was kept of a case that passed and did not close its rig"
+    );
+    assert!(!home.exists(), "the home of a rig that was dropped is gone");
+    Ok(())
+}
+
+#[test]
+fn a_rig_a_step_dropped_on_an_error_keeps_its_report_once_the_case_returns_the_error() -> Outcome {
+    let mut home = None;
+
+    let failed = a_case_that_returns_the_error_of_its_step(&mut home);
+
+    assert!(failed.is_err(), "the wait for what never comes ended well");
+    let report = report_beside(&home.ok_or("the case never started its rig")?);
+    let kept = fs::read_to_string(&report)?;
+    assert!(kept.contains(HEADING), "{kept}");
+    fs::remove_file(report)?;
+    Ok(())
+}
+
+#[test]
+fn a_rig_a_step_dropped_on_an_error_keeps_its_report_once_the_case_fails_a_check_on_it() -> Outcome
+{
+    let mut home = None;
+
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        a_case_that_fails_a_check_on_the_error_of_its_step(&mut home);
+    }));
+
+    assert!(caught.is_err(), "the check held");
+    let report = report_beside(&home.ok_or("the case never started its rig")?);
+    let kept = fs::read_to_string(&report)?;
+    assert!(kept.contains(HEADING), "{kept}");
+    fs::remove_file(report)?;
+    Ok(())
+}
+
+#[test]
+fn a_rig_a_step_dropped_on_an_error_the_case_went_on_from_keeps_no_report() -> Outcome {
+    let mut home = None;
+
+    let passed = a_case_that_goes_on_from_the_error_of_its_step(&mut home);
+
+    assert!(passed.is_ok(), "the case did not pass");
+    let report = report_beside(&home.ok_or("the case never started its rig")?);
+    assert!(
+        !report.exists(),
+        "a report was kept of a case that went on from the error of its step"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_rig_started_after_a_case_failed_on_its_thread_is_judged_by_its_own_case() -> Outcome {
+    // An error the thread returned before this rig was started is none of its failure.
+    let mut failed_home = None;
+    assert!(a_case_that_waits_for_what_never_comes(&mut failed_home).is_err());
+    fs::remove_file(report_beside(
+        &failed_home.ok_or("no rig for the failed case")?,
+    ))?;
+    let mut home = None;
+
+    let passed = a_case_that_passes_without_closing_its_rig(&mut home);
+
+    assert!(passed.is_ok(), "the case did not pass");
+    let report = report_beside(&home.ok_or("the case never started its rig")?);
+    assert!(
+        !report.exists(),
+        "a report was kept of a case that passed after another had failed on the thread"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_rig_dropped_unclosed_while_a_check_fails_keeps_its_report() -> Outcome {
+    let mut home = None;
+
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        a_case_whose_check_fails_with_its_rig_up(&mut home);
+    }));
+
+    assert!(caught.is_err(), "the check held");
+    let report = report_beside(&home.ok_or("the case never started its rig")?);
+    let kept = fs::read_to_string(&report)?;
+    assert!(kept.contains(HEADING), "{kept}");
+    fs::remove_file(report)?;
+    Ok(())
+}
+
+#[test]
+fn a_rig_not_judged_by_what_its_case_returns_keeps_its_report_for_every_drop_unclosed() -> Outcome {
+    let mut home = None;
+
+    let passed = a_case_that_passes_without_closing_a_rig_that_is_not_judged(&mut home);
+
+    assert!(passed.is_ok(), "the case did not pass");
+    let report = report_beside(&home.ok_or("the case never started its rig")?);
+    let kept = fs::read_to_string(&report)?;
+    assert!(kept.contains(HEADING), "{kept}");
+    fs::remove_file(report)?;
+    Ok(())
+}
+
+#[test]
+fn a_report_names_the_test_that_left_it_and_the_case_a_rig_is_given() -> Outcome {
+    // On a thread named as the test harness names a test's.
+    let named = std::thread::Builder::new()
+        .name("a_suite::a_case_that_fails".to_owned())
+        .spawn(|| {
+            let mut home = None;
+            let failed = a_case_that_waits_for_what_never_comes(&mut home);
+            (failed.is_err(), home)
+        })?
+        .join()
+        .map_err(|_| "the named thread panicked")?;
+    let (failed, home) = named;
+    assert!(failed, "the wait for what never comes ended well");
+    let report = report_beside(&home.ok_or("the case never started its rig")?);
+    let kept = fs::read_to_string(&report)?;
+    fs::remove_file(report)?;
+    assert!(
+        kept.contains("case: a_suite::a_case_that_fails\n"),
+        "the report does not name its test: {kept}"
+    );
+
+    let mut home = None;
+    let failed = a_case_given_a_name_that_waits_for_what_never_comes(&mut home);
+    assert!(failed.is_err(), "the wait for what never comes ended well");
+    let report = report_beside(&home.ok_or("the case never started its rig")?);
+    let kept = fs::read_to_string(&report)?;
+    fs::remove_file(report)?;
+    assert!(
+        kept.contains("case: a run that is no test\n"),
+        "the report does not name the case its rig was given: {kept}"
+    );
+    Ok(())
 }
 
 #[test]
@@ -294,11 +522,13 @@ fn a_rig_shut_down_and_dropped_while_a_check_fails_keeps_its_report() -> Outcome
     Ok(())
 }
 
+/// The case the test binary is asked to run alone.
+const CASE_ALONE: &str = "reports::a_rig_its_case_left_on_an_error_it_returned_keeps_its_report";
+
 /// What the test binary says of one case it is asked to run alone: its output,
 /// as `cargo test` shows it (`shown`: as `--nocapture` does).
 fn output_of_the_case_alone(shown: bool) -> Result<String, Box<dyn std::error::Error>> {
-    let case = "reports::a_rig_its_case_left_on_an_error_it_returned_keeps_its_report";
-    let mut asked = vec!["--exact", case, "--test-threads=1"];
+    let mut asked = vec!["--exact", CASE_ALONE, "--test-threads=1"];
     if shown {
         asked.push("--nocapture");
     }
@@ -321,6 +551,11 @@ fn where_a_report_is_kept_is_said_in_the_output_of_the_case_that_failed_and_of_n
     assert!(
         shown.contains("the rig, as the failed case left it, is kept in"),
         "{shown}"
+    );
+    // And the line says which case left it, so that a log of many points at it.
+    assert!(
+        shown.contains(&format!("(case: {CASE_ALONE})")),
+        "the line does not name its case: {shown}"
     );
     Ok(())
 }
@@ -453,28 +688,25 @@ fn startings_in(text: &str) -> Result<Vec<Starting>, Box<dyn std::error::Error>>
 }
 
 #[test]
-fn every_function_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it_or_hands_it_on(
-) -> Outcome {
+fn every_function_of_the_suites_that_starts_a_rig_closes_it_or_hands_it_on() -> Outcome {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let mut left = Vec::new();
     let mut starting = 0;
-    for folder in ["regressions", "rig"] {
-        for file in sources_in(&tests.join(folder)) {
-            // This module's own cases leave their rigs unclosed, on purpose.
-            if file.ends_with("reports.rs") {
-                continue;
-            }
-            for function in startings_in(&fs::read_to_string(&file)?)? {
-                starting += 1;
-                if function.started > function.closed {
-                    left.push(format!(
-                        "{folder}/{}: {} starts {} rigs and closes {}",
-                        file.file_name().unwrap_or_default().to_string_lossy(),
-                        function.name,
-                        function.started,
-                        function.closed
-                    ));
-                }
+    for file in sources_in(&tests) {
+        // This module's own cases leave their rigs unclosed, on purpose.
+        if file.ends_with("reports.rs") {
+            continue;
+        }
+        for function in startings_in(&fs::read_to_string(&file)?)? {
+            starting += 1;
+            if function.started > function.closed {
+                left.push(format!(
+                    "{}: {} starts {} rigs and closes {}",
+                    file.strip_prefix(&tests).unwrap_or(&file).display(),
+                    function.name,
+                    function.started,
+                    function.closed
+                ));
             }
         }
     }
@@ -485,9 +717,75 @@ fn every_function_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it_or_
     );
     assert!(
         left.is_empty(),
-        "a case that passes ends by closing its rig, or its drop keeps a report of a case that did not fail:\n{}",
+        "a case that passes ends by closing its rig, or the rig of a suite that cannot tell a pass \
+         from a failure (a live one) keeps a report of a case that did not fail:\n{}",
         left.join("\n")
     );
+    Ok(())
+}
+
+/// A `#[test]` function: its name, and what it returns where it returns something.
+const CASE: &str = r"#\[test\][^\n]*\n(?:[ \t]*#\[[^\n]*\n)*[ \t]*(?:pub(?:\([a-z]+\))?\s+)?fn\s+(\w+)\s*\(\s*\)\s*(?:->\s*([^{]+?))?\s*\{";
+
+#[test]
+fn every_case_of_the_rig_and_the_regressions_returns_nothing_or_an_outcome() -> Outcome {
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let case = Regex::new(CASE)?;
+    let mut other = Vec::new();
+    let mut found = 0;
+    for folder in ["regressions", "rig"] {
+        for file in sources_in(&tests.join(folder)) {
+            let text = fs::read_to_string(&file)?;
+            for found_case in case.captures_iter(&text) {
+                found += 1;
+                let returns = found_case
+                    .get(2)
+                    .map_or("", |returned| returned.as_str().trim());
+                if !returns.is_empty() && returns != "Outcome" {
+                    other.push(format!(
+                        "{folder}/{}: {} returns {returns}",
+                        file.file_name().unwrap_or_default().to_string_lossy(),
+                        &found_case[1]
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        found > 200,
+        "only {found} cases were found: the scan is blind"
+    );
+    assert!(
+        other.is_empty(),
+        "a case that fails by an error it returns tells its rig so only by returning an Outcome, \
+         and the rig of any other keeps its report for a case that passed, or none for one that \
+         failed:\n{}",
+        other.join("\n")
+    );
+    Ok(())
+}
+
+#[test]
+fn every_rig_the_suites_of_the_rig_the_regressions_and_the_load_start_is_judged_by_its_case(
+) -> Outcome {
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    for file in ["rig.rs", "regressions.rs", "load.rs"] {
+        let text = fs::read_to_string(tests.join(file))?;
+        let (made, judged) = (
+            text.matches("Config::new(").count(),
+            text.matches(".judged_by_outcome()").count(),
+        );
+        assert!(
+            made > 0,
+            "{file} makes no rig configuration: the scan is blind"
+        );
+        assert_eq!(
+            made, judged,
+            "{file} makes {made} rig configurations and judges {judged} by what their cases \
+             return: a rig dropped unclosed by a case that passed keeps a report of it"
+        );
+    }
     Ok(())
 }
 

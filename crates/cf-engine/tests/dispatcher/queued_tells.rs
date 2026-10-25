@@ -7,19 +7,21 @@
 //! the task is paused, which are kept for its resume (the second review,
 //! 2026-10-16); words the window took back go in again with the words that
 //! resume it; and words in the first message of a launch called off before its
-//! window opened are said to have gone with it. None of these tests is held to
-//! a Node recording: Node refused the tell.
+//! window opened are said to have gone with it, as are those of a task whose
+//! member the human removes before they went in (T-389); words still queued
+//! when the harness fails the task wait for its reopen (T-448). None of these
+//! tests is held to a Node recording: Node refused the tell.
 
 use cf_engine::delivery_text::marker_of;
 use cf_engine::testing::Context;
-use cf_ledger::NewNote;
+use cf_ledger::{NewNote, NewTask};
 
 use crate::fixtures::{assert_match, given, last_message, notes, Tiers};
 use crate::work_in_flight::looks_at;
 
 /// The chief tells the window of T-`number`, still queued, `body`: the id of the
 /// note that keeps the words.
-fn tell(context: &Context, project: i64, number: i64, body: &str) -> i64 {
+pub(crate) fn tell(context: &Context, project: i64, number: i64, body: &str) -> i64 {
     context
         .ledger
         .borrow_mut()
@@ -32,7 +34,7 @@ fn tell(context: &Context, project: i64, number: i64, body: &str) -> i64 {
 /// brief when the chief tells it "Use the v2 grammar"; then the window comes up
 /// with the brief and works on it. The staff, the session's handle and the
 /// note that keeps the words.
-fn told_on_its_way(context: &Context) -> (Tiers<'_>, String, i64) {
+pub(crate) fn told_on_its_way(context: &Context) -> (Tiers<'_>, String, i64) {
     let tiers = Tiers::new(context, &["zeus"]);
     tiers.open_body("Parser");
     context.pass().unwrap();
@@ -345,5 +347,262 @@ fn words_in_the_first_message_of_a_launch_cancelled_before_its_window_opened_are
         )),
         "{:?}",
         notes(&context, chief)
+    );
+}
+
+#[test]
+fn words_carried_in_the_briefs_paste_are_answered_with_it_and_that_answer_is_the_result() {
+    // Calliope's L2 on the merge with turn-end (T-370): where a turn's answer begins is the
+    // paste of the window's latest message (`last_pasted`), here the brief that carried the
+    // words.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    let told = tell(&context, project.id, 1, "Use the v2 grammar");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(told).state, "delivered");
+    context
+        .adapter
+        .answer("zeus", "Parser done, on the v2 grammar");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let thread = context.task(project.id, 1);
+    assert_eq!(thread.task.state, "done");
+    let result = thread.messages.iter().find(|m| m.kind == "result").unwrap();
+    assert_eq!(result.body, "Parser done, on the v2 grammar");
+}
+
+#[test]
+fn an_answer_that_leaves_work_running_while_told_words_wait_is_no_hold_and_its_requester_is_told_nothing(
+) {
+    // Calliope's L1 on the merge with turn-end (T-370): the answer to the brief, its job
+    // running, is neither the result nor a hold while the words are on their way. They go
+    // in next, and the answer to them decides.
+    let context = Context::new();
+    let (tiers, session, told) = told_on_its_way(&context);
+    context.adapter.answer_leaving(
+        "zeus",
+        "The parser builds in the background",
+        cf_harness::records::Pending {
+            agents: 0,
+            jobs: 1,
+            retired: 0,
+            noticed: 0,
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert!(
+        !tiers
+            .notes("chief")
+            .iter()
+            .any(|note| note.contains("goes on in the background")),
+        "{:?}",
+        tiers.notes("chief")
+    );
+    let words = given(&context, &session);
+    assert_eq!(
+        words.last().unwrap(),
+        &format!("[ConsensFlow m-{told} · T-1 · note from @chief]\nUse the v2 grammar"),
+        "the words went in next"
+    );
+    context.pass().unwrap();
+    context
+        .adapter
+        .answer("zeus", "Parser done, on the v2 grammar");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let thread = tiers.task(1);
+    assert_eq!(thread.task.state, "done");
+    let result = thread.messages.iter().find(|m| m.kind == "result").unwrap();
+    assert_eq!(result.body, "Parser done, on the v2 grammar");
+}
+
+#[test]
+fn finish_is_refused_while_told_words_are_on_their_way_and_says_so_to_the_chief() {
+    // Calliope's L1 on the merge with turn-end (T-370): Finish recorded the answer to the
+    // brief over words that had not reached the window, or failed with the worker's
+    // sentence ("run cf task done again").
+    let context = Context::new();
+    let (tiers, session, told) = told_on_its_way(&context);
+    context.adapter.answer("zeus", "Parser done");
+    let refused = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .unwrap_err();
+    assert_eq!(
+        refused.to_string(),
+        format!(
+            "cannot finish T-1: words told to @{session} are on their way to its window, and its answer to them is the result; finish it once it has answered them, or cancel it"
+        )
+    );
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert_eq!(context.message(told).state, "queued");
+    // Once it has answered them, Finish takes that answer.
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(told).state, "delivered");
+    // In its window and not yet answered, they are the task's latest message to it
+    // (`last_pasted`), and Finish starts at their paste: the answer to the brief before them
+    // is no result (T-405's Finish window of L2).
+    let unanswered = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .unwrap_err();
+    assert_eq!(
+        unanswered.to_string(),
+        format!(
+            "cannot finish T-1: @{session} has written no complete answer since its latest message about it; wait for one, or cancel it"
+        )
+    );
+    assert_eq!(tiers.task(1).task.state, "working");
+    context
+        .adapter
+        .answer("zeus", "Parser done, on the v2 grammar");
+    let finished = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .expect("finished");
+    assert_eq!(finished.task.state, "done");
+    let thread = tiers.task(1);
+    let result = thread.messages.iter().find(|m| m.kind == "result").unwrap();
+    assert!(
+        result.body.starts_with("Parser done, on the v2 grammar"),
+        "{}",
+        result.body
+    );
+}
+
+/// The same launch, called off by the human's Close first: the window is not
+/// opened, its first message waits for the Resume, and the human then cancels the
+/// task while the project is closed. The cancel said nothing of the words that rode
+/// in the launch, on their way as they were, so the launch's end says them
+/// (Calliope's review of the merge, T-408, P3-6).
+#[test]
+fn words_in_the_first_message_of_a_launch_a_close_called_off_are_said_to_have_gone_with_a_cancel_while_closed(
+) {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let preparing = context.adapter.prepare_holds.hold(|_| true);
+    let brief = context.give(project.id, "zeus", "Parser").message.unwrap();
+    let told = tell(&context, project.id, 1, "Use the v2 grammar");
+    context.pass().unwrap();
+    assert_eq!(context.message(brief.id).state, "delivering");
+
+    // The human closes the project while the window is prepared, then calls the
+    // task off before the Resume.
+    let closing = context.begin_close_project(project.id);
+    context.settle();
+    assert_eq!(context.project(project.id).state, "suspended");
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project.id, 1, "human")
+        .unwrap();
+    preparing.open();
+    context.finish(closing).unwrap();
+    context.settle();
+    assert!(context.host.last("zeus").is_none(), "no pane opened");
+    assert_eq!(context.project(project.id).state, "suspended");
+    let chief = context.id(project.id, "chief");
+    assert!(
+        notes(&context, chief).contains(&format!(
+            "T-1 was cancelled before its window opened. What you told its window, m-{told}, went with it: it never had it."
+        )),
+        "{:?}",
+        notes(&context, chief)
+    );
+}
+
+#[test]
+fn words_told_to_the_window_of_a_task_whose_member_the_human_removes_are_said_to_have_gone() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    // The human asked for it; the chief told its window, which is not up yet.
+    context.create_task(
+        project.id,
+        NewTask {
+            from: "human".to_owned(),
+            to: Some("zeus".to_owned()),
+            body: "Parser".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    let told = tell(&context, project.id, 1, "Use the v2 grammar");
+
+    let removed = context.remove_member(project.id, "zeus").unwrap();
+    assert_eq!(removed.cancelled, [1]);
+    assert_eq!(context.message(told).state, "cancelled");
+    let chief = context.id(project.id, "chief");
+    assert!(
+        notes(&context, chief).contains(&format!(
+            "T-1 was cancelled: @zeus left the staff. What you told its window, m-{told}, went with it: it never had it."
+        )),
+        "{:?}",
+        notes(&context, chief)
+    );
+}
+
+#[test]
+fn words_still_on_their_way_when_the_harness_fails_the_task_wait_for_its_reopen() {
+    let context = Context::new();
+    let (tiers, session, told) = told_on_its_way(&context);
+    context.adapter.with("zeus", |agent| agent.failed = true);
+    context.adapter.answer("zeus", "Parser, half done");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "failed");
+    // Kept for the reopen, as words a failed delivery leaves are (the chief's
+    // decision on Calliope's P3-4 of T-446); one note says why, which words wait
+    // and how to reopen it (her P3 of T-437: the words came in a note of their own).
+    assert_eq!(context.message(told).state, "queued");
+    assert_eq!(
+        tiers.notes("chief"),
+        [format!("T-1 failed: @{session}'s harness reported a failure; the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\"")]
+    );
+}
+
+#[test]
+fn words_that_never_reach_the_window_are_told_to_whoever_told_them_as_to_the_requester() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    // The human asked for it; the chief told its window while the brief was on
+    // its way (Calliope's P3 of T-437: only the requester heard).
+    context.create_task(
+        project.id,
+        NewTask {
+            from: "human".to_owned(),
+            to: Some("zeus".to_owned()),
+            body: "Parser".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    context.pass().unwrap();
+    let brief = context.task(project.id, 1).messages[0].id;
+    assert_eq!(context.message(brief).state, "delivering");
+    let told = tell(&context, project.id, 1, "Use the v2 grammar");
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    context.adapter.answer("zeus", "Parser done");
+    context.adapter.with("zeus", |agent| agent.admit = false);
+    for _ in 0..5 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(told).state, "failed");
+    assert_eq!(context.task(project.id, 1).task.state, "failed");
+    let said = format!(
+        "T-1 failed: what @chief told its window, m-{told}, did not reach it (refused by the test). Reopen it with: cf task reopen T-1 \"…\""
+    );
+    let chief = context.id(project.id, "chief");
+    assert!(
+        notes(&context, chief).contains(&said),
+        "{:?}",
+        notes(&context, chief)
+    );
+    let human = context.id(project.id, "human");
+    assert!(
+        notes(&context, human).contains(&said),
+        "{:?}",
+        notes(&context, human)
     );
 }

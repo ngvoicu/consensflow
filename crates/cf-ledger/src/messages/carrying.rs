@@ -20,6 +20,7 @@ use cf_proto::ledger::MessageView;
 use rusqlite::params;
 use serde_json::json;
 
+use super::continuations::{drop_continuations, withdraw_stale_among};
 use super::delivery::cancel_message;
 use super::messages;
 use super::receipt::reconcile;
@@ -208,17 +209,28 @@ pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {
 }
 
 /// What a carrier that was cancelled, or failed, carried is its own again:
-/// still kept, still `queued`, for the next carrier to take. Withdrawing a
-/// carrier's transport never takes what it carried with it.
-pub(crate) fn release_carried(store: &Store, task_id: i64) -> Result<(), LedgerError> {
+/// still kept, still `queued`, for the next carrier to take, and handed nothing,
+/// whatever its carrier's transport let go (`delivery`'s `admit`), but for a
+/// continuation whose task is no longer at work, which goes (`continuations`).
+/// Withdrawing a carrier's transport never takes what it carried with it.
+pub(crate) fn release_carried(store: &mut Store, task_id: i64) -> Result<(), LedgerError> {
+    let released = ids(
+        store,
+        "SELECT id FROM message
+         WHERE task_id = ?1 AND state = 'queued'
+           AND carried_by IN (SELECT id FROM message WHERE task_id = ?1
+                              AND state IN ('cancelled', 'failed'))
+         ORDER BY id",
+        [task_id],
+    )?;
     store.db.execute(
-        "UPDATE message SET carried_by = NULL
+        "UPDATE message SET carried_by = NULL, handed_at = NULL
          WHERE task_id = ?1 AND state = 'queued'
            AND carried_by IN (SELECT id FROM message WHERE task_id = ?1
                               AND state IN ('cancelled', 'failed'))",
         [task_id],
     )?;
-    Ok(())
+    withdraw_stale_among(store, &released)
 }
 
 /// What a daemon that knows no carriers left riding in one. A row is in the
@@ -247,6 +259,12 @@ pub(crate) fn release_carried(store: &Store, task_id: i64) -> Result<(), LedgerE
 /// carrier whose first paste was late and that waited again, so a marker found took
 /// an answer no paste had held for received); a carrier no paste of which began kept
 /// its set, which its first paste holds.
+///
+/// A row let go of is handed nothing, whatever its carrier's transport let go
+/// (both reviews of 2026-10-17: a restart during an admitted carrier's delivery
+/// left its rows marked, and a reader of the closed project read them), and a
+/// continuation among them whose task is no longer at work goes
+/// (`continuations`).
 pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
     store.write(|store| {
         let carriers: Vec<(i64, i64)> = store
@@ -266,7 +284,8 @@ pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
                 [carrier],
             )?;
             store.db.execute(
-                "UPDATE message SET carried_by = NULL WHERE carried_by = ? AND state = 'queued'",
+                "UPDATE message SET carried_by = NULL, handed_at = NULL
+                 WHERE carried_by = ? AND state = 'queued'",
                 [carrier],
             )?;
             store.log(
@@ -274,6 +293,7 @@ pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
                 "message.uncarried",
                 json!({ "carrier": carrier, "released": released }),
             )?;
+            withdraw_stale_among(store, &released)?;
         }
         Ok(())
     })
@@ -359,13 +379,16 @@ pub(crate) struct Transfer {
 /// - what it had held at the gate, and any tell, is withdrawn: the human
 ///   gave no word for the next window, and the one that is gone was the tell's;
 /// - what it asked, and no one has seen yet, is withdrawn with it. Only the
-///   next window's own questions count for the task.
+///   next window's own questions count for the task;
+/// - what told it to go on after a cut turn is withdrawn first, and never said
+///   in the brief (`continuations`): the next window never began that turn.
 pub(crate) fn transfer(
     store: &mut Store,
     task: &TaskRow,
     window: &ParticipantRow,
     brief: &str,
 ) -> Result<Transfer, LedgerError> {
+    drop_continuations(store, task, window.id)?;
     requeue_unreceived_reads(store, task, window.id)?;
     let rows = messages(
         store,

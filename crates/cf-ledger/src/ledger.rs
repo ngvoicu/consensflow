@@ -166,6 +166,13 @@ impl Ledger {
         }
     }
 
+    /// Writes `sql` as it is: rows a ledger written before a rule of this build
+    /// can hold and no door of it writes (a session with several tasks), for the
+    /// engine's tests to meet.
+    pub fn write_raw(&mut self, sql: &str) -> Result<(), LedgerError> {
+        Ok(self.store.db.execute_batch(sql)?)
+    }
+
     /// Holds each value SQLite makes or loads whole to `bytes` at most
     /// (`SQLITE_LIMIT_LENGTH`): a read that loads a longer value whole fails,
     /// "string or blob too big", where one that reads only its size, the
