@@ -221,8 +221,13 @@ runs = ["harness-opencode", "harness-launch-opencode-versions"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/opencode/role.rs"
-find = "    not_to_update(&mut configuration);"
-replace = ""
+find = '''
+    let mut configuration = merged(current.as_deref().unwrap_or("{}"), &folders, &written.file)?;
+    not_to_update(&mut configuration);
+'''
+replace = '''
+    let mut configuration = merged(current.as_deref().unwrap_or("{}"), &folders, &written.file)?;
+'''
 
 [[plant]]
 name = "opencode 2: what the human says of updates is overwritten"

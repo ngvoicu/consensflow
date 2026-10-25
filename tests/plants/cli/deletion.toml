@@ -314,11 +314,11 @@ runs = ["sign-mac"]
 [[plant.edit]]
 file = "tools/cf-release/src/sign_mac/signing.rs"
 find = '''
-    codesign(tools, signing, app, &["--options", "runtime"])
-}'''
+        &["--options", "runtime", "--entitlements", &entitlements],
+'''
 replace = '''
-    codesign(tools, signing, app, &[])
-}'''
+        &["--entitlements", &entitlements],
+'''
 
 [[plant]]
 name = "deletion: a verb is given the first line of an argument"

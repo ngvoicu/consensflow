@@ -330,11 +330,9 @@ replace = '''      <h2 id="project-settings-title">Project settings</h2>
 file = "app/ui/index.html"
 find = '''      </fieldset>
       <div data-project-sections></div>
-      <div class="dialog-actions">
-        <button class="quiet-button" type="button" value="cancel">Close</button>'''
+      <!-- Computer use (core/computer-use.js)'''
 replace = '''      </fieldset>
-      <div class="dialog-actions">
-        <button class="quiet-button" type="button" value="cancel">Close</button>'''
+      <!-- Computer use (core/computer-use.js)'''
 
 [[plant]]
 name = "project settings: New project has its sections before its staff"
@@ -713,8 +711,8 @@ runs = ["page-project-settings"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "      project: () => (dialog.open ? this.#project : null),\n"
-replace = "      project: () => page.board().project.id,\n"
+find = "        project: () => (dialog.open ? this.#project : null),\n        daemon: page.daemon,\n"
+replace = "        project: () => page.board().project.id,\n        daemon: page.daemon,\n"
 
 [[plant]]
 name = "project settings: a dialog that is shut is still for the project it was"
@@ -723,8 +721,8 @@ runs = ["page-project-settings"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "      project: () => (dialog.open ? this.#project : null),\n"
-replace = "      project: () => this.#project,\n"
+find = "        project: () => (dialog.open ? this.#project : null),\n        daemon: page.daemon,\n"
+replace = "        project: () => this.#project,\n        daemon: page.daemon,\n"
 
 [[plant]]
 name = "project settings: the answer to a save of the calls is shown in the dialog of another project"

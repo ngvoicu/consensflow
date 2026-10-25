@@ -150,10 +150,12 @@ pub(crate) fn plain_path(path: PathBuf) -> PathBuf {
 /// with those folders. Nothing of the environment's values is said: a variable
 /// the human exports may be a key.
 ///
-/// On Windows no shell is asked, though `SHELL` names one (Git Bash's): an app
-/// started from the Start menu has the environment of the user and the machine,
-/// which a terminal there has too, and a POSIX shell's (`/c/…`, joined by `:`) is
-/// none a Windows program can use.
+/// On Windows no `SHELL` is asked, though it names one (Git Bash's): a POSIX shell's
+/// PATH (`/c/…`, joined by `:`) is none a Windows program can use. An app started from
+/// the Start menu has the environment of the user and the machine, which a terminal
+/// there has too, and a terminal's PowerShell adds what the user's profile sets: that
+/// PowerShell is asked ([`profile_environment_in`]), and where it gives nothing the
+/// daemon keeps the app's environment.
 fn on_login_environment(
     command: &mut Command,
     env: &Env,
@@ -161,11 +163,15 @@ fn on_login_environment(
     lookup: &LoginLookup,
 ) -> Option<String> {
     let shell = env.path("SHELL").filter(|_| !env.on_windows());
-    let taken = shell.and_then(|shell| login_environment_in(shell, timeout, lookup));
+    let taken = match shell {
+        Some(shell) => login_environment_in(shell, timeout, lookup),
+        None if cfg!(windows) => profile_environment_in(&powershell_of(env), timeout, lookup),
+        None => None,
+    };
     let login = match &taken {
         Some(vars) => vars
             .iter()
-            .find(|(name, _)| name == "PATH")
+            .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
             .and_then(|(_, value)| value.to_str())
             .map(str::to_owned),
         None => shell.and_then(|shell| login_path_in(shell, timeout, lookup)),
@@ -208,18 +214,68 @@ pub(crate) fn login_environment_in(
     let marker = marker("env");
     let printed = asked(
         shell,
-        "-ilc",
-        &format!("printf '{marker}'; /usr/bin/env -0; printf '{marker}'"),
+        &[
+            "-ilc",
+            &format!("printf '{marker}'; /usr/bin/env -0; printf '{marker}'"),
+        ],
         &marker,
         timeout,
         lookup,
     )?;
+    taken(&printed)
+}
+
+/// On Windows, the environment a terminal's PowerShell gives what it starts once the
+/// user's profile has run: asked of `powershell` ([`powershell_of`]) with the profile
+/// loaded (`-Command` loads it, as a terminal's PowerShell does), each `NAME=value` with
+/// a NUL after it, in UTF-8, between markers, with the same bounds as a login shell's.
+pub(crate) fn profile_environment_in(
+    powershell: &Path,
+    timeout: Duration,
+    lookup: &LoginLookup,
+) -> Option<Vec<(OsString, OsString)>> {
+    let marker = marker("env");
+    let script = format!(
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; [Console]::Out.Write('{marker}'); \
+         Get-ChildItem env: | ForEach-Object {{ [Console]::Out.Write($_.Name + '=' + $_.Value + [char]0) }}; \
+         [Console]::Out.Write('{marker}')"
+    );
+    let printed = asked(
+        powershell,
+        &["-NoLogo", "-NonInteractive", "-Command", &script],
+        &marker,
+        timeout,
+        lookup,
+    )?;
+    taken(&printed)
+}
+
+/// The PowerShell a terminal opens on Windows: PowerShell 7 (`pwsh.exe`) where it is
+/// in a folder of the PATH, as Windows Terminal opens it once it is installed, else
+/// Windows PowerShell, which every Windows has.
+fn powershell_of(env: &Env) -> PathBuf {
+    env.os("PATH")
+        .into_iter()
+        .flat_map(|path| std::env::split_paths(path).collect::<Vec<_>>())
+        .map(|folder| folder.join("pwsh.exe"))
+        .find(|pwsh| pwsh.is_file())
+        .unwrap_or_else(|| {
+            let root = env.os("SystemRoot").unwrap_or(OsStr::new(r"C:\Windows"));
+            Path::new(root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+        })
+}
+
+/// The variables of what a shell printed (`NAME=value`, a NUL after each), but those
+/// [`not_taken`]; none where it names no PATH (Windows names it `Path`).
+fn taken(printed: &[u8]) -> Option<Vec<(OsString, OsString)>> {
     let vars: Vec<(OsString, OsString)> = printed
         .split(|&byte| byte == 0)
         .filter_map(variable)
         .filter(|(name, _)| !not_taken(name))
         .collect();
-    vars.iter().any(|(name, _)| name == "PATH").then_some(vars)
+    vars.iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+        .then_some(vars)
 }
 
 /// A `NAME=value` of `env -0`'s, as the variable it is: none for an entry with no
@@ -357,8 +413,7 @@ pub(crate) fn login_path_in(
     let marker = marker("path");
     let printed = asked(
         shell,
-        "-lc",
-        &format!("printf '{marker}%s{marker}' \"$PATH\""),
+        &["-lc", &format!("printf '{marker}%s{marker}' \"$PATH\"")],
         &marker,
         timeout,
         lookup,
@@ -376,14 +431,13 @@ fn marker(what: &str) -> String {
     )
 }
 
-/// What `shell` started with `flags` and `script` printed between two `marker`s,
+/// What `shell` started with `args` printed between two `marker`s,
 /// from a shell that exits cleanly, all within `timeout` and before the app quits
 /// (`lookup`); none otherwise, and the shell is ended if it still runs. Only the
 /// shell: what its login files started is the user's ([`LoginLookup`]).
 fn asked(
     shell: &Path,
-    flags: &str,
-    script: &str,
+    args: &[&str],
     marker: &str,
     timeout: Duration,
     lookup: &LoginLookup,
@@ -392,7 +446,7 @@ fn asked(
 
     let mut asked = Command::new(shell);
     asked
-        .args([flags, script])
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());

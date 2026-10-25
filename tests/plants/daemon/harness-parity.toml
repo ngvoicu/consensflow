@@ -1,0 +1,111 @@
+# Harness parity (T-540, the owner's ask of 2026-10-25: a member has what the same harness
+# has when the human opens it in a terminal in the project's folder). Claude Code's computer use is read
+# from Claude's own configuration under the entry it keeps for the project's repository,
+# never written (`crates/cf-harness/src/claude/computer_use.rs`); a Claude launch where it
+# is on while ConsensFlow lacks a macOS grant tells the human once per missing state
+# (`crates/cf-engine/src/computer_use.rs`); the page's row shows a harness's part only with
+# a member on it, and opens only the two System Settings panes. One plant takes one rule
+# out; a test of it fails. Every name holds `parity`.
+
+[run]
+harness-claude-computer-use = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::computer_use"]
+engine-computer-use = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "computer_use::"]
+daemon-computer-use = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use"]
+page-computer-use = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "computer use|computer use.s permissions"]
+
+[[plant]]
+name = "parity computer use: a worktree is read under its own folder"
+meant = "a_folder_of_a_repository_and_a_linked_worktree_take_the_main_checkouts_entry"
+runs = ["harness-claude-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use.rs"
+find = '''    let folder = trusts(directory).folder;'''
+replace = '''    let folder = directory.to_owned();
+    let _ = trusts;'''
+
+[[plant]]
+name = "parity computer use: any enabled server is read as Claude's computer use"
+meant = "a_configuration_that_is_not_there_or_no_json_or_lists_no_server_is_off"
+runs = ["harness-claude-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use.rs"
+find = '''        .is_some_and(|servers| servers.iter().any(|server| server == SERVER))'''
+replace = '''        .is_some_and(|servers| !servers.is_empty() || SERVER.is_empty())'''
+
+[[plant]]
+name = "parity computer use: every launch tells the human again"
+meant = "a_claude_launch_where_computer_use_is_on_and_a_permission_is_missing_tells_the_human_once"
+runs = ["engine-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/computer_use.rs"
+find = '''        if !self.computer_use.told.borrow_mut().insert(('''
+replace = '''        if self.computer_use.told.borrow().is_empty() && !self.computer_use.told.borrow_mut().insert(('''
+
+[[plant]]
+name = "parity computer use: a state mended and lost again is never said again"
+meant = "each_missing_state_is_said_once_and_a_state_mended_and_lost_is_said_again"
+runs = ["engine-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/computer_use.rs"
+find = '''                .retain(|(id, ..)| *id != project.id);'''
+replace = '''                .retain(|(id, ..)| *id != project.id || project.id > 0);'''
+
+[[plant]]
+name = "parity computer use: the human is told where Claude's computer use is off"
+meant = "nothing_is_said_where_computer_use_is_off_or_every_permission_is_given_or_none_runs"
+runs = ["engine-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/computer_use.rs"
+find = '''        if !self.seams.computer_use.claude(&project.directory).on {'''
+replace = '''        if !self.seams.computer_use.claude(&project.directory).on && project.id < 0 {'''
+
+[[plant]]
+name = "parity computer use: open opens a pane the page did not name"
+meant = "open_opens_only_the_two_named_panes"
+runs = ["daemon-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/computer_use.rs"
+find = '''            "screen-recording" => Some(Self::ScreenRecording),
+            _ => None,'''
+replace = '''            "screen-recording" => Some(Self::ScreenRecording),
+            _ => Some(Self::Accessibility),'''
+
+[[plant]]
+name = "parity computer use: the row is shown for a project with no Claude Code member"
+meant = "Project settings: a project with no Claude Code member, the chief included, shows no computer use"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''      ([harness]) => present.has(harness) && said?.harnesses?.[harness],'''
+replace = '''      ([harness]) => said?.harnesses?.[harness],'''
+
+[[plant]]
+name = "parity computer use: any note gets the System Settings buttons"
+meant = "a note that ConsensFlow lacks computer use's permissions opens the System Settings pane of each it names"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''  if (message.kind !== 'note' || !message.body?.startsWith(NOTE_OPENING)) return []
+  const named = message.body.slice(message.body.indexOf('allow it '))'''
+replace = '''  if (message.kind !== 'note') return []
+  const named = message.body.includes('allow it ') ? message.body : 'Accessibility'''
+
+[[plant]]
+name = "parity computer use: the permissions are not read again as the dialog opens"
+meant = "Project settings: computer use that is on says so, and on Windows says Claude Code has none there"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    this.#computerUse.show(computerUse)
+'''
+replace = '''    if (computerUse === undefined) this.#computerUse.show(computerUse)
+'''

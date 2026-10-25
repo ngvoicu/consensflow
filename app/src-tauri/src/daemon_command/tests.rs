@@ -631,3 +631,66 @@ fn an_entry_is_named_by_its_first_equals_sign_and_one_without_a_name_is_none() {
     assert_eq!(variable(b"=x"), None);
     assert_eq!(variable(b"no-equals"), None);
 }
+
+/// The PowerShell a Windows terminal opens: PowerShell 7 where a folder of the PATH has
+/// it, else Windows PowerShell, under the system's root.
+#[test]
+fn the_powershell_asked_is_pwsh_where_the_path_has_it_else_windows_powershell() {
+    let folder = tempfile::tempdir().expect("a folder");
+    let other = tempfile::tempdir().expect("another");
+    let env = |path: &[&Path]| {
+        Env::from_vars([
+            (
+                std::ffi::OsString::from("PATH"),
+                std::env::join_paths(path).expect("a PATH"),
+            ),
+            (
+                std::ffi::OsString::from("SystemRoot"),
+                std::ffi::OsString::from("/Windows-root"),
+            ),
+        ])
+    };
+    assert_eq!(
+        powershell_of(&env(&[other.path(), folder.path()])),
+        Path::new("/Windows-root").join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+    );
+    let pwsh = folder.path().join("pwsh.exe");
+    std::fs::write(&pwsh, "").expect("a pwsh");
+    assert_eq!(powershell_of(&env(&[other.path(), folder.path()])), pwsh);
+}
+
+/// Windows names its PATH `Path`: an environment that has it is taken whole.
+#[test]
+fn a_printed_environment_is_taken_by_its_path_whatever_its_case() {
+    let printed = b"Path=C:\\Windows\0SystemRoot=C:\\Windows\0PWD=/x\0";
+    let vars = taken(printed).expect("taken");
+    let names: Vec<String> = vars
+        .iter()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["Path", "SystemRoot"]);
+    assert_eq!(taken(b"SystemRoot=C:\\Windows\0"), None, "no PATH: none");
+}
+
+/// The real Windows PowerShell answers what this process has, as a terminal's gives it:
+/// its Path and SystemRoot come back as they are, within the time.
+#[cfg(windows)]
+#[test]
+fn windows_powershell_says_its_environment_in_utf8_between_the_markers() {
+    let env = Env::from_process();
+    let started = Instant::now();
+    let vars = profile_environment_in(
+        &powershell_of(&env),
+        Duration::from_secs(60),
+        &LoginLookup::default(),
+    )
+    .expect("PowerShell gave its environment");
+    assert!(started.elapsed() < Duration::from_secs(60));
+    let value = |name: &str| {
+        vars.iter()
+            .find(|(held, _)| held.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.clone())
+    };
+    assert_eq!(value("SystemRoot"), std::env::var_os("SystemRoot"));
+    assert!(value("PATH").is_some_and(|path| !path.is_empty()));
+}

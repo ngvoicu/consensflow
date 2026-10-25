@@ -646,9 +646,9 @@ runs = ["daemon-wake-up-page", "proto-page"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/page.rs"
-find = '''                | Self::HistoryPart
+find = '''                | Self::ComputerUseOpen
         )'''
-replace = '''                | Self::HistoryPart
+replace = '''                | Self::ComputerUseOpen
                 | Self::WakeUpSet
         )'''
 

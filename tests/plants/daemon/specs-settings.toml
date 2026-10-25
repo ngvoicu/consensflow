@@ -651,8 +651,16 @@ runs = ["settings-page-sections"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "    const [calls] = await Promise.all([this.#wakeUp.read(project), this.#page.readSpecs()])"
-replace = "    const calls = await this.#wakeUp.read(project)"
+find = '''
+      this.#wakeUp.read(project),
+      this.#page.readSpecs(),
+      this.#computerUse.read(project),
+'''
+replace = '''
+      this.#wakeUp.read(project),
+      null,
+      this.#computerUse.read(project),
+'''
 
 [[plant]]
 name = "specs settings: New project does not read what the app says as it opens"
@@ -661,9 +669,13 @@ runs = ["settings-page-new-project"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''      this.#page.readSpecs(),
+find = '''
+      this.#page.daemon('staff.last'),
+      this.#page.readSpecs(),
 '''
-replace = ""
+replace = '''
+      this.#page.daemon('staff.last'),
+'''
 
 [[plant]]
 name = "specs settings: a project that said a variant the Specmint does not have loses it"

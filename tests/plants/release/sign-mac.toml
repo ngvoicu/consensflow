@@ -70,7 +70,13 @@ runs = ["sign-mac"]
 [[plant.edit]]
 file = "tools/cf-release/src/sign_mac/signing.rs"
 find = '''
-    codesign(tools, signing, app, &["--options", "runtime"])
+    let entitlements = entitlements.to_string_lossy();
+    codesign(
+        tools,
+        signing,
+        app,
+        &["--options", "runtime", "--entitlements", &entitlements],
+    )
 }'''
 replace = '''
     Ok(())
@@ -82,7 +88,12 @@ find = '''
     for path in macho::mach_os(app)?
 '''
 replace = '''
-    codesign(tools, signing, app, &["--options", "runtime"])?;
+    codesign(
+        tools,
+        signing,
+        app,
+        &["--options", "runtime", "--entitlements", &entitlements.to_string_lossy()],
+    )?;
     for path in macho::mach_os(app)?
 '''
 
@@ -124,11 +135,11 @@ runs = ["sign-mac", "with-apples-tools"]
 [[plant.edit]]
 file = "tools/cf-release/src/sign_mac/signing.rs"
 find = '''
-    codesign(tools, signing, app, &["--options", "runtime"])
-}'''
+        &["--options", "runtime", "--entitlements", &entitlements],
+'''
 replace = '''
-    codesign(tools, signing, app, &[])
-}'''
+        &["--entitlements", &entitlements],
+'''
 
 [[plant]]
 name = "sign-mac: a binary inside the app is signed without the hardened runtime"
@@ -263,3 +274,30 @@ runs = ["sign-mac", "with-apples-tools"]
 file = "tools/cf-release/src/sign_mac.rs"
 find = "if let Err(cause) = file::remove_all(&scratch) {"
 replace = "if let Err(cause) = Ok::<(), cf_base::file::FileError>(()) {"
+
+# What a program in ConsensFlow's panes may ask macOS for, as a terminal's may (T-540): the
+# bundle is signed with ConsensFlow's entitlements, and the release refuses a bundle whose
+# signature or Info.plist lacks them.
+[[plant]]
+name = "sign-mac: the bundle is signed without its entitlements"
+meant = "it_signs_every_mach_o_of_the_app_from_the_inside_out_then_makes_the_dmg_again_around_it"
+runs = ["with-apples-tools"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/sign_mac/signing.rs"
+find = '''
+        &["--options", "runtime", "--entitlements", &entitlements],
+'''
+replace = '''
+        &["--options", "runtime", &entitlements][..2],
+'''
+
+[[plant]]
+name = "sign-mac: a bundle whose Info.plist says no usage is taken"
+meant = "a_bundle_whose_info_plist_says_no_usage_is_refused_once_signed"
+runs = ["with-apples-tools"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/sign_mac/verify.rs"
+find = '''    asks_as_a_terminal(tools, app)?;'''
+replace = '''    let _ = asks_as_a_terminal;'''
