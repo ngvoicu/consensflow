@@ -10,7 +10,6 @@
 //! adds no rules of its own, only the Windows shim a window's program may be
 //! ([`cf_process::pane_argv`]) and the bound on the wait for an open.
 
-use std::future::Future;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -20,10 +19,12 @@ use cf_bridge::local::{Bridge, BridgeBuilder, Subscription};
 use cf_bridge::BridgeError;
 use cf_engine::host::{EngineHost, Killed, OpenPane, Opened};
 use cf_engine::runtime::LocalWork;
-use cf_engine::seams::BackgroundWork;
+use cf_engine::seams::{BackgroundWork, CommandsSeen};
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::Role;
-use cf_proto::panes::{EndRequest, Ending, MarkRequest, PaneExit, Servers, ENDING_BOUND};
+use cf_proto::panes::{
+    CommandsAnswer, CommandsRequest, MarkRequest, PaneExit, Rest, RestRequest, Servers,
+};
 use serde_json::{json, Map, Value};
 
 use crate::errors::contain_now;
@@ -32,11 +33,6 @@ use crate::seams::DaemonSpawn;
 /// How long the host has to open a window: the pane's program is started and
 /// watched before it answers (`deadlineMs: 60_000`).
 pub const OPEN_DEADLINE: Duration = Duration::from_secs(60);
-
-/// How long the host has to end what a turn left running and to say so: the bound it
-/// keeps to ([`ENDING_BOUND`]: the grace it gives what it asks to end, and what it
-/// waits after it has killed what ignored it), and a margin for the bridge.
-pub const END_DEADLINE: Duration = Duration::from_secs(ENDING_BOUND.as_secs() + 20);
 
 /// What the engine says to the host of the app, through its bridge.
 pub struct BridgeHost {
@@ -122,45 +118,73 @@ impl BackgroundWork for BridgeHost {
         })
     }
 
-    fn end<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Ending>> {
-        Box::pin(self.ending_within(pane, END_DEADLINE))
-    }
-}
-
-impl BridgeHost {
-    /// The ending of what `pane`'s turn left, asked of the host and waited for up to
-    /// `deadline`: as long as the host takes to end it, which is the bound it keeps to
-    /// and a margin. The default deadline is for requests that answer at once.
-    fn ending_within(
-        &self,
-        pane: &Pane,
-        deadline: Duration,
-    ) -> impl Future<Output = Option<Ending>> + 'static {
-        let request = EndRequest {
+    fn commands<'a>(
+        &'a self,
+        pane: &'a Pane,
+        since: Option<u64>,
+        after: Option<i64>,
+    ) -> Work<'a, CommandsSeen> {
+        let request = CommandsRequest {
             id: pane.id.clone(),
             generation: pane.generation,
+            since,
+            after,
         };
-        let sent = serde_json::to_value(&request).ok().map(|body| {
-            self.bridge
-                .request("pane.end_background", body, Some(deadline))
-        });
-        async move { ending(sent?.await.ok()) }
+        let sent = serde_json::to_value(&request)
+            .ok()
+            .map(|body| self.bridge.request("pane.commands", body, None));
+        Box::pin(async move {
+            match sent {
+                Some(sent) => commands_seen(sent.await.ok().as_ref()),
+                None => CommandsSeen::Unanswered,
+            }
+        })
+    }
+
+    fn rest<'a>(&'a self, pane: &'a Pane, keep: &'a [u64]) -> Work<'a, Option<u64>> {
+        let request = RestRequest {
+            id: pane.id.clone(),
+            generation: pane.generation,
+            keep: keep.to_vec(),
+        };
+        let sent = serde_json::to_value(&request)
+            .ok()
+            .map(|body| self.bridge.request("pane.rest", body, None));
+        // A host that keeps none, does not answer or is older keeps no rest.
+        Box::pin(async move {
+            let answer = sent?.await.ok()?;
+            let rest: Rest = serde_json::from_value(answer.get("rest")?.clone()).ok()?;
+            rest
+        })
     }
 }
 
-/// What a host answered to an ending: its word, or that nothing was ended for an
-/// answer that was a refusal (a host that does not know the operation, or has no such
-/// window): nothing is said to be ended that was not, and nothing is known to be left.
-/// None where there was no answer (the deadline passed, or the bridge went), for the
-/// host may be ending still.
-fn ending(answer: Option<Value>) -> Option<Ending> {
-    let answer = answer?;
-    if answer.get("ok") == Some(&Value::Bool(true)) {
-        return Some(serde_json::from_value(answer).unwrap_or_default());
-    }
-    match answer.get("error") {
-        Some(Value::String(error)) if error == "deadline" => None,
-        _ => Some(Ending::default()),
+/// What `pane.commands`' answer says (none where no answer came): so many commands run,
+/// the host cannot tell them (`commands: null`), a process of the window cannot be read
+/// (`null` and `unreadable`), the window's processes kept changing as it read them (`null`
+/// and `unsettled`), or nothing that is an answer (an older host's, which knows no such
+/// request, among it).
+fn commands_seen(answer: Option<&Value>) -> CommandsSeen {
+    let Some(answer) = answer.filter(|answer| answer.get("commands").is_some()) else {
+        return CommandsSeen::Unanswered;
+    };
+    match serde_json::from_value::<CommandsAnswer>(answer.clone()) {
+        Ok(CommandsAnswer {
+            commands: Some(commands),
+            ..
+        }) => CommandsSeen::Running(commands.total),
+        Ok(CommandsAnswer {
+            commands: None,
+            unreadable: true,
+            ..
+        }) => CommandsSeen::Unreadable,
+        Ok(CommandsAnswer {
+            commands: None,
+            unsettled: true,
+            ..
+        }) => CommandsSeen::Unsettled,
+        Ok(CommandsAnswer { commands: None, .. }) => CommandsSeen::Untold,
+        Err(_) => CommandsSeen::Unanswered,
     }
 }
 

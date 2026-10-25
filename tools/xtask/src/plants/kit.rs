@@ -8,8 +8,10 @@
 //!   `builds` left built from planted sources (none, for a family that builds
 //!   nothing); `tables`, the files of plants in the order they are run, which
 //!   is also the list of them (a file the folder holds that it does not name,
-//!   or the reverse, is an error); and `[run]`, the runs that several tables
-//!   share.
+//!   or the reverse, is an error); `known_unapplied`, the names of the plants
+//!   that do not apply yet, which `--check` says known rather than failing (a
+//!   name that no plant has is an error); and `[run]`, the runs that several
+//!   tables share.
 //! - `<table>.toml` are the plants, one table for each area, and `[run]` there is
 //!   the runs of that table alone.
 //!
@@ -25,8 +27,9 @@
 //! meant = "every_list_of_words_is_read_as_node_reads_it"   # the test it was written for
 //! runs = ["args", ["cargo", "test", "--offline", "-p", "cf"]]   # a name, or the words
 //! builds = true             # optional: its runs build the native `cf`
-//! prepare = [["cargo", "xtask", "smoke-updater", "--export-bridge"]]   # optional: must succeed first
+//! prepare = [["cargo", "xtask", "smoke-updater", "--export-bridge", "--cache", "app/src-tauri/target/updater-smoke"]]   # optional: must succeed first
 //! requires = ["app/src-tauri/target/…"]   # optional: files its runs take as given
+//! platforms = ["macos"]     # optional: the systems it is run on ("macos", "windows", "linux")
 //!
 //! [[plant.edit]]            # one or more, each in one file where `find` is found exactly once
 //! file = "crates/cf-base/src/args.rs"
@@ -34,12 +37,21 @@
 //! replace = "(Takes::Nothing, Some(_)) if false => {"
 //! ```
 //!
-//! The runs are tried in order until one fails, and the plant is caught by the
-//! tests that failed; `meant` is the test it was written for, and the report
-//! says when another caught it. The edits of a plant are made one after the
+//! The runs are tried in order until one catches the plant. `meant` is the test the
+//! plant was written for, named whole (a Node test by its own title, or with the
+//! titles of the tests it is in before it, ` › ` between): a run whose failure names
+//! it catches the plant, where that run passes without it; one whose failure names
+//! only other tests goes on to the next run, and where none names it the plant is
+//! MISSED-BY-MEANT. A failure that names no test (a command that says only its
+//! status) is a catch by the run itself, which the report says is not by `meant`
+//! (the driver tells how each is confirmed). The edits of a plant are made one after the
 //! other, each on the text the one before left. Text with a newline in it is best
 //! written as TOML's multi-line literal string, `'''`, which holds it as it is
 //! (a newline right after the opening quotes is not part of it).
+//!
+//! A plant of code that one system alone has (a Mac's) says so in `platforms`: on
+//! any other it is not run, and is said SKIPPED (platform), neither caught nor
+//! missed. A name there that is no system, or none at all, is an error of the table.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -61,6 +73,10 @@ pub struct Family {
     /// What builds again what a run that builds leaves built from planted sources.
     pub rebuild: Option<Vec<String>>,
     pub plants: Vec<Plant>,
+    /// The plants that do not apply to the sources yet, by name: `check` says them known
+    /// rather than failing, until each is mended and taken off this list (a plant on it
+    /// that applies again fails the check).
+    pub known_unapplied: Vec<String>,
 }
 
 /// One bug, and how it is to be noticed.
@@ -77,8 +93,14 @@ pub struct Plant {
     pub prepare: Vec<Vec<String>>,
     /// Files, from the checkout's root, that its runs take as given.
     pub requires: Vec<String>,
+    /// The systems it is run on, as Rust names them (`std::env::consts::OS`): none
+    /// for every one.
+    pub platforms: Vec<String>,
     pub edits: Vec<Edit>,
 }
+
+/// The systems a plant may be for, as Rust names them.
+const PLATFORMS: [&str; 3] = ["macos", "windows", "linux"];
 
 /// A command to try a plant with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +138,8 @@ struct KitFile {
     run_limit_minutes: u64,
     rebuild: Option<Vec<String>>,
     tables: Vec<String>,
+    #[serde(default)]
+    known_unapplied: Vec<String>,
     #[serde(default)]
     run: BTreeMap<String, RunSpec>,
 }
@@ -160,6 +184,7 @@ struct PlantSpec {
     prepare: Vec<Vec<String>>,
     #[serde(default)]
     requires: Vec<String>,
+    platforms: Option<Vec<String>>,
     edit: Vec<EditSpec>,
 }
 
@@ -237,6 +262,16 @@ impl Family {
                 found.push(plant);
             }
         }
+        if let Some(name) = kit
+            .known_unapplied
+            .iter()
+            .find(|name| !found.iter().any(|plant| plant.name == name.as_str()))
+        {
+            return Err(Error::data(
+                &folder.join("kit.toml"),
+                format!("known_unapplied names `{name}`, which no plant of the family has"),
+            ));
+        }
         let builds = |plant: &Plant| plant.builds || plant.runs.iter().any(|run| run.builds);
         if kit.rebuild.is_none() && found.iter().any(builds) {
             return Err(Error::data(
@@ -249,6 +284,7 @@ impl Family {
             limit: Duration::from_secs(kit.run_limit_minutes * 60),
             rebuild: kit.rebuild,
             plants: found,
+            known_unapplied: kit.known_unapplied,
         })
     }
 
@@ -274,6 +310,11 @@ impl Family {
 }
 
 impl Plant {
+    /// Whether it is run on the system `os` (`std::env::consts::OS`).
+    pub fn runs_on(&self, os: &str) -> bool {
+        self.platforms.is_empty() || self.platforms.iter().any(|platform| platform == os)
+    }
+
     /// Every file the plant touches, with the text it holds once the edits are
     /// made: the files in the order the plant names them first, an edit made on
     /// what the one before left. A piece of text that is not found once is the
@@ -403,6 +444,32 @@ fn resolve(
             ),
         ));
     }
+    let platforms = match spec.platforms {
+        None => Vec::new(),
+        Some(named) if named.is_empty() => {
+            return Err(Error::data(
+                path,
+                format!(
+                    "the plant `{}` is for no system: name one, or leave its platforms out",
+                    spec.name
+                ),
+            ))
+        }
+        Some(named) => named,
+    };
+    let unknown = platforms
+        .iter()
+        .find(|platform| !PLATFORMS.contains(&platform.as_str()));
+    if let Some(unknown) = unknown {
+        return Err(Error::data(
+            path,
+            format!(
+                "the plant `{}` is for `{unknown}`, which is no system a plant is for: {}",
+                spec.name,
+                PLATFORMS.join(", ")
+            ),
+        ));
+    }
     Ok(Plant {
         table: table.to_owned(),
         name: spec.name,
@@ -411,6 +478,7 @@ fn resolve(
         builds: spec.builds,
         prepare: spec.prepare,
         requires: spec.requires,
+        platforms,
         edits: spec
             .edit
             .into_iter()

@@ -69,10 +69,15 @@ impl Runner for Nothing {
     fn stopped(&mut self) -> bool {
         false
     }
+
+    fn state(&mut self) -> Option<String> {
+        panic!("nothing was to be run, and the state was asked for");
+    }
 }
 
-/// A checkout with the family `demo` of two plants and the file they plant.
-fn checkout() -> (tempfile::TempDir, Context) {
+/// A checkout with the family `demo` of two plants and the file they plant, whose kit
+/// says `extra` as well.
+fn checkout_with(extra: &str) -> (tempfile::TempDir, Context) {
     let folder = tempfile::tempdir().unwrap();
     let context = Context {
         root: folder.path().to_path_buf(),
@@ -86,7 +91,7 @@ fn checkout() -> (tempfile::TempDir, Context) {
     write("src/a.rs", "one\ntwo\n");
     write(
         "tests/plants/demo/kit.toml",
-        "run_limit_minutes = 1\ntables = [\"all\"]\n",
+        &format!("run_limit_minutes = 1\ntables = [\"all\"]\n{extra}"),
     );
     write(
         "tests/plants/demo/all.toml",
@@ -96,6 +101,11 @@ fn checkout() -> (tempfile::TempDir, Context) {
          [[plant.edit]]\nfile = \"src/a.rs\"\nfind = \"gone\"\nreplace = \"2\"\n",
     );
     (folder, context)
+}
+
+/// A checkout with the family `demo` as [`checkout_with`] makes it, with nothing more in its kit.
+fn checkout() -> (tempfile::TempDir, Context) {
+    checkout_with("")
 }
 
 /// What the command answered to `words` in `context`, and what it said.
@@ -179,6 +189,46 @@ fn data_that_cannot_be_read_is_an_error_that_names_the_file() {
             "{}",
             context.path("tests/plants/demo/all.toml").display()
         )),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_plant_the_kit_lists_as_not_applying_is_known_and_does_not_fail_the_check() {
+    let (_folder, context) = checkout_with("known_unapplied = [\"demo: two\"]\n");
+    let (status, said) = command(&context, "demo --check");
+    assert_eq!(status.unwrap(), 0);
+    assert_eq!(
+        said,
+        "known not to apply: demo: two: src/a.rs holds \"gone\" 0 times, not once\n\
+         1 of 2 plants apply, 1 known not to apply\n"
+    );
+}
+
+#[test]
+fn a_plant_the_kit_lists_that_applies_again_fails_the_check_until_the_list_is_emptied() {
+    let (_folder, context) = checkout_with("known_unapplied = [\"demo: one\"]\n");
+    let (status, said) = command(&context, "demo --check");
+    assert_eq!(status.unwrap(), 1);
+    assert_eq!(
+        said,
+        "demo: one: applies, so it is not known not to apply: take it off known_unapplied in kit.toml\n\
+         demo: two: src/a.rs holds \"gone\" 0 times, not once\n\
+         1 of 2 plants apply\n"
+    );
+}
+
+#[test]
+fn a_name_the_kit_lists_that_no_plant_has_is_a_data_error_that_names_it() {
+    let (_folder, context) = checkout_with("known_unapplied = [\"demo: three\"]\n");
+    let (status, _) = command(&context, "demo --check");
+    let Err(Failure::Plants(error)) = status else {
+        panic!("{status:?}");
+    };
+    assert!(
+        error
+            .to_string()
+            .ends_with("known_unapplied names `demo: three`, which no plant of the family has"),
         "{error}"
     );
 }

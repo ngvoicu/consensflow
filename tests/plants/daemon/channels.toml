@@ -26,12 +26,10 @@ runs = [
 [[plant.edit]]
 file = "crates/cf-harness/src/opencode/channel/send.rs"
 find = '''
-    let Some(Ok(mut reply)) = timeout.bound(wires.loopback.send(request)).await else {
-        return Ok(uncertain());
+        _ => return Ok(uncertain()),
     };'''
 replace = '''
-    let Some(Ok(mut reply)) = timeout.bound(wires.loopback.send(request)).await else {
-        return Ok(refused("transport".to_owned()));
+        _ => return Ok(refused("transport".to_owned())),
     };'''
 
 [[plant]]

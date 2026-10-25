@@ -53,13 +53,125 @@ pub struct Record {
     pub failed: bool,
     pub quota: Option<Arc<Quota>>,
     pub settlement: Settlement,
-    /// The turn is settled and left background agents or workflows running,
-    /// which its harness says on the record that ends it (Claude Code's counts).
-    /// The window takes input between turns, and an agent's end wakes a turn of
-    /// its own: a task whose turn ended so is not done. Said only when true: no
-    /// reading Node wrote has it.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub agents_pending: bool,
+    /// What the settled turn left running that its harness wakes its agent for as
+    /// each ends: said only for what there is, and no reading Node wrote has it.
+    #[serde(flatten)]
+    pub pending: Pending,
+    /// The monitors among the jobs pending, as the harness's record says them (Claude
+    /// Code's): said only where there are any, and no reading Node wrote has them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub monitors: Vec<Monitor>,
+}
+
+/// A monitor a turn armed that its harness has said no end of: its task's id, what its
+/// agent called it, what it watches, the time of the record of the call that armed it
+/// (milliseconds since the epoch, where the record says one), and the notice of its end
+/// that came with no word of how it ended, where one did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Monitor {
+    pub id: Arc<str>,
+    pub description: Arc<str>,
+    pub source: Source,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub called: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<Notice>,
+}
+
+/// What a monitor watches, as the call that armed it says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Source {
+    /// A command, which a process of the window runs: its call names one, not empty,
+    /// and no other source.
+    Command,
+    /// A socket (`ws`), which no process of the window runs.
+    Socket,
+    /// Neither: no process of the window to look for. Claude Code 2.1.308 refuses such a
+    /// call (its schema takes exactly one of `command` and `ws`), which starts no job, and
+    /// an MCP server's own monitor is armed by no Monitor call: it is the safe reading of a
+    /// call no version this reader knows writes (Calliope on 136a7158).
+    Server,
+}
+
+/// A notice of a monitor's end as the record reports it, not verified: the line in
+/// `<event>` with no status, which is Claude Code's own or a line of the watched
+/// command's that says the same, and the time its record says it came, where it says
+/// one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Notice {
+    pub end: End,
+    pub at: Option<Arc<str>>,
+}
+
+/// How a monitor's notice says it ended, which may be a command's line that says so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum End {
+    /// It says its time ran out (`[Monitor expired after …]`, `[Monitor timed out …]`).
+    Expired,
+    /// It says it was stopped (`[Monitor stopped]`, `[Monitor stopped — too much output
+    /// …]`).
+    Stopped,
+    /// It says its socket closed (`[WebSocket closed: …]`).
+    Closed,
+}
+
+/// What a turn left running that its harness wakes its agent for as each ends (Claude
+/// Code does). The window takes input between turns, and the end of one wakes a turn of
+/// its own: a task whose turn ended so is not done. The jobs are known of a turn still
+/// under way too; the agents only of a turn that is over.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pending {
+    /// The background agents and workflows, as the harness counts them on the record
+    /// that ends the turn, and again on the record of each turn after it: what it says
+    /// last is how many run. Said as `agentsPending: true` where there are any, as it
+    /// was before the count was kept.
+    #[serde(
+        rename = "agentsPending",
+        serialize_with = "any",
+        skip_serializing_if = "is_none"
+    )]
+    pub agents: usize,
+    /// The jobs a tool call started in the background (a command, a monitor) and the
+    /// harness has said no end of, as the reader counts them from the records that
+    /// start and end each (`claude::record::jobs`).
+    #[serde(rename = "jobsPending", skip_serializing_if = "is_none")]
+    pub jobs: usize,
+    /// The jobs of a process ConsensFlow saw gone before it opened the conversation
+    /// again, of which no end was said: no longer waited on, and not known to have
+    /// ended (a job its shell detached can outlive its window).
+    #[serde(rename = "jobsRetired", skip_serializing_if = "is_none")]
+    pub retired: usize,
+    /// The monitors among the jobs that said they ended ([`Notice`]): pending all the same,
+    /// as a line of a watched command's could say it. Where the notice is Claude Code's
+    /// the monitor is over in Claude Code and wakes its agent no more (T-181); where it is
+    /// a command's line, the monitor watches on. What runs in the window tells which of a
+    /// command's ([`Record::monitors`] says which watch one).
+    #[serde(rename = "monitorsNoticed", skip_serializing_if = "is_none")]
+    pub noticed: usize,
+}
+
+impl Pending {
+    /// How many it waits on, of agents and jobs: what keeps a task working.
+    pub fn total(self) -> usize {
+        self.agents.saturating_add(self.jobs)
+    }
+}
+
+/// Whether a count is none, for a reading that leaves a count of none unsaid.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_none(count: &usize) -> bool {
+    *count == 0
+}
+
+/// A count said as whether there are any.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn any<S: Serializer>(count: &usize, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_bool(*count > 0)
 }
 
 impl Record {
@@ -72,7 +184,8 @@ impl Record {
             failed: false,
             quota: None,
             settlement: Settlement::Unknown,
-            agents_pending: false,
+            pending: Pending::default(),
+            monitors: Vec::new(),
         }
     }
 }
@@ -239,6 +352,31 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&Reading::Known(record)).unwrap(),
             r#"{"items":[{"id":"msg_1","role":"assistant","text":"Done.","complete":true,"at":"2026-09-06T17:27:06.000Z"},{"id":"msg_2","role":"assistant","text":"Reading the diff","complete":false,"commentary":true},{"id":"u_1","role":"user","text":"Summary","complete":true}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"in-flight"}}"#
+        );
+        // What a settled turn left running is said only where there is some: agents as
+        // they always were, the jobs, the retired jobs and the monitors noticed by their
+        // counts, and the monitors.
+        let mut pending = Record::new();
+        pending.pending = Pending {
+            agents: 2,
+            jobs: 1,
+            retired: 3,
+            noticed: 1,
+        };
+        pending.monitors = vec![Monitor {
+            id: Arc::from("b615qv2gd"),
+            description: Arc::from("ticks"),
+            source: Source::Command,
+            called: None,
+            notice: Some(Notice {
+                end: End::Expired,
+                at: Some(Arc::from("2026-10-21T23:03:10.329Z")),
+            }),
+        }];
+        let written = serde_json::to_string(&Reading::Known(pending)).unwrap();
+        assert!(
+            written.ends_with(r#""agentsPending":true,"jobsPending":1,"jobsRetired":3,"monitorsNoticed":1,"monitors":[{"id":"b615qv2gd","description":"ticks","source":"command","notice":{"end":"expired","at":"2026-10-21T23:03:10.329Z"}}]}"#),
+            "{written}"
         );
         assert_eq!(
             serde_json::to_string(&Reading::unreadable("no codex rollout for s")).unwrap(),

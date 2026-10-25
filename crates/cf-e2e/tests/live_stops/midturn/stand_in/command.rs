@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use cf_e2e::live::members::Account;
 
 use super::super::begin::{begin, Begun};
+use super::super::judge::lane_went_working_then_closed;
 use super::super::tool::{self, Command};
 use super::super::{stop_it, Hold};
 use super::{context, project, WORK};
@@ -178,11 +179,9 @@ fn a_member_whose_turn_goes_on_while_its_command_runs_is_a_stop_the_case_fails_a
         "{said}"
     );
     // The window that did not stop was closed after its third round (whether the notes
-    // that say so had landed by the end of the watch is the host's grace's).
-    assert!(
-        said.contains("     the lane over the stop: working at +0.0 s, closed at +"),
-        "{said}"
-    );
+    // that say so had landed by the end of the watch is the host's grace's). It was
+    // working at the first look at the lane, whenever that came.
+    assert!(lane_went_working_then_closed(&said), "{said}");
     // At each of the three looks the command is there.
     assert_eq!(
         said.matches("the host's tree still has the command (")

@@ -127,10 +127,20 @@ pub struct Activity {
     pub reason: Option<String>,
 }
 
+/// A lane of the board: whose, and what its window does as the board reads it
+/// (`starting`, `working`, `idle`, `waiting`…).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Lane {
+    pub handle: String,
+    pub state: String,
+}
+
 /// The windows of the run as the look found them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Windows {
     pub open: Vec<OpenWindow>,
+    /// Every lane of the board that reads a state, open window or none.
+    pub lanes: Vec<Lane>,
     /// Every window that exited since the app last started.
     pub exits: Vec<Exit>,
     pub strangers: Vec<Stranger>,
@@ -154,6 +164,9 @@ pub struct Look {
     /// How far the run read each record it reads ([`Reading`]), by the conversation's
     /// row. A record the look holds with none was read at the look.
     pub readings: BTreeMap<i64, Reading>,
+    /// The pane host's process as of the look (a restart of the app starts another), where
+    /// the app runs: what a stalled window's evidence samples beside its program.
+    pub host: Option<u32>,
 }
 
 /// How far the run read a conversation's own record: when its last reading that held

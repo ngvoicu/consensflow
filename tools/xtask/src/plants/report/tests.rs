@@ -1,15 +1,8 @@
 use super::*;
-use crate::plants::runs::Ran;
 
-/// What a run that wrote `output` caught.
-fn caught(output: &str) -> Vec<String> {
-    Ran {
-        command: vec!["cargo".into(), "test".into()],
-        code: Some(101),
-        hung: false,
-        output: output.to_owned(),
-    }
-    .caught()
+/// The tests a run said failed, by their names.
+fn caught(names: &[&str]) -> Vec<String> {
+    names.iter().map(|name| (*name).to_owned()).collect()
 }
 
 #[test]
@@ -31,47 +24,102 @@ fn the_line_of_a_plant_pads_its_verdict_to_sixteen_and_says_the_seconds_and_what
         line(Verdict::DoesNotApply, "a", 0, ""),
         "DOES NOT APPLY   a (0 s)"
     );
+    assert_eq!(
+        line(Verdict::NotRun, "a", 2, ""),
+        "NOT RUN          a (2 s)"
+    );
+    assert_eq!(
+        line(Verdict::Unstable, "a", 3, ""),
+        "UNSTABLE         a (3 s)"
+    );
+    assert_eq!(
+        line(Verdict::Broken, "a", 1, ""),
+        "BROKEN           a (1 s)"
+    );
+    assert_eq!(
+        line(Verdict::MissedByMeant, "a", 4, " by m::b, not by c"),
+        "MISSED-BY-MEANT  a (4 s) by m::b, not by c"
+    );
+    assert_eq!(
+        line(Verdict::NotBuilt, "a", 5, ""),
+        "NOT BUILT        a (5 s)"
+    );
+}
+
+#[test]
+fn what_a_playwright_run_ran_and_its_first_failure_are_its_summary_and_its_first_error() {
+    let output = "Running 13 tests using 1 worker\n\n  ✓  1 a.spec.mjs:1:1 › one (5ms)\n\n  1) a.spec.mjs:9:3 › g › two \n\n    Error: expect(received).toBe(expected) // Object.is equality\n\n    Expected: 2\n\n  1 failed\n    a.spec.mjs:9:3 › g › two \n  12 passed (3.1s)\n";
+    assert_eq!(
+        what_ran(output),
+        [
+            "Running 13 tests using 1 worker",
+            "  1 failed",
+            "  12 passed (3.1s)"
+        ]
+    );
+    assert_eq!(
+        first_failure(output).as_deref(),
+        Some("Error: expect(received).toBe(expected) // Object.is equality")
+    );
+    assert_eq!(
+        first_failure("  1) a.spec.mjs:9:3 › g › two \n\n  no error said\n"),
+        None
+    );
 }
 
 #[test]
 fn a_plant_is_said_to_be_caught_by_the_first_test_that_failed_and_how_many_more_did() {
-    let one = caught("test a::b::first ... FAILED\n");
+    let one = caught(&["a::b::first"]);
     assert_eq!(caught_by(&one, "first"), " by a::b::first");
-    let three = caught(
-        "test a::b::first ... FAILED\ntest a::b::second ... FAILED\ntest c::third ... FAILED\n",
-    );
+    let three = caught(&["a::b::first", "a::b::second", "c::third"]);
     assert_eq!(caught_by(&three, "second"), " by a::b::first (+2)");
     assert_eq!(caught_by(&[], "second"), "");
 }
 
 #[test]
 fn a_plant_caught_by_another_test_than_the_one_meant_says_so() {
-    let found = caught("test a::other ... FAILED\n");
+    let found = caught(&["a::other"]);
     assert_eq!(
         caught_by(&found, "the_one_meant"),
         " by a::other, not by the_one_meant"
     );
-    // A Rust test's name is a path that ends with the function, and what a plant says it
-    // is meant for may be the whole function or only its start.
-    for test in ["x::the_one_meant", "x::the_one_meant_and_more"] {
-        let found = caught(&format!("test {test} ... FAILED\n"));
-        assert_eq!(caught_by(&found, "the_one_meant"), format!(" by {test}"));
-    }
     // A test that was meant is among those that failed, not only the first of them.
-    let several = caught("test a::other ... FAILED\ntest b::the_one_meant ... FAILED\n");
+    let several = caught(&["a::other", "b::the_one_meant"]);
     assert_eq!(caught_by(&several, "the_one_meant"), " by a::other (+1)");
 }
 
 #[test]
-fn a_node_test_is_the_one_meant_where_its_name_holds_the_words_it_was_meant_by() {
-    let found = caught("  ✖ it takes a word that is no option (1.2ms)\n");
+fn the_test_meant_is_one_by_its_whole_name_or_the_end_of_its_path() {
+    // A Rust test's name is a path that ends with the function; a Playwright test's, its
+    // groups and its title; a Node test's, its own words.
+    for (name, meant) in [
+        ("x::tests::the_one_meant", "the_one_meant"),
+        ("x::tests::the_one_meant", "tests::the_one_meant"),
+        ("x::tests::the_one_meant", "x::tests::the_one_meant"),
+        ("file drop on a Mac › types the paths", "types the paths"),
+        (
+            "it takes a word that is no option",
+            "it takes a word that is no option",
+        ),
+    ] {
+        assert!(is_meant(name, meant), "{name} is {meant}");
+    }
+    // Words that a name holds, at its start, its end or in it, are not enough.
+    for (name, meant) in [
+        ("x::not_the_one_meant", "the_one_meant"),
+        ("x::the_one_meant_and_more", "the_one_meant"),
+        ("x::the_one_meant::inner", "the_one_meant"),
+        ("x::tests::the_one_meant", "s::the_one_meant"),
+        ("file drop on a Mac › types the paths", "the paths"),
+        ("it takes a word that is no option", "takes a word"),
+        ("anything", ""),
+    ] {
+        assert!(!is_meant(name, meant), "{name} is not {meant}");
+    }
+    let found = caught(&["it takes a word that is no option"]);
     assert_eq!(
         caught_by(&found, "takes a word"),
-        " by it takes a word that is no option"
-    );
-    assert_eq!(
-        caught_by(&found, "takes two"),
-        " by it takes a word that is no option, not by takes two"
+        " by it takes a word that is no option, not by takes a word"
     );
 }
 
@@ -139,6 +187,15 @@ fn the_tail_of_a_text_is_its_last_characters_whole() {
 }
 
 #[test]
-fn the_count_says_how_many_of_those_chosen_were_caught() {
-    assert_eq!(totals(14, 15), "14 of 15 plants caught");
+fn the_count_says_how_many_of_those_chosen_were_caught_and_how_many_were_unstable_or_skipped() {
+    assert_eq!(totals(14, 15, 0, 0), "14 of 15 plants caught");
+    assert_eq!(totals(13, 15, 2, 0), "13 of 15 plants caught, 2 unstable");
+    assert_eq!(
+        totals(71, 71, 0, 2),
+        "71 of 71 plants caught, 2 skipped (platform)"
+    );
+    assert_eq!(
+        skipped("a Mac says when", &["macos".into()], "windows"),
+        "SKIPPED (platform) a Mac says when: for macos, and this is windows"
+    );
 }

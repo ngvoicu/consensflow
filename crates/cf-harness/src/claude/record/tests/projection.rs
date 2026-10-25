@@ -101,7 +101,6 @@ fn noisy(mut record: Value) -> Value {
     add(
         fields,
         &[
-            "toolUseResult",
             "wireToolInputs",
             "snapshot",
             "rendered",
@@ -111,7 +110,6 @@ fn noisy(mut record: Value) -> Value {
             "session_id",
             "promptId",
             "sourceToolAssistantUUID",
-            "origin",
             "leafUuid",
         ],
     );
@@ -158,6 +156,7 @@ fn variant(projected: &Projected) -> &'static str {
     match projected {
         Projected::Other => "other",
         Projected::Hook(_) => "hook",
+        Projected::Notified(..) => "notified",
         Projected::Enqueue(_) => "enqueue",
         Projected::Dequeue => "dequeue",
         Projected::PopAll(_) => "popAll",
@@ -201,6 +200,7 @@ fn made() -> Vec<Value> {
         ),
         closed("c1", "u1"),
         attachment("at1", "u1"),
+        brought_in(),
         queue("enqueue", json!("later")),
         queue("dequeue", Value::Null),
         queue("popAll", json!("later")),
@@ -216,6 +216,18 @@ fn made() -> Vec<Value> {
 
 fn output_of_clear() -> Value {
     output("u1")
+}
+
+/// Claude Code's notification of a job's end, brought into a turn under way.
+pub(super) fn brought_in() -> Value {
+    of_session(json!({
+        "type": "attachment", "isSidechain": false, "uuid": "n1", "parentUuid": "a1",
+        "timestamp": "2026-10-21T10:00:00.000Z",
+        "attachment": {
+            "type": "queued_command", "commandMode": "task-notification",
+            "prompt": "<task-notification>\n<task-id>j1</task-id>\n<status>completed</status>\n</task-notification>",
+        },
+    }))
 }
 
 /// Claude Code's own record of an interrupt.
@@ -260,6 +272,7 @@ fn what_nothing_reads_of_a_record_changes_neither_how_it_waits_nor_the_reading()
     let every = [
         "other",
         "hook",
+        "notified",
         "enqueue",
         "dequeue",
         "popAll",
@@ -277,6 +290,30 @@ fn what_nothing_reads_of_a_record_changes_neither_how_it_waits_nor_the_reading()
     // And the noise is no small one.
     let size = |record: &Value| record.to_string().len();
     assert!(size(&noisy(answer("a1", "u1"))) > 20 * size(&answer("a1", "u1")));
+}
+
+#[test]
+fn the_records_claude_code_writes_of_a_request_are_no_item_of_the_conversation() {
+    // Claude Code 2.1.303 echoes the request it sent, the prompt as the user's message
+    // in it (the long run's chief on the Mac, 2026-10-19; made-up words here): the
+    // conversation's items are the same with them or without, and they begin no turn.
+    let prompt = "[ConsensFlow m-13 · note from @human]\nGo on.";
+    let echoes = [
+        of_session(json!({ "type": "api-request-blob", "hash": "h1",
+            "message": { "role": "user", "content": prompt } })),
+        of_session(json!({ "type": "api-request",
+            "message": { "role": "user", "content": [text(json!(prompt))] } })),
+    ];
+    for echo in &echoes {
+        assert_eq!(projected(echo, SESSION), Projected::Other, "{echo}");
+    }
+    let turn = [
+        user("u1", Value::Null, json!(prompt)),
+        answer("a1", "u1"),
+        duration("d1", "a1"),
+    ];
+    let echoed: Vec<Value> = turn.iter().chain(&echoes).cloned().collect();
+    assert_eq!(once(&echoed), once(&turn));
 }
 
 #[test]
@@ -324,7 +361,7 @@ fn a_record_waits_as_little_as_its_reading_asks_of_it() {
     // What it holds of what it says: the uuid of the boundary and whether it
     // says agents run (a `turn_duration` does, by its counts; a summary does
     // not), the text of a result.
-    let boundary = |uuid: &str, agents: Option<bool>| {
+    let boundary = |uuid: &str, agents: Option<usize>| {
         Projected::Boundary(project::Boundary {
             uuid: Some(Arc::from(uuid)),
             agents,
@@ -332,14 +369,14 @@ fn a_record_waits_as_little_as_its_reading_asks_of_it() {
     };
     assert_eq!(
         projected(&duration("d1", "a1"), SESSION),
-        boundary("d1", Some(false))
+        boundary("d1", Some(0))
     );
     assert_eq!(
         projected(
             &having(duration("d1", "a1"), json!({ "pendingWorkflowCount": 2 })),
             SESSION
         ),
-        boundary("d1", Some(true))
+        boundary("d1", Some(2))
     );
     assert_eq!(
         projected(&summary("s1", "a1"), SESSION),

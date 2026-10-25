@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
 use cf_harness::opencode::{create_session, Bridge, Channel, Launched, Serve, TIMEOUT_MS};
-use cf_harness::seams::SystemProcesses;
+use cf_harness::seams::{LoopbackPorts, Ports, SystemProcesses};
 use serde_json::{json, Value};
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -22,31 +22,27 @@ use crate::support::{matches, real_folder, run, wires};
 const FAKE: &str = env!("CARGO_BIN_EXE_fake-opencode");
 
 /// What a window's launch gives OpenCode to serve with, as the stand-in takes
-/// it: a free loopback port, the server's arguments, and a password of its own
-/// that the channel asks it with; the folder the window works in; and the
-/// stand-in's environment, which tells it how to behave and where to leave
-/// what it saw.
-struct Setup {
+/// it: a free loopback port (the seam's, as a window's launch has it), the
+/// server's arguments, and a password of its own that the channel asks it
+/// with; the folder the window works in; and the stand-in's environment, which
+/// tells it how to behave and where to leave what it saw.
+pub(super) struct Setup {
     /// Where the stand-in leaves what it saw.
-    dir: TempDir,
+    pub(super) dir: TempDir,
     /// The folder the window works in, as the system names it.
     folder: String,
     _workspace: TempDir,
-    port: u16,
+    pub(super) port: u16,
     launched: Launched,
-    env: Env,
+    pub(super) env: Env,
 }
 
 impl Setup {
     /// A setup whose stand-in behaves as `mode` says.
-    fn new(mode: &str) -> Self {
+    pub(super) fn new(mode: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
-        let port = TcpListener::bind(("127.0.0.1", 0))
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        let port = LoopbackPorts.free_loopback().unwrap();
         let password = Uuid::new_v4().simple().to_string();
         let state = dir.path().join("state");
         Self {
@@ -82,7 +78,11 @@ impl Setup {
 
     /// A session made in the folder by `executable`, within `timeout_ms` (a
     /// window's, where there is none).
-    async fn create(&self, executable: &str, timeout_ms: Option<i64>) -> Result<String, String> {
+    pub(super) async fn create(
+        &self,
+        executable: &str,
+        timeout_ms: Option<i64>,
+    ) -> Result<String, String> {
         let processes = SystemProcesses::new(Env::from_process());
         let serve = Serve {
             executable,

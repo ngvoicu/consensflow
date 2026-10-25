@@ -44,6 +44,6 @@ meant = "a_transcript_says_nothing_of_any_answer_whether_it_prints_the_thread_or
 runs = ["board-get"]
 
 [[plant.edit]]
-file = "crates/cf/src/board/task.rs"
-find = 'let transcript = format!("/api/tasks/{number}/transcript?last={last}");'
-replace = 'let transcript = format!("/api/tasks/{number}/transcript?last=10");'
+file = "crates/cf/src/board/transcript.rs"
+find = 'Asked::Last(last) => format!("/api/tasks/{number}/transcript?last={last}"),'
+replace = 'Asked::Last(_) => format!("/api/tasks/{number}/transcript?last=10"),'

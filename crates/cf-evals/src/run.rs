@@ -119,7 +119,11 @@ fn start(plan: &Plan, floor: &mut Floor, workspace: &Path) -> Result<Rig> {
         .claude
         .clone()
         .unwrap_or_else(|| plan.machine.bin().join("claude"));
-    let rig = Rig::start(plan.machine.rig(&options.crew(), plan.chief, &stand_in))?;
+    let rig = Rig::start(
+        plan.machine
+            .rig(&options.crew(), plan.chief, &stand_in)
+            .case("an eval run"),
+    )?;
     floor.say(format!("daemon: {}", daemon_of(&rig)))?;
     if options.in_run("claude") {
         trust(plan.machine, &rig, workspace, floor)?;

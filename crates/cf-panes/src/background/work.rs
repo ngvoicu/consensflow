@@ -36,6 +36,11 @@
 //!   ends is what a shell that still runs started: a command the shell tool of the
 //!   harness is still waiting for when the turn ends, or one the harness runs in the
 //!   background for its agent and keeps the shell of.
+//! - On Windows a program of Git Bash's own kind that a script started (`sleep`, `grep`) names
+//!   a parent that has gone, a forked copy of the shell, so the walk up from it stops there:
+//!   the reader of the job's members gives it the parent `ps -W` of Git Bash says
+//!   ([`crate::cygwin`]). Where the script itself has ended before the look (a harness ended it
+//!   by its number), its command's shell has ended, and it is left as above.
 //! - `cmd.exe` is no shell here. npm installs every server it runs on Windows
 //!   behind a `cmd.exe /c npx …`, which the harness starts as it does the agent's
 //!   command, and what the agent runs through `cmd /c` is left running with it.

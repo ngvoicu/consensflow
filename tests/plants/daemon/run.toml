@@ -68,6 +68,74 @@ find = '''
 replace = "        pending.replace(true);"
 
 [[plant]]
+name = "throttle: every call begins a wait of its own, and the page is told twice"
+meant = "the_page_is_told_the_board_moved_a_hundred_milliseconds_after_the_first_change_and_once"
+runs = ["daemon-lib-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/pass.rs"
+find = '''
+        if pending.replace(true) {
+            return;
+        }'''
+replace = "        pending.replace(true);"
+
+[[plant]]
+name = "throttle: a later call puts the wait off"
+meant = "the_page_is_told_the_board_moved_a_hundred_milliseconds_after_the_first_change_and_once"
+runs = ["daemon-lib-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/pass.rs"
+find = '''
+    let pending = Rc::new(Cell::new(false));
+    let work = Rc::new(work);'''
+replace = '''
+    let pending = Rc::new(Cell::new(false));
+    let latest = Rc::new(Cell::new(0_u32));
+    let work = Rc::new(work);'''
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/pass.rs"
+find = '''
+        if pending.replace(true) {
+            return;
+        }
+        let (pending, work) = (Rc::clone(&pending), Rc::clone(&work));
+        drop(tokio::task::spawn_local(async move {
+            sleep(wait).await;
+            pending.set(false);
+            work();
+        }));'''
+replace = '''
+        let call = latest.get() + 1;
+        latest.set(call);
+        let (latest, pending, work) = (Rc::clone(&latest), Rc::clone(&pending), Rc::clone(&work));
+        drop(tokio::task::spawn_local(async move {
+            sleep(wait).await;
+            if latest.get() == call {
+                pending.set(false);
+                work();
+            }
+        }));'''
+
+[[plant]]
+name = "start: the page is told at once of each change"
+meant = "the_page_is_told_the_board_moved_a_hundred_milliseconds_after_the_first_change_and_once"
+runs = ["daemon-lib-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '''
+        dispatcher.on_change(throttle(STATE_EVENT, move || {
+            bridge.event("state.changed", json!({ "reason": "core" }));
+        }));'''
+replace = '''
+        dispatcher.on_change(Rc::new(move || {
+            bridge.event("state.changed", json!({ "reason": "core" }));
+        }));'''
+
+[[plant]]
 name = "stop: the last reason wins"
 meant = "the_first_reason_wins_and_the_daemon_stops_for_that_one_alone"
 runs = ["daemon-lib-stop"]

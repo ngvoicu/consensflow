@@ -26,6 +26,7 @@ fn chosen(identity: Identity) -> Running {
         identity,
         ppid: std::process::id(),
         command: "waiting".to_owned(),
+        exe: None,
     }
 }
 

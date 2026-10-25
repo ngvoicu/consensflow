@@ -17,6 +17,8 @@ mod deleting;
 mod headings;
 #[path = "whole_history/healing.rs"]
 mod healing;
+#[path = "whole_history/load.rs"]
+mod load;
 #[path = "whole_history/old_logs.rs"]
 mod old_logs;
 #[path = "whole_history/pages.rs"]

@@ -17,7 +17,7 @@ use crate::model::{
 };
 use crate::queue::{queue, send, Queued, Sent};
 use crate::staff::{
-    continuable_session, has_members_of_tier, nearest_tier, require_free, require_member_row,
+    follow_up_session, has_members_of_tier, nearest_tier, require_free, require_member_row,
     start_session, Giving,
 };
 use crate::store::Store;
@@ -142,7 +142,9 @@ fn distinct(numbers: &[u64], field: &str) -> Result<Vec<i64>, LedgerError> {
 }
 
 /// A task, from the chief or the human. Given `to`, it is queued for that
-/// participant at once (the chief, the human, or the requester itself).
+/// participant at once (the chief, the human, or the requester itself). Given
+/// `after`, it is queued for the session that did that task at once, or, when the
+/// task is still on its work, waits on the board for it to be accepted.
 /// Given a pool and tier instead, it opens for the daemon to assign to a
 /// member of that pool and tier. A task on the board may need other tasks:
 /// it waits until each is accepted. With `before`, tasks still on the board
@@ -178,18 +180,32 @@ pub(crate) fn create_task(
                 403,
             ));
         }
-        // A follow-up on a finished task goes to the session that did it, while
-        // it is still there and free: the one case a coordinator names a window.
-        // A task named for a session is held to the same rule, whether it goes
-        // to the window now or waits on the board for what it needs.
+        // A follow-up goes to the session that did the task followed, while it
+        // is still there: the one case a coordinator names a window. For a task
+        // whose result is in, the session must be free; for one still on its
+        // work, the follow-up waits on the board behind it, T-`after` being one
+        // of the tasks it needs. A task named for a session is held to the free
+        // rule, whether it goes to the window now or waits on the board for what
+        // it needs.
+        let mut behind = None;
         let assignee = match (request.after, &request.to) {
-            (Some(after), _) => Some(continuable_session(store, project_id, after)?),
+            (Some(after), _) => {
+                let follow_up = follow_up_session(store, project_id, after, &blocking)?;
+                if follow_up.behind {
+                    behind = Some(after);
+                }
+                Some(follow_up.session)
+            }
             (None, Some(to)) => {
                 let named = store.participant_by_handle(project_id, to)?;
                 require_free(store, &named, Giving::Task)?;
                 Some(named)
             }
             (None, None) => None,
+        };
+        let needed = match behind {
+            Some(after) if !needed.contains(&after) => [needed.as_slice(), &[after]].concat(),
+            _ => needed.clone(),
         };
         // A tier nobody on the staff holds goes to the nearest one somebody does,
         // the next one up first: light work with only critical members still goes.
@@ -418,6 +434,8 @@ pub(crate) fn assign_task(
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,
+            withdrawn: Vec::new(),
+            landing: Vec::new(),
         })
     })
 }
@@ -452,7 +470,8 @@ pub(crate) fn release_task(
             None => None,
         };
         // One statement: the row is never without an assignee in a working
-        // state. It remembers the member it was taken from (a session's member).
+        // state. It remembers the member it was taken from (a session's member),
+        // and is no pause of its project's suspension now, for a Resume to resume.
         let body = match (&member, &carried) {
             (Some(member), Some(carried)) => format!(
                 "{}{}\n\nReassigned from @{} ({because}); check the working tree for partial changes.",
@@ -463,7 +482,7 @@ pub(crate) fn release_task(
         let at = store.at();
         store.db.execute(
             "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
-           taken_from_id = COALESCE(?, taken_from_id)
+           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0
          WHERE id = ?",
             params![
                 body,
@@ -506,6 +525,34 @@ pub(crate) fn release_task(
                 "T-{number} is back on the board ({because}) and waits for {}.",
                 a_pool(pool, tier)
             ),
+        };
+        // The follow-ups bound to the window that lost the task stay bound to it, which
+        // never finished it: they are named, with what to do.
+        let bound: Vec<String> = match &member {
+            Some(member) => store
+                .db
+                .prepare(
+                    "SELECT t.number FROM task t JOIN task_need n ON n.task_id = t.id
+               WHERE n.needs_id = ? AND t.state IN ('open', 'paused') AND t.assignee_id = ?
+               ORDER BY t.number",
+                )?
+                .query_map(params![task.id, member.id], |row| {
+                    Ok(format!("T-{}", row.get::<_, i64>(0)?))
+                })?
+                .collect::<rusqlite::Result<_>>()?,
+            None => Vec::new(),
+        };
+        let note = match (&member, bound.as_slice()) {
+            (Some(member), [only]) => format!(
+                "{note} {only} stays bound to @{}, which no longer has T-{number}: cancel it, or add it again for a tier with --needs T-{number}.",
+                member.handle
+            ),
+            (Some(member), [_, _, ..]) => format!(
+                "{note} {} stay bound to @{}, which no longer has T-{number}: cancel them, or add them again for a tier with --needs T-{number}.",
+                bound.join(", "),
+                member.handle
+            ),
+            _ => note,
         };
         send(
             store,

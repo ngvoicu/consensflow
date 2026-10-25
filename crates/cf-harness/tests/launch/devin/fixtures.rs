@@ -358,7 +358,8 @@ pub(super) fn settled(session: &str) -> Record {
         failed: false,
         quota: None,
         settlement: Settlement::Settled,
-        agents_pending: false,
+        pending: Default::default(),
+        monitors: Vec::new(),
     }
 }
 

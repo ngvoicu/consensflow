@@ -4,7 +4,8 @@
 //! stops a window owes, the result a decision withdraws before it is pasted
 //! (`queue.rs`), what each kind of word does at the human's gate
 //! (`messages/gate.rs`), the notes of a task's wait that go when it moves on
-//! (`messages/pauses.rs`, `messages/holds.rs`), and what a ledger Node wrote
+//! (`messages/pauses.rs`, `messages/holds.rs`), the pauses a project's
+//! suspension makes and its Resume ends (`suspended.rs`), and what a ledger Node wrote
 //! means to this one (the
 //! rules are the docs of `messages/carrying.rs`, `messages/receipt.rs` and
 //! `tasks/pausing.rs`). Each test is a sequence of what the callers do, on a
@@ -15,16 +16,27 @@
 
 mod answered_again;
 mod approval;
+mod behind_work;
 mod carrying;
+mod continuations;
 mod decided;
 mod doors;
+mod edited_brief;
+mod failed_briefs;
 mod fixture;
 mod gate;
+mod handed;
 mod legacy;
+mod open_questions;
 mod pause_notes;
 mod questions;
+mod queued_tells;
+mod self_steps;
 mod sessions;
+mod suspended;
 mod taken_back;
 mod told;
+mod told_edges;
+mod told_kept;
 mod transfers;
 mod waiting_notes;

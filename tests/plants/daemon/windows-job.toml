@@ -1,0 +1,236 @@
+# On Windows a window's program joined its Job Object only once it ran (`issues/windows-job-
+# object-is-assigned-after-the-start.md`, found in turn-end's round 6, 2026-10-17): portable-pty
+# started it, and the pane host put it in its job after. A launcher (a `.cmd` shim, an npm wrapper)
+# that started a child in that moment left the child outside the job: the job's inventories did not
+# list it, and the close did not end it. The pane host now starts the program itself, on a
+# pseudoconsole of its own, with the job in the program's attributes
+# (`crates/cf-panes/src/pty/conpty.rs`, `PROC_THREAD_ATTRIBUTE_JOB_LIST`): the program is the job's
+# from its first instruction (T-137, 3.0.6).
+#
+# The case is `pty::conpty::tests`, on zeewin: a launcher that starts a PING at once, with a
+# console of its own (`start "" /min`: one started with `/b` shares the window's console, whose own
+# end kills it whatever its job), and waits, its start held five seconds once it has been made (where the host used to put it in
+# its job), and the window's close. The moment the old code left was a few system calls long, where
+# a launcher needs milliseconds to start anything: nothing outside a held moment loses that race,
+# which is why the fix is the start itself and not a faster join. So the plants hold the moment, as
+# the case does, and put the late join after it.
+#
+# Round 2 (the reviews T-167 and T-168): a window that fails as it opens lets go of its output
+# before its console is closed, and the master closes its ends of the pipes before the console
+# (before Windows 11 24H2 a console closed with its output held open and unread waited for ever);
+# an environment value that is not Unicode reaches the program as it is; a library with no
+# pseudoconsole is let go; a NUL in the program's name is refused; an empty environment ends with
+# two NULs. Each has its case in `pty::conpty::tests`.
+#
+# Round 3 (Astraeus's re-check, T-173): a console that inherits its cursor asks where it is
+# as it starts and, before 24H2, reads its input until it is told, so a window closed before
+# its terminal answered waited for ever: the pane host's consoles no longer inherit their
+# cursor, and a pane lets go of its input before its master closes the console. The
+# environment's names are read from portable-pty's own serde form (`serde_support`), so a
+# variable only the builder holds (one the registry gained after the user logged in) with a
+# value that is not Unicode goes too; a form that cannot be read is said once in the pane
+# host's log. A folder with a NUL in its name is refused before the folder is chosen.
+#
+# **Where each is caught.** A plant whose name says `(Windows: zeewin)` is of code only Windows
+# compiles: a Mac runs no test of it, and reads it MISSED. Run them there:
+# `cargo xtask windows --host zeewin -- cargo xtask plants daemon "(Windows: zeewin)"`. The plant
+# whose name says `(a Mac)` is of the audit of who may end a process, which reads the sources of
+# every system and is a module of the macOS process tree: zeewin runs no test of it, and reads it
+# MISSED. Every name holds `windows job`.
+
+[run]
+panes-conpty = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::conpty::"]
+panes-audit = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::audit::"]
+
+[[plant]]
+name = "windows job (Windows: zeewin): the launcher joins its job only once it runs, as portable-pty's start had it"
+meant = "a_child_a_launcher_starts_at_once_is_the_jobs_and_the_close_ends_it"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = "    attributes.jobs(&jobs)?;\n"
+replace = "    let _ = &jobs;\n"
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = '''    std::thread::sleep(HOLD_STARTED.get());
+'''
+replace = '''    std::thread::sleep(HOLD_STARTED.get());
+    // SAFETY: planted: both handles are open.
+    if unsafe {
+        windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(
+            job.handle(),
+            process.as_raw_handle(),
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+'''
+
+[[plant]]
+name = "windows job (Windows: zeewin): the launcher is started in no job"
+meant = "a_child_a_launcher_starts_at_once_is_the_jobs_and_the_close_ends_it"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = "    attributes.jobs(&jobs)?;\n"
+replace = "    let _ = &jobs;\n"
+
+[[plant]]
+name = "windows job (a Mac): the window's own program is ended by a sender the audit does not name"
+meant = "nothing_but_the_bound_sends_a_signal"
+runs = ["panes-audit"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = "TerminateProcess(process.as_raw_handle(), 1)"
+replace = "TerminateProcess(process.as_raw_handle(), 2)"
+
+[[plant]]
+name = "windows job (Windows: zeewin): a window that fails as it opens is ended with its reader held"
+meant = "a_window_whose_exit_watcher_fails_lets_go_of_its_output_before_its_console_is_closed"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = """
+        if let Err(error) = self.watch_exit(&key) {
+            drop(reader);
+"""
+replace = """
+        if let Err(error) = self.watch_exit(&key) {
+"""
+
+[[plant]]
+name = "windows job (Windows: zeewin): the master closes its console before its ends of the pipes, as portable-pty did"
+meant = "a_window_whose_exit_watcher_fails_lets_go_of_its_output_before_its_console_is_closed"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = """
+struct Master {
+    output: Output,
+    input: Mutex<Option<Input>>,
+    size: Mutex<PtySize>,
+    console: Arc<Console>,
+}"""
+replace = """
+struct Master {
+    console: Arc<Console>,
+    output: Output,
+    input: Mutex<Option<Input>>,
+    size: Mutex<PtySize>,
+}"""
+
+[[plant]]
+name = "windows job (Windows: zeewin): a value that is not Unicode is left out of the environment"
+meant = "a_value_that_is_not_unicode_reaches_the_program_as_it_is"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty/environment.rs"
+find = "let Some(value) = command.get_env(name) else {"
+replace = "let Some(value) = command.get_env(name).filter(|value| value.to_str().is_some()) else {"
+
+[[plant]]
+name = "windows job (Windows: zeewin): a library without a pseudoconsole stays loaded"
+meant = "a_library_without_a_pseudoconsole_is_let_go"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = "unsafe { FreeLibrary(module) };"
+replace = "let _ = (module, FreeLibrary);"
+
+[[plant]]
+name = "windows job (Windows: zeewin): a program with a NUL in its name is started"
+meant = "a_program_with_a_nul_in_its_name_is_refused"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = """    whole(named, "program")?;"""
+replace = """    let _ = named;"""
+
+[[plant]]
+name = "windows job (Windows: zeewin): an empty environment ends with one NUL"
+meant = "an_empty_environment_is_two_nuls"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty/environment.rs"
+find = """
+    if block.is_empty() {
+        block.push(0);
+    }
+"""
+replace = """
+"""
+
+[[plant]]
+name = "windows job (Windows: zeewin): the console inherits its cursor, and asks where it is"
+meant = "a_windows_console_does_not_ask_where_the_cursor_is"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = "                PSEUDOCONSOLE_RESIZE_QUIRK | PSEUDOCONSOLE_WIN32_INPUT_MODE,"
+replace = "                1 | PSEUDOCONSOLE_RESIZE_QUIRK | PSEUDOCONSOLE_WIN32_INPUT_MODE,"
+
+[[plant]]
+name = "windows job (Windows: zeewin): a pane closes its console before it lets go of its input"
+meant = "a_window_killed_as_it_opens_lets_go_of_its_input_before_its_console_and_closes_in_its_bound"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = """
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    master: Box<dyn MasterPty + Send>,
+"""
+replace = """
+    master: Box<dyn MasterPty + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+"""
+
+[[plant]]
+name = "windows job (Windows: zeewin): the environment's names are the builder's Unicode ones alone"
+meant = "a_variable_only_the_builder_holds_whose_value_is_not_unicode_is_passed_on"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty/environment.rs"
+find = "    block_of(command, names_of(command))"
+replace = """    block_of(
+        command,
+        Ok(command
+            .iter_full_env_as_str()
+            .map(|(name, _)| OsString::from(name))
+            .collect()),
+    )"""
+
+[[plant]]
+name = "windows job (Windows: zeewin): a form that cannot be read is said each time"
+meant = "a_form_that_cannot_be_read_is_said_once_and_its_unicode_variables_go"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty/environment.rs"
+find = """    if !said.get_or_insert_with(HashSet::new).insert(line.clone()) {
+        return;
+    }"""
+replace = """    said.get_or_insert_with(HashSet::new).insert(line.clone());"""
+
+[[plant]]
+name = "windows job (Windows: zeewin): a folder with a NUL in its name is let through"
+meant = "a_folder_with_a_nul_in_its_name_is_refused"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = """        whole(asked, "folder")?;"""
+replace = """        let _ = asked;"""

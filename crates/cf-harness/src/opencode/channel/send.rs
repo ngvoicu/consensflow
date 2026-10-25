@@ -1,14 +1,14 @@
 //! A message to the window through ConsensFlow's plugin inside its TUI, which
 //! posts it to the conversation the TUI shows. The pane's claim comes first: a
-//! failed claim before the request is known to have sent zero bytes, and
-//! anything after the request started is uncertain, for OpenCode's own record
-//! to decide.
+//! failed claim before the request, or the pane host's no once the request's
+//! connection is up, is known to have sent zero bytes, and anything after the
+//! request started is uncertain, for OpenCode's own record to decide.
 
 use cf_base::js;
 use serde_json::{json, Value};
 
 use super::{json_of, succeeded, Channel, Wires};
-use crate::contract::{Pane, PaneHost};
+use crate::contract::{Pane, PaneHost, NOT_ADMITTED};
 use crate::seams::arm;
 use crate::seams::loopback::{Method, Request};
 use crate::shared::admission::Sent;
@@ -69,10 +69,18 @@ pub async fn send(
         body: Some(js::stringify(&body).into_bytes()),
     };
     // Whether the plugin took it is its own word, in a reply the request's
-    // time bounds; any failure on the way leaves it uncertain.
+    // time bounds; any failure on the way leaves it uncertain, but for the pane
+    // host's no once the request's connection is up, which wrote nothing.
     let timeout = arm(wires.time, DEADLINE_MS.min(left).unsigned_abs());
-    let Some(Ok(mut reply)) = timeout.bound(wires.loopback.send(request)).await else {
-        return Ok(uncertain());
+    let mut reply = match timeout
+        .bound(wires.loopback.hand_over(request, target.host))
+        .await
+    {
+        Some(Ok(reply)) => reply,
+        Some(Err(failed)) if failed == NOT_ADMITTED => {
+            return Ok(claim_refused(&json!({ "cause": failed })));
+        }
+        _ => return Ok(uncertain()),
     };
     let status = reply.status();
     let Some(Ok(bytes)) = timeout.bound(reply.body(usize::MAX)).await else {

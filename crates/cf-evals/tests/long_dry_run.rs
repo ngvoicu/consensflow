@@ -72,12 +72,16 @@ fn stand_in(name: &str) -> PathBuf {
 }
 
 /// The `claude` and the `devin` of the run, in `bin`: the stand-ins, on the folders of
-/// the home they are run on.
-fn write_harnesses(bin: &Path) {
+/// the home they are run on; each Claude window's answers held `held` milliseconds where
+/// it says (the stand-in's `CF_TEST_ANSWER_MS`: its turn reads working that long).
+fn write_harnesses(bin: &Path, held: Option<u64>) {
     // A window given a conversation is the stand-in, on the Claude folder of its home,
     // which accepts each result it is given (a worker is given none); the one the run
     // opens to trust its workspace, given none, a Claude with nothing to ask; and the
     // run asks its version.
+    let hold = held.map_or_else(String::new, |ms| {
+        format!("\x20   CF_TEST_ANSWER_MS={ms}\n\x20   export CF_TEST_ANSWER_MS\n")
+    });
     files::write_executable(
         &bin.join("claude"),
         format!(
@@ -88,6 +92,7 @@ fn write_harnesses(bin: &Path) {
              \x20   CLAUDE_CONFIG_DIR=\"$HOME/.claude\"\n\
              \x20   CF_TEST_ACCEPT_RESULTS=1\n\
              \x20   export CLAUDE_CONFIG_DIR CF_TEST_ACCEPT_RESULTS\n\
+             {hold}\
              \x20   exec '{}' \"$@\" ;;\n\
              esac\n\
              echo 'Welcome back!'\n\
@@ -111,17 +116,17 @@ fn write_harnesses(bin: &Path) {
     .unwrap();
 }
 
-#[test]
-#[ignore = "plays a whole long run against the stand-ins: about fifteen minutes, and nothing spent"]
-fn the_long_run_is_played_against_the_stand_ins_to_its_end_with_every_disruption_and_a_report() {
-    let folder = tempfile::tempdir().unwrap();
+/// `cf-evals long --ask stand-in` with `words` besides, its reports kept in
+/// `<folder>/reports`, on a home of its own in `folder` whose harnesses are the stand-ins,
+/// each Claude window's answers held as `held` says ([`write_harnesses`]).
+fn long_run(folder: &Path, words: &[&str], held: Option<u64>) -> cf_e2e::process::Ran {
     let (home, bin, reports) = (
-        folder.path().join("home"),
-        folder.path().join("bin"),
-        folder.path().join("reports"),
+        folder.join("home"),
+        folder.join("bin"),
+        folder.join("reports"),
     );
     files::make_dir(&home.join(".claude")).unwrap();
-    write_harnesses(&bin);
+    write_harnesses(&bin, held);
     // The person's own cargo, which the run builds the `cf` and the pane host with.
     let real_home = machine::home().unwrap();
     let cargo_home = own_var("CARGO_HOME")
@@ -135,31 +140,8 @@ fn the_long_run_is_played_against_the_stand_ins_to_its_end_with_every_disruption
     .unwrap();
 
     let ran = Run::new(env!("CARGO_BIN_EXE_cf-evals"))
-        .arg("long")
-        .args([
-            "--ask",
-            "stand-in",
-            "--chief",
-            "claude",
-            "--staff",
-            "claude,devin",
-        ])
-        .args([
-            "--model",
-            "fake-chief",
-            "--models",
-            "claude=fake+fake,devin=fake+fake",
-        ])
-        .args([
-            "--switch-to",
-            "claude",
-            "--hours",
-            "0.5",
-            "--every-min",
-            "1.5",
-        ])
-        .args(["--look-sec", "3", "--quiet-min", "1.5", "--wake-min", "5"])
-        .args(["--settle-sec", "5", "--drop-reading-sec", "12"])
+        .args(["long", "--ask", "stand-in"])
+        .args(words)
         .arg("--reports")
         .arg(&reports)
         .inheriting_env()
@@ -172,6 +154,54 @@ fn the_long_run_is_played_against_the_stand_ins_to_its_end_with_every_disruption
         .run()
         .unwrap();
     eprintln!("{ran}");
+    ran
+}
+
+/// The files `folder` keeps, by name.
+fn kept_in(folder: &Path) -> Vec<PathBuf> {
+    let mut kept: Vec<PathBuf> = std::fs::read_dir(folder)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    kept.sort();
+    kept
+}
+
+#[test]
+#[ignore = "plays a whole long run against the stand-ins: about fifteen minutes, and nothing spent"]
+fn the_long_run_is_played_against_the_stand_ins_to_its_end_with_every_disruption_and_a_report() {
+    let folder = tempfile::tempdir().unwrap();
+    let reports = folder.path().join("reports");
+    let ran = long_run(
+        folder.path(),
+        &[
+            "--chief",
+            "claude",
+            "--staff",
+            "claude,devin",
+            "--model",
+            "fake-chief",
+            "--models",
+            "claude=fake+fake,devin=fake+fake",
+            "--switch-to",
+            "claude",
+            "--hours",
+            "0.5",
+            "--every-min",
+            "1.5",
+            "--look-sec",
+            "3",
+            "--quiet-min",
+            "1.5",
+            "--wake-min",
+            "5",
+            "--settle-sec",
+            "5",
+            "--drop-reading-sec",
+            "12",
+        ],
+        None,
+    );
 
     // It ended, with a verdict: 0 if it held, 1 if it did not, and its report said.
     assert!(matches!(ran.code, Some(0 | 1)), "{ran}");
@@ -185,12 +215,9 @@ fn the_long_run_is_played_against_the_stand_ins_to_its_end_with_every_disruption
     );
     assert!(says("  report: ") && says("  timeline: "), "{ran}");
 
-    // It kept one report, as JSON and as Markdown.
-    let mut kept: Vec<PathBuf> = std::fs::read_dir(&reports)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .collect();
-    kept.sort();
+    // It kept one report, as JSON and as Markdown, and no ledger: no window stalled, and
+    // the project reached its end.
+    let kept = kept_in(&reports);
     assert_eq!(kept.len(), 2, "{kept:?}");
     assert!(kept[0]
         .to_string_lossy()
@@ -306,5 +333,180 @@ fn the_long_run_is_played_against_the_stand_ins_to_its_end_with_every_disruption
             !ran.stdout.contains(found["said"].as_str().unwrap()),
             "{found} said: {ran}"
         );
+    }
+}
+
+/// The Mac's 2-hour run of 2026-10-19 in short: the chief reads working for good (here
+/// the stand-in, its first answer held longer than the run), the project never reaches
+/// its end, and the run kept no screen of it. Now its window is kept as a stall (working
+/// for longer than the idle limit) and as it was at the end, with the ledger's last
+/// events, in the local report, and the ledger beside it; the console says none of it.
+///
+/// ```text
+/// cargo test -p cf-evals --test long_dry_run -- --ignored --nocapture held
+/// ```
+#[test]
+#[ignore = "plays a short long run against the stand-ins, its chief held working: about five minutes, and nothing spent"]
+fn a_chief_held_working_past_the_idle_limit_is_kept_with_its_screen_and_the_ledger_beside_the_report(
+) {
+    let folder = tempfile::tempdir().unwrap();
+    let reports = folder.path().join("reports");
+    let ran = long_run(
+        folder.path(),
+        &[
+            "--chief",
+            "claude",
+            "--staff",
+            "claude",
+            "--model",
+            "fake-chief",
+            "--models",
+            "claude=fake+fake",
+            "--quiet",
+            "--hours",
+            "0.06",
+            "--idle-min",
+            "1",
+            "--look-sec",
+            "3",
+            "--settle-sec",
+            "5",
+        ],
+        Some(30 * 60 * 1000),
+    );
+    // Time ran out, the chief at work: a FAIL, the end broken.
+    assert_eq!(ran.code, Some(1), "{ran}");
+    let kept = kept_in(&reports);
+    let names: Vec<String> = kept
+        .iter()
+        .map(|file| file.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    let file = |end: &str| {
+        let at = names
+            .iter()
+            .position(|name| name.ends_with(end))
+            .unwrap_or_else(|| panic!("no file ending {end}: {names:?}"));
+        kept[at].clone()
+    };
+    let base = "-long-chief-claude-staff-claude";
+    // The report, the ledger and, on the Mac, a sample of the chief's program when its stall
+    // was found and once more at the end.
+    let samples = if cfg!(target_os = "macos") { 2 } else { 0 };
+    // And of the pane host beside a sample of a program whose terminal held bytes unread.
+    let hosts = names
+        .iter()
+        .filter(|name| name.ends_with("-host-sample.txt"))
+        .count();
+    assert_eq!(kept.len(), 3 + samples + hosts, "{names:?}");
+    let ledger_file = file(&format!("{base}-ledger.db"));
+    let report: Value =
+        serde_json::from_str(&std::fs::read_to_string(file(&format!("{base}.json"))).unwrap())
+            .unwrap();
+    let markdown = std::fs::read_to_string(file(&format!("{base}.md"))).unwrap();
+    assert_eq!(report["verdict"], "FAIL", "{report}");
+    assert!(
+        report["breaks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|found| found["key"] == "9:end"),
+        "{report}"
+    );
+    // The chief's window, kept as a stall: at work for longer than the minute's limit,
+    // with its last screen and the trace's changes of its state.
+    let stalls = &report["stalls"];
+    let chief = stalls["windows"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no stalls kept: {report}"))
+        .iter()
+        .find(|stall| stall["handle"] == "chief")
+        .unwrap_or_else(|| panic!("no stall of the chief: {stalls}"));
+    assert_eq!(chief["state"], "working", "{chief}");
+    assert!(chief["minutes"].as_i64().unwrap() >= 1, "{chief}");
+    assert!(!chief["screen"].as_array().unwrap().is_empty(), "{chief}");
+    assert!(!chief["events"].as_array().unwrap().is_empty(), "{chief}");
+    assert_eq!(chief["cleared"], Value::Null, "{chief}");
+    // What the system said of its window's processes, when the stall was found and once more
+    // at the end: each process of its tree with its state, and the terminal's unread bytes.
+    let held = chief["held"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no processes kept: {chief}"));
+    assert_eq!(held.len(), 2, "{chief}");
+    for (taken, when) in held.iter().zip(["found", "end"]) {
+        assert_eq!(taken["when"], when, "{taken}");
+        assert!(
+            !taken["processes"].as_array().unwrap().is_empty(),
+            "{taken}"
+        );
+        if cfg!(target_os = "macos") {
+            assert!(taken["unread"]["bytes"].is_u64(), "{taken}");
+            let sample = std::path::PathBuf::from(taken["sample"].as_str().unwrap());
+            assert_eq!(sample, file(&format!("{base}-chief-1-{when}-sample.txt")));
+            assert!(std::fs::metadata(&sample).unwrap().len() > 0, "{taken}");
+            // The pane host is sampled where the chief's terminal held bytes it had not read.
+            let unread = taken["unread"]["bytes"].as_u64().unwrap();
+            if unread > 0 {
+                let host = std::path::PathBuf::from(taken["host"].as_str().unwrap());
+                assert_eq!(
+                    host,
+                    file(&format!("{base}-chief-1-{when}-host-sample.txt"))
+                );
+            } else {
+                assert_eq!(taken["host"], Value::Null, "{taken}");
+            }
+        }
+    }
+    assert!(markdown.contains("processes"), "{markdown}");
+    // And as it was at the end, beside the ledger's last events.
+    let at_the_end = stalls["atTheEnd"].as_array().unwrap();
+    assert!(
+        at_the_end.iter().any(|window| window["handle"] == "chief"
+            && window["state"] == "working"
+            && !window["screen"].as_array().unwrap().is_empty()),
+        "{stalls}"
+    );
+    assert!(!stalls["events"].as_array().unwrap().is_empty(), "{stalls}");
+    // The ledger the app left, whole, beside the report: what the home held.
+    assert_eq!(
+        stalls["ledger"],
+        Value::from(ledger_file.to_string_lossy().into_owned())
+    );
+    let ledger = rusqlite::Connection::open(&ledger_file).unwrap();
+    let events: i64 = ledger
+        .query_row("SELECT count(*) FROM event", [], |row| row.get(0))
+        .unwrap();
+    assert!(events > 0, "the copy holds the ledger's log");
+    assert!(report["timeline"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|moment| moment["kind"] == "stall"));
+    // The records read once more after the close, and said so: each reading held.
+    assert!(
+        report["timeline"].as_array().unwrap().iter().any(|moment| {
+            let text = moment["text"].as_str().unwrap_or_default();
+            moment["kind"] == "run"
+                && text.starts_with("the records were read once more after the close: ")
+                && text.ends_with(", 0 readings failed")
+        }),
+        "{report}"
+    );
+    assert!(markdown.contains("\n## Stalls\n"), "{markdown}");
+    assert!(
+        markdown.contains("\n### The windows at the end\n"),
+        "{markdown}"
+    );
+    // The console says none of it.
+    for part in ["## Stalls", "has read working"] {
+        assert!(!ran.stdout.contains(part), "{part} said: {ran}");
+    }
+    let processes = held
+        .iter()
+        .flat_map(|taken| taken["processes"].as_array().unwrap());
+    for line in chief["screen"].as_array().unwrap().iter().chain(processes) {
+        let line = line.as_str().unwrap().trim();
+        if line.len() > 8 {
+            assert!(!ran.stdout.contains(line), "{line} said: {ran}");
+        }
     }
 }

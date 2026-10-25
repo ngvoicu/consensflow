@@ -7,7 +7,8 @@
 //! The records and the helpers that make them are here; the tests are by what
 //! they look at: the ids and texts of the records (`texts`), what ends a turn
 //! (`boundaries`), the agents a turn left running (`agents`, which departs from
-//! Node's reading), the tool calls and how the items are ordered (`items`),
+//! Node's reading) and the jobs (`jobs`, which Node's never counted), the tool
+//! calls and how the items are ordered (`items`),
 //! the messages queued (`queues`) and a relaunch, which empties the queue
 //! (`restart`), the API's refusals (`refusals`), the output of a `/clear`
 //! (`clear`) and of the other commands typed at the prompt (`commands`), a
@@ -28,8 +29,10 @@ mod commands;
 mod compaction;
 mod companions;
 mod fields;
+mod final_answer;
 mod interrupts;
 mod items;
+mod jobs;
 mod memory;
 mod projection;
 mod queues;
@@ -174,13 +177,25 @@ fn show(reading: &Reading) -> String {
         Settlement::InFlight => "in-flight",
         Settlement::Settled => "settled",
     };
-    let agents = if record.agents_pending {
-        r#","agentsPending":true"#
-    } else {
-        ""
-    };
+    let mut pending = String::new();
+    for (name, count) in [
+        ("agents", record.pending.agents),
+        ("jobs", record.pending.jobs),
+        ("retired", record.pending.retired),
+        ("noticed", record.pending.noticed),
+    ] {
+        if count > 0 {
+            pending.push_str(&format!(r#","{name}":{count}"#));
+        }
+    }
+    if !record.monitors.is_empty() {
+        pending.push_str(&format!(
+            r#","monitors":{}"#,
+            serde_json::to_string(&record.monitors).unwrap()
+        ));
+    }
     format!(
-        r#"{{"items":{},"inFlight":{},"asking":{},"failed":{},"quota":{},"settlement":"{state}"{agents}}}"#,
+        r#"{{"items":{},"inFlight":{},"asking":{},"failed":{},"quota":{},"settlement":"{state}"{pending}}}"#,
         js::stringify(&Value::from(items)),
         record.in_flight,
         record.asking,

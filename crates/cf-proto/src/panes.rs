@@ -20,7 +20,8 @@
 //! harness's it leaves alone, and says nothing of; nor does it end what it cannot
 //! prove the turn's by a chain of processes that run to a shell the harness started.
 //! What it ends it chooses once, when the ending begins, and answers within
-//! [`ENDING_BOUND`].
+//! [`ENDING_BOUND`]. It says too which commands of the window's harness run in its tree
+//! now, where it can tell them (`pane.commands`, answered by [`Background`] or by nothing).
 
 use std::time::Duration;
 
@@ -126,6 +127,68 @@ pub struct Background {
     pub total: usize,
     pub processes: Vec<BackgroundProcess>,
 }
+
+/// `pane.commands`' answer, under `commands`: the commands of the window's harness that
+/// run in its tree now, listed as `pane.background` lists its answer, where the host can
+/// tell them; `null` where it cannot, which is not "none". A command is what the window's
+/// program started in a process group of its own: Claude Code runs each command of its
+/// agent so (a Bash call, a Monitor's, a background job's, in the foreground or not, and
+/// what one `exec`s keeps the group), and its hooks and status line, a moment each; its
+/// MCP servers and helpers stay in the window's group. The host tells them only of a
+/// window whose harness keeps its servers in the window's group ([`Servers::InGroup`]),
+/// on a platform with groups: nowhere else does a group say what a process is. It is
+/// `null` too where a process of the window cannot be read (another user's, as a command
+/// that `exec`s `sudo` becomes), which may be a command: the answer says so then
+/// ([`CommandsAnswer`]). What ran at the rest the request
+/// names (`since`, a number `pane.rest` answered) is left out, and what the host proves
+/// began before the time it names (`after`; the host's clock watch): a server or helper
+/// that left the window's group.
+pub type Commands = Option<Background>;
+
+/// A `pane.commands` request: the pane, the rest whose processes are no command (`since`),
+/// where the daemon names one, and the time before which a process began is no command
+/// (`after`, milliseconds since the epoch), where it names one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CommandsRequest {
+    pub id: String,
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<i64>,
+}
+
+/// `pane.commands`' answer: the commands ([`Commands`]), and, where they are `null`
+/// because a process of the window cannot be read (another user's), `unreadable`, or
+/// because the window's processes kept changing while the host read them, `unsettled`
+/// (Calliope on 136a7158, Astraeus on 02a6cd4f: on a platform that tells them, neither is a
+/// "cannot tell", and a later look may read them all).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandsAnswer {
+    pub commands: Commands,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unreadable: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unsettled: bool,
+}
+
+/// A `pane.rest` request: the pane, and the rests the daemon still names (`keep`), which
+/// the host keeps however many come after them (Astraeus on 136a7158).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RestRequest {
+    pub id: String,
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keep: Vec<u64>,
+}
+
+/// `pane.rest`'s answer, under `rest`: the number the host keeps the window's processes
+/// under, now that the daemon says the window is at rest, for a later `pane.commands` to
+/// name; `null` where it tells no commands of the window.
+pub type Rest = Option<u64>;
 
 /// A `pane.end_background` request: the pane's turn is over and the daemon has
 /// taken its answer for the task's result, so what the turn left running is

@@ -7,7 +7,7 @@
 //!
 //! | `op` | the question | the answer |
 //! |---|---|---|
-//! | `cut_note` | `message` (its id), `tasks` (the numbers of the tasks a member had at work or waiting; none for the chief) | the note that tells a window the human's Resume brings back that its turn was cut, as the window is given it: its header, and the engine's words |
+//! | `cut_note` | `message` (its id), `tasks` (the number of the task a member had at work or waiting, one; none for the chief) | the note that tells a window the human's Resume brings back that its turn was cut, as the window is given it: its header, and the engine's words; an error for several tasks, as a window that held several comes back for none |
 //! | `is_paste_of` | `text` (an item of a harness's record), `message` (an id) | whether the engine takes the item for the paste of that message, which proves it arrived (`delivery_text::is_paste_of`) |
 
 use cf_proto::ledger::MessageView;
@@ -55,12 +55,20 @@ fn cut_note(question: &Value) -> Result<Value, String> {
         .and_then(Value::as_array)
         .map(|tasks| tasks.iter().filter_map(Value::as_i64).collect())
         .unwrap_or_default();
-    let coming = if tasks.is_empty() {
-        Coming::Chief
-    } else {
-        Coming::Member(tasks)
+    let coming = match tasks.as_slice() {
+        [] => Coming::Chief,
+        [task] => Coming::Member {
+            task: *task,
+            paid: None,
+        },
+        _ => {
+            return Err(
+                "a window that held several tasks comes back for none, and is told nothing"
+                    .to_owned(),
+            )
+        }
     };
-    // The note as the ledger writes it: from ConsensFlow, on the member's first task.
+    // The note as the ledger writes it: from ConsensFlow, on the member's task.
     let note = MessageView {
         id,
         project_id: 0,
@@ -94,8 +102,10 @@ mod tests {
         let member = answer(&json!({ "op": "cut_note", "message": 2, "tasks": [1] })).unwrap();
         assert_eq!(
             member,
-            "[ConsensFlow m-2 · T-1 · note from ConsensFlow]\nConsensFlow quit while you were working on T-1. Go on where you stopped."
+            "[ConsensFlow m-2 · T-1 · note from ConsensFlow]\nConsensFlow stopped while you were working on T-1. Go on where you stopped."
         );
+        // A window that held several tasks comes back for none, and is told nothing.
+        assert!(answer(&json!({ "op": "cut_note", "message": 2, "tasks": [1, 2] })).is_err());
         let chief = answer(&json!({ "op": "cut_note", "message": 7 })).unwrap();
         assert_eq!(
             chief,

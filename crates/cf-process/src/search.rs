@@ -14,9 +14,14 @@ use cf_base::env::Env;
 /// (`.JS`, `.PS1`) names nothing a process can start.
 const STARTABLE: [&str; 4] = [".com", ".exe", ".bat", ".cmd"];
 
-/// The names `command` may have on disk: with each startable PATHEXT
-/// extension on Windows, as it is elsewhere.
-fn candidate_names(command: &str, env: &Env) -> Vec<String> {
+/// The extensions of a program Windows starts as it is: `.com` and `.exe`. A script
+/// ([`STARTABLE`]'s other two) is for cmd.exe, which a window or a process that is not a
+/// shell cannot host.
+const PROGRAMS: [&str; 2] = [".com", ".exe"];
+
+/// The names `command` may have on disk: with each PATHEXT extension of
+/// `extensions` on Windows, as it is elsewhere.
+fn candidate_names(command: &str, env: &Env, extensions: &[&str]) -> Vec<String> {
     if !env.on_windows() {
         return vec![command.to_string()];
     }
@@ -28,7 +33,7 @@ fn candidate_names(command: &str, env: &Env) -> Vec<String> {
         )
         .split(';')
         .map(str::to_lowercase)
-        .filter(|extension| STARTABLE.contains(&extension.as_str()))
+        .filter(|extension| extensions.contains(&extension.as_str()))
         .map(|extension| format!("{command}{extension}"))
         .collect()
 }
@@ -38,7 +43,14 @@ fn candidate_names(command: &str, env: &Env) -> Vec<String> {
 /// hold relative folders. Where a program something needs is found (the Node
 /// an npm shim runs on): a daemon's has the system's folders after it.
 pub fn on_path(command: &str, env: &Env) -> Option<PathBuf> {
-    on(command, env.os("PATH"), env)
+    on(command, env.os("PATH"), env, &STARTABLE)
+}
+
+/// [`on_path`] for a program that is run as it is, not through cmd.exe: on Windows a `.exe`
+/// or a `.com`, never a `.cmd` or a `.bat` that PATHEXT lists before them (the Node an npm
+/// shim runs on, which a `node.cmd` first on the PATH is not).
+pub fn on_path_as_program(command: &str, env: &Env) -> Option<PathBuf> {
+    on(command, env.os("PATH"), env, &PROGRAMS)
 }
 
 /// Where `command` resolves on the PATH `env` was given
@@ -46,14 +58,14 @@ pub fn on_path(command: &str, env: &Env) -> Option<PathBuf> {
 /// where a harness's CLI is looked for first, the places under the home and
 /// those folders coming after it (`cf-harness`'s detection, and it alone).
 pub fn on_search_path(command: &str, env: &Env) -> Option<PathBuf> {
-    on(command, env.search_path(), env)
+    on(command, env.search_path(), env, &STARTABLE)
 }
 
 /// Where `command` resolves on `path`, read as the system reads a PATH
 /// (`split_paths`: Windows takes a folder in double quotes whole, `;` and all).
-fn on(command: &str, path: Option<&OsStr>, env: &Env) -> Option<PathBuf> {
+fn on(command: &str, path: Option<&OsStr>, env: &Env, extensions: &[&str]) -> Option<PathBuf> {
     let folders = std::env::split_paths(path?).filter(|folder| !folder.as_os_str().is_empty());
-    find_in(command, folders, env)
+    find(command, folders, env, extensions)
 }
 
 /// The first of `folders` that holds `command` as a file this user can start,
@@ -63,7 +75,17 @@ pub fn find_in(
     folders: impl IntoIterator<Item = PathBuf>,
     env: &Env,
 ) -> Option<PathBuf> {
-    let names = candidate_names(command, env);
+    find(command, folders, env, &STARTABLE)
+}
+
+/// [`find_in`] by the PATHEXT extensions of `extensions` alone.
+fn find(
+    command: &str,
+    folders: impl IntoIterator<Item = PathBuf>,
+    env: &Env,
+    extensions: &[&str],
+) -> Option<PathBuf> {
+    let names = candidate_names(command, env, extensions);
     folders
         .into_iter()
         .flat_map(|folder| names.iter().map(move |name| folder.join(name)))
@@ -103,14 +125,21 @@ mod tests {
     #[test]
     fn looks_as_windows_does_on_windows_or_when_the_environment_says_so() {
         let windows = Env::from_vars([("OS", "Windows_NT"), ("PATHEXT", ".JS;.EXE;.Cmd;.PS1")]);
-        assert_eq!(candidate_names("node", &windows), ["node.exe", "node.cmd"]);
+        assert_eq!(
+            candidate_names("node", &windows, &STARTABLE),
+            ["node.exe", "node.cmd"]
+        );
+        assert_eq!(candidate_names("node", &windows, &PROGRAMS), ["node.exe"]);
         let default = Env::from_vars([("OS", "Windows_NT")]);
         assert_eq!(
-            candidate_names("node", &default),
+            candidate_names("node", &default, &STARTABLE),
             ["node.com", "node.exe", "node.bat", "node.cmd"]
         );
         let empty = Env::from_vars([("OS", "Windows_NT"), ("PATHEXT", "")]);
-        assert_eq!(candidate_names("node", &empty), Vec::<String>::new());
+        assert_eq!(
+            candidate_names("node", &empty, &STARTABLE),
+            Vec::<String>::new()
+        );
     }
 
     #[cfg(unix)]
@@ -129,6 +158,54 @@ mod tests {
         assert_eq!(on_path("node", &env), Some(runs.join("node")));
         assert_eq!(on_path("codex", &env), None);
         assert_eq!(on_path("node", &Env::default()), None);
+    }
+
+    /// A script is startable by PATHEXT and no program of its own: the program an npm shim
+    /// runs on is a `.exe` or a `.com`, whatever a `node.cmd` or `node.bat` before it is
+    /// (the review of 2026-10-21).
+    #[cfg(unix)]
+    #[test]
+    fn a_program_is_found_as_an_exe_or_a_com_and_never_as_a_script_pathext_lists_first() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (scripts, programs) = (dir.path().join("scripts"), dir.path().join("programs"));
+        for (folder, name) in [
+            (&scripts, "node.bat"),
+            (&scripts, "node.cmd"),
+            (&programs, "node.com"),
+            (&programs, "node.exe"),
+        ] {
+            fs::create_dir_all(folder).unwrap();
+            fs::write(folder.join(name), "").unwrap();
+            fs::set_permissions(folder.join(name), fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let windows = |folders: &[&Path]| {
+            let path = std::env::join_paths(folders).unwrap();
+            Env::from_vars([
+                ("OS", "Windows_NT"),
+                ("PATH", path.to_str().unwrap()),
+                ("PATHEXT", ".BAT;.CMD;.EXE;.COM"),
+            ])
+        };
+        let both = windows(&[&scripts, &programs]);
+        assert_eq!(on_path("node", &both), Some(scripts.join("node.bat")));
+        assert_eq!(
+            on_path_as_program("node", &both),
+            Some(programs.join("node.exe"))
+        );
+        // `.com` is a program too, in PATHEXT's order.
+        fs::remove_file(programs.join("node.exe")).unwrap();
+        assert_eq!(
+            on_path_as_program("node", &both),
+            Some(programs.join("node.com"))
+        );
+        assert_eq!(on_path_as_program("node", &windows(&[&scripts])), None);
+        // Elsewhere there is no extension: the name is the program's.
+        let plain = Env::from_vars([("PATH", programs.as_os_str())]);
+        assert_eq!(
+            on_path_as_program("node.com", &plain),
+            Some(programs.join("node.com"))
+        );
     }
 
     /// What a daemon runs has the system's folders after its PATH. A program it
@@ -154,6 +231,10 @@ mod tests {
             .os("PATH")
             .is_some_and(|path| std::env::split_paths(path).any(|folder| folder == homebrew)));
         assert_eq!(on_path("codex", &running), Some(homebrew.join("codex")));
+        assert_eq!(
+            on_path_as_program("codex", &running),
+            Some(homebrew.join("codex"))
+        );
         assert_eq!(on_search_path("codex", &running), None);
     }
 

@@ -30,5 +30,10 @@ thiserror.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 
+# A stalled window's stand-ins: a terminal opened as the pane host opens a window's, which
+# a program writes to and nobody reads, or reads from the background and is stopped by.
+[target.'cfg(unix)'.dev-dependencies]
+portable-pty.workspace = true
+
 [lints]
 workspace = true
