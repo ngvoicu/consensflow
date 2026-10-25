@@ -217,8 +217,18 @@ runs = ["fm-engine-delivered"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "if delivering.chief || (delivering.owed.is_some() && closed_with_project) {"
+find = "if delivering.chief || (once_up && closed_with_project) {"
 replace = "if delivering.chief {"
+
+[[plant]]
+name = "first message: a Close after the hand-over, before its record shows it, fails the brief"
+meant = "a_first_message_handed_over_whose_project_closes_before_its_record_shows_it_is_given_back_and_goes_in_once_after_the_resume"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "let once_up = delivering.owed.is_some() || delivering.late;"
+replace = "let once_up = delivering.owed.is_some();"
 
 [[plant]]
 name = "first message: one owed to a window that ended by itself in an open project is given back"
@@ -227,8 +237,8 @@ runs = ["fm-engine-delivered"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "(delivering.owed.is_some() && closed_with_project)"
-replace = "delivering.owed.is_some()"
+find = "(once_up && closed_with_project)"
+replace = "once_up"
 
 [[plant]]
 name = "first message: a monitor of the turn it begins proves no rest before it"
@@ -242,3 +252,30 @@ find = """
         record.held.borrow_mut().rests.pasted();"""
 replace = """
         // every monitor of that turn will (`deliver`)."""
+
+[[plant]]
+name = "first message: a window still to show it yields the answer before it as the result"
+meant = "a_window_the_resume_reopens_yields_no_result_before_its_continuation_is_in_nor_to_finish"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = """
+        if first_on_its_way(record) {
+            return Ok(Turn::Open);
+        }"""
+replace = ""
+
+[[plant]]
+name = "first message: Finish takes the answer before it from a window still to show it"
+meant = "a_window_the_resume_reopens_yields_no_result_before_its_continuation_is_in_nor_to_finish"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = """
+        if first_on_its_way(record) {
+            return Err(refused("""
+replace = """
+        if first_on_its_way(record) && false {
+            return Err(refused("""

@@ -11,7 +11,7 @@ use std::rc::Rc;
 use cf_engine::delivery_text::marker_of;
 use cf_engine::testing::Context;
 use cf_harness::contract::{FirstMessage, Held, Readiness};
-use cf_harness::records::{End, Monitor, Notice, Pending, Source};
+use cf_harness::records::{End, Monitor, Notice, Pending, Role, Source};
 use cf_proto::trace::{Traced, WindowEvent};
 use serde_json::json;
 
@@ -432,5 +432,106 @@ fn a_monitor_of_the_turn_a_first_message_began_is_left_the_rest_before_the_hand_
         context.background.looked_since(),
         [Some(u64::try_from(rested - 1).unwrap())]
     );
+    context.close();
+}
+
+/// The results of T-1 the ledger holds.
+fn results(context: &Context, project: i64) -> Vec<String> {
+    context
+        .task(project, 1)
+        .messages
+        .into_iter()
+        .filter(|message| message.kind == "result")
+        .map(|message| message.body)
+        .collect()
+}
+
+#[test]
+fn a_window_the_resume_reopens_yields_no_result_before_its_continuation_is_in_nor_to_finish() {
+    // The sweep of T-523 with every window delivered its first message (Calliope's P3-4
+    // on T-432, T-520): the Resume's words to go on are the first message of the window
+    // it opens again on the conversation, handed over once that window is up. Read at
+    // rest before then, its record ended on the answer written before the Close, after
+    // the brief, the latest message delivered: the step and Finish took that answer for
+    // the result (T-405's L10, which the words on the command line had kept away).
+    let context = delivered();
+    context.adapter.resumes_records.set(true);
+    let (project, _brief) = briefed(&context);
+    passes(&context, 3);
+    assert_eq!(context.task(project, 1).task.state, "working");
+    let half = context
+        .adapter
+        .item(Role::Assistant, "The lexer is half done");
+    context.adapter.with("zeus", |agent| {
+        agent.items.push(half);
+        agent.settled = false;
+    });
+    context.close_project(project).unwrap();
+    // The window the Resume opens again is up and at rest, not ready for its words yet.
+    let ready = Rc::new(Cell::new(false));
+    let asked = Rc::clone(&ready);
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        Ok(if asked.get() {
+            Readiness::Ready
+        } else {
+            Readiness::Held(Held::Because("starting".to_owned()))
+        })
+    }));
+    context.resume_project(project).unwrap();
+    context.adapter.with("zeus", |agent| agent.settled = true);
+    passes(&context, 3);
+    assert_eq!(context.task(project, 1).task.state, "working");
+    assert_eq!(
+        results(&context, project),
+        Vec::<String>::new(),
+        "no result yet"
+    );
+    let refused = context.finish_task(project, 1, "chief").unwrap_err();
+    assert!(refused.to_string().contains("first message"), "{refused}");
+
+    ready.set(true);
+    passes(&context, 3);
+    assert_eq!(
+        results(&context, project),
+        Vec::<String>::new(),
+        "nor once it is in"
+    );
+    context.adapter.answer("zeus", "The lexer is done");
+    passes(&context, 3);
+    assert_eq!(context.task(project, 1).task.state, "done");
+    assert_eq!(results(&context, project), ["The lexer is done"]);
+    context.close();
+}
+
+#[test]
+fn a_first_message_handed_over_whose_project_closes_before_its_record_shows_it_is_given_back_and_goes_in_once_after_the_resume(
+) {
+    // The sweep of T-523 (Calliope's P3-4 on T-432, T-520): the Close came a moment after
+    // the brief was pasted, before the window's record had it, and the brief failed its
+    // task, as a launch's brief on the command line did before its record showed it
+    // (T-534, bug 2). Nothing of it reached the conversation the Resume goes on with.
+    let context = delivered();
+    let (project, brief) = briefed(&context);
+    context.pass().unwrap();
+    context.settle();
+    // Zeus's window takes the paste, and its record has not shown it yet.
+    context.adapter.with("zeus", |agent| agent.arrive = false);
+    passes(&context, 1);
+    assert_eq!(times_handed(&context, SEAM, brief), 1);
+    assert_eq!(context.message(brief).state, "delivering");
+    context.close_project(project).unwrap();
+    context.settle();
+    assert_eq!(context.message(brief).state, "queued", "back in its queue");
+    assert_ne!(context.task(project, 1).task.state, "failed");
+    context.adapter.with("zeus", |agent| agent.arrive = true);
+    context.resume_project(project).unwrap();
+    passes(&context, 4);
+    assert_eq!(context.message(brief).state, "delivered");
+    assert_eq!(
+        times_handed(&context, SEAM, brief),
+        2,
+        "once more, after the Resume"
+    );
+    assert_eq!(context.task(project, 1).task.state, "working");
     context.close();
 }
