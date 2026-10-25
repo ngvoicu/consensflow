@@ -528,126 +528,6 @@ async fn a_turn_is_marked_with_how_the_harness_keeps_its_servers_and_which_harne
 }
 
 #[tokio::test]
-async fn an_ending_asks_the_pane_to_end_what_its_turn_left_and_names_no_process_and_says_what_it_answered(
-) {
-    LocalSet::new()
-        .run_until(async {
-            let (daemon, app) = bridge_pair();
-            let seen = Rc::new(RefCell::new(Vec::new()));
-            let asked = Rc::clone(&seen);
-            app.on("pane.end_background", move |_, body| {
-                asked.borrow_mut().push(body);
-                async {
-                    Ok(json!({
-                        "ok": true,
-                        "ended": { "total": 2, "processes": [
-                            { "pid": 4242, "command": "python3 lock.py record" },
-                            { "pid": 4243, "command": "tail -f run.log" },
-                        ] },
-                        "left": { "total": 1, "processes": [{ "pid": 4300, "command": "node server.js" }] },
-                    }))
-                }
-            });
-            let host = host_over(&daemon);
-
-            let ending = host
-                .end(&pane("p1-zeus-amber-pine", 7))
-                .await
-                .expect("the host answered");
-
-            // No process crosses from one look to the next: the host chooses.
-            assert_eq!(
-                *seen.borrow(),
-                [json!({ "id": "p1-zeus-amber-pine", "generation": 7 })]
-            );
-            assert_eq!(ending.ended.total, 2);
-            assert_eq!(ending.ended.processes[1].command, "tail -f run.log");
-            assert_eq!(ending.left.total, 1);
-            assert_eq!(ending.left.processes[0].pid, 4300);
-        })
-        .await;
-}
-
-#[test]
-fn a_host_that_refuses_an_ending_has_ended_nothing_and_one_that_gives_no_answer_has_said_nothing() {
-    let nothing = Some(Ending::default());
-    assert_eq!(
-        ending(Some(
-            json!({ "ok": false, "error": "pane p1 generation 1 is not open" })
-        )),
-        nothing,
-        "a refusal is the host's word that it ended nothing"
-    );
-    assert_eq!(ending(Some(json!({}))), nothing);
-    assert_eq!(
-        ending(Some(json!({ "ok": true, "ended": "all of it" }))),
-        nothing,
-        "an answer that is not one says nothing was ended"
-    );
-    // One that says nothing was ended and nothing is left.
-    assert_eq!(ending(Some(json!({ "ok": true }))), nothing);
-    let said = ending(Some(json!({
-        "ok": true,
-        "ended": { "total": 1, "processes": [{ "pid": 1, "command": "sleep 600" }] },
-    })))
-    .expect("an answer");
-    assert_eq!(said.ended.total, 1);
-    assert_eq!(said.left, cf_proto::panes::Background::default());
-
-    // The host may be ending still, or it went: that is no word that it ended.
-    assert_eq!(ending(None), None, "the bridge went");
-    assert_eq!(
-        ending(Some(json!({ "ok": false, "error": "deadline" }))),
-        None,
-        "the bridge's answer when the host gave none in time"
-    );
-}
-
-#[tokio::test(start_paused = true)]
-async fn an_ending_is_waited_for_past_the_default_wait_and_one_the_host_never_answers_is_no_answer()
-{
-    LocalSet::new()
-        .run_until(async {
-            let (daemon, app) = bridge_pair();
-            let asked = Rc::new(Cell::new(0));
-            let counted = Rc::clone(&asked);
-            app.on("pane.end_background", move |_, _| {
-                counted.set(counted.get() + 1);
-                let first = counted.get() == 1;
-                async move {
-                    if !first {
-                        pending::<()>().await;
-                    }
-                    // Longer than a request that answers at once is given, and within
-                    // the bound the host keeps to.
-                    tokio::time::sleep(Duration::from_secs(35)).await;
-                    Ok(json!({
-                        "ok": true,
-                        "ended": { "total": 1, "processes": [{ "pid": 7, "command": "sleep 600" }] },
-                    }))
-                }
-            });
-            let host = host_over(&daemon);
-            let pane = pane("p1-zeus-amber-pine", 7);
-
-            let started = tokio::time::Instant::now();
-            let ending = host.end(&pane).await.expect("the host answered");
-            assert_eq!(ending.ended.total, 1);
-            assert_eq!(started.elapsed(), Duration::from_secs(35));
-
-            let started = tokio::time::Instant::now();
-            assert_eq!(host.end(&pane).await, None);
-            assert_eq!(
-                started.elapsed(),
-                END_DEADLINE,
-                "the bound the host keeps to, and a margin"
-            );
-            assert_eq!(asked.get(), 2);
-        })
-        .await;
-}
-
-#[tokio::test]
 async fn an_exit_that_panics_is_written_down_and_the_bridge_goes_on() {
     LocalSet::new()
         .run_until(async {
@@ -668,6 +548,99 @@ async fn an_exit_that_panics_is_written_down_and_the_bridge_goes_on() {
             let log = std::fs::read_to_string(home.path().join("daemon.log")).unwrap();
             assert!(log.contains("error a window's exit failed"), "{log}");
             assert!(log.contains("panic: a bug in an exit"), "{log}");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_look_at_a_windows_commands_is_asked_with_the_rest_it_names_and_its_answer_read() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let heard = Rc::clone(&seen);
+            let answers = Rc::new(RefCell::new(vec![
+                json!({ "ok": true, "commands": { "total": 3, "processes": [] } }),
+                json!({ "ok": true, "commands": null }),
+                json!({ "ok": true, "commands": null, "unreadable": true }),
+                json!({ "ok": true, "commands": null, "unsettled": true }),
+                json!({ "ok": true }),
+                json!({ "ok": true, "commands": "three" }),
+            ]));
+            let next = Rc::clone(&answers);
+            app.on("pane.commands", move |_, body| {
+                heard.borrow_mut().push(body);
+                let answer = next.borrow_mut().remove(0);
+                async move { Ok(answer) }
+            });
+            let rested = Rc::new(RefCell::new(Vec::new()));
+            let asked = Rc::clone(&rested);
+            app.on("pane.rest", move |_, body| {
+                asked.borrow_mut().push(body);
+                async { Ok(json!({ "ok": true, "rest": 7 })) }
+            });
+            let host = host_over(&daemon);
+            let at = pane("p1-zeus", 2);
+            // So many run; the host cannot tell them (null); and what is no answer.
+            assert_eq!(
+                host.commands(&at, Some(7), Some(1_000)).await,
+                CommandsSeen::Running(3)
+            );
+            assert_eq!(host.commands(&at, None, None).await, CommandsSeen::Untold);
+            assert_eq!(
+                host.commands(&at, None, None).await,
+                CommandsSeen::Unreadable
+            );
+            assert_eq!(
+                host.commands(&at, None, None).await,
+                CommandsSeen::Unsettled
+            );
+            assert_eq!(
+                host.commands(&at, None, None).await,
+                CommandsSeen::Unanswered
+            );
+            assert_eq!(
+                host.commands(&at, None, None).await,
+                CommandsSeen::Unanswered
+            );
+            assert_eq!(
+                serde_json::to_string(&seen.borrow()[0]).unwrap(),
+                r#"{"id":"p1-zeus","generation":2,"since":7,"after":1000}"#
+            );
+            assert_eq!(
+                serde_json::to_string(&seen.borrow()[1]).unwrap(),
+                r#"{"id":"p1-zeus","generation":2}"#
+            );
+            assert_eq!(host.rest(&at, &[2, 5]).await, Some(7));
+            assert_eq!(host.rest(&at, &[]).await, Some(7));
+            assert_eq!(
+                serde_json::to_string(&rested.borrow()[0]).unwrap(),
+                r#"{"id":"p1-zeus","generation":2,"keep":[2,5]}"#
+            );
+            assert_eq!(
+                serde_json::to_string(&rested.borrow()[1]).unwrap(),
+                r#"{"id":"p1-zeus","generation":2}"#
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_look_at_a_windows_commands_that_no_host_answers_is_unanswered_and_keeps_no_rest() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            app.on("pane.commands", |_, _| async {
+                Err::<serde_json::Value, String>("no such pane".to_owned())
+            });
+            let host = host_over(&daemon);
+            let at = pane("p1-zeus", 2);
+            assert_eq!(
+                host.commands(&at, None, None).await,
+                CommandsSeen::Unanswered
+            );
+            // A host that knows no `pane.rest` keeps none.
+            assert_eq!(host.rest(&at, &[]).await, None);
         })
         .await;
 }

@@ -1,6 +1,7 @@
 //! What a handler of the agents' API is given. **Frozen**: one type, the
 //! options Node's API was started with and the daemon's log and trace beside
-//! them.
+//! them, and the engine's one answer (`finish`), a move of a task that Node's
+//! API had no twin of, which only the engine can make: it reads the window.
 //!
 //! Everything in it is shared, and the daemon runs on one thread: a handler
 //! borrows the ledger for one call at a time and never across a wait, copying
@@ -13,6 +14,8 @@ use std::rc::Rc;
 
 use cf_base::refusal::Refusal;
 use cf_catalog::AgentRow;
+use cf_engine::Finished;
+use cf_harness::contract::Work;
 use cf_ledger::Ledger;
 use tokio::sync::watch;
 
@@ -67,6 +70,13 @@ impl Default for Closing {
     }
 }
 
+/// What the API asks of the engine for the one move of a task that is its own to make:
+/// `finish(project, number, by)`, which `by` (the chief's handle) asks so that what the
+/// worker of a working task said last is its result, ending nothing. The engine reads the
+/// window and answers with the task done and the jobs and agents its harness still
+/// counted ([`Finished`]), or with why it is refused.
+pub type Finishing = dyn Fn(i64, i64, String) -> Work<'static, Result<Finished, Refusal>>;
+
 /// What every handler of the agents' API is given.
 pub struct Context {
     /// The board's record: `borrow()` to read, `borrow_mut()` to write, for
@@ -78,6 +88,8 @@ pub struct Context {
     /// Wakes the dispatcher (`changed`): every write calls it once it is
     /// done. It only schedules a pass; none runs inside it.
     pub kick: Rc<dyn Fn()>,
+    /// What the engine makes of a task the chief asks to finish ([`Finishing`]).
+    pub finish: Rc<Finishing>,
     pub closing: Closing,
     pub roster: Rc<dyn AgentRows>,
     pub log: Rc<Log>,

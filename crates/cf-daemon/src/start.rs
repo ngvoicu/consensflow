@@ -216,6 +216,11 @@ async fn run(
         },
     )?;
     let ledger = Rc::new(RefCell::new(ledger));
+    // A wait the environment cut (a test's) is in the log: one left in a shell is seen there.
+    let limits = Limits::of(&env);
+    if let Some(cut) = limits.cut_by_the_environment() {
+        log.info(&cut);
+    }
     // No window survives a restart: what every launch left in the home goes.
     let swept = cf_harness::sweep_launches(&home.to_string_lossy())
         .map_err(|failed| StartError::System(failed.to_string()))?;
@@ -272,10 +277,13 @@ async fn run(
             }
         })
     };
+    // The engine is built after the API, so what the API asks of it waits for it.
+    let engine: Rc<OnceCell<Rc<Dispatcher>>> = Rc::new(OnceCell::new());
     let context = Rc::new(Context {
         ledger: Rc::clone(&ledger),
         credentials: Rc::clone(&credentials),
         kick: Rc::clone(&kick),
+        finish: finishing::of(&engine, &spawn),
         closing: crate::api::context::Closing::new(),
         roster: Rc::clone(&agents) as Rc<dyn crate::api::context::AgentRows>,
         log: Rc::clone(&log),
@@ -365,9 +373,11 @@ async fn run(
         log: Rc::clone(&log) as _,
         launch_files: Rc::new(LaunchFolders::new(home.clone(), Rc::clone(&errors))),
         spawn: Rc::clone(&spawn) as _,
-        limits: Limits::of(&env),
+        limits,
     };
     let dispatcher = Dispatcher::new(seams);
+    // Set once, here: nothing asked of the engine before this has been given it.
+    let _ = engine.set(Rc::clone(&dispatcher));
 
     // The stop is armed before the handle line: whatever the app does once it
     // has read it finds a daemon that can stop. Every trigger trips the one
@@ -487,6 +497,8 @@ async fn run(
         },
     })
 }
+
+mod finishing;
 
 #[cfg(test)]
 mod tests;

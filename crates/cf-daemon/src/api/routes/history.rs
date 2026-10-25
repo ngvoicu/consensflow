@@ -9,6 +9,7 @@ use cf_ledger::{LedgerError, MessageView};
 
 use super::{Answer, Caller, Context, Failure, Request};
 use crate::api::views::value;
+use crate::api::waits::Waits;
 
 /// The largest whole number a page may be and still be written down as it
 /// was asked for: a double holds no more exactly.
@@ -33,10 +34,14 @@ pub(super) async fn handle(
     let tools = request.param("tools") == Some("1");
     let project = caller.project.id;
     let history = context.ledger.borrow().chief_history(project)?;
-    // A line may name any number: only this project's messages are read out.
+    // A line may name any number: only this project's messages are read out, and
+    // of one that waits for the Resume, none of its text ([`Waits`]).
+    let waits = Waits::now(context, caller)?;
     let message = |id: i64| -> Result<Option<MessageView>, Refusal> {
         let found = context.ledger.borrow().message(id).map_err(refused)?;
-        Ok(found.filter(|found| found.project_id == project))
+        Ok(found
+            .filter(|found| found.project_id == project)
+            .map(|found| waits.shown(found)))
     };
     let shown = history_page(&history, &message, page, find, tools)?;
     context

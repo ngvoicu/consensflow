@@ -12,8 +12,8 @@
 //! came late, the daemon took the paste for lost and pasted it again, and Devin, holding
 //! both, gave the copy to its agent with what came next. If that machine ran 3.0.3, this
 //! is that bug. 3.0.4 left one shape of it, the third case below: a turn whose agent says
-//! nothing for longer than the 30 s the daemon reads it busy and the daemon's minute after
-//! them. A Devin resumed after a cut sat so in the live probe of B1 of the same report
+//! nothing for longer than the 30 s the daemon reads it busy and the daemon's arrival window
+//! (a minute) after them. A Devin resumed after a cut sat so in the live probe of B1 of the same report
 //! (the Mac, 3000.11.92), and the windows of that machine had closed in the middle of their
 //! tasks (B2).
 //!
@@ -24,38 +24,39 @@
 //! turn into its queue and writes its row when it runs it, and whose turns take a model's
 //! time: to the agent's first word (in which the wire shows none of the turn's work) and
 //! then the work. Its first word here comes 40 s after the prompt, past the 30 s the daemon
-//! reads a Devin window busy from its prompt, and the work takes 70 s more: a result pasted
+//! reads a Devin window busy from its prompt, and the work takes 25 s more: a result pasted
 //! in the silence goes into a turn that has begun, and Devin's record shows it when that
-//! turn ends, some 80 s after the paste, past the daemon's minute. The workers are the stand-in
-//! Claude, two of them, each given a task through the chief's window as `cf` does.
+//! turn ends, some 35 s after the paste, past the daemon's arrival window, which is 15 s here
+//! (`ARRIVAL_MS`: the minute it gives a person's, cut by the variable the daemon reads, so
+//! that a turn which outlasts it is seconds longer and no minute and a half). The workers are
+//! the stand-in Claude, two of them, each given a task through the chief's window as `cf` does.
 //!
 //! - The first result's record is late: the human's turn is in front of it.
 //! - The same, with the chief at work on a turn when the second result comes.
-//! - The same, the turn in front silent for minutes (`THINK`), as a Devin resumed after a
-//!   cut sat at "Thinking": the window reads at rest for more than the daemon's minute
-//!   while Devin holds the first result. This one failed on 3.0.4: the daemon took the
-//!   paste for lost after its minute of the window's rest and pasted it again, into the
+//! - The same, the turn in front silent for the gap and the arrival window and more
+//!   (`THINK`), as a Devin resumed after a cut sat at "Thinking" for minutes: the window reads
+//!   at rest for more than the daemon's arrival window while Devin holds the first result.
+//!   This one failed on 3.0.4: the daemon took the
+//!   paste for lost after its arrival window of the window's rest and pasted it again, into the
 //!   queue that held the first. A paste made while the TUI's prompt is asked is now held
 //!   in that turn for as long as a prompt is (`Window::held`, from Devin's wire log): the
 //!   window counts no rest meanwhile, and the paste never goes again while it is held.
 //! - The first paste's record never comes: Devin's TUI dropped the paste
-//!   (`FAKE_DEVIN_DROP`), and the daemon pastes it again after its minute at rest.
+//!   (`FAKE_DEVIN_DROP`), and the daemon pastes it again after its arrival window at rest.
 //! - The same, and the human asks the chief why the result is still queued, quoting its
 //!   header (the reviews of 2026-10-16): the daemon took the words for Devin's word that
 //!   its agent had the paste, and waited for its record for good. Words that quote a
 //!   header are no paste, and a word that a paste is in a turn lasts that turn: the
-//!   result goes again after the human's turn and the daemon's minute.
+//!   result goes again after the human's turn and the daemon's arrival window.
 //!
 //! What proves it is the daemon's own word for its pastes (`delivery.begun`,
 //! `delivery.retried`): a second copy would be read by the chief after the turns before it,
-//! minutes on, so the case ends at the paste over the count, the daemon's word being
+//! later than this looks, so the case ends at the paste over the count, the daemon's word being
 //! enough. And what the chief was given by then, read from its store: each result's
 //! header in one message only, that message holding the result's words and what the chief
 //! decides with, and no other header. Each case runs where the rig runs, Windows too, where
 //! a paste reaches Devin as the console carries it (`console_text`) and its Enter as the
 //! pseudoconsole does.
-
-use std::time::Duration;
 
 use cf_e2e::devin_store::{self, Message};
 use cf_e2e::files;
@@ -64,26 +65,38 @@ use cf_e2e::rig::{Config, Project, Rig};
 use cf_e2e::Error;
 use serde_json::{json, Value};
 
-use crate::devin_notes_twice::{store_of, until_still};
+use crate::devin_notes_twice::{arrival, store_of, work_ms, ARRIVAL_MS, WORK_MS};
 use crate::{config, secs, Outcome, FAKE_DEVIN};
 
-/// How long the stand-in's agent takes to its first word, and how long it works on a
-/// turn after it, in milliseconds: silent past the 30 s the daemon reads a Devin window
-/// busy from its prompt, and a turn longer than the daemon's minute by more than a slow
+/// How long the stand-in's agent takes to its first word, in seconds: silent past the
+/// gap the daemon reads a Devin window busy from its prompt for ([`GAP_SECONDS`]). Its work
+/// after it takes [`WORK_MS`], longer than the arrival window by more than a slow
 /// machine's passes take.
-const FIRST_WORD_MS: &str = "40000";
-const WORK_MS: &str = "70000";
+const FIRST_WORD_SECONDS: u64 = 40;
 
-/// The daemon's arrival window: a record that shows a paste later than this after the
-/// paste is late by the daemon's own measure.
-const MINUTE_MS: i64 = 60_000;
+/// The 30 s the daemon reads a Devin window busy from a prompt of its TUI, which the
+/// stand-in's first word has to outlast (the adapter's `PROMPT_GAP_MS`, which no variable sets).
+const GAP_SECONDS: u64 = 30;
 
-/// How long the chief's store is to hold still before its messages are taken for all it
-/// was given: the daemon's passes are a second apart.
-const STILL: Duration = Duration::from_secs(15);
+/// What the second `cf task add` and its worker's launch add to the worker's sleep before
+/// its result is made, in seconds. Measured on 2026-10-22 (the Mac, under load) with a sleep
+/// of 45: the second result was made 16 s after the first paste and 19 s before the
+/// record showed that paste, the middle of the 35 s between them; the sleep is the
+/// middle of the turn less this.
+const SETUP_SECONDS: u64 = 2;
+
+/// How long the agent of the case whose turn says nothing for a long time is silent, in
+/// seconds: the 30 s the daemon reads the window busy from its prompt, then the arrival
+/// window at rest, and a margin for the paste to come late in it.
+const THINK_SECONDS: i64 = GAP_SECONDS as i64 + ARRIVAL_MS / 1_000 + 15;
 
 /// Where every header of the daemon's begins.
 const HEADER: &str = "[ConsensFlow m-";
+
+/// How long the stand-in's agent takes to its first word, in milliseconds.
+fn first_word_ms() -> String {
+    (FIRST_WORD_SECONDS * 1_000).to_string()
+}
 
 /// The roster of the cases: a Devin (the stand-in) is the chief, and two workers of the
 /// stand-in Claude.
@@ -100,10 +113,9 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
 }
 
 /// A rig whose chief is the stand-in Devin, its agent as quick as `first_word` and
-/// `work` say (in milliseconds).
+/// `work` say (in milliseconds), the daemon's arrival window [`ARRIVAL_MS`].
 fn a_rig(first_word: &str, work: &str) -> Config {
-    config()
-        .devin(FAKE_DEVIN)
+    arrival(config().devin(FAKE_DEVIN))
         .var("FAKE_DEVIN_FIRST_WORD_MS", first_word)
         .var("FAKE_DEVIN_WORK_MS", work)
 }
@@ -170,9 +182,10 @@ fn id_of(project: &Project, asked: Asked) -> cf_e2e::Result<i64> {
         .ok_or_else(|| Error::Daemon(format!("no result says {}", asked.words)))
 }
 
-/// Waits for both results to be confirmed in the chief's window, and the chief's store to
-/// hold still: the two results' ids. A result pasted more often than `pasted` says ends
-/// the case there, before the chief has run the copy: the daemon's word for it is enough.
+/// Waits for both results to be confirmed in the chief's window: the two results' ids. A
+/// result pasted more often than `pasted` says ends the case there, before the chief has
+/// run the copy: the daemon's word for it is enough. Where both are confirmed the chief's
+/// store holds both, for a result is confirmed by the header in its row.
 fn until_both_are_in(rig: &Rig, project: &Project, pasted: [usize; 2]) -> cf_e2e::Result<[i64; 2]> {
     rig.wait_for("both results to be made", secs(300), || {
         Ok(result_of(project, FIRST)?.is_some() && result_of(project, SECOND)?.is_some())
@@ -187,7 +200,6 @@ fn until_both_are_in(rig: &Rig, project: &Project, pasted: [usize; 2]) -> cf_e2e
                 .any(|message| message["id"] == *id && message["state"] == "delivered")
         }))
     })?;
-    until_still(&store_of(rig), STILL)?;
     Ok(ids)
 }
 
@@ -297,7 +309,7 @@ fn each_went_in_once_whole_and_apart(rig: &Rig, ids: [i64; 2], pasted: [usize; 2
 #[test]
 fn two_results_for_a_devin_chief_whose_record_of_the_first_is_late_go_in_once_each_whole_and_apart(
 ) -> Outcome {
-    let rig = Rig::start(a_rig(FIRST_WORD_MS, WORK_MS))?;
+    let rig = Rig::start(a_rig(&first_word_ms(), &work_ms()))?;
     let (project, tier) = a_project(&rig)?;
     // The human's turn is in front: the first result, made in it, is pasted in its
     // silence, and the second waits behind the first.
@@ -307,10 +319,10 @@ fn two_results_for_a_devin_chief_whose_record_of_the_first_is_late_go_in_once_ea
     let ids = until_both_are_in(&rig, &project, [1, 1])?;
 
     // What the case is about: the record showed the first result later than the daemon's
-    // minute after its paste. Without it the case would hold nothing.
+    // arrival window after its paste. Without it the case would hold nothing.
     let late = how_late(&rig.events(), ids[0]);
     assert!(
-        late.is_some_and(|late| late > MINUTE_MS),
+        late.is_some_and(|late| late > ARRIVAL_MS),
         "the record of the first result was not late: {late:?} ms"
     );
     each_went_in_once_whole_and_apart(&rig, ids, [1, 1])?;
@@ -321,13 +333,22 @@ fn two_results_for_a_devin_chief_whose_record_of_the_first_is_late_go_in_once_ea
 #[test]
 fn two_results_for_a_devin_chief_at_work_when_the_second_comes_go_in_once_each_whole_and_apart(
 ) -> Outcome {
-    let rig = Rig::start(a_rig(FIRST_WORD_MS, WORK_MS))?;
+    let rig = Rig::start(a_rig(&first_word_ms(), &work_ms()))?;
     let (project, tier) = a_project(&rig)?;
     the_human_types_to_the_chief(&rig, &project)?;
     give(&rig, &project, &tier, FIRST, 2)?;
     // The second worker answers once the first result is in the chief's turn, and the
-    // chief at work.
-    give(&rig, &project, &tier, SECOND, 45)?;
+    // chief at work: half way between the first paste (the gap after the prompt) and the
+    // end of the turn (its first word and its work), where a slow runner has the most
+    // room on either side.
+    let turn = FIRST_WORD_SECONDS + WORK_MS as u64 / 1_000;
+    give(
+        &rig,
+        &project,
+        &tier,
+        SECOND,
+        (GAP_SECONDS + turn) / 2 - SETUP_SECONDS,
+    )?;
     let ids = until_both_are_in(&rig, &project, [1, 1])?;
 
     // What the case is about: the second result was made after the first was pasted and
@@ -344,7 +365,7 @@ fn two_results_for_a_devin_chief_at_work_when_the_second_comes_go_in_once_each_w
     );
     let late = how_late(&events, ids[0]);
     assert!(
-        late.is_some_and(|late| late > MINUTE_MS),
+        late.is_some_and(|late| late > ARRIVAL_MS),
         "the record of the first result was not late: {late:?} ms"
     );
     each_went_in_once_whole_and_apart(&rig, ids, [1, 1])?;
@@ -352,12 +373,13 @@ fn two_results_for_a_devin_chief_at_work_when_the_second_comes_go_in_once_each_w
     Ok(())
 }
 
-/// The turn in front is one whose agent says nothing for two and a half minutes, as a
-/// Devin resumed after a cut sat at "Thinking" (B1 of the same report, a Devin worker on
-/// the same machine; the live suite `devin-resume`, 3000.11.92). The daemon reads the
-/// window busy for 30 s of the prompt and then at rest, so the first result goes into the
-/// turn, where Devin holds it, and its record shows it only when the turn ends: more than
-/// a minute of the window's rest after the paste.
+/// The turn in front is one whose agent says nothing for as long as the window reads busy
+/// from its prompt and then for the arrival window and more ([`THINK_SECONDS`]), as a
+/// Devin resumed after a cut sat at "Thinking" for minutes (B1 of the same report, a Devin
+/// worker on the same machine; the live suite `devin-resume`, 3000.11.92). The daemon reads
+/// the window busy for 30 s of the prompt and then at rest, so the first result goes into
+/// the turn, where Devin holds it, and its record shows it only when the turn ends: more
+/// than the arrival window of the window's rest after the paste.
 #[test]
 fn two_results_for_a_devin_chief_whose_turn_says_nothing_for_minutes_go_in_once_each_whole_and_apart(
 ) -> Outcome {
@@ -365,19 +387,23 @@ fn two_results_for_a_devin_chief_whose_turn_says_nothing_for_minutes_go_in_once_
     let (project, tier) = a_project(&rig)?;
     rig.tell_within(
         project.id(),
-        "THINK 150 Reply with exactly: BUSY",
+        &format!("THINK {THINK_SECONDS} Reply with exactly: BUSY"),
         secs(180),
     )?;
     give(&rig, &project, &tier, FIRST, 2)?;
     give(&rig, &project, &tier, SECOND, 6)?;
     let ids = until_both_are_in(&rig, &project, [1, 1])?;
 
-    // What the case is about: the record showed the first result more than a minute and
-    // a half after its paste, which is the daemon's minute of the window's rest and more.
+    // What the case is about: the window rested more than the daemon's arrival window
+    // while Devin held the first result, by half a window and more, as the case was
+    // written (a minute and a half for the minute). The record shows the result when the
+    // turn ends, so it is that late after the paste, less the gap the paste waited for.
+    // A turn silent for less would leave the held rule out of the shape.
     let late = how_late(&rig.events(), ids[0]);
     assert!(
-        late.is_some_and(|late| late > MINUTE_MS + MINUTE_MS / 2),
-        "the record of the first result was not late enough: {late:?} ms"
+        late.is_some_and(|late| late > ARRIVAL_MS + ARRIVAL_MS / 2),
+        "the record of the first result was not late enough: {late:?} ms, not more than {} ms",
+        ARRIVAL_MS + ARRIVAL_MS / 2
     );
     each_went_in_once_whole_and_apart(&rig, ids, [1, 1])?;
     rig.close()?;
@@ -392,7 +418,7 @@ fn two_results_for_a_devin_chief_whose_tui_dropped_the_first_paste_go_in_once_ea
     let (project, tier) = a_project(&rig)?;
     give(&rig, &project, &tier, FIRST, 2)?;
     give(&rig, &project, &tier, SECOND, 6)?;
-    // The daemon's minute of the window's rest, and its next look: the paste goes again.
+    // The daemon's arrival window of the window's rest, and its next look: the paste goes again.
     rig.wait_for("the first result to be made", secs(120), || {
         Ok(result_of(&project, FIRST)?.is_some())
     })?;
@@ -402,8 +428,18 @@ fn two_results_for_a_devin_chief_whose_tui_dropped_the_first_paste_go_in_once_ea
     })?;
     let ids = until_both_are_in(&rig, &project, [2, 1])?;
 
-    // The paste Devin dropped went again, once, a minute on: that was its one arrival.
+    // The paste Devin dropped went again, once, an arrival window on: that was its one arrival.
     let events = rig.events();
+    // The daemon was given the window the case sizes its turns by, not the minute it gives a
+    // person's: a daemon that did not read the variable pastes again a minute on.
+    let pasted_at: Vec<i64> = of_message(&events, "delivery.begun", ids[0])
+        .into_iter()
+        .filter_map(at_ms)
+        .collect();
+    assert!(
+        matches!(pasted_at.as_slice(), [first, again] if again - first < 3 * ARRIVAL_MS),
+        "the paste Devin dropped did not go again within three arrival windows ({ARRIVAL_MS} ms each); a daemon that does not read the variable takes its minute: {pasted_at:?}"
+    );
     let retried = of_message(&events, "delivery.retried", ids[0]);
     assert!(
         retried.iter().all(|event| event["data"]["reason"]
@@ -444,7 +480,7 @@ fn a_result_whose_paste_devins_tui_dropped_goes_again_after_the_humans_words_tha
         &format!("Why is \"{header}\" still queued?"),
         secs(50),
     )?;
-    // The human's turn, and the daemon's minute of the window's rest after it: the
+    // The human's turn, and the daemon's arrival window of the window's rest after it: the
     // paste goes again, and its record shows it.
     rig.wait_for("the dropped paste to go again", secs(240), || {
         Ok(of_message(&rig.events(), "delivery.begun", first).len() >= 2)
@@ -452,7 +488,6 @@ fn a_result_whose_paste_devins_tui_dropped_goes_again_after_the_humans_words_tha
     rig.wait_for("the result to be confirmed", secs(180), || {
         Ok(!of_message(&rig.events(), "delivery.confirmed", first).is_empty())
     })?;
-    until_still(&store_of(&rig), STILL)?;
 
     let events = rig.events();
     let retried = of_message(&events, "delivery.retried", first);
@@ -464,10 +499,16 @@ fn a_result_whose_paste_devins_tui_dropped_goes_again_after_the_humans_words_tha
         (2, 1),
         "pasted twice, the dropped paste and once again: {retried:?}"
     );
-    assert!(
-        retried[0]["data"]["reason"]
-            .as_str()
-            .is_some_and(|reason| reason.starts_with("the harness record never showed it")),
+    // The human's words came between the paste and the retry, a turn of the chief's, and
+    // the daemon says so in the reason: the window was at rest the arrival window since its
+    // last turn (`arrival`). A retry with no turn between reads the bare words.
+    let turn_between = format!(
+        "the harness record never showed it in the {} s its window was at rest since its last turn",
+        ARRIVAL_MS / 1_000
+    );
+    assert_eq!(
+        retried[0]["data"]["reason"].as_str(),
+        Some(turn_between.as_str()),
         "{retried:?}"
     );
     let marker = format!("{HEADER}{first} ");

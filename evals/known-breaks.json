@@ -2,10 +2,10 @@
   "about": "Breaks of the long run that a release may carry: each a known bug, deferred to the issue it names. A break matches an entry by its invariant and its shape, both; a matched break is KNOWN (kept with its evidence and the issue), and a run whose only breaks are KNOWN passes, said 'PASS with N known'. Any other break fails the run, one of a known invariant in another shape too. The list is read into cf-evals when it is built (crates/cf-evals/src/long_run/known.rs).",
   "known": [
     {
-      "invariant": 3,
-      "shape": "ended-note",
-      "what": "ConsensFlow's note that a worker's turn left background work running, and that it was ended, reaches the chief after the turn's result instead of with it or before it.",
-      "issue": "Field report A3 of 2026-10-15 (the brain's field reports): turn-end's bug, deferred to 3.0.6 by the lead's decision of 2026-10-17 on long runs."
+      "invariant": 4,
+      "shape": "progress-lines",
+      "what": "A worker's result holds lines of its turn's progress, the words it wrote before its last tool call, beside the turn's final answer.",
+      "issue": "Field report dip-agentos #5 (the brain's field reports): turn-end's A4, deferred to 3.0.6 by the lead's decision of 2026-10-16; 3.0.4 has it too."
     }
   ]
 }

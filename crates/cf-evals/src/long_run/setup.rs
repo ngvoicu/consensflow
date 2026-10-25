@@ -132,6 +132,7 @@ pub fn open(
     // the rig started again on a restart is given the same.
     let config = machine
         .rig(&cast.crew, &cast.chief, &stand_in)
+        .case("the long run")
         .masked_by(masker);
     let rig = Rig::start(config.clone())?;
     let daemon = daemon_of(&rig);

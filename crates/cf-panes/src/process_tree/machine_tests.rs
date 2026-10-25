@@ -531,3 +531,86 @@ fn a_tree_with_no_program_signals_nothing_whatever_is_selected() {
     assert!(machine.signalled_none());
     assert!(asked.identities.is_empty() && forced.members.is_empty());
 }
+
+#[test]
+fn a_look_that_must_not_miss_a_process_is_hidden_where_one_of_the_windows_cannot_be_read() {
+    // Astraeus on 472b1d96: a command that `exec`s `sudo` becomes a process of another
+    // user, which no look reads and which the table leaves out; the program, or a command
+    // of its, still names it as one it started.
+    let readable = Machine::new(a_window_among_strangers());
+    let table = readable.processes().expect("the table");
+    let tree = tree_of(&table);
+    let Readable::All(seen) = tree.readable_members_by(&readable).expect("a look") else {
+        panic!("all of it read");
+    };
+    assert_eq!(numbers_of(&seen), the_windows());
+    for parent in [PROGRAM, SHELL, DEEP] {
+        let hidden = Machine::new(a_window_among_strangers()).with_unreadable(parent, 4_000_099);
+        assert_eq!(
+            tree.readable_members_by(&hidden).expect("a look"),
+            Readable::Unreadable,
+            "a process {parent} started that cannot be read"
+        );
+    }
+    // One that a stranger started is none of the window's.
+    let elsewhere = Machine::new(a_window_among_strangers()).with_unreadable(BUILD, 4_000_099);
+    assert!(matches!(
+        tree.readable_members_by(&elsewhere).expect("a look"),
+        Readable::All(_)
+    ));
+    // A tree with no program cannot be read whole.
+    assert_eq!(
+        ProcessTree::new()
+            .readable_members_by(&readable)
+            .expect("a look"),
+        Readable::Unsettled
+    );
+}
+
+#[test]
+fn a_process_born_or_ended_while_a_look_read_the_tree_hides_nothing() {
+    // Calliope on 136a7158: a child born, or ended unreaped, between the table and the
+    // listing of children made the look say it could not tell.
+    let readable = Machine::new(a_window_among_strangers());
+    let table = readable.processes().expect("the table");
+    let tree = tree_of(&table);
+    let ended = Machine::new(a_window_among_strangers()).with_zombie(SHELL, 4_000_098);
+    assert!(matches!(
+        tree.readable_members_by(&ended).expect("a look"),
+        Readable::All(_)
+    ));
+    let born = Machine::new(a_window_among_strangers()).with_born(SHELL, 4_000_097);
+    assert!(matches!(
+        tree.readable_members_by(&born).expect("a look"),
+        Readable::All(_)
+    ));
+}
+
+#[test]
+fn a_tree_that_kept_changing_while_it_was_read_is_told_apart_from_one_another_user_holds() {
+    // Astraeus on 02a6cd4f: a look that ran out of tries, every one of them meeting a child
+    // born since its table, was said "another user's".
+    let readable = Machine::new(a_window_among_strangers());
+    let table = readable.processes().expect("the table");
+    let tree = tree_of(&table);
+    let churning = Machine::new(a_window_among_strangers()).with_churning(SHELL);
+    assert_eq!(
+        tree.readable_members_by(&churning).expect("a look"),
+        Readable::Unsettled,
+        "no process of another user's"
+    );
+}
+
+#[test]
+fn a_process_that_changed_while_a_look_read_it_is_looked_at_again_and_is_no_other_users() {
+    // Astraeus on eb9f25ef: a child of ours that ended between a look's two reads of it was
+    // taken for another user's.
+    let readable = Machine::new(a_window_among_strangers());
+    let table = readable.processes().expect("the table");
+    let tree = tree_of(&table);
+    let changed = Machine::new(a_window_among_strangers()).with_changed(SHELL, 4_000_096);
+    assert!(matches!(
+        tree.readable_members_by(&changed).expect("a look"),
+        Readable::All(_)
+    ));
+}

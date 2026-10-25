@@ -148,7 +148,7 @@ impl Dispatcher {
         )?;
         if let Some(delivering) = delivering {
             self.give_back(
-                delivering,
+                delivering.message,
                 &format!("{agent} is no longer among your agents"),
             )?;
         }
@@ -223,7 +223,10 @@ impl Dispatcher {
         observed: &Observed,
         idle: bool,
     ) -> Result<(), EngineError> {
-        if !idle {
+        // A closed project's switch waits for the Resume: its window is given nothing
+        // meanwhile, the note that asks for the handoff among it (both reviews of
+        // 2026-10-16, round 3).
+        if !idle || project.state != "open" {
             return Ok(());
         }
         let Some(pending) = record.pending_switch.borrow().clone() else {
@@ -301,7 +304,10 @@ impl Dispatcher {
             }
             let delivering = record.delivery.borrow_mut().delivering.take();
             if let Some(delivering) = delivering {
-                self.give_back(delivering, "the chief was switched before it arrived")?;
+                self.give_back(
+                    delivering.message,
+                    "the chief was switched before it arrived",
+                )?;
             }
             if !self.close_own(record, &pane).await? {
                 // The old window would not close: the switch waits, as one

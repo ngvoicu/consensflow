@@ -279,6 +279,8 @@ pub struct Fake {
     pub tag_fetch_fails: bool,
     /// Whether a tag pushed to upstream starts its Release run.
     pub tags_start_runs: bool,
+    /// Whether every `gh` fails, as it does when it is not logged in.
+    pub gh_fails: bool,
     /// Every program run, in order.
     pub ran: Vec<Invocation>,
     pub pauses: u32,
@@ -315,6 +317,7 @@ impl Fake {
             failing_after_the_tag: Vec::new(),
             tag_fetch_fails: false,
             tags_start_runs: true,
+            gh_fails: false,
             ran: Vec::new(),
             pauses: 0,
         }
@@ -426,6 +429,13 @@ impl Fake {
     }
 
     fn gh(&mut self, args: &[String]) -> Captured {
+        if self.gh_fails {
+            return Captured {
+                code: 4,
+                stdout: String::new(),
+                stderr: "To get started with GitHub CLI, please run:  gh auth login".to_owned(),
+            };
+        }
         let flag = |name: &str| {
             args.iter()
                 .position(|arg| arg == name)

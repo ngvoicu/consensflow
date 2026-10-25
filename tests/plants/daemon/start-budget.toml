@@ -116,13 +116,20 @@ runs = ["daemon-lib-stop-tree"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/child.rs"
-find = "            end(pid, Ending::Forced, self.reach, false);"
-replace = "            end(pid, Ending::Forced, Reach::Process, false);"
+find = "            end(pid, Ending::Forced, self.reach, false, live.job());"
+replace = "            end(pid, Ending::Forced, Reach::Process, false, live.job());"
 
 [[plant.edit]]
 file = "crates/cf-process/src/terminate.rs"
 find = '.args(["/PID", &pid.to_string(), "/T", "/F"])'
 replace = '.args(["/PID", &pid.to_string(), "/F"])'
+
+# On Windows the program's job ends its whole tree before taskkill is asked: left alone, the
+# tree is taskkill's to end.
+[[plant.edit]]
+file = "crates/cf-process/src/terminate.rs"
+find = "        if job.terminate() {\n            return;\n        }\n"
+replace = ""
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop/tests/tree.rs"
@@ -143,13 +150,20 @@ runs = ["process-lib-capture-forced"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/child.rs"
-find = "            end(pid, Ending::Forced, self.reach, false);"
-replace = "            end(pid, Ending::Forced, Reach::Process, false);"
+find = "            end(pid, Ending::Forced, self.reach, false, live.job());"
+replace = "            end(pid, Ending::Forced, Reach::Process, false, live.job());"
 
 [[plant.edit]]
 file = "crates/cf-process/src/terminate.rs"
 find = '.args(["/PID", &pid.to_string(), "/T", "/F"])'
 replace = '.args(["/PID", &pid.to_string(), "/F"])'
+
+# On Windows the program's job ends its whole tree before taskkill is asked: left alone, the
+# tree is taskkill's to end.
+[[plant.edit]]
+file = "crates/cf-process/src/terminate.rs"
+find = "        if job.terminate() {\n            return;\n        }\n"
+replace = ""
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture/tests/tree.rs"

@@ -9,7 +9,13 @@
 # The plants of the last block plant what only a real app shows, the steps of
 # the smoke's own case and its stand-in harness: they run the packaged smoke
 # itself, on the app a build of the checkout leaves (`npm --prefix app run build
-# -- --bundles app`), and are refused where there is none.
+# -- --bundles app`), and are refused where there is none. They run under
+# nextest as every plant does (`cargo xtask smoke` as the runner starts it has
+# no `--nocapture`), and they want a window: on a locked screen the app's page
+# is put to sleep about 30 s after it starts, so a run that is slower than that
+# (a busy Mac) fails at whatever step it is on, plant or none. The smoke has one
+# test, so the runner's catch names it for any failure: a catch that took
+# minutes is that, and is read in the failure's words (T-429).
 
 [run]
 # The tests of the smoke's parts: the bundle, the machine, the app, the extension.
@@ -24,6 +30,14 @@ smoke-command-run = ["cargo", "test", "--offline", "--target-dir", "app/src-taur
 candidate-steps = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "candidate::"]
 # The packaged smoke, on the app a build leaves.
 smoke-on-the-app = ["cargo", "xtask", "smoke"]
+# The page's half of the smoke: how long it waits, and when a flood has stopped (in fake time).
+selftest-wait = ["node", "--test", "tests/selftest-wait.test.mjs"]
+# The app's door for the smoke: what the page is told.
+app-selftest = ["cargo", "xtask", "app", "test", "the_selftest"]
+# Whether the screen is locked, which every smoke that shows a window asks first.
+screen-reader = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "--no-fail-fast", "-p", "xtask", "--lib", "--", "screen::"]
+# The updater smoke's driver: what it is given, what it says, the status it answers.
+updater-smoke-driver = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::tests::"]
 
 # What the smoke holds the bundle to
 [[plant]]
@@ -234,8 +248,28 @@ runs = ["smoke-command", "smoke-command-run"]
 
 [[plant.edit]]
 file = "tools/xtask/src/smoke.rs"
-find = 'cargo_test(context, SMOKE, &["--".into(), "--nocapture".into()])'
-replace = "cargo_test(context, SMOKE, &[])"
+find = 'tests(context, app, &["--".into(), "--nocapture".into()])'
+replace = "tests(context, app, &[])"
+
+[[plant]]
+name = "packaged smoke: the smoke the plants run is told not to capture"
+meant = "the_smoke_the_plants_run_has_no_nocapture_and_is_otherwise_the_one_a_person_runs"
+runs = ["smoke-command"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = "tests(context, app, &[])"
+replace = 'tests(context, app, &["--".into(), "--nocapture".into()])'
+
+[[plant]]
+name = "packaged smoke: the smoke the plants run is not told the app it is given"
+meant = "the_smoke_the_plants_run_has_no_nocapture_and_is_otherwise_the_one_a_person_runs"
+runs = ["smoke-command"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = "    tests(context, app, &[])"
+replace = "    tests(context, None, &[])"
 
 [[plant]]
 name = "packaged smoke: the app it is given is not told to the test"
@@ -529,6 +563,232 @@ find = '''
 replace = '''
         let _ = pid;
         true
+'''
+
+# How long the page waits at each step of the smoke, and the flood that has stopped
+[[plant]]
+name = "packaged smoke: the page waits 45 s whatever the app told it"
+meant = "waits the step it was told and says so, not the 45 s it has when told nothing"
+runs = ["selftest-wait"]
+
+[[plant.edit]]
+file = "app/ui/selftest.js"
+find = '  const stepMs = stepMsOf(config)'
+replace = '  const stepMs = 45_000'
+
+[[plant]]
+name = "packaged smoke: the step the app told the page is not read"
+meant = "is what the app told it, and 45 s where the app told it nothing usable"
+runs = ["selftest-wait"]
+
+[[plant.edit]]
+file = "app/ui/core/selftest-wait.js"
+find = '  return Number.isFinite(told) && told > 0 ? told : STEP_MS'
+replace = '  return STEP_MS'
+
+[[plant]]
+name = "packaged smoke: a flood that has stopped waits out the whole step"
+meant = "fails when no byte has come for the stall limit, long before a raised step is over"
+runs = ["selftest-wait"]
+
+[[plant.edit]]
+file = "app/ui/core/selftest-wait.js"
+find = '        } else if (at - movedAt > stallMs) {'
+replace = '        } else if (false) {'
+
+[[plant]]
+name = "packaged smoke: a flood that pauses is taken for one that has stopped"
+meant = "fails at the fixed 45 s, and drains when the step the smoke was given reaches the page (in bursts)"
+runs = ["selftest-wait"]
+
+[[plant.edit]]
+file = "app/ui/core/selftest-wait.js"
+find = '''
+          seen = latest
+          movedAt = at
+'''
+replace = '''
+          seen = latest
+'''
+
+[[plant]]
+name = "packaged smoke: the app does not tell the page its step"
+meant = "the_selftest_tells_the_page_the_step_it_was_given_and_null_where_it_was_given_none"
+runs = ["app-selftest"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = ', "stepMs": config.step_ms}),'
+replace = '}),'
+
+[[plant]]
+name = "packaged smoke: the app is told the step of the page at 45 s whatever the patience"
+meant = "the_page_is_given_a_quarter_of_the_patience_and_the_app_a_minute_over_it"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/machine.rs"
+find = '(self.patience / STEP_SHARE).as_millis().to_string().into(),'
+replace = '"45000".into(),'
+
+[[plant]]
+name = "packaged smoke: the app ends itself at 240 s whatever the patience"
+meant = "the_page_is_given_a_quarter_of_the_patience_and_the_app_a_minute_over_it"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/machine.rs"
+find = '(self.patience + DEADLINE_OVER_PATIENCE)'
+replace = '(Duration::from_secs(180) + DEADLINE_OVER_PATIENCE)'
+
+# Whether the screen is locked: the reader, and the smokes that ask it
+[[plant]]
+name = "screen: a console that says its root is locked is not taken for locked"
+meant = "a_console_that_says_it_is_locked_is_locked_by_either_of_its_two_keys"
+runs = ["screen-reader"]
+
+[[plant.edit]]
+file = "tools/xtask/src/screen.rs"
+find = '''
+    r#""IOConsoleLocked" = Yes"#,
+    r#""CGSSessionScreenIsLocked"=Yes"#,
+'''
+replace = '''
+    r#""IOConsoleLocked" = Maybe"#,
+    r#""CGSSessionScreenIsLocked"=Yes"#,
+'''
+
+[[plant]]
+name = "screen: a console whose user says the screen is locked is not taken for locked"
+meant = "a_console_that_says_it_is_locked_is_locked_by_either_of_its_two_keys"
+runs = ["screen-reader"]
+
+[[plant.edit]]
+file = "tools/xtask/src/screen.rs"
+find = '''
+    r#""IOConsoleLocked" = Yes"#,
+    r#""CGSSessionScreenIsLocked"=Yes"#,
+'''
+replace = '''
+    r#""IOConsoleLocked" = Yes"#,
+    r#""CGSSessionScreenIsLocked"=Maybe"#,
+'''
+
+[[plant]]
+name = "screen: a console that says it is not locked is taken for one that told nothing"
+meant = "a_console_that_says_it_is_not_locked_is_not"
+runs = ["screen-reader"]
+
+[[plant.edit]]
+file = "tools/xtask/src/screen.rs"
+find = '            } else if answer.stdout.contains(NOT_LOCKED_IS) {'
+replace = '            } else if false {'
+
+[[plant]]
+name = "screen: an ioreg that is not there refuses the smoke"
+meant = "an_answer_that_says_nothing_of_the_lock_or_cannot_be_had_is_not_told_and_never_refuses"
+runs = ["screen-reader"]
+
+[[plant.edit]]
+file = "tools/xtask/src/screen.rs"
+find = '''
+        _ => Reading::Unknown,
+    }
+}
+'''
+replace = '''
+        _ => Reading::Locked,
+    }
+}
+'''
+
+[[plant]]
+name = "screen: an ioreg that ended with an error is believed"
+meant = "an_answer_that_says_nothing_of_the_lock_or_cannot_be_had_is_not_told_and_never_refuses"
+runs = ["screen-reader"]
+
+[[plant.edit]]
+file = "tools/xtask/src/screen.rs"
+find = '        Ok(answer) if answer.code == 0 => {'
+replace = '        Ok(answer) => {'
+
+[[plant]]
+name = "screen: an answer that says nothing of the lock refuses the smoke"
+meant = "a_smoke_goes_on_without_a_word_where_the_screen_is_not_locked_or_nothing_says_it_is"
+runs = ["screen-reader"]
+
+[[plant.edit]]
+file = "tools/xtask/src/screen.rs"
+find = '    let is_locked = read(process::capture(&ask, &context.env)) == Reading::Locked;'
+replace = '    let is_locked = read(process::capture(&ask, &context.env)) != Reading::NotLocked;'
+
+[[plant]]
+name = "screen: a locked screen is refused without a word"
+meant = "a_smoke_is_refused_in_words_where_the_ioreg_of_the_machine_says_the_screen_is_locked"
+runs = ["screen-reader"]
+
+[[plant.edit]]
+file = "tools/xtask/src/screen.rs"
+find = '''
+        writeln!(err, "{who}: {LOCKED}")?;
+'''
+replace = ''''''
+
+[[plant]]
+name = "screen: the packaged smoke does not ask whether the screen is locked"
+meant = "smoke_is_refused_in_words_where_the_screen_is_locked_and_starts_nothing"
+runs = ["smoke-command-run"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = '''
+    if screen::locked("smoke", context, console.err)? {
+        return Ok(1);
+    }
+'''
+replace = ''''''
+
+[[plant]]
+name = "screen: the candidate does not ask whether the screen is locked"
+meant = "a_locked_screen_refuses_the_candidate_in_words_before_anything_is_built"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = '''
+    if screen::locked("candidate", context, console.err)? {
+        return Ok(1);
+    }
+'''
+replace = ''''''
+
+[[plant]]
+name = "screen: the updater smoke does not ask whether the screen is locked"
+meant = "a_locked_screen_refuses_a_run_that_shows_a_window_in_words_before_anything_is_made"
+runs = ["updater-smoke-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = '''
+        && screen::locked("smoke:updater", context, console.err)?
+'''
+replace = '''
+        && false
+'''
+
+[[plant]]
+name = "screen: the updater smoke refuses a run that shows no window"
+meant = "builds_and_says_where_and_runs_nothing_when_told_to_build_only_even_on_a_locked_screen"
+runs = ["updater-smoke-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = '''
+    if !options.export_bridge
+        && !options.build_only
+'''
+replace = '''
+    if true
 '''
 
 # What only the app shows: the packaged smoke, run on the app a build leaves

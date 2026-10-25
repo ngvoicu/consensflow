@@ -227,9 +227,9 @@ fn the_hosts_word_on_a_window_the_engine_closed_itself_is_what_its_next_launch_i
         if word {
             context.exit("zeus");
         }
+        // The Resume brings back T-1, which the Close paused.
         context.resume_project(project.id).unwrap();
         context.pass().unwrap();
-        context.resume_task(project.id, 1, "Carry on");
         context.pass().unwrap();
         context.pass().unwrap();
         told_gone(&context, "zeus")

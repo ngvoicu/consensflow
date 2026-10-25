@@ -3,6 +3,7 @@
 //! a reply streaming or cut at its length, and a part of another session.
 
 use super::*;
+use crate::shared::record::reading::Role;
 
 #[test]
 fn a_reply_that_stopped_is_settled_and_one_streaming_or_cut_is_not_complete() {
@@ -22,6 +23,101 @@ fn a_reply_that_stopped_is_settled_and_one_streaming_or_cut_is_not_complete() {
         "finish": "length",
     }));
     assert_eq!(read_once(&staged), settled(&conversation_items(false, 9)));
+}
+
+/// A reply to the user's message that finished as `finish`, saying `said` and, when it
+/// stopped for a tool, calling it: its rows and its events, from the event `seq`.
+fn reply(staged: &Staged, id: &str, seq: i64, finish: &str, said: &str, tool: Option<&str>) {
+    let (text, call) = (format!("{id}-text"), format!("{id}-call"));
+    let time = json!({ "created": seq, "completed": seq + 4 });
+    staged.message(
+        id,
+        seq,
+        &json!({ "role": "assistant", "time": time, "finish": finish }),
+    );
+    staged.part(&text, id, seq + 1, &json!({ "type": "text", "text": said }));
+    staged.event(seq, "message.updated.1", &info(id, None));
+    staged.event(seq + 1, "message.part.updated.1", &part_of(&text, id));
+    if let Some(tool) = tool {
+        staged.part(
+            &call,
+            id,
+            seq + 2,
+            &json!({
+                "type": "tool", "tool": tool, "callID": call,
+                "state": { "status": "completed", "output": "out", "time": { "end": seq + 2 } },
+            }),
+        );
+        staged.event(seq + 2, "message.part.updated.1", &part_of(&call, id));
+    }
+    staged.event(seq + 3, "message.updated.1", &info(id, Some(&time)));
+}
+
+#[test]
+fn the_replies_of_a_turn_that_stopped_for_a_tool_are_never_complete_and_the_reply_that_stopped_is()
+{
+    // OpenCode writes a message for each step of a turn: the owner's decision of 2026-10-15
+    // (a result is what the member wrote after its last tool call) reads the final answer
+    // out of the reply that stopped, the replies before it stopped for a tool.
+    let staged = Staged::new();
+    staged.message(
+        "m1",
+        1,
+        &json!({ "role": "user", "time": { "created": 1 } }),
+    );
+    staged.part(
+        "p1",
+        "m1",
+        2,
+        &json!({ "type": "text", "text": "Review T-1" }),
+    );
+    staged.event(1, "message.updated.1", &info("m1", None));
+    staged.event(2, "message.part.updated.1", &part_of("p1", "m1"));
+    reply(
+        &staged,
+        "m2",
+        10,
+        "tool-calls",
+        "Still reviewing",
+        Some("bash"),
+    );
+    reply(
+        &staged,
+        "m3",
+        20,
+        "tool-calls",
+        "Now the tests",
+        Some("bash"),
+    );
+    reply(&staged, "m4", 30, "stop", "PASS: no findings.", None);
+
+    let reading = look(&mut staged.reader());
+    let Reading::Known(record) = &*reading else {
+        panic!("a reading");
+    };
+    assert_eq!(record.settlement, Settlement::Settled);
+    let shape: Vec<(Role, bool)> = record
+        .items
+        .iter()
+        .map(|item| (item.role, item.complete))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            (Role::User, true),
+            (Role::Assistant, false),
+            (Role::Tool, true),
+            (Role::Assistant, false),
+            (Role::Tool, true),
+            (Role::Assistant, true),
+        ],
+        "the replies before the last stopped for a tool, and the last stopped"
+    );
+    let words: Vec<&str> = record.items.iter().map(|item| &*item.text).collect();
+    assert_eq!(
+        (words[1], words[3], words[5]),
+        ("Still reviewing", "Now the tests", "PASS: no findings.")
+    );
 }
 
 #[test]
@@ -283,5 +379,64 @@ fn a_time_of_a_column_the_store_has_not_is_left_out_as_json_leaves_it() {
     assert_eq!(
         serde_json::to_string(&*look(&mut staged.reader())).unwrap(),
         r#"{"items":[{"id":"m","role":"assistant","text":"","complete":true,"at":9},{"id":"p","role":"tool","text":"ok","complete":true}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"settled"}}"#
+    );
+}
+
+#[test]
+fn the_summary_a_compaction_writes_is_marked_so_and_the_answer_before_it_is_not() {
+    // OpenCode 1.19.3 writes a compaction's summary as an assistant's message of its own,
+    // `summary: true`, its mode and agent `compaction`, which stops as any reply does
+    // (Calliope on 0eec91d2: it was read as the member's words, and could be joined into a
+    // final answer).
+    let staged = Staged::new();
+    staged.message(
+        "m1",
+        1,
+        &json!({ "role": "user", "time": { "created": 1 } }),
+    );
+    staged.part(
+        "p1",
+        "m1",
+        2,
+        &json!({ "type": "text", "text": "Review T-1" }),
+    );
+    staged.event(1, "message.updated.1", &info("m1", None));
+    staged.event(2, "message.part.updated.1", &part_of("p1", "m1"));
+    reply(&staged, "m2", 10, "stop", "PASS: no findings.", None);
+    let time = json!({ "created": 20, "completed": 24 });
+    staged.message(
+        "m3",
+        20,
+        &json!({
+            "role": "assistant", "time": time, "finish": "stop",
+            "summary": true, "mode": "compaction", "agent": "compaction",
+        }),
+    );
+    staged.part(
+        "m3-text",
+        "m3",
+        21,
+        &json!({ "type": "text", "text": "Summary of the conversation so far" }),
+    );
+    staged.event(20, "message.updated.1", &info("m3", None));
+    staged.event(21, "message.part.updated.1", &part_of("m3-text", "m3"));
+    staged.event(23, "message.updated.1", &info("m3", Some(&time)));
+
+    let reading = look(&mut staged.reader());
+    let Reading::Known(record) = &*reading else {
+        panic!("a reading");
+    };
+    let shape: Vec<(&str, bool)> = record
+        .items
+        .iter()
+        .filter(|item| item.role == Role::Assistant)
+        .map(|item| (&*item.text, item.compaction))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            ("PASS: no findings.", false),
+            ("Summary of the conversation so far", true),
+        ]
     );
 }

@@ -5,9 +5,10 @@
 //! its harness moved to the background, which never exits): a worker finished its task, and
 //! the board kept it working with `background work running`, for processes the pane host
 //! took for the turn's work. The owner decided on 2026-10-13 that a worker's answer is its
-//! task's result at once and that what its turn left running is ended. The pane host tells
-//! the turn's work by proof, and when in doubt ends less: what a shell the harness started
-//! ran, and what that started, by a chain of processes that run; what it cannot trace so (a
+//! task's result at once (and turn-end's smallest rule of 2026-10-21 that a turn's end ends
+//! nothing, the window's close does). The pane host tells the turn's work by proof: what a
+//! shell the harness started ran, and what that started, by a chain of processes that run;
+//! what it cannot trace so (a
 //! job the agent detached with `nohup … &` from a shell that then ended) it leaves running
 //! and says nothing of, as it does a server the harness starts late. These are the runs that
 //! show, on a machine, what a real harness leaves, what the host ends of it, what escapes
@@ -42,19 +43,19 @@
 //!   recorded and last drew;
 //! - **`a_worker_that_leaves_a_long_command_running…`** asks the worker to start a long
 //!   command in the background (`sleep 4711`, or the platform's own), not to wait for it
-//!   and to answer. The task is done at once, its result is in the chief's inbox, and the
-//!   command is gone after: ended by the host, which told the chief so in a note beside the
-//!   result (a note that says part of it still runs and was not ended fails the run, with
-//!   what the host listed), or ended by the harness itself with its tool call (Codex and
-//!   Devin, seen on 2026-10-14), which the run says. A command that still runs once the task
-//!   is done and the chief told escaped the ending, and fails the run: it says whether the
-//!   host ever listed it, and whether the window's close found it when the window closed, and
-//!   it ends what still runs, so that a run leaves nothing on the machine. Claude Code runs
-//!   the command by its own option for one in the background, its shell staying a parent of
-//!   it, which the host ends; an agent that detaches it from a shell that then ends (`nohup
-//!   … &`, `setsid`) leaves it with no chain of processes to a shell the harness started,
-//!   and the host leaves it running: that is the limit the engine's `background` module
-//!   writes down, and this step is where it shows, harness by harness.
+//!   and to answer. A turn's end ends nothing (turn-end's smallest rule, 2026-10-21): the
+//!   task is done at once, its result is in the chief's inbox, and its window, free, closes
+//!   after it and ends what its tree runs, telling the chief what was still running; or
+//!   the harness ended the command itself with its tool call (Codex and Devin, seen on
+//!   2026-10-14), which the run says. Claude Code runs the command as a job of its own,
+//!   which it wakes its agent for: the task is held for it and the chief told it goes on,
+//!   and the run, as the chief, finishes it (T-15's shape: the command never ends within
+//!   the run), and goes on as for the others. A command that still runs once the window
+//!   has closed escaped it, and fails the run: it says whether the host ever listed it,
+//!   and it ends what still runs, so that a run leaves nothing on the machine. An agent
+//!   that detaches it from a shell that then ends (`nohup … &`, `setsid`) leaves it with
+//!   no chain of processes to a shell the harness started, which the close cannot find:
+//!   this step is where that limit shows, harness by harness.
 //!
 //! Whatever the verdict, a run prints the processes the host listed as the turn's work at
 //! the turn's end (at the first look that found the window at rest, and before one has, at
@@ -117,7 +118,7 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 const CHECKED: &str = "result reaches the chief, nothing of its own ended";
 
 /// What the line of each worker in the table says the second step checked.
-const CHECKED_LEAVING: &str = "command left running ended with the result, chief told";
+const CHECKED_LEAVING: &str = "command left running ended by the window's close, chief told";
 
 /// The workers the words of the command line name, or Claude where it names none.
 fn workers(named: &[String]) -> Result<Vec<Who>> {

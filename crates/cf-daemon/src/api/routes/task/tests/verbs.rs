@@ -5,12 +5,13 @@
 //! what the real API answered the same request (the probe that printed those
 //! answers went with Node's API).
 
+use cf_base::refusal::Refusal;
 use hyper::Method;
 use serde_json::json;
 
 use super::{get, post, refused};
 use crate::api::routes::tests::support::{
-    open_task, read_while, state_of, through, with_body, working_task,
+    open_task, queued_task, read_while, state_of, through, with_body, working_task,
 };
 use crate::testing::scene;
 
@@ -20,7 +21,7 @@ async fn the_body_is_read_before_it_is_decided_who_may_do_what() {
     let number = working_task(&scene);
     let huge = "x".repeat(3 * 1024 * 1024);
     for verb in [
-        "done", "accept", "pause", "resume", "reopen", "edit", "cancel", "tell",
+        "done", "accept", "pause", "resume", "reopen", "edit", "cancel", "finish", "tell",
     ] {
         // zeus did not give the task and, but for `done`, is no one to move it.
         for (body, status, code) in [
@@ -44,7 +45,7 @@ async fn a_window_that_is_no_coordinator_is_told_which_verb_it_may_not() {
     let scene = scene();
     let number = working_task(&scene);
     for verb in [
-        "accept", "pause", "resume", "reopen", "edit", "cancel", "tell",
+        "accept", "pause", "resume", "reopen", "edit", "cancel", "finish", "tell",
     ] {
         let said = post(&scene, &scene.zeus, &format!("{number}/{verb}"), "{}").await;
         assert_eq!(
@@ -176,6 +177,55 @@ async fn the_chief_moves_a_task_with_the_verbs_and_each_wakes_the_dispatcher_onc
 }
 
 #[tokio::test]
+async fn the_chief_asks_the_engine_to_finish_a_task_and_what_it_refuses_is_refused_in_its_words() {
+    // Only the engine reads the window: it is asked, in the chief's name, and the route
+    // answers with the task done, the dispatcher woken for what follows.
+    let scene = scene();
+    let number = working_task(&scene);
+    let (status, said) = post(&scene, &scene.chief, &format!("{number}/finish"), "").await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        said.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["task", "jobs", "agents"]
+    );
+    assert_eq!(said["task"]["number"], number);
+    assert_eq!(said["task"]["state"], "done");
+    assert_eq!((&said["jobs"], &said["agents"]), (&json!(0), &json!(0)));
+    assert_eq!(
+        scene.finishings.asked.borrow().clone(),
+        [(scene.project.id, number, "chief".to_owned())]
+    );
+    assert_eq!(scene.kicks.get(), 1);
+
+    // What the engine refuses is said as it said it, with its status, and wakes nothing.
+    let words = format!(
+        "cannot finish T-{number}: @zeus has written no complete answer since its latest message about it; wait for one, or cancel it"
+    );
+    *scene.finishings.refusal.borrow_mut() =
+        Some(Refusal::with_status("no-answer", words.clone(), 409));
+    let said = post(&scene, &scene.chief, &format!("{number}/finish"), "{}").await;
+    assert_eq!(refused(&said), (409, "no-answer", words.as_str()));
+    assert_eq!(scene.kicks.get(), 1);
+
+    // A task there is none of is the route's to refuse, before the engine is asked.
+    let said = post(&scene, &scene.chief, "99/finish", "").await;
+    assert_eq!(said.1["error"], "unknown-task");
+    assert_eq!(scene.finishings.asked.borrow().len(), 2);
+
+    // The jobs and agents its harness still counted, which finishing ends none of, are
+    // counted, for `cf` to say.
+    *scene.finishings.refusal.borrow_mut() = None;
+    scene.finishings.jobs.set(1);
+    scene.finishings.agents.set(2);
+    let (status, said) = post(&scene, &scene.chief, &format!("{number}/finish"), "").await;
+    assert_eq!(
+        (status, &said["jobs"], &said["agents"]),
+        (200, &json!(1), &json!(2)),
+        "{said}"
+    );
+}
+
+#[tokio::test]
 async fn a_result_is_accepted_or_the_task_is_given_back_with_the_chief_s_words() {
     let scene = scene();
     let number = working_task(&scene);
@@ -295,6 +345,127 @@ async fn a_task_with_no_window_is_not_told_and_says_what_it_is() {
     let said = post(&scene, &scene.chief, &format!("{open}/tell"), "{}").await;
     assert_eq!(said.1["error"], "no-window");
     assert_eq!(scene.kicks.get(), 0);
+}
+
+#[tokio::test]
+async fn a_queued_task_is_told_with_no_pause_and_its_words_wait_for_its_window_after_its_brief() {
+    let scene = scene();
+    let (number, brief) = queued_task(&scene);
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/tell"),
+        r#"{"body":"Use the v2 grammar"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        [
+            &said["message"]["kind"],
+            &said["message"]["state"],
+            &said["message"]["recipient"],
+            &said["task"]["state"],
+        ],
+        [
+            &json!("note"),
+            &json!("queued"),
+            &json!("zeus"),
+            &json!("queued")
+        ],
+        "kept for the window, and nothing paused"
+    );
+    assert_eq!(scene.kicks.get(), 1);
+    let told = said["message"]["id"].as_i64().unwrap();
+    let begun = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .begin_delivery(brief)
+        .unwrap();
+    assert_eq!(
+        begun.carried.iter().map(|row| row.id).collect::<Vec<_>>(),
+        [told],
+        "it rides in the brief's paste"
+    );
+
+    // No words are none, and nothing is kept for them.
+    let (number, _) = queued_task(&scene);
+    let said = post(&scene, &scene.chief, &format!("{number}/tell"), "{}").await;
+    assert_eq!(said.1["error"], "invalid-text");
+    assert_eq!(state_of(&scene, number), "queued");
+}
+
+#[tokio::test]
+async fn a_tell_goes_the_way_its_task_is_on_once_its_words_are_in() {
+    // Queued when it was read; its brief arrives while the words come in: the
+    // window has it, and is stopped and asked.
+    let scene = scene();
+    let (number, brief) = queued_task(&scene);
+    let context = std::rc::Rc::clone(&scene.context);
+    let arrived = read_while(r#"{"body":"Use the v2 grammar"}"#, move || {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.begin_delivery(brief).unwrap();
+        ledger
+            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
+            .unwrap();
+    });
+    let asked = with_body(
+        Method::POST,
+        &format!("/api/tasks/{number}/tell"),
+        &scene.chief,
+        arrived,
+    );
+    let (status, said) = through(&scene, asked).await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        [&said["message"]["kind"], &said["task"]["state"]],
+        [&json!("question"), &json!("paused")]
+    );
+
+    // At work when it was read; paused and resumed while the words come in: it
+    // is queued for its window again, and the words are kept for it.
+    let number = working_task(&scene);
+    let context = std::rc::Rc::clone(&scene.context);
+    let queued_again = read_while(r#"{"body":"And keep the old tests"}"#, move || {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.pause_task(1, number, Some("human"), None).unwrap();
+        ledger
+            .resume_task(1, number, Some("human"), "Go on")
+            .unwrap();
+    });
+    let asked = with_body(
+        Method::POST,
+        &format!("/api/tasks/{number}/tell"),
+        &scene.chief,
+        queued_again,
+    );
+    let (status, said) = through(&scene, asked).await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        [&said["message"]["kind"], &said["task"]["state"]],
+        [&json!("note"), &json!("queued")]
+    );
+}
+
+#[tokio::test]
+async fn a_cancel_says_which_of_the_callers_words_its_window_never_had_went_with_it() {
+    let scene = scene();
+    let (number, _) = queued_task(&scene);
+    let mut told = Vec::new();
+    for words in ["Use the v2 grammar", "And keep the old tests"] {
+        let body = json!({ "body": words }).to_string();
+        let (_, said) = post(&scene, &scene.chief, &format!("{number}/tell"), &body).await;
+        told.push(said["message"]["id"].clone());
+    }
+    let (status, said) = post(&scene, &scene.chief, &format!("{number}/cancel"), "{}").await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["state"], "cancelled");
+    assert_eq!(said["dropped"], json!(told));
+
+    // A cancel that took none says nothing of it.
+    let (number, _) = queued_task(&scene);
+    let (_, said) = post(&scene, &scene.chief, &format!("{number}/cancel"), "{}").await;
+    assert_eq!(said.get("dropped"), None, "{said}");
 }
 
 #[tokio::test]

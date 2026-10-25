@@ -66,7 +66,7 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use super::{key_of, native, Identity, Process};
+use super::{key_of, native, Identity, Looked, Process};
 use crate::background::ProcessKey;
 
 /// What a tree asks of the system: the processes there are, whether one runs, and a signal
@@ -78,6 +78,14 @@ pub(super) trait System {
     /// Whether the process `key` names (its number and when it began) runs now: none that
     /// has taken its number does.
     fn runs(&self, key: ProcessKey) -> bool;
+
+    /// The numbers of the processes `pid` started that the system names now, whatever
+    /// of them [`System::processes`] can read: one of another user, or one that ended and
+    /// was not yet reaped, among them.
+    fn children(&self, pid: i32) -> io::Result<Vec<i32>>;
+
+    /// What the system says of the process `pid` now ([`Looked`]).
+    fn looked(&self, pid: i32) -> Looked;
 
     /// Sends `signal` to the process `to` names, and to none that has taken its
     /// number: one that is gone is no error. Only [`Bound::signal`] calls it.
@@ -111,6 +119,14 @@ impl System for Native {
             .ok()
             .and_then(native::process)
             .is_some_and(|process| key_of(process.identity) == key)
+    }
+
+    fn children(&self, pid: i32) -> io::Result<Vec<i32>> {
+        native::children(pid)
+    }
+
+    fn looked(&self, pid: i32) -> Looked {
+        native::looked(pid)
     }
 
     fn send(&self, to: Identity, signal: i32) -> io::Result<()> {

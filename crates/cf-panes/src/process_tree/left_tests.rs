@@ -151,8 +151,10 @@ fn the_bound_refuses_what_is_named_and_no_close_or_ending_signals_it() {
     let server = identity_of(&table, SERVER);
     assert_eq!(named(&tree, &machine), [SERVER.unsigned_abs()]);
 
-    // Looks at the tree, then a close and an ending whose selection names every process.
+    // Looks at the tree (a close's, and turn-end's look at the window's commands, which must
+    // read all of it), then a close and an ending whose selection names every process.
     tree.members_by(&machine).expect("a look");
+    tree.readable_members_by(&machine).expect("a look");
     assert!(!tree.bound.allows(&Table::of(&table), server));
     let every = Lineage {
         identities: table.iter().map(|process| process.identity).collect(),

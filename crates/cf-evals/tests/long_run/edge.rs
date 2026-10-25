@@ -40,6 +40,8 @@ fn writes_out(line: &str) -> bool {
         "stderr()",
         "files::write",
         "fs::write",
+        "fs::copy",
+        "VACUUM INTO",
         "File::create",
         "OpenOptions",
         "write_all",
@@ -130,9 +132,16 @@ fn what_stops_the_run_and_what_its_rig_says_leave_through_the_edge() {
         written[0].contains(r#"eprint!("{where_kept}")"#),
         "{written:?}"
     );
-    assert!(report.contains(
-        "let where_kept = keep(&rig.root, &tell.text(&report), rig.reports.as_deref());"
-    ));
+    // What the rig has to say is told whole through the masker as it is composed, and
+    // kept in a file as it is said, whatever way rustfmt breaks the lines.
+    let flat = report.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("report: tell.text(&report),"), "{flat}");
+    assert!(
+        flat.contains(
+            "let where_kept = keep(&self.root, &self.case, &self.report, self.folder.as_deref());"
+        ),
+        "{flat}"
+    );
     assert!(report.contains("let tell = Tell(rig.masker.as_ref());"));
 }
 
@@ -186,7 +195,42 @@ fn takes_part(line: &str) -> bool {
 /// `last_lines`, which the chief's wait takes a window's last 40 lines with, a cut
 /// accepted as the pane host's is), a cut it does not know the word of, and whether a
 /// text it lists reaches the run's output at all. It reads lines, not meaning.
-const TAKEN: [(&str, &str, &str); 46] = [
+const TAKEN: [(&str, &str, &str); 57] = [
+    (
+        "long_run/stalls.rs",
+        "self.prober.take(listed, pid, others, label)",
+        "the system asked of a stalled window's processes, no text taken",
+    ),
+    (
+        "long_run/stalls.rs",
+        "taking.take(pid, &others, label)",
+        "the same",
+    ),
+    (
+        "long_run/conduct.rs",
+        "self.stalls.take(&look, self.prober.as_mut());",
+        "the system asked of a stalled window's processes, no text taken",
+    ),
+    (
+        "long_run/stalls/held.rs",
+        "said.lines()",
+        "the system's list of processes, read; each line kept is masked whole and cut in stalls.rs",
+    ),
+    (
+        "long_run/stalls/held.rs",
+        "for row in said.lines() {",
+        "the same, as Windows says it",
+    ),
+    (
+        "long_run/stalls/held.rs",
+        "let mut fields = row.split_whitespace();",
+        "the same: a process's numbers read, and its line kept whole, masked after",
+    ),
+    (
+        "long_run/stalls/held.rs",
+        "if let [pid, state, wait] = numbers[..] {",
+        "a thread's numbers, no text",
+    ),
     (
         "long_run/disruptions.rs",
         "if let Some(next) = self.planned[place + 1..]",
@@ -196,6 +240,26 @@ const TAKEN: [(&str, &str, &str); 46] = [
         "long_run/invariants/deliveries.rs",
         "quoting_until = body(id).map_or(end, |said| end + said_until(&text[end..], said));",
         "a check reading a prompt, nothing it says",
+    ),
+    (
+        "long_run/invariants/deliveries.rs",
+        ".find(&text[start..])",
+        "where a delivery begins in a prompt, read and never said",
+    ),
+    (
+        "long_run/invariants/deliveries.rs",
+        "let inner = &text[start + tag.end()..];",
+        "the same",
+    ),
+    (
+        "long_run/stalls.rs",
+        ".take(CHANGES)",
+        "the last changes of a window's state, each masked whole and then cut",
+    ),
+    (
+        "long_run/stalls.rs",
+        ".take(EVENTS)",
+        "the ledger's last events, each masked whole and then cut",
     ),
     (
         "long_run/invariants/order.rs",
