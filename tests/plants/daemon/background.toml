@@ -2213,16 +2213,6 @@ replace = """
             )?;"""
 
 [[plant]]
-name = "background possibly-left: a chief's window's note says the work its close ended still runs"
-meant = "a_chiefs_window_that_closes_tells_the_human_what_it_left_and_what_may_be_its_own"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = """            " with background work running, which its close ended: {}","""
-replace = """            " with background work still running: {}","""
-
-[[plant]]
 name = "background possibly-left: a Windows window's exit holds a handle of its job past the exit"
 meant = "a_window_whose_program_exits_by_itself_has_ended_what_it_started_when_its_exit_is_handed"
 platforms = ["windows"]
