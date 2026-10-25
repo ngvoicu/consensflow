@@ -16,6 +16,7 @@
  * the child's own hex of what was typed, the ack count the page really sent.
  */
 
+import { sleep, stepMsOf, waiter } from './core/selftest-wait.js'
 import { runUpdateSelftest } from './update-selftest.js'
 
 const READY = /CFSMOKE-READY (\S+)/
@@ -23,12 +24,6 @@ const TOOLS = /CFSMOKE-TOOLS (\S+)/
 const FLOODED = /CFSMOKE-FLOODED (\S+)/
 const FLOOD = /CFSMOKE-FLOOD (\d+) /
 const HEX = /CFSMOKE-HEX ([0-9a-f]+)/
-
-const STEP_MS = 45_000
-
-function sleep(ms) {
-  return new Promise((wake) => setTimeout(wake, ms))
-}
 
 /**
  * Every line the emulator has, scrollback included. A line the terminal
@@ -46,25 +41,6 @@ function screen(emulator) {
     else lines.push(text)
   }
   return lines
-}
-
-/**
- * Polls a condition against the live page rather than waiting on an event.
- *
- * The thing being proved is what the human would see on screen, and the only
- * honest source for that is the buffer the renderer is reading from.
- */
-async function until(what, check, { timeoutMs = STEP_MS, note = null } = {}) {
-  const deadline = Date.now() + timeoutMs
-  let polls = 0
-  for (;;) {
-    const found = await check()
-    if (found !== null && found !== undefined && found !== false) return found
-    if (Date.now() > deadline) throw new Error(`${what} did not happen within ${timeoutMs} ms`)
-    polls += 1
-    if (note !== null && polls % 30 === 0) await note(what, polls)
-    await sleep(100)
-  }
 }
 
 function toHex(text) {
@@ -91,15 +67,21 @@ export async function runSelftest({
     return
   }
 
+  // The step each wait is given is what the app was told (core/selftest-wait.js).
+  const stepMs = stepMsOf(config)
+  const until = waiter({ stepMs })
+
   let acks = 0
   let arrivals = 0
   let arrivedBytes = 0
+  let lastArrivalAt = Date.now()
   onAck(() => {
     acks += 1
   })
   onOutput((message) => {
     arrivals += 1
     arrivedBytes += message?.bytes?.length ?? 0
+    lastArrivalAt = Date.now()
   })
 
   const report = async (event, data) => {
@@ -249,7 +231,7 @@ export async function runSelftest({
         },
       },
     )
-    const confirmedBy = Date.now() + STEP_MS
+    const confirmedBy = Date.now() + stepMs
     let state = null
     while (state !== 'delivered') {
       if (Date.now() > confirmedBy) {
@@ -323,8 +305,21 @@ export async function runSelftest({
       },
       {
         note: async (what, polls) => {
-          await report('waiting', { what, polls, acks, arrivals, arrivedBytes })
+          await report('waiting', {
+            what,
+            polls,
+            acks,
+            arrivals,
+            arrivedBytes,
+            sinceArrivalMs: Date.now() - lastArrivalAt,
+            hidden: document.hidden,
+          })
         },
+        // The bytes that reached the page are the flood's progress: a flood that
+        // sends none for the stall limit has stopped, however long the step is.
+        progress: () => arrivedBytes,
+        detail: () =>
+          `${arrivedBytes} bytes in ${arrivals} arrivals, the last ${Date.now() - lastArrivalAt} ms ago; ${acks} acks; page hidden: ${document.hidden}`,
       },
     )
     await report('drained', { lastFloodLine: flood.last, acks })

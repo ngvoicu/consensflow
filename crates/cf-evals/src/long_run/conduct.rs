@@ -428,8 +428,11 @@ fn finish(
         }
     }
     read_once_more(run, floor, settings, || Stagehand::look(stage));
+    // The pane host sampled is the running app's: the last look's was reaped by a restart
+    // the app did not survive.
+    let host = stage.rig().ok().map(cf_e2e::rig::Rig::host_pid);
     run.stalls
-        .before_close(run.last.as_ref(), run.prober.as_mut());
+        .before_close(run.last.as_ref(), host, run.prober.as_mut());
     let ledger = stage
         .rig()
         .ok()

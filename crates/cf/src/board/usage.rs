@@ -16,15 +16,31 @@ const CONTINUED: usize = 36;
 
 /// The task commands alone: what `cf task --help` prints.
 pub fn task_usage() -> String {
-    usage()
-        .lines()
-        .filter(|line| {
-            let indented = line.starts_with(char::is_whitespace);
-            (indented && line.trim_start().starts_with("cf task "))
-                || line.starts_with(&" ".repeat(CONTINUED))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    let is_task_command = |line: &str| {
+        let indented = line.starts_with(char::is_whitespace);
+        indented && line.trim_start().starts_with("cf task ")
+    };
+    commands_kept(usage().lines(), is_task_command)
+}
+
+/// The lines of `lines` that `wanted` picks by their command lines, with the
+/// lines that go on from each: a line that goes on from a command nobody
+/// picked would stand under the wrong command.
+fn commands_kept<'a>(
+    lines: impl Iterator<Item = &'a str>,
+    wanted: impl Fn(&str) -> bool,
+) -> String {
+    let mut kept = false;
+    let mut chosen = Vec::new();
+    for line in lines {
+        if !line.starts_with(&" ".repeat(CONTINUED)) {
+            kept = wanted(line);
+        }
+        if kept {
+            chosen.push(line);
+        }
+    }
+    chosen.join("\n")
 }
 
 /// The usage of the one command `cf <path…>` (`["note"]`, `["task", "get"]`):
@@ -34,21 +50,11 @@ pub fn task_usage() -> String {
 /// takes besides. What the usage says after the list (how to give a text on
 /// the standard input) is for none of them.
 pub fn of(path: &[&str]) -> String {
-    let mut kept = false;
-    let mut lines = Vec::new();
     let commands = usage()
         .lines()
         .skip_while(|line| !line.starts_with("  cf "))
         .take_while(|line| !line.is_empty());
-    for line in commands {
-        if !line.starts_with(&" ".repeat(CONTINUED)) {
-            kept = covers(line, path);
-        }
-        if kept {
-            lines.push(line);
-        }
-    }
-    lines.join("\n")
+    commands_kept(commands, |line| covers(line, path))
 }
 
 /// Whether the usage `line` is one of the command `cf <path…>`'s.
@@ -112,5 +118,30 @@ mod tests {
         assert!(!of(&["task", "add"]).contains("BRIEF"));
         assert_eq!(of(&["frobnicate"]), "");
         assert_eq!(of(&["task", "frobnicate"]), "");
+    }
+
+    #[test]
+    fn the_task_usage_holds_no_line_of_a_command_that_is_no_task_command() {
+        let task = task_usage();
+        for other in ["tell", "ask", "history"] {
+            let theirs = of(&[other]);
+            assert!(theirs.lines().count() > 1, "{other}: {theirs}");
+            for line in theirs.lines() {
+                assert!(!task.lines().any(|held| held == line), "{line:?}\n{task}");
+            }
+        }
+        // Each line that goes on belongs to a `cf task` line of the whole usage.
+        let all: Vec<&str> = usage().lines().collect();
+        let continued = |line: &&str| line.starts_with(&" ".repeat(CONTINUED));
+        for line in task.lines().filter(continued) {
+            let at = all.iter().position(|each| *each == line).expect("a line");
+            let owner = all[..at].iter().rev().find(|each| !continued(each));
+            assert!(
+                owner.is_some_and(|owner| owner.trim_start().starts_with("cf task ")),
+                "{line:?} goes on from {owner:?}"
+            );
+        }
+        assert!(task.contains("the member (--purpose for critical work)"));
+        assert!(task.contains("  cf task add --tier standard - <<'BRIEF'"));
     }
 }

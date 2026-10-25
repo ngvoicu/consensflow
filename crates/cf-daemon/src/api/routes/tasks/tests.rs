@@ -8,10 +8,12 @@ use std::rc::Rc;
 use hyper::Method;
 use serde_json::{json, Value};
 
+use crate::api::routes::task::GATED;
 use crate::api::routes::tests::support::{
-    api, finished_session_task, open_task, read_while, session_task_at_work, through, with_body,
-    working_task,
+    api, finished_session_task, gated_brief_of, open_task, project_is, read_while,
+    session_task_at_work, through, with_body, working_task,
 };
+use crate::api::waits::WAITS;
 use crate::testing::{scene, Scene};
 
 async fn post(scene: &Scene, token: &str, body: &str) -> (u16, Value) {
@@ -519,4 +521,60 @@ async fn a_follow_up_of_a_task_still_at_work_waits_for_it_and_is_not_queued_for_
         (status, said["task"]["blockedBy"].clone()),
         (201, json!([next]))
     );
+}
+
+/// The title of task `number` as `token`'s window lists the board: on its lane, or
+/// among the open tasks.
+async fn listed_title(scene: &Scene, token: &str, number: i64) -> Value {
+    let (status, said) = api(scene, Method::GET, "/api/tasks", token, "").await;
+    assert_eq!(status, 200, "{said}");
+    let lanes = said["lanes"].as_array().unwrap().iter();
+    lanes
+        .flat_map(|lane| lane["tasks"].as_array().unwrap().iter())
+        .chain(said["open"].as_array().unwrap().iter())
+        .find(|card| card["number"] == number)
+        .map(|card| card["title"].clone())
+        .unwrap_or_else(|| panic!("T-{number} is on no list: {said}"))
+}
+
+/// Calliope's review of the merge (T-408, P3-1): a card's title is its brief's
+/// first line, so `cf task list` gave a line of a brief that waits at the human's
+/// gate to every window. Each window that did not give the task lists it saying it
+/// waits; the chief, who wrote it, lists its title.
+#[tokio::test]
+async fn a_card_whose_brief_waits_at_the_gate_is_listed_saying_so_but_to_its_writer() {
+    let scene = scene();
+    let (session, _) = gated_brief_of(&scene, "Lexer\nTokenize every file under src");
+    for token in [&scene.zeus, &session] {
+        assert_eq!(listed_title(&scene, token, 1).await, GATED);
+    }
+    assert_eq!(listed_title(&scene, &scene.chief, 1).await, "Lexer");
+}
+
+/// The same, for a brief that waits for the Resume: while the project is closed,
+/// its window lists it saying it waits, and lists its title once it is open.
+#[tokio::test]
+async fn while_the_project_is_closed_a_card_whose_brief_no_window_was_handed_is_listed_saying_it_waits(
+) {
+    let scene = scene();
+    let created = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .create_task(
+            scene.project.id,
+            &cf_ledger::NewTask {
+                from: "chief".to_owned(),
+                to: Some("zeus".to_owned()),
+                body: "Lexer\nTokenize every file under src".to_owned(),
+                ..cf_ledger::NewTask::default()
+            },
+        )
+        .unwrap();
+    let number = created.task.number;
+    project_is(&scene, "suspended");
+    assert_eq!(listed_title(&scene, &scene.zeus, number).await, WAITS);
+    assert_eq!(listed_title(&scene, &scene.chief, number).await, "Lexer");
+    project_is(&scene, "open");
+    assert_eq!(listed_title(&scene, &scene.zeus, number).await, "Lexer");
 }

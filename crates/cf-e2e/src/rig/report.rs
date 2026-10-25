@@ -6,7 +6,7 @@
 //! where. And how a window's bytes become the text on its screen.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -20,6 +20,10 @@ const SCREEN: usize = 1_500;
 
 /// How many of the last lines of the daemon's log a failure shows.
 const LOG: usize = 30;
+
+/// The kinds of event that say why a delivery failed, was retried or was cancelled: each
+/// carries the daemon's own reason.
+const FAILURE_KINDS: [&str; 3] = ["delivery.failed", "delivery.retried", "delivery.cancelled"];
 
 /// How many of the last records of a conversation a failure shows.
 const RECORDS: usize = 4;
@@ -260,24 +264,69 @@ fn said_by_the_daemon(rig: &Rig, tell: &Tell) -> String {
     text
 }
 
-/// Says on the standard error what the rig showed: for a case that failed
-/// with the rig still up. Through `eprint!`, which a test's output holds for the
-/// case that failed and says nothing of for one that passed.
-#[allow(clippy::print_stderr)] // Said in the output of the test that failed.
-pub(super) fn say(rig: &Rig) {
+/// What a rig dropped unclosed has to say, written while it is up and said when its case
+/// is known to have failed (`outcome::leave`).
+pub(super) struct Left {
+    root: PathBuf,
+    case: String,
+    report: String,
+    folder: Option<PathBuf>,
+}
+
+impl Left {
+    /// Says on the standard error where the report is kept and which case left it. Through
+    /// `eprint!`, which a test's output holds for the case that failed and says nothing of
+    /// for one that passed.
+    #[allow(clippy::print_stderr)] // Said in the output of the test that failed.
+    pub(super) fn say(self) {
+        let where_kept = keep(&self.root, &self.case, &self.report, self.folder.as_deref());
+        eprint!("{where_kept}");
+    }
+}
+
+/// What the rig shows of itself, as a failed case left it with the rig still up, told
+/// whole through its owner's masker before anything of it is kept.
+pub(super) fn left_by(rig: &Rig) -> Left {
     let tell = Tell(rig.masker.as_ref());
-    let mut report = String::from("\n--- the rig, as the failed case left it\n");
+    let report = told(rig, &tell);
+    Left {
+        root: rig.root.clone(),
+        case: rig.case.clone(),
+        report: tell.text(&report),
+        folder: rig.reports.clone(),
+    }
+}
+
+/// What the rig showed of a failed case, as its report says it: the windows' screens, the
+/// programs' error output, the daemon's failure events and log, what the stand-in agents
+/// wrote, and what the daemon says, all told through the owner's masker.
+pub(super) fn report_of(rig: &Rig) -> String {
+    let mask = Tell(rig.masker.as_ref());
+    mask.text(&told(rig, &mask))
+}
+
+/// The report of a failed case (see [`left_by`]), each part of it told through the owner's masker
+/// as it is written, and the whole told again by the caller.
+fn told(rig: &Rig, tell: &Tell) -> String {
+    let mut report = format!(
+        "\n--- the rig, as the failed case left it\ncase: {}\n",
+        rig.case
+    );
     report.push_str(&format!("daemon stderr: {}\n", rig.daemon.errors().trim()));
     report.push_str(&format!("pane host stderr: {}\n", rig.host.errors().trim()));
+    report.push_str(
+        "the failure events of the run, from its event file (ids, kinds and the daemon's own reasons):\n",
+    );
+    report.push_str(&failure_lines(&rig.events(), tell));
     report.push_str("daemon log, the last lines:\n");
-    report.push_str(&log_lines(&rig.log(), &tell));
+    report.push_str(&log_lines(&rig.log(), tell));
     report.push_str("what the stand-in agents wrote:\n");
     report.push_str(&written(
         Path::new(rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default()),
-        &tell,
+        tell,
     ));
     report.push_str("what the daemon says:\n");
-    report.push_str(&said_by_the_daemon(rig, &tell));
+    report.push_str(&said_by_the_daemon(rig, tell));
     // Read under the lock, told after it: an owner's masker reads what the windows
     // printed under the same lock.
     let (windows, exits, stray) = {
@@ -291,23 +340,23 @@ pub(super) fn say(rig: &Rig) {
         (windows, seen.exits.clone(), seen.stray.clone())
     };
     for (id, screen) in windows {
-        report.push_str(&window_line(&id, &screen, &tell));
+        report.push_str(&window_line(&id, &screen, tell));
     }
-    report.push_str(&exits_line(&exits, &tell));
+    report.push_str(&exits_line(&exits, tell));
     if !stray.is_empty() {
         report.push_str(&format!("lines that are no frame: {stray:?}\n"));
     }
-    let where_kept = keep(&rig.root, &tell.text(&report), rig.reports.as_deref());
-    eprint!("{where_kept}");
+    report
 }
 
 /// Keeps `report`, what a rig dropped unclosed says of itself, in a file beside its home
 /// `root` (the home goes with the rig), or in `folder` where the rig is given one
 /// ([`Config::reports_in`]), on the machine it ran on; and what its error output says
-/// instead: where the report is, and none of its words. Whatever runs a rig (an agent's
+/// instead: where the report is and the `case` that left it (a test's name, so that a line
+/// of a log points at the case), and none of its words. Whatever runs a rig (an agent's
 /// tool, another machine's runner) takes its error output off the machine, and the report
 /// holds what its windows showed.
-fn keep(root: &Path, report: &str, folder: Option<&Path>) -> String {
+fn keep(root: &Path, case: &str, report: &str, folder: Option<&Path>) -> String {
     let name = root
         .file_name()
         .map_or_else(|| "rig".into(), |name| name.to_string_lossy());
@@ -317,13 +366,46 @@ fn keep(root: &Path, report: &str, folder: Option<&Path>) -> String {
     };
     match files::write(&file, report) {
         Ok(()) => format!(
-            "\n--- the rig, as the failed case left it, is kept in {}\n",
+            "\n--- the rig, as the failed case left it, is kept in {} (case: {case})\n",
             file.display()
         ),
         Err(unkept) => {
-            format!("\n--- the rig, as the failed case left it, could not be kept: {unkept}\n")
+            format!(
+                "\n--- the rig, as the failed case left it, could not be kept: {unkept} (case: {case})\n"
+            )
         }
     }
+}
+
+/// The failure events among `events`, each a line with its place in the file, its kind, its
+/// project and its message, and the daemon's own reason, told through `tell` and set on one
+/// line. No other part of an event is said: a window's screen and a conversation's words are
+/// none of it.
+fn failure_lines(events: &[Value], tell: &Tell) -> String {
+    let failures: Vec<&Value> = events
+        .iter()
+        .filter(|event| {
+            event["kind"]
+                .as_str()
+                .is_some_and(|kind| FAILURE_KINDS.contains(&kind))
+        })
+        .collect();
+    if failures.is_empty() {
+        return "  none\n".to_owned();
+    }
+    let mut text = String::new();
+    for event in failures {
+        let reason = tell.text(event["data"]["reason"].as_str().unwrap_or_default());
+        text.push_str(&format!(
+            "  {} {} project {} message {}: {}\n",
+            event["n"],
+            event["kind"].as_str().unwrap_or("?"),
+            event["project"],
+            event["data"]["message"],
+            reason.replace('\n', " "),
+        ));
+    }
+    text
 }
 
 /// The last [`LOG`] lines of the daemon's log `log`, told whole first, each a line
@@ -422,7 +504,8 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let root = folder.path().join("consensflow-integration-AbC123");
         let report = "--- p1-long-claude-1: \"correct horse battery staple\"\n";
-        let said = keep(&root, report, None);
+        let case = "a_suite::a_case_that_left_it";
+        let said = keep(&root, case, report, None);
         let file = folder
             .path()
             .join("consensflow-integration-AbC123-left.txt");
@@ -430,20 +513,21 @@ mod tests {
         assert_eq!(
             said,
             format!(
-                "\n--- the rig, as the failed case left it, is kept in {}\n",
+                "\n--- the rig, as the failed case left it, is kept in {} (case: {case})\n",
                 file.display()
             )
         );
         assert!(!said.contains("horse"), "{said}");
         // Given a folder, the file is in it, and the folder is made.
         let reports = folder.path().join("reports");
-        let said = keep(&root, report, Some(&reports));
+        let said = keep(&root, case, report, Some(&reports));
         let file = reports.join("consensflow-integration-AbC123-left.txt");
         assert_eq!(fs::read_to_string(&file).unwrap(), report);
         assert!(said.contains(&file.display().to_string()), "{said}");
         // A file that cannot be written: said so, with none of the report either.
-        let said = keep(&file.join("home"), report, None);
+        let said = keep(&file.join("home"), case, report, None);
         assert!(said.contains("could not be kept"), "{said}");
+        assert!(said.ends_with(&format!("(case: {case})\n")), "{said}");
         assert!(!said.contains("horse"), "{said}");
     }
 
@@ -464,6 +548,24 @@ mod tests {
             let joined = wrapped.replace_all(&joined, "[masked]\n");
             joined.split('\n').map(str::to_owned).collect()
         })
+    }
+
+    #[test]
+    fn a_failure_lists_each_failure_event_by_its_ids_and_the_daemons_reason_and_nothing_else() {
+        let events = vec![
+            json!({ "n": 1, "at": "t", "kind": "window.activity", "participant": "worker", "state": "idle" }),
+            json!({ "n": 2, "at": "t", "kind": "delivery.retried", "project": 1, "data": { "message": 5, "reason": "the window never showed its first message" } }),
+            json!({ "n": 3, "at": "t", "kind": "message.sent", "project": 1, "data": { "message": 6, "body": "a transcript line" } }),
+            json!({ "n": 4, "at": "t", "kind": "delivery.failed", "project": 1, "data": { "message": 5, "reason": "the window never showed its first message; its last screen lines named a secret, so they are left out" } }),
+        ];
+        assert_eq!(
+            failure_lines(&events, &Tell(None)),
+            concat!(
+                "  2 delivery.retried project 1 message 5: the window never showed its first message\n",
+                "  4 delivery.failed project 1 message 5: the window never showed its first message; its last screen lines named a secret, so they are left out\n",
+            )
+        );
+        assert_eq!(failure_lines(&events[..1], &Tell(None)), "  none\n");
     }
 
     #[test]

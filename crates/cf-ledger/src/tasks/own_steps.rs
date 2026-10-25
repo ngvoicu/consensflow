@@ -55,12 +55,52 @@ pub(crate) fn withdrawn_late(
     Ok(true)
 }
 
+/// What of the step `task` is still on its way to its chief, `chief`: the
+/// messages a finish withdraws (queued for the chief or held at the gate: its
+/// brief, and any answer or note carried on it) and, apart, its brief if it is
+/// being typed in, which cannot be taken back (it goes no further if its paste
+/// is given back, and may still arrive once). Their ids, oldest first.
+fn on_their_way(
+    store: &Store,
+    task: &TaskRow,
+    chief: i64,
+) -> Result<(Vec<i64>, Vec<i64>), LedgerError> {
+    let ids = |sql: &str| -> Result<Vec<i64>, LedgerError> {
+        Ok(store
+            .db
+            .prepare(sql)?
+            .query_map(params![task.id, chief], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?)
+    };
+    Ok((
+        ids(
+            "SELECT id FROM message WHERE task_id = ? AND recipient_id = ?
+               AND state IN ('queued', 'gated') ORDER BY id",
+        )?,
+        ids(
+            "SELECT id FROM message WHERE task_id = ? AND recipient_id = ?
+               AND state = 'delivering' AND kind = 'task' ORDER BY id",
+        )?,
+    ))
+}
+
+/// The messages with these ids, as they stand.
+fn views(store: &Store, ids: &[i64]) -> Result<Vec<MessageView>, LedgerError> {
+    let mut found = Vec::new();
+    for id in ids {
+        found.extend(store.message(*id)?);
+    }
+    Ok(found)
+}
+
 /// The chief finishes its own step with `body`, queued for it (its brief on
 /// its way back) or at work on it; one still waiting on the board for what it
 /// needs is refused. In one step: what of the step had not reached the chief
-/// yet (its brief, most often) is withdrawn; the words are its result, received
-/// as they are written, never pasted; and the step is accepted, there being
-/// nobody else to decide it, so what needs it goes on.
+/// yet (its brief, most often) is withdrawn and named, and so is its brief if
+/// it is being typed in and may still land (`TaskMoved::withdrawn`, `landing`);
+/// the words are its result, received as they are written, never pasted; and
+/// the step is accepted, there being nobody else to decide it, so what needs it
+/// goes on.
 pub(super) fn finish(
     store: &mut Store,
     project_id: i64,
@@ -69,6 +109,7 @@ pub(super) fn finish(
 ) -> Result<TaskMoved, LedgerError> {
     require_task_state(task, &HELD_TASK_STATES, "finish")?;
     let chief = store.participant_row(task.requester_id)?;
+    let (withdrawn, landing) = on_their_way(store, task, chief.id)?;
     store.db.execute(
         "UPDATE message SET state = 'cancelled', reason = ?
          WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'gated')",
@@ -98,5 +139,7 @@ pub(super) fn finish(
     Ok(TaskMoved {
         task: task_by_id(store, task.id)?,
         message: store.message(message_id)?,
+        withdrawn: views(store, &withdrawn)?,
+        landing: views(store, &landing)?,
     })
 }

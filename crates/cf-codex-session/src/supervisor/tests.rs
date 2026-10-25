@@ -58,7 +58,7 @@ impl Home {
         all.extend(args.iter().map(OsString::from));
         let setup = Setup {
             startup,
-            endpoint: Endpoint::open,
+            ..Setup::standard()
         };
         crate::block_on_local(supervise_with(&self.env, &all, setup)).unwrap()
     }
@@ -126,6 +126,89 @@ fn says_why_codexs_server_could_not_start_with_what_it_wrote_and_leaves_nothing_
         given[10]
     );
     assert_eq!(given.len(), 11);
+}
+
+const NO_JOB: &str = "could not be put in a job of its own: Access is denied. (os error 5)";
+
+#[test]
+fn a_program_the_system_gave_no_job_is_told_in_a_line_that_names_it_and_the_reason() {
+    assert_eq!(
+        without_a_job("Codex's TUI", NO_JOB),
+        "ConsensFlow: Codex's TUI ran in no job of its own, the system gave it none (could not be put in a job of its own: Access is denied. (os error 5)); it was ended with taskkill, which can leave what it started as it was ended running until the window closes"
+    );
+}
+
+thread_local! {
+    /// What a window said once it had ended, to the test that runs it.
+    static SAID: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+fn said_to_the_test(line: &str) {
+    SAID.with(|said| said.borrow_mut().push(line.to_owned()));
+}
+
+/// A whole window on loopback, as the one test above runs, whose programs the system gives a job
+/// or not as `refusal` says: the code it ended with and what it said once it had ended.
+fn a_window_saying(refusal: fn(&Owned) -> Option<String>) -> (i32, Vec<String>) {
+    let home = Home::new();
+    let (code, said) = crate::block_on_local(async {
+        let codex = FakeCodex::start(Behaviour::Ready).await;
+        let program = codex_on_loopback(&home, codex.address.port(), "");
+        let setup = Setup {
+            startup: Duration::from_secs(10),
+            endpoint: |_| Endpoint::loopback(),
+            refusal,
+            say: said_to_the_test,
+        };
+        let code = supervise_with(&home.env, &[program.into_os_string()], setup).await;
+        (code, SAID.with(|said| said.take()))
+    })
+    .unwrap();
+    (code.unwrap(), said)
+}
+
+#[test]
+fn a_window_whose_programs_the_system_gave_no_job_says_which_once_it_has_ended_and_goes_on_as_before(
+) {
+    let (code, said) = a_window_saying(|_| Some(NO_JOB.to_owned()));
+    assert_eq!(code, 7, "the TUI's code is the window's");
+    assert_eq!(
+        said,
+        [
+            without_a_job("Codex's server", NO_JOB),
+            without_a_job("Codex's TUI", NO_JOB)
+        ]
+    );
+}
+
+#[test]
+fn a_window_whose_programs_have_their_jobs_says_nothing_of_them() {
+    let (code, said) = a_window_saying(Setup::standard().refusal);
+    assert_eq!(code, 7);
+    assert!(said.is_empty(), "{said:?}");
+}
+
+#[test]
+fn a_server_that_could_not_start_in_a_window_that_gave_it_no_job_is_said_all_the_same() {
+    let home = Home::new();
+    let codex = home.codex("echo 'not logged in' >&2\nexit 1");
+    let setup = Setup {
+        startup: Duration::from_secs(5),
+        refusal: |_| Some(NO_JOB.to_owned()),
+        say: said_to_the_test,
+        ..Setup::standard()
+    };
+    let failed = crate::block_on_local(supervise_with(&home.env, &[codex.into_os_string()], setup))
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(
+        failed.to_string(),
+        "Codex server could not start: not logged in\n"
+    );
+    assert_eq!(
+        SAID.with(|said| said.take()),
+        [without_a_job("Codex's server", NO_JOB)]
+    );
 }
 
 #[test]
@@ -226,7 +309,7 @@ fn no_program_named_is_said() {
     let home = Home::new();
     let setup = Setup {
         startup: Duration::from_secs(1),
-        endpoint: Endpoint::open,
+        ..Setup::standard()
     };
     let failed = crate::block_on_local(supervise_with(&home.env, &[], setup))
         .unwrap()
@@ -265,6 +348,7 @@ fn a_window_on_loopback_as_windows_runs_one_hands_the_server_its_tokens_hash_and
         let setup = Setup {
             startup: Duration::from_secs(10),
             endpoint: |_| Endpoint::loopback(),
+            ..Setup::standard()
         };
         let args = [
             program.into_os_string(),
@@ -360,6 +444,7 @@ fn a_server_that_does_not_end_when_asked_is_killed_after_a_moment_and_the_tuis_c
         let setup = Setup {
             startup: Duration::from_secs(10),
             endpoint: |_| Endpoint::loopback(),
+            ..Setup::standard()
         };
         let code = supervise_with(&home.env, &[program.into_os_string()], setup).await;
         (code, Instant::now())
@@ -405,6 +490,7 @@ fn the_servers_standard_error_is_read_for_as_long_as_it_runs_not_only_until_it_i
             endpoint: Endpoint::open(&home.env).unwrap(),
             bypass: false,
             startup: Duration::from_secs(5),
+            refusal: Setup::standard().refusal,
         };
         let tail = Rc::new(RefCell::new(Tail::default()));
         let mut session = Session::default();

@@ -5,14 +5,13 @@
 //! item too, and on from where it stopped until it finds; and a long item a
 //! part at a time, each part read alone and the participant's own.
 
-use std::time::Instant;
-
 use cf_ledger::{
     HistoryAsk, HistoryEntry, HistoryFrom, HistoryRead, Ledger, NewMember, HISTORY_PART,
     HISTORY_SCAN_BYTES, PAGE_BYTES,
 };
 use serde_json::{json, Value};
 
+use super::pages::{fetched, SLACK};
 use super::{id_of, item, ledger_in, project};
 
 /// A page's room, as the viewer asks: the frame, less what the page says besides.
@@ -820,14 +819,33 @@ fn a_long_item_that_shrinks_and_grows_is_read_as_it_is_now() {
     }
 }
 
-#[test]
-fn reading_a_24_mib_item_whole_a_part_at_a_time_reads_each_part_alone() {
-    // The reviewers' item: 24 MiB, about 394 parts. Read whole for each part,
-    // as the second round did, it was read 394 times over: tens of seconds.
-    let dir = tempfile::tempdir().expect("a folder");
-    let (mut ledger, project, conversation) = chief(&dir);
-    // Each with its time, which its row holds past the whole of its text: an
-    // item of two parts, and in the next conversation the long one.
+/// The reviewers' ledger: the chief's conversation of an item of two parts,
+/// and after it the newest, of one of 24 MiB, about 394 parts. Each with its
+/// time, which its row holds past the whole of its text.
+///
+/// What it writes stays in the write-ahead log, never checkpointed into the
+/// database file: a long value's pages that are in the file itself can be read
+/// straight from it, past the cache the pages are counted in, and a walk of
+/// the item's chain went uncounted so (a read of the whole 24 MiB text counted
+/// 9 pages); kept in the log, every page of the walk is counted (6,159).
+pub(super) struct Reviewers {
+    pub(super) ledger: Ledger,
+    pub(super) project: i64,
+    /// The conversation of the long item, and the row it stands at.
+    pub(super) conversation: i64,
+    pub(super) place: i64,
+    /// The length of the long item's text, in bytes.
+    pub(super) length: usize,
+    /// Where the page that shows the item of two parts begins.
+    pub(super) two_parts: HistoryFrom,
+}
+
+pub(super) fn reviewers(dir: &tempfile::TempDir) -> Reviewers {
+    let (mut ledger, project, conversation) = chief(dir);
+    ledger
+        .sqlite()
+        .execute_batch("PRAGMA wal_autocheckpoint = 0")
+        .expect("kept in the log");
     let timed = |id: &str, text: &str| {
         let mut timed = item(id, "assistant", text);
         timed["at"] = json!("2026-10-16T09:30:00.000Z");
@@ -855,46 +873,143 @@ fn reading_a_24_mib_item_whole_a_part_at_a_time_reads_each_part_alone() {
         .copy_transcript(conversation, &[timed("long", &whole)], 0)
         .expect("copied");
     let place = row_of(&ledger, project, "long");
-    let started = Instant::now();
-    let mut parts = 0;
-    let mut bytes = 0;
-    let mut from = Some(0);
-    while let Some(at) = from {
-        let part = ledger
-            .read_history_part(project, "chief", conversation, place, at)
-            .expect("a part");
-        parts += 1;
-        bytes += part.text.len();
-        from = part.next;
-        assert!(parts < 1_000, "no end");
-    }
-    let took = started.elapsed();
-    assert_eq!((parts, bytes), (394, whole.len()));
-    assert!(took.as_secs() < 5, "{parts} parts took {took:?}");
-    // A page that shows the long one's first part takes what a page that
-    // shows the other's does: its fields are read from where they are held
-    // apart, never from past the whole of its text.
     let long_page = ledger
         .read_history(project, "chief", &ask(HistoryFrom::Newest, None, false, 1))
         .expect("read");
     let two_parts = HistoryFrom::Before(long_page.resume.expect("the one before"));
-    let pages = |from: HistoryFrom| {
-        let started = Instant::now();
-        for _ in 0..200 {
-            let read = ledger
-                .read_history(project, "chief", &ask(from, None, false, 1))
-                .expect("read");
-            assert_eq!(read.entries.len(), 1);
-        }
-        started.elapsed()
+    Reviewers {
+        ledger,
+        project,
+        conversation,
+        place,
+        length: whole.len(),
+        two_parts,
+    }
+}
+
+/// The size of the pages of the ledger's file.
+fn page_size(ledger: &Ledger) -> usize {
+    let size: i64 = ledger
+        .sqlite()
+        .query_row("PRAGMA page_size", [], |row| row.get(0))
+        .expect("a page size");
+    usize::try_from(size).expect("a size")
+}
+
+/// How many pages a value of `bytes` bytes spreads over where it is longer
+/// than its row's own page: each takes the next one's number before its data.
+fn chain(page_size: usize, bytes: usize) -> i32 {
+    i32::try_from(bytes.div_ceil(page_size - 4)).expect("a count")
+}
+
+/// What a read of a part takes besides the chain of its own text: the pages
+/// of the indexes and rows it comes to it by (the participant, the item's
+/// head, the part's row) and of its row's end kept before its text. It takes
+/// 28 for a part of 64,000 bytes, whose chain is 16.
+const AROUND: i32 = 14;
+
+/// The most a value may be where a read loads no long item's text: a part and
+/// a little more.
+pub(super) const LOADED_AT_MOST: usize = 100_000;
+
+#[test]
+fn reading_a_24_mib_item_whole_a_part_at_a_time_reads_each_part_alone() {
+    // The reviewers' item: 24 MiB, about 394 parts. Read whole for each part,
+    // as the second round did, it was read 394 times over (some 6,150 pages a
+    // part, tens of seconds), and a part found by going through its item from
+    // the first would take more pages the later it is. SQLite's pages are
+    // counted, not the seconds the machine takes for them, which another
+    // build running beside this one moves.
+    let dir = tempfile::tempdir().expect("a folder");
+    let Reviewers {
+        ledger,
+        project,
+        conversation,
+        place,
+        length,
+        ..
+    } = reviewers(&dir);
+    let size = page_size(&ledger);
+    // A read that loaded the item's text whole would fail, the value too long.
+    ledger.limit_value_length(LOADED_AT_MOST).expect("held");
+    let part = |at: usize| {
+        ledger
+            .read_history_part(project, "chief", conversation, place, at)
+            .expect("a part")
     };
-    // Each once to warm up, then each timed.
-    pages(two_parts);
-    pages(HistoryFrom::Newest);
-    let two = pages(two_parts);
-    let long = pages(HistoryFrom::Newest);
+    // The first once beforehand: what SQLite reads to make its statements is
+    // not counted.
+    part(0);
+    fetched(&ledger);
+    let (mut parts, mut bytes, mut first) = (0, 0, None);
+    let mut from = Some(0);
+    while let Some(at) = from {
+        let got = part(at);
+        let pages = fetched(&ledger);
+        // The part's own chain and the few pages around it, whichever part it
+        // is: a walk of the item's whole text is some 6,150.
+        assert!(
+            pages <= chain(size, got.text.len()) + AROUND,
+            "part {parts} took {pages} pages: a walk of the item's {length} bytes is {}",
+            chain(size, length)
+        );
+        // And none takes more than the first: it did not go through the
+        // parts before it.
+        let first = *first.get_or_insert(pages);
+        assert!(
+            pages <= first + SLACK,
+            "part {parts} took {pages} pages, the first {first}"
+        );
+        parts += 1;
+        bytes += got.text.len();
+        from = got.next;
+        assert!(parts < 1_000, "no end");
+    }
+    assert_eq!((parts, bytes), (394, length));
+}
+
+#[test]
+fn a_page_that_shows_a_24_mib_item_reads_what_one_that_shows_an_item_of_two_parts_does() {
+    // Its fields are read from where they are held apart, never from past the
+    // whole of its text: that is a walk of the long text's chain (some 6,150
+    // pages), which a count of steps does not show and the seconds a busy
+    // machine takes for it do not either, so SQLite's pages are counted.
+    let dir = tempfile::tempdir().expect("a folder");
+    let Reviewers {
+        ledger,
+        project,
+        length,
+        two_parts,
+        ..
+    } = reviewers(&dir);
+    // A read that loaded the item's text whole would fail, the value too long.
+    ledger.limit_value_length(LOADED_AT_MOST).expect("held");
+    let long = page_cost(&ledger, project, HistoryFrom::Newest);
+    let two = page_cost(&ledger, project, two_parts);
+    // The long page takes 47 pages, the two-part page 49: it is the dearer by
+    // construction (its conversation is ended, so its heading reads what
+    // ended it from the log, and the read probes for an older conversation and
+    // finds none: 274 steps against 222). So the bound leaves the long page 4
+    // pages over the 47 it takes, the 2 the other is dearer by and SLACK.
     assert!(
-        long < two * 2,
-        "200 pages of the long item took {long:?}, of the two parts' {two:?}"
+        long <= two + SLACK,
+        "a page of the 24 MiB item took {long} pages, of the two parts' {two}: a walk of its text is {}",
+        chain(page_size(&ledger), length)
     );
+}
+
+/// What reading the page of one entry from `from` takes of the ledger's file,
+/// in SQLite's pages: the read once first, so that what SQLite reads to make
+/// its statements is not counted.
+pub(super) fn page_cost(ledger: &Ledger, project: i64, from: HistoryFrom) -> i32 {
+    let page = || {
+        let read = ledger
+            .read_history(project, "chief", &ask(from, None, false, 1))
+            .expect("read");
+        assert_eq!(read.entries.len(), 1);
+    };
+    page();
+    fetched(ledger);
+    page();
+    fetched(ledger)
 }

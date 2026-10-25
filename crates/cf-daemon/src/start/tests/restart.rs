@@ -426,7 +426,19 @@ async fn an_exit_the_host_tells_reaches_the_engine_where_it_is_read() {
         .await;
 }
 
-#[tokio::test]
+/// Lets what is ready run, without the clock moving: the telling goes from the
+/// engine through the bridge to the app in several turns.
+async fn turns() {
+    for _ in 0..100 {
+        tokio::task::yield_now().await;
+    }
+}
+
+// On the runtime's paused clock, which moves only when nothing else can run: the
+// wait is read to the millisecond and no machine can stretch it. (On the wall
+// clock a loaded Windows runner once read 1.09 s from the first change to the
+// telling, T-431.)
+#[tokio::test(start_paused = true)]
 async fn the_page_is_told_the_board_moved_a_hundred_milliseconds_after_the_first_change_and_once() {
     LocalSet::new()
         .run_until(async {
@@ -440,10 +452,10 @@ async fn the_page_is_told_the_board_moved_a_hundred_milliseconds_after_the_first
             ledger.close().unwrap();
             let (said, exited, handles) = (Said::default(), Rc::default(), Rc::default());
             let (options, app) = options(root.path(), &said, &exited, &handles);
-            let told: Rc<RefCell<Vec<Instant>>> = Rc::default();
+            let told: Rc<RefCell<Vec<tokio::time::Instant>>> = Rc::default();
             let noted = Rc::clone(&told);
             let _heard = app.on_event("state.changed", move |_| {
-                noted.borrow_mut().push(Instant::now());
+                noted.borrow_mut().push(tokio::time::Instant::now());
             });
             let daemon = start(environment(root.path()), options).await.unwrap();
             ask(&app, "ping", json!({})).await;
@@ -455,22 +467,27 @@ async fn the_page_is_told_the_board_moved_a_hundred_milliseconds_after_the_first
             );
 
             // Two changes a moment apart are one telling, the wait after the first.
-            let first = Instant::now();
+            let first = tokio::time::Instant::now();
             daemon.parts.engine.close_project(project).await.unwrap();
             tokio::time::sleep(Duration::from_millis(30)).await;
             daemon.parts.engine.close_project(project).await.unwrap();
-            wait_for(root.path(), || !told.borrow().is_empty()).await;
-            // Nothing more comes of what came together.
-            tokio::time::sleep(Duration::from_millis(300)).await;
+            tokio::time::sleep(Duration::from_millis(69)).await;
+            assert!(
+                told.borrow().is_empty(),
+                "told before the wait was over, 99 ms after the first change: {:?}",
+                told.borrow()
+            );
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            turns().await;
             let after = {
                 let told = told.borrow();
-                assert_eq!(told.len(), 1, "{told:?}");
+                assert_eq!(told.len(), 1, "100 ms after the first change: {told:?}");
                 told[0] - first
             };
-            assert!(
-                after >= Duration::from_millis(100) && after < Duration::from_millis(600),
-                "{after:?}"
-            );
+            assert_eq!(after, Duration::from_millis(100));
+            // Nothing more comes of what came together.
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            assert_eq!(told.borrow().len(), 1, "{:?}", told.borrow());
             daemon.stop("SIGTERM");
             daemon.finished().await;
         })

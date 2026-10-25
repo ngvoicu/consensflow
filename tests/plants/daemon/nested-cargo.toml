@@ -1,0 +1,33 @@
+# The cargo a test starts inside `cargo test` (`crates/cf-daemon/tests/api/nested_cargo.rs`, which
+# the test of `cf` uses to build it) is started without the variables cargo gave the test. With
+# them a build script that watches one (`ring`'s does, `CARGO_MANIFEST_DIR`) runs again, and the
+# build the test starts builds `ring` and what is over it over files of the build that runs the
+# test; with `RUSTC_BOOTSTRAP=1` set for this run and not for the one before, they are other
+# crates, and the last step of `cargo test`, rustdoc, said "can't find crate" of `cf_daemon`
+# (zeewin, 2026-10-23, T-365). Every name here begins `nested cargo:`, so
+# `npm run plants:daemon -- "nested cargo"` runs them.
+
+[run]
+nested-cargo-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "api", "nested_cargo::"]
+
+# The cargo that is started is told nothing of the variables.
+[[plant]]
+name = "nested cargo: the cargo a test starts keeps the variables cargo gave the test"
+meant = "the_cargo_a_test_starts_builds_nothing_over_the_files_of_the_run"
+runs = ["nested-cargo-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/api/nested_cargo.rs"
+find = "    without_the_tests_own(&mut command, std::env::vars_os().map(|(name, _)| name));"
+replace = ""
+
+# The list of the variables lacks the crate's own, `CARGO_PKG_*`.
+[[plant]]
+name = "nested cargo: the package variables cargo gave the test stay"
+meant = "what_cargo_sets_for_a_test_is_taken_from_the_cargo_it_starts_and_nothing_else_is"
+runs = ["nested-cargo-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/api/nested_cargo.rs"
+find = 'name.starts_with("CARGO_PKG_")'
+replace = 'name.starts_with("CARGO_PKG_STAYS_")'

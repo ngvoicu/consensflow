@@ -20,10 +20,12 @@
 //!    nothing.
 //! 2. No task is done while a background job of its window still runs, unless it
 //!    was finished (A2): a Claude Code job its harness will wake the worker for.
-//! 3. An "ended" notice never comes after its result (A3). Which result is a
-//!    notice's is the log's word alone (the moves of its task), never how near the two
-//!    were written; one the log does not tie to a result is unresolved ([`Unjudged`]):
-//!    said in the timeline, no break, and never taken to hold.
+//! 3. No work is ended under a task at work (A3): the note of a window's close that
+//!    ended what its turn left running comes once its task has ended. Which state a
+//!    task was in when it was written is the log's word alone (the moves of the task),
+//!    never how near the two were written; a note the log does not tie to the earlier
+//!    attempt of a task sent back or to the new one is unresolved ([`Unjudged`]): said
+//!    in the timeline, no break, and never taken to hold.
 //! 4. A result is the last turn's final answer (A4): no progress line in it.
 //! 5. No "turn was cut" note for a turn that was not cut (A5), as the window's own
 //!    record says, an idle compaction being no turn.
@@ -62,13 +64,14 @@ use super::look::Look;
 use super::mask::{mask, screen, Names};
 
 pub use end::end;
-pub use order::{ENDED_NOTE, LET_GO_NOTE, PROGRESS_LINES};
+pub use order::{CLOSE_NOTE, PROGRESS_LINES};
+pub use turns::CUT;
 
 /// What each invariant is called in a report, and the field's shape it is made of.
 pub const INVARIANTS: [(u8, &str, &str); 10] = [
     (1, "no task works on at rest", "A1"),
     (2, "no task done while its job runs", "A2"),
-    (3, "an ended notice comes with or before its result", "A3"),
+    (3, "no work is ended under a task at work", "A3"),
     (4, "a result is the last turn's final answer", "A4"),
     (5, "no false \"turn was cut\"", "A5"),
     (6, "every window has its process, and no stranger", "B2"),
@@ -267,7 +270,7 @@ pub struct Filled {
 pub fn check(look: &Look, settings: &Settings) -> Vec<Break> {
     let mut found = work::idle(look, settings);
     found.extend(work::done_while_job(look, settings));
-    found.extend(order::ended_after_result(look));
+    found.extend(order::closed_under_work(look));
     found.extend(order::final_answer(look, settings));
     found.extend(turns::false_cut(look));
     found.extend(windows::processes(look));
@@ -279,7 +282,7 @@ pub fn check(look: &Look, settings: &Settings) -> Vec<Break> {
 /// What one look holds that the checks cannot judge, with `settings`: the tasks whose
 /// Claude Code window the copy says rested too long, its own record not read through
 /// the look (1); the results whose worker's own record was not read through their turn
-/// (2); the ended notices the log ties to no result (3); the results whose turn the copy
+/// (2); the close notes the log ties to neither attempt of a task (3); the results whose turn the copy
 /// of their worker's conversation does not hold (4); the cut notes to a Claude Code
 /// window whose own record was not read through them (5); and what the watch could not
 /// see of a window's tree, or of a task's state when its window closed by itself (6).

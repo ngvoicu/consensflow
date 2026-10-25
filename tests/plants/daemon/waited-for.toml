@@ -107,8 +107,8 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "        if held_back && !may_move(caller, &task) {"
-replace = "        if held_back {"
+find = "        if let Some(held) = held_back.filter(|_| !may_move(caller, &task.task.requester)) {"
+replace = "        if let Some(held) = held_back {"
 
 [[plant]]
 name = "brief gate: Node's recording of the chief reading its gated task is not answered as Node answered it"
@@ -117,8 +117,8 @@ runs = ["daemon-api"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "        if held_back && !may_move(caller, &task) {"
-replace = "        if held_back {"
+find = "        if let Some(held) = held_back.filter(|_| !may_move(caller, &task.task.requester)) {"
+replace = "        if let Some(held) = held_back {"
 
 [[plant]]
 name = "waited for: a member's removal leaves the tasks that waited for its tasks without a word to the chief"

@@ -56,6 +56,8 @@ viewer-ledger-long = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test",
 viewer-ledger-wake-ups = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "wake_ups", "moved::"]
 viewer-ledger-held-apart = ["cargo", "test", "--offline", "-p", "cf-ledger", "--features", "test-support", "--lib", "testing::compaction"]
 viewer-ledger-plan = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "conversations::history::"]
+# The by-hand test of a long history, which cargo test ignores unless asked.
+viewer-ledger-long-page = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "whole_history", "--", "--ignored", "a_page_of_a_long_history"]
 viewer-base-time = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "time::"]
 viewer-engine-restart = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "restart::"]
 viewer-engine-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text"]
@@ -527,6 +529,47 @@ replace = '''    if false && parts > 0 {
         let index'''
 
 [[plant]]
+name = "session viewer: a page measures an item by the length of its text, not by its head's bytes"
+meant = "a_page_that_shows_a_24_mib_item_reads_what_one_that_shows_an_item_of_two_parts_does"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "SELECT item AS row_id, role, bytes, parts, id_shown"
+replace = "SELECT item AS row_id, role, length((SELECT text FROM transcript WHERE rowid = item)) AS bytes, parts, id_shown"
+
+[[plant]]
+name = "session viewer: a page reads the end of an item's text through a blob read to say how long it is"
+meant = "a_page_that_shows_a_24_mib_item_reads_what_one_that_shows_an_item_of_two_parts_does"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''        let first = self.part_bytes(&met, 0)?;
+        let reading = first.unwrap_or(met.bytes);'''
+replace = '''        let first = self.part_bytes(&met, 0)?;
+        let blob = self.store.db.blob_open(rusqlite::MAIN_DB, c"transcript", c"text", met.key.row, true)?;
+        blob.read_at(&mut [0_u8; 1], blob.len().saturating_sub(1))?;
+        let reading = first.unwrap_or(met.bytes);'''
+
+[[plant]]
+name = "session viewer: history.part goes through the parts before the one it reads"
+meant = "reading_a_24_mib_item_whole_a_part_at_a_time_reads_each_part_alone"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "        let index = (from / HISTORY_PART).min(parts - 1);"
+replace = '''        let index = (from / HISTORY_PART).min(parts - 1);
+        for earlier in 0..index {
+            let _: Option<String> = store
+                .db
+                .prepare_cached(PART_TEXT)?
+                .query_row(params![row, number(earlier)], |found| found.get(0))
+                .optional()?;
+        }'''
+
+[[plant]]
 name = "session viewer: a page reads an item's time from its row, past the whole of its id and its text"
 meant = "a_read_takes_as_many_pages_beside_32_mib_ids_roles_names_and_bodies_as_beside_short_ones"
 runs = ["viewer-ledger-history"]
@@ -830,6 +873,10 @@ find = '''            element('span', 'terminal-meta', participant.harness ?? ''
 replace = '''            element('span', 'terminal-meta', participant.harness ?? ''),
 '''
 
+# Drawn as markup without the handler the app's policy refuses: the spec's afterEach holds every
+# test to a page the policy refuses nothing of, and a test whose body failed beside a hook that
+# threw is no catch of its own (the plants' runner). The body is what this plant is for.
+
 [[plant]]
 name = "session viewer: an item's text is drawn as markup"
 meant = "labels items as the task drawer does, a compaction's summary as one, and shows every text as text"
@@ -838,7 +885,7 @@ runs = ["viewer-ui-labels"]
 [[plant.edit]]
 file = "app/ui/core/history-viewer.js"
 find = "    entry.append(element('pre', 'transcript-body', item.text))"
-replace = "    entry.insertAdjacentHTML('beforeend', `<pre class=\"transcript-body\">${item.text}</pre>`)"
+replace = '''    entry.insertAdjacentHTML('beforeend', `<pre class="transcript-body">${item.text.replace(/ onerror="[^"]*"/g, '')}</pre>`)'''
 
 [[plant]]
 name = "session viewer: a compaction's summary is labelled as what was sent to the window"
@@ -1040,6 +1087,46 @@ runs = ["viewer-daemon-page"]
 file = "crates/cf-ledger/src/conversations/history.rs"
 find = '''    opening.opening = opening_of(&store.db, c"message", c"body", id, MESSAGE_OPENING)?;'''
 replace = '''    opening.opening = store.db.query_row("SELECT substr(body, 1, 4096) FROM message WHERE id = ?", [id], |row| row.get(0))?;'''
+
+[[plant]]
+name = "session viewer: an opening is cut by substr, which loads the whole body, beside the counts of pages"
+meant = "a_read_takes_as_many_pages_beside_32_mib_ids_roles_names_and_bodies_as_beside_short_ones"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''    opening.opening = opening_of(&store.db, c"message", c"body", id, MESSAGE_OPENING)?;'''
+replace = '''    opening.opening = store.db.query_row("SELECT substr(body, 1, 4096) FROM message WHERE id = ?", [id], |row| row.get(0))?;'''
+
+[[plant]]
+name = "session viewer: an opening is cut by substr, which loads the whole body, beside the counts of a migrated ledger"
+meant = "a_migrated_ledger_s_reads_take_as_many_pages_beside_32_mib_ids_roles_names_and_bodies"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''    opening.opening = opening_of(&store.db, c"message", c"body", id, MESSAGE_OPENING)?;'''
+replace = '''    opening.opening = store.db.query_row("SELECT substr(body, 1, 4096) FROM message WHERE id = ?", [id], |row| row.get(0))?;'''
+
+[[plant]]
+name = "session viewer: history.part takes when an item was copied from its row, past the whole of its text"
+meant = "reading_a_24_mib_item_whole_a_part_at_a_time_reads_each_part_alone"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''const PART_HEAD: &str = "SELECT h.parts, h.revision FROM transcript_head h'''
+replace = '''const PART_HEAD: &str = "SELECT h.parts, h.revision + (SELECT length(t.copied_at) * 0 FROM transcript t WHERE t.rowid = h.item) FROM transcript_head h'''
+
+[[plant]]
+name = "session viewer: a read is bounded at a sixty-fourth of what it may go through"
+meant = "a_page_of_a_long_history_takes_what_a_page_takes"
+runs = ["viewer-ledger-long-page"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "        if moved && self.charged() + more > self.scan {"
+replace = "        if moved && self.charged() + more > self.scan / 64 {"
 
 [[plant]]
 name = "session viewer: a message's opening keeps a character it cut short"

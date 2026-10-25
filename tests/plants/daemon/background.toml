@@ -93,6 +93,8 @@ rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "
 e2e-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger::"]
 # What a project of the live checks that does not end in time says it left.
 rig-members-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_members::a_project_that_does_not_end_in_time"]
+rig-members-close-begun = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_members::a_close_begun_ends_the_daemon"]
+rig-members-held-up = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_members::a_close_says_which_were_left_though_the_pane_host_was_held_up"]
 # How what such a project left is listed, on processes made up.
 e2e-lib-closing = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::closing::"]
 # T-15's shape: a command that never exits, and the final answer of the worker that left it.
@@ -1009,8 +1011,8 @@ runs = ["rig-members-left"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/closing.rs"
-find = '    let said = ended(|| rig.shut_down_within(within), listing, LOOK);'
-replace = '    let said = ended(move || rig.close_within(within), listing, LOOK);'
+find = '    let said = ended(|| shut_down(&mut rig), listing, LOOK);'
+replace = '    let said = ended(move || { let mut rig = rig; shut_down(&mut rig) }, listing, LOOK);'
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/closing.rs"
@@ -1880,3 +1882,31 @@ find = '''
             .any(|layer| exists(&folder.join(layer)))
 '''
 replace = ""
+
+# Round T-118: the live members close margin. A gate under load holds the pane host, whose two
+# looks at the window's tree and request to end come late, so a close given four seconds from its
+# start was read before the window had left: the time is counted from the window's leaving.
+
+[[plant]]
+name = "background rig: the close is given its four seconds from its start, not from the window's leaving"
+meant = "a_close_says_which_were_left_though_the_pane_host_was_held_up_before_it_asked_the_window_to_end"
+runs = ["rig-members-held-up"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = "        rig.wait_for(what, EVENT, || Ok(happened(rig)))?;"
+replace = "        let _ = (what, &happened);"
+
+[[plant]]
+name = "background rig: a close begun ends neither the daemon's input nor the pane host's"
+meant = "a_close_begun_ends_the_daemon_without_the_case_waiting_for_it"
+runs = ["rig-members-close-begun"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = """    pub fn begin_close(&self) {
+        self.daemon.end_input();
+        self.host.end_input();
+"""
+replace = """    pub fn begin_close(&self) {
+"""

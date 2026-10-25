@@ -277,6 +277,7 @@ fn family(plants: Vec<Plant>) -> Family {
         limit: Duration::from_secs(600),
         rebuild: Some(vec!["rebuild-cf".into()]),
         plants,
+        known_unapplied: Vec::new(),
     }
 }
 
@@ -1657,7 +1658,7 @@ fn a_build_that_cannot_be_made_again_is_said_and_counted() {
 fn checked(context: &Context, plants: &[Plant], runner: &mut dyn Runner) -> (i32, String) {
     let chosen: Vec<&Plant> = plants.iter().collect();
     let mut out = Vec::new();
-    let status = check(context, &chosen, runner, &mut out).unwrap();
+    let status = check(context, &family(plants.to_vec()), &chosen, runner, &mut out).unwrap();
     (status, String::from_utf8(out).unwrap())
 }
 

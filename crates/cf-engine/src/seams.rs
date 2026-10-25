@@ -185,10 +185,16 @@ impl Default for Limits {
 /// would otherwise wait three minutes; nothing in a person's environment sets it.
 pub const LAUNCH_MS_VARIABLE: &str = "CONSENSFLOW_LAUNCH_TIMEOUT_MS";
 
+/// The variable that sets how long a delivered message's header may take to show
+/// in its window's record, in milliseconds. A test of the daemon's reading of a
+/// record that comes late has to outlast it, so with the minute the daemon gives
+/// it, each such case takes minutes; nothing in a person's environment sets it.
+pub const ARRIVAL_MS_VARIABLE: &str = "CONSENSFLOW_ARRIVAL_TIMEOUT_MS";
+
 impl Limits {
-    /// The daemon's limits, with the launch's wait what `env` says it is
-    /// ([`LAUNCH_MS_VARIABLE`]) where it names a number of milliseconds above
-    /// zero; any other value is no value.
+    /// The daemon's limits, with the launch's wait and the arrival's what `env`
+    /// says they are ([`LAUNCH_MS_VARIABLE`], [`ARRIVAL_MS_VARIABLE`]) where it
+    /// names a number of milliseconds above zero; any other value is no value.
     pub fn of(env: &Env) -> Self {
         let named = |variable: &str| {
             env.text(variable)
@@ -197,9 +203,36 @@ impl Limits {
         };
         let default = Self::default();
         Self {
+            arrival_ms: named(ARRIVAL_MS_VARIABLE).unwrap_or(default.arrival_ms),
             launch_ms: named(LAUNCH_MS_VARIABLE).unwrap_or(default.launch_ms),
             ..default
         }
+    }
+
+    /// What the environment cut, in the words the daemon's log says it in at its
+    /// start, so that a variable left in a shell is seen there; none where it cut
+    /// nothing, the daemon of a person's.
+    pub fn cut_by_the_environment(&self) -> Option<String> {
+        let default = Self::default();
+        let cuts: Vec<String> = [
+            (
+                "arrival wait",
+                self.arrival_ms,
+                default.arrival_ms,
+                ARRIVAL_MS_VARIABLE,
+            ),
+            (
+                "launch wait",
+                self.launch_ms,
+                default.launch_ms,
+                LAUNCH_MS_VARIABLE,
+            ),
+        ]
+        .into_iter()
+        .filter(|(_, now, was, _)| now != was)
+        .map(|(what, now, was, variable)| format!("{what} {now} ms, not {was} ({variable})"))
+        .collect();
+        (!cuts.is_empty()).then(|| format!("limits set by the environment: {}", cuts.join(", ")))
     }
 }
 
@@ -295,6 +328,54 @@ mod tests {
             (named.arrival_ms, named.max_attempts),
             (60_000, 3),
             "the rest is as it was"
+        );
+    }
+
+    #[test]
+    fn the_arrival_wait_is_a_minute_unless_the_environment_names_a_number_of_milliseconds() {
+        // The variable's name is written out, so that a rename shows here.
+        let wait = |value: &str| {
+            Limits::of(&Env::from_vars([("CONSENSFLOW_ARRIVAL_TIMEOUT_MS", value)])).arrival_ms
+        };
+        assert_eq!(ARRIVAL_MS_VARIABLE, "CONSENSFLOW_ARRIVAL_TIMEOUT_MS");
+        assert_eq!(wait("15000"), 15_000);
+        for refused in ["", "0", "-5", "soon", "1.5", "2s"] {
+            assert_eq!(wait(refused), 60_000, "{refused:?}");
+        }
+        let named = Limits::of(&Env::from_vars([
+            (ARRIVAL_MS_VARIABLE, "15000"),
+            (LAUNCH_MS_VARIABLE, "1500"),
+        ]));
+        assert_eq!(
+            named,
+            Limits {
+                arrival_ms: 15_000,
+                launch_ms: 1_500,
+                max_attempts: 3,
+            },
+            "each variable sets its own wait and nothing else"
+        );
+    }
+
+    #[test]
+    fn a_limit_the_environment_cut_is_told_for_the_log_and_one_it_left_is_not() {
+        let told = |vars: &[(&str, &str)]| {
+            Limits::of(&Env::from_vars(vars.iter().copied())).cut_by_the_environment()
+        };
+        assert_eq!(told(&[]), None);
+        // A value that is no number cuts nothing, and says nothing.
+        assert_eq!(told(&[(ARRIVAL_MS_VARIABLE, "soon")]), None);
+        assert_eq!(
+            told(&[(ARRIVAL_MS_VARIABLE, "15000")]).as_deref(),
+            Some("limits set by the environment: arrival wait 15000 ms, not 60000 (CONSENSFLOW_ARRIVAL_TIMEOUT_MS)")
+        );
+        assert_eq!(
+            told(&[(LAUNCH_MS_VARIABLE, "8000")]).as_deref(),
+            Some("limits set by the environment: launch wait 8000 ms, not 180000 (CONSENSFLOW_LAUNCH_TIMEOUT_MS)")
+        );
+        assert_eq!(
+            told(&[(ARRIVAL_MS_VARIABLE, "15000"), (LAUNCH_MS_VARIABLE, "8000")]).as_deref(),
+            Some("limits set by the environment: arrival wait 15000 ms, not 60000 (CONSENSFLOW_ARRIVAL_TIMEOUT_MS), launch wait 8000 ms, not 180000 (CONSENSFLOW_LAUNCH_TIMEOUT_MS)")
         );
     }
 }
