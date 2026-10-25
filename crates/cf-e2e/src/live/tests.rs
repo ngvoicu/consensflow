@@ -2,11 +2,13 @@
 
 use std::cell::Cell;
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::json;
 
 use super::*;
+use crate::rig::ClaudeConfig;
 
 /// The 1-based lines of the `#[test]`s of `source` that no `#[ignore` stands
 /// beside, above or below (the two attributes are a pair of lines, in either
@@ -54,6 +56,59 @@ fn every_live_test_is_ignored_unless_asked_for() {
         );
     }
     assert!(live_files > 0, "no live test file in {}", folder.display());
+}
+
+/// The source files of the live tests: `tests/live_<name>.rs` and the folders of the same
+/// name beside them, with their modules.
+fn live_sources(folder: &Path, found: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(folder).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        if path.is_dir() && name.starts_with("live_") {
+            live_sources(&path, found);
+        } else if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
+            if folder.file_name().is_some_and(|dir| dir == "tests") && !name.starts_with("live_") {
+                continue;
+            }
+            found.push(path);
+        }
+    }
+}
+
+/// A live test does not choose the config folder of its Claude Code: the kit gives every
+/// real Claude window the throwaway folder of the run ([`login`]), and a suite that set the
+/// variable (or cleared it, which leaves Claude on the person's own `~/.claude`) would run a
+/// window past it, writing the person's settings, history and projects.
+#[test]
+fn no_live_test_sets_or_clears_the_config_folder_of_its_claude_code() {
+    let folder = crate::checkout::path("crates/cf-e2e/tests");
+    let mut sources = Vec::new();
+    live_sources(&folder, &mut sources);
+    assert!(
+        !sources.is_empty(),
+        "no live test file in {}",
+        folder.display()
+    );
+    for source in sources {
+        let text = fs::read_to_string(&source).unwrap();
+        for (at, line) in text.lines().enumerate() {
+            let code = line.trim_start();
+            if code.starts_with("//") {
+                continue;
+            }
+            for choosing in [
+                ".unset(\"CLAUDE_CONFIG_DIR\"",
+                ".var(\"CLAUDE_CONFIG_DIR\",",
+            ] {
+                assert!(
+                    !code.contains(choosing),
+                    "{}:{}: a live test leaves the config folder of its Claude Code to the kit: {code}",
+                    source.display(),
+                    at + 1
+                );
+            }
+        }
+    }
 }
 
 /// The live tests whose windows run agents of their own, not the models of
@@ -297,5 +352,34 @@ fn a_harness_found_is_said_with_its_program_its_version_and_where_its_login_is_r
     assert_eq!(
         found_line(&codex, "unknown"),
         "codex is /opt/codex (unknown); its login is read from /home/me/.codex"
+    );
+}
+
+#[derive(Debug)]
+struct Copied;
+
+impl ClaudeConfig for Copied {
+    fn folder(&self) -> Result<PathBuf> {
+        Ok(PathBuf::from("/run/claude"))
+    }
+
+    fn described(&self) -> String {
+        "the Keychain".to_owned()
+    }
+
+    fn finish(&self) -> Result {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_claude_whose_windows_run_on_a_copy_of_the_login_says_where_it_is_copied_from_and_not_the_home()
+{
+    let claude = Installed::at(Harness::Claude, "/home/me/.local/bin/claude", "/home/me")
+        .with_claude_config(Arc::new(Copied));
+    assert_eq!(
+        found_line(&claude, "2.1.308"),
+        "claude is /home/me/.local/bin/claude (2.1.308); its login is copied from the Keychain \
+         into a config folder of the run's own"
     );
 }

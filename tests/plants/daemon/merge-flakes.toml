@@ -23,6 +23,7 @@
 [run]
 process-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell"]
 process-lib-settle = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output_wherever_it_runs"]
+reports-not-judged-drop = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_not_judged_by_what_its_case_returns_keeps_no_report_of_a_drop_on_purpose"]
 trust-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "trust::"]
 trust-rig-gone = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_the_human_said_yes_in_that_is_gone"]
 trust-rig-no = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_humans_no"]
@@ -70,8 +71,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "            self.trust.accept(project.id, folder);\n        }\n        // A launch the exit ended"
-replace = "            let _ = folder;\n        }\n        // A launch the exit ended"
+find = "            self.trust.said_yes(project.id, &folder, sure);\n        }\n        // A launch the exit ended"
+replace = "            let _ = (folder, sure);\n        }\n        // A launch the exit ended"
 
 [[plant]]
 name = "merge flakes: a window that ended at the question banks a yes at its exit"
@@ -81,8 +82,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "    window.shows_prompt(shown.lines()).then(|| folder.clone())"
-replace = "    Some(folder.clone())"
+find = "    (window.shows_prompt(lines) && !window.names_trust_choices(lines))\n        .then(|| (folder.clone(), part.trust_sure))"
+replace = "    let _ = lines;\n    Some((folder.clone(), part.trust_sure))"
 
 # Round 2 (T-443, Calliope's review of the above, T-438): the same cases at the engine's level,
 # which no rig is needed for (`crates/cf-engine/src/trust/tests.rs`); a window the engine closes
@@ -97,8 +98,8 @@ runs = ["trust-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "            self.trust.accept(project.id, folder);\n        }\n        // A launch the exit ended"
-replace = "            let _ = folder;\n        }\n        // A launch the exit ended"
+find = "            self.trust.said_yes(project.id, &folder, sure);\n        }\n        // A launch the exit ended"
+replace = "            let _ = (folder, sure);\n        }\n        // A launch the exit ended"
 
 [[plant]]
 name = "merge flakes: a window that ends at the question banks a yes at its exit, engine"
@@ -107,8 +108,8 @@ runs = ["trust-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "    window.shows_prompt(shown.lines()).then(|| folder.clone())"
-replace = "    Some(folder.clone())"
+find = "    (window.shows_prompt(lines) && !window.names_trust_choices(lines))\n        .then(|| (folder.clone(), part.trust_sure))"
+replace = "    let _ = lines;\n    Some((folder.clone(), part.trust_sure))"
 
 [[plant]]
 name = "merge flakes: a window ConsensFlow pressed keys in banks the human's yes at its exit"
@@ -117,8 +118,8 @@ runs = ["trust-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "    if part.trust != Trusting::Asked || part.trust_keys > 0 {"
-replace = "    if part.trust != Trusting::Asked {"
+find = "    if !part.trust.asks() || part.trust_keys > 0 {"
+replace = "    if !part.trust.asks() {"
 
 [[plant]]
 name = "merge flakes: a window that never asked banks a yes at its exit"
@@ -127,7 +128,7 @@ runs = ["trust-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "    if part.trust != Trusting::Asked || part.trust_keys > 0 {"
+find = "    if !part.trust.asks() || part.trust_keys > 0 {"
 replace = "    if part.trust_keys > 0 {"
 
 [[plant]]
@@ -147,8 +148,8 @@ runs = ["trust-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "            part.trust == Trusting::Asked && part.trust_keys == 0"
-replace = "            part.trust == Trusting::Asked"
+find = "            part.trust.asks() && part.trust_keys == 0"
+replace = "            part.trust.asks()"
 
 [[plant]]
 name = "merge flakes: a window that ended keeps its count of keys for the next one"
@@ -184,3 +185,83 @@ runs = ["process-lib"]
 file = "crates/cf-e2e/src/process/spawned.rs"
 find = "        self.child.try_wait().ok().flatten()\n    }\n\n    /// Whether it has ended ("
 replace = "        let status = self.child.try_wait().ok().flatten();\n        if status.is_some() {\n            self.settle_errors();\n        }\n        status\n    }\n\n    /// Whether it has ended ("
+
+# T-502: the merge with the folder-trust stack (wt/mcp-dialog), whose watch the exit path now
+# reads as: the question read with its choice placed (`trust_sure`), the prompt with the
+# question's choices gone from the screen (`cleared`), a window in the dialog of servers
+# (`asks`), and the keys ConsensFlow pressed counted on the window's record (`trust_keys`).
+
+[[plant]]
+name = "merge flakes: a prompt below a conversation that quoted the question is the human's yes at an exit"
+meant = "a_window_that_ends_with_its_prompt_below_a_conversation_that_quoted_the_question_banks_nothing"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "    (window.shows_prompt(lines) && !window.names_trust_choices(lines))\n"
+replace = "    (window.shows_prompt(lines))\n"
+
+[[plant]]
+name = "merge flakes: a window the engine closes below a quoted question banks the prompt as a yes"
+meant = "a_window_the_engine_closes_below_a_quoted_question_banks_nothing"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "    (window.shows_prompt(lines) && !window.names_trust_choices(lines))\n"
+replace = "    (window.shows_prompt(lines))\n"
+
+[[plant]]
+name = "merge flakes: a yes to a question never read with its choice placed is carried at an exit"
+meant = "a_yes_to_a_question_whose_choice_was_never_placed_is_not_carried_and_has_the_others_told_of_again"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "        .then(|| (folder.clone(), part.trust_sure))"
+replace = "        .then(|| (folder.clone(), true))"
+
+[[plant]]
+name = "merge flakes: a yes said and not carried does not have the others told of again"
+meant = "a_yes_to_a_question_whose_choice_was_never_placed_is_not_carried_and_has_the_others_told_of_again"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "        if sure {\n            self.accepted"
+replace = "        if true {\n            self.accepted"
+
+[[plant]]
+name = "merge flakes: a window in the dialog of servers that ends at its prompt banks no yes"
+meant = "a_window_in_the_dialog_of_servers_that_ends_at_its_prompt_is_the_humans_yes"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "    if !part.trust.asks() || part.trust_keys > 0 {"
+replace = "    if part.trust != Trusting::Asked || part.trust_keys > 0 {"
+
+[[plant]]
+name = "merge flakes: the keys ConsensFlow presses are not counted on the window's record"
+meant = "a_window_consensflow_answered_itself_is_not_the_humans_yes_at_its_exit"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                            record.window.borrow_mut().trust_keys += 1;"
+replace = "                            record.window.borrow_mut().trust_keys += 0;"
+
+# T-502, the rig's two rules about a rig dropped unclosed meet (T-428's, a judged rig says
+# nothing for a case that passed and holds its report for one that fails; T-501's, a rig
+# its case ends as a drop on purpose keeps none): a drop on purpose says nothing of a rig
+# whatever its case is judged by, and what the case finds after is its own to say.
+
+[[plant]]
+name = "merge flakes: a rig not judged by what its case returns keeps a report of a drop on purpose"
+meant = "a_rig_not_judged_by_what_its_case_returns_keeps_no_report_of_a_drop_on_purpose"
+runs = ["reports-not-judged-drop"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = "        if self.closed || failure_expected || self.dropped_on_purpose {"
+replace = "        if self.closed || failure_expected {"

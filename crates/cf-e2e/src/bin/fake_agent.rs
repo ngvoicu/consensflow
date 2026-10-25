@@ -49,7 +49,12 @@
 //! was never told to trust, asks whether to trust it first, as Claude Code does
 //! (`trust`); with `CF_TEST_SAYS_FIRST` it prints those words before its first line,
 //! and with `CF_TEST_PLAIN_PROMPT` its first line does not say it is in
-//! full-permission mode, as a prompt drawn otherwise.
+//! full-permission mode, as a prompt drawn otherwise. The window of a participant
+//! `CF_TEST_QUOTES_BEFORE_PROMPT` names draws a conversation that quotes the
+//! question's choices for 1.5 s before its first line, as a resumed window does,
+//! the `❯` on the first with `CF_TEST_QUOTES_THE_CURSOR` (the question of a trusted
+//! folder's grants with `CF_TEST_QUOTES_THE_GRANTS`), and its input box above that line. With `CF_TEST_TRUST_IDLE_WHILE_ASKING` a window says it is idle while it
+//! asks, as a Claude Code that writes its status before its question would.
 //!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
@@ -113,6 +118,16 @@ const NO_LOGIN: &str =
 
 /// What a window the provider refuses says, in the record Claude writes for it.
 const LIMIT: &str = "You've hit your limit. Resets in 2 hours.";
+
+/// A conversation that quotes the question's two choices, each a line of its own, with
+/// no input box below it yet, as a list or as the dialog draws them, and how long it
+/// stands before the window's prompt.
+const QUOTES_THE_CHOICES: &str =
+    " ⏺ The dialog offers:\r\n   - No, exit\r\n   - Yes, I trust this folder\r\n";
+const QUOTES_THE_DIALOG: &str =
+    " ⏺ The dialog reads:\r\n ❯ No, exit\r\n   Yes, I trust this folder\r\n";
+const QUOTES_THE_GRANTS: &str = " ⏺ The dialog reads:\r\n ❯ No, continue without these permissions\r\n   Yes, I trust this folder\r\n";
+const QUOTED_BEFORE_PROMPT: std::time::Duration = std::time::Duration::from_millis(1_500);
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -204,6 +219,12 @@ fn run(
     let asking = named("CF_TEST_TRUST");
     if asking {
         trust::bring_the_record_back(records.transcript());
+        // A Claude Code that writes its status before its question reads at rest.
+        if own_var("CF_TEST_TRUST_IDLE_WHILE_ASKING").is_some() {
+            records
+                .status(pid, "idle")
+                .map_err(|failed| failed.to_string())?;
+        }
     }
     let grows = asking && own_var("CF_TEST_RECORD_GROWS_ON_NO").is_some();
     // Its terminal is read from the start, raw, as a TUI reads it: the question
@@ -230,10 +251,28 @@ fn run(
     if let trust::Answer::Exit = answer {
         leave(&status_file, 0);
     }
+    // Then, in a trusted folder, the dialog of a server of its `.mcp.json`.
+    trust::ask_server(Path::new(&config), asking, &mut keys)?;
     if asking {
         if let Some(said) = own_var("CF_TEST_SAYS_FIRST") {
             say(&format!("{said}\n")).map_err(|failed| failed.to_string())?;
         }
+    }
+    // A resumed window draws its conversation before its prompt: here one that quotes
+    // the question's two choices, each a line of its own, for as long as Claude Code
+    // 2.1.307 took on a chief's conversation (`cargo xtask live folder-trust`).
+    let quotes = named("CF_TEST_QUOTES_BEFORE_PROMPT");
+    if quotes {
+        let quote = if own_var("CF_TEST_QUOTES_THE_GRANTS").is_some() {
+            QUOTES_THE_GRANTS
+        } else if own_var("CF_TEST_QUOTES_THE_CURSOR").is_some() {
+            QUOTES_THE_DIALOG
+        } else {
+            QUOTES_THE_CHOICES
+        };
+        say(quote).map_err(|failed| failed.to_string())?;
+        std::thread::sleep(QUOTED_BEFORE_PROMPT);
+        say(" ❯ \r\n").map_err(|failed| failed.to_string())?;
     }
     records
         .status(pid, "idle")

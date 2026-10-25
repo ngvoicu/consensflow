@@ -234,11 +234,15 @@ impl FakeAdapter {
     /// before it starts, as Claude Code does in a git repository: a yes would
     /// trust `folder`, and `inside` says it is the project's folder or below it.
     /// A window reads its screen as the question where a line holds
-    /// `TRUST_QUESTION`, and as its prompt where a line holds `TRUST_PROMPT`.
+    /// `TRUST_QUESTION` (or `TRUST_UNPLACED`: the question, its choice not placed), as
+    /// its prompt where a line holds `TRUST_PROMPT` and it shows no question, and as
+    /// naming the question's choices where a line holds one of the three or
+    /// `TRUST_QUOTED`: a conversation that quotes them.
     pub fn asks_to_trust(&self, folder: &str, inside: bool) {
         *self.trusts.borrow_mut() = Some(Trusts {
             folder: folder.to_owned(),
             inside,
+            servers_above: None,
         });
     }
 

@@ -6,6 +6,7 @@
 //! dialog opens one: with the staff, specs on, and the owner's wake-up calls.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use cf_e2e::live::{self, agents, Harness, Installed, Log};
 use cf_e2e::rig::{Config, Masker, Rig};
@@ -15,6 +16,7 @@ use super::options::Options;
 use super::staff::{self, Found, LeftOut};
 use crate::plan::{chief_environment, harness, Agent, ChiefSetup, Staff};
 use crate::run::floor::Floor;
+use crate::run::login::{self, Throwaway};
 use crate::run::machine::Machine;
 use crate::run::{daemon_of, trust, workspace, wrappers, Crew};
 use crate::scenarios::Scenario;
@@ -106,8 +108,12 @@ pub struct Opened {
     pub config: Config,
     pub project: i64,
     pub daemon: String,
-    /// Where the run's Claude Code windows keep their records.
+    /// Where the run's Claude Code windows keep their records: the throwaway folder of the
+    /// run, which goes with it.
     pub claude: PathBuf,
+    /// The login those windows run on, which says at the end what the run did to the owner's
+    /// Claude setup or to the copy of the login.
+    pub login: Option<Arc<Throwaway>>,
 }
 
 /// Starts the rig the cast runs on and opens the project: the fixture of
@@ -121,9 +127,22 @@ pub fn open(
     floor: &mut Floor,
     masker: Masker,
 ) -> Result<Opened> {
-    let machine = Machine::of(&cast.crew)?;
+    // The windows of a real Claude Code run on a throwaway config folder with a copy of the
+    // machine's login, which must last the run's budget and its end (a login that would end
+    // before is refused when the workspace is made, before anything is spent).
+    let login = login::throwaway(
+        login::real_claude(&options.chief, &cast.chief.model, &cast.staff),
+        options.budget,
+    );
+    let machine = Machine::of(&cast.crew, login.clone())?;
     let wrappers = wrappers::write(&machine, &cast.crew, &cast.chief)?;
     let workspace = workspace::fresh(&machine, scenario)?;
+    let claude_config = machine.claude_records()?;
+    if login.is_some() {
+        // Where the run's Claude records are while it lasts (`cargo xtask watch --tokens
+        // --claude-config`), and in the kept home after it.
+        floor.say(format!("claude config: {}", claude_config.display()))?;
+    }
     let stand_in = wrappers
         .claude
         .clone()
@@ -164,6 +183,7 @@ pub fn open(
         config,
         project,
         daemon,
-        claude: machine.home.join(".claude"),
+        claude: claude_config,
+        login,
     })
 }

@@ -15,7 +15,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Admission, Held, Observed, Pane, PaneHost, Readiness, Trusts, Waiting, Window, Work,
+    Admission, Held, Observed, Pane, PaneHost, Question, Readiness, Trusts, Waiting, Window, Work,
     NOT_ADMITTED,
 };
 use cf_harness::records::{Item, Reading, Record, Role, Settlement};
@@ -30,6 +30,10 @@ use crate::runtime::next_turn;
 /// that is the harness's prompt, once it is past the question.
 pub const TRUST_QUESTION: &str = "Do you trust this folder? (a test's question)";
 pub const TRUST_PROMPT: &str = "Ready for work (a test's prompt)";
+/// The question with its choice where the reader cannot place it, and a line that
+/// names the question's choices without asking it: a conversation that quotes them.
+pub const TRUST_UNPLACED: &str = "Do you trust this folder? (a test's question, its choice lost)";
+pub const TRUST_QUOTED: &str = "Yes, I trust this folder / No, exit (a test's quote of them)";
 
 pub(super) struct FakeWindow {
     seam: String,
@@ -104,12 +108,26 @@ impl Window for FakeWindow {
 
     /// Down is the key toward a yes, whatever the screen: it is only asked where
     /// the question is.
-    fn toward_trust(&self, screen: &[String]) -> Option<&'static [u8]> {
-        (self.trusts.is_some() && holds(screen, TRUST_QUESTION)).then_some(b"\x1b[B".as_slice())
+    fn toward_trust(&self, screen: &[String]) -> Option<Question> {
+        self.trusts.as_ref()?;
+        if holds(screen, TRUST_QUESTION) {
+            Some(Question::Toward(b"\x1b[B"))
+        } else if holds(screen, TRUST_UNPLACED) {
+            Some(Question::Unplaced)
+        } else {
+            None
+        }
     }
 
     fn shows_prompt(&self, screen: &[String]) -> bool {
-        self.trusts.is_some() && holds(screen, TRUST_PROMPT) && !holds(screen, TRUST_QUESTION)
+        self.trusts.is_some() && holds(screen, TRUST_PROMPT) && self.toward_trust(screen).is_none()
+    }
+
+    fn names_trust_choices(&self, screen: &[String]) -> bool {
+        self.trusts.is_some()
+            && [TRUST_QUESTION, TRUST_UNPLACED, TRUST_QUOTED]
+                .iter()
+                .any(|words| holds(screen, words))
     }
 
     fn follow(&self, session: &str) {

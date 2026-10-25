@@ -177,8 +177,12 @@ pub(crate) struct WindowPart {
     pub(crate) named: bool,
     /// Where it stands with its harness's question about trusting its folder.
     pub(crate) trust: Trusting,
-    /// How many keys ConsensFlow pressed into it toward a yes to that question.
+    /// How many keys ConsensFlow pressed into it toward a yes to its harness's questions.
     pub(crate) trust_keys: usize,
+    /// Whether the first question was read with its choice placed: only that is a
+    /// question whose yes is carried to the project's other windows, the only ones a key
+    /// of ConsensFlow's can answer.
+    pub(crate) trust_sure: bool,
     /// The last stop this window process paid: its task and the sequence. It
     /// dies with the window, and a window opened later owes nothing for the
     /// stops asked before it opened.
@@ -233,6 +237,7 @@ impl Default for WindowPart {
             named: false,
             trust: Trusting::Past,
             trust_keys: 0,
+            trust_sure: false,
             stopped: None,
             interrupted: None,
             unstopped: None,
@@ -363,6 +368,7 @@ impl Dispatcher {
             window.activity = Activity::of(ActivityState::Closed);
             window.trust = Trusting::Past;
             window.trust_keys = 0;
+            window.trust_sure = false;
             taken
         };
         // What its task was held for went with it: a task held again in a window opened

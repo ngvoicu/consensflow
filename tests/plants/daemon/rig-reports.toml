@@ -50,12 +50,12 @@ runs = ["reports-closed"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
 find = """
-        if self.closed || failure_expected {
+        if self.closed || failure_expected || self.dropped_on_purpose {
             return DropSays::Nothing;
         }"""
 replace = """
-        if self.closed || failure_expected {
-            return DropSays::Now;
+        if failure_expected || self.dropped_on_purpose {
+            return DropSays::Nothing;
         }"""
 
 [[plant]]
@@ -826,11 +826,14 @@ runs = ["reports-closes"]
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_folder_trust.rs"
 find = """
-        folders.push(path.to_string_lossy().into_owned());
-    }
-    rig.close()?;
-    Ok(checks)"""
+    // The rig is closed, not dropped: what the run did in the owner's setup fails it.
+    rig.close_within(CLOSES)?;
+    Ok(checks)
+}
+
+/// The folder Claude Code keeps"""
 replace = """
-        folders.push(path.to_string_lossy().into_owned());
-    }
-    Ok(checks)"""
+    Ok(checks)
+}
+
+/// The folder Claude Code keeps"""

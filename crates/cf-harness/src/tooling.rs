@@ -23,7 +23,7 @@
 //! | `devin_ready` | `wire`: the wire log of a Devin window's launch | `{shown, mode, command}`: what the daemon's readiness reads of it (the conversation the window shows, the permission mode it is in) and the command the window is given before it is ready for work (`/bypass` where the wire says the normal mode), or null |
 //! | `devin_readiness` | `wire`, `session`, `pane` (`id`, `generation`), `withinMs`, `everyMs`: a Devin window that is open, asked whether it is ready as the engine asks it, until it is ready or unfit or the time is up; the pane host it asks is the asker's, a request a line of the output and its answer a line of the input (`readiness`) | `{answers, ready}`: what the looks answered, in order (`ready`, `held: …`, `unfit: …`, one that came again in a row said once), and whether the last was ready |
 //! | `devin_hooks` | `cf`, `member`: the hooks ConsensFlow adds to the owner's in a Devin launch (a member's, or the chief's), its session hook run by `cf` | `{event: [entry]}`: each event with the entries added, as the launch's config has them written |
-//! | `trust` | `kind`, `screen` (a window's last lines), and `directory` where asked: what the engine reads there of the harness's question about trusting the window's folder | `{key, prompt}`: the key it presses next toward a yes (`down`, `enter`), or null where the lines show no such question or the harness never asks one, and whether they are the harness's prompt; with `directory`, `trusts` too: `{folder, inside}`, what a yes trusts for a window opened in that project's folder |
+//! | `trust` | `kind`, `screen` (a window's last lines), and `directory` where asked: what the engine reads there of the harness's question about trusting the window's folder | `{key, prompt, grants, servers}`: the key it presses next toward a yes (`down`, `up`, `enter`), or null where the lines show no such question or the harness never asks one, whether they are the harness's prompt, and whether the question is the one of a trusted folder's grants or Claude's dialog of new servers of `.mcp.json`; with `directory`, `trusts` too: `{folder, inside, servers_above}`, what a yes trusts for a window opened in that project's folder, and the nearest folder above it whose `.mcp.json` Claude reads too |
 //!
 //! The last eight are the evals' and the live tests' own: the program a window
 //! opens on, which the daemon asks `cf_process::pane_argv` for, the
@@ -50,7 +50,7 @@ use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 
 use crate::claude::install;
-use crate::contract::{Agent, Input, Interrupt, LaunchId, Skill};
+use crate::contract::{Agent, Input, Interrupt, LaunchId, Question, Skill};
 use crate::launch::adapter;
 use crate::records::{self, Options};
 use crate::shared::record_state::record_state;
@@ -111,9 +111,13 @@ fn env(question: &Value) -> Result<Env, String> {
     )))
 }
 
-/// The key the engine presses next toward a yes to the harness's question about
-/// trusting a window's folder, read in the window's last lines as the engine reads
-/// them: null where they show none, or the harness never asks one.
+/// Whether the window's last lines show the harness's question about trusting its
+/// folder, as the engine reads them, and the key it presses next toward a yes: null
+/// where they show none, the harness never asks one, or its choice cannot be placed;
+/// whether it is the question of a trusted folder's grants, whether it is the
+/// dialog of new servers of `.mcp.json`, and whether it names the question's choices
+/// (`names`): a prompt that does is read as the engine reads it, below a conversation
+/// that quoted the question, and its yes is not banked.
 fn trust(question: &Value) -> Result<Value, String> {
     let screen: Vec<String> = question
         .get("screen")
@@ -122,19 +126,38 @@ fn trust(question: &Value) -> Result<Value, String> {
         .iter()
         .filter_map(|line| line.as_str().map(str::to_owned))
         .collect();
-    let (key, prompt) = match harness(text(question, "kind")?)? {
+    let (key, prompt, names) = match harness(text(question, "kind")?)? {
         Harness::Claude => (
             crate::claude::trust::toward_trust(&screen),
             crate::claude::trust::shows_prompt(&screen),
+            crate::claude::trust::names_choices(&screen),
         ),
-        Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin => (None, false),
+        Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin => (None, false, false),
     };
-    let key = key.map(|key| if key == trust::ENTER { "enter" } else { "down" });
-    let mut answer = json!({ "key": key, "prompt": prompt });
-    // What a yes trusts, for a window opened in a project's folder `directory`.
+    let pressed = match key {
+        Some(
+            Question::Toward(key) | Question::Grants(Some(key)) | Question::Servers(Some(key)),
+        ) => Some(match key {
+            trust::ENTER => "enter",
+            trust::UP => "up",
+            _ => "down",
+        }),
+        Some(Question::Unplaced | Question::Grants(None) | Question::Servers(None)) | None => None,
+    };
+    let mut answer =
+        json!({ "asks": key.is_some(), "key": pressed, "prompt": prompt, "names": names });
+    answer["grants"] = json!(matches!(key, Some(Question::Grants(_))));
+    answer["servers"] = json!(matches!(key, Some(Question::Servers(_))));
+    // What a yes trusts, for a window opened in a project's folder `directory`, and the
+    // folder above it whose servers Claude Code asks of as well.
     if let Some(directory) = optional(question, "directory") {
-        let trust::Trusts { folder, inside } = trust::trusts(directory);
-        answer["trusts"] = json!({ "folder": folder, "inside": inside });
+        let trust::Trusts {
+            folder,
+            inside,
+            servers_above,
+        } = trust::trusts(directory);
+        answer["trusts"] =
+            json!({ "folder": folder, "inside": inside, "servers_above": servers_above });
     }
     Ok(answer)
 }
