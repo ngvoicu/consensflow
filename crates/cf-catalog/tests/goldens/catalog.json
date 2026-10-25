@@ -123,9 +123,23 @@
           "modelKey": "claude-opus-5.5",
           "modelLabel": "Claude Opus 5.5",
           "routeLabel": "Devin account",
-          "workTier": "complex"
+          "workTier": "standard"
         },
         "preset": "anubis"
+      },
+      {
+        "name": "ammit",
+        "model": "claude-opus-5-5",
+        "effort": "low",
+        "description": "Devin Claude Opus 5.5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "ammit"
       },
       {
         "name": "ptah",
@@ -156,6 +170,20 @@
         "preset": "sekhmet"
       },
       {
+        "name": "meretseger",
+        "model": "claude-sonnet-5-5",
+        "effort": "high",
+        "description": "Devin Claude Sonnet 5.5 HIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "meretseger"
+      },
+      {
         "name": "bastet",
         "model": "claude-sonnet-5-5",
         "effort": "medium",
@@ -168,6 +196,20 @@
           "workTier": "standard"
         },
         "preset": "bastet"
+      },
+      {
+        "name": "meskhenet",
+        "model": "claude-sonnet-5-5",
+        "effort": "low",
+        "description": "Devin Claude Sonnet 5.5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "meskhenet"
       },
       {
         "name": "amun",
@@ -365,17 +407,1705 @@
         "preset": "hapi"
       },
       {
-        "name": "khnum",
-        "model": "swe-1-6-slow",
-        "description": "Devin SWE-1.6 Slow",
-        "detail": "Devin’s own SWE-1.6 Slow: everyday implementation and tests.",
+        "name": "amunet",
+        "model": "adaptive",
+        "description": "Devin Adaptive",
+        "detail": "Small code changes and focused reviews.",
         "profile": {
-          "modelKey": "swe-1-6-slow",
-          "modelLabel": "SWE-1.6 Slow",
+          "modelKey": "adaptive",
+          "modelLabel": "Adaptive",
           "routeLabel": "Devin account",
           "workTier": "light"
         },
-        "preset": "khnum"
+        "preset": "amunet"
+      },
+      {
+        "name": "anhur",
+        "model": "gpt-6-sol",
+        "effort": "max",
+        "description": "Devin GPT 6 Sol MAX",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6-sol",
+          "modelLabel": "GPT-6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "anhur"
+      },
+      {
+        "name": "anuket",
+        "model": "gpt-6-sol",
+        "effort": "xhigh",
+        "description": "Devin GPT 6 Sol XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-sol",
+          "modelLabel": "GPT-6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "anuket"
+      },
+      {
+        "name": "apep",
+        "model": "gpt-6-sol",
+        "effort": "high",
+        "description": "Devin GPT 6 Sol HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-sol",
+          "modelLabel": "GPT-6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "apep"
+      },
+      {
+        "name": "apis",
+        "model": "gpt-6-sol",
+        "effort": "medium",
+        "description": "Devin GPT 6 Sol MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-sol",
+          "modelLabel": "GPT-6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "apis"
+      },
+      {
+        "name": "babi",
+        "model": "gpt-6-sol",
+        "effort": "low",
+        "description": "Devin GPT 6 Sol LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-sol",
+          "modelLabel": "GPT-6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "babi"
+      },
+      {
+        "name": "bes",
+        "model": "gpt-6-luna",
+        "effort": "max",
+        "description": "Devin GPT 6 Luna MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-luna",
+          "modelLabel": "GPT-6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "bes"
+      },
+      {
+        "name": "buchis",
+        "model": "gpt-6-luna",
+        "effort": "xhigh",
+        "description": "Devin GPT 6 Luna XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-luna",
+          "modelLabel": "GPT-6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "buchis"
+      },
+      {
+        "name": "dedun",
+        "model": "gpt-6-luna",
+        "effort": "high",
+        "description": "Devin GPT 6 Luna HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-luna",
+          "modelLabel": "GPT-6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "dedun"
+      },
+      {
+        "name": "duamutef",
+        "model": "gpt-6-luna",
+        "effort": "medium",
+        "description": "Devin GPT 6 Luna MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-luna",
+          "modelLabel": "GPT-6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "duamutef"
+      },
+      {
+        "name": "hedetet",
+        "model": "gpt-6-luna",
+        "effort": "low",
+        "description": "Devin GPT 6 Luna LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-luna",
+          "modelLabel": "GPT-6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "hedetet"
+      },
+      {
+        "name": "heka",
+        "model": "gemini-4-argon",
+        "effort": "high",
+        "description": "Devin Gemini 4 Argon HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gemini-4-argon",
+          "modelLabel": "Gemini 4 Argon",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "heka"
+      },
+      {
+        "name": "heqet",
+        "model": "gemini-4-argon",
+        "effort": "medium",
+        "description": "Devin Gemini 4 Argon MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gemini-4-argon",
+          "modelLabel": "Gemini 4 Argon",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "heqet"
+      },
+      {
+        "name": "hesat",
+        "model": "gemini-4-argon",
+        "effort": "low",
+        "description": "Devin Gemini 4 Argon LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-4-argon",
+          "modelLabel": "Gemini 4 Argon",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "hesat"
+      },
+      {
+        "name": "iabet",
+        "model": "kimi-k3",
+        "effort": "max",
+        "description": "Devin Kimi K3 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "kimi-k3",
+          "modelLabel": "Kimi K3",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "iabet"
+      },
+      {
+        "name": "imentet",
+        "model": "kimi-k3",
+        "effort": "high",
+        "description": "Devin Kimi K3 HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "kimi-k3",
+          "modelLabel": "Kimi K3",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "imentet"
+      },
+      {
+        "name": "imsety",
+        "model": "kimi-k3",
+        "effort": "low",
+        "description": "Devin Kimi K3 LOW",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "kimi-k3",
+          "modelLabel": "Kimi K3",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "imsety"
+      },
+      {
+        "name": "iusaaset",
+        "model": "glm-5-2",
+        "effort": "max",
+        "description": "Devin GLM 5.2 MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.2",
+          "modelLabel": "GLM 5.2",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "iusaaset"
+      },
+      {
+        "name": "kebechet",
+        "model": "glm-5-2",
+        "description": "Devin GLM 5.2",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.2",
+          "modelLabel": "GLM 5.2",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "kebechet"
+      },
+      {
+        "name": "mafdet",
+        "model": "glm-5-3",
+        "effort": "max",
+        "description": "Devin GLM 5.3 MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.3",
+          "modelLabel": "GLM 5.3",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "mafdet"
+      },
+      {
+        "name": "mehen",
+        "model": "glm-5-3",
+        "effort": "high",
+        "description": "Devin GLM 5.3 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.3",
+          "modelLabel": "GLM 5.3",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "mehen"
+      },
+      {
+        "name": "menhit",
+        "model": "glm-5-3",
+        "effort": "low",
+        "description": "Devin GLM 5.3 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.3",
+          "modelLabel": "GLM 5.3",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "menhit"
+      },
+      {
+        "name": "montu",
+        "model": "gemini-3-8-flash",
+        "effort": "high",
+        "description": "Devin Gemini 3.8 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.8-flash",
+          "modelLabel": "Gemini 3.8 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "montu"
+      },
+      {
+        "name": "mnevis",
+        "model": "gemini-3-8-flash",
+        "effort": "medium",
+        "description": "Devin Gemini 3.8 Flash MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.8-flash",
+          "modelLabel": "Gemini 3.8 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "mnevis"
+      },
+      {
+        "name": "nefertum",
+        "model": "gemini-3-8-flash",
+        "effort": "low",
+        "description": "Devin Gemini 3.8 Flash LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.8-flash",
+          "modelLabel": "Gemini 3.8 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nefertum"
+      },
+      {
+        "name": "nehebkau",
+        "model": "claude-opus-4-7",
+        "effort": "max",
+        "description": "Devin Claude Opus 4.7 MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.7",
+          "modelLabel": "Claude Opus 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nehebkau"
+      },
+      {
+        "name": "nekhbet",
+        "model": "claude-opus-4-7",
+        "effort": "xhigh",
+        "description": "Devin Claude Opus 4.7 XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.7",
+          "modelLabel": "Claude Opus 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nekhbet"
+      },
+      {
+        "name": "neper",
+        "model": "claude-opus-4-7",
+        "effort": "high",
+        "description": "Devin Claude Opus 4.7 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.7",
+          "modelLabel": "Claude Opus 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "neper"
+      },
+      {
+        "name": "naunet",
+        "model": "claude-opus-4-7",
+        "effort": "medium",
+        "description": "Devin Claude Opus 4.7 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.7",
+          "modelLabel": "Claude Opus 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "naunet"
+      },
+      {
+        "name": "pakhet",
+        "model": "claude-opus-4-7",
+        "effort": "low",
+        "description": "Devin Claude Opus 4.7 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.7",
+          "modelLabel": "Claude Opus 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "pakhet"
+      },
+      {
+        "name": "qebehsenuef",
+        "model": "claude-opus-4-8",
+        "effort": "max",
+        "description": "Devin Claude Opus 4.8 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-opus-4.8",
+          "modelLabel": "Claude Opus 4.8",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "qebehsenuef"
+      },
+      {
+        "name": "raet",
+        "model": "claude-opus-4-8",
+        "effort": "xhigh",
+        "description": "Devin Claude Opus 4.8 XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-opus-4.8",
+          "modelLabel": "Claude Opus 4.8",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "raet"
+      },
+      {
+        "name": "renenutet",
+        "model": "claude-opus-4-8",
+        "effort": "high",
+        "description": "Devin Claude Opus 4.8 HIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-opus-4.8",
+          "modelLabel": "Claude Opus 4.8",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "renenutet"
+      },
+      {
+        "name": "renpet",
+        "model": "claude-opus-4-8",
+        "effort": "medium",
+        "description": "Devin Claude Opus 4.8 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.8",
+          "modelLabel": "Claude Opus 4.8",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "renpet"
+      },
+      {
+        "name": "reshep",
+        "model": "claude-opus-4-8",
+        "effort": "low",
+        "description": "Devin Claude Opus 4.8 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.8",
+          "modelLabel": "Claude Opus 4.8",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "reshep"
+      },
+      {
+        "name": "satet",
+        "model": "claude-opus-5",
+        "effort": "max",
+        "description": "Devin Claude Opus 5 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "satet"
+      },
+      {
+        "name": "serket",
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+        "description": "Devin Claude Opus 5 XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "serket"
+      },
+      {
+        "name": "seth",
+        "model": "claude-opus-5",
+        "effort": "high",
+        "description": "Devin Claude Opus 5 HIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "seth"
+      },
+      {
+        "name": "shai",
+        "model": "claude-opus-5",
+        "effort": "medium",
+        "description": "Devin Claude Opus 5 MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "shai"
+      },
+      {
+        "name": "shezmu",
+        "model": "claude-opus-5",
+        "effort": "low",
+        "description": "Devin Claude Opus 5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "shezmu"
+      },
+      {
+        "name": "sopdet",
+        "model": "claude-5-fable",
+        "effort": "max",
+        "description": "Devin Claude Fable 5 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5",
+          "modelLabel": "Claude Fable 5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "sopdet"
+      },
+      {
+        "name": "sopdu",
+        "model": "claude-5-fable",
+        "effort": "xhigh",
+        "description": "Devin Claude Fable 5 XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-fable-5",
+          "modelLabel": "Claude Fable 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "sopdu"
+      },
+      {
+        "name": "tatenen",
+        "model": "claude-5-fable",
+        "effort": "high",
+        "description": "Devin Claude Fable 5 HIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-fable-5",
+          "modelLabel": "Claude Fable 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "tatenen"
+      },
+      {
+        "name": "taweret",
+        "model": "claude-5-fable",
+        "effort": "medium",
+        "description": "Devin Claude Fable 5 MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-fable-5",
+          "modelLabel": "Claude Fable 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "taweret"
+      },
+      {
+        "name": "tayet",
+        "model": "claude-5-fable",
+        "effort": "low",
+        "description": "Devin Claude Fable 5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-fable-5",
+          "modelLabel": "Claude Fable 5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "tayet"
+      },
+      {
+        "name": "wepwawet",
+        "model": "claude-sonnet-5",
+        "effort": "max",
+        "description": "Devin Claude Sonnet 5 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-sonnet-5",
+          "modelLabel": "Claude Sonnet 5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "wepwawet"
+      },
+      {
+        "name": "wosret",
+        "model": "claude-sonnet-5",
+        "effort": "xhigh",
+        "description": "Devin Claude Sonnet 5 XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-sonnet-5",
+          "modelLabel": "Claude Sonnet 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "wosret"
+      },
+      {
+        "name": "weneg",
+        "model": "claude-sonnet-5",
+        "effort": "high",
+        "description": "Devin Claude Sonnet 5 HIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-sonnet-5",
+          "modelLabel": "Claude Sonnet 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "weneg"
+      },
+      {
+        "name": "mehetweret",
+        "model": "claude-sonnet-5",
+        "effort": "medium",
+        "description": "Devin Claude Sonnet 5 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-sonnet-5",
+          "modelLabel": "Claude Sonnet 5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "mehetweret"
+      },
+      {
+        "name": "nemty",
+        "model": "claude-sonnet-5",
+        "effort": "low",
+        "description": "Devin Claude Sonnet 5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-sonnet-5",
+          "modelLabel": "Claude Sonnet 5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nemty"
+      },
+      {
+        "name": "sepa",
+        "model": "claude-haiku-5-5",
+        "effort": "max",
+        "description": "Devin Claude Haiku 5.5 MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-haiku-5.5",
+          "modelLabel": "Claude Haiku 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sepa"
+      },
+      {
+        "name": "tutu",
+        "model": "claude-haiku-5-5",
+        "effort": "xhigh",
+        "description": "Devin Claude Haiku 5.5 XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-haiku-5.5",
+          "modelLabel": "Claude Haiku 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "tutu"
+      },
+      {
+        "name": "unut",
+        "model": "claude-haiku-5-5",
+        "effort": "high",
+        "description": "Devin Claude Haiku 5.5 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-haiku-5.5",
+          "modelLabel": "Claude Haiku 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "unut"
+      },
+      {
+        "name": "maahes",
+        "model": "claude-haiku-5-5",
+        "effort": "medium",
+        "description": "Devin Claude Haiku 5.5 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-haiku-5.5",
+          "modelLabel": "Claude Haiku 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "maahes"
+      },
+      {
+        "name": "mandulis",
+        "model": "claude-haiku-5-5",
+        "effort": "low",
+        "description": "Devin Claude Haiku 5.5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-haiku-5.5",
+          "modelLabel": "Claude Haiku 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "mandulis"
+      },
+      {
+        "name": "andjety",
+        "model": "gemini-3-5-flash",
+        "effort": "high",
+        "description": "Devin Gemini 3.5 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.5-flash",
+          "modelLabel": "Gemini 3.5 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "andjety"
+      },
+      {
+        "name": "ihy",
+        "model": "gemini-3-5-flash",
+        "effort": "medium",
+        "description": "Devin Gemini 3.5 Flash MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.5-flash",
+          "modelLabel": "Gemini 3.5 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "ihy"
+      },
+      {
+        "name": "anat",
+        "model": "gemini-3-5-flash",
+        "effort": "low",
+        "description": "Devin Gemini 3.5 Flash LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.5-flash",
+          "modelLabel": "Gemini 3.5 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "anat"
+      },
+      {
+        "name": "astarte",
+        "model": "gemini-3-6-flash",
+        "effort": "high",
+        "description": "Devin Gemini 3.6 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.6-flash",
+          "modelLabel": "Gemini 3.6 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "astarte"
+      },
+      {
+        "name": "qetesh",
+        "model": "gemini-3-6-flash",
+        "effort": "medium",
+        "description": "Devin Gemini 3.6 Flash MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.6-flash",
+          "modelLabel": "Gemini 3.6 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "qetesh"
+      },
+      {
+        "name": "aker",
+        "model": "gemini-3-6-flash",
+        "effort": "low",
+        "description": "Devin Gemini 3.6 Flash LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.6-flash",
+          "modelLabel": "Gemini 3.6 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "aker"
+      },
+      {
+        "name": "hauhet",
+        "model": "gemini-3-7-flash",
+        "effort": "high",
+        "description": "Devin Gemini 3.7 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.7-flash",
+          "modelLabel": "Gemini 3.7 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "hauhet"
+      },
+      {
+        "name": "kauket",
+        "model": "gemini-3-7-flash",
+        "effort": "medium",
+        "description": "Devin Gemini 3.7 Flash MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.7-flash",
+          "modelLabel": "Gemini 3.7 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "kauket"
+      },
+      {
+        "name": "heh",
+        "model": "gemini-3-7-flash",
+        "effort": "low",
+        "description": "Devin Gemini 3.7 Flash LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.7-flash",
+          "modelLabel": "Gemini 3.7 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "heh"
+      },
+      {
+        "name": "narmer",
+        "model": "gpt-5-6-sol",
+        "effort": "max",
+        "description": "Devin GPT 5.6 Sol MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-sol",
+          "modelLabel": "GPT-5.6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "narmer"
+      },
+      {
+        "name": "menes",
+        "model": "gpt-5-6-sol",
+        "effort": "xhigh",
+        "description": "Devin GPT 5.6 Sol XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-sol",
+          "modelLabel": "GPT-5.6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "menes"
+      },
+      {
+        "name": "djer",
+        "model": "gpt-5-6-sol",
+        "effort": "high",
+        "description": "Devin GPT 5.6 Sol HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-sol",
+          "modelLabel": "GPT-5.6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "djer"
+      },
+      {
+        "name": "merneith",
+        "model": "gpt-5-6-sol",
+        "effort": "medium",
+        "description": "Devin GPT 5.6 Sol MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-sol",
+          "modelLabel": "GPT-5.6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "merneith"
+      },
+      {
+        "name": "khasekhemwy",
+        "model": "gpt-5-6-sol",
+        "effort": "low",
+        "description": "Devin GPT 5.6 Sol LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-sol",
+          "modelLabel": "GPT-5.6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khasekhemwy"
+      },
+      {
+        "name": "djoser",
+        "model": "gpt-5-6-terra",
+        "effort": "max",
+        "description": "Devin GPT 5.6 Terra MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "djoser"
+      },
+      {
+        "name": "sneferu",
+        "model": "gpt-5-6-terra",
+        "effort": "xhigh",
+        "description": "Devin GPT 5.6 Terra XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sneferu"
+      },
+      {
+        "name": "khufu",
+        "model": "gpt-5-6-terra",
+        "effort": "high",
+        "description": "Devin GPT 5.6 Terra HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khufu"
+      },
+      {
+        "name": "khafre",
+        "model": "gpt-5-6-terra",
+        "effort": "medium",
+        "description": "Devin GPT 5.6 Terra MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khafre"
+      },
+      {
+        "name": "menkaure",
+        "model": "gpt-5-6-terra",
+        "effort": "low",
+        "description": "Devin GPT 5.6 Terra LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "menkaure"
+      },
+      {
+        "name": "userkaf",
+        "model": "gpt-5-6-luna",
+        "effort": "max",
+        "description": "Devin GPT 5.6 Luna MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "userkaf"
+      },
+      {
+        "name": "sahure",
+        "model": "gpt-5-6-luna",
+        "effort": "xhigh",
+        "description": "Devin GPT 5.6 Luna XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sahure"
+      },
+      {
+        "name": "unas",
+        "model": "gpt-5-6-luna",
+        "effort": "high",
+        "description": "Devin GPT 5.6 Luna HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "unas"
+      },
+      {
+        "name": "teti",
+        "model": "gpt-5-6-luna",
+        "effort": "medium",
+        "description": "Devin GPT 5.6 Luna MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "teti"
+      },
+      {
+        "name": "pepi",
+        "model": "gpt-5-6-luna",
+        "effort": "low",
+        "description": "Devin GPT 5.6 Luna LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "pepi"
+      },
+      {
+        "name": "mentuhotep",
+        "model": "grok-4-6",
+        "effort": "xhigh",
+        "description": "Devin Grok 4.6 XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.6",
+          "modelLabel": "Grok 4.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "mentuhotep"
+      },
+      {
+        "name": "amenemhat",
+        "model": "grok-4-6",
+        "effort": "high",
+        "description": "Devin Grok 4.6 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.6",
+          "modelLabel": "Grok 4.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "amenemhat"
+      },
+      {
+        "name": "senusret",
+        "model": "grok-4-6",
+        "effort": "medium",
+        "description": "Devin Grok 4.6 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.6",
+          "modelLabel": "Grok 4.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "senusret"
+      },
+      {
+        "name": "sobekneferu",
+        "model": "grok-4-6",
+        "effort": "low",
+        "description": "Devin Grok 4.6 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.6",
+          "modelLabel": "Grok 4.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sobekneferu"
+      },
+      {
+        "name": "ahmose",
+        "model": "grok-4-7",
+        "effort": "xhigh",
+        "description": "Devin Grok 4.7 XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.7",
+          "modelLabel": "Grok 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "ahmose"
+      },
+      {
+        "name": "kamose",
+        "model": "grok-4-7",
+        "effort": "high",
+        "description": "Devin Grok 4.7 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.7",
+          "modelLabel": "Grok 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "kamose"
+      },
+      {
+        "name": "hatshepsut",
+        "model": "grok-4-7",
+        "effort": "medium",
+        "description": "Devin Grok 4.7 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.7",
+          "modelLabel": "Grok 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "hatshepsut"
+      },
+      {
+        "name": "thutmose",
+        "model": "grok-4-7",
+        "effort": "low",
+        "description": "Devin Grok 4.7 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.7",
+          "modelLabel": "Grok 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "thutmose"
+      },
+      {
+        "name": "amenhotep",
+        "model": "muse-wonder-1-0",
+        "effort": "max",
+        "description": "Devin Muse Wonder MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "muse-wonder-1.0",
+          "modelLabel": "Muse Wonder",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "amenhotep"
+      },
+      {
+        "name": "akhenaten",
+        "model": "muse-wonder-1-0",
+        "effort": "xhigh",
+        "description": "Devin Muse Wonder XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "muse-wonder-1.0",
+          "modelLabel": "Muse Wonder",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "akhenaten"
+      },
+      {
+        "name": "nefertiti",
+        "model": "muse-wonder-1-0",
+        "effort": "high",
+        "description": "Devin Muse Wonder HIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "muse-wonder-1.0",
+          "modelLabel": "Muse Wonder",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "nefertiti"
+      },
+      {
+        "name": "tutankhamun",
+        "model": "muse-wonder-1-0",
+        "effort": "medium",
+        "description": "Devin Muse Wonder MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "muse-wonder-1.0",
+          "modelLabel": "Muse Wonder",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "tutankhamun"
+      },
+      {
+        "name": "horemheb",
+        "model": "muse-wonder-1-0",
+        "effort": "low",
+        "description": "Devin Muse Wonder LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "muse-wonder-1.0",
+          "modelLabel": "Muse Wonder",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "horemheb"
+      },
+      {
+        "name": "ramesses",
+        "model": "glm-5-3-flash",
+        "effort": "max",
+        "description": "Devin GLM 5.3 Flash MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.3-flash",
+          "modelLabel": "GLM 5.3 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "ramesses"
+      },
+      {
+        "name": "seti",
+        "model": "glm-5-3-flash",
+        "effort": "high",
+        "description": "Devin GLM 5.3 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.3-flash",
+          "modelLabel": "GLM 5.3 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "seti"
+      },
+      {
+        "name": "merneptah",
+        "model": "glm-5-3-flash",
+        "effort": "low",
+        "description": "Devin GLM 5.3 Flash LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.3-flash",
+          "modelLabel": "GLM 5.3 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "merneptah"
+      },
+      {
+        "name": "nefertari",
+        "model": "deepseek-v4-flash",
+        "effort": "max",
+        "description": "Devin DeepSeek V4 Flash MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4-flash",
+          "modelLabel": "DeepSeek V4 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nefertari"
+      },
+      {
+        "name": "tiye",
+        "model": "deepseek-v4-flash",
+        "effort": "high",
+        "description": "Devin DeepSeek V4 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4-flash",
+          "modelLabel": "DeepSeek V4 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "tiye"
+      },
+      {
+        "name": "taharqa",
+        "model": "deepseek-v4-1-flash-1017",
+        "effort": "max",
+        "description": "Devin DeepSeek V4.1 Flash MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4.1-flash-1017",
+          "modelLabel": "DeepSeek V4.1 Flash (1017)",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "taharqa"
+      },
+      {
+        "name": "piye",
+        "model": "deepseek-v4-1-flash-1017",
+        "effort": "high",
+        "description": "Devin DeepSeek V4.1 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4.1-flash-1017",
+          "modelLabel": "DeepSeek V4.1 Flash (1017)",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "piye"
+      },
+      {
+        "name": "psamtik",
+        "model": "deepseek-v4-1-flash-1017",
+        "effort": "low",
+        "description": "Devin DeepSeek V4.1 Flash LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4.1-flash-1017",
+          "modelLabel": "DeepSeek V4.1 Flash (1017)",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "psamtik"
+      },
+      {
+        "name": "nectanebo",
+        "model": "swe-1-7",
+        "effort": "medium",
+        "description": "Devin SWE-1.7 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "swe-1-7",
+          "modelLabel": "SWE-1.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nectanebo"
+      },
+      {
+        "name": "imhotep",
+        "model": "swe-1-7",
+        "description": "Devin SWE-1.7",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "swe-1-7",
+          "modelLabel": "SWE-1.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "imhotep"
+      },
+      {
+        "name": "ankhesenamun",
+        "model": "claude-opus-4-6",
+        "description": "Devin Claude Opus 4.6",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.6",
+          "modelLabel": "Claude Opus 4.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "ankhesenamun"
+      },
+      {
+        "name": "shepseskaf",
+        "model": "gpt-5-4",
+        "effort": "xhigh",
+        "description": "Devin GPT 5.4 XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4",
+          "modelLabel": "GPT-5.4",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "shepseskaf"
+      },
+      {
+        "name": "neferirkare",
+        "model": "gpt-5-4",
+        "effort": "high",
+        "description": "Devin GPT 5.4 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4",
+          "modelLabel": "GPT-5.4",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "neferirkare"
+      },
+      {
+        "name": "djedkare",
+        "model": "gpt-5-4",
+        "effort": "medium",
+        "description": "Devin GPT 5.4 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4",
+          "modelLabel": "GPT-5.4",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "djedkare"
+      },
+      {
+        "name": "khety",
+        "model": "gpt-5-4",
+        "effort": "low",
+        "description": "Devin GPT 5.4 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4",
+          "modelLabel": "GPT-5.4",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khety"
+      },
+      {
+        "name": "intef",
+        "model": "gpt-5-5",
+        "effort": "xhigh",
+        "description": "Devin GPT 5.5 XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.5",
+          "modelLabel": "GPT-5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "intef"
+      },
+      {
+        "name": "ahhotep",
+        "model": "gpt-5-5",
+        "effort": "high",
+        "description": "Devin GPT 5.5 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.5",
+          "modelLabel": "GPT-5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "ahhotep"
+      },
+      {
+        "name": "smenkhkare",
+        "model": "gpt-5-5",
+        "effort": "medium",
+        "description": "Devin GPT 5.5 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.5",
+          "modelLabel": "GPT-5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "smenkhkare"
+      },
+      {
+        "name": "khentkaus",
+        "model": "gpt-5-5",
+        "effort": "low",
+        "description": "Devin GPT 5.5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.5",
+          "modelLabel": "GPT-5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khentkaus"
+      },
+      {
+        "name": "hetepheres",
+        "model": "gpt-5-4-mini",
+        "effort": "xhigh",
+        "description": "Devin GPT 5.4 Mini XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4-mini",
+          "modelLabel": "GPT-5.4 Mini",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "hetepheres"
+      },
+      {
+        "name": "meresankh",
+        "model": "gpt-5-4-mini",
+        "effort": "high",
+        "description": "Devin GPT 5.4 Mini HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4-mini",
+          "modelLabel": "GPT-5.4 Mini",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "meresankh"
+      },
+      {
+        "name": "nitocris",
+        "model": "gpt-5-4-mini",
+        "effort": "medium",
+        "description": "Devin GPT 5.4 Mini MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4-mini",
+          "modelLabel": "GPT-5.4 Mini",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nitocris"
+      },
+      {
+        "name": "twosret",
+        "model": "gpt-5-4-mini",
+        "effort": "low",
+        "description": "Devin GPT 5.4 Mini LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4-mini",
+          "modelLabel": "GPT-5.4 Mini",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "twosret"
+      },
+      {
+        "name": "sekhemkhet",
+        "model": "claude-sonnet-4-6",
+        "description": "Devin Claude Sonnet 4.6",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-sonnet-4.6",
+          "modelLabel": "Claude Sonnet 4.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sekhemkhet"
+      },
+      {
+        "name": "huni",
+        "model": "kimi-k2-6",
+        "description": "Devin Kimi K2.6",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "kimi-k2.6",
+          "modelLabel": "Kimi K2.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "huni"
+      },
+      {
+        "name": "radjedef",
+        "model": "kimi-k2-7",
+        "description": "Devin Kimi K2.7",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "kimi-k2.7",
+          "modelLabel": "Kimi K2.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "radjedef"
+      },
+      {
+        "name": "khaba",
+        "model": "nemotron-3-ultra",
+        "effort": "high",
+        "description": "Devin Nemotron 3 Ultra HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "nemotron-3-ultra",
+          "modelLabel": "Nemotron 3 Ultra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khaba"
+      },
+      {
+        "name": "nebka",
+        "model": "nemotron-3-ultra",
+        "effort": "medium",
+        "description": "Devin Nemotron 3 Ultra MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "nemotron-3-ultra",
+          "modelLabel": "Nemotron 3 Ultra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nebka"
+      },
+      {
+        "name": "sanakht",
+        "model": "deepseek-v4-pro",
+        "effort": "max",
+        "description": "Devin DeepSeek V4 Pro MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4-pro",
+          "modelLabel": "DeepSeek V4 Pro",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sanakht"
+      },
+      {
+        "name": "djedefre",
+        "model": "deepseek-v4-pro",
+        "effort": "high",
+        "description": "Devin DeepSeek V4 Pro HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4-pro",
+          "modelLabel": "DeepSeek V4 Pro",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "djedefre"
       }
     ],
     "codex": [
@@ -839,7 +2569,7 @@
           "modelKey": "claude-opus-5.5",
           "modelLabel": "Claude Opus 5.5",
           "routeLabel": "OpenRouter · API",
-          "workTier": "complex"
+          "workTier": "standard"
         },
         "preset": "atlas"
       },
@@ -856,6 +2586,48 @@
           "workTier": "light"
         },
         "preset": "nike"
+      },
+      {
+        "name": "hecate",
+        "model": "openrouter/google/gemini-4-argon",
+        "effort": "high",
+        "description": "Pi Gemini 4 Argon HIGH",
+        "detail": "Google's newest model: coding, analysis and reviews.",
+        "profile": {
+          "modelKey": "gemini-4-argon",
+          "modelLabel": "Gemini 4 Argon",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "hecate"
+      },
+      {
+        "name": "dione",
+        "model": "openrouter/google/gemini-4-argon",
+        "effort": "medium",
+        "description": "Pi Gemini 4 Argon MEDIUM",
+        "detail": "Google's newest model: coding, analysis and reviews.",
+        "profile": {
+          "modelKey": "gemini-4-argon",
+          "modelLabel": "Gemini 4 Argon",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "dione"
+      },
+      {
+        "name": "tyche",
+        "model": "openrouter/google/gemini-4-argon",
+        "effort": "low",
+        "description": "Pi Gemini 4 Argon LOW",
+        "detail": "Google's newest model: coding, analysis and reviews.",
+        "profile": {
+          "modelKey": "gemini-4-argon",
+          "modelLabel": "Gemini 4 Argon",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "tyche"
       },
       {
         "name": "zephyros",
@@ -980,6 +2752,48 @@
           "workTier": "complex"
         },
         "preset": "endymion"
+      },
+      {
+        "name": "themis",
+        "model": "openrouter/moonshotai/kimi-k3.1-pro",
+        "effort": "max",
+        "description": "Pi Kimi K3.1 Pro MAX",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "kimi-k3.1-pro",
+          "modelLabel": "Kimi K3.1 Pro",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "themis"
+      },
+      {
+        "name": "crius",
+        "model": "openrouter/moonshotai/kimi-k3.1-pro",
+        "effort": "high",
+        "description": "Pi Kimi K3.1 Pro HIGH",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "kimi-k3.1-pro",
+          "modelLabel": "Kimi K3.1 Pro",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "crius"
+      },
+      {
+        "name": "coeus",
+        "model": "openrouter/moonshotai/kimi-k3.1-pro",
+        "effort": "low",
+        "description": "Pi Kimi K3.1 Pro LOW",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "kimi-k3.1-pro",
+          "modelLabel": "Kimi K3.1 Pro",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "coeus"
       },
       {
         "name": "nyx",
@@ -1286,7 +3100,7 @@
           "modelKey": "claude-opus-5.5",
           "modelLabel": "Claude Opus 5.5",
           "routeLabel": "OpenRouter · API",
-          "workTier": "complex"
+          "workTier": "standard"
         },
         "preset": "vali"
       },
@@ -1635,7 +3449,7 @@
           "modelKey": "claude-opus-5.5",
           "modelLabel": "Claude Opus 5.5",
           "routeLabel": "Claude Code account",
-          "workTier": "complex"
+          "workTier": "standard"
         },
         "preset": "artemis"
       },
@@ -1854,7 +3668,7 @@
           "modelKey": "claude-opus-5.5",
           "modelLabel": "Claude Opus 5.5",
           "routeLabel": "Devin account",
-          "workTier": "complex"
+          "workTier": "standard"
         },
         "preset": "anubis",
         "harness": "devin"
@@ -2168,18 +3982,7 @@
     {
       "name": "khnum",
       "entry": {
-        "name": "khnum",
-        "model": "swe-1-6-slow",
-        "description": "Devin SWE-1.6 Slow",
-        "detail": "Devin’s own SWE-1.6 Slow: everyday implementation and tests.",
-        "profile": {
-          "modelKey": "swe-1-6-slow",
-          "modelLabel": "SWE-1.6 Slow",
-          "routeLabel": "Devin account",
-          "workTier": "light"
-        },
-        "preset": "khnum",
-        "harness": "devin"
+        "$undefined": true
       }
     },
     {
@@ -3022,7 +4825,7 @@
           "modelKey": "claude-opus-5.5",
           "modelLabel": "Claude Opus 5.5",
           "routeLabel": "Claude Code account",
-          "workTier": "complex"
+          "workTier": "standard"
         },
         "preset": "artemis",
         "harness": "claude"
@@ -3184,7 +4987,7 @@
           "modelKey": "claude-opus-5.5",
           "modelLabel": "Claude Opus 5.5",
           "routeLabel": "OpenRouter · API",
-          "workTier": "complex"
+          "workTier": "standard"
         },
         "preset": "atlas",
         "harness": "pi"
@@ -3238,7 +5041,7 @@
           "modelKey": "claude-opus-5.5",
           "modelLabel": "Claude Opus 5.5",
           "routeLabel": "OpenRouter · API",
-          "workTier": "complex"
+          "workTier": "standard"
         },
         "preset": "vali",
         "harness": "opencode"
@@ -3890,6 +5693,2357 @@
       "name": "Thoth",
       "entry": {
         "$undefined": true
+      }
+    },
+    {
+      "name": "ammit",
+      "entry": {
+        "name": "ammit",
+        "model": "claude-opus-5-5",
+        "effort": "low",
+        "description": "Devin Claude Opus 5.5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "ammit",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "meretseger",
+      "entry": {
+        "name": "meretseger",
+        "model": "claude-sonnet-5-5",
+        "effort": "high",
+        "description": "Devin Claude Sonnet 5.5 HIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "meretseger",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "meskhenet",
+      "entry": {
+        "name": "meskhenet",
+        "model": "claude-sonnet-5-5",
+        "effort": "low",
+        "description": "Devin Claude Sonnet 5.5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "meskhenet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "amunet",
+      "entry": {
+        "name": "amunet",
+        "model": "adaptive",
+        "description": "Devin Adaptive",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "adaptive",
+          "modelLabel": "Adaptive",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "amunet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "anhur",
+      "entry": {
+        "name": "anhur",
+        "model": "gpt-6-sol",
+        "effort": "max",
+        "description": "Devin GPT 6 Sol MAX",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6-sol",
+          "modelLabel": "GPT-6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "anhur",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "anuket",
+      "entry": {
+        "name": "anuket",
+        "model": "gpt-6-sol",
+        "effort": "xhigh",
+        "description": "Devin GPT 6 Sol XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-sol",
+          "modelLabel": "GPT-6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "anuket",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "apep",
+      "entry": {
+        "name": "apep",
+        "model": "gpt-6-sol",
+        "effort": "high",
+        "description": "Devin GPT 6 Sol HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-sol",
+          "modelLabel": "GPT-6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "apep",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "apis",
+      "entry": {
+        "name": "apis",
+        "model": "gpt-6-sol",
+        "effort": "medium",
+        "description": "Devin GPT 6 Sol MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-sol",
+          "modelLabel": "GPT-6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "apis",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "babi",
+      "entry": {
+        "name": "babi",
+        "model": "gpt-6-sol",
+        "effort": "low",
+        "description": "Devin GPT 6 Sol LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-sol",
+          "modelLabel": "GPT-6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "babi",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "bes",
+      "entry": {
+        "name": "bes",
+        "model": "gpt-6-luna",
+        "effort": "max",
+        "description": "Devin GPT 6 Luna MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-luna",
+          "modelLabel": "GPT-6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "bes",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "buchis",
+      "entry": {
+        "name": "buchis",
+        "model": "gpt-6-luna",
+        "effort": "xhigh",
+        "description": "Devin GPT 6 Luna XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-luna",
+          "modelLabel": "GPT-6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "buchis",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "dedun",
+      "entry": {
+        "name": "dedun",
+        "model": "gpt-6-luna",
+        "effort": "high",
+        "description": "Devin GPT 6 Luna HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-luna",
+          "modelLabel": "GPT-6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "dedun",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "duamutef",
+      "entry": {
+        "name": "duamutef",
+        "model": "gpt-6-luna",
+        "effort": "medium",
+        "description": "Devin GPT 6 Luna MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-luna",
+          "modelLabel": "GPT-6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "duamutef",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "hedetet",
+      "entry": {
+        "name": "hedetet",
+        "model": "gpt-6-luna",
+        "effort": "low",
+        "description": "Devin GPT 6 Luna LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-luna",
+          "modelLabel": "GPT-6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "hedetet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "heka",
+      "entry": {
+        "name": "heka",
+        "model": "gemini-4-argon",
+        "effort": "high",
+        "description": "Devin Gemini 4 Argon HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gemini-4-argon",
+          "modelLabel": "Gemini 4 Argon",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "heka",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "heqet",
+      "entry": {
+        "name": "heqet",
+        "model": "gemini-4-argon",
+        "effort": "medium",
+        "description": "Devin Gemini 4 Argon MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gemini-4-argon",
+          "modelLabel": "Gemini 4 Argon",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "heqet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "hesat",
+      "entry": {
+        "name": "hesat",
+        "model": "gemini-4-argon",
+        "effort": "low",
+        "description": "Devin Gemini 4 Argon LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-4-argon",
+          "modelLabel": "Gemini 4 Argon",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "hesat",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "iabet",
+      "entry": {
+        "name": "iabet",
+        "model": "kimi-k3",
+        "effort": "max",
+        "description": "Devin Kimi K3 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "kimi-k3",
+          "modelLabel": "Kimi K3",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "iabet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "imentet",
+      "entry": {
+        "name": "imentet",
+        "model": "kimi-k3",
+        "effort": "high",
+        "description": "Devin Kimi K3 HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "kimi-k3",
+          "modelLabel": "Kimi K3",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "imentet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "imsety",
+      "entry": {
+        "name": "imsety",
+        "model": "kimi-k3",
+        "effort": "low",
+        "description": "Devin Kimi K3 LOW",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "kimi-k3",
+          "modelLabel": "Kimi K3",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "imsety",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "iusaaset",
+      "entry": {
+        "name": "iusaaset",
+        "model": "glm-5-2",
+        "effort": "max",
+        "description": "Devin GLM 5.2 MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.2",
+          "modelLabel": "GLM 5.2",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "iusaaset",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "kebechet",
+      "entry": {
+        "name": "kebechet",
+        "model": "glm-5-2",
+        "description": "Devin GLM 5.2",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.2",
+          "modelLabel": "GLM 5.2",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "kebechet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "mafdet",
+      "entry": {
+        "name": "mafdet",
+        "model": "glm-5-3",
+        "effort": "max",
+        "description": "Devin GLM 5.3 MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.3",
+          "modelLabel": "GLM 5.3",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "mafdet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "mehen",
+      "entry": {
+        "name": "mehen",
+        "model": "glm-5-3",
+        "effort": "high",
+        "description": "Devin GLM 5.3 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.3",
+          "modelLabel": "GLM 5.3",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "mehen",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "menhit",
+      "entry": {
+        "name": "menhit",
+        "model": "glm-5-3",
+        "effort": "low",
+        "description": "Devin GLM 5.3 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.3",
+          "modelLabel": "GLM 5.3",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "menhit",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "montu",
+      "entry": {
+        "name": "montu",
+        "model": "gemini-3-8-flash",
+        "effort": "high",
+        "description": "Devin Gemini 3.8 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.8-flash",
+          "modelLabel": "Gemini 3.8 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "montu",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "mnevis",
+      "entry": {
+        "name": "mnevis",
+        "model": "gemini-3-8-flash",
+        "effort": "medium",
+        "description": "Devin Gemini 3.8 Flash MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.8-flash",
+          "modelLabel": "Gemini 3.8 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "mnevis",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "nefertum",
+      "entry": {
+        "name": "nefertum",
+        "model": "gemini-3-8-flash",
+        "effort": "low",
+        "description": "Devin Gemini 3.8 Flash LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.8-flash",
+          "modelLabel": "Gemini 3.8 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nefertum",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "nehebkau",
+      "entry": {
+        "name": "nehebkau",
+        "model": "claude-opus-4-7",
+        "effort": "max",
+        "description": "Devin Claude Opus 4.7 MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.7",
+          "modelLabel": "Claude Opus 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nehebkau",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "nekhbet",
+      "entry": {
+        "name": "nekhbet",
+        "model": "claude-opus-4-7",
+        "effort": "xhigh",
+        "description": "Devin Claude Opus 4.7 XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.7",
+          "modelLabel": "Claude Opus 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nekhbet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "neper",
+      "entry": {
+        "name": "neper",
+        "model": "claude-opus-4-7",
+        "effort": "high",
+        "description": "Devin Claude Opus 4.7 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.7",
+          "modelLabel": "Claude Opus 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "neper",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "naunet",
+      "entry": {
+        "name": "naunet",
+        "model": "claude-opus-4-7",
+        "effort": "medium",
+        "description": "Devin Claude Opus 4.7 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.7",
+          "modelLabel": "Claude Opus 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "naunet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "pakhet",
+      "entry": {
+        "name": "pakhet",
+        "model": "claude-opus-4-7",
+        "effort": "low",
+        "description": "Devin Claude Opus 4.7 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.7",
+          "modelLabel": "Claude Opus 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "pakhet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "qebehsenuef",
+      "entry": {
+        "name": "qebehsenuef",
+        "model": "claude-opus-4-8",
+        "effort": "max",
+        "description": "Devin Claude Opus 4.8 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-opus-4.8",
+          "modelLabel": "Claude Opus 4.8",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "qebehsenuef",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "raet",
+      "entry": {
+        "name": "raet",
+        "model": "claude-opus-4-8",
+        "effort": "xhigh",
+        "description": "Devin Claude Opus 4.8 XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-opus-4.8",
+          "modelLabel": "Claude Opus 4.8",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "raet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "renenutet",
+      "entry": {
+        "name": "renenutet",
+        "model": "claude-opus-4-8",
+        "effort": "high",
+        "description": "Devin Claude Opus 4.8 HIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-opus-4.8",
+          "modelLabel": "Claude Opus 4.8",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "renenutet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "renpet",
+      "entry": {
+        "name": "renpet",
+        "model": "claude-opus-4-8",
+        "effort": "medium",
+        "description": "Devin Claude Opus 4.8 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.8",
+          "modelLabel": "Claude Opus 4.8",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "renpet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "reshep",
+      "entry": {
+        "name": "reshep",
+        "model": "claude-opus-4-8",
+        "effort": "low",
+        "description": "Devin Claude Opus 4.8 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.8",
+          "modelLabel": "Claude Opus 4.8",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "reshep",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "satet",
+      "entry": {
+        "name": "satet",
+        "model": "claude-opus-5",
+        "effort": "max",
+        "description": "Devin Claude Opus 5 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "satet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "serket",
+      "entry": {
+        "name": "serket",
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+        "description": "Devin Claude Opus 5 XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "serket",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "seth",
+      "entry": {
+        "name": "seth",
+        "model": "claude-opus-5",
+        "effort": "high",
+        "description": "Devin Claude Opus 5 HIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "seth",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "shai",
+      "entry": {
+        "name": "shai",
+        "model": "claude-opus-5",
+        "effort": "medium",
+        "description": "Devin Claude Opus 5 MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "shai",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "shezmu",
+      "entry": {
+        "name": "shezmu",
+        "model": "claude-opus-5",
+        "effort": "low",
+        "description": "Devin Claude Opus 5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "shezmu",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "sopdet",
+      "entry": {
+        "name": "sopdet",
+        "model": "claude-5-fable",
+        "effort": "max",
+        "description": "Devin Claude Fable 5 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5",
+          "modelLabel": "Claude Fable 5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "sopdet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "sopdu",
+      "entry": {
+        "name": "sopdu",
+        "model": "claude-5-fable",
+        "effort": "xhigh",
+        "description": "Devin Claude Fable 5 XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-fable-5",
+          "modelLabel": "Claude Fable 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "sopdu",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "tatenen",
+      "entry": {
+        "name": "tatenen",
+        "model": "claude-5-fable",
+        "effort": "high",
+        "description": "Devin Claude Fable 5 HIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-fable-5",
+          "modelLabel": "Claude Fable 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "tatenen",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "taweret",
+      "entry": {
+        "name": "taweret",
+        "model": "claude-5-fable",
+        "effort": "medium",
+        "description": "Devin Claude Fable 5 MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-fable-5",
+          "modelLabel": "Claude Fable 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "taweret",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "tayet",
+      "entry": {
+        "name": "tayet",
+        "model": "claude-5-fable",
+        "effort": "low",
+        "description": "Devin Claude Fable 5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-fable-5",
+          "modelLabel": "Claude Fable 5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "tayet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "wepwawet",
+      "entry": {
+        "name": "wepwawet",
+        "model": "claude-sonnet-5",
+        "effort": "max",
+        "description": "Devin Claude Sonnet 5 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-sonnet-5",
+          "modelLabel": "Claude Sonnet 5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "wepwawet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "wosret",
+      "entry": {
+        "name": "wosret",
+        "model": "claude-sonnet-5",
+        "effort": "xhigh",
+        "description": "Devin Claude Sonnet 5 XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-sonnet-5",
+          "modelLabel": "Claude Sonnet 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "wosret",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "weneg",
+      "entry": {
+        "name": "weneg",
+        "model": "claude-sonnet-5",
+        "effort": "high",
+        "description": "Devin Claude Sonnet 5 HIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-sonnet-5",
+          "modelLabel": "Claude Sonnet 5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "weneg",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "mehetweret",
+      "entry": {
+        "name": "mehetweret",
+        "model": "claude-sonnet-5",
+        "effort": "medium",
+        "description": "Devin Claude Sonnet 5 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-sonnet-5",
+          "modelLabel": "Claude Sonnet 5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "mehetweret",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "nemty",
+      "entry": {
+        "name": "nemty",
+        "model": "claude-sonnet-5",
+        "effort": "low",
+        "description": "Devin Claude Sonnet 5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-sonnet-5",
+          "modelLabel": "Claude Sonnet 5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nemty",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "sepa",
+      "entry": {
+        "name": "sepa",
+        "model": "claude-haiku-5-5",
+        "effort": "max",
+        "description": "Devin Claude Haiku 5.5 MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-haiku-5.5",
+          "modelLabel": "Claude Haiku 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sepa",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "tutu",
+      "entry": {
+        "name": "tutu",
+        "model": "claude-haiku-5-5",
+        "effort": "xhigh",
+        "description": "Devin Claude Haiku 5.5 XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-haiku-5.5",
+          "modelLabel": "Claude Haiku 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "tutu",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "unut",
+      "entry": {
+        "name": "unut",
+        "model": "claude-haiku-5-5",
+        "effort": "high",
+        "description": "Devin Claude Haiku 5.5 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-haiku-5.5",
+          "modelLabel": "Claude Haiku 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "unut",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "maahes",
+      "entry": {
+        "name": "maahes",
+        "model": "claude-haiku-5-5",
+        "effort": "medium",
+        "description": "Devin Claude Haiku 5.5 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-haiku-5.5",
+          "modelLabel": "Claude Haiku 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "maahes",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "mandulis",
+      "entry": {
+        "name": "mandulis",
+        "model": "claude-haiku-5-5",
+        "effort": "low",
+        "description": "Devin Claude Haiku 5.5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-haiku-5.5",
+          "modelLabel": "Claude Haiku 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "mandulis",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "andjety",
+      "entry": {
+        "name": "andjety",
+        "model": "gemini-3-5-flash",
+        "effort": "high",
+        "description": "Devin Gemini 3.5 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.5-flash",
+          "modelLabel": "Gemini 3.5 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "andjety",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "ihy",
+      "entry": {
+        "name": "ihy",
+        "model": "gemini-3-5-flash",
+        "effort": "medium",
+        "description": "Devin Gemini 3.5 Flash MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.5-flash",
+          "modelLabel": "Gemini 3.5 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "ihy",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "anat",
+      "entry": {
+        "name": "anat",
+        "model": "gemini-3-5-flash",
+        "effort": "low",
+        "description": "Devin Gemini 3.5 Flash LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.5-flash",
+          "modelLabel": "Gemini 3.5 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "anat",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "astarte",
+      "entry": {
+        "name": "astarte",
+        "model": "gemini-3-6-flash",
+        "effort": "high",
+        "description": "Devin Gemini 3.6 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.6-flash",
+          "modelLabel": "Gemini 3.6 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "astarte",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "qetesh",
+      "entry": {
+        "name": "qetesh",
+        "model": "gemini-3-6-flash",
+        "effort": "medium",
+        "description": "Devin Gemini 3.6 Flash MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.6-flash",
+          "modelLabel": "Gemini 3.6 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "qetesh",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "aker",
+      "entry": {
+        "name": "aker",
+        "model": "gemini-3-6-flash",
+        "effort": "low",
+        "description": "Devin Gemini 3.6 Flash LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.6-flash",
+          "modelLabel": "Gemini 3.6 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "aker",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "hauhet",
+      "entry": {
+        "name": "hauhet",
+        "model": "gemini-3-7-flash",
+        "effort": "high",
+        "description": "Devin Gemini 3.7 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.7-flash",
+          "modelLabel": "Gemini 3.7 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "hauhet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "kauket",
+      "entry": {
+        "name": "kauket",
+        "model": "gemini-3-7-flash",
+        "effort": "medium",
+        "description": "Devin Gemini 3.7 Flash MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.7-flash",
+          "modelLabel": "Gemini 3.7 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "kauket",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "heh",
+      "entry": {
+        "name": "heh",
+        "model": "gemini-3-7-flash",
+        "effort": "low",
+        "description": "Devin Gemini 3.7 Flash LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gemini-3.7-flash",
+          "modelLabel": "Gemini 3.7 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "heh",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "narmer",
+      "entry": {
+        "name": "narmer",
+        "model": "gpt-5-6-sol",
+        "effort": "max",
+        "description": "Devin GPT 5.6 Sol MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-sol",
+          "modelLabel": "GPT-5.6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "narmer",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "menes",
+      "entry": {
+        "name": "menes",
+        "model": "gpt-5-6-sol",
+        "effort": "xhigh",
+        "description": "Devin GPT 5.6 Sol XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-sol",
+          "modelLabel": "GPT-5.6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "menes",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "djer",
+      "entry": {
+        "name": "djer",
+        "model": "gpt-5-6-sol",
+        "effort": "high",
+        "description": "Devin GPT 5.6 Sol HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-sol",
+          "modelLabel": "GPT-5.6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "djer",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "merneith",
+      "entry": {
+        "name": "merneith",
+        "model": "gpt-5-6-sol",
+        "effort": "medium",
+        "description": "Devin GPT 5.6 Sol MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-sol",
+          "modelLabel": "GPT-5.6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "merneith",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "khasekhemwy",
+      "entry": {
+        "name": "khasekhemwy",
+        "model": "gpt-5-6-sol",
+        "effort": "low",
+        "description": "Devin GPT 5.6 Sol LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-sol",
+          "modelLabel": "GPT-5.6 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khasekhemwy",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "djoser",
+      "entry": {
+        "name": "djoser",
+        "model": "gpt-5-6-terra",
+        "effort": "max",
+        "description": "Devin GPT 5.6 Terra MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "djoser",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "sneferu",
+      "entry": {
+        "name": "sneferu",
+        "model": "gpt-5-6-terra",
+        "effort": "xhigh",
+        "description": "Devin GPT 5.6 Terra XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sneferu",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "khufu",
+      "entry": {
+        "name": "khufu",
+        "model": "gpt-5-6-terra",
+        "effort": "high",
+        "description": "Devin GPT 5.6 Terra HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khufu",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "khafre",
+      "entry": {
+        "name": "khafre",
+        "model": "gpt-5-6-terra",
+        "effort": "medium",
+        "description": "Devin GPT 5.6 Terra MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khafre",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "menkaure",
+      "entry": {
+        "name": "menkaure",
+        "model": "gpt-5-6-terra",
+        "effort": "low",
+        "description": "Devin GPT 5.6 Terra LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "menkaure",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "userkaf",
+      "entry": {
+        "name": "userkaf",
+        "model": "gpt-5-6-luna",
+        "effort": "max",
+        "description": "Devin GPT 5.6 Luna MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "userkaf",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "sahure",
+      "entry": {
+        "name": "sahure",
+        "model": "gpt-5-6-luna",
+        "effort": "xhigh",
+        "description": "Devin GPT 5.6 Luna XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sahure",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "unas",
+      "entry": {
+        "name": "unas",
+        "model": "gpt-5-6-luna",
+        "effort": "high",
+        "description": "Devin GPT 5.6 Luna HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "unas",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "teti",
+      "entry": {
+        "name": "teti",
+        "model": "gpt-5-6-luna",
+        "effort": "medium",
+        "description": "Devin GPT 5.6 Luna MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "teti",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "pepi",
+      "entry": {
+        "name": "pepi",
+        "model": "gpt-5-6-luna",
+        "effort": "low",
+        "description": "Devin GPT 5.6 Luna LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "pepi",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "mentuhotep",
+      "entry": {
+        "name": "mentuhotep",
+        "model": "grok-4-6",
+        "effort": "xhigh",
+        "description": "Devin Grok 4.6 XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.6",
+          "modelLabel": "Grok 4.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "mentuhotep",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "amenemhat",
+      "entry": {
+        "name": "amenemhat",
+        "model": "grok-4-6",
+        "effort": "high",
+        "description": "Devin Grok 4.6 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.6",
+          "modelLabel": "Grok 4.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "amenemhat",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "senusret",
+      "entry": {
+        "name": "senusret",
+        "model": "grok-4-6",
+        "effort": "medium",
+        "description": "Devin Grok 4.6 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.6",
+          "modelLabel": "Grok 4.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "senusret",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "sobekneferu",
+      "entry": {
+        "name": "sobekneferu",
+        "model": "grok-4-6",
+        "effort": "low",
+        "description": "Devin Grok 4.6 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.6",
+          "modelLabel": "Grok 4.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sobekneferu",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "ahmose",
+      "entry": {
+        "name": "ahmose",
+        "model": "grok-4-7",
+        "effort": "xhigh",
+        "description": "Devin Grok 4.7 XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.7",
+          "modelLabel": "Grok 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "ahmose",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "kamose",
+      "entry": {
+        "name": "kamose",
+        "model": "grok-4-7",
+        "effort": "high",
+        "description": "Devin Grok 4.7 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.7",
+          "modelLabel": "Grok 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "kamose",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "hatshepsut",
+      "entry": {
+        "name": "hatshepsut",
+        "model": "grok-4-7",
+        "effort": "medium",
+        "description": "Devin Grok 4.7 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.7",
+          "modelLabel": "Grok 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "hatshepsut",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "thutmose",
+      "entry": {
+        "name": "thutmose",
+        "model": "grok-4-7",
+        "effort": "low",
+        "description": "Devin Grok 4.7 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "grok-4.7",
+          "modelLabel": "Grok 4.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "thutmose",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "amenhotep",
+      "entry": {
+        "name": "amenhotep",
+        "model": "muse-wonder-1-0",
+        "effort": "max",
+        "description": "Devin Muse Wonder MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "muse-wonder-1.0",
+          "modelLabel": "Muse Wonder",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "amenhotep",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "akhenaten",
+      "entry": {
+        "name": "akhenaten",
+        "model": "muse-wonder-1-0",
+        "effort": "xhigh",
+        "description": "Devin Muse Wonder XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "muse-wonder-1.0",
+          "modelLabel": "Muse Wonder",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "akhenaten",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "nefertiti",
+      "entry": {
+        "name": "nefertiti",
+        "model": "muse-wonder-1-0",
+        "effort": "high",
+        "description": "Devin Muse Wonder HIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "muse-wonder-1.0",
+          "modelLabel": "Muse Wonder",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "nefertiti",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "tutankhamun",
+      "entry": {
+        "name": "tutankhamun",
+        "model": "muse-wonder-1-0",
+        "effort": "medium",
+        "description": "Devin Muse Wonder MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "muse-wonder-1.0",
+          "modelLabel": "Muse Wonder",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "tutankhamun",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "horemheb",
+      "entry": {
+        "name": "horemheb",
+        "model": "muse-wonder-1-0",
+        "effort": "low",
+        "description": "Devin Muse Wonder LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "muse-wonder-1.0",
+          "modelLabel": "Muse Wonder",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "horemheb",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "ramesses",
+      "entry": {
+        "name": "ramesses",
+        "model": "glm-5-3-flash",
+        "effort": "max",
+        "description": "Devin GLM 5.3 Flash MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.3-flash",
+          "modelLabel": "GLM 5.3 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "ramesses",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "seti",
+      "entry": {
+        "name": "seti",
+        "model": "glm-5-3-flash",
+        "effort": "high",
+        "description": "Devin GLM 5.3 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.3-flash",
+          "modelLabel": "GLM 5.3 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "seti",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "merneptah",
+      "entry": {
+        "name": "merneptah",
+        "model": "glm-5-3-flash",
+        "effort": "low",
+        "description": "Devin GLM 5.3 Flash LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "glm-5.3-flash",
+          "modelLabel": "GLM 5.3 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "merneptah",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "nefertari",
+      "entry": {
+        "name": "nefertari",
+        "model": "deepseek-v4-flash",
+        "effort": "max",
+        "description": "Devin DeepSeek V4 Flash MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4-flash",
+          "modelLabel": "DeepSeek V4 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nefertari",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "tiye",
+      "entry": {
+        "name": "tiye",
+        "model": "deepseek-v4-flash",
+        "effort": "high",
+        "description": "Devin DeepSeek V4 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4-flash",
+          "modelLabel": "DeepSeek V4 Flash",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "tiye",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "taharqa",
+      "entry": {
+        "name": "taharqa",
+        "model": "deepseek-v4-1-flash-1017",
+        "effort": "max",
+        "description": "Devin DeepSeek V4.1 Flash MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4.1-flash-1017",
+          "modelLabel": "DeepSeek V4.1 Flash (1017)",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "taharqa",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "piye",
+      "entry": {
+        "name": "piye",
+        "model": "deepseek-v4-1-flash-1017",
+        "effort": "high",
+        "description": "Devin DeepSeek V4.1 Flash HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4.1-flash-1017",
+          "modelLabel": "DeepSeek V4.1 Flash (1017)",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "piye",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "psamtik",
+      "entry": {
+        "name": "psamtik",
+        "model": "deepseek-v4-1-flash-1017",
+        "effort": "low",
+        "description": "Devin DeepSeek V4.1 Flash LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4.1-flash-1017",
+          "modelLabel": "DeepSeek V4.1 Flash (1017)",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "psamtik",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "nectanebo",
+      "entry": {
+        "name": "nectanebo",
+        "model": "swe-1-7",
+        "effort": "medium",
+        "description": "Devin SWE-1.7 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "swe-1-7",
+          "modelLabel": "SWE-1.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nectanebo",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "imhotep",
+      "entry": {
+        "name": "imhotep",
+        "model": "swe-1-7",
+        "description": "Devin SWE-1.7",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "swe-1-7",
+          "modelLabel": "SWE-1.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "imhotep",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "ankhesenamun",
+      "entry": {
+        "name": "ankhesenamun",
+        "model": "claude-opus-4-6",
+        "description": "Devin Claude Opus 4.6",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-opus-4.6",
+          "modelLabel": "Claude Opus 4.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "ankhesenamun",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "shepseskaf",
+      "entry": {
+        "name": "shepseskaf",
+        "model": "gpt-5-4",
+        "effort": "xhigh",
+        "description": "Devin GPT 5.4 XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4",
+          "modelLabel": "GPT-5.4",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "shepseskaf",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "neferirkare",
+      "entry": {
+        "name": "neferirkare",
+        "model": "gpt-5-4",
+        "effort": "high",
+        "description": "Devin GPT 5.4 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4",
+          "modelLabel": "GPT-5.4",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "neferirkare",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "djedkare",
+      "entry": {
+        "name": "djedkare",
+        "model": "gpt-5-4",
+        "effort": "medium",
+        "description": "Devin GPT 5.4 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4",
+          "modelLabel": "GPT-5.4",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "djedkare",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "khety",
+      "entry": {
+        "name": "khety",
+        "model": "gpt-5-4",
+        "effort": "low",
+        "description": "Devin GPT 5.4 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4",
+          "modelLabel": "GPT-5.4",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khety",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "intef",
+      "entry": {
+        "name": "intef",
+        "model": "gpt-5-5",
+        "effort": "xhigh",
+        "description": "Devin GPT 5.5 XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.5",
+          "modelLabel": "GPT-5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "intef",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "ahhotep",
+      "entry": {
+        "name": "ahhotep",
+        "model": "gpt-5-5",
+        "effort": "high",
+        "description": "Devin GPT 5.5 HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.5",
+          "modelLabel": "GPT-5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "ahhotep",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "smenkhkare",
+      "entry": {
+        "name": "smenkhkare",
+        "model": "gpt-5-5",
+        "effort": "medium",
+        "description": "Devin GPT 5.5 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.5",
+          "modelLabel": "GPT-5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "smenkhkare",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "khentkaus",
+      "entry": {
+        "name": "khentkaus",
+        "model": "gpt-5-5",
+        "effort": "low",
+        "description": "Devin GPT 5.5 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.5",
+          "modelLabel": "GPT-5.5",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khentkaus",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "hetepheres",
+      "entry": {
+        "name": "hetepheres",
+        "model": "gpt-5-4-mini",
+        "effort": "xhigh",
+        "description": "Devin GPT 5.4 Mini XHIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4-mini",
+          "modelLabel": "GPT-5.4 Mini",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "hetepheres",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "meresankh",
+      "entry": {
+        "name": "meresankh",
+        "model": "gpt-5-4-mini",
+        "effort": "high",
+        "description": "Devin GPT 5.4 Mini HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4-mini",
+          "modelLabel": "GPT-5.4 Mini",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "meresankh",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "nitocris",
+      "entry": {
+        "name": "nitocris",
+        "model": "gpt-5-4-mini",
+        "effort": "medium",
+        "description": "Devin GPT 5.4 Mini MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4-mini",
+          "modelLabel": "GPT-5.4 Mini",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nitocris",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "twosret",
+      "entry": {
+        "name": "twosret",
+        "model": "gpt-5-4-mini",
+        "effort": "low",
+        "description": "Devin GPT 5.4 Mini LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-5.4-mini",
+          "modelLabel": "GPT-5.4 Mini",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "twosret",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "sekhemkhet",
+      "entry": {
+        "name": "sekhemkhet",
+        "model": "claude-sonnet-4-6",
+        "description": "Devin Claude Sonnet 4.6",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-sonnet-4.6",
+          "modelLabel": "Claude Sonnet 4.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sekhemkhet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "huni",
+      "entry": {
+        "name": "huni",
+        "model": "kimi-k2-6",
+        "description": "Devin Kimi K2.6",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "kimi-k2.6",
+          "modelLabel": "Kimi K2.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "huni",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "radjedef",
+      "entry": {
+        "name": "radjedef",
+        "model": "kimi-k2-7",
+        "description": "Devin Kimi K2.7",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "kimi-k2.7",
+          "modelLabel": "Kimi K2.7",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "radjedef",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "khaba",
+      "entry": {
+        "name": "khaba",
+        "model": "nemotron-3-ultra",
+        "effort": "high",
+        "description": "Devin Nemotron 3 Ultra HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "nemotron-3-ultra",
+          "modelLabel": "Nemotron 3 Ultra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khaba",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "nebka",
+      "entry": {
+        "name": "nebka",
+        "model": "nemotron-3-ultra",
+        "effort": "medium",
+        "description": "Devin Nemotron 3 Ultra MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "nemotron-3-ultra",
+          "modelLabel": "Nemotron 3 Ultra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nebka",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "sanakht",
+      "entry": {
+        "name": "sanakht",
+        "model": "deepseek-v4-pro",
+        "effort": "max",
+        "description": "Devin DeepSeek V4 Pro MAX",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4-pro",
+          "modelLabel": "DeepSeek V4 Pro",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sanakht",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "djedefre",
+      "entry": {
+        "name": "djedefre",
+        "model": "deepseek-v4-pro",
+        "effort": "high",
+        "description": "Devin DeepSeek V4 Pro HIGH",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "deepseek-v4-pro",
+          "modelLabel": "DeepSeek V4 Pro",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "djedefre",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "hecate",
+      "entry": {
+        "name": "hecate",
+        "model": "openrouter/google/gemini-4-argon",
+        "effort": "high",
+        "description": "Pi Gemini 4 Argon HIGH",
+        "detail": "Google's newest model: coding, analysis and reviews.",
+        "profile": {
+          "modelKey": "gemini-4-argon",
+          "modelLabel": "Gemini 4 Argon",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "hecate",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "dione",
+      "entry": {
+        "name": "dione",
+        "model": "openrouter/google/gemini-4-argon",
+        "effort": "medium",
+        "description": "Pi Gemini 4 Argon MEDIUM",
+        "detail": "Google's newest model: coding, analysis and reviews.",
+        "profile": {
+          "modelKey": "gemini-4-argon",
+          "modelLabel": "Gemini 4 Argon",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "dione",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "tyche",
+      "entry": {
+        "name": "tyche",
+        "model": "openrouter/google/gemini-4-argon",
+        "effort": "low",
+        "description": "Pi Gemini 4 Argon LOW",
+        "detail": "Google's newest model: coding, analysis and reviews.",
+        "profile": {
+          "modelKey": "gemini-4-argon",
+          "modelLabel": "Gemini 4 Argon",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "tyche",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "themis",
+      "entry": {
+        "name": "themis",
+        "model": "openrouter/moonshotai/kimi-k3.1-pro",
+        "effort": "max",
+        "description": "Pi Kimi K3.1 Pro MAX",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "kimi-k3.1-pro",
+          "modelLabel": "Kimi K3.1 Pro",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "themis",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "crius",
+      "entry": {
+        "name": "crius",
+        "model": "openrouter/moonshotai/kimi-k3.1-pro",
+        "effort": "high",
+        "description": "Pi Kimi K3.1 Pro HIGH",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "kimi-k3.1-pro",
+          "modelLabel": "Kimi K3.1 Pro",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "crius",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "coeus",
+      "entry": {
+        "name": "coeus",
+        "model": "openrouter/moonshotai/kimi-k3.1-pro",
+        "effort": "low",
+        "description": "Pi Kimi K3.1 Pro LOW",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "kimi-k3.1-pro",
+          "modelLabel": "Kimi K3.1 Pro",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "coeus",
+        "harness": "pi"
       }
     }
   ],

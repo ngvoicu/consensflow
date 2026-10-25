@@ -152,11 +152,17 @@ impl Dispatcher {
                 ));
             }
             Some(None) => {
-                return Some(format!(
-                    "@{} has no agent any more ({} is not among your agents: define it, or remove the member)",
-                    member.handle,
-                    agent.unwrap_or("null")
-                ));
+                let agent = agent.unwrap_or("null");
+                return Some(match self.seams.roster.retired(agent) {
+                    Some(why) => format!(
+                        "@{} has no agent any more ({agent} left the catalog: {why}; remove @{} from the staff and add another agent)",
+                        member.handle, member.handle
+                    ),
+                    None => format!(
+                        "@{} has no agent any more ({agent} is not among your agents: define it, or remove the member)",
+                        member.handle
+                    ),
+                });
             }
             Some(Some(_)) => {}
         }
@@ -475,10 +481,8 @@ impl Dispatcher {
         participant: &ParticipantView,
         delivering: Option<Delivering>,
     ) -> Result<(), EngineError> {
-        let because = format!(
-            "{} is no longer among your agents",
-            participant.agent.as_deref().unwrap_or("null")
-        );
+        let agent = participant.agent.as_deref().unwrap_or("null");
+        let because = self.gone_because(agent);
         let tiered: Vec<TaskCard> = self
             .active_work(project, participant)?
             .into_iter()
@@ -494,8 +498,8 @@ impl Dispatcher {
             Some(delivering) => self.settle_failure(
                 delivering,
                 &format!(
-                    "{because}: add it back under Agents, or remove @{} from the staff",
-                    participant.handle
+                    "{because}: {}",
+                    self.member_remedy(agent, &participant.handle)
                 ),
                 false,
             )?,
@@ -521,6 +525,26 @@ impl Dispatcher {
             .into_iter()
             .filter(|task| matches!(task.state.as_str(), "queued" | "working" | "waiting"))
             .collect())
+    }
+
+    /// Why `agent` is gone, as a task taken back or a launch says it: a
+    /// ready-made agent the catalog no longer carries says why it went; any
+    /// other is no longer among the human's agents.
+    pub(crate) fn gone_because(&self, agent: &str) -> String {
+        match self.seams.roster.retired(agent) {
+            Some(why) => format!("{agent} left the catalog: {why}"),
+            None => format!("{agent} is no longer among your agents"),
+        }
+    }
+
+    /// What the human does about a member whose agent is gone: picks another
+    /// agent for one the catalog no longer carries, or adds theirs back.
+    fn member_remedy(&self, agent: &str, handle: &str) -> String {
+        if self.seams.roster.retired(agent).is_some() {
+            format!("remove @{handle} from the staff and add another agent")
+        } else {
+            format!("add it back under Agents, or remove @{handle} from the staff")
+        }
     }
 
     /// A participant whose saved agent the human has since deleted.

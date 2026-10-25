@@ -346,6 +346,14 @@ export const identity = (participant, agent) =>
 export function laneStatus(lane, board, now) {
   const { participant, activity } = lane
   if (lane.agentMissing) {
+    // One a release took out of the catalog cannot be defined again: its harness no longer has its model.
+    if (lane.agentRetired) {
+      const pick =
+        participant.role === 'chief'
+          ? 'Switch the chief to another agent'
+          : `Remove @${participant.handle} from the staff and add another agent`
+      return ['missing', `${participant.agent} left the catalog: ${lane.agentRetired}. ${pick}`]
+    }
     const remedy =
       participant.role === 'chief'
         ? 'switch the chief'

@@ -141,16 +141,18 @@ impl Dispatcher {
                 from: None,
                 to: "human".to_owned(),
                 task: None,
-                body: format!(
-                    "The chief runs on {agent}, which is no longer among your agents: add it back under Agents, or switch the chief."
-                ),
+                body: match self.seams.roster.retired(agent) {
+                    Some(why) => format!(
+                        "The chief runs on {agent}, which left the catalog: {why}. Switch the chief to another agent."
+                    ),
+                    None => format!(
+                        "The chief runs on {agent}, which is no longer among your agents: add it back under Agents, or switch the chief."
+                    ),
+                },
             },
         )?;
         if let Some(delivering) = delivering {
-            self.give_back(
-                delivering.message,
-                &format!("{agent} is no longer among your agents"),
-            )?;
+            self.give_back(delivering.message, &self.gone_because(agent))?;
         }
         self.changed();
         Ok(())

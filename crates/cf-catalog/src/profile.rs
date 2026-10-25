@@ -159,29 +159,48 @@ impl Catalog {
                 || (harness == Some("codex") && effort == Some("ultra")))
         {
             match profile.model_key.as_str() {
-                "gpt-6-astra" | "claude-fable-5.1" => match effort {
+                // Opus 5.5 at medium is standard work, as Fable and Astra are (the owner, 2026-10-24).
+                "gpt-6-astra" | "claude-fable-5.1" | "claude-opus-5.5" => match effort {
                     Some("max" | "ultra") => WorkTier::Critical,
                     Some("high" | "xhigh") => WorkTier::Complex,
                     Some("medium") => WorkTier::Standard,
                     _ => WorkTier::Light,
                 },
-                "claude-opus-5.5" => match effort {
-                    Some("max") => WorkTier::Critical,
-                    Some("low") => WorkTier::Light,
-                    _ => WorkTier::Complex,
-                },
-                "gpt-6.1-sol" => match effort {
-                    Some("max" | "ultra") => WorkTier::Complex,
-                    Some("low" | "medium") => WorkTier::Light,
-                    _ => WorkTier::Standard,
-                },
-                "claude-sonnet-5.5" => match effort {
+                // Opus 4.8, Sonnet 5 and Muse Wonder on Devin take Sol's ladder (the owner, 2026-10-25).
+                "gpt-6.1-sol" | "claude-opus-4.8" | "claude-sonnet-5" | "muse-wonder-1.0" => {
+                    match effort {
+                        Some("max" | "ultra") => WorkTier::Complex,
+                        Some("low" | "medium") => WorkTier::Light,
+                        _ => WorkTier::Standard,
+                    }
+                }
+                // Fable 5 and Opus 5 on Devin, one rung below their successors, take Sonnet's.
+                "claude-sonnet-5.5" | "claude-fable-5" | "claude-opus-5" => match effort {
                     Some("max") => WorkTier::Complex,
                     Some("low") => WorkTier::Light,
                     _ => WorkTier::Standard,
                 },
+                // The generation before 6.1 Sol: standard work at max only.
+                "gpt-6-sol" => match effort {
+                    Some("max") => WorkTier::Standard,
+                    _ => WorkTier::Light,
+                },
+                // Gemini 4 Argon, its ceiling high, on Devin and Pi: one rung a
+                // level, high starting at complex work (the owner, 2026-10-25).
+                "gemini-4-argon" => match effort {
+                    Some("high") => WorkTier::Complex,
+                    Some("medium") => WorkTier::Standard,
+                    _ => WorkTier::Light,
+                },
+                // Kimi K3.1 Pro, on Pi (the owner, 2026-10-25).
+                "kimi-k3.1-pro" => match effort {
+                    Some("max") => WorkTier::Complex,
+                    Some("high") => WorkTier::Standard,
+                    _ => WorkTier::Light,
+                },
                 // A model the table leaves out is light work at every effort:
-                // Haiku 5.5, Terra, Luna.
+                // Haiku 5.5, Terra, Luna, Devin's SWE models and the rest of
+                // Devin's list.
                 _ => WorkTier::Light,
             }
         } else {
@@ -283,6 +302,10 @@ fn curated_key(model: &str) -> String {
     if let Some(dotted) = gpt_version_dotted(&key) {
         key = dotted;
     }
+    // And the versions of the other families it carries (gemini-3-8-flash, claude-5-fable).
+    if let Some(dotted) = devin_version_dotted(&key) {
+        key = dotted;
+    }
     // Contributor/free are reviewed pricing and data-use routes for Muse 1.3.
     if let Some(plain) = muse_spark_plain(&key) {
         key = plain;
@@ -313,6 +336,42 @@ fn gpt_version_dotted(key: &str) -> Option<String> {
     let lowercase = !family.is_empty() && family.bytes().all(|byte| byte.is_ascii_lowercase());
     (is_digit(major) && is_digit(minor) && lowercase)
         .then(|| format!("gpt-{major}.{minor}-{family}"))
+}
+
+/// The key of a model Devin spells with a dash in its version, with the
+/// version spelled as the catalog spells it, so Devin's agent of a model shares
+/// the key (and the card) of the same model on the other harnesses: GPT with no
+/// family (`gpt-5-4`), Gemini, GLM and Grok (`gemini-3-8-flash`, `glm-5-3-flash`,
+/// `grok-4-7`), Kimi (`kimi-k2-6`), Muse Wonder (`muse-wonder-1-0`), DeepSeek
+/// (`deepseek-v4-1-flash-1017`, its snapshot kept), and Fable 5, which Devin
+/// names `claude-5-fable`. None when the key is none of them.
+fn devin_version_dotted(key: &str) -> Option<String> {
+    if key == "claude-5-fable" {
+        return Some("claude-fable-5".to_owned());
+    }
+    let (family, version) = [
+        "gpt-",
+        "gemini-",
+        "glm-",
+        "grok-",
+        "kimi-k",
+        "muse-wonder-",
+        "deepseek-v",
+    ]
+    .into_iter()
+    .find_map(|family| key.strip_prefix(family).map(|version| (family, version)))?;
+    let mut parts = version.splitn(3, '-');
+    let (major, minor, rest) = (parts.next()?, parts.next()?, parts.next());
+    let rest_fits = match family {
+        "gpt-" | "kimi-k" | "muse-wonder-" => rest.is_none(),
+        "gemini-" | "glm-" => rest.is_none_or(|rest| rest == "flash"),
+        "grok-" => rest.is_none(),
+        _ => rest.is_some_and(|rest| !rest.is_empty()),
+    };
+    (is_digit(major) && is_digit(minor) && rest_fits).then(|| match rest {
+        Some(rest) => format!("{family}{major}.{minor}-{rest}"),
+        None => format!("{family}{major}.{minor}"),
+    })
 }
 
 /// `key.replace(/^muse-spark-1\.3-contributor(?:-free)?$/, 'muse-spark-1.3')`:

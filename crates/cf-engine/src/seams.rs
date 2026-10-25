@@ -115,6 +115,14 @@ impl SavedAgent {
 pub trait Roster {
     fn agent(&self, name: &str) -> Result<Option<SavedAgent>, Refusal>;
 
+    /// Why the ready-made agent `name` went from the catalog (its harness no
+    /// longer offers its model), when it is one that did: a member or a chief
+    /// still on it is told so, and to pick another agent rather than define
+    /// it again. None for any other name, and where nothing says.
+    fn retired(&self, _name: &str) -> Option<String> {
+        None
+    }
+
     /// What the human says of specs for every project, as the agents file keeps
     /// it (the app's setting a project may say otherwise of): whether they are
     /// on, and the folder and the variant a project uses when it names none.

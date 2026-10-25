@@ -68,6 +68,7 @@ mod receipts;
 mod restart;
 mod resumable;
 mod resume;
+mod retired_agents;
 mod review;
 mod role_change;
 mod schedules;

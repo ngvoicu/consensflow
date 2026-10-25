@@ -308,6 +308,90 @@ async fn the_board_marks_the_agent_of_a_member_gone_and_not_that_of_the_session_
 }
 
 #[tokio::test]
+async fn a_project_staffed_with_khnum_after_the_release_that_dropped_it_says_why_on_its_lanes() {
+    // Khnum (Devin's SWE-1.6 Slow) left the catalog on 2026-10-25: Devin no
+    // longer offers its model. A staff and a chief saved before still name it.
+    LocalSet::new()
+        .run_until(async {
+            let (_home, env) = home_with("[]");
+            let rig = rig_over(env, None);
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let project = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .create_project(&NewProject {
+                    directory: "/work/app".to_owned(),
+                    name: "app".to_owned(),
+                    chief: NewChief {
+                        harness: "devin".to_owned(),
+                        agent: Some("khnum".to_owned()),
+                    },
+                    staff: vec![
+                        NewMember {
+                            agent: "khnum".to_owned(),
+                            harness: "devin".to_owned(),
+                            designer: false,
+                            roles: vec!["worker".to_owned()],
+                            tier: "light".to_owned(),
+                        },
+                        // An agent of the human's own they removed: gone, but no catalog's.
+                        NewMember {
+                            agent: "mine".to_owned(),
+                            harness: "codex".to_owned(),
+                            designer: false,
+                            roles: vec!["worker".to_owned()],
+                            tier: "standard".to_owned(),
+                        },
+                    ],
+                    gate: false,
+                    wake_up: None,
+                    specs: None,
+                })
+                .unwrap()
+                .id;
+            let board =
+                ask(&app, "board.get", json!({ "project": project })).await["board"].clone();
+            let lanes: Vec<(&str, &Value, &Value)> = board["lanes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|lane| {
+                    (
+                        lane["participant"]["handle"].as_str().unwrap(),
+                        &lane["agentMissing"],
+                        lane.get("agentRetired").unwrap_or(&Value::Null),
+                    )
+                })
+                .collect();
+            let why = json!("Devin no longer offers SWE-1.6 Slow");
+            assert_eq!(
+                lanes,
+                [
+                    ("human", &json!(false), &Value::Null),
+                    ("chief", &json!(true), &why),
+                    ("khnum", &json!(true), &why),
+                    ("mine", &json!(true), &Value::Null),
+                ]
+            );
+            // Said right after `agentMissing`, and only where it holds.
+            let keys: Vec<&str> = board["lanes"][2]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .take(4)
+                .collect();
+            assert_eq!(
+                keys,
+                ["participant", "tasks", "agentMissing", "agentRetired"]
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn the_agents_file_is_read_at_each_lane_and_not_once_for_the_board() {
     LocalSet::new()
         .run_until(async {

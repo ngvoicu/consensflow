@@ -998,7 +998,7 @@ impl Dispatcher {
                 project,
                 participant,
                 None,
-                &format!("{agent} is no longer among your agents"),
+                &self.gone_because(agent),
             )?;
         }
         Ok(())
