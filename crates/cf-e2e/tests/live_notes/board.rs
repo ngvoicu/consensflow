@@ -122,7 +122,7 @@ mod tests {
         let inbox = vec![
             note(
                 9,
-                "T-3's window closed with background work still running: node job",
+                "T-3's window closed with background work running, which its close ended: node job",
                 Value::Null,
             ),
             note(

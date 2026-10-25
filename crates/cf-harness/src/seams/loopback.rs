@@ -5,7 +5,7 @@
 //! caller's: `within` around `send`, and around `body` with what is left; a
 //! reply dropped unread is `response.body.cancel()`.
 
-use crate::contract::Work;
+use crate::contract::{PaneHost, Work};
 use crate::shared::net;
 
 /// A request's method.
@@ -46,6 +46,19 @@ pub enum BodyFailed {
 pub trait Loopback {
     /// Sends `request`: its reply once a head came, or [`FETCH_FAILED`].
     fn send(&self, request: Request) -> Work<'_, Result<Box<dyn Reply>, String>>;
+
+    /// Sends `request` as [`Loopback::send`] does, as the hand-over of text to a
+    /// window: once its connection is up, right before a byte of it is written,
+    /// `host` is asked whether it admits it ([`PaneHost::admits`]), and one it does
+    /// not is never written, the failure
+    /// [`NOT_ADMITTED`](crate::contract::NOT_ADMITTED). The connection is a wait of
+    /// the system's, and a Close can come during it (Astra's review of 2026-10-16,
+    /// round 5).
+    fn hand_over<'a>(
+        &'a self,
+        request: Request,
+        host: &'a dyn PaneHost,
+    ) -> Work<'a, Result<Box<dyn Reply>, String>>;
 }
 
 /// A reply whose head came.
@@ -61,7 +74,18 @@ pub struct SystemLoopback;
 impl Loopback for SystemLoopback {
     fn send(&self, request: Request) -> Work<'_, Result<Box<dyn Reply>, String>> {
         Box::pin(async move {
-            let reply = net::send(request).await?;
+            let reply = net::send(request, &|| true).await?;
+            Ok(Box::new(reply) as Box<dyn Reply>)
+        })
+    }
+
+    fn hand_over<'a>(
+        &'a self,
+        request: Request,
+        host: &'a dyn PaneHost,
+    ) -> Work<'a, Result<Box<dyn Reply>, String>> {
+        Box::pin(async move {
+            let reply = net::send(request, &|| host.admits()).await?;
             Ok(Box::new(reply) as Box<dyn Reply>)
         })
     }

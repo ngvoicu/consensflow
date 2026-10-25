@@ -2,7 +2,10 @@
 //! watched for the message's paste, an item the message's header begins as the
 //! harness records a paste, which confirms it; a header quoted in other words
 //! proves nothing (`is_paste_of`). A paste the window may not have sent is given
-//! one more Enter, and one the record never showed is pasted again, by this rule:
+//! one more Enter (a paste only: what a harness takes over a channel of its own
+//! gets none, its record alone saying whether it arrived; an Enter withheld leaves
+//! its paste in the input box, which the next paste empties first, `deliveries`),
+//! and one the record never showed is pasted again, by this rule:
 //!
 //! - **Taken.** A harness that says its own queue has the message, at the hand-over
 //!   (`Admission::Admitted`'s `queued`) or after it (`Window::took`: Devin's TUI put
@@ -76,12 +79,12 @@
 use std::rc::Rc;
 
 use cf_base::js;
-use cf_harness::contract::{Observed, Pane};
+use cf_harness::contract::{Input, Observed, Pane};
 use cf_harness::records::{Reading, Role};
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
-use crate::deliveries::Unread;
+use crate::deliveries::{Enter, Uncleared, Unread};
 use crate::delivery_text::is_paste_of;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -95,7 +98,7 @@ const ENTER: u8 = 13;
 const ENTER_AGAIN_MS: i64 = 10_000;
 /// How long the window must have printed nothing first: one being typed into,
 /// or drawing, is left be.
-const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
+pub(crate) const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
 /// How long a read of the window may take and still say what the window does now:
 /// a pane host answers a snapshot at once, so one that took longer stalled, and what
 /// it says is as old as the stall.
@@ -246,9 +249,13 @@ impl Dispatcher {
         let at_rest = observed.settled && observed.waiting.is_none();
         let overdue = at_rest && free.is_some_and(|free| now - free > RECONCILE_MS);
         if rested <= self.seams.limits.arrival_ms && !overdue {
+            // Only a paste waits in an input box for an Enter: what a harness took
+            // over its own channel is reconciled by its record alone, however
+            // uncertain its hand-over (Astra's review of 2026-10-20, round 10).
             if waited > ENTER_AGAIN_MS
                 && waited <= self.seams.limits.arrival_ms
                 && !delivering.entered_again
+                && self.pasted(record)
             {
                 self.enter_again(record, delivering.message).await?;
             }
@@ -291,6 +298,11 @@ impl Dispatcher {
             "the harness record never showed it".to_owned()
         };
         self.settle_failure(delivering, &because, true)
+    }
+
+    /// Whether the window takes what it is handed pasted into its input box.
+    fn pasted(&self, record: &Record) -> bool {
+        matches!(record.window.borrow().input, Input::Pasted { .. })
     }
 
     /// Whether the window's harness says its agent has the message on its way.
@@ -397,6 +409,35 @@ impl Dispatcher {
         if !ready {
             self.entered_again(record, message, false);
             return Ok(());
+        }
+        // Enter sends what waits in the input box: only as the ledger admits the
+        // paste now, its project open and nothing of it withdrawn while the screen
+        // was looked at (`deliveries`). Withheld, the paste stays in the box, and
+        // the next paste into the window empties it first: else it would go in
+        // beside it, and its Enter send both (both reviews of 2026-10-20, round 10).
+        match self.enter_admitted(record, message)? {
+            Enter::Go => {}
+            Enter::Withheld => {
+                self.entered_again(record, message, false);
+                let since = self.seams.ledger.borrow_mut().now();
+                let mut part = record.delivery.borrow_mut();
+                let carried = part
+                    .delivering
+                    .as_ref()
+                    .filter(|delivering| delivering.message == message)
+                    .map(|delivering| delivering.carried.clone())
+                    .unwrap_or_default();
+                part.uncleared = Some(Uncleared {
+                    pane,
+                    message,
+                    carried,
+                    since,
+                    unquiet_since: None,
+                    unquiet_last: None,
+                });
+                return Ok(());
+            }
+            Enter::Arrived => return Ok(()),
         }
         let input = json!({ "id": pane.id, "generation": pane.generation, "bytes": [ENTER] });
         // A key the host did not take is pressed again at the next look's

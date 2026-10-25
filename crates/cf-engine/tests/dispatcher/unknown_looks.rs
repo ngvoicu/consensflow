@@ -642,3 +642,135 @@ fn writes_down_every_step_that_fails_after_its_pass_ended_at_the_first() {
         context.log.failures.borrow()
     );
 }
+
+/// The results of T-`number` its requester was given or is to be given.
+fn results_of(tiers: &Tiers<'_>, number: i64) -> Vec<String> {
+    tiers
+        .task(number)
+        .messages
+        .into_iter()
+        .filter(|message| message.kind == "result")
+        .map(|message| message.body)
+        .collect()
+}
+
+/// T-1 given to zeus, at work in its window: zeus asked the chief which format, and
+/// its turn ended on the question. The chief's answer is on its way into zeus's
+/// window, which its record does not show yet: the project's id and the answer.
+fn answer_on_its_way(context: &Context) -> (Tiers<'_>, MessageView) {
+    context.host.exits_showing(Some(0), None, None);
+    let tiers = Tiers::new(context, &["zeus", "diana"]);
+    let project = tiers.project.id;
+    context.give(project, "zeus", "Record the run");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    let question = context.ask(project, "zeus", "chief", 1, "Which format?");
+    context
+        .adapter
+        .answer("zeus", "Asked the chief which format to record the run in");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.with("zeus", |agent| agent.arrive = false);
+    let answer = context.answer(project, question.id, "JSON");
+    context.pass().unwrap();
+    assert_eq!(context.message(answer.id).state, "delivering");
+    (tiers, answer)
+}
+
+#[test]
+fn an_answer_the_pane_host_held_goes_in_once_and_the_task_s_result_is_what_answers_it() {
+    // Turn-end meets the retype rule: while the host holds the answer, zeus's record
+    // reads at rest with the turn that asked ended in complete words, and nothing
+    // left running. The task waits for its answer until a record shows it, so those
+    // words are no result, and the answer is never pasted again behind the one the
+    // host held.
+    let context = Context::new();
+    let (tiers, answer) = answer_on_its_way(&context);
+    context
+        .host
+        .set_snapshot(json!({ "ok": false, "error": "deadline" }));
+    context.advance(11_000);
+    context.pass().unwrap();
+    for _ in 0..4 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    assert_eq!(where_is(&context, &answer), ("delivering".to_owned(), 1));
+    assert_eq!(results_of(&tiers, 1), Vec::<String>::new());
+    assert_eq!(
+        tiers.task(1).task.state,
+        "waiting",
+        "waiting for the answer, which nothing showed it had"
+    );
+
+    // The host comes back and writes the paste it held only as the window is read
+    // once more; the record shows it a look later, and zeus answers it.
+    context.host.set_snapshot(json!({ "ok": true }));
+    context.advance(ARRIVAL_MS + 1_000);
+    let (host, once) = (Rc::downgrade(&context.host), Rc::new(Cell::new(true)));
+    *context.host.on_request.borrow_mut() = Some(Rc::new(move |op: &str, _: &Value| {
+        if let (true, Some(host)) = (op == "pane.snapshot" && once.replace(false), host.upgrade()) {
+            host.set_snapshot(json!({ "ok": true, "pasteQuietMs": 0 }));
+        }
+    }));
+    context.pass().unwrap();
+    assert_eq!(where_is(&context, &answer), ("delivering".to_owned(), 1));
+    assert_eq!(results_of(&tiers, 1), Vec::<String>::new());
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    shows(&context, "zeus", &context.message(answer.id));
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    assert_eq!(where_is(&context, &answer), ("delivered".to_owned(), 1));
+    context.adapter.answer("zeus", "Recorded the run as JSON");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(results_of(&tiers, 1), ["Recorded the run as JSON"]);
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(where_is(&context, &answer), ("delivered".to_owned(), 1));
+}
+
+#[test]
+fn an_answer_its_record_shows_as_the_window_is_read_once_more_is_what_the_result_follows() {
+    // The receipt the look once more confirms with names the item turn-end finds the
+    // answer to the task's latest message after (`delivered_at`).
+    let context = Context::new();
+    let (tiers, answer) = answer_on_its_way(&context);
+    context.advance(ARRIVAL_MS + 1_000);
+    let (adapter, header) = (
+        Rc::downgrade(&context.adapter),
+        delivery_text(&context.message(answer.id), &[]),
+    );
+    *context.host.on_request.borrow_mut() = Some(Rc::new(move |op: &str, _: &Value| {
+        if let (true, Some(adapter)) = (op == "pane.snapshot", adapter.upgrade()) {
+            let shown = adapter.with("zeus", |agent| {
+                agent.items.iter().any(|item| *item.text == *header)
+            });
+            if !shown {
+                let item = adapter.item(Role::User, &header);
+                adapter.with("zeus", |agent| {
+                    agent.items.push(item);
+                    agent.settled = false;
+                });
+            }
+        }
+    }));
+    context.pass().unwrap();
+    assert_eq!(where_is(&context, &answer), ("delivered".to_owned(), 1));
+    let receipt = context.message(answer.id).receipt;
+    let item = context.adapter.with("zeus", |agent| {
+        agent
+            .items
+            .iter()
+            .rfind(|item| item.role == Role::User)
+            .map(|item| item.id.to_string())
+    });
+    assert_eq!(receipt["item"].as_str(), item.as_deref(), "{receipt}");
+    assert_eq!(results_of(&tiers, 1), Vec::<String>::new());
+    *context.host.on_request.borrow_mut() = None;
+    context.adapter.answer("zeus", "Recorded the run as JSON");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(results_of(&tiers, 1), ["Recorded the run as JSON"]);
+    assert_eq!(where_is(&context, &answer), ("delivered".to_owned(), 1));
+}

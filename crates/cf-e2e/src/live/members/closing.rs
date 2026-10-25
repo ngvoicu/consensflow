@@ -136,8 +136,38 @@ fn look(seen: &Mutex<Seen>, list: &impl Fn() -> Listing) {
 
 /// Ends `rig`, giving its daemon and its pane host `within` each. One that does
 /// not end is an error that says which of the processes it started were left.
-pub fn end_within(mut rig: Rig, within: Duration) -> Result {
-    let said = ended(|| rig.shut_down_within(within), listing, LOOK);
+pub fn end_within(rig: Rig, within: Duration) -> Result {
+    end_by(rig, |rig| rig.shut_down_within(within))
+}
+
+/// How long the event [`end_after`] waits for is given to come: the host's looks and its
+/// request to end are slow on a loaded machine, and the grace it gives a program that ignores
+/// it is ten seconds.
+const EVENT: Duration = Duration::from_secs(60);
+
+/// [`end_within`], but `within` is counted from the moment `happened` says an event of the
+/// close has (`what` it is, for the failure that says it did not): the close begins, the
+/// event is waited for, and only then are the daemon and the pane host given their time. A
+/// case that reads what a close left at a fixed time after it began is read too early on a
+/// loaded machine, where the host's looks and its request to end come late: counting from
+/// the event is the same moment on any machine (T-118).
+pub fn end_after(
+    rig: Rig,
+    what: &str,
+    happened: impl Fn(&Rig) -> bool,
+    within: Duration,
+) -> Result {
+    end_by(rig, |rig| {
+        rig.begin_close();
+        rig.wait_for(what, EVENT, || Ok(happened(rig)))?;
+        rig.shut_down_within(within)
+    })
+}
+
+/// Ends `rig` by `shut_down`, and says which of the processes it started were left if it
+/// did not end.
+fn end_by(mut rig: Rig, shut_down: impl FnOnce(&mut Rig) -> Result) -> Result {
+    let said = ended(|| shut_down(&mut rig), listing, LOOK);
     // What was left is listed before the rig is dropped, which kills the daemon and
     // the pane host it could not end: a listing after that would not have the host
     // that was still waiting for its windows.

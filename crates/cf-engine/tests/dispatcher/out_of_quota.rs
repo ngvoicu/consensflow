@@ -374,6 +374,9 @@ fn keeps_a_held_task_paused_its_hold_cleared_when_its_session_was_deleted_before
     // failed every pass at its start, so nothing was delivered, launched or
     // collected for anyone (calliope, 2026-10-06).
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: a follow-up,
+    // another task, goes on with the session's conversation (`ownership`).
+    context.host.exits_showing(Some(0), None, None);
     let tiers = Tiers::new(&context, &["zeus", "diana"]);
     tiers.open_body("Parser");
     context.pass().unwrap();

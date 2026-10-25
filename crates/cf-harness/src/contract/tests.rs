@@ -80,3 +80,16 @@ async fn a_turn_was_cut_when_the_record_ends_in_one_with_no_end_not_when_at_rest
         );
     }
 }
+
+#[test]
+fn a_look_at_a_record_that_is_not_there_reads_no_items_nothing_left_running_and_no_monitor() {
+    // The record was read and holds nothing: what turn-end asks of it is that of an empty
+    // record, though it was not read known.
+    let observed =
+        crate::shared::record_state::record_state(Arc::new(Reading::missing("session yet")));
+    let reading = observed.reading.as_deref().expect("a reading");
+    assert!(!reading.read_failed(), "{reading:?}");
+    assert!(observed.items().is_empty());
+    assert_eq!(observed.pending(), Pending::default());
+    assert_eq!(observed.monitors(), Vec::new());
+}

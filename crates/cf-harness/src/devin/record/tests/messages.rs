@@ -3,6 +3,7 @@
 //! requests keyed as JavaScript keys them, and the question tool's calls.
 
 use super::*;
+use crate::shared::record::reading::Role;
 
 #[test]
 fn a_chain_that_leads_back_to_itself_and_messages_no_reading_holds_fail_the_look() {
@@ -135,6 +136,56 @@ fn a_message_s_text_parts_are_joined_as_javascript_joins_them() {
         format!(
             r#"{{"items":[["m","custom","ctx",true,"{AT}"]],"inFlight":false,"asking":false,"failed":false,"settlement":"unknown"}}"#
         )
+    );
+}
+
+#[test]
+fn the_replies_of_a_request_before_its_last_are_never_complete_and_its_last_is_where_it_stopped() {
+    // Devin stores a message for each step of a request (the owner's decision of
+    // 2026-10-15: a result is what the member wrote after its last tool call): only the last
+    // reply of a request can be its final answer, and it is one once Devin stored it as the
+    // turn's end.
+    let staged = Staged::new();
+    let output = |id: &str, call: &str| json!({ "message_id": id, "role": "tool", "content": "ok", "tool_call_id": call });
+    let calling = |id: &str, said: &str, call: &str| {
+        let mut message = reply(id, json!(said));
+        message["tool_calls"] = json!([{ "id": call, "name": "read" }]);
+        message
+    };
+    staged.chain(&[
+        user("u-1", Some(json!("request-1"))),
+        calling("a-1", "Still reviewing", "c-1"),
+        output("t-1", "c-1"),
+        calling("a-2", "Now the tests", "c-2"),
+        output("t-2", "c-2"),
+        stopped("a-3", "PASS: no findings."),
+    ]);
+    let reading = look(&mut staged.reader());
+    let Reading::Known(record) = &*reading else {
+        panic!("a reading");
+    };
+
+    assert_eq!(record.settlement, Settlement::Settled);
+    let shape: Vec<(Role, bool)> = record
+        .items
+        .iter()
+        .map(|item| (item.role, item.complete))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            (Role::User, true),
+            (Role::Assistant, false),
+            (Role::Tool, true),
+            (Role::Assistant, false),
+            (Role::Tool, true),
+            (Role::Assistant, true),
+        ]
+    );
+    let words: Vec<&str> = record.items.iter().map(|item| &*item.text).collect();
+    assert_eq!(
+        (words[1], words[3], words[5]),
+        ("Still reviewing", "Now the tests", "PASS: no findings.")
     );
 }
 

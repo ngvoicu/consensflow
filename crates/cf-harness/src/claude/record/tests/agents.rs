@@ -65,7 +65,7 @@ fn once_read(records: &[Value]) -> Record {
 /// What a look says of the turn and of the agents: `(settlement, agents_pending)`.
 fn says(stage: &mut Stage) -> (Settlement, bool) {
     let record = read(stage);
-    (record.settlement, record.agents_pending)
+    (record.settlement, record.pending.agents > 0)
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn a_turn_duration_that_says_agents_or_workflows_are_pending_ends_the_turn_and_t
         ]);
         assert_eq!(record.settlement, Settlement::Settled, "{name}");
         assert!(!record.in_flight, "{name}");
-        assert_eq!(record.agents_pending, agents, "{name}");
+        assert_eq!(record.pending.agents > 0, agents, "{name}");
         assert!(
             record.items.last().is_some_and(|item| item.complete),
             "{name}: its answer is whole"
@@ -136,7 +136,7 @@ fn a_count_that_is_no_count_does_not_end_the_turn_as_in_node_and_nothing_is_said
                 having(duration("d1", "a1"), said),
             ]);
             assert_eq!(record.settlement, Settlement::InFlight, "{field} {value}");
-            assert!(!record.agents_pending, "{field} {value}");
+            assert!(record.pending.agents == 0, "{field} {value}");
         }
     }
 }
@@ -254,7 +254,7 @@ fn agents_are_said_of_a_turn_that_is_over_and_of_none_that_is_open() {
     );
     let open = once_read(&[hello(), calling, pending("d1", "a1", 2)]);
     assert_eq!(open.settlement, Settlement::InFlight);
-    assert!(!open.agents_pending, "a call is open");
+    assert!(open.pending.agents == 0, "a call is open");
 
     let queued = once_read(&[
         hello(),
@@ -263,5 +263,5 @@ fn agents_are_said_of_a_turn_that_is_over_and_of_none_that_is_open() {
         queue("enqueue", json!("More")),
     ]);
     assert_eq!(queued.settlement, Settlement::InFlight);
-    assert!(!queued.agents_pending, "a message is queued");
+    assert!(queued.pending.agents == 0, "a message is queued");
 }

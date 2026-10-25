@@ -757,6 +757,36 @@ fn rebuild(
     }
 }
 
+/// How a run's folder is named: three letters and as few random ones as keep two runs
+/// apart, which is for the length of the path (see [`run_folder`]).
+const RUN_PREFIX: &str = "cfp";
+const RUN_RANDOM: usize = 4;
+
+/// Makes the folder a run keeps its copies in, and gives its commands as their temp folder:
+/// `/tmp/cfpXXXX` on Unix, else under the system's temp folder.
+///
+/// It is short on purpose. The Codex session of a rig makes a Unix socket in the temp folder
+/// it is given (or in its home, which is made there), and a socket's path is 104 bytes at
+/// most on a Mac, a Mac's own temp folder 48 bytes long before any name of ours. Under it
+/// the longest such path is 93 bytes with `cf-plants-XXXXXX`, and no name leaves it 20 to
+/// spare; at `/tmp/cfpXXXX` (12 bytes) the longest is 84, 20 to spare.
+fn run_folder() -> Result<PathBuf, Error> {
+    let make = |base: &Path| {
+        tempfile::Builder::new()
+            .prefix(RUN_PREFIX)
+            .rand_bytes(RUN_RANDOM)
+            .tempdir_in(base)
+            .map(tempfile::TempDir::keep)
+    };
+    if cfg!(unix) {
+        if let Ok(folder) = make(Path::new("/tmp")) {
+            return Ok(folder);
+        }
+    }
+    let temp = std::env::temp_dir();
+    make(&temp).map_err(Error::files("make a folder for the copies in", &temp))
+}
+
 /// Ends a run that was stopped: the copies are not wanted, everything is back.
 fn stopped(saved: &Path, out: &mut dyn Write) -> Result<i32, Failure> {
     let _ = fs::remove_dir_all(saved);
@@ -779,20 +809,19 @@ pub fn run(
 ) -> Result<i32, Failure> {
     // A checkout git says nothing of has no state a command's run can be known in: a
     // run that changed it would go untold, and a clean pass taken from another state.
+    // Refused before the run makes its folder, which it would leave empty.
     if let Some(root) = runner.gitless() {
         return Err(Error::NoCheckout { root }.into());
     }
-    let temp = std::env::temp_dir();
-    let saved = tempfile::Builder::new()
-        .prefix("cf-plants-")
-        .tempdir_in(&temp)
-        .map_err(Error::files("make a folder for the copies in", &temp))?
-        .keep();
+    let saved = run_folder()?;
     writeln!(
         out,
         "copies of what is planted are kept in {}",
         saved.display()
     )?;
+    // The run's folder is the temp folder of every command of it: what a plant makes fail
+    // on purpose leaves reports and homes there, and they go with it.
+    runner.temp_in(&saved);
     let limit = family.limit.as_secs();
     let mut built = false;
     let mut clean = CleanRuns::default();
@@ -833,7 +862,25 @@ pub fn run(
             Rebuilt::Stopped => return stopped(&saved, out),
         }
     }
-    let _ = fs::remove_dir_all(&saved);
+    // Gone with the run only when every plant was caught. What a plant that was not leaves
+    // of it (the home of a rig a hung run was ended in, the report of a case caught by
+    // another test than the one meant) is in the run's temp folder, and nowhere else. It is
+    // said before the totals, which stay the last line.
+    if wrong == 0 {
+        let _ = fs::remove_dir_all(&saved);
+    } else {
+        writeln!(
+            out,
+            "{wrong} {} not caught: what {} runs left is kept in {}",
+            if wrong == 1 {
+                "plant was"
+            } else {
+                "plants were"
+            },
+            if wrong == 1 { "its" } else { "their" },
+            saved.display()
+        )?;
+    }
     let run = plants.len() - skipped;
     let caught = run.saturating_sub(wrong);
     writeln!(out, "{}", report::totals(caught, run, unstable, skipped))?;
@@ -858,70 +905,112 @@ fn entity(meant: &str) -> Option<&str> {
     })
 }
 
-/// Whether each of `plants` applies, which plants nothing: the status is 0 where
-/// every one does. The commands a plant needs first are run. A meant name that holds
-/// an XML entity is refused, and so is a run that cannot be run as it is written (an
-/// option of `cargo test` that nextest has no word for). A plant for other systems is
-/// said SKIPPED (platform), its names checked (the table's data was), nothing of it
-/// prepared or applied.
+/// What `check` finds of one plant.
+enum Fare {
+    /// It applies to the sources as they are.
+    Applies,
+    /// It does not, for the reason `check` says.
+    NotApplies(String),
+    /// It is for another system: said, and not prepared or applied.
+    Skipped,
+    /// The run was stopped before it was checked.
+    Stopped,
+}
+
+/// How `plant` fares against the sources as they are. A meant name that holds an XML
+/// entity, and a run that cannot be run as it is written, are plants that do not apply
+/// (they are refused before anything is prepared). A plant for another system is
+/// skipped, and any other has what it needs first run and is then planted in memory
+/// only.
+fn fare(context: &Context, plant: &Plant, runner: &mut dyn Runner) -> Result<Fare, Failure> {
+    if let Some(entity) = entity(&plant.meant) {
+        return Ok(Fare::NotApplies(format!(
+            "{}: its meant name holds {entity}, a report's escape and no part of a test's name: write the name as the test does",
+            plant.name
+        )));
+    }
+    let refused = plant
+        .runs
+        .iter()
+        .find_map(|run| super::runs::refused(&run.command, context));
+    if let Some(why) = refused {
+        return Ok(Fare::NotApplies(format!("{}: {why}", plant.name)));
+    }
+    // What it needs first may be of its own system, and what it plants of that one.
+    if !plant.runs_on(HERE) {
+        return Ok(Fare::Skipped);
+    }
+    Ok(match prepare(plant, runner)? {
+        Prepared::Stopped => Fare::Stopped,
+        Prepared::Failed(unready) => Fare::NotApplies(unready.to_string()),
+        Prepared::Done => match plant.planted(context) {
+            Ok(_) => Fare::Applies,
+            Err(cause) => Fare::NotApplies(cause.to_string()),
+        },
+    })
+}
+
+/// Whether each of `plants` applies, which plants nothing: the status is 0 where every
+/// one does, or does not and is listed in `family`'s `known_unapplied` (said as known,
+/// and counted apart). A listed plant that applies again fails the check, so the list
+/// is emptied as its plants are mended. The commands a plant needs first are run. A
+/// meant name that holds an XML entity is refused, and so is a run that cannot be run as
+/// it is written (an option of `cargo test` that nextest has no word for). A plant for
+/// other systems is said SKIPPED (platform), its names checked (the table's data was),
+/// nothing of it prepared or applied.
 pub fn check(
     context: &Context,
+    family: &Family,
     plants: &[&Plant],
     runner: &mut dyn Runner,
     out: &mut dyn Write,
 ) -> Result<i32, Failure> {
-    let mut unapplied = 0;
-    let mut skipped = 0;
+    let (mut unapplied, mut known, mut stale, mut skipped) = (0, 0, 0, 0);
     for plant in plants {
-        if let Some(entity) = entity(&plant.meant) {
-            unapplied += 1;
-            writeln!(
-                out,
-                "{}: its meant name holds {entity}, a report's escape and no part of a test's name: write the name as the test does",
-                plant.name
-            )?;
-            continue;
-        }
-        let refused = plant
-            .runs
-            .iter()
-            .find_map(|run| super::runs::refused(&run.command, context));
-        if let Some(why) = refused {
-            unapplied += 1;
-            writeln!(out, "{}: {why}", plant.name)?;
-            continue;
-        }
-        // What it needs first may be of its own system, and what it plants of that one.
-        if !plant.runs_on(HERE) {
-            skipped += 1;
-            writeln!(
-                out,
-                "{}",
-                report::skipped(&plant.name, &plant.platforms, HERE)
-            )?;
-            continue;
-        }
-        let applied = match prepare(plant, runner)? {
-            Prepared::Stopped => return Ok(STOPPED),
-            Prepared::Failed(unready) => Err(unready),
-            Prepared::Done => plant.planted(context).map(drop),
-        };
-        if let Err(cause) = applied {
-            unapplied += 1;
-            writeln!(out, "{cause}")?;
+        let listed = family.known_unapplied.contains(&plant.name);
+        match fare(context, plant, runner)? {
+            Fare::Stopped => return Ok(STOPPED),
+            Fare::Skipped => {
+                skipped += 1;
+                writeln!(
+                    out,
+                    "{}",
+                    report::skipped(&plant.name, &plant.platforms, HERE)
+                )?;
+            }
+            Fare::Applies if listed => {
+                stale += 1;
+                writeln!(
+                    out,
+                    "{}: applies, so it is not known not to apply: take it off known_unapplied in kit.toml",
+                    plant.name
+                )?;
+            }
+            Fare::Applies => {}
+            Fare::NotApplies(cause) if listed => {
+                known += 1;
+                writeln!(out, "known not to apply: {cause}")?;
+            }
+            Fare::NotApplies(cause) => {
+                unapplied += 1;
+                writeln!(out, "{cause}")?;
+            }
         }
     }
     let checked = plants.len() - skipped;
-    let mut said = if unapplied == 0 {
+    let mut said = if unapplied == 0 && known == 0 {
         format!("{checked} plants apply")
     } else {
-        format!("{} of {checked} plants apply", checked - unapplied)
+        format!("{} of {checked} plants apply", checked - unapplied - known)
     };
+    if known > 0 {
+        said.push_str(&format!(", {known} known not to apply"));
+    }
     if skipped > 0 {
         said.push_str(&format!(", {skipped} skipped (platform)"));
     }
     writeln!(out, "{said}")?;
-    Ok(i32::from(unapplied != 0))
+    Ok(i32::from(unapplied + stale != 0))
 }
 
 #[cfg(test)]

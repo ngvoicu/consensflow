@@ -566,6 +566,18 @@ find = '''            [cargo, test, ..] if cargo == "cargo" && test == "test" =>
 replace = '''            [cargo, test, ..] if cargo == "cargo" && test == "test" => Self::Status,'''
 
 [[plant]]
+name = "tooling: the packaged smoke is run under nextest as a person runs it, without capture"
+meant = "a_suite_of_xtask_s_is_the_cargo_test_it_runs_under_nextest_in_its_folder_with_its_variables"
+runs = ["xtask-lib-plants"]
+# The smoke is a Mac's: elsewhere the command is no suite and the test does not look at it.
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = "            Self::Smoke(app) => crate::smoke::captured(context, app.as_deref()),"
+replace = "            Self::Smoke(app) => crate::smoke::invocation(context, app.as_deref()),"
+
+[[plant]]
 name = "tooling: the plants' reporter of Node's tests says no file Node failed whole"
 meant = "node_s_report_names_each_test_as_written_and_a_file_that_ran_none_of_its_own"
 runs = ["xtask-lib-plants"]
@@ -1248,8 +1260,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver.rs"
-find = "        if let Some(entity) = entity(&plant.meant) {"
-replace = "        if let Some(entity) = None::<&str> {"
+find = "    if let Some(entity) = entity(&plant.meant) {"
+replace = "    if let Some(entity) = None::<&str> {"
 
 # Every run of a plant is tried until one catches it, each that told nothing said for itself.
 
@@ -1595,8 +1607,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver.rs"
-find = "            .find_map(|run| super::runs::refused(&run.command, context));"
-replace = "            .find_map(|run| super::runs::refused(&run.command, context).filter(|_| false));"
+find = "        .find_map(|run| super::runs::refused(&run.command, context));"
+replace = "        .find_map(|run| super::runs::refused(&run.command, context).filter(|_| false));"
 
 # Every file of a plant is put back, whatever came of another, and again at its end.
 
@@ -1651,8 +1663,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver.rs"
-find = "        // What it needs first may be of its own system, and what it plants of that one.\n        if !plant.runs_on(HERE) {"
-replace = "        // What it needs first may be of its own system, and what it plants of that one.\n        if false && !plant.runs_on(HERE) {"
+find = "    // What it needs first may be of its own system, and what it plants of that one.\n    if !plant.runs_on(HERE) {"
+replace = "    // What it needs first may be of its own system, and what it plants of that one.\n    if false && !plant.runs_on(HERE) {"
 
 [[plant]]
 name = "tooling: a plant skipped for another system is counted as one not caught"
@@ -1914,15 +1926,15 @@ find = "    if cfg!(unix) {\n        group.end(Ending::Forced);\n    }\n"
 replace = ""
 
 [[plant]]
-name = "tooling (cf-process): a program held whole runs in the job of every child, which it leaves"
+name = "tooling (cf-process): on Windows what a program held whole left running is not ended once it ended"
 meant = "held_whole_what_a_program_left_running_is_ended_once_it_has_ended"
 runs = ["cf-process-capture"]
 platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture.rs"
-find = "        Hold::Node => {\n            crate::job::adopt(&child);"
-replace = "        Hold::Node | Hold::Whole => {\n            crate::job::adopt(&child);"
+find = "        group.end(Ending::Forced);\n    }\n    group.job().end().and(group.unpinned())\n}"
+replace = "        group.end(Ending::Forced);\n    }\n    group.unpinned()\n}"
 
 [[plant]]
 name = "tooling (cf-process): the job of a program held whole lets what it starts leave"
@@ -1932,8 +1944,221 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/job.rs"
-find = "                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;"
-replace = "                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;"
+find = "    let mut limits = JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;"
+replace = "    let mut limits = JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;"
+
+# Windows: every program cf-process starts runs in a job of its own, which an end, a drop and a
+# time running out end whole (what a program starts as it is ended included: `taskkill /T` ends what
+# it has read of a tree and leaves the rest, T-322), and which a program that ended of itself leaves
+# alone. A test of these is the program that keeps starting programs (`testing`'s helper), ended each
+# way, and every pid it wrote down asked for.
+
+[[plant]]
+name = "tooling (cf-process): on Windows ending a program walks its tree and leaves its job alone"
+meant = "an_ender_ends_a_program_that_is_starting_programs_and_everything_it_started"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/terminate.rs"
+find = "        if job.terminate() {\n            return;\n        }\n"
+replace = ""
+
+[[plant]]
+name = "tooling (cf-process): on Windows an ender forces with a walk of the tree, not its program's job"
+meant = "an_ender_ends_a_program_that_is_starting_programs_and_everything_it_started"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/child.rs"
+find = "            end(pid, Ending::Forced, self.reach, false, live.job());"
+replace = "            end(pid, Ending::Forced, self.reach, false, &Job::unheld());"
+
+[[plant]]
+name = "tooling (cf-process): on Windows a job does not end what is in it when its handle closes, and a capture dropped ends its program alone"
+meant = "a_capture_dropped_ends_a_program_that_is_starting_programs_and_everything_it_started"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "        limits |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;"
+replace = "        limits |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE & 0;"
+
+[[plant]]
+name = "tooling (cf-process): on Windows a capture out of time ends its program with a walk of the tree"
+meant = "a_capture_out_of_time_ends_a_program_that_is_starting_programs_and_everything_it_started"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/group.rs"
+find = "        end(pid, how, Reach::Group, true, self.live.job());"
+replace = "        end(pid, how, Reach::Group, true, &Job::unheld());"
+
+[[plant]]
+name = "tooling (cf-process): on Windows a child is ended with a walk of the tree, not its job"
+meant = "a_child_that_is_starting_programs_is_ended_with_everything_it_started"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/child.rs"
+find = "            end(pid, how, Reach::Process, true, self.live.job());"
+replace = "            end(pid, how, Reach::Process, true, &Job::unheld());"
+
+[[plant]]
+name = "tooling (cf-process): on Windows a child let go is not ended: not forced, and its job does not end what is in it when its handle closes"
+meant = "a_child_let_go_while_it_is_starting_programs_is_ended_with_everything_it_started"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "        limits |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;"
+replace = "        limits |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE & 0;"
+
+[[plant.edit]]
+file = "crates/cf-process/src/child.rs"
+find = "            self.terminate(Ending::Forced);"
+replace = "            let _ = Ending::Forced;"
+
+[[plant]]
+name = "tooling (cf-process): on Windows a program that ended of itself has what it left running ended with its job"
+meant = "a_program_that_ends_of_itself_leaves_what_it_started_running"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "        limit(handle, limits_of(self.breakaway, false));\n    }"
+replace = "        let _ = (handle, limits_of(self.breakaway, false));\n    }"
+
+[[plant]]
+name = "tooling (cf-process): on Windows a child that exited of itself has what it left running ended with its job"
+meant = "a_child_that_exits_of_itself_leaves_what_it_started_running"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "        limit(handle, limits_of(self.breakaway, false));\n    }"
+replace = "        let _ = (handle, limits_of(self.breakaway, false));\n    }"
+
+[[plant]]
+name = "tooling (cf-process): on Windows a program is let run outside the job it was made"
+meant = "a_capture_dropped_ends_the_tree_it_started_and_leaves_nothing_for_its_ender_to_end"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "            if AssignProcessToJobObject(made, handle as _) == 0 {\n                return Err(failed(\"could not be put in a job of its own\"));\n            }"
+replace = "            let _ = (AssignProcessToJobObject as usize, handle);"
+
+# Breakaway (T-363): a program that asks to start a process outside its job may, one that does
+# not stays in the job, a program held whole may not (Codex's `update` asks, to detach its daemon);
+# and a program held whole that says too much or runs out of its time has every process of its job
+# gone when the capture returns (the plants' runner puts the sources back then).
+
+[[plant]]
+name = "tooling (cf-process): on Windows a program held whole is allowed to break away"
+meant = "a_program_held_whole_is_refused_the_breakaway_and_all_it_starts_is_ended"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "    if breakaway {\n        limits |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;\n    }\n"
+replace = "    limits |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;\n"
+
+[[plant]]
+name = "tooling (cf-process): on Windows a program is refused the breakaway it asks for"
+meant = "a_program_that_asks_to_break_away_may_and_the_one_that_does_not_ask_is_ended_with_its_job"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "        limits |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;"
+replace = "        limits |= JOB_OBJECT_LIMIT_BREAKAWAY_OK & 0;"
+
+[[plant]]
+name = "tooling (cf-process): on Windows a program held whole that says too much is not waited for while its job ends"
+meant = "a_program_held_whole_that_says_too_much_has_every_process_of_its_job_ended_when_the_capture_returns"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = "            let job_ended = group.job().end();\n"
+replace = "            let job_ended = Ok(());\n"
+
+[[plant]]
+name = "tooling (cf-process): on Windows an opener handed over is put in a job that ends with the handing over"
+meant = "a_program_still_running_is_let_go_and_runs_on_to_its_end"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/hand_over.rs"
+find = "    lead(&mut command);\n"
+replace = "    lead(&mut command);\n    crate::job::start_in_job(&mut command);\n"
+
+[[plant.edit]]
+file = "crates/cf-process/src/hand_over.rs"
+find = "    match tokio::time::timeout(within, child.wait()).await {"
+replace = "    let _job = crate::job::Job::of(&child, false)?;\n    match tokio::time::timeout(within, child.wait()).await {"
+
+# The test of the opener let go reads its program's mark once the mark says what it was
+# written to say, never for being there: the program makes the mark and writes into it a
+# second on, as a shell's `>` does a moment apart where the machine is busy (T-425: once in
+# the gate, `""` read where `"done"` was written).
+
+[[plant]]
+name = "tooling (cf-process): the mark of an opener let go is read for being there, not for what it says"
+meant = "a_program_still_running_is_let_go_and_runs_on_to_its_end"
+runs = ["cf-process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/hand_over.rs"
+find = "            if held == words || Instant::now() >= until {\n"
+replace = "            if mark.exists() || Instant::now() >= until {\n"
+
+# A shim that names a native program alone (opencode-ai 1.19.4's: its package ships a program
+# where it shipped a script) starts that program; one that names a program that is not there, or
+# is not one, is cmd.exe's (T-353, found by `live finish opencode` on zeewin: no window opened).
+
+[[plant]]
+name = "tooling (cf-process): a shim that names a native program alone is not read"
+meant = "an_npm_shim_that_names_a_native_program_alone_runs_that_program"
+runs = ["cf-process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "        [program] if program.before.trim().is_empty() => (Some(program.text), None),"
+replace = "        [program] if program.before.trim().is_empty() && false => (Some(program.text), None),"
+
+[[plant]]
+name = "tooling (cf-process): a shim that names a program alone that is not there is read"
+meant = "a_shim_that_names_a_program_alone_that_is_not_there_or_is_not_one_stays_for_cmd_exe"
+runs = ["cf-process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "        && program.is_file()\n}"
+replace = "        && true\n}"
+
+[[plant]]
+name = "tooling (cf-process): a shim that names a script alone is read as a program"
+meant = "a_shim_that_names_a_program_alone_that_is_not_there_or_is_not_one_stays_for_cmd_exe"
+runs = ["cf-process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "        .is_some_and(|extension| extension.eq_ignore_ascii_case(\"exe\"))"
+replace = "        .is_some()"
 
 # A meant name stands for every test registered of it, whatever came of each.
 
@@ -2340,9 +2565,9 @@ runs = ["cf-process-capture"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "crates/cf-process/src/group.rs"
-find = "    command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);"
-replace = "    command.creation_flags(CREATE_NO_WINDOW | (CREATE_SUSPENDED & 0));"
+file = "crates/cf-process/src/job.rs"
+find = "        CREATE_NO_WINDOW | CREATE_SUSPENDED\n    } else {"
+replace = "        CREATE_NO_WINDOW | (CREATE_SUSPENDED & 0)\n    } else {"
 
 [[plant]]
 name = "tooling (cf-process): a program held whole is never let run"
@@ -2352,8 +2577,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/job.rs"
-find = "            resume(pid)?;"
-replace = "            let _ = (pid, resume as fn(u32) -> Result<(), String>);"
+find = "        resume(pid)?;"
+replace = "        if !whole {\n            resume(pid)?;\n        }"
 
 # The Windows runner's copy is a checkout of git's whose one commit is what went over, and
 # where git says nothing of a checkout, the plants' runner says so once.
@@ -2479,13 +2704,13 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/job.rs"
-find = "        let held = Held::open(self.handle, listed.clone().unwrap_or_default());\n"
+find = "        let held = Held::open(handle, listed.clone().unwrap_or_default());\n"
 replace = ""
 
 [[plant.edit]]
 file = "crates/cf-process/src/job.rs"
 find = "        listed?;\n"
-replace = "        let held = Held::open(self.handle, self.processes().unwrap_or_default());\n        listed?;\n"
+replace = "        let held = Held::open(handle, self.processes().unwrap_or_default());\n        listed?;\n"
 
 [[plant]]
 name = "tooling (cf-process): a program held whole has ended only once its streams closed"
@@ -2517,8 +2742,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture.rs"
-find = "    job.map_or(Ok(()), Job::end).and(group.unpinned())\n}"
-replace = "    let _ = job;\n    group.unpinned()\n}"
+find = "    group.job().end().and(group.unpinned())\n}"
+replace = "    group.unpinned()\n}"
 
 [[plant]]
 name = "tooling (cf-process): streams held open after a program held whole ended are let go of"
@@ -2661,9 +2886,9 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture.rs"
-find = '''    job.map_or(Ok(()), Job::end).and(group.unpinned())
+find = '''    group.job().end().and(group.unpinned())
 }'''
-replace = '''    job.map_or(Ok(()), Job::end)
+replace = '''    group.job().end()
 }'''
 
 [[plant]]
@@ -2674,8 +2899,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture.rs"
-find = '''            let left = job.map_or(Ok(()), Job::end).and(group.unpinned());'''
-replace = '''            let left = job.map_or(Ok(()), Job::end);'''
+find = '''            let left = job_ended.and(group.unpinned());'''
+replace = '''            let left = job_ended;'''
 
 [[plant]]
 name = "tooling (cf-process): the sweep keeps nothing of what it could not hold"
@@ -2861,3 +3086,141 @@ file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
 find = '''    return (this.assertions.get(result) ?? []).some((line) => failed.includes(line))'''
 replace = '''    return (this.assertions.get(result) ?? []).length > 0'''
 
+[[plant]]
+name = "tooling (cf-process): on Windows what a program starts goes out of its job without asking"
+meant = "a_program_that_asks_to_break_away_may_and_the_one_that_does_not_ask_is_ended_with_its_job"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "    let mut limits = JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;"
+replace = "    let mut limits = JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;"
+
+# T-404: the programs the Codex window's supervisor starts are started through `start_owned`, which on
+# Windows puts each in a job of its own (the TUI keeps the console of its window, and a program that
+# asks to break away may). Ending one ends the job, everything it started with it; ending by its id
+# alone (`taskkill /T`) leaves what it started as it is ended (zeewin, T-322) and what lost its parent.
+# The rig plants for these are in `tests/plants/cli/rig.toml`.
+
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program is ended with a walk of its tree, not its job"
+meant = "an_owned_program_that_is_starting_programs_is_ended_with_everything_it_started"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "            end(pid, how, Reach::Process, true, &self.job);"
+replace = "            end(pid, how, Reach::Process, true, &Job::unheld());"
+
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program's job is closed as it starts, and ends it"
+meant = "an_owned_program_that_is_starting_programs_is_ended_with_everything_it_started"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "        Ok(job) => Ok(Owned { child, job }),"
+replace = "        Ok(_) => Ok(Owned {\n            child,\n            job: Job::unheld(),\n        }),"
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program that ended of itself has what it left ended with its job, when it was waited for"
+meant = "a_program_that_exits_of_itself_leaves_what_it_started_running"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "        let status = self.child.wait().await?;\n        self.job.release();"
+replace = "        let status = self.child.wait().await?;"
+
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program that ended of itself has what it left ended with its job, when it was looked at"
+meant = "a_program_that_exits_of_itself_leaves_what_it_started_running"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "        if status.is_some() {\n            self.job.release();\n        }"
+replace = ""
+
+[[plant]]
+name = "tooling (cf-process): an owned program is forced to end when it is asked to"
+meant = "an_owned_program_is_ended_with_the_signal_asked_for_and_never_once_waited_for"
+runs = ["cf-process-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "            end(pid, how, Reach::Process, true, &self.job);"
+replace = "            end(pid, Ending::Forced, Reach::Process, true, &self.job);"
+
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program is given the hidden window of a program that has no console"
+meant = "a_program_given_its_callers_console_is_started_suspended_and_with_its_window"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "    } else {\n        CREATE_SUSPENDED\n    }"
+replace = "    } else {\n        CREATE_NO_WINDOW | CREATE_SUSPENDED\n    }"
+
+
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program is given a console of its own, not its caller's"
+meant = "an_owned_program_is_attached_to_the_console_of_its_caller"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "    } else {\n        CREATE_SUSPENDED\n    }"
+replace = "    } else {\n        CREATE_NO_WINDOW | CREATE_SUSPENDED\n    }"
+
+[[plant]]
+name = "tooling (cf-process): on Windows a program started in a job is not hidden"
+meant = "a_program_started_hidden_has_a_console_of_its_own"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "        CREATE_NO_WINDOW | CREATE_SUSPENDED\n    } else {"
+replace = "        CREATE_SUSPENDED\n    } else {"
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program is let run before it is put in its job"
+meant = "an_owned_program_that_is_starting_programs_is_ended_with_everything_it_started"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "    job::start_suspended(command);\n"
+replace = ""
+
+[[plant]]
+name = "tooling (cf-process): on Windows an owned program may break away of its job"
+meant = "an_owned_program_that_asks_to_break_away_is_refused_and_all_it_started_is_ended_with_its_job"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/owned.rs"
+find = "    match Job::sealed(&child) {"
+replace = "    match Job::of(&child, false) {"
+
+# T-424's P3-2: a program the system would not put in a job runs in none, and says why.
+
+[[plant]]
+name = "tooling (cf-process): on Windows a program the system would not put in a job is not said to have been refused"
+meant = "an_owned_program_the_system_will_not_put_in_a_job_says_so_and_is_ended_without_one"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "            Err(why) => Self::refused(why),"
+replace = "            Err(_) => Self::unheld(),"

@@ -65,7 +65,7 @@ fn board_usage() -> String {
 
 /// Each board command's words (the ones that name it), and the lines of the
 /// usage it answers with.
-const BOARD: [(&[&str], &str); 18] = [
+const BOARD: [(&[&str], &str); 19] = [
     (
         &["task", "add"],
         concat!(
@@ -93,13 +93,17 @@ const BOARD: [(&[&str], &str); 18] = [
     ),
     (
         &["task", "list"],
-        "  cf task list                      the board: what waits for a member, then every lane\n",
+        concat!(
+            "  cf task list [--all]              the board: what waits for a member, then the lanes\n",
+            "                                    with a task to look at; --all adds the idle sessions\n",
+        ),
     ),
     (
         &["task", "get"],
         concat!(
             "  cf task get T-3                   one task and its whole thread\n",
             "  cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)\n",
+            "                                    --page 2 for older ones, 50 a page; --find \"…\" for those that say it\n",
         ),
     ),
     (
@@ -131,10 +135,18 @@ const BOARD: [(&[&str], &str); 18] = [
         "  cf task resume T-3 \"…\"            go on with it: the same window, with your words\n",
     ),
     (
+        &["task", "finish"],
+        concat!(
+            "  cf task finish T-3                take what a working task's worker said last as its result;\n",
+            "                                    what its turn left running is not ended\n",
+        ),
+    ),
+    (
         &["tell"],
         concat!(
             "  cf tell T-3 \"…\"                   stop T-3 and put this to its window: its answer arrives as\n",
             "                                    a message; then cf task resume T-3 \"…\"\n",
+            "                                    (queued: kept for its window, to go in after its brief)\n",
         ),
     ),
     (

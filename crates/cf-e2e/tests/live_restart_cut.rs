@@ -86,7 +86,7 @@ const NOT_UP: &str = "The chief could not start: ";
 
 /// What the daemon tells a worker whose turn the quit cut on the task `number`.
 fn worker_cut(number: i64) -> String {
-    format!("ConsensFlow quit while you were working on T-{number}. Go on where you stopped.")
+    format!("ConsensFlow stopped while you were working on T-{number}. Go on where you stopped.")
 }
 
 /// What the human asks the window: to run the long command and wait for it.
@@ -923,7 +923,7 @@ mod tests {
     fn what_a_window_is_told_when_its_turn_was_cut_is_what_the_daemon_writes() {
         assert_eq!(
             worker_cut(3),
-            "ConsensFlow quit while you were working on T-3. Go on where you stopped."
+            "ConsensFlow stopped while you were working on T-3. Go on where you stopped."
         );
         let note = serde_json::json!({
             "kind": "note", "sender": null, "state": "delivered", "body": worker_cut(3)

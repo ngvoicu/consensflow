@@ -1,0 +1,369 @@
+# Round 7's plants that still apply to turn-end's smallest rule (T-14 of 2026-10-21): wt/turn-end
+# left 280 plants unrun; those whose every edit is still found once in this tree, and that no table of
+# this tree holds already, are kept here as round 7 wrote them, with their runs, so the rules they
+# took out are still proven held: the final answer's words, the notification head, `cf task finish`
+# and the page's Finish and lane. The rest are answered in turn-end-min's result: removed machinery,
+# or a rule turn-end-min.toml plants in its new place. Every name holds `turn end` and none
+# `turn-end-min`, so `npm run plants:daemon -- "turn end"` runs these and not that table.
+
+[run]
+tep-background-rig-background-grace = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "background_work::a_job_that_ignores"]
+tep-engine-turn-end = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "turn_end::"]
+tep-turn-end-finish-cf-verb = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
+tep-turn-end-finish-cf-goldens = ["cargo", "test", "--offline", "-p", "cf", "--test", "board_goldens"]
+tep-turn-end-finish-daemon-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "api"]
+tep-turn-end-finish-page-finish = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "background|Finish"]
+tep-turn-end-finish-regression-never-ends = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_job_that_never_ends"]
+tep-turn-end-review-2-claude-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+tep-turn-end-review-2-cf-board-task = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
+tep-turn-end-review-3-claude-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+tep-turn-end-review-3-regression-still-ran = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_job_that_still_ran"]
+tep-turn-end-review-4-claude-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+tep-turn-end-claude-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+tep-turn-end-engine-final-answer = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "final_answer"]
+tep-turn-end-engine-lib-turn-end = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "turn_end"]
+
+[[plant]]
+name = "background rig: a window's close kills a job that is not given its grace"
+meant = "a_job_that_ignores_the_signals_that_ask_it_to_end_is_killed_by_the_windows_close_once_its_grace_is_over_and_the_result_waits_for_neither"
+runs = ["tep-background-rig-background-grace"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/close.rs"
+find = "    wait_until(pane, &asked, Instant::now() + grace);"
+replace = "    wait_until(pane, &asked, Instant::now() + grace / 100);"
+
+[[plant]]
+name = "turn end finish: the note says finishing does not end the job of what is an agent"
+meant = "a_turn_that_ends_with_its_job_running_keeps_its_task_working_and_its_progress_is_no_result"
+runs = ["tep-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        1 => \"it\","
+replace = "        1 => \"the job\","
+
+[[plant]]
+name = "turn end finish: cf has no finish among the verbs that move a task"
+meant = "finish_asks_the_board_to_finish_the_task_with_no_words_and_says_what_follows"
+runs = ["tep-turn-end-finish-cf-verb"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "    \"done\", \"accept\", \"cancel\", \"reopen\", \"edit\", \"pause\", \"resume\", \"finish\",\n];"
+replace = "    \"done\", \"accept\", \"cancel\", \"reopen\", \"edit\", \"pause\", \"resume\", \"resume\",\n];"
+
+[[plant]]
+name = "turn end finish: cf says nothing of what follows a finish"
+meant = "finish_asks_the_board_to_finish_the_task_with_no_words_and_says_what_follows"
+runs = ["tep-turn-end-finish-cf-verb"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "        \"finish\" => {"
+replace = "        \"finished\" => {"
+
+[[plant]]
+name = "turn end finish: cf’s unknown task command does not name finish"
+meant = "every_case_but_the_departed_asks_says_and_exits_as_node_did"
+runs = ["tep-turn-end-finish-cf-goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "use add, list, get, done, accept, reopen, edit, cancel, pause, resume or finish"
+replace = "use add, list, get, done, accept, reopen, edit, cancel, pause or resume"
+
+[[plant]]
+name = "turn end finish: cf says its unknown task command in Node’s words"
+meant = "every_departed_trace_is_there_and_still_departs"
+runs = ["tep-turn-end-finish-daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "use add, list, get, done, accept, reopen, edit, cancel, pause, resume or finish"
+replace = "use add, list, get, done, accept, reopen, edit, cancel, pause or resume"
+
+[[plant]]
+name = "turn end finish page: a card does not say what it waits on"
+meant = "says on the card of a task that goes on in the background what it waits on, and on its lane that the window waits and does not idle"
+runs = ["tep-turn-end-finish-page-finish"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "      return task.state === 'working' && lane.held?.task === task.number\n        ? { ...task, held: lane.held }\n        : task"
+replace = "      return task"
+
+[[plant]]
+name = "turn end finish page: every working task of a lane is said to wait"
+meant = "offers Finish for any working task of a member, held or not, and for none that is not working"
+runs = ["tep-turn-end-finish-page-finish"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "      return task.state === 'working' && lane.held?.task === task.number"
+replace = "      return task.state === 'working' && lane.held"
+
+[[plant]]
+name = "turn end finish page: a paused task is said to wait"
+meant = "says nothing of waiting on a task that is paused, though its lane is held for it, and offers no Finish"
+runs = ["tep-turn-end-finish-page-finish"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "      return task.state === 'working' && lane.held?.task === task.number"
+replace = "      return lane.held?.task === task.number"
+
+[[plant]]
+name = "turn end finish page: a lane that waits is said idle"
+meant = "says on the card of a task that goes on in the background what it waits on, and on its lane that the window waits and does not idle"
+runs = ["tep-turn-end-finish-page-finish"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "  if (lane.held && state === 'idle') return ['held', `Waiting on ${heldWords(lane.held)}`]"
+replace = ""
+
+[[plant]]
+name = "turn end finish page: a lane of a paused task is said idle"
+meant = "says nothing of waiting on a task that is paused, though its lane is held for it, and offers no Finish"
+runs = ["tep-turn-end-finish-page-finish"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "  if (lane.held && state === 'idle') return ['held', `Waiting on ${heldWords(lane.held)}`]"
+replace = "  if (lane.held && state === 'idle' && lane.tasks.some((t) => t.number === lane.held.task && t.state === 'working')) return ['held', `Waiting on ${heldWords(lane.held)}`]"
+
+[[plant]]
+name = "turn end finish page: a card is not marked as waiting in the background"
+meant = "says on the card of a task that goes on in the background what it waits on, and on its lane that the window waits and does not idle"
+runs = ["tep-turn-end-finish-page-finish"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "    if (task.held) card.dataset.pending = 'background'"
+replace = ""
+
+[[plant]]
+name = "turn end finish page: a card’s state does not say it waits on a job"
+meant = "says on the card of a task that goes on in the background what it waits on, and on its lane that the window waits and does not idle"
+runs = ["tep-turn-end-finish-page-finish"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "    : task.held\n      ? `Working, waiting on ${heldWords(task.held)}`\n      : STATE_LABEL[task.state]"
+replace = "    : STATE_LABEL[task.state]"
+
+[[plant]]
+name = "turn end finish page: three jobs are said as one"
+meant = "says \"waiting on 3 background jobs\" on the card of a task whose lane counts 3 jobs and 0 agents"
+runs = ["tep-turn-end-finish-page-finish"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "  if (agents === 0) return jobs === 1 ? 'a background job' : `${jobs} background jobs`"
+replace = "  if (agents === 0) return 'a background job'"
+
+[[plant]]
+name = "turn end finish page: Finish is offered for a task the lane is held for though it is paused"
+meant = "says nothing of waiting on a task that is paused, though its lane is held for it, and offers no Finish"
+runs = ["tep-turn-end-finish-page-finish"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "  return task.state === 'working' && lane?.held?.task === task.number ? lane.held : null"
+replace = "  return lane?.held?.task === task.number ? lane.held : null"
+
+[[plant]]
+name = "turn end finish page: Finish is offered on a closed project"
+meant = "offers no Finish on a closed project, where nothing acts, though its task is held"
+runs = ["tep-turn-end-finish-page-finish"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "    if (!closed) actions.append(...this.#taskActions(task))"
+replace = "    if (!closed || this.#held !== null) actions.append(...this.#taskActions(task))"
+
+[[plant]]
+name = "turn end finish page: Finish cancels the task"
+meant = "finishes a task that goes on in the background from its drawer, for the human: Finish asks the daemon and says what follows"
+runs = ["tep-turn-end-finish-page-finish"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "      const { jobs = 0, agents = 0 } = await daemon('task.finish', {"
+replace = "      const { jobs = 0, agents = 0 } = await daemon('task.cancel', {"
+
+[[plant]]
+name = "turn end finish page: the drawer does not say what the task waits on"
+meant = "finishes a task that goes on in the background from its drawer, for the human: Finish asks the daemon and says what follows"
+runs = ["tep-turn-end-finish-page-finish"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "${stateLabel({ ...task, held })}"
+replace = "${STATE_LABEL[task.state]}"
+
+[[plant]]
+name = "turn end finish rig: on round 1 the chief has no finish"
+meant = "the_chief_finishes_a_task_held_by_a_job_that_never_ends_with_its_workers_last_answer"
+runs = ["tep-turn-end-finish-regression-never-ends"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = "        let Some(record) = record else {"
+replace = "        let Some(record) = record.filter(|_| false) else {"
+
+[[plant]]
+name = "turn end review 2: a record written to the transcript only begins a turn"
+meant = "a_real_notification_that_names_two_jobs_ends_both"
+runs = ["tep-turn-end-review-2-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "        if record.transcript_only {"
+replace = "        if false {"
+
+[[plant]]
+name = "turn end review 2: cf says nothing of the agents left"
+meant = "finish_promises_no_ending_and_says_the_jobs_and_agents_its_harness_counted_may_run_on"
+runs = ["tep-turn-end-review-2-cf-board-task"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "    let (jobs, agents) = (jobs.unwrap_or(0), agents.unwrap_or(0));"
+replace = "    let (jobs, agents) = (jobs.unwrap_or(0), agents.and(Some(0)).unwrap_or(0));"
+
+[[plant]]
+name = "turn end review 3: a status after a notification's close is its own"
+meant = "a_notification_is_read_by_its_head_alone_and_the_head_by_its_fields_in_their_order"
+runs = ["tep-turn-end-review-3-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = "        let Some((place, value)) = field(line) else {\n            head.closes_after_event = at == Some(EVENT)\n                && line == \"</task-notification>\"\n                && lines.all(|after| after.trim().is_empty());\n            break;\n        };"
+replace = "        let Some((place, value)) = field(line) else {\n            head.closes_after_event = at == Some(EVENT)\n                && line == \"</task-notification>\"\n                && lines.all(|after| after.trim().is_empty());\n            continue;\n        };"
+
+[[plant]]
+name = "turn end review 3: a killed end is no end"
+meant = "a_real_killed_end_queued_at_rest_ends_its_job_when_the_turn_it_begins_takes_it"
+runs = ["tep-turn-end-review-3-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = "const OVER: [&str; 4] = [\"completed\", \"failed\", \"killed\", \"stopped\"];"
+replace = "const OVER: [&str; 4] = [\"completed\", \"failed\", \"\", \"stopped\"];"
+
+[[plant]]
+name = "turn end review 3: a record written to the transcript alone is the user's"
+meant = "a_real_notification_that_names_two_jobs_ends_both"
+runs = ["tep-turn-end-review-3-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "        } else if record.transcript_only {"
+replace = "        } else if record.transcript_only && record.summary {"
+
+[[plant]]
+name = "turn end review 3 rig: a record written to the transcript alone is the user's"
+meant = "a_held_workers_words_are_its_result_when_its_jobs_end_is_written_to_the_transcript_alone"
+runs = ["tep-turn-end-review-3-regression-still-ran"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "        } else if record.transcript_only {"
+replace = "        } else if record.transcript_only && record.summary {"
+
+[[plant]]
+name = "turn end review 4: the last notification a text quotes is read for its own"
+meant = "a_notification_that_quotes_the_end_of_another_job_ends_only_what_its_own_head_says"
+runs = ["tep-turn-end-review-4-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = "    let Some(rest) = text.strip_prefix(NOTIFICATION) else {"
+replace = "    let Some((_, rest)) = text.rsplit_once(NOTIFICATION) else {"
+
+[[plant]]
+name = "turn end review 4: a field of the body is read as the head's"
+meant = "a_notification_is_read_by_its_head_alone_and_the_head_by_its_fields_in_their_order"
+runs = ["tep-turn-end-review-4-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = "        if at.is_some_and(|at| place < at || (place == at && place != TASK_ID)) {"
+replace = "        if at.is_some_and(|at| place == at && place != TASK_ID) {"
+
+[[plant]]
+name = "turn end: the words before a notification’s opening name a job"
+meant = "a_notification_is_read_by_its_head_alone_and_the_head_by_its_fields_in_their_order"
+runs = ["tep-turn-end-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = "    let Some(rest) = text.strip_prefix(NOTIFICATION) else {"
+replace = "    let Some((_, rest)) = text.split_once(NOTIFICATION) else {"
+
+[[plant]]
+name = "turn end: a harness’s commentary is a word of the result"
+meant = "codexs_notes_are_commentary_and_its_final_answer_is_the_result"
+runs = ["tep-turn-end-engine-final-answer", "tep-turn-end-engine-lib-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        .filter(|item| !item.commentary)"
+replace = ""
+
+[[plant]]
+name = "turn end: a turn that wrote nothing after its last tool call has no word to say so"
+meant = "a_turn_that_wrote_nothing_after_its_last_tool_call_says_so_and_its_progress_is_not_the_result"
+runs = ["tep-turn-end-engine-final-answer", "tep-turn-end-engine-lib-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        WITHOUT_ANSWER.to_owned()"
+replace = "        String::new()"
+
+[[plant]]
+name = "turn end: the words of a result are not trimmed"
+meant = "the_words_of_an_answer_are_its_items_trimmed_and_none_says_so"
+runs = ["tep-turn-end-engine-lib-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        .map(|item| js::trim(&item.text))"
+replace = "        .map(|item| &*item.text)"
+
+[[plant]]
+name = "turn end: the items of a final answer run together"
+meant = "the_words_of_an_answer_are_its_items_trimmed_and_none_says_so"
+runs = ["tep-turn-end-engine-lib-turn-end", "tep-turn-end-engine-final-answer"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        words.join(\"\\n\\n\")"
+replace = "        words.join(\"\")"
+
+[[plant]]
+name = "turn end: a turn whose last step stopped for a tool is its task’s result"
+meant = "a_turn_whose_last_word_is_a_step_that_stopped_for_a_tool_is_no_result_though_its_window_is_at_rest"
+runs = ["tep-turn-end-engine-final-answer"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            .filter(|answers| answers.last.is_some_and(|last| last.complete))"
+replace = ""

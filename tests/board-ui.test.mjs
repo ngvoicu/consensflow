@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { columnOf, laneStatus, rowTasks, stateLabel } from '../app/ui/core/board.js'
+import { columnOf, laneStatus, rowTasks, stateLabel, storyOf } from '../app/ui/core/board.js'
 
 /** What the page draws of a lane: the receipt and stop redesign's two words (app/ui/core/board.js). */
 
@@ -94,5 +94,60 @@ describe('a lane whose window did not stop', () => {
   it('says nothing of it once the stop is paid', () => {
     const paid = lane({ state: 'working' }, [], { unstopped: undefined })
     assert.deepEqual(laneStatus(paid, board, Date.now()), ['working', 'Working'])
+  })
+})
+
+/** What a task's story in the drawer tells of the words told to its window before it was up. */
+describe("the words told to a task's window before it was up", () => {
+  const window = 'zeus-amber-pine'
+  const message = (id, kind, sender, recipient, state) => ({
+    id,
+    kind,
+    sender,
+    recipient,
+    state,
+    reason: null,
+    body: `m-${id}`,
+    createdAt: '2026-10-15T09:00:00.000Z',
+  })
+  const queued = (messages) => ({
+    number: 3,
+    state: 'queued',
+    requester: 'chief',
+    assignee: window,
+    body: 'Parser',
+    messages,
+  })
+  const told = (task) => storyOf(task).map((step) => [step.id, step.label, step.delivery])
+
+  it('are in its story under Told, waiting for its window, and no other note is', () => {
+    const story = told(
+      queued([
+        message(1, 'task', 'chief', window, 'delivering'),
+        message(2, 'note', 'chief', window, 'queued'),
+        message(3, 'note', null, 'chief', 'queued'),
+        message(4, 'note', window, 'chief', 'queued'),
+        message(5, 'note', 'chief', window, 'gated'),
+      ]),
+    )
+    assert.deepEqual(story, [
+      [1, 'Request 1', 'delivering'],
+      [2, 'Told', 'waits for its window'],
+      [5, 'Told', 'needs your approval'],
+    ])
+  })
+
+  it('say nothing of a wait once the window has them, and are gone once withdrawn', () => {
+    const story = told(
+      queued([
+        message(1, 'task', 'chief', window, 'delivered'),
+        message(2, 'note', 'chief', window, 'delivered'),
+        message(3, 'note', 'chief', window, 'cancelled'),
+      ]),
+    )
+    assert.deepEqual(story, [
+      [1, 'Request 1', null],
+      [2, 'Told', null],
+    ])
   })
 })

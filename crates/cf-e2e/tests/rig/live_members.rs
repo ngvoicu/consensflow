@@ -355,25 +355,69 @@ fn a_project_with_a_window_that_takes_the_hosts_whole_grace_to_leave_is_closed_o
     Ok(())
 }
 
+/// The failure of the close of a project of `folder` given four seconds from the moment the
+/// worker's window has left, with the pane host held (stopped) for `held_up` just after the close
+/// begins, as a loaded machine holds it: the failure, and the job the worker left.
 #[cfg(unix)]
-#[test]
-fn a_project_that_does_not_end_in_time_says_which_of_the_processes_it_started_were_left() -> Outcome
-{
+fn the_close_that_gives_up(
+    folder: &str,
+    held_up: Duration,
+) -> cf_e2e::Result<(String, cf_e2e::rig::Job)> {
     let log = Log::new("live members");
-    let (members, job) = with_a_job_that_ignores_the_request_to_end("members-left", &log)?;
+    let (members, job) = with_a_job_that_ignores_the_request_to_end(folder, &log)?;
     // The host looks at what a window left running (two looks, two seconds apart) before it asks
-    // the window to end, so the window has left, and the job has not, some seconds after the close.
-    let failed = members
-        .close_within(Duration::from_secs(4))
-        .unwrap_err()
-        .to_string();
+    // the window to end: the window has left, and the job has not, some seconds after the close,
+    // as many as the machine takes to get there, so the time the close is given is counted from
+    // the window's leaving, and not from the close.
+    members.rig().expect_the_close_to_fail();
+    let host = members.rig().host_pid();
+    let program = members
+        .window_of("worker")?
+        .and_then(|window| members.window_process(&window))
+        .map(|program| program.pid)
+        .ok_or_else(|| cf_e2e::Error::Daemon("the worker's window has no process".to_owned()))?;
+    let failed = std::thread::scope(|scope| {
+        scope.spawn(|| hold(host, held_up));
+        members.close_after(
+            "the worker's window to leave",
+            |_| !cf_e2e::process::is_alive(program),
+            Duration::from_secs(4),
+        )
+    })
+    .err()
+    .ok_or_else(|| cf_e2e::Error::Daemon("the close ended within its time".to_owned()))?
+    .to_string();
     // What it left running is not the test's to leave.
     let _ = cf_e2e::process::signal(job.pid(), cf_e2e::process::Signal::Kill);
+    Ok((failed, job))
+}
+
+/// Holds the process `pid` stopped for `held_up`, a moment after this is called (nothing, for
+/// none), and lets it go on: a pid the rig started.
+#[cfg(unix)]
+fn hold(pid: u32, held_up: Duration) {
+    use nix::sys::signal::{kill, Signal};
+    use nix::unistd::Pid;
+
+    if held_up.is_zero() {
+        return;
+    }
+    let host = Pid::from_raw(i32::try_from(pid).unwrap_or(i32::MAX));
+    std::thread::sleep(Duration::from_millis(300));
+    let _ = kill(host, Signal::SIGSTOP);
+    std::thread::sleep(held_up);
+    let _ = kill(host, Signal::SIGCONT);
+}
+
+/// What the failure of a close that did not end in time says: the processes the rig started that
+/// were left.
+#[cfg(unix)]
+fn says_what_was_left(failed: &str, job: &cf_e2e::rig::Job) -> Outcome {
     assert!(failed.starts_with("process did not exit"), "{failed}");
     let left = failed
         .split("the processes it started that were left: ")
         .nth(1)
-        .ok_or(failed.as_str())?;
+        .ok_or(failed)?;
     // The pane host, waiting for the window to leave (the rig kills it once what was
     // left is said, and not before), the shell that runs the worker's job (its parent
     // gone, it is the machine's: `(1)`; a command is cut to a line) and the job that
@@ -387,6 +431,37 @@ fn a_project_that_does_not_end_in_time_says_which_of_the_processes_it_started_we
     );
     assert!(left.contains("fake-agent --background-jo"), "{failed}");
     Ok(())
+}
+
+/// A close a case begins (the app's quit: the daemon's input and the pane host's end) and does not
+/// wait for, so that it can wait for an event of the close first: the daemon ends, with no wait of
+/// the case's own.
+#[test]
+fn a_close_begun_ends_the_daemon_without_the_case_waiting_for_it() -> Outcome {
+    let mut running = rig()?;
+    running.begin_close();
+    running.wait_for_daemon_exit(secs(20))?;
+    running.close()?;
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn a_project_that_does_not_end_in_time_says_which_of_the_processes_it_started_were_left() -> Outcome
+{
+    let (failed, job) = the_close_that_gives_up("members-left", Duration::ZERO)?;
+    says_what_was_left(&failed, &job)
+}
+
+/// A gate under load holds the pane host: its looks at the window's tree, two seconds apart,
+/// and the request to end are all later, and the window left no sooner than the close's four
+/// seconds were gone (T-118: the margin was the one the host takes on a machine at rest).
+#[cfg(unix)]
+#[test]
+fn a_close_says_which_were_left_though_the_pane_host_was_held_up_before_it_asked_the_window_to_end(
+) -> Outcome {
+    let (failed, job) = the_close_that_gives_up("members-held-up", Duration::from_secs(5))?;
+    says_what_was_left(&failed, &job)
 }
 
 #[test]

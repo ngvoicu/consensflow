@@ -29,24 +29,18 @@
 //! second), which confirms the paste before the window goes: a run on the code before the
 //! fix may then pass, never one on the code after it fail.
 
-use std::time::Duration;
-
 use cf_e2e::devin_store;
 use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig};
 use cf_e2e::Error;
 use serde_json::{json, Value};
 
-use crate::devin_notes_twice::{store_of, until_still};
+use crate::devin_notes_twice::store_of;
 use crate::resume_of_a_chief_with_no_turn::windows_of;
 use crate::{config, secs, Outcome, FAKE_DEVIN};
 
 /// What the worker answers, and what the chief's window ends at.
 const RESULT: &str = "RESULT_ONE";
-
-/// How long the chief's store is to hold still before what it holds is taken for all
-/// it was given.
-const STILL: Duration = Duration::from_secs(15);
 
 /// The roster: a Devin (the stand-in) is the chief, and the stand-in Claude the worker.
 fn write_roster(rig: &Rig) -> cf_e2e::Result {
@@ -113,10 +107,18 @@ fn a_result_a_devin_chiefs_window_took_as_it_went_is_not_pasted_again_into_the_w
         1,
         "its window took the result before it went"
     );
-    // What the window's end made of the paste is settled by now.
+    // What the window's end made of the paste is settled by now: the record showed the
+    // paste as it went, so the ledger holds it delivered, and nothing waits to be pasted
+    // into the window the resume opens. (The code before the fix gave it back to the
+    // queue here.)
     rig.wait_for("the paste to be settled", secs(30), || {
         Ok(result(&project)?.is_some_and(|message| message["state"] != "delivering"))
     })?;
+    let settled = result(&project)?.unwrap_or_default();
+    assert_eq!(
+        settled["state"], "delivered",
+        "the window's end gave the paste back to the queue: {settled}"
+    );
 
     // The human resumes the project: the chief's window comes back on its session.
     let resumed = rig.page("project.resume", json!({ "project": project.id() }))?;
@@ -127,7 +129,6 @@ fn a_result_a_devin_chiefs_window_took_as_it_went_is_not_pasted_again_into_the_w
     rig.wait_for("the chief's window to be at rest", secs(120), || {
         Ok(project.lane("chief")?["activity"]["state"] == "idle")
     })?;
-    until_still(&store_of(&rig), STILL)?;
 
     let settled = result(&project)?.unwrap_or_default();
     assert_eq!(settled["state"], "delivered", "{settled}");

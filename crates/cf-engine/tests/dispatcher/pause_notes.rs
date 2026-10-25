@@ -164,11 +164,13 @@ fn tells_a_stall_after_a_close_in_a_note_of_its_own_though_the_close_left_a_note
         "one note, queued"
     );
 
-    // The project comes back with its chief in the middle of a turn; T-1 goes
-    // on in its window, which then closes by itself.
+    // Diana leaves the staff while the project is closed, so T-2 has no window to
+    // come back in and stays paused. The project comes back with its chief in the
+    // middle of a turn, and T-1 with it, the close's note naming T-2 alone; T-1's
+    // window then closes by itself.
+    context.remove_member(project.id, "diana").unwrap();
     context.resume_project(project.id).unwrap();
     context.adapter.busy("chief");
-    context.resume_task(project.id, 1, "Carry on");
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(context.task(project.id, 1).task.state, "working");
@@ -176,9 +178,11 @@ fn tells_a_stall_after_a_close_in_a_note_of_its_own_though_the_close_left_a_note
     let notes = pause_notes(&context, project.id);
     assert_eq!(notes.len(), 2, "the close's note is not the one it joins");
     assert!(
-        notes[0].body.contains("T-2") && !notes[0].body.contains("T-1"),
+        notes[0].state == "queued"
+            && notes[0].body.contains("T-2")
+            && !notes[0].body.contains("T-1"),
         "{:?}",
-        notes[0].body
+        notes[0]
     );
     assert_eq!(
         (notes[1].state.as_str(), notes[1].task_number),

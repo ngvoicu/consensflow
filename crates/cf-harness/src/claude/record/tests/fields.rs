@@ -4,6 +4,7 @@
 //! (`keep`). A row is a scenario, the record of it that changes, and how.
 
 use super::commands::{printed, typed_command};
+use super::jobs::monitor_wait;
 use super::projection::{interrupt, projected};
 use super::restart::closed;
 use super::*;
@@ -118,6 +119,152 @@ fn answered_call() -> Vec<Value> {
         json!("end_turn"),
     );
     vec![hello(), calling, result, done, duration("d1", "a2")]
+}
+
+/// A call that runs a job in the background, its result, which says the job's id, and
+/// the turn's end with the job running.
+fn job_started() -> Vec<Value> {
+    let calling = assistant("a1", "u1", json!("m1"), json!([tool("t1")]), Value::Null);
+    let result = having(
+        user(
+            "u2",
+            json!("a1"),
+            json!([tool_result(json!("t1"), json!("running"))]),
+        ),
+        json!({ "toolUseResult": { "backgroundTaskId": "j1" } }),
+    );
+    let done = assistant(
+        "a2",
+        "u2",
+        json!("m2"),
+        json!([text(json!("Going on"))]),
+        json!("end_turn"),
+    );
+    vec![hello(), calling, result, done, summary("s1", "a2")]
+}
+
+/// That job, and the notification of its end, which Claude Code takes as the turn it
+/// begins, and the answer to it, as 2.1.277 writes it.
+fn job_ended() -> Vec<Value> {
+    job_ended_saying(json!({ "promptSource": "system", "turnOrigin": "task_notification" }))
+}
+
+/// The same, as 2.1.241 writes it: no `turnOrigin`, and the kind of its origin.
+fn job_ended_earlier() -> Vec<Value> {
+    job_ended_saying(json!({ "promptSource": "system", "origin": { "kind": "task-notification" } }))
+}
+
+/// The job, and the notification of its end, which nothing answers yet.
+fn job_noted() -> Vec<Value> {
+    let mut records = job_ended();
+    records.truncate(6);
+    records
+}
+
+/// The job, a turn under way that the notification of its end is brought into, and the
+/// answer that ends that turn.
+fn job_ended_mid_turn() -> Vec<Value> {
+    let mut records = job_started();
+    let next = assistant(
+        "a3",
+        "u3",
+        json!("m3"),
+        json!([text(json!("Done"))]),
+        json!("end_turn"),
+    );
+    records.extend([
+        user("u3", json!("s1"), json!("Go on")),
+        having(
+            super::projection::brought_in(),
+            json!({ "uuid": "n1", "parentUuid": "u3" }),
+        ),
+        next,
+        summary("s2", "a3"),
+    ]);
+    records
+}
+
+/// The job, and the notification of its end, the user's record of it saying `whence`.
+fn job_ended_saying(whence: Value) -> Vec<Value> {
+    let said = "<task-notification>\n<task-id>j1</task-id>\n<status>completed</status>\n</task-notification>";
+    let woken = having(user("w1", json!("s1"), json!(said)), whence);
+    let done = assistant(
+        "a3",
+        "w1",
+        json!("m3"),
+        json!([text(json!("Done"))]),
+        json!("end_turn"),
+    );
+    let mut records = job_started();
+    records.extend([woken, done, summary("s2", "a3")]);
+    records
+}
+
+/// The live run's record (`monitor-wait.jsonl`) to the end of the turn whose words are
+/// `words`, the `nth` of them.
+fn monitor_to(words: &str, nth: usize) -> Vec<Value> {
+    let records = monitor_wait();
+    let said = records
+        .iter()
+        .enumerate()
+        .filter(|(_, record)| {
+            record["message"]["content"]
+                .as_array()
+                .is_some_and(|parts| parts.iter().any(|part| part["text"] == words))
+        })
+        .nth(nth)
+        .map(|(at, _)| at)
+        .expect("the words");
+    let end = records[said..]
+        .iter()
+        .position(|record| record["subtype"] == "turn_duration")
+        .expect("its end")
+        + said
+        + 1;
+    records[..end].to_vec()
+}
+
+/// The command and the monitor armed on it, at the first event's turn's end.
+fn monitor_armed() -> Vec<Value> {
+    monitor_to("NOTED", 0)
+}
+
+/// To the turn the monitor's expiry woke.
+fn monitor_expired() -> Vec<Value> {
+    monitor_to("ALL-DONE", 0)
+}
+
+/// The place in [`monitor_expired`] of the Monitor call's record.
+fn monitor_called() -> usize {
+    place(monitor_expired, |record| {
+        record["message"]["content"]
+            .as_array()
+            .is_some_and(|parts| parts.iter().any(|part| part["name"] == "Monitor"))
+    })
+}
+
+/// The Monitor call's input changed by `change`.
+fn monitor_input(change: fn(&mut Value)) -> Change {
+    Box::new(move |mut record: Value| {
+        if let Some(parts) = record["message"]["content"].as_array_mut() {
+            for part in parts {
+                if part["name"] == "Monitor" {
+                    change(&mut part["input"]);
+                }
+            }
+        }
+        record
+    })
+}
+
+/// To the turn that stopped a command with TaskStop.
+fn command_stopped() -> Vec<Value> {
+    monitor_to("STOPPED", 0)
+}
+
+/// The place in `scenario` of the first record `is` holds of.
+fn place(scenario: Scenario, is: impl Fn(&Value) -> bool) -> usize {
+    scenario().iter().position(is).expect("the record")
 }
 
 /// A turn whose message makes a call `call`, which nothing answers, then answers.
@@ -391,6 +538,160 @@ fn read() -> Vec<Row> {
             answered_call,
             2,
             blocks(json!([tool_result(json!("t1"), json!("other"))])),
+        ),
+        (
+            "toolUseResult.backgroundTaskId",
+            job_started,
+            2,
+            is("toolUseResult", json!({})),
+        ),
+        (
+            "message.content, of the notification a turn begins with",
+            job_ended,
+            5,
+            blocks(json!("Go on")),
+        ),
+        (
+            "promptSource, of the notification a turn begins with",
+            job_ended,
+            5,
+            is("promptSource", json!("typed")),
+        ),
+        (
+            "turnOrigin, of the notification a turn begins with",
+            job_ended,
+            5,
+            is("turnOrigin", json!("human")),
+        ),
+        (
+            "origin.kind, of the notification a turn begins with",
+            job_ended_earlier,
+            5,
+            is("origin", json!({ "kind": "human" })),
+        ),
+        (
+            "queueTranscriptOnly, of a notification",
+            job_noted,
+            5,
+            is("queueTranscriptOnly", json!(true)),
+        ),
+        (
+            "attachment.commandMode, of a notification brought into a turn",
+            job_ended_mid_turn,
+            6,
+            in_the_attachment("commandMode", json!("prompt")),
+        ),
+        (
+            "attachment.prompt, of a notification brought into a turn",
+            job_ended_mid_turn,
+            6,
+            in_the_attachment("prompt", json!("Go on")),
+        ),
+        (
+            "attachment.type, of a notification brought into a turn",
+            job_ended_mid_turn,
+            6,
+            in_the_attachment("type", json!("hook_success")),
+        ),
+        (
+            "toolUseResult.taskId, of a monitor armed",
+            monitor_armed,
+            place(monitor_armed, |record| {
+                record["toolUseResult"]["taskId"].is_string()
+            }),
+            is("toolUseResult", json!({})),
+        ),
+        (
+            "toolUseResult.timeoutMs, of a monitor armed",
+            monitor_armed,
+            place(monitor_armed, |record| {
+                record["toolUseResult"]["taskId"].is_string()
+            }),
+            is("toolUseResult", json!({ "taskId": "b615qv2gd" })),
+        ),
+        (
+            "block.input.command, of a Monitor call",
+            monitor_expired,
+            monitor_called(),
+            monitor_input(|input| input["command"] = Value::Null),
+        ),
+        (
+            "block.input.ws, of a Monitor call",
+            monitor_expired,
+            monitor_called(),
+            monitor_input(|input| input["ws"] = json!({ "url": "wss://example.org/events" })),
+        ),
+        (
+            "block.input.description, of a Monitor call",
+            monitor_expired,
+            monitor_called(),
+            monitor_input(|input| input["description"] = json!("other")),
+        ),
+        (
+            "block.name, of a Monitor call",
+            monitor_expired,
+            monitor_called(),
+            Box::new(|mut record: Value| {
+                if let Some(parts) = record["message"]["content"].as_array_mut() {
+                    for part in parts {
+                        if part["name"] == "Monitor" {
+                            part["name"] = json!("Watch");
+                        }
+                    }
+                }
+                record
+            }),
+        ),
+        (
+            "timestamp, of a monitor's notice of its expiry",
+            monitor_expired,
+            place(monitor_expired, |record| {
+                record["turnOrigin"] == "task_notification"
+                    && record["message"]["content"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("Monitor expired"))
+            }),
+            is("timestamp", json!("2026-10-20T23:04:00.000Z")),
+        ),
+        (
+            "toolUseResult.task_id, of a TaskStop",
+            command_stopped,
+            place(command_stopped, |record| {
+                record["toolUseResult"]["task_id"].is_string()
+            }),
+            is("toolUseResult", json!({ "task_id": "other" })),
+        ),
+        (
+            "message.content[].name, of a TaskStop call",
+            command_stopped,
+            place(command_stopped, |record| {
+                record["message"]["content"]
+                    .as_array()
+                    .is_some_and(|parts| parts.iter().any(|part| part["name"] == "TaskStop"))
+            }),
+            Box::new(|mut record: Value| {
+                if let Some(parts) = record["message"]["content"].as_array_mut() {
+                    for part in parts {
+                        part["name"] = json!("Bash");
+                    }
+                }
+                record
+            }),
+        ),
+        (
+            "message.content[].is_error, of a TaskStop's result",
+            command_stopped,
+            place(command_stopped, |record| {
+                record["toolUseResult"]["task_id"].is_string()
+            }),
+            Box::new(|mut record: Value| {
+                if let Some(parts) = record["message"]["content"].as_array_mut() {
+                    for part in parts {
+                        part["is_error"] = json!(true);
+                    }
+                }
+                record
+            }),
         ),
         (
             "isApiErrorMessage",

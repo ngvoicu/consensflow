@@ -94,5 +94,6 @@ fn a_task_open_tasks_wait_for_is_not_cancelled_by_the_chief_or_the_page_until_th
     cf(&rig, &chief, &["task", "cancel", "T-3"])?;
     cf(&rig, &chief, &["task", "cancel", "T-1"])?;
     assert_eq!(state(&project, 1)?, "cancelled");
+    rig.close()?;
     Ok(())
 }

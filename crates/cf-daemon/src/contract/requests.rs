@@ -320,6 +320,14 @@ async fn zeus_at_work() -> (Rig, Rc<Context>, String, Value) {
         ledger: Rc::clone(&rig.ledger),
         credentials: Rc::new(credentials),
         kick: Rc::new(|| {}),
+        finish: Rc::new(|_, _, _| {
+            Box::pin(async {
+                Err(cf_base::refusal::Refusal::new(
+                    "not-asked",
+                    "this request is no finish",
+                ))
+            })
+        }),
         closing: Closing::new(),
         roster: Rc::new(NoRows),
         log: Rc::new(Log::new(home)),

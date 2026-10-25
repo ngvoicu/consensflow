@@ -391,7 +391,7 @@ fn the_agents_the_closed_process_left_running_went_with_it() {
     ];
     let pending = |options: &Options| {
         let read = record_told(&records, options);
-        (read.settlement, read.agents_pending)
+        (read.settlement, read.pending.agents > 0)
     };
     assert_eq!(
         pending(&Options::default()),
@@ -420,7 +420,7 @@ fn the_agents_the_closed_process_left_running_went_with_it() {
         ),
     ]);
     let read = record_told(&again, &relaunched(&again, records.len()));
-    assert!(read.agents_pending);
+    assert!(read.pending.agents > 0);
 }
 
 #[test]
@@ -440,13 +440,13 @@ fn a_record_the_old_process_wrote_past_the_relaunch_ends_none_of_its_turns_again
     ];
     let relaunch = relaunched(&records, 4);
     let read = record_told(&records, &relaunch);
-    assert!(!read.agents_pending, "no agent of the new process runs");
+    assert!(read.pending.agents == 0, "no agent of the new process runs");
     // Read as it was written, the old turn's duration after the relaunch's look.
     let mut stage = Stage::new();
     stage.write(&records[..4]);
-    assert!(!known(&stage.look_told(&relaunch)).agents_pending);
+    assert!(known(&stage.look_told(&relaunch)).pending.agents == 0);
     stage.append(&records[4..]);
-    assert!(!known(&stage.look_told(&relaunch)).agents_pending);
+    assert!(known(&stage.look_told(&relaunch)).pending.agents == 0);
 }
 
 #[test]
@@ -528,4 +528,126 @@ fn the_close_of_a_cut_turn_is_no_part_of_any_answer() {
         json!({ "isApiErrorMessage": true })
     )));
     assert!(words(closed("c1", "u1")));
+}
+
+/// The live run's record (`monitor-wait.jsonl`) to the end of the turn its monitor's
+/// first event woke: a command and a monitor pending, as the window closed on them.
+fn left_a_monitor() -> Vec<Value> {
+    let records = super::jobs::monitor_wait();
+    let first_event = place(&records, |record| {
+        record["message"]["content"]
+            .as_array()
+            .is_some_and(|parts| parts.iter().any(|part| part["text"] == "NOTED"))
+    });
+    let end = first_event
+        + 1
+        + place(&records[first_event..], |record| {
+            record["subtype"] == "turn_duration"
+        });
+    records[..end].to_vec()
+}
+
+/// What the new process does: a prompt, and its answer, which ends its turn.
+fn went_on(after: &str) -> Vec<Value> {
+    vec![
+        user("u90", json!(after), json!("Go on")),
+        assistant(
+            "a90",
+            "u90",
+            json!("m90"),
+            json!([text(json!("Gone on"))]),
+            json!("end_turn"),
+        ),
+        summary("s90", "a90"),
+    ]
+}
+
+/// The last record's uuid.
+fn last_uuid(records: &[Value]) -> String {
+    records.last().unwrap()["uuid"].as_str().unwrap().to_owned()
+}
+
+#[test]
+fn the_jobs_the_closed_process_left_are_retired_at_the_relaunch_and_not_ended() {
+    // T-442's restart with its monitor (T-8's answer, 2026-10-21): the window was closed
+    // with a command and a monitor running, and opened again on the conversation once the
+    // host proved its program gone. Their notifications went with the process: the new
+    // process's turns are held by none of them, and the reading says they were retired.
+    let before = left_a_monitor();
+    let mut records = before.clone();
+    records.extend(went_on(&last_uuid(&before)));
+    let read = record_of(&records);
+    assert_eq!(
+        (read.settlement, read.pending.jobs, read.pending.retired),
+        (Settlement::Settled, 2, 0),
+        "the record alone: both run"
+    );
+    let read = record_told(&records, &relaunched(&records, before.len()));
+    assert_eq!(
+        (read.settlement, read.pending.jobs, read.pending.retired),
+        (Settlement::Settled, 0, 2),
+        "a process started after it"
+    );
+    // A job the new process starts runs, as any; a word of the end of a retired one, as
+    // the new process's summary of what the old left says, settles it.
+    let mut again = records.clone();
+    let started = having(
+        user(
+            "u91",
+            json!("s90"),
+            json!([tool_result(
+                json!("t91"),
+                json!("Command running in background")
+            )]),
+        ),
+        json!({ "toolUseResult": { "backgroundTaskId": "bnew0001" } }),
+    );
+    let said = "<task-notification>\n<task-id>b615qv2gd</task-id>\n<status>stopped</status>\n</task-notification>";
+    again.extend([
+        assistant(
+            "a91",
+            "s90",
+            json!("m91"),
+            json!([tool_use(json!("t91"))]),
+            json!("tool_use"),
+        ),
+        started,
+        having(
+            user("w91", json!("u91"), json!(said)),
+            json!({ "promptSource": "system", "turnOrigin": "task_notification" }),
+        ),
+        assistant(
+            "a92",
+            "w91",
+            json!("m92"),
+            json!([text(json!("Noted"))]),
+            json!("end_turn"),
+        ),
+        summary("s92", "a92"),
+    ]);
+    let read = record_told(&again, &relaunched(&again, before.len()));
+    assert_eq!(
+        (read.settlement, read.pending.jobs, read.pending.retired),
+        (Settlement::Settled, 1, 1)
+    );
+}
+
+#[test]
+fn a_resume_in_the_window_retires_no_job() {
+    // `/resume` typed in the window keeps the process and its jobs: Claude Code writes
+    // the close of a cut turn and the resume hook's run all the same, and ConsensFlow,
+    // which opened no window, tells the reader of no relaunch.
+    let before = left_a_monitor();
+    let last = last_uuid(&before);
+    let mut records = before;
+    records.extend([
+        closed("c90", &last),
+        session_start("h90", "c90", "SessionStart:resume"),
+    ]);
+    records.extend(went_on("h90"));
+    let read = record_of(&records);
+    assert_eq!(
+        (read.settlement, read.pending.jobs, read.pending.retired),
+        (Settlement::Settled, 2, 0)
+    );
 }

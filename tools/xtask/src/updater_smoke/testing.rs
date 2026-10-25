@@ -202,3 +202,20 @@ pub fn fake_bundle(parent: &Path, fake: &Fake) -> PathBuf {
     .unwrap();
     app
 }
+
+/// The hold on `cache` once it is let go of. A test that takes it back at once can
+/// meet a program another test is starting (a `fork` copies the descriptors of the
+/// process until the program is `exec`ed, and the lock goes with the last of them),
+/// so it is tried for a moment before it is said to be held.
+pub fn hold_when_free(cache: &Path) -> super::cache::Hold {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match super::cache::hold(cache) {
+            Ok(hold) => return hold,
+            Err(held) if std::time::Instant::now() > until => {
+                panic!("the cache is still held: {held}")
+            }
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    }
+}

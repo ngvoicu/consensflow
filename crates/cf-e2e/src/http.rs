@@ -48,8 +48,14 @@ impl Http {
     /// A client that takes no proxy of the machine's: what it asks is on
     /// loopback.
     pub fn new() -> Self {
+        Self::waiting(TIMEOUT)
+    }
+
+    /// A client that gives a request `timeout` to be answered: an update of a
+    /// harness takes minutes.
+    pub fn waiting(timeout: Duration) -> Self {
         let agent = ureq::Agent::config_builder()
-            .timeout_global(Some(TIMEOUT))
+            .timeout_global(Some(timeout))
             .http_status_as_error(false)
             .proxy(None)
             .build()

@@ -24,6 +24,7 @@ panes-lib-handlers = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "
 e2e-lib-route = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::route::"]
 harness-reading = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::reading::"]
 e2e-lib-process-shell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell::"]
+harness-contract = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "contract::tests::"]
 rig-regression-load-retype = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_message_the_chief_took_was_typed_in_again_under_load::"]
 
 # The case of the rig. Its plant takes the whole host check out of the look once more, as
@@ -380,3 +381,38 @@ builds = true
 file = "crates/cf-engine/src/steps.rs"
 find = "        let told = !left.is_empty() && self.tell_left(left);"
 replace = "        let told = false && self.tell_left(left);"
+
+# Where the retype rule meets turn-end (T-504, the merge of 3.0.6-alpha.3's batch): a task's
+# result is the final answer to its latest message, found after the item that message's
+# receipt names (`turn_end::delivered_at`).
+
+[[plant]]
+name = "load retype and turn-end: a task that waits for its answer, which the pane host holds, takes the words of the turn that asked as its result"
+meant = "an_answer_the_pane_host_held_goes_in_once_and_the_task_s_result_is_what_answers_it"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '        let Some(thread) = task.filter(|thread| thread.task.state == "working") else {'
+replace = '        let Some(thread) = task.filter(|thread| matches!(thread.task.state.as_str(), "working" | "waiting")) else {'
+
+[[plant]]
+name = "load retype and turn-end: an arrival confirmed as the window is read once more names no item of the record turn-end finds the answer after"
+meant = "an_answer_its_record_shows_as_the_window_is_read_once_more_is_what_the_result_follows"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '        let receipt = json!({ "item": &*arrived.id });'
+replace = '        let receipt = json!({});'
+
+[[plant]]
+name = "load retype and turn-end: a record that is not there says a job is left running"
+meant = "a_look_at_a_record_that_is_not_there_reads_no_items_nothing_left_running_and_no_monitor"
+runs = ["harness-contract"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = "            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => Pending::default(),"
+replace = '''            Some(Reading::Missing(_)) => Pending { jobs: 1, ..Pending::default() },
+            Some(Reading::Unknown(_)) | None => Pending::default(),'''
