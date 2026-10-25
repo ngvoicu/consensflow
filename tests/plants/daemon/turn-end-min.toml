@@ -868,8 +868,8 @@ runs = ["tem-engine-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/background.rs"
-find = '''"T-{number}'s window closed with background work running, which its close ended: {}",'''
-replace = '''"T-{number}'s window closed with background work still running: {}",'''
+find = '''            " with background work running, which its close ended: {}",'''
+replace = '''            " with background work still running: {}",'''
 
 [[plant]]
 name = "turn-end-min ownership: a window knows no task of the message its launch began with"
