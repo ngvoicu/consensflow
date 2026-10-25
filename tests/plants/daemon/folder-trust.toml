@@ -414,7 +414,7 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
 find = "                        Some((on, looks, key)) if *on == lines => {"
-replace = "                        Some((on, looks, key)) if *on == lines && keys == usize::MAX => {"
+replace = "                        Some((on, looks, key)) if *on == lines && record.window.borrow().trust_keys == usize::MAX => {"
 
 [[plant]]
 name = "folder trust: Claude's prompt is never read"
@@ -632,8 +632,10 @@ runs = ["folder-trust-tooling"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/tooling.rs"
-find = '    let mut answer = json!({ "asks": key.is_some(), "key": pressed, "prompt": prompt });'
-replace = '    let mut answer = json!({ "asks": pressed.is_some(), "key": pressed, "prompt": prompt });'
+find = '''
+        json!({ "asks": key.is_some(), "key": pressed, "prompt": prompt, "names": names });'''
+replace = '''
+        json!({ "asks": pressed.is_some(), "key": pressed, "prompt": prompt, "names": names });'''
 
 [[plant]]
 name = "folder trust: a cursor on a line that names no choice reads as the question with its cursor unplaced (round 4, T-231)"

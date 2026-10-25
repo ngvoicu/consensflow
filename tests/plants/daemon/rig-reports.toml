@@ -831,9 +831,9 @@ find = """
     Ok(checks)
 }
 
-/// The folder Claude Code keeps"""
+/// How a window of [`ends`] is ended."""
 replace = """
     Ok(checks)
 }
 
-/// The folder Claude Code keeps"""
+/// How a window of [`ends`] is ended."""
