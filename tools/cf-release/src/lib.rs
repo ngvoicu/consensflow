@@ -1,4 +1,5 @@
-//! The release's steps as one command, `cf-release`: `version` (what the
+//! The release's steps as one command, `cf-release`: `ci-passed` (CI's full
+//! gate passed the commit on both platforms), `version` (what the
 //! sources agree on), `prepare-update` (the update feed's entry for a build) and
 //! `sign-mac` (the Developer ID signing). The release workflow is to build it
 //! with `--locked` and run the binary; `cargo xtask` asks its [`version`] module
@@ -13,6 +14,7 @@
 #![forbid(unsafe_code)]
 
 mod args;
+pub mod ci_passed;
 mod cli;
 pub mod process;
 mod sign_mac;

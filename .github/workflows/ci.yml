@@ -5,16 +5,18 @@
 # (on macOS: it needs no app, and once is enough), and the Rust host's tests,
 # headless ones included, and clippy. The packaged smoke needs a built app and
 # stays with the release build. Rust comes from the runner's own rustup; the
-# one third-party action is pinned to a commit. A release runs this same gate
-# on the commit it releases.
+# one third-party action is pinned to a commit. A release publishes only a
+# commit this gate passed on both platforms (release.yml's `gate` job, cf-release
+# `ci-passed`): its run by a push or by hand, with `gate (macos-latest)` and
+# `gate (windows-latest)` green. A promotion's commit is pushed to its
+# release/X.Y.Z branch, where this runs on it too.
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/*']
   pull_request:
   workflow_dispatch:
-  workflow_call:
 
 jobs:
   gate:

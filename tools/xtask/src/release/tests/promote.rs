@@ -143,11 +143,29 @@ fn a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_never_writ
                 Some(promoted.clone())
             );
         }
-        // The tag's own run is the gate: nothing is started by hand.
+        // The branch's push ran CI on the version commit, watched green before the tag;
+        // nothing is started by hand.
         assert!(
             fake.when("gh workflow run").is_none(),
             "{:#?}",
             fake.lines()
+        );
+        let ci = fake.runs_of("ci.yml", "push");
+        let ci: Vec<_> = ci.iter().filter(|run| run.commit == promoted).collect();
+        assert_eq!(ci.len(), 1, "{:#?}", fake.runs);
+        let watched = fake.when(&format!("gh run view {}", ci[0].id)).unwrap();
+        let branch_pushed = fake
+            .when(&format!("git push -q upstream {BRANCH}"))
+            .unwrap();
+        let tagged = fake.when(&format!("git push -q origin v{PLAIN}")).unwrap();
+        assert!(
+            branch_pushed < watched && watched < tagged,
+            "{:#?}",
+            fake.lines()
+        );
+        assert!(
+            said.contains(&format!("ci run {}: success", ci[0].id)),
+            "{said}"
         );
         assert_eq!(fake.runs_of("release.yml", "push").len(), 1);
         assert_eq!(fake.serves("feed-alpha").as_deref(), Some(PLAIN));
@@ -335,11 +353,12 @@ fn a_version_already_released_is_refused() {
 }
 
 /// What a refusal says of the branch a promotion left: where it is, at which
-/// commit, and how to start over, or finish when its parent is the alpha's.
+/// commit, and how to start over, or finish when its parent is the alpha's and
+/// CI passed it.
 fn leftover(places: &str, at: &str, alpha_commit: &str, undo: &str) -> String {
     format!(
         "{BRANCH} is {places}, at {}: a promotion stopped before its tag. Start over: `{undo}`, and run again; \
-         or, if its parent is {alpha_commit}, finish it by hand: \
+         or, if its parent is {alpha_commit} and CI is green on it, finish it by hand: \
          `git tag -a v{PLAIN} -F <notes> {at} && git push origin v{PLAIN} && git push upstream v{PLAIN}`, \
          then watch its Release run and read both feeds",
         &at[..8]
@@ -586,4 +605,106 @@ fn a_lockfile_or_a_file_cargo_changed_beyond_the_version_is_refused_and_nothing_
     assert_eq!(said, "the promotion changed crates/cf/src/stray.rs, which holds no version: only the version may change");
     assert!(fake.when("git push").is_none());
     no_tree_left(&world);
+}
+
+/// What a refusal says of the branch a promotion pushed when CI did not pass its
+/// commit `at`: `rerun` is how to have CI run again.
+fn ci_not_green(at: &str, rerun: &str) -> String {
+    format!(
+        "{BRANCH} is on origin and upstream at {}, and no tag was pushed. Its commit is the alpha's with the \
+         version alone changed: {rerun}, and once CI is green on it finish by hand, \
+         `git tag -a v{PLAIN} -F <notes> {at} && git push origin v{PLAIN} && git push upstream v{PLAIN}`, \
+         then watch its Release run and read both feeds; or start over, \
+         `git push origin --delete {BRANCH} && git push upstream --delete {BRANCH} && git branch -D {BRANCH}`, \
+         and run again",
+        &at[..8]
+    )
+}
+
+/// Whether nothing was tagged, in the checkout or on a remote, and no Release run started.
+fn no_tag(world: &World, fake: &Fake) {
+    assert!(fake.when("git tag").is_none(), "{:#?}", fake.lines());
+    for repository in [&world.root, &world.origin, &world.upstream] {
+        assert_eq!(World::tagged(repository, &format!("v{PLAIN}")), None);
+    }
+    assert!(fake.runs_of("release.yml", "push").is_empty());
+}
+
+#[test]
+fn ci_that_ended_red_on_the_version_commit_stops_it_before_the_tag() {
+    for ended in ["failure", "cancelled"] {
+        let (world, mut fake) = released();
+        fake.conclusions.insert(("ci.yml", "push"), ended);
+        let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+        let at = git(&world.upstream, &["rev-parse", BRANCH]);
+        let run = fake.runs_of("ci.yml", "push")[0].id;
+        assert_eq!(
+            said,
+            format!(
+                "ci run {run} ended {ended}: {}",
+                ci_not_green(
+                    &at,
+                    &format!("a flake: rerun it, `gh run rerun {run} --failed --repo ngvoicu/consensflow`")
+                )
+            )
+        );
+        no_tag(&world, &fake);
+        // Done as it says once CI is green, the words tag the version commit.
+        let tagged = said
+            .split("-F <notes> ")
+            .nth(1)
+            .and_then(|rest| rest.split(' ').next())
+            .unwrap();
+        assert_eq!(tagged, at);
+    }
+}
+
+#[test]
+fn ci_without_both_platforms_summaries_green_on_the_version_commit_stops_it_before_the_tag() {
+    let (world, mut fake) = released();
+    fake.ci_jobs = vec![
+        ("gate (macos-latest)", "success"),
+        ("test (windows-latest, rig)", "success"),
+    ];
+    let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+    let at = git(&world.upstream, &["rev-parse", BRANCH]);
+    let run = fake.runs_of("ci.yml", "push")[0].id;
+    assert_eq!(
+        said,
+        format!(
+            "ci run {run} holds no green gate (windows-latest): both platforms must pass; {}",
+            ci_not_green(
+                &at,
+                &format!(
+                    "a flake: rerun it, `gh run rerun {run} --failed --repo ngvoicu/consensflow`"
+                )
+            )
+        )
+    );
+    no_tag(&world, &fake);
+}
+
+#[test]
+fn a_version_commit_ci_never_ran_on_is_not_tagged_though_ci_passed_the_alpha() {
+    // CI passed the alpha's own commit, and none ran on the version commit: the
+    // alpha's green gate is another commit's.
+    let (world, mut fake) = released();
+    fake.start("ci.yml", &world.commit_of(&format!("v{ALPHA}")), "push");
+    fake.branches_start_ci = false;
+    let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+    let at = git(&world.upstream, &["rev-parse", BRANCH]);
+    assert_eq!(
+        said,
+        format!(
+            "ci: no new run of ci.yml appeared on {}: {}",
+            &at[..8],
+            ci_not_green(
+                &at,
+                &format!(
+                    "start its CI by hand, `gh workflow run ci.yml --ref {BRANCH} --repo ngvoicu/consensflow`"
+                )
+            )
+        )
+    );
+    no_tag(&world, &fake);
 }

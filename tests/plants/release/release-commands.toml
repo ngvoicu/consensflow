@@ -127,7 +127,7 @@ replace = "if served.as_str().is_empty() {"
 
 [[plant]]
 name = "release: a run that did not end green is taken"
-meant = "a_dry_run_that_fails_stops_it_before_the_tag"
+meant = "ci_that_ended_red_is_refused_and_nothing_is_tagged"
 runs = ["release-commands"]
 
 [[plant.edit]]
@@ -139,7 +139,7 @@ if ended.conclusion == "cancelled" {'''
 
 [[plant]]
 name = "release: CI green on one platform is taken"
-meant = "ci_that_is_not_green_on_both_platforms_stops_it_before_the_dry_run"
+meant = "ci_without_both_platforms_summaries_green_is_refused_and_nothing_is_tagged"
 runs = ["release-commands"]
 
 [[plant.edit]]
@@ -150,7 +150,7 @@ if watched.both_platforms && watched.label == "never" {'''
 
 [[plant]]
 name = "release: the run newest before is taken for the new one"
-meant = "an_older_dry_run_of_the_same_commit_is_not_taken_for_the_new_one"
+meant = "an_older_release_run_of_the_same_commit_is_not_taken_for_the_new_one"
 runs = ["release-commands"]
 
 [[plant.edit]]
@@ -170,22 +170,136 @@ if status.status == "completed" {'''
 replace = "if !status.status.is_empty() {"
 
 [[plant]]
-name = "release: release alpha asks for no dry run"
-meant = "an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone"
+name = "release: release alpha tags whatever CI's run of main ended"
+meant = "ci_that_ended_red_is_refused_and_nothing_is_tagged"
 runs = ["release-commands"]
 
 [[plant.edit]]
 file = "tools/xtask/src/release/alpha.rs"
 find = '''
-    release.dispatch("release.yml", "main")?;
-'''
+    release.watch(&Watched {
+        label: "ci",'''
 replace = '''
+    let _ = release.watch(&Watched {
+        label: "ci",'''
 
-'''
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = '''
+        left: Left::Nothing,
+    })?;'''
+replace = '''
+        left: Left::Nothing,
+    });'''
+
+[[plant]]
+name = "release: release alpha takes a pull request's CI for main's"
+meant = "ci_of_a_pull_request_on_main_s_commit_is_not_its_gate"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/alpha.rs"
+find = '''
+        event: Some("push"),
+        before: None,
+        both_platforms: true,'''
+replace = '''
+        event: None,
+        before: None,
+        both_platforms: true,'''
+
+[[plant]]
+name = "release: a platform's summary is any job that names the platform"
+meant = "ci_without_both_platforms_summaries_green_is_refused_and_nothing_is_tagged"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = ".any(|(job, conclusion)| job == summary && conclusion == \"success\");"
+replace = ".any(|(job, conclusion)| job.contains(&summary[6..13]) && conclusion == \"success\");"
+
+[[plant]]
+name = "release: a promotion tags whatever CI's run of its commit ended"
+meant = "ci_that_ended_red_on_the_version_commit_stops_it_before_the_tag"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    // The branch's push started CI on the version commit: the gate, before the tag.
+    release.watch(&Watched {'''
+replace = '''
+    // The branch's push started CI on the version commit: the gate, before the tag.
+    let _ = release.watch(&Watched {'''
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+            commit: &promoted,
+        },
+    })?;'''
+replace = '''
+            commit: &promoted,
+        },
+    });'''
+
+[[plant]]
+name = "release: a promotion takes the alpha's green CI for its version commit's"
+meant = "a_version_commit_ci_never_ran_on_is_not_tagged_though_ci_passed_the_alpha"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+        commit: &promoted,
+        event: Some("push"),
+        before: ci_before,'''
+replace = '''
+        commit: &commit,
+        event: Some("push"),
+        before: ci_before,'''
+
+[[plant]]
+name = "release: a promotion's CI green on one platform is taken"
+meant = "ci_without_both_platforms_summaries_green_on_the_version_commit_stops_it_before_the_tag"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+        before: ci_before,
+        both_platforms: true,'''
+replace = '''
+        before: ci_before,
+        both_platforms: false,'''
+
+[[plant]]
+name = "release: a promotion's red CI says to rerun nothing"
+meant = "ci_that_ended_red_on_the_version_commit_stops_it_before_the_tag"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+                let rerun = match run {
+                    Some(id) => format!('''
+replace = '''
+                let rerun = match run.filter(|_| false) {
+                    Some(id) => format!('''
+
+[[plant]]
+name = "release: a promotion's red CI is finished by hand on its branch's name"
+meant = "ci_that_ended_red_on_the_version_commit_stops_it_before_the_tag"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "                    finish_by_hand(tag, commit)"
+replace = "                    finish_by_hand(tag, branch)"
 
 [[plant]]
 name = "release: release alpha's dry run tags"
-meant = "a_dry_run_does_everything_up_to_the_tag_and_tags_nothing"
+meant = "a_dry_run_watches_ci_and_starts_and_tags_nothing"
 runs = ["release-commands"]
 
 [[plant.edit]]
@@ -450,9 +564,9 @@ runs = ["release-commands"]
 [[plant.edit]]
 file = "tools/xtask/src/release/github.rs"
 find = '''
-|tag| format!("{tag} stays on upstream; {}", rerun_advice(tag, Some(id))),'''
+Some(_) => format!("{tag} stays on upstream; {}", rerun_advice(tag, run)),'''
 replace = '''
-|tag| format!("{tag} stays on upstream; {}", rerun_advice(tag, None)),'''
+Some(_) => format!("{tag} stays on upstream; {}", rerun_advice(tag, None)),'''
 
 [[plant]]
 name = "release: a release run that never appears says nothing to do"
@@ -462,9 +576,9 @@ runs = ["release-commands"]
 [[plant.edit]]
 file = "tools/xtask/src/release/github.rs"
 find = '''
-|tag| format!("{tag} is on upstream; {}", rerun_advice(tag, None)),'''
+None => format!("{tag} is on upstream; {}", rerun_advice(tag, None)),'''
 replace = '''
-|_| "nothing after it was done".to_owned(),'''
+None => "nothing after it was done".to_owned(),'''
 
 [[plant]]
 name = "release: a feed read that cannot reach the feed ends the run"
@@ -563,13 +677,26 @@ meant = "a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_neve
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/promote.rs"
+file = "tools/xtask/src/release/github.rs"
 find = '''
-    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    /// The newest run of `workflow`, on `commit` and by `event` where they are named.
 '''
 replace = '''
-    release.dispatch("ci.yml", &branch)?;
-    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    pub(super) fn dispatch(&mut self, workflow: &str, reference: &str) -> Result<(), Error> {
+        self.gh(&["workflow", "run", workflow, "--repo", REPOSITORY, "--ref", reference])?;
+        Ok(())
+    }
+
+    /// The newest run of `workflow`, on `commit` and by `event` where they are named.
+'''
+
+[[plant.edit]]
+file = "tools/xtask/src/release/promote.rs"
+find = '''
+    // The branch's push started CI on the version commit: the gate, before the tag.
+'''
+replace = '''
+    release.dispatch(CI_WORKFLOW, &branch)?;
 '''
 
 [[plant]]
@@ -630,7 +757,7 @@ runs = ["release-commands"]
 [[plant.edit]]
 file = "tools/xtask/src/release/promote.rs"
 find = '''
-    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    let ci_before = release.newest_run(CI_WORKFLOW, Some(&promoted), Some("push"))?;
     if options.dry_run {'''
 replace = '''
     if options.dry_run {'''
@@ -638,10 +765,11 @@ replace = '''
 [[plant.edit]]
 file = "tools/xtask/src/release/promote.rs"
 find = '''
-    release.tag_and_push(&tag, &notes, &promoted)?;'''
+    // The branch's push started CI on the version commit: the gate, before the tag.
+'''
 replace = '''
-    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
-    release.tag_and_push(&tag, &notes, &promoted)?;'''
+    let ci_before = release.newest_run(CI_WORKFLOW, Some(&promoted), Some("push"))?;
+'''
 
 [[plant]]
 name = "release: a promotion asks gh before its pushes in the dry run alone"
@@ -651,19 +779,20 @@ runs = ["release-commands"]
 [[plant.edit]]
 file = "tools/xtask/src/release/promote.rs"
 find = '''
-    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    let ci_before = release.newest_run(CI_WORKFLOW, Some(&promoted), Some("push"))?;
     if options.dry_run {'''
 replace = '''
     if options.dry_run {
-        release.newest_run("release.yml", Some(&promoted), Some("push"))?;'''
+        release.newest_run(CI_WORKFLOW, Some(&promoted), Some("push"))?;'''
 
 [[plant.edit]]
 file = "tools/xtask/src/release/promote.rs"
 find = '''
-    release.tag_and_push(&tag, &notes, &promoted)?;'''
+    // The branch's push started CI on the version commit: the gate, before the tag.
+'''
 replace = '''
-    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
-    release.tag_and_push(&tag, &notes, &promoted)?;'''
+    let ci_before = release.newest_run(CI_WORKFLOW, Some(&promoted), Some("push"))?;
+'''
 
 [[plant]]
 name = "release: a promotion left is finished by hand by its branch's name"
@@ -672,8 +801,8 @@ runs = ["release-commands"]
 
 [[plant.edit]]
 file = "tools/xtask/src/release/promote.rs"
-find = "`git tag -a {tag} -F <notes> {at} && git push origin {tag}"
-replace = "`git tag -a {tag} -F <notes> {branch} && git push origin {tag}"
+find = "        finish_by_hand(tag, &at)"
+replace = "        finish_by_hand(tag, branch)"
 
 [[plant]]
 name = "release: a promotion left is finished by hand whatever its parent"
@@ -682,7 +811,7 @@ runs = ["release-commands"]
 
 [[plant.edit]]
 file = "tools/xtask/src/release/promote.rs"
-find = "or, if its parent is {alpha_commit}, finish it by hand:"
+find = "or, if its parent is {alpha_commit} and CI is green on it, finish it by hand:"
 replace = "or finish it by hand:"
 
 [[plant]]

@@ -1,8 +1,9 @@
 //! What the release's tests run on: a checkout in a temporary tree with two
 //! bare repositories for its remotes, `origin` and `upstream`, which `git`
 //! really pushes to; and a GitHub that is a script. `gh` lists, shows and
-//! starts runs the test sets up, a push of `main` to upstream starts CI, a push
-//! of a tag starts the Release run, which (when it ends green) puts the version
+//! starts runs the test sets up, a push of `main` or of a `release/` branch to
+//! upstream starts CI, a push of a tag starts the Release run, which (when it
+//! ends green) puts the version
 //! on the feeds a release of its channel moves; `curl` reads those feeds; and
 //! `cargo update` writes the lockfile's version as cargo does. Nothing here
 //! reaches GitHub or moves a feed.
@@ -279,6 +280,8 @@ pub struct Fake {
     pub tag_fetch_fails: bool,
     /// Whether a tag pushed to upstream starts its Release run.
     pub tags_start_runs: bool,
+    /// Whether a `release/` branch pushed to upstream starts CI on it.
+    pub branches_start_ci: bool,
     /// Whether every `gh` fails, as it does when it is not logged in.
     pub gh_fails: bool,
     /// Every program run, in order.
@@ -317,6 +320,7 @@ impl Fake {
             failing_after_the_tag: Vec::new(),
             tag_fetch_fails: false,
             tags_start_runs: true,
+            branches_start_ci: true,
             gh_fails: false,
             ran: Vec::new(),
             pauses: 0,
@@ -425,6 +429,15 @@ impl Fake {
         } else if target == "main" || target == "refs/heads/main" {
             let commit = self.upstream_commit("main");
             self.start("ci.yml", &commit, "push");
+        } else if let Some(branch) = target
+            .strip_prefix("refs/heads/")
+            .or(Some(target))
+            .filter(|branch| branch.starts_with("release/"))
+        {
+            if self.branches_start_ci {
+                let commit = self.upstream_commit(&format!("refs/heads/{branch}"));
+                self.start("ci.yml", &commit, "push");
+            }
         }
     }
 
@@ -485,13 +498,6 @@ impl Fake {
                     &json!({ "status": status, "conclusion": conclusion, "jobs": jobs })
                         .to_string(),
                 )
-            }
-            ["workflow", "run", workflow, ..] => {
-                let reference = flag("--ref").unwrap();
-                let commit = self.upstream_commit(&reference);
-                let workflow = (*workflow).to_owned();
-                self.start(&workflow, &commit, "workflow_dispatch");
-                said("")
             }
             _ => panic!("gh was asked what GitHub's script does not answer: {args:?}"),
         }

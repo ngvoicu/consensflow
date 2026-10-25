@@ -30,15 +30,33 @@
 //! 4. `feed-alpha` serves a version before this one, which the publisher would
 //!    otherwise leave where it is (a feed that answers no release in all its
 //!    reads is an outage, and refused as one);
-//! 5. CI on `main`'s commit ended green, with both platforms' gates;
-//! 6. the Release workflow's dry run on `main` ended green;
-//! 7. the annotated tag, its message the notes, pushed to origin and upstream;
-//! 8. the Release run of the tag, watched to its end;
-//! 9. `feed-alpha` read until it serves the version, and `feed-stable` checked
+//! 5. CI's push run of `main`'s commit, watched to its end, ended green with
+//!    both platforms' summaries (cf-release's `REQUIRED_JOBS`): this is the
+//!    release's gate, which the Release run checks again and does not run;
+//! 6. the annotated tag, its message the notes, pushed to origin and upstream;
+//! 7. the Release run of the tag, watched to its end: its `gate` job finds CI's
+//!    green run of the commit, and its `mac` and `windows` jobs build, sign and
+//!    smoke-test the packages before `publish`;
+//! 8. `feed-alpha` read until it serves the version, and `feed-stable` checked
 //!    to serve the release it served before. A feed is read again on a 404 or
 //!    a network error, within its reads.
 //!
-//! `--dry-run` does 1 to 6 and says what it would tag.
+//! `--dry-run` does 1 to 5 and says what it would tag.
+//!
+//! There is no Release dry run before the tag. Of the 40 hand runs of the
+//! Release workflow to 3.0.6-alpha.2, the 10 that were not green failed in the
+//! gate, which CI runs, except three in the Mac job's signing and smoke between
+//! 2026-10-01 and 10-05, while those steps were being built; no tag's run ever
+//! failed in its `mac` or `windows` job. Those jobs run before `publish` in the
+//! tag's own run, so a failure there publishes nothing. A hand run of the Release
+//! workflow (`gh workflow run release.yml --ref main`) is still the trial of a
+//! change to the release's own build, signing or smoke.
+//!
+//! How long it takes: with CI already green on main's commit, about 15 minutes
+//! from the command to the feed (the Mac job 4 to 8 minutes and the
+//! notarization, usually under one; Windows 4 to 8; the gate's check about 3;
+//! then publish about 3); with CI still to run, its 75 minutes more. A
+//! promotion is CI on its branch (about 75 minutes), then the same 15.
 //!
 //! `release promote` is [`promote`]'s. The programs are `git`, `gh` (logged in,
 //! for the runs and the dispatch), `curl` (the feeds, read where installed apps
