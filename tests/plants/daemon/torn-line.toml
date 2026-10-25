@@ -150,7 +150,7 @@ runs = ["harness-claude-torn"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record/followed.rs"
-find = "                        record.lost = read.lost;\n"
+find = "                        record.lines.lost = read.lost;\n"
 replace = "                        drop(read.lost);\n"
 
 [[plant]]
@@ -159,9 +159,9 @@ meant = "a_result_taken_past_a_line_lost_in_its_turn_ends_with_a_line_for_the_ch
 runs = ["engine-lost-lines"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = "        if let Some(lost) = lost_in_turn(record, observed, Some(start)) {"
-replace = "        if let Some(lost) = lost_in_turn(record, observed, Some(start)).filter(|_| false) {"
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            lost_in_turn(record, observed, Some(start)),\n"
+replace = "            lost_in_turn(record, observed, Some(start)).filter(|_| false),\n"
 
 [[plant]]
 name = "torn line: the window's activity says nothing of a line lost in its turn"
@@ -268,7 +268,7 @@ meant = "a_line_lost_before_a_turn_is_no_part_of_it_after_a_restart"
 runs = ["engine-lost-lines"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
+file = "crates/cf-engine/src/turn_end.rs"
 find = "    let Some(places) = observed.places() else {"
 replace = "    let Some(places) = observed.places().filter(|_| false) else {"
 
@@ -278,7 +278,7 @@ meant = "a_result_taken_past_a_line_lost_in_its_turn_ends_with_a_line_for_the_ch
 runs = ["engine-lost-lines"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
+file = "crates/cf-engine/src/turn_end.rs"
 find = "    observed.items().iter().rposition(|item| {"
 replace = "    observed.items().iter().rposition(|item| false && {"
 
@@ -321,3 +321,77 @@ runs = ["base-append-processes"]
 file = "crates/cf-base/src/file/append.rs"
 find = "    let _held = held(file);"
 replace = "    let _held = ();"
+
+# The merge with turn-end (T-494): a result is recorded at a turn's end, held or not
+# (`turn_end::collect`), and by `cf task finish` (`turn_end/finish.rs`); each is marked past a
+# line lost in the turn, the line ahead of what ConsensFlow says of the leftovers.
+
+[[plant]]
+name = "torn line: a task finished past a line lost in its turn has its result say nothing of it"
+meant = "a_task_finished_past_a_line_lost_in_its_turn_has_its_result_marked_ahead_of_the_leftovers"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = "            lost_in_turn(record, &observed, Some(delivered)),\n"
+replace = "            lost_in_turn(record, &observed, Some(delivered)).filter(|_| false),\n"
+
+[[plant]]
+name = "torn line: a finished task's turn is counted from the start of its record"
+meant = "a_task_finished_past_a_line_lost_before_its_turn_has_its_result_unmarked"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = "            lost_in_turn(record, &observed, Some(delivered)),\n"
+replace = "            lost_in_turn(record, &observed, Some(0)),\n"
+
+[[plant]]
+name = "torn line: a finished task's result says its lost line after ConsensFlow's word on the leftovers"
+meant = "a_task_finished_past_a_line_lost_in_its_turn_has_its_result_marked_ahead_of_the_leftovers"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = """
+        let words = with_lost(
+            words_of(&run),
+            &participant.handle,
+            lost_in_turn(record, &observed, Some(delivered)),
+        );
+        let body = with_leftovers(
+            words,
+            &leftovers(&participant.handle, pending, Some(by), observed.settled),
+        );"""
+replace = """
+        let body = with_lost(
+            with_leftovers(
+                words_of(&run),
+                &leftovers(&participant.handle, pending, Some(by), observed.settled),
+            ),
+            &participant.handle,
+            lost_in_turn(record, &observed, Some(delivered)),
+        );"""
+
+[[plant]]
+name = "torn line: a held turn's result its job's end brings forgets the line the turn lost"
+meant = "a_line_lost_in_a_turn_held_for_its_job_marks_the_result_its_jobs_end_brings"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            lost_in_turn(record, observed, Some(start)),\n"
+replace = "            lost_in_turn(record, observed, Some(start)).filter(|_| record.held.borrow().told.is_none()),\n"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = """
+        record.held.borrow_mut().reset();
+        let words = with_lost("""
+replace = """
+        let words = with_lost("""
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        let body = with_leftovers(words, &leftovers(&participant.handle, pending, None, true));\n"
+replace = "        record.held.borrow_mut().reset();\n        let body = with_leftovers(words, &leftovers(&participant.handle, pending, None, true));\n"

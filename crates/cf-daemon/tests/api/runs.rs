@@ -15,6 +15,8 @@ use std::sync::OnceLock;
 use serde_json::Value;
 use tokio::sync::oneshot;
 
+use crate::nested_cargo;
+
 /// What a run printed, and how it ended.
 pub struct Ran {
     pub stdout: String,
@@ -29,11 +31,14 @@ pub fn cf() -> &'static Path {
 }
 
 /// `cargo build -p cf` in this workspace, in the target folder these tests
-/// were built in, and the program it made: cargo says where it put it.
+/// were built in, and the program it made: cargo says where it put it. That
+/// cargo has the environment of this test but for the variables cargo gave the
+/// test (`nested_cargo`): with them it builds over files of the build that
+/// runs this test.
 fn build() -> PathBuf {
     let tests = Path::new(env!("CARGO_TARGET_TMPDIR"));
     let target = tests.parent().expect("a target folder");
-    let mut command = Command::new(env!("CARGO"));
+    let mut command = nested_cargo::cargo();
     command
         .args(["build", "--offline", "--package", "cf", "--bin", "cf"])
         .arg("--message-format=json-render-diagnostics")

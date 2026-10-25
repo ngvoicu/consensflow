@@ -24,6 +24,56 @@ fn a_record_that_is_null_fails_the_look_and_a_file_of_no_record_is_an_empty_sess
     assert_eq!(record.settlement, Settlement::Unknown);
 }
 
+/// An assistant's step that said `text` and called the tool `call`.
+fn saying_and_calling(id: &str, text: &str, call: &Value) -> Value {
+    message(
+        id,
+        json!({ "role": "assistant", "stopReason": "toolUse",
+            "content": [{ "type": "text", "text": text },
+                        { "type": "toolCall", "id": call, "name": "read" }] }),
+    )
+}
+
+#[test]
+fn the_steps_of_a_turn_that_stopped_for_a_tool_are_never_complete_and_the_step_that_stopped_is() {
+    // The owner's decision of 2026-10-15: a result is what the member wrote after its
+    // last tool call. Pi's steps that said something and called a tool stop for it
+    // (`toolUse`): they are progress, and only the step that stopped is complete.
+    let mut stage = Stage::with(&[
+        header(),
+        user("u1", "Review the commit"),
+        saying_and_calling("a1", "Still reviewing", &json!("c1")),
+        result("t1", &json!("c1")),
+        saying_and_calling("a2", "Now the tests", &json!("c2")),
+        result("t2", &json!("c2")),
+        assistant("a3", "stop", "PASS: no findings."),
+    ]);
+    let record = stage.at(121_000);
+
+    assert_eq!(record.settlement, Settlement::Settled);
+    let shape: Vec<(Role, bool)> = record
+        .items
+        .iter()
+        .map(|item| (item.role, item.complete))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            (Role::User, true),
+            (Role::Assistant, false),
+            (Role::Tool, true),
+            (Role::Assistant, false),
+            (Role::Tool, true),
+            (Role::Assistant, true),
+        ]
+    );
+    let words: Vec<&str> = record.items.iter().map(|item| &*item.text).collect();
+    assert_eq!(
+        (words[1], words[3], words[5]),
+        ("Still reviewing", "Now the tests", "PASS: no findings.")
+    );
+}
+
 #[test]
 fn a_step_that_names_no_end_keeps_the_turn_open_and_the_failure_as_it_was() {
     let mut stage = Stage::with(&[
@@ -325,7 +375,7 @@ fn a_record_whose_newline_a_short_write_dropped_keeps_its_place_and_its_time() {
     assert_eq!(after.items.len(), 2);
     assert_eq!(after.items[0], before[0], "the same id, at the same place");
     assert_eq!(after.items[1].at, Some(json!(2)));
-    assert!(after.lost.is_empty());
+    assert!(after.lines.lost.is_empty());
     // Each item with its record's place, the header's at 0.
-    assert_eq!(after.places, Some(vec![1, 2]));
+    assert_eq!(after.lines.places, Some(vec![1, 2]));
 }

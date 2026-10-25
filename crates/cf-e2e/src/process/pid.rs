@@ -13,8 +13,8 @@ use std::io;
 
 use super::Run;
 
-/// A signal a case sends. Windows has no `Interrupt`, and its `Terminate` is a
-/// kill.
+/// A signal a case sends. Windows has no `Interrupt`, `Stop` or `Continue`, and
+/// its `Terminate` is a kill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
     /// SIGTERM: the polite end, which a window's supervisor answers by ending
@@ -24,6 +24,11 @@ pub enum Signal {
     Interrupt,
     /// SIGKILL: the end nothing answers to.
     Kill,
+    /// SIGSTOP: the program is stopped where it is, and runs no more until it is
+    /// continued. What is sent to it meanwhile waits in its pipes.
+    Stop,
+    /// SIGCONT: a program that was stopped goes on.
+    Continue,
 }
 
 /// Sends `signal` to the process `pid`.
@@ -35,8 +40,24 @@ pub fn signal(pid: u32, signal: Signal) -> io::Result<()> {
         Signal::Terminate => Sent::SIGTERM,
         Signal::Interrupt => Sent::SIGINT,
         Signal::Kill => Sent::SIGKILL,
+        Signal::Stop => Sent::SIGSTOP,
+        Signal::Continue => Sent::SIGCONT,
     };
     kill(as_pid(pid)?, sent).map_err(io::Error::from)
+}
+
+/// Stops the process `pid` where it is and lets it go on after `span`: what a machine
+/// too loaded to run it does for a moment. A request made of it meanwhile is answered
+/// when it goes on, as late as the stop was long. It is stopped when this returns.
+#[cfg(unix)]
+pub fn stall(pid: u32, span: std::time::Duration) -> io::Result<()> {
+    signal(pid, Signal::Stop)?;
+    std::thread::spawn(move || {
+        std::thread::sleep(span);
+        // A process that is gone by then is the end of its case, not a failure of this.
+        let _ = signal(pid, Signal::Continue);
+    });
+    Ok(())
 }
 
 /// Whether the process `pid` is there to be signalled: the answer of `kill`
@@ -87,10 +108,10 @@ fn as_pid(pid: u32) -> io::Result<nix::unistd::Pid> {
 /// is what ends a process there.
 #[cfg(windows)]
 pub fn signal(pid: u32, signal: Signal) -> io::Result<()> {
-    if signal == Signal::Interrupt {
+    if matches!(signal, Signal::Interrupt | Signal::Stop | Signal::Continue) {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
-            "Windows has no SIGINT to send",
+            format!("Windows has no {signal:?} to send"),
         ));
     }
     let ran = Run::new("taskkill")
@@ -112,6 +133,59 @@ pub fn is_alive(pid: u32) -> bool {
         .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
         .run()
         .is_ok_and(|ran| ran.stdout.contains(&format!("\"{pid}\"")))
+}
+
+/// The ones of `pids` that are there.
+#[cfg(unix)]
+pub fn alive_among(pids: &[u32]) -> Vec<u32> {
+    pids.iter().copied().filter(|&pid| is_alive(pid)).collect()
+}
+
+/// The ones of `pids` that are there, by one look at the system's processes rather than
+/// one for each (`tasklist` says a process's id second in each line, in quotes). All of
+/// them where the system will not say: a case that asks for what is gone must not take
+/// silence for it.
+#[cfg(windows)]
+pub fn alive_among(pids: &[u32]) -> Vec<u32> {
+    let Ok(ran) = Run::new("tasklist").args(["/NH", "/FO", "CSV"]).run() else {
+        return pids.to_vec();
+    };
+    let there: std::collections::HashSet<u32> = ran
+        .stdout
+        .lines()
+        .filter_map(|line| line.split("\",\"").nth(1)?.parse().ok())
+        .collect();
+    // The system's idle process is always listed: a list without it was not read.
+    if !there.contains(&0) {
+        return pids.to_vec();
+    }
+    pids.iter()
+        .copied()
+        .filter(|pid| there.contains(pid))
+        .collect()
+}
+
+/// Ends every one of `pids` that is there, each by itself and none of what it started:
+/// a case's guard against what it started and a failed case would leave running.
+#[cfg(unix)]
+pub fn end_all(pids: &[u32]) {
+    for &pid in pids {
+        let _ = signal(pid, Signal::Kill);
+    }
+}
+
+/// Ends every one of `pids` that is there, each by itself and none of what it started,
+/// by one `taskkill`.
+#[cfg(windows)]
+pub fn end_all(pids: &[u32]) {
+    if pids.is_empty() {
+        return;
+    }
+    let mut taskkill = Run::new("taskkill").arg("/F");
+    for pid in pids {
+        taskkill = taskkill.args(["/PID", &pid.to_string()]);
+    }
+    let _ = taskkill.run();
 }
 
 /// How long the PowerShell that says when a process began is given: well past what

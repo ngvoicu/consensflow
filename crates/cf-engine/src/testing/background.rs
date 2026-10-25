@@ -1,30 +1,18 @@
-//! What a pane host says of the work a window's turn left running, for a test
-//! to give: the commands a window's tree has running that its turn started, which
-//! the host proves are the turn's, and the windows the engine told a turn begins in.
-//! It writes nothing of its calls in the Node traces' shape: Node's dispatcher never
-//! asked, and the traces hold the engine to what Node's asked.
-//!
-//! It keeps the rule of the real host that the engine's asks are for: the host
-//! chooses what it ends, from what it can prove the turn's, and says so; what it
-//! cannot tell from the harness's own (a server the harness started late) it leaves
-//! alone, and says nothing of, so a test gives the engine none of it. Asked to end
-//! what its window's turn left, it ends the commands the test said ran
-//! ([`FakeBackground::run`]), says those it could not end ([`FakeBackground::stubborn`])
-//! left, says nothing was ended where it is made to ([`FakeBackground::refuse`]), and
-//! gives no answer where it is made to ([`FakeBackground::leave_unanswered`]).
+//! What the pane host is told of the windows a turn begins in, for a test to read:
+//! the engine marks each window where a turn begins (with how its harness keeps its
+//! servers, and which harness it is), so that what a close says the window left
+//! running is the turns'. It writes nothing of its calls in the Node traces' shape:
+//! Node's dispatcher never asked, and the traces hold the engine to what Node's asked.
+//! Nothing is ever asked to end (`turn_end`): the seam has no such call.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cf_harness::contract::{Pane, Work};
-use cf_proto::panes::{Background, BackgroundProcess, Ending, Servers, BACKGROUND_PROCESSES};
+use cf_proto::panes::Servers;
 
-use super::executor::Gate;
-use super::host::window_of;
-use crate::seams::BackgroundWork;
-
-/// What a window's tree runs, one list a window.
-type Processes = RefCell<Vec<(String, Vec<BackgroundProcess>)>>;
+use super::Gate;
+use crate::seams::{BackgroundWork, CommandsSeen};
 
 /// What a mark told the host of a window.
 struct Marked {
@@ -33,62 +21,25 @@ struct Marked {
     harness: String,
 }
 
-/// The pane host's answers about background work, which a test sets.
+/// A look at a window's commands: the pane, the rest it named and the time.
+type Looked = (Pane, Option<u64>, Option<i64>);
+
+/// The pane host's side of the marks, which a test reads, and of its looks at the
+/// commands of a window's harness, which a test sets.
 #[derive(Default)]
 pub struct FakeBackground {
-    /// What each window's tree runs that its turn started, which an ending ends,
-    /// by the handle of its participant.
-    jobs: Processes,
-    /// What each window's tree runs that its turn started and the host cannot end.
-    stubborn: Processes,
     /// What the engine told of each window a turn begins in, in order.
     marked: RefCell<Vec<Marked>>,
-    /// What the engine asked to end, by the pane it asked it of, and what the host
-    /// ended of it, in order.
-    endings: RefCell<Vec<(Pane, Vec<BackgroundProcess>)>>,
-    /// The host refuses an ending: it says nothing was ended, as one that does not
-    /// know the operation does.
-    refusing: Cell<bool>,
-    /// How many of the next endings the host gives no answer to.
-    unanswered: Cell<usize>,
-    /// An ending waits for this gate before it ends anything.
-    hold: RefCell<Option<Gate>>,
-}
-
-/// `commands` as the processes a host lists, numbered from `first`.
-fn listed(commands: &[&str], first: u32) -> Vec<BackgroundProcess> {
-    commands
-        .iter()
-        .zip(first..)
-        .map(|(command, pid)| BackgroundProcess {
-            pid,
-            command: (*command).to_owned(),
-        })
-        .collect()
-}
-
-/// `list` with the entry of `handle` made `processes`.
-fn set(list: &Processes, handle: &str, processes: Vec<BackgroundProcess>) {
-    let mut list = list.borrow_mut();
-    list.retain(|(named, _)| named != handle);
-    list.push((handle.to_owned(), processes));
-}
-
-/// What `list` holds of the window of `pane`.
-fn of(list: &Processes, pane: &Pane) -> Vec<BackgroundProcess> {
-    list.borrow()
-        .iter()
-        .find(|(handle, _)| window_of(&pane.id, handle))
-        .map(|(_, processes)| processes.clone())
-        .unwrap_or_default()
-}
-
-/// `processes` as the host lists them: how many, and the first of them.
-fn background_of(processes: Vec<BackgroundProcess>) -> Background {
-    Background {
-        total: processes.len(),
-        processes: processes.into_iter().take(BACKGROUND_PROCESSES).collect(),
-    }
+    /// What a look at a window's commands answers: that the host cannot tell, unless a
+    /// test says.
+    commands: Cell<Option<CommandsSeen>>,
+    /// The panes the engine looked at the commands of, in order, and the rest each named.
+    looked: RefCell<Vec<Looked>>,
+    /// The rests the engine asked the host to keep, in order, with the earlier rests each
+    /// asked kept: each is given the number of its place, from 0.
+    rests: RefCell<Vec<(Pane, Vec<u64>)>>,
+    /// The word that a turn begins waits for this gate before it is taken.
+    mark_hold: RefCell<Option<Gate>>,
 }
 
 impl FakeBackground {
@@ -96,61 +47,12 @@ impl FakeBackground {
         Rc::new(Self::default())
     }
 
-    /// The window of `handle` (its own, or one of its sessions') has these
-    /// commands running that its turn started, instead of what it had: what an
-    /// ending of it ends.
-    pub fn run(&self, handle: &str, commands: &[&str]) {
-        set(&self.jobs, handle, listed(commands, 1001));
-    }
-
-    /// The window of `handle` has these commands running that its turn started and
-    /// that the host cannot end: it says they are still running.
-    pub fn stubborn(&self, handle: &str, commands: &[&str]) {
-        set(&self.stubborn, handle, listed(commands, 2001));
-    }
-
-    /// What the window of `handle` ran has ended by itself.
-    pub fn finish(&self, handle: &str) {
-        self.jobs.borrow_mut().retain(|(named, _)| named != handle);
-    }
-
-    /// The host refuses to end anything: an older one, which does not know the
-    /// operation, answers that it ended nothing.
-    pub fn refuse(&self) {
-        self.refusing.set(true);
-    }
-
-    /// The host gives no answer to the next `times` endings it is asked: it may be
-    /// ending still, or it went.
-    pub fn leave_unanswered(&self, times: usize) {
-        self.unanswered.set(times);
-    }
-
-    /// The host takes its time over an ending, as it does over the grace it gives
-    /// the work: it ends nothing until the gate is opened.
-    pub fn hold_endings(&self) -> Gate {
+    /// The host takes its time over the word that a turn begins: it is not taken
+    /// until the gate is opened.
+    pub fn hold_marks(&self) -> Gate {
         let gate = Gate::default();
-        *self.hold.borrow_mut() = Some(gate.clone());
+        *self.mark_hold.borrow_mut() = Some(gate.clone());
         gate
-    }
-
-    /// The commands the host ended of the window of `handle`'s work, in order.
-    pub fn ended(&self, handle: &str) -> Vec<String> {
-        self.endings
-            .borrow()
-            .iter()
-            .filter(|(pane, _)| window_of(&pane.id, handle))
-            .flat_map(|(_, ended)| ended.iter().map(|process| process.command.clone()))
-            .collect()
-    }
-
-    /// How many times the engine asked the host to end the window of `handle`'s work.
-    pub fn endings_asked(&self, handle: &str) -> usize {
-        self.endings
-            .borrow()
-            .iter()
-            .filter(|(pane, _)| window_of(&pane.id, handle))
-            .count()
     }
 
     /// The panes the engine said a turn begins in, in order.
@@ -172,6 +74,67 @@ impl FakeBackground {
             .collect()
     }
 
+    /// A look at a window's commands answers that `commands` run from now on, or that the
+    /// host cannot tell them (none).
+    pub fn commands_run(&self, commands: Option<usize>) {
+        self.commands.set(Some(
+            commands.map_or(CommandsSeen::Untold, CommandsSeen::Running),
+        ));
+    }
+
+    /// A look at a window's commands is answered that a process of it cannot be read.
+    pub fn commands_unreadable(&self) {
+        self.commands.set(Some(CommandsSeen::Unreadable));
+    }
+
+    /// A look at a window's commands is answered that its processes kept changing.
+    pub fn commands_unsettled(&self) {
+        self.commands.set(Some(CommandsSeen::Unsettled));
+    }
+
+    /// The earlier rests each rest asked the host to keep, in order.
+    pub fn kept(&self) -> Vec<Vec<u64>> {
+        self.rests
+            .borrow()
+            .iter()
+            .map(|(_, keep)| keep.clone())
+            .collect()
+    }
+
+    /// A look at a window's commands is answered with nothing from now on.
+    pub fn commands_unanswered(&self) {
+        self.commands.set(Some(CommandsSeen::Unanswered));
+    }
+
+    /// How many looks at a window's commands the engine made.
+    pub fn looks(&self) -> usize {
+        self.looked.borrow().len()
+    }
+
+    /// The rest each look at a window's commands named, in order.
+    pub fn looked_since(&self) -> Vec<Option<u64>> {
+        self.looked
+            .borrow()
+            .iter()
+            .map(|(_, since, _)| *since)
+            .collect()
+    }
+
+    /// The time each look at a window's commands named, before which a process began is
+    /// no command, in order.
+    pub fn looked_after(&self) -> Vec<Option<i64>> {
+        self.looked
+            .borrow()
+            .iter()
+            .map(|(_, _, after)| *after)
+            .collect()
+    }
+
+    /// How many rests the engine asked the host to keep.
+    pub fn rests(&self) -> usize {
+        self.rests.borrow().len()
+    }
+
     /// What each of those marks said of which harness the window is.
     pub fn harness_said(&self) -> Vec<String> {
         self.marked
@@ -189,40 +152,29 @@ impl BackgroundWork for FakeBackground {
             servers,
             harness: harness.to_owned(),
         });
-        Box::pin(async {})
-    }
-
-    fn end<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Ending>> {
-        // What is asked is written down when it is asked; what is ended, when the
-        // host does it.
-        self.endings.borrow_mut().push((pane.clone(), Vec::new()));
-        let at = self.endings.borrow().len() - 1;
-        let held = self.hold.borrow().clone();
+        let held = self.mark_hold.borrow().clone();
         Box::pin(async move {
             if let Some(gate) = held {
                 gate.wait().await;
             }
-            let unanswered = self.unanswered.get();
-            if unanswered > 0 {
-                self.unanswered.set(unanswered - 1);
-                return None;
-            }
-            if self.refusing.get() {
-                return Some(Ending::default());
-            }
-            let ended = of(&self.jobs, pane);
-            let left = of(&self.stubborn, pane);
-            // A process that is ended is no more among what the window's tree runs.
-            for (handle, processes) in self.jobs.borrow_mut().iter_mut() {
-                if window_of(&pane.id, handle) {
-                    processes.clear();
-                }
-            }
-            self.endings.borrow_mut()[at].1.clone_from(&ended);
-            Some(Ending {
-                ended: background_of(ended),
-                left: background_of(left),
-            })
         })
+    }
+
+    fn commands<'a>(
+        &'a self,
+        pane: &'a Pane,
+        since: Option<u64>,
+        after: Option<i64>,
+    ) -> Work<'a, CommandsSeen> {
+        self.looked.borrow_mut().push((pane.clone(), since, after));
+        let commands = self.commands.get().unwrap_or(CommandsSeen::Untold);
+        Box::pin(async move { commands })
+    }
+
+    fn rest<'a>(&'a self, pane: &'a Pane, keep: &'a [u64]) -> Work<'a, Option<u64>> {
+        let mut rests = self.rests.borrow_mut();
+        rests.push((pane.clone(), keep.to_vec()));
+        let number = u64::try_from(rests.len() - 1).ok();
+        Box::pin(async move { number })
     }
 }

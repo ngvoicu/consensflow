@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 
 use super::written_page;
 use crate::api::routes::tests::support::api;
+use crate::api::waits::WAITS;
 use crate::testing::{scene, Scene};
 
 async fn history(scene: &Scene, token: &str, query: &str) -> (u16, Value) {
@@ -67,6 +68,58 @@ fn switched(scene: &Scene) {
             },
         )
         .unwrap();
+}
+
+/// A line of a page names a message by its header, and is read out with its
+/// gist: while the project is closed, a message no window was handed yet (here
+/// zeus's question, which still waits for the chief) is read out with none of its
+/// text (round 6's look at every route that says a message's text).
+#[tokio::test]
+async fn while_the_project_is_closed_a_page_reads_out_none_of_a_message_no_window_was_handed() {
+    let scene = scene();
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let chief = ledger
+            .project(scene.project.id)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .find(|p| p.handle == "chief")
+            .unwrap();
+        let old = ledger.start_conversation(chief.id, "claude-code").unwrap();
+        let named = format!(
+            "[ConsensFlow m-{} · question from @zeus]",
+            scene.question.id
+        );
+        ledger
+            .copy_transcript(
+                old.id,
+                &[json!({ "id": "u1", "role": "user", "text": named, "complete": true })],
+                0,
+            )
+            .unwrap();
+        ledger
+            .switch_chief(
+                scene.project.id,
+                &ChiefSwitch {
+                    harness: "claude-code".to_owned(),
+                    agent: "other".to_owned(),
+                    cut: false,
+                },
+            )
+            .unwrap();
+        ledger
+            .set_project_state(scene.project.id, "suspended")
+            .unwrap();
+    }
+
+    let (status, said) = history(&scene, &scene.chief, "").await;
+
+    assert_eq!(status, 200);
+    let text = said["text"].as_str().unwrap();
+    assert!(text.contains(WAITS), "{text}");
+    assert!(!text.contains("Which?"), "{text}");
 }
 
 #[tokio::test]

@@ -99,7 +99,7 @@ replace = '''            let current = self.seams.ledger.borrow().current_conver
 
 [[plant]]
 name = "resume unturned: a member's message is begun after its harness is asked, so a pause during the ask is forgiven"
-meant = "a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_the_note_is_given_back"
+meant = "a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_the_note_is_withdrawn"
 runs = ["engine-launch-stops"]
 
 [[plant.edit]]
@@ -131,13 +131,13 @@ find = '''        let conversation = if participant.role == "chief" {
             )? {
                 return Ok(None);
             }
-            found
+            self.kept_apart(project, participant, record, found, before.as_ref(), first)?
         };'''
 replace = ''''''
 
 [[plant]]
 name = "resume unturned: a launch whose pause came while the harness was asked goes on to prepare its window"
-meant = "a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_the_note_is_given_back"
+meant = "a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_the_note_is_withdrawn"
 runs = ["engine-launch-stops"]
 
 [[plant.edit]]
@@ -151,8 +151,8 @@ find = '''            if self.launch_over(
             )? {
                 return Ok(None);
             }
-            found'''
-replace = '''            found'''
+            self.kept_apart(project, participant, record, found, before.as_ref(), first)?'''
+replace = '''            self.kept_apart(project, participant, record, found, before.as_ref(), first)?'''
 
 [[plant]]
 name = "resume unturned: the conversation a member's launch looked into is not the one its window goes on with"
@@ -163,10 +163,10 @@ runs = ["engine-resume"]
 file = "crates/cf-engine/src/windows.rs"
 find = '''                return Ok(None);
             }
-            found'''
+            self.kept_apart(project, participant, record, found, before.as_ref(), first)?'''
 replace = '''                return Ok(None);
             }
-            found.filter(|_| false)'''
+            self.kept_apart(project, participant, record, found.filter(|_| false), before.as_ref(), first)?'''
 
 # --- each harness's own answer ---
 

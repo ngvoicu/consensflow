@@ -405,7 +405,8 @@ fn a_host_shut_down_with_windows_open_tells_the_exit_of_each_before_it_closes_it
             }
             assert!(Instant::now() < deadline, "no {word}: {said:?}");
             if let Ok((id, bytes)) = printed.recv_timeout(Duration::from_millis(100)) {
-                // The console asks where the cursor is before a program may print.
+                // A console that asks where the cursor is holds what a program prints until
+                // it is told (the pane host's do not ask: `pty::conpty`).
                 if bytes.windows(4).any(|query| query == b"\x1b[6n") {
                     let answered = daemon.ask(
                         "pane.reply",

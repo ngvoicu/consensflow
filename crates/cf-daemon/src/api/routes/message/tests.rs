@@ -7,7 +7,7 @@ use serde_json::json;
 
 use crate::api::routes::tests::support::{
     answer_in_words, answered_question, api, gated_brief, note_for_zeus, plain_question_on,
-    state_of, working_question, working_task,
+    project_is, state_of, working_question, working_task,
 };
 use crate::testing::scene;
 
@@ -243,6 +243,160 @@ async fn a_gated_answer_is_not_its_recipients_to_read_so_it_is_not_received() {
     assert_eq!(status, 404, "{said}");
     assert_eq!(scene.message(answer.id).state, "gated");
     assert_eq!(scene.kicks.get(), 0);
+}
+
+/// Both reviews of 2026-10-16, round 6: a window the Close could not close read
+/// the answer the door held for the Resume, whole, and `cf` said it received it,
+/// so the task went on in a closed project. It is told the answer waits, and is
+/// given none of it; the chief, who wrote it, reads it as ever.
+#[tokio::test]
+async fn a_message_no_window_was_handed_waits_while_the_project_is_closed_and_its_sender_reads_it_as_ever(
+) {
+    let scene = scene();
+    let answer = answered_question(&scene, "Blue.");
+    project_is(&scene, "suspended");
+    let target = format!("/api/inbox/{}", answer.id);
+
+    let (status, said) = api(&scene, Method::GET, &target, &scene.zeus, "").await;
+    assert_eq!(
+        (status, said),
+        (
+            409,
+            json!({
+                "error": "waits",
+                "message": format!("m-{} waits until the human resumes the project: it comes to you then. Do not ask for it again now.", answer.id)
+            })
+        )
+    );
+    let (status, said) = api(&scene, Method::GET, &target, &scene.chief, "").await;
+    assert_eq!(
+        (status, &said["message"]["body"]),
+        (200, &json!(answer.body))
+    );
+
+    project_is(&scene, "open");
+    let (status, said) = api(&scene, Method::GET, &target, &scene.zeus, "").await;
+    assert_eq!(
+        (status, &said["message"]["body"]),
+        (200, &json!(answer.body))
+    );
+}
+
+/// Sol's review of 2026-10-16, round 7: a delivery begun before the Close, its
+/// adapter still waiting, was read whole after it, though its hand-over was then
+/// refused. One only begun waits as one queued does; one whose transport let it
+/// go before the Close is the window's, and is read.
+#[tokio::test]
+async fn a_message_whose_delivery_is_only_begun_waits_while_the_project_is_closed_and_one_handed_over_is_read(
+) {
+    for handed in [false, true] {
+        let scene = scene();
+        let answer = answered_question(&scene, "Blue.");
+        {
+            let mut ledger = scene.context.ledger.borrow_mut();
+            ledger.begin_delivery(answer.id).unwrap();
+            if handed {
+                ledger.admit(answer.id, &[]).unwrap();
+            }
+        }
+        project_is(&scene, "suspended");
+        let target = format!("/api/inbox/{}", answer.id);
+
+        let (status, said) = api(&scene, Method::GET, &target, &scene.zeus, "").await;
+
+        if handed {
+            assert_eq!(
+                (status, &said["message"]["body"]),
+                (200, &json!(answer.body))
+            );
+        } else {
+            assert_eq!((status, &said["error"]), (409, &json!("waits")), "{said}");
+        }
+    }
+}
+
+/// Astra's review of 2026-10-16, round 7: a window read the word to go on with a
+/// task paused since, as one still waiting for it. The pause withdrew it in its
+/// own write: read, it is a message withdrawn, and its reason says why.
+#[tokio::test]
+async fn a_continuation_of_a_task_paused_since_reads_as_withdrawn() {
+    let scene = scene();
+    let number = working_task(&scene);
+    let continuation = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let note = ledger
+            .note(
+                scene.project.id,
+                &cf_ledger::NewNote {
+                    from: None,
+                    to: "zeus".to_owned(),
+                    task: Some(number),
+                    body: cf_ledger::continuation(number),
+                },
+            )
+            .unwrap();
+        ledger
+            .pause_task(scene.project.id, number, Some("human"), None)
+            .unwrap();
+        note
+    };
+    let target = format!("/api/inbox/{}", continuation.id);
+
+    let (status, said) = api(&scene, Method::GET, &target, &scene.zeus, "").await;
+
+    assert_eq!(
+        (
+            status,
+            &said["message"]["state"],
+            &said["message"]["reason"]
+        ),
+        (
+            200,
+            &json!("cancelled"),
+            &json!(format!("T-{number} is paused now"))
+        )
+    );
+}
+
+/// Astra's review of 2026-10-17: the continuation was handed over, the human
+/// paused its task while the paste waited, and the paste was refused, nothing
+/// written: `cf inbox read` then gave an uncancelled word to go on. The refusal
+/// withdraws it, and the read says so.
+#[tokio::test]
+async fn a_continuation_handed_over_and_sent_back_after_its_task_was_paused_reads_as_withdrawn() {
+    let scene = scene();
+    let number = working_task(&scene);
+    let continuation = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let note = ledger
+            .note(
+                scene.project.id,
+                &cf_ledger::NewNote {
+                    from: None,
+                    to: "zeus".to_owned(),
+                    task: Some(number),
+                    body: cf_ledger::continuation(number),
+                },
+            )
+            .unwrap();
+        ledger.begin_delivery(note.id).unwrap();
+        ledger.admit(note.id, &[]).unwrap();
+        ledger
+            .pause_task(scene.project.id, number, Some("human"), None)
+            .unwrap();
+        ledger
+            .retry_delivery(note.id, "the paste wrote nothing", true)
+            .unwrap();
+        note
+    };
+    let target = format!("/api/inbox/{}", continuation.id);
+
+    let (status, said) = api(&scene, Method::GET, &target, &scene.zeus, "").await;
+
+    assert_eq!(
+        (status, &said["message"]["state"]),
+        (200, &json!("cancelled"))
+    );
 }
 
 #[tokio::test]

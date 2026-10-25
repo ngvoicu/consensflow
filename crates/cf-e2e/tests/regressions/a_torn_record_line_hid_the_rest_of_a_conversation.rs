@@ -108,11 +108,18 @@ fn a_worker_whose_record_tore_a_line_is_read_past_it_its_results_taken_and_its_c
         .as_str()
         .unwrap_or_default()
         .to_owned();
+    // The worker's window is the one whose record T-1 was pasted into: the stand-ins write
+    // their starts as each comes up, so under load the chief's can come last (the gate of
+    // T-494).
     let session = rig
         .started()
-        .last()
-        .map(|started| started.session.clone())
-        .ok_or("no window was started")?;
+        .into_iter()
+        .map(|started| started.session)
+        .find(|session| {
+            rig.transcript(session)
+                .contains("TORN Reply with exactly: ONE")
+        })
+        .ok_or("no window was given T-1")?;
     let record = rig.transcript(&session);
     let torn = record
         .lines()

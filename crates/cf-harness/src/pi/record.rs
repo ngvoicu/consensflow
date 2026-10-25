@@ -91,7 +91,7 @@ impl Reader {
             Some(read) => {
                 let mut reading = read.state.result(&self.env, options, now_ms, &read.file)?;
                 if let Reading::Known(record) = &mut reading {
-                    record.lost = read.lost;
+                    record.lines.lost = read.lost;
                 }
                 Ok(reading)
             }
@@ -334,7 +334,7 @@ impl Session {
             };
         let mut record = Record::new();
         record.items = self.items.clone();
-        record.places = Some(self.places.clone());
+        record.lines.places = Some(self.places.clone());
         record.in_flight = in_flight;
         record.failed = self.failed;
         record.quota = self.quota.clone();

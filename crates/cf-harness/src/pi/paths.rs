@@ -35,7 +35,7 @@ fn session_dir(env: &Env) -> Result<String, String> {
 
 /// Pi's folder (`piAgentDir`): `PI_CODING_AGENT_DIR`, else `.pi/agent` in the
 /// home. An empty variable is none.
-fn agent_dir(env: &Env) -> Result<String, String> {
+pub(crate) fn agent_dir(env: &Env) -> Result<String, String> {
     let configured = match set(env, "PI_CODING_AGENT_DIR") {
         Some(configured) => configured,
         None => path::join(&[&home(env)?, ".pi", "agent"]),

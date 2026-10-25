@@ -18,6 +18,38 @@ use fake::{Fake, Fixed, World};
 /// The time the tests say it is, which the record of a build says back.
 const NOW: &str = "2026-10-10T09:08:07.654Z";
 
+#[cfg(target_os = "macos")]
+#[test]
+fn a_locked_screen_refuses_the_candidate_in_words_before_anything_is_built() {
+    use crate::screen::testing::{with_ioreg, LOCKED_ANSWER};
+    use cf_base::env::Env;
+
+    let root = tempfile::tempdir().unwrap();
+    // No HOME: a run that went on to plan its build would say so, and build nothing too.
+    let system = Env::from_vars([("PATH", "/usr/bin:/bin")]);
+    let (_screen, env) = with_ioreg(&system, LOCKED_ANSWER);
+    let context = Context {
+        root: root.path().to_path_buf(),
+        env,
+    };
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = run(
+        &context,
+        &[],
+        &mut Console {
+            out: &mut out,
+            err: &mut err,
+        },
+    )
+    .unwrap();
+    assert_eq!(status, 1);
+    assert!(out.is_empty());
+    assert_eq!(
+        String::from_utf8(err).unwrap(),
+        "candidate: the screen is locked: a window can't be shown; unlock the Mac and run it again\n"
+    );
+}
+
 /// What a good run of `world` has the system say: the live app is running as `pid`.
 fn running_live_app(world: &World, pid: u32) -> Fake {
     let plan = world.plan();

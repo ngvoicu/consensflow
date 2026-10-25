@@ -18,11 +18,13 @@
 //! - the gate, and what runs a part of it or a suite beside it: `check` (the whole
 //!   gate), `app` and `clippy_windows` (the lint and the tests where the app or
 //!   the platform cannot be built as it ships), `suites` (`test daemons`,
-//!   `integration`, `clis`, `agents`, `load`: the black-box suites of
-//!   `crates/cf-e2e`), `departures` and `bench` (thin drivers of cargo);
+//!   `daemon-and-rig`, `integration`, `clis`, `agents`, `load`: the black-box
+//!   suites of `crates/cf-e2e`), `departures` and `bench` (thin drivers of cargo);
 //! - the app as built, run as a user would: `smoke` (the packaged smoke, and
 //!   `smoke-updater`, which is `updater_smoke`);
 //! - the mutation tests: `plants`, with their data in `tests/plants`;
+//! - how long CI takes: `ci_times` (`ci-times`), which reads the jobs' and steps'
+//!   times of CI's runs against the limits `ci.yml` gives them;
 //! - the releases: `release` (`release alpha`, and `release promote` of a tested
 //!   alpha to its plain version);
 //! - what spends real quota and is no part of the gate: `live` (one command for
@@ -44,6 +46,7 @@ mod app;
 mod bench;
 mod candidate;
 mod check;
+mod ci_times;
 mod clippy_windows;
 pub mod context;
 mod departures;
@@ -54,6 +57,7 @@ mod plants;
 mod portable;
 pub mod process;
 mod release;
+mod screen;
 mod scrub_transcript;
 mod sidecar;
 mod smoke;

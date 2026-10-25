@@ -73,6 +73,16 @@ find = "const STATE_EVENT: Duration = Duration::from_millis(100);"
 replace = "const STATE_EVENT: Duration = Duration::from_millis(1000);"
 
 [[plant]]
+name = "constant: the page is told ten milliseconds after a change"
+meant = "the_page_is_told_the_board_moved_a_hundred_milliseconds_after_the_first_change_and_once"
+runs = ["daemon-lib-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = "const STATE_EVENT: Duration = Duration::from_millis(100);"
+replace = "const STATE_EVENT: Duration = Duration::from_millis(10);"
+
+[[plant]]
 name = "constant: a preview is sixteen hundred units"
 meant = "the_preview_is_the_first_line_cut_at_160_utf16_units"
 runs = [

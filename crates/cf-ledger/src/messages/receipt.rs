@@ -145,9 +145,13 @@ pub(crate) fn door_born_closed(store: &Store, task: &TaskRow) -> Result<bool, Le
 ///   human, waits;
 /// - an answer still `queued` and in no paste is claimed for the door: the
 ///   paste skips it from now, until the door says it handed it over, or the
-///   claim is voided;
+///   claim is voided. While the question's project is closed (the human's
+///   Close, or the chief's window ending) it waits unclaimed instead, kept for
+///   the Resume: a window the Close could not close is handed nothing, its door
+///   no more than a paste (both reviews of 2026-10-16, round 5);
 /// - an answer the door took already, and its reply was lost, is answered
-///   again, writing nothing;
+///   again, writing nothing: a claim is a hand-over begun, the window's
+///   whatever came since, as a paste begun is;
 /// - an answer that rides in a paste, is being pasted or was pasted is
 ///   closed: it comes as text.
 pub(crate) fn claim_answer(
@@ -156,13 +160,20 @@ pub(crate) fn claim_answer(
     asker: i64,
 ) -> Result<Claim, LedgerError> {
     store.write(|store| {
-        let (sender, task, shut): (Option<i64>, Option<i64>, Option<String>) = store
+        let (sender, task, shut, project): (Option<i64>, Option<i64>, Option<String>, i64) = store
             .db
             .query_row(
-                "SELECT sender_id, task_id, door_closed_at FROM message
+                "SELECT sender_id, task_id, door_closed_at, project_id FROM message
                  WHERE id = ? AND kind = 'question'",
                 [question_id],
-                |row| Ok((row.get("sender_id")?, row.get("task_id")?, row.get("door_closed_at")?)),
+                |row| {
+                    Ok((
+                        row.get("sender_id")?,
+                        row.get("task_id")?,
+                        row.get("door_closed_at")?,
+                        row.get("project_id")?,
+                    ))
+                },
             )
             .optional()?
             .ok_or_else(|| {
@@ -210,12 +221,18 @@ pub(crate) fn claim_answer(
             ("read", _) => Ok(Claim::Answered(Box::new(known_message(store, answer)?))),
             ("queued", None) => {
                 if claimed.is_none() {
+                    let open = store
+                        .db
+                        .prepare("SELECT 1 FROM project WHERE id = ? AND state = 'open'")?
+                        .exists([project])?;
+                    if !open {
+                        return Ok(Claim::Waiting);
+                    }
                     let at = store.at();
                     store.db.execute(
                         "UPDATE message SET claimed_at = ? WHERE id = ?",
                         params![at, answer],
                     )?;
-                    let project = known_message(store, answer)?.project_id;
                     store.log(
                         project,
                         "delivery.claimed",

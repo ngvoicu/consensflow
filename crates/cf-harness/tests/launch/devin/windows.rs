@@ -7,10 +7,14 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use cf_base::text::console_text;
-use cf_harness::contract::{Adapter, Admission, Held, Interrupt, Readiness, Records, Waiting};
+use cf_harness::contract::{
+    Adapter, Admission, Held, Interrupt, Readiness, Records, Waiting, NOT_ADMITTED,
+};
 use cf_harness::records::{Record, Settlement};
 use cf_harness::seams::Time;
-use cf_harness::testing::{finished, AnsweringHost, Driver, EPOCH_MS, FIRST_MESSAGE_MS};
+use cf_harness::testing::{
+    finished, AnsweringHost, Driver, ScriptedHost, EPOCH_MS, FIRST_MESSAGE_MS,
+};
 use serde_json::{json, Value};
 
 use super::fixtures::*;
@@ -23,7 +27,10 @@ fn learns_the_session_this_window_opened_from_its_own_wire_log() {
     let window = window(&adapter, &Request::default());
     let mut driver = Driver::default();
     let asking = Rc::clone(&window);
-    driver.begin(0, async move { asking.started().await });
+    driver.begin(
+        0,
+        async move { asking.started(&ScriptedHost::default()).await },
+    );
     assert!(driver.run().is_empty());
     // Devin's wire log says it some polls later.
     assert!(home.fakes.time.fire_next(EPOCH_MS + 250));
@@ -50,7 +57,7 @@ fn a_torn_line_of_its_wire_log_before_the_session_s_line_neither_stops_the_launc
     home.appends(&shows("another-one"));
     home.appends(&shows("mild-coin"));
     assert_eq!(
-        finished(window.started()),
+        finished(window.started(&ScriptedHost::default())),
         Ok(Some("mild-coin".to_owned())),
         "the launch learns its session past the torn line"
     );
@@ -73,7 +80,10 @@ fn waits_for_the_session(request: &Request) -> i64 {
     let adapter = home.adapter();
     let window = window(&adapter, request);
     let mut driver = Driver::default();
-    driver.begin(0, async move { window.started().await });
+    driver.begin(
+        0,
+        async move { window.started(&ScriptedHost::default()).await },
+    );
     let began = home.fakes.time.wall_ms();
     let mut settled = driver.run();
     while settled.is_empty() {
@@ -162,6 +172,25 @@ fn pastes_only_into_the_conversation_it_knows_and_never_into_what_the_human_has_
         finished(window.ready(&host, &pane())),
         Ok(Readiness::Held(Held::Unsent))
     );
+}
+
+/// Both reviews of 2026-10-16, round 4: a paste asks the host whether it still
+/// admits it as it is asked for, after the window's own reads.
+#[test]
+fn a_paste_the_host_no_longer_admits_is_refused_and_never_reaches_the_pane() {
+    let home = Home::new();
+    let window = window(&home.adapter(), &Request::resumed("mild-coin"));
+    home.selects("mild-coin");
+    let host = ScriptedHost::default();
+    host.refuse_hand_overs();
+    assert_eq!(
+        finished(window.deliver(&host, &pane(), "hi")),
+        Ok(Admission::Refused {
+            reason: NOT_ADMITTED.to_owned()
+        })
+    );
+    assert!(host.take_asked().is_empty(), "nothing reached the pane");
+    assert_eq!(host.admissions(), 1);
 }
 
 #[test]
@@ -293,7 +322,10 @@ fn reads_its_own_question_dialog_still_open_as_waiting() {
     let mut driver = Driver::default();
     let asking = Rc::clone(&window);
     home.fakes.time.settle_at(EPOCH_MS);
-    driver.begin(0, async move { asking.started().await });
+    driver.begin(
+        0,
+        async move { asking.started(&ScriptedHost::default()).await },
+    );
     assert!(driver.run().is_empty());
     home.selects("dev-1");
     assert!(home.fakes.time.fire_next(EPOCH_MS + 250));

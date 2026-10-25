@@ -11,6 +11,18 @@
 //! header, is a quote, not a delivery; one after them is.) A header is read whatever
 //! the white space in it, as a paste or a retry may change it. The trace of the
 //! deliveries, `delivery.begun` and `delivery.retried` in the log, is the evidence.
+//!
+//! Every other header counts, wherever a prompt holds it: one that a harness's own row
+//! or a person's words quote is taken for a delivery, a false FAIL the lead reads, never a
+//! double hidden. Text that only looks like a harness's own is never told from a delivery
+//! by its words (rounds b2 and b3 each found new words that fooled such a rule). The one
+//! row left out is the one Claude Code marks itself as its summary of a compaction, by the
+//! record's own flag (`isCompactSummary`): it quotes the prompts before it whole (m-13 on
+//! the Mac's 2-hour run of 2026-10-19), and was given none. It is left out only where its
+//! uuid is unambiguous (one line alone of the records the watch reads carries it, and that
+//! line is flagged, round b5) and its record was read through the moment the row was copied
+//! (round b7: a record read before a retry was copied under the summary's uuid could not
+//! hold it); a summary copied after the record's last reading is held as any row is.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -99,15 +111,35 @@ fn body_in(look: &Look, id: i64) -> Option<&str> {
         .map(|message| message.body.as_str())
 }
 
+/// The opening tag Claude Code wraps a long paste in, in its record and so in the copy
+/// (2.1.303 and 2.1.304: `<pasted_content id="…">` or `<pasted_content>`, the paste on the
+/// next line): `<pasted_content`, then each attribute ` name="value"`, its value holding no
+/// `"`, `>` or line break, then `>`.
+const PASTED: &str = r#"^<pasted_content(?: [A-Za-z][A-Za-z0-9_-]*="[^">\n]*")*>"#;
+
+/// Where a delivery in `text` would begin: past its leading white space and, where
+/// Claude Code wrapped the paste, past the wrapper's opening tag ([`PASTED`]) and the white
+/// space after it.
+fn delivery_start(text: &str) -> usize {
+    static TAG: OnceLock<Regex> = OnceLock::new();
+    let start = text.len() - text.trim_start().len();
+    pattern::once(&TAG, PASTED)
+        .find(&text[start..])
+        .map_or(start, |tag| {
+            let inner = &text[start + tag.end()..];
+            text.len() - inner.trim_start().len()
+        })
+}
+
 /// The messages `item` delivered to `worker`, in order: none where it is no prompt that
-/// opens with a delivery's header (a job's notification, a tool's output or what a
-/// person typed may quote one anywhere); else each message it was given ([`given_in`]: a
-/// header its words quote is none) that the ledger holds as one to `worker`.
+/// opens with a delivery's header, inside the wrapper where Claude Code wrapped the paste
+/// (a job's notification, a tool's output or what a person typed may quote one anywhere);
+/// else each message it was given ([`given_in`]: a header its words quote is none) that
+/// the ledger holds as one to `worker`.
 pub(super) fn delivered_to<'l>(look: &'l Look, item: &Item, worker: i64) -> Vec<&'l Message> {
-    let leading = item.text.len() - item.text.trim_start().len();
     let opens = headers(&item.text)
         .first()
-        .is_some_and(|(_, start, _)| *start == leading);
+        .is_some_and(|(_, start, _)| *start == delivery_start(&item.text));
     if item.role != "user" || !opens {
         return Vec::new();
     }
@@ -118,19 +150,32 @@ pub(super) fn delivered_to<'l>(look: &'l Look, item: &Item, worker: i64) -> Vec<
         .collect()
 }
 
+/// Whether `item` is a row Claude Code marks as its summary of a compaction, by the
+/// record's own flag ([`crate::long_run::record::Record::is_summary`]), its record read
+/// through the moment the row was copied (a record read before then cannot hold what the
+/// daemon copied under that uuid since), and no other record the watch reads carries its
+/// uuid. Without such a record, it is held as any item is.
+fn is_summary(look: &Look, item: &Item) -> bool {
+    let copied = crate::clock::millis(&item.copied_at).unwrap_or(i64::MAX);
+    look.record_through(item.conversation, copied)
+        .is_ok_and(|record| record.is_summary(&item.id))
+        && look.records.iter().all(|(conversation, record)| {
+            *conversation == item.conversation || !record.carries(&item.id)
+        })
+}
+
 /// 7: per conversation, a message whose header is in two of its prompts, and a
-/// prompt that holds the headers of two messages.
+/// prompt that holds the headers of two messages; every user's item a prompt, but the
+/// summary Claude Code marks as one ([`is_summary`]).
 pub fn twice_or_joined(look: &Look) -> Vec<Break> {
     let body = |id: i64| body_in(look, id);
     let names = Names::of(look);
     let mut found = Vec::new();
     for conversation in &look.ledger.conversations {
         let handle = look.ledger.handle(conversation.participant);
-        let prompts = look
-            .ledger
-            .items
-            .iter()
-            .filter(|item| item.conversation == conversation.id && item.role == "user");
+        let prompts = look.ledger.items.iter().filter(|item| {
+            item.conversation == conversation.id && item.role == "user" && !is_summary(look, item)
+        });
         let mut given: BTreeMap<i64, Vec<String>> = BTreeMap::new();
         for item in prompts {
             let named = given_in(&item.text, body);
@@ -281,6 +326,32 @@ mod tests {
         // The quote alone is no delivery.
         let alone = format!("[ConsensFlow m-246 · T-9 · result from @w]\n{quoting}");
         assert_eq!(given_in(&alone, |id| (id == 246).then_some(quoting)), [246]);
+    }
+
+    #[test]
+    fn a_paste_wrapper_is_claude_codes_tag_and_nothing_that_only_opens_like_it() {
+        let header = "[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding";
+        let opens_with_header =
+            |text: &str| text[delivery_start(text)..].starts_with("[ConsensFlow m-120");
+        // Claude Code 2.1.303 and 2.1.304's tag: bare, or with its id of four hex digits, the
+        // paste on the next line.
+        for tag in ["<pasted_content>", "<pasted_content id=\"f8f1\">"] {
+            let text = format!("\n\n{tag}\n{header}\n</pasted_content>\n");
+            assert!(opens_with_header(&text), "{text}");
+        }
+        // GPT-6-Astra's review of round b4: a `>` inside an attribute ends no tag; and neither
+        // does anything but attributes of Claude Code's shape before the `>`.
+        for tag in [
+            "<pasted_content note=\">[ConsensFlow m-120 · T-14 · task from @chief]\">",
+            "<pasted_content id=\"f8f1\" ",
+            "<pasted_content id=f8f1>",
+            "<pasted_content id=\"f8\nf1\">",
+            "<pasted_contents>",
+            "<pasted_content x>",
+        ] {
+            let text = format!("{tag}\n{header}");
+            assert_eq!(delivery_start(&text), 0, "{tag}");
+        }
     }
 
     #[test]

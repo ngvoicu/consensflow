@@ -520,7 +520,7 @@ impl Answer for Rollout {
             .iter()
             .map(|kept| handed_out(&kept.item))
             .collect();
-        record.places = Some(self.items.iter().map(|kept| kept.began).collect());
+        record.lines.places = Some(self.items.iter().map(|kept| kept.began).collect());
         record.in_flight = in_flight;
         record.failed = matches!(end, Some((_, End::Failed)));
         record.quota = self.quota.clone();

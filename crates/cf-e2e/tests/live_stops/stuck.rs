@@ -15,6 +15,12 @@
 //! outside the window is, whatever its command line says (a check that ended every
 //! process whose command line held its mark ended the worker that ran it, 2026-10-16),
 //! so what an earlier run left ends by itself when its seconds are out.
+//!
+//! On Windows the sleep's own parent has gone by the time the table is read (Git Bash's `sh`
+//! forks a copy of itself to start a program of its own kind, which is gone then; `exec sleep`
+//! and a job in the background do the same), so the listing gives it the parent `ps -W` of Git
+//! Bash says it has ([`cf_e2e::live::members::with_cygwin_parents`]): it is the script's child
+//! there as it is on the Mac, found in the window's tree and ended with it.
 
 use std::sync::OnceLock;
 use std::thread::sleep;
@@ -49,19 +55,26 @@ pub fn brief() -> String {
     format!("Run exactly this one shell command, then stop: sh ./{SCRIPT}")
 }
 
+/// A program as a command line names it: by its path or not, with either separator, with
+/// `.exe` or without, in any case, and, on Windows, in double quotes where the path holds a
+/// space (`"C:\Program Files\Git\usr\bin\sh.exe" ./x`, as zeewin lists Git Bash's).
+fn program(name: &str) -> String {
+    format!(r#"(?:"(?:[^"]*[\\/])?(?i:{name}(?:\.exe)?)"|(?:\S*[\\/])?(?i:{name}(?:\.exe)?))"#)
+}
+
 /// The command line of the script: `sh ./<script>`, the shell named by its path or not.
 fn script_pattern() -> &'static Regex {
     static SCRIPT_RE: OnceLock<Regex> = OnceLock::new();
     pattern::once(
         &SCRIPT_RE,
-        &format!(r"^(\S*/)?sh\s+\./{}$", regex::escape(SCRIPT)),
+        &format!(r"^{}\s+\./{}$", program("sh"), regex::escape(SCRIPT)),
     )
 }
 
 /// The command line of the script's sleep: `sleep <seconds>`, and nothing more.
 fn sleep_pattern() -> &'static Regex {
     static SLEEP_RE: OnceLock<Regex> = OnceLock::new();
-    pattern::once(&SLEEP_RE, &format!(r"^(\S*/)?sleep\s+{STUCK_S}$"))
+    pattern::once(&SLEEP_RE, &format!(r"^{}\s+{STUCK_S}$", program("sleep")))
 }
 
 /// The command's own processes among `found`: the script and its sleep, not the harness
@@ -142,6 +155,23 @@ fn said(found: &[Running]) -> String {
         })
         .collect();
     shown(&processes).join("; ")
+}
+
+/// What is said of the screen of a member that ran nothing: "it has no window" where there is none, so
+/// that a blank screen (a window that drew nothing) is not read as no window.
+fn screen_line(screen: Option<String>) -> String {
+    match screen {
+        Some(screen) => format!("     its screen: {screen}"),
+        None => "     it has no window".to_owned(),
+    }
+}
+
+/// Whether the tree the host says holds the script's sleep: a process that runs `sleep` for
+/// [`STUCK_S`] seconds, by whichever path, as a word of its own.
+fn names_the_sleep(tree: &tree::Tree) -> bool {
+    tree.processes
+        .iter()
+        .any(|process| sleep_pattern().is_match(&process.command))
 }
 
 /// What the pane host finds under the window (`pane.background`: its tree's processes
@@ -237,10 +267,27 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
             WORK.as_secs()
         ));
         let window = members.window_of(ctx.agent)?;
-        case.say(format!(
-            "     its screen: {}",
-            members.tail(window.as_ref().map_or("", |window| window.id()))
+        case.say(screen_line(
+            window.as_ref().map(|window| members.tail(window.id())),
         ));
+        // What else is known of a member that ran nothing: its lane, and what the host and the
+        // machine find under its window (a screen may be blank where the window is not), and
+        // what the daemon wrote of its task: whether a window was opened, and what became of it.
+        case.say(format!(
+            "     its lane: {}; what the pane host finds under its window: {}; what descends from its window's process: {}",
+            state().unwrap_or_else(|failed| format!("(unread: {failed})")),
+            window
+                .as_ref()
+                .map_or_else(|| "no window".to_owned(), |window| host_view(members, window)),
+            window
+                .as_ref()
+                .and_then(|window| members.window_process(window))
+                .map_or_else(
+                    || "no process".to_owned(),
+                    |own| said(&descending_from(&ThisMachine.processes().unwrap_or_default(), own))
+                )
+        ));
+        say_events(case, members, number);
         return Ok(());
     }
     let Some(window) = members.window_of(ctx.agent)? else {
@@ -253,6 +300,22 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
         said(&look_now(members, ctx.agent, chosen)?.command),
         state()?
     ));
+    // What the pane host finds under the window while the command runs: the turn's work, which
+    // a stop would end. It is seen here and not only after the stop (a harness that ends the
+    // script by its pid leaves the host nothing to walk from): on Windows the host walks the
+    // parents the system names, and the sleep's own is a process that has gone (T-142, P3-7).
+    case.say(format!(
+        "     what the pane host finds under the window while it runs: {}",
+        host_view(members, &window)
+    ));
+    // On Windows the host names the script's sleep among them: it walks the parents the system
+    // names, and Git Bash's own programs name one that has gone, which the host mends with
+    // `ps -W` (cf-panes' `cygwin`). One it does not name is one a stop leaves running.
+    if cfg!(windows)
+        && !tree::read(members.rig(), &window.pane).is_ok_and(|tree| names_the_sleep(&tree))
+    {
+        case.fail("the pane host did not name the script's sleep among what the turn started, while it ran: a stop would leave it running");
+    }
     let paused = members.pause(number)?;
     let made = paused.made_ms;
     if paused.answer["ok"] != true {
@@ -380,6 +443,7 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
 
 #[cfg(test)]
 mod tests {
+    use cf_e2e::live::members::with_cygwin_parents;
     use serde_json::json;
 
     use super::*;
@@ -390,6 +454,7 @@ mod tests {
             identity: Identity { pid, started },
             ppid,
             command: command.to_owned(),
+            exe: None,
         }
     }
 
@@ -427,6 +492,184 @@ mod tests {
         ];
         assert_eq!(pids(&of_the_command(&found)), [10, 11, 20, 21]);
         assert!(of_the_command(&[running(20, 2, 10, "sleep 200")]).is_empty());
+    }
+
+    /// Windows lists a process by the command line it was started with, which for Git Bash's
+    /// own programs names them by their path, with `\`, `.exe`, and in double quotes where the
+    /// path holds a space; the first two lines are what zeewin listed for `sh ./<script>`
+    /// run by a harness's bash, and for its sleep (2026-10-21). The case found nothing of the
+    /// command on Windows for it (T-2: "the member never ran the command in 300 s").
+    #[test]
+    fn the_commands_processes_are_found_by_the_command_lines_windows_lists_for_them_too() {
+        let found = vec![
+            running(
+                10,
+                1,
+                1,
+                r#""C:\Program Files\Git\usr\bin\sh.exe" ./ignore-signals-cf-stops-live.sh"#,
+            ),
+            // The path unquoted (it holds no space), another spelling of the same, in capitals.
+            running(
+                11,
+                1,
+                1,
+                r"C:\msys64\usr\bin\sh.exe ./ignore-signals-cf-stops-live.sh",
+            ),
+            running(
+                12,
+                1,
+                1,
+                "C:/Git/usr/bin/sh ./ignore-signals-cf-stops-live.sh",
+            ),
+            running(
+                13,
+                1,
+                1,
+                r#""C:\GIT\USR\BIN\SH.EXE" ./ignore-signals-cf-stops-live.sh"#,
+            ),
+            // Not the command's: the bash the harness ran it in, which holds its text; another
+            // program by a name that ends in `sh`; and the script run with more.
+            running(
+                14,
+                1,
+                1,
+                r#""C:\Program Files\Git\bin\bash.exe" -c "sh ./ignore-signals-cf-stops-live.sh""#,
+            ),
+            running(
+                15,
+                1,
+                1,
+                r#""C:\Program Files\Git\usr\bin\bash.exe" ./ignore-signals-cf-stops-live.sh"#,
+            ),
+            running(
+                16,
+                1,
+                1,
+                r#""C:\Program Files\Git\usr\bin\sh.exe" ./ignore-signals-cf-stops-live.sh extra"#,
+            ),
+            running(
+                17,
+                1,
+                1,
+                r"C:\tools\ssh.exe ./ignore-signals-cf-stops-live.sh",
+            ),
+            running(20, 2, 10, r#""C:\Program Files\Git\usr\bin\sleep.exe" 200"#),
+            running(21, 2, 11, r"C:\msys64\usr\bin\sleep.exe 200"),
+            running(22, 2, 12, "C:/Git/usr/bin/sleep 200"),
+            running(23, 2, 13, r#""C:\GIT\USR\BIN\SLEEP.EXE" 200"#),
+            // Another's sleep; one of other seconds; and more than the seconds.
+            running(24, 2, 99, r#""C:\Program Files\Git\usr\bin\sleep.exe" 200"#),
+            running(25, 2, 10, r#""C:\Program Files\Git\usr\bin\sleep.exe" 20"#),
+            running(
+                26,
+                2,
+                10,
+                r#""C:\Program Files\Git\usr\bin\sleep.exe" 200 and more"#,
+            ),
+        ];
+        assert_eq!(
+            pids(&of_the_command(&found)),
+            [10, 11, 12, 13, 20, 21, 22, 23]
+        );
+    }
+
+    /// On Windows the sleep's own parent has gone by the time the table is read (Git Bash's
+    /// sh forks a copy of itself to start it), so it descends from nothing of the window's, and
+    /// is none of the command, though its script is: the table as Windows lists it. With the
+    /// parent Git Bash says it has (`with_cygwin_parents`) it is the script's child, found in
+    /// the window's tree and known by which process it is, and what a stop leaves of it is seen
+    /// (T-141, P3-7).
+    #[test]
+    fn the_sleep_of_a_script_on_windows_is_the_commands_once_its_parent_is_the_one_git_bash_says() {
+        let window = Identity {
+            pid: 9040,
+            started: 10,
+        };
+        let listed = vec![
+            running(
+                9040,
+                10,
+                10952,
+                r#""C:\Program Files\Git\bin\bash.exe" -c "sh ./ignore-signals-cf-stops-live.sh""#,
+            ),
+            running(
+                18028,
+                11,
+                9040,
+                r#""C:\Program Files\Git\bin\..\usr\bin\bash.exe" -c "sh ./ignore-signals-cf-stops-live.sh""#,
+            ),
+            running(
+                9736,
+                12,
+                18028,
+                r#""C:\Program Files\Git\usr\bin\sh.exe" ./ignore-signals-cf-stops-live.sh"#,
+            ),
+            Running {
+                exe: Some(r"C:\Program Files\Git\usr\bin\sleep.exe".to_owned()),
+                ..running(
+                    25892,
+                    14,
+                    29604,
+                    r#""C:\Program Files\Git\usr\bin\sleep.exe" 200"#,
+                )
+            },
+        ];
+        let ps = "      PID    PPID    PGID     WINPID  TTY         UID    STIME COMMAND\n     1464       1    1464       9736  cons0     197609 18:25:26 /usr/bin/sh\n     1466    1464    1464      25892  cons0     197609 18:25:26 /usr/bin/sleep\n";
+        // As Windows lists them: the script, and the sleep outside the window's tree.
+        let mut chosen = Vec::new();
+        let seen = look(&mut chosen, &listed, Some(window));
+        assert_eq!(pids(&seen.command), [9736]);
+        // With the parent Git Bash says: both, and the sleep is the script's.
+        let mut chosen = Vec::new();
+        let repaired = with_cygwin_parents(listed, |_| Some(ps.to_owned()));
+        let seen = look(&mut chosen, &repaired, Some(window));
+        assert_eq!(pids(&seen.command), [9736, 25892]);
+        // The harness ends the script by its number: the sleep is the command's orphan, which
+        // the case then reports and ends, as it does on the Mac.
+        let left: Vec<Running> = repaired
+            .into_iter()
+            .filter(|one| one.identity.pid != 9736)
+            .collect();
+        let seen = look(&mut chosen, &left, Some(window));
+        assert!(seen.command.is_empty());
+        assert_eq!(pids(&seen.orphans), [25892]);
+    }
+
+    #[test]
+    fn a_member_with_no_window_says_so_and_a_blank_screen_is_said_to_be_one() {
+        // A screen that is blank reads the same as no window, which a failure must tell apart
+        // (T-194, P3-4: the failed run's screen was blank for the whole 300 s).
+        assert_eq!(screen_line(None), "     it has no window");
+        assert_eq!(screen_line(Some(String::new())), "     its screen: ");
+        assert_eq!(
+            screen_line(Some("a prompt".to_owned())),
+            "     its screen: a prompt"
+        );
+    }
+
+    #[test]
+    fn the_tree_the_host_says_names_the_sleep_by_its_command_line_whichever_path_it_has() {
+        let tree = |commands: &[&str]| tree::Tree {
+            total: commands.len(),
+            processes: commands
+                .iter()
+                .enumerate()
+                .map(|(number, command)| tree::Proc {
+                    pid: 100 + number as u64,
+                    command: (*command).to_owned(),
+                })
+                .collect(),
+        };
+        let script = r#""C:\Program Files\Git\usr\bin\sh.exe" ./ignore-signals-cf-stops-live.sh"#;
+        assert!(names_the_sleep(&tree(&[
+            script,
+            r#""C:\Program Files\Git\usr\bin\sleep.exe" 200"#
+        ])));
+        assert!(names_the_sleep(&tree(&["/bin/sleep 200"])));
+        // The script alone, another sleep, and nothing.
+        assert!(!names_the_sleep(&tree(&[script])));
+        assert!(!names_the_sleep(&tree(&["sleep 20", "sleep 200 and more"])));
+        assert!(!names_the_sleep(&tree(&[])));
     }
 
     #[test]

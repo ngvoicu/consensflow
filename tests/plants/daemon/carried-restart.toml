@@ -147,7 +147,10 @@ runs = ["ledger-receipt"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger.rs"
 find = '''
-        db.execute_batch("PRAGMA synchronous = FULL")?;
+        db.execute_batch(&format!(
+            "PRAGMA synchronous = {}",
+            synchronous(cfg!(feature = "test-support"))
+        ))?;
         migrate(&db, &MIGRATIONS)
     })();
     if let Err(cause) = ready {
@@ -155,7 +158,10 @@ find = '''
         return Err(opening_refusal(file, cause));
     }'''
 replace = '''
-        db.execute_batch("PRAGMA synchronous = FULL")?;
+        db.execute_batch(&format!(
+            "PRAGMA synchronous = {}",
+            synchronous(cfg!(feature = "test-support"))
+        ))?;
         let written_at: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         migrate(&db, &MIGRATIONS)?;
         Ok(written_at)
@@ -184,7 +190,10 @@ runs = ["engine-dispatcher-restart"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger.rs"
 find = '''
-        db.execute_batch("PRAGMA synchronous = FULL")?;
+        db.execute_batch(&format!(
+            "PRAGMA synchronous = {}",
+            synchronous(cfg!(feature = "test-support"))
+        ))?;
         migrate(&db, &MIGRATIONS)
     })();
     if let Err(cause) = ready {
@@ -192,7 +201,10 @@ find = '''
         return Err(opening_refusal(file, cause));
     }'''
 replace = '''
-        db.execute_batch("PRAGMA synchronous = FULL")?;
+        db.execute_batch(&format!(
+            "PRAGMA synchronous = {}",
+            synchronous(cfg!(feature = "test-support"))
+        ))?;
         let written_at: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         migrate(&db, &MIGRATIONS)?;
         Ok(written_at)

@@ -284,5 +284,5 @@ fn each_item_is_said_with_the_place_of_the_record_that_first_named_it() {
     ])
     .unwrap();
     assert_eq!(read.items.len(), 2);
-    assert_eq!(read.places, Some(vec![1, 3]));
+    assert_eq!(read.lines.places, Some(vec![1, 3]));
 }

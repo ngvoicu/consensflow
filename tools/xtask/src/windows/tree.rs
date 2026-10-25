@@ -7,11 +7,20 @@
 //! if there is something of that name on disk (a link counts, whatever it points
 //! at). The list of what went over, written beside the files there, is the
 //! filtered one: it is what the machine removes from its copy what is not in.
+//!
+//! The tarball also holds the tree's identity ([`identity`]): the commit the checkout
+//! is at and a hash of every file that goes over. The machine holds what it unpacked to
+//! that hash (the sweep) and says the identity once it has, so that this program can tell
+//! whether what ran there is what it sent. And it holds the run script, which is what the
+//! run is asked for (the steps, the variables, the command).
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
-use super::script::{sweep_script, SWEEP, SYNCED};
+use sha2::{Digest, Sha256};
+
+use super::script::{sweep_script, RUN, SWEEP, SYNCED, TREE};
 use super::Error;
 use crate::context::Context;
 use crate::process::{self, Invocation};
@@ -46,25 +55,90 @@ fn kept(listing: &str, exists: impl Fn(&str) -> bool) -> Result<Vec<String>, Err
     Ok(files)
 }
 
-/// Packs `files`, the list of them and the sweep that removes from the copy what
-/// the list does not name ([`sweep_script`]) into `tree.tgz` in `scratch`, and
-/// answers where it is.
+/// What a tree is, as a line of text: the commit the checkout is at (`none` where it
+/// has no commit yet), and the first 16 hex digits of a SHA-256 over what goes over: for
+/// each file, in the order `files` has them, the length of its name (8 bytes, little
+/// endian), its name, its kind and, for a file, its bytes (a link or a folder, which git
+/// can list, is `other` and has no bytes). Two checkouts at the same commit with other
+/// changes made are two trees; so are two at different commits whose changes make the
+/// same files.
 ///
-/// The list and the sweep are files of the checkout while `tar` reads them, for it
-/// names its files from the checkout's root; they are taken away when the tarball
-/// is made, or when that fails.
-pub fn pack(context: &Context, files: &[String], scratch: &Path) -> Result<PathBuf, Error> {
+/// The hash is one the machine can make of what it unpacked (the sweep does, and
+/// holds the files to it), so it is made of what a Windows file system keeps: names, bytes,
+/// and whether a thing is a file.
+pub fn identity(context: &Context, files: &[String]) -> Result<String, Error> {
+    let head =
+        Invocation::new("git", &context.root).args(["rev-parse", "--verify", "--quiet", "HEAD"]);
+    let answered = process::capture(&head, &context.env)?;
+    let commit = if answered.code == 0 {
+        answered.stdout.trim().to_owned()
+    } else {
+        NO_COMMIT.to_owned()
+    };
+    Ok(format!("{commit} {}", content(context, files)?))
+}
+
+/// The hash in [`identity`]: the first 16 hex digits of the SHA-256 over `files` as they
+/// are under the checkout's root. It is the hash the sweep makes on the machine of what it
+/// unpacked.
+pub fn content(context: &Context, files: &[String]) -> Result<String, Error> {
+    let mut hash = Sha256::new();
+    for name in files {
+        let path = context.path(name);
+        let read = |cause: io::Error| Error::Files {
+            what: "read",
+            path: path.clone(),
+            cause,
+        };
+        hash.update(u64::try_from(name.len()).unwrap_or(u64::MAX).to_le_bytes());
+        hash.update(name.as_bytes());
+        if fs::symlink_metadata(&path)
+            .map_err(read)?
+            .file_type()
+            .is_file()
+        {
+            hash.update(b"file");
+            let mut file = fs::File::open(&path).map_err(read)?;
+            io::copy(&mut file, &mut hash).map_err(read)?;
+        } else {
+            hash.update(b"other");
+        }
+    }
+    let digest = hash.finalize();
+    Ok(digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+/// What [`identity`] says for a checkout with no commit yet.
+const NO_COMMIT: &str = "none";
+
+/// Packs `files`, the list of them, the tree's `identity`, the sweep that removes from
+/// the copy what the list does not name ([`sweep_script`]) and the `run` script into
+/// `tree.tgz` in `scratch`, and answers where it is.
+///
+/// The list, the identity, the sweep and the run script are files of the checkout while
+/// `tar` reads them, for it names its files from the checkout's root; they are taken
+/// away when the tarball is made, or when that fails.
+pub fn pack(
+    context: &Context,
+    files: &[String],
+    identity: &str,
+    run: &str,
+    scratch: &Path,
+) -> Result<PathBuf, Error> {
     let names = scratch.join("files");
     let tarball = scratch.join("tree.tgz");
     let named: Vec<&str> = files
         .iter()
         .map(String::as_str)
-        .chain([SYNCED, SWEEP])
+        .chain([SYNCED, TREE, SWEEP, RUN])
         .collect();
     fs::write(&names, named.join("\0")).map_err(Error::files("write", &names))?;
     let tar = tar(context, scratch, &names);
     let made = {
-        let _list = Listed::write(&context.root, files)?;
+        let _list = Listed::write(&context.root, files, identity, run)?;
         process::capture(&tar, &context.env)
     }?;
     if made.code != 0 {
@@ -87,16 +161,21 @@ fn tar(context: &Context, scratch: &Path, names: &Path) -> Invocation {
         .var("COPYFILE_DISABLE", "1")
 }
 
-/// The list of what goes over and the sweep, as files of the checkout: taken away
-/// when it is dropped.
+/// The list of what goes over, the identity, the sweep and the run script, as files of the
+/// checkout: taken away when it is dropped.
 struct Listed(Vec<PathBuf>);
 
 impl Listed {
-    fn write(root: &Path, files: &[String]) -> Result<Self, Error> {
+    fn write(root: &Path, files: &[String], identity: &str, run: &str) -> Result<Self, Error> {
         let mut listed = Self(Vec::new());
         let mut list = files.join("\n");
         list.push('\n');
-        for (name, text) in [(SYNCED, list), (SWEEP, sweep_script())] {
+        for (name, text) in [
+            (SYNCED, list),
+            (TREE, format!("{identity}\n")),
+            (SWEEP, sweep_script()),
+            (RUN, run.to_owned()),
+        ] {
             let path = root.join(name);
             fs::write(&path, text).map_err(Error::files("write", &path))?;
             listed.0.push(path);

@@ -648,7 +648,7 @@ fn begin_asking(played: &mut Played, id: usize, step: &Value) {
         });
     } else if step.get("started").is_some() {
         played.driver.begin(id, async move {
-            let started = window.started().await;
+            let started = window.started(&*host).await;
             (settled(started, |session| json!(session)), None)
         });
     } else {

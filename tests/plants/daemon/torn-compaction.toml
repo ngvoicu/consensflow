@@ -1,0 +1,66 @@
+# The 3.0.6-alpha.1 dry run's regression case that timed out waiting for a compaction's summary
+# (CI run 39692888986, the macOS runner, 2026-10-21, T-187). The case compacted the stand-in's
+# record while the stand-in was still writing its answer (it waited for the words it had told the
+# chief, which the record holds from the user's line on), and its helper wrote the compaction's
+# records a token at a time, so the answer landed inside the boundary's line. A line cut by another
+# record is malformed JSON for good, the Claude reader fails a look at a record with one, as Node's
+# did, and the daemon copies nothing more of the conversation. The cases are
+# `crates/cf-e2e/tests/regressions/a_compaction_written_beside_an_answer_tore_its_line.rs`, and the
+# reader's own, which holds that a record written in pieces is read once whole
+# (`crates/cf-harness/src/claude/record/tests/compaction.rs`). The rig's cases build the native `cf`
+# from the sources as planted, so their plants say `builds`. Every name begins `torn compaction`,
+# so `npm run plants:daemon -- "torn compaction"` runs them all.
+
+[run]
+rig-regression-torn = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_compaction_written_beside_an_answer_tore_its_line::"], builds = true }
+harness-claude-compaction = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::compaction"]
+
+[[plant]]
+name = "torn compaction: the helper writes a compaction's records a token at a time, and the stand-in's answer lands inside one"
+meant = "a_compaction_written_as_the_stand_in_answers_is_copied_with_the_answer"
+runs = ["rig-regression-torn"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/regressions/idle_compaction_read_as_a_cut_turn.rs"
+find = '''    for record in [boundary, summary] {
+        let mut line = record.to_string();
+        line.push('\n');
+        out.write_all(line.as_bytes())?;
+    }
+    Ok(())'''
+replace = '''    writeln!(out, "{boundary}")?;
+    writeln!(out, "{summary}")'''
+
+[[plant]]
+name = "torn compaction: a case waits for the words it told the chief, which the record holds from the user's line on, not for the turn's end"
+meant = "the_wait_for_a_turn_s_end_returns_when_the_stand_in_has_answered"
+runs = ["rig-regression-torn"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/regressions/idle_compaction_read_as_a_cut_turn.rs"
+find = '''        let record = rig.transcript(session);
+        let lines: Vec<&str> = record.lines().collect();
+        Ok(lines
+            .iter()
+            .position(|line| line.contains(said))
+            .is_some_and(|said| {
+                lines[said..]
+                    .iter()
+                    .any(|line| line.contains(r#""subtype":"stop_hook_summary""#))
+            }))'''
+replace = '''        Ok(rig.transcript(session).contains(said))'''
+
+[[plant]]
+name = "torn compaction: the reader fails a look at a record whose last line can never be JSON"
+meant = "the_summary_a_compaction_writes_in_pieces_is_read_once_whole_and_no_look_between_fails"
+runs = ["harness-claude-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''            Err(_) if is_json_lossy(&line) => return Err(cannot_hold(records)),
+'''
+replace = '''            Err(_) if is_json_lossy(&line) => return Err(cannot_hold(records)),
+            Err(_) if true => return Err(Stop::Failed(format!("malformed JSONL at record {records}"))),
+'''

@@ -40,9 +40,9 @@ fn reading(items: Vec<Item>, settlement: Settlement) -> Arc<Reading> {
         failed: false,
         quota: None,
         settlement,
-        agents_pending: false,
-        lost: Vec::new(),
-        places: None,
+        pending: Default::default(),
+        monitors: Vec::new(),
+        lines: Box::default(),
     }))
 }
 

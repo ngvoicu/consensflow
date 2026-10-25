@@ -37,6 +37,25 @@ fn turned(started: &[Member], protected: &[u32]) -> Vec<u32> {
     turned
 }
 
+/// The sleep of a script on Windows (Git Bash): the script is a shell the harness's shell started,
+/// and the sleep is the turn's when its parent is the script. Windows names a forked copy of
+/// the shell that has gone as its parent, which is no member, so the member reader gives it
+/// none and the chain is broken: a stop leaves it. `ps -W` of Git Bash says the script
+/// ([`crate::cygwin`]), and the reader gives that parent instead (T-142, P3-7).
+#[test]
+fn a_sleep_of_a_script_is_the_turns_when_its_parent_is_the_script_and_not_when_its_parent_has_gone()
+{
+    let with = |sleep_parent| {
+        [
+            process(2, "bash.exe", of(1)),
+            process(3, "sh.exe", of(2)),
+            process(4, "sleep.exe", sleep_parent),
+        ]
+    };
+    assert_eq!(turned(&with(of(3)), &[]), [2, 3, 4]);
+    assert_eq!(turned(&with(None), &[]), [2, 3]);
+}
+
 #[test]
 fn a_shell_is_known_by_the_name_of_its_program_with_or_without_the_extension_and_the_case_of_windows(
 ) {

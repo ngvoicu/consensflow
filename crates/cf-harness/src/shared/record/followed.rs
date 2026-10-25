@@ -217,7 +217,7 @@ impl<P: Parser + Answer> Look for TranscriptReader<P> {
                 }
                 match read.state.result() {
                     Ok(mut record) => {
-                        record.lost = read.lost;
+                        record.lines.lost = read.lost;
                         let answer = Arc::new(Reading::Known(record));
                         self.answer = Some(Arc::clone(&answer));
                         answer

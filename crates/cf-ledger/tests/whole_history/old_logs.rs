@@ -215,7 +215,8 @@ fn a_ledger_3_0_5_wrote_migrates_to_the_viewer_s_0020_once_and_is_read_and_its_l
     drop(ledger);
     open_ledger(&file, Options::default()).expect("and open again");
     let db = Connection::open(&file).expect("the file");
-    assert_eq!(version(&db), 20);
+    // The viewer's 0020, and the Resume's 0021 and 0022 after it.
+    assert_eq!(version(&db), 22);
     assert_eq!(heads(&db).expect("the heads"), 3, "one head an item");
     let parts: i64 = db
         .query_row(
@@ -261,7 +262,8 @@ fn a_fresh_ledger_is_made_at_0020_after_b5_s_0019_with_the_viewer_s_tables() {
     let version: i64 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("a version");
-    assert_eq!(version, 20);
+    // The Resume's 0021 and 0022 follow the viewer's 0020.
+    assert_eq!(version, 22);
     let tables: i64 = db
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master
@@ -438,4 +440,148 @@ fn a_heading_reads_an_event_of_the_participant_that_names_no_conversation_or_say
             r#"codex diana None ["user: said in 5"]"#,
         ]
     );
+}
+
+/// B5's migration 0019, as 3.0.5 shipped it, and the viewer's 0020: the ledgers
+/// below are made of them by name, so that what an older build wrote does not move
+/// with the order of [`MIGRATIONS`].
+const B5_0019: &str = include_str!("../../migrations/0019.sql");
+const VIEWER_0020: &str = include_str!("../../migrations/0020.sql");
+
+/// A ledger an older build left at the schema it migrated to with `migrations`:
+/// a project whose task 1 is paused with its brief delivered, as 3.0.5 left one,
+/// and none of the Resume's columns.
+fn left_at(dir: &tempfile::TempDir, migrations: &[&str]) -> PathBuf {
+    let file = dir.path().join("consensflow.db");
+    let db = Connection::open(&file).expect("a database");
+    migrate(&db, migrations).expect("an older version");
+    db.execute_batch(&format!(
+        "INSERT INTO project (id, directory, name, state, gate, created_at, updated_at)
+           VALUES (1, '/work/app', 'app', 'suspended', 0, '{AT}', '{AT}');
+         INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, tier, member_id, created_at, designer) VALUES
+           (2, 1, 'chief', 'chief', '[]', 'diana', 'codex', NULL, NULL, '{AT}', 0),
+           (3, 1, 'zeus', 'worker', '[\"worker\"]', 'zeus', 'claude-code', 'standard', NULL, '{AT}', 0);
+         INSERT INTO task (id, project_id, number, title, body, requester_id, assignee_id, state, created_at, updated_at, paused_at)
+           VALUES (1, 1, 1, 'Parser', 'Parser', 2, 3, 'paused', '{AT}', '{AT}', '{AT}');
+         INSERT INTO message (id, project_id, recipient_id, sender_id, kind, task_id, body, state, created_at)
+           VALUES (1, 1, 3, 2, 'task', 1, 'Parser', 'delivered', '{AT}');"
+    ))
+    .expect("its rows");
+    file
+}
+
+/// The ledger's version, and what it holds of the Resume's migrations: 0021's mark
+/// on task 1 and 0022's time message 1 was handed, where the columns are there.
+fn resume_columns(file: &PathBuf) -> (i64, Option<i64>, Option<Option<String>>) {
+    let db = Connection::open(file).expect("the file");
+    let version = db
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("a version");
+    let mark = db
+        .query_row(
+            "SELECT paused_with_project FROM task WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    let handed = db
+        .query_row("SELECT handed_at FROM message WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .ok();
+    (version, mark, handed)
+}
+
+/// The whole schema a ledger holds, by name: what a second open must leave as it is.
+fn schema_of(file: &PathBuf) -> Vec<(String, String)> {
+    let db = Connection::open(file).expect("the file");
+    let schema = db
+        .prepare("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")
+        .expect("the schema")
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .expect("its rows")
+        .collect::<rusqlite::Result<_>>()
+        .expect("each");
+    schema
+}
+
+/// What 3.0.5 left, version 19 with B5's 0019, opens at 22: the viewer's 0020, then
+/// the Resume's 0021 (its task reads paused by nothing but the human, so its Resume
+/// leaves it paused) and 0022 (its message was handed nothing it marked). A second
+/// open migrates nothing again.
+#[test]
+fn a_ledger_3_0_5_wrote_migrates_to_the_resume_s_0021_and_0022_after_the_viewer_s_0020_once() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut b5 = MIGRATIONS[..18].to_vec();
+    b5.push(B5_0019);
+    let file = left_at(&dir, &b5);
+    assert_eq!(resume_columns(&file), (19, None, None));
+
+    drop(open_ledger(&file, Options::default()).expect("migrated and open"));
+    assert_eq!(resume_columns(&file), (22, Some(0), Some(None)));
+    let schema = schema_of(&file);
+    assert!(
+        schema.iter().any(|(name, _)| name == "transcript_head"),
+        "the viewer's 0020 ran too"
+    );
+    drop(open_ledger(&file, Options::default()).expect("and open again"));
+    assert_eq!(resume_columns(&file), (22, Some(0), Some(None)));
+    assert_eq!(schema_of(&file), schema, "nothing migrated again");
+}
+
+/// A ledger the next release would write before the Resume lands, version 20 with
+/// the viewer's 0020, opens at 22 with the Resume's columns. A second open migrates
+/// nothing again.
+#[test]
+fn a_ledger_at_the_viewer_s_0020_migrates_to_the_resume_s_0022() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut viewer = MIGRATIONS[..18].to_vec();
+    viewer.extend([B5_0019, VIEWER_0020]);
+    let file = left_at(&dir, &viewer);
+    assert_eq!(resume_columns(&file), (20, None, None));
+
+    drop(open_ledger(&file, Options::default()).expect("migrated and open"));
+    assert_eq!(resume_columns(&file), (22, Some(0), Some(None)));
+    let schema = schema_of(&file);
+    drop(open_ledger(&file, Options::default()).expect("and open again"));
+    assert_eq!(resume_columns(&file), (22, Some(0), Some(None)));
+    assert_eq!(schema_of(&file), schema, "nothing migrated again");
+}
+
+/// A fresh ledger is made at 22: main's 0019 and 0020 (B5's, the viewer's), then
+/// the Resume's 0021 and 0022, in that order.
+#[test]
+fn a_fresh_ledger_is_made_at_0022_with_main_s_migrations_first_and_the_resume_s_after() {
+    assert_eq!(
+        (MIGRATIONS.len(), MIGRATIONS[18], MIGRATIONS[19]),
+        (22, B5_0019, VIEWER_0020),
+        "main's 0019 and 0020 where main has them"
+    );
+    assert!(
+        MIGRATIONS[20].contains("ADD COLUMN paused_with_project"),
+        "0021 is the Resume's mark"
+    );
+    assert!(
+        MIGRATIONS[21].contains("ADD COLUMN handed_at"),
+        "0022 is the Resume's hand-over"
+    );
+    let dir = tempfile::tempdir().expect("a folder");
+    let file = dir.path().join("consensflow.db");
+    drop(open_ledger(&file, Options::default()).expect("made and open"));
+    let schema = schema_of(&file);
+    let table = |name: &str| {
+        schema
+            .iter()
+            .find(|(table, _)| table == name)
+            .map(|(_, sql)| sql.clone())
+            .unwrap_or_default()
+    };
+    assert!(table("task").contains("paused_with_project"));
+    assert!(table("message").contains("handed_at"));
+    assert!(!table("transcript_head").is_empty(), "the viewer's table");
+    let db = Connection::open(&file).expect("the file");
+    let version: i64 = db
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("a version");
+    assert_eq!(version, 22);
 }

@@ -944,7 +944,7 @@ replace = '''        else {
 
 [[plant]]
 name = "specs viewer: the specs are listed by name, not in the registry's order"
-meant = "lists the registry, the specs in its order by title"
+meant = "lists the registry, the specs in its order by title, the rest by name, and assets last, folded"
 runs = ["viewer-arranging", "viewer-tree"]
 
 [[plant.edit]]
@@ -954,7 +954,7 @@ replace = "    .sort(byName)"
 
 [[plant]]
 name = "specs viewer: a spec's research and interviews are listed with the rest"
-meant = "lists inside a spec its spec, its research and interviews by number"
+meant = "lists inside a spec its spec, its research and interviews by number, then the rest by name, folders folded"
 runs = ["viewer-arranging", "viewer-tree"]
 
 [[plant.edit]]
@@ -964,7 +964,7 @@ replace = "      if (found !== null) return [NUMBERED.length + 1, 0]"
 
 [[plant]]
 name = "specs viewer: the page lists dotfiles it is given"
-meant = "leaves dotfiles out at every level"
+meant = "leaves dotfiles out at every level, whoever answered"
 runs = ["viewer-arranging", "viewer-tree"]
 
 [[plant.edit]]
@@ -994,7 +994,7 @@ replace = "      .map((assets) => ({ ...listed(assets), open: true, entries: byN
 
 [[plant]]
 name = "specs viewer: it opens on the first spec though there is a registry"
-meant = "opens on the registry, else on the first spec"
+meant = "opens on the registry, else on the first spec; a spec opens on its own file"
 runs = ["viewer-arranging", "viewer-registry"]
 
 [[plant.edit]]
@@ -1061,7 +1061,7 @@ replace = '''function cells(row) {
 
 [[plant]]
 name = "specs viewer: a Markdown cell of escaped pipes is read again at each pipe"
-meant = "built to make a parser slow is read in a moment"
+meant = "built to make a parser slow is read in a moment, as the registry or as markdown"
 runs = ["viewer-registry"]
 
 [[plant.edit]]
@@ -1089,7 +1089,7 @@ replace = '''function cells(row) {
 
 [[plant]]
 name = "specs viewer: a link climbs above the folder and down onto a file of it"
-meant = "leads nowhere out of the folder"
+meant = "leads nowhere out of the folder, to anything with a scheme, an absolute path or the file itself"
 runs = ["viewer-arranging"]
 
 [[plant.edit]]
@@ -1099,7 +1099,7 @@ replace = "      if (names.length === 0) continue"
 
 [[plant]]
 name = "specs viewer: a link to a file the folder does not hold is followed"
-meant = "leads nowhere out of the folder"
+meant = "leads nowhere out of the folder, to anything with a scheme, an absolute path or the file itself"
 runs = ["viewer-arranging", "viewer-markdown"]
 
 [[plant.edit]]
@@ -1111,7 +1111,7 @@ replace = "  return tries.find((target) => target !== null) ?? null"
 
 [[plant]]
 name = "specs viewer: the board walks the whole tree to show its button"
-meant = "is hidden with no specs folder, hidden while the folder is empty"
+meant = "is hidden with no specs folder, hidden while the folder is empty, and shows at the next read once the first spec is written"
 runs = ["viewer-button"]
 
 [[plant.edit]]
@@ -1121,7 +1121,7 @@ replace = "  const said = await daemon('specs.tree', { project }).then(() => ({ 
 
 [[plant]]
 name = "specs viewer: the button keeps what the first read said"
-meant = "a folder the daemon refuses shows none"
+meant = "shows for a closed project and for one with specs off, and a folder the daemon refuses shows none"
 runs = ["viewer-button"]
 
 [[plant.edit]]
@@ -1131,7 +1131,7 @@ replace = "  state.specsPresent = { project, present: state.specsPresent?.presen
 
 [[plant]]
 name = "specs viewer: the board waits for whether the specs folder holds a file"
-meant = "never holds up the board"
+meant = "never holds up the board: a folder slow to answer shows the button when it does"
 runs = ["viewer-button"]
 
 [[plant.edit]]
@@ -1141,7 +1141,7 @@ replace = "      if (selected !== null) await readPresence(selected)"
 
 [[plant]]
 name = "specs viewer: an answer that comes late is shown for whatever the board shows"
-meant = "never holds up the board"
+meant = "never holds up the board: a folder slow to answer shows the button when it does"
 runs = ["viewer-button"]
 
 [[plant.edit]]
@@ -1151,7 +1151,7 @@ replace = "  if (read === null) return"
 
 [[plant]]
 name = "specs viewer: an answer from the daemon's memory is the last the page asks for"
-meant = "asks once more when the daemon answered from memory"
+meant = "asks once more when the daemon answered from memory, so a spec written just before shows"
 runs = ["viewer-button"]
 
 [[plant.edit]]
@@ -1161,7 +1161,7 @@ replace = "  if (typeof said.readAgainIn === 'never') {"
 
 [[plant]]
 name = "specs viewer: the menu opens the viewer on the project the board shows"
-meant = "opens the viewer on its project, shown first"
+meant = "opens the viewer on its project, shown first, and gives the keyboard back to it"
 runs = ["viewer-menu"]
 
 [[plant.edit]]
@@ -1172,7 +1172,7 @@ replace = "    await specsViewer.open("
 
 [[plant]]
 name = "specs viewer: Specs… in the menu opens nothing"
-meant = "opens the viewer on its project, shown first"
+meant = "opens the viewer on its project, shown first, and gives the keyboard back to it"
 runs = ["viewer-menu"]
 
 [[plant.edit]]
@@ -1182,7 +1182,7 @@ replace = "      specs: { dialog: specs, open: async () => {}, for: null },"
 
 [[plant]]
 name = "specs viewer: every status has the same chip"
-meant = "shows each spec as a row with its status chip"
+meant = "shows each spec as a row with its status chip, priority, progress bar and date; a row opens its spec"
 runs = ["viewer-registry"]
 
 [[plant.edit]]
@@ -1192,7 +1192,7 @@ replace = "      chip.dataset.status = 'other'"
 
 [[plant]]
 name = "specs viewer: a progress bar is full whatever the progress"
-meant = "shows each spec as a row with its status chip"
+meant = "shows each spec as a row with its status chip, priority, progress bar and date; a row opens its spec"
 runs = ["viewer-registry"]
 
 [[plant.edit]]
@@ -1202,7 +1202,7 @@ replace = "  const share = 1"
 
 [[plant]]
 name = "specs viewer: a registry row opens nothing"
-meant = "shows each spec as a row with its status chip"
+meant = "shows each spec as a row with its status chip, priority, progress bar and date; a row opens its spec"
 runs = ["viewer-registry"]
 
 [[plant.edit]]
@@ -1212,7 +1212,7 @@ replace = "        if (opens === null) void this.#choose(opens)"
 
 [[plant]]
 name = "specs viewer: every row of a registry of thousands is drawn"
-meant = "of thousands of specs draws its first 500 rows"
+meant = "of thousands of specs draws its first 500 rows and says how many it lists"
 runs = ["viewer-registry"]
 
 [[plant.edit]]
@@ -1222,7 +1222,7 @@ replace = "    for (const row of registry.rows) {"
 
 [[plant]]
 name = "specs viewer: Refresh opens on the registry again"
-meant = "reads the folder again and the file shown"
+meant = "reads the folder again and the file shown; a file chosen again is read again"
 runs = ["viewer-refresh"]
 
 [[plant.edit]]
@@ -1242,7 +1242,7 @@ replace = "    if (this.#shown === null) return"
 
 [[plant]]
 name = "specs viewer: a file chosen again is not read again"
-meant = "reads the folder again and the file shown"
+meant = "reads the folder again and the file shown; a file chosen again is read again"
 runs = ["viewer-refresh"]
 
 [[plant.edit]]
@@ -1254,7 +1254,7 @@ replace = '''      const file = button(entry.label, 'tree-file', () => {
 
 [[plant]]
 name = "specs viewer: Mermaid fences are left as code"
-meant = "draws its Mermaid diagram, and a broken one shows its source"
+meant = "draws its Mermaid diagram, and a broken one shows its source and Mermaid words"
 runs = ["viewer-markdown"]
 
 [[plant.edit]]
@@ -1266,7 +1266,7 @@ replace = '''          if (lang !== 'mermaid' || code !== null) return null
 
 [[plant]]
 name = "specs viewer: every diagram of a document is drawn"
-meant = "of many diagrams draws its first 50"
+meant = "of many diagrams draws its first 50, shows the rest as their source, and stops drawing once left"
 runs = ["viewer-markdown"]
 
 [[plant.edit]]
@@ -1276,7 +1276,7 @@ replace = "          return diagram(code, signal)"
 
 [[plant]]
 name = "specs viewer: a diagram still to draw when its file is left is drawn all the same"
-meant = "of many diagrams draws its first 50"
+meant = "of many diagrams draws its first 50, shows the rest as their source, and stops drawing once left"
 runs = ["viewer-markdown"]
 
 [[plant.edit]]
@@ -1294,7 +1294,7 @@ replace = '''    const drawer = await mermaid()
 
 [[plant]]
 name = "specs viewer: another file chosen leaves the diagrams of the one shown to draw"
-meant = "of many diagrams draws its first 50"
+meant = "of many diagrams draws its first 50, shows the rest as their source, and stops drawing once left"
 runs = ["viewer-markdown"]
 
 [[plant.edit]]
@@ -1309,7 +1309,7 @@ replace = '''    const read = ++this.#reads
 
 [[plant]]
 name = "specs viewer: the viewer shut leaves the diagrams of the file shown to draw"
-meant = "of many diagrams draws its first 50"
+meant = "of many diagrams draws its first 50, shows the rest as their source, and stops drawing once left"
 runs = ["viewer-markdown"]
 
 [[plant.edit]]
@@ -1324,7 +1324,7 @@ replace = '''      this.#reads += 1
 
 [[plant]]
 name = "specs viewer: the page is given no turn between two diagrams"
-meant = "of many diagrams draws its first 50"
+meant = "of many diagrams draws its first 50, shows the rest as their source, and stops drawing once left"
 runs = ["viewer-markdown"]
 
 [[plant.edit]]
@@ -1350,7 +1350,7 @@ replace = '''      const file = answered ?? (await this.#file(shown.project, pat
 
 [[plant]]
 name = "specs viewer: an image is drawn as markup"
-meant = "show text plain in monospace, images as images"
+meant = "show text plain in monospace, images as images, and the rest as words with their size"
 runs = ["viewer-files"]
 
 [[plant.edit]]
@@ -1363,7 +1363,7 @@ replace = '''      const image = element('div', 'specs-image')
 
 [[plant]]
 name = "specs viewer: an HTML file is put in the page as markup"
-meant = "in HTML runs nothing in the app"
+meant = "in HTML runs nothing in the app: it shows as a card, and opens only in the browser"
 runs = ["viewer-hostile"]
 
 [[plant.edit]]
@@ -1377,7 +1377,7 @@ replace = '''    if (kind === 'html') {
 
 [[plant]]
 name = "specs viewer: an HTML file's title is put in the page as markup"
-meant = "in HTML has its title read as text"
+meant = "in HTML has its title read as text, whatever markup it holds"
 runs = ["viewer-hostile"]
 
 [[plant.edit]]
@@ -1401,7 +1401,7 @@ replace = "          await this.#page.daemon('specs.open', { project, path: name
 
 [[plant]]
 name = "specs viewer: a word of Markdown is read as markup"
-meant = "in Markdown stays words"
+meant = "in Markdown stays words: no script, no handler, no address followed, nothing fetched"
 runs = ["viewer-hostile"]
 
 [[plant.edit]]
@@ -1415,7 +1415,7 @@ replace = '''    if ('text' in span) {
 
 [[plant]]
 name = "specs viewer: every link of Markdown is followed"
-meant = "in Markdown stays words"
+meant = "in Markdown stays words: no script, no handler, no address followed, nothing fetched"
 runs = ["viewer-hostile"]
 
 [[plant.edit]]
@@ -1425,7 +1425,7 @@ replace = "    const follow = 'link' in span ? () => {} : null"
 
 [[plant]]
 name = "specs viewer: a task's box is its words"
-meant = "shows its frontmatter, headings, task boxes"
+meant = "shows its frontmatter, headings, task boxes, nested lists, tables and code"
 runs = ["viewer-markdown"]
 
 [[plant.edit]]
@@ -1435,7 +1435,7 @@ replace = "    const box = null"
 
 [[plant]]
 name = "specs viewer: a spec's headings are bold lines"
-meant = "shows its frontmatter, headings, task boxes"
+meant = "shows its frontmatter, headings, task boxes, nested lists, tables and code"
 runs = ["viewer-markdown"]
 
 [[plant.edit]]
@@ -1445,7 +1445,7 @@ replace = "    const heading = element('p', 'md-heading')"
 
 [[plant]]
 name = "specs viewer: lists and quotes nest past what a page's stack holds"
-meant = "built to make a parser slow is read in a moment"
+meant = "built to make a parser slow is read in a moment, as the registry or as markdown"
 runs = ["viewer-registry"]
 
 [[plant.edit]]
@@ -1457,7 +1457,7 @@ replace = "  const nests = true"
 
 [[plant]]
 name = "specs viewer: a label keeps what loads while Mermaid lays it out"
-meant = "diagram makes no request leave the page while Mermaid lays it out"
+meant = "diagram makes no request leave the page while Mermaid lays it out, whatever it asks"
 runs = ["viewer-policy"]
 
 [[plant.edit]]
@@ -1468,7 +1468,7 @@ replace = ""
 
 [[plant]]
 name = "specs viewer: a node's image named by a quoted key keeps its address"
-meant = "diagram makes no request leave the page while Mermaid lays it out"
+meant = "diagram makes no request leave the page while Mermaid lays it out, whatever it asks"
 runs = ["viewer-policy"]
 
 [[plant.edit]]
@@ -1478,7 +1478,7 @@ replace = '''const NODE_IMAGE = /(\bimg\s*:\s*)("[^"]*"|'[^']*'|[^,}\s]*)/gi'''
 
 [[plant]]
 name = "specs viewer: a node's image keeps its address"
-meant = "diagram makes no request leave the page while Mermaid lays it out"
+meant = "diagram makes no request leave the page while Mermaid lays it out, whatever it asks"
 runs = ["viewer-policy"]
 
 [[plant.edit]]
@@ -1488,7 +1488,7 @@ replace = "    const { svg } = await drawer.render(id, code)"
 
 [[plant]]
 name = "specs viewer: a diagram sets its own colours and CSS"
-meant = "in Markdown stays words"
+meant = "in Markdown stays words: no script, no handler, no address followed, nothing fetched"
 runs = ["viewer-hostile"]
 
 [[plant.edit]]
@@ -1500,7 +1500,7 @@ replace = ""
 
 [[plant]]
 name = "specs viewer: a drawing keeps what runs or loads"
-meant = "drawing is checked before it joins the page"
+meant = "drawing is checked before it joins the page: nothing in it runs, loads or leads away"
 runs = ["viewer-hostile"]
 
 [[plant.edit]]
@@ -1510,7 +1510,7 @@ replace = "    if (false) {"
 
 [[plant]]
 name = "specs viewer: a drawing keeps its handlers"
-meant = "drawing is checked before it joins the page"
+meant = "drawing is checked before it joins the page: nothing in it runs, loads or leads away"
 runs = ["viewer-hostile"]
 
 [[plant.edit]]
@@ -1520,7 +1520,7 @@ replace = "      if (false) node.removeAttribute(name)"
 
 [[plant]]
 name = "specs viewer: a drawing keeps addresses out of it"
-meant = "drawing is checked before it joins the page"
+meant = "drawing is checked before it joins the page: nothing in it runs, loads or leads away"
 runs = ["viewer-hostile"]
 
 [[plant.edit]]
@@ -1530,7 +1530,7 @@ replace = "      else if (false) node.removeAttribute(name)"
 
 [[plant]]
 name = "specs viewer: a drawing's CSS may load"
-meant = "drawing is checked before it joins the page"
+meant = "drawing is checked before it joins the page: nothing in it runs, loads or leads away"
 runs = ["viewer-hostile"]
 
 [[plant.edit]]
@@ -1540,7 +1540,7 @@ replace = "    if (false) node.textContent = quiet(node.textContent)"
 
 [[plant]]
 name = "specs viewer: a drawing's CSS escapes are not read"
-meant = "drawing is checked before it joins the page"
+meant = "drawing is checked before it joins the page: nothing in it runs, loads or leads away"
 runs = ["viewer-hostile"]
 
 [[plant.edit]]
@@ -1550,7 +1550,7 @@ replace = "    .replace(/(?!)/g, (_, hex, character) => {"
 
 [[plant]]
 name = "specs viewer: diagrams are drawn in Mermaid's own colours"
-meant = "in the page's colours, its diagrams too"
+meant = "the viewer is drawn in the page's colours, its diagrams too, in dark"
 runs = ["viewer-colours"]
 
 [[plant.edit]]
@@ -1560,7 +1560,7 @@ replace = "      themeVariables: {},"
 
 [[plant]]
 name = "specs viewer: the app's policy lets the page load an image from anywhere"
-meant = "lets the page load nothing from anywhere else"
+meant = "lets the page load nothing from anywhere else: an image, a script, a stylesheet, a frame, a request"
 runs = ["viewer-policy"]
 
 [[plant.edit]]
@@ -1570,7 +1570,7 @@ replace = "img-src *;"
 
 [[plant]]
 name = "specs viewer: the app's policy lets the page connect anywhere"
-meant = "lets the page load nothing from anywhere else"
+meant = "lets the page load nothing from anywhere else: an image, a script, a stylesheet, a frame, a request"
 runs = ["viewer-policy"]
 
 [[plant.edit]]
@@ -1580,7 +1580,7 @@ replace = "connect-src *;"
 
 [[plant]]
 name = "specs viewer: the app's policy lets the page frame anything"
-meant = "lets the page load nothing from anywhere else"
+meant = "lets the page load nothing from anywhere else: an image, a script, a stylesheet, a frame, a request"
 runs = ["viewer-policy"]
 
 [[plant.edit]]
@@ -1590,7 +1590,7 @@ replace = "frame-src *;"
 
 [[plant]]
 name = "specs viewer: the app's policy lets the page run a script from anywhere"
-meant = "lets the page load nothing from anywhere else"
+meant = "lets the page load nothing from anywhere else: an image, a script, a stylesheet, a frame, a request"
 runs = ["viewer-policy"]
 
 [[plant.edit]]
@@ -1600,7 +1600,7 @@ replace = "script-src *;"
 
 [[plant]]
 name = "specs viewer: the app's policy lets the page take a stylesheet from anywhere"
-meant = "lets the page load nothing from anywhere else"
+meant = "lets the page load nothing from anywhere else: an image, a script, a stylesheet, a frame, a request"
 runs = ["viewer-policy"]
 
 [[plant.edit]]
@@ -1610,7 +1610,7 @@ replace = "style-src * 'unsafe-inline';"
 
 [[plant]]
 name = "specs viewer: the app has no policy"
-meant = "diagram makes no request leave the page while Mermaid lays it out"
+meant = "diagram makes no request leave the page while Mermaid lays it out, whatever it asks"
 runs = ["viewer-policy"]
 
 [[plant.edit]]

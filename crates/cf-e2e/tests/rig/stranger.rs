@@ -21,6 +21,7 @@ fn a_rig_closes_with_the_process_that_is_none_of_any_windows_still_running() -> 
 fn a_rig_that_finds_the_process_that_is_none_of_any_windows_ended_says_so_when_it_closes() -> Outcome
 {
     let rig = crate::rig()?;
+    rig.expect_the_close_to_fail();
     signal(rig.stranger_pid(), Signal::Kill)?;
     // The daemon and the pane host end first, which takes longer than the signal does.
     std::thread::sleep(secs(1));

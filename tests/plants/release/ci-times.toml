@@ -1,0 +1,96 @@
+# `cargo xtask ci-times` (tools/xtask/src/ci_times.rs): the times of CI's jobs and steps read
+# against the limits ci.yml gives them, and the share they may take. Its library tests give it a
+# GitHub that is a script (nothing reaches GitHub); they build no program.
+
+[run]
+ci-times = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "ci_times::"]
+
+[[plant]]
+name = "ci-times: a time at its share of the limit is over"
+meant = "a_time_over_its_share_of_the_limit_is_over_and_one_at_the_share_is_not"
+runs = ["ci-times"]
+
+[[plant.edit]]
+file = "tools/xtask/src/ci_times.rs"
+find = "self.seconds * 100 > i64::try_from"
+replace = "self.seconds * 100 >= i64::try_from"
+
+[[plant]]
+name = "ci-times: a check that read no time is all well"
+meant = "a_check_that_read_no_time_is_refused_it_is_never_all_well"
+runs = ["ci-times"]
+
+[[plant.edit]]
+file = "tools/xtask/src/ci_times.rs"
+find = "    if read == 0 {"
+replace = "    if read < 0 {"
+
+[[plant]]
+name = "ci-times: a step that was skipped is read for the time of its start"
+meant = "a_step_skipped_or_never_started_has_no_time_and_a_step_cancelled_at_its_limit_has_its_own"
+runs = ["ci-times"]
+
+[[plant.edit]]
+file = "tools/xtask/src/ci_times.rs"
+find = '''if item["conclusion"] == "skipped" {'''
+replace = '''if item["conclusion"] == "never" {'''
+
+[[plant]]
+name = "ci-times: a job of a run that called ci.yml is not found by its id"
+meant = "a_job_of_a_run_that_called_the_workflow_is_found_by_its_id_as_the_runs_of_ci_are"
+runs = ["ci-times"]
+
+[[plant.edit]]
+file = "tools/xtask/src/ci_times.rs"
+find = '''let own = name.rsplit(" / ").next().unwrap_or(name);'''
+replace = "let own = name;"
+
+[[plant]]
+name = "ci-times: every step is judged however few are asked for"
+meant = "only_the_steps_named_are_judged_and_a_step_over_its_share_beside_them_does_not_fail_the_check"
+runs = ["ci-times"]
+
+[[plant.edit]]
+file = "tools/xtask/src/ci_times.rs"
+find = "options.only.is_empty() || options.only.iter().any(|name| reading.what.contains(name))"
+replace = "true"
+
+[[plant]]
+name = "ci-times: the first line of a literal block is not the name of its step"
+meant = "a_job_and_a_step_are_found_by_the_name_github_shows_them_under"
+runs = ["ci-times"]
+
+[[plant.edit]]
+file = "tools/xtask/src/ci_times.rs"
+find = "if let Some(step) = step.as_mut().filter(|step| step.run.is_none()) {"
+replace = "if let Some(step) = step.as_mut() {"
+
+[[plant]]
+name = "ci-times: a build a test makes is read as the build of the tests"
+meant = "a_cargo_step_is_read_binary_by_binary_from_its_log_each_under_the_crate_whose_tests_came_first"
+runs = ["ci-times"]
+
+[[plant.edit]]
+file = "tools/xtask/src/ci_times/binaries.rs"
+find = "            if found.binaries.is_empty() {"
+replace = "            if true {"
+
+[[plant]]
+name = "ci-times: the tests of a crate are not told from the library's"
+meant = "a_cargo_step_is_read_binary_by_binary_from_its_log_each_under_the_crate_whose_tests_came_first"
+runs = ["ci-times"]
+
+[[plant.edit]]
+file = "tools/xtask/src/ci_times/binaries.rs"
+find = '''if target.ends_with("lib.rs") {'''
+replace = '''if target.ends_with("never.rs") {'''
+
+[[plant]]
+name = "ci-times: the next step's binaries are read as this step's"
+meant = "a_cargo_step_is_read_binary_by_binary_from_its_log_each_under_the_crate_whose_tests_came_first"
+runs = ["ci-times"]
+
+[[plant.edit]]
+file = "tools/xtask/src/ci_times/binaries.rs"
+find = '''if line.starts_with("##[group]Run") {'''
+replace = '''if line.starts_with("##[group]Never") {'''

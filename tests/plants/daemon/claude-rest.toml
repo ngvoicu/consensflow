@@ -140,8 +140,8 @@ runs = ["harness-launch-claude-stops"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            if self.restored.get() {"
-replace = "            if self.restored.get() && false {"
+find = "            if self.restored.get() && !host.cleared() {"
+replace = "            if self.restored.get() && false && !host.cleared() {"
 
 [[plant]]
 name = "rest: an input box that could not be cleared is pasted into all the same"

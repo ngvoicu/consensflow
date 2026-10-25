@@ -20,6 +20,8 @@
 
 pub mod arbiter;
 mod background;
+#[cfg(any(windows, test))]
+mod cygwin;
 pub mod ended;
 pub mod headless;
 pub mod input_queue;

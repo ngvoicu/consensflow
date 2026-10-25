@@ -7,15 +7,23 @@
 //! record, so a line lost before that paste's own record is no part of it, after
 //! a restart or a resume as before. Devin's reading cannot say the record of an
 //! item (its items are its store's): the count taken at the last hand-over
-//! stands in. Node had no such lines, so none of these is held to a Node trace.
+//! stands in. Under turn-end's rule (T-494) a turn that leaves a job running holds
+//! its task, and its result is the final answer of the turn its job's end wakes, or
+//! the last complete answer `cf task finish` takes: a line lost in the turn may have
+//! been that answer, so either result is marked, ahead of what ConsensFlow says of
+//! the leftovers. Node had no such lines, so none of these is held to a Node trace.
 
 use cf_engine::testing::Context;
+use cf_harness::records::Pending;
 use cf_ledger::NewTask;
 
 use crate::fixtures::{given, Tiers};
 
-/// T-1 given to zeus, whose window has taken it in.
+/// T-1 given to zeus, whose window has taken it in. The host proves each window's
+/// program gone, as the app's does, so a follow-up goes on in the same conversation
+/// (`ownership`), whose record holds what was lost before it.
 fn working(context: &Context) -> Tiers<'_> {
+    context.host.exits_showing(Some(0), None, None);
     let tiers = Tiers::new(context, &["zeus"]);
     tiers.open();
     context.pass().unwrap();
@@ -188,7 +196,9 @@ fn restarted<'a>(context: &'a Context, tiers: &Tiers<'_>) -> cf_engine::testing:
 #[test]
 fn a_line_lost_before_a_turn_is_no_part_of_it_after_a_restart() {
     // Nothing of the engine's is kept across the restart: the record says where the
-    // turn began.
+    // turn began. Since turn-end another task goes on in a new conversation after a
+    // restart, and a task in its own (T-494): so T-2 follows T-1 into its conversation,
+    // past the line lost there, before the restart.
     let context = Context::new();
     context.adapter.resumes_records.set(true);
     let tiers = working(&context);
@@ -197,9 +207,12 @@ fn a_line_lost_before_a_turn_is_no_part_of_it_after_a_restart() {
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "done");
     context.adapter.loses_a_line("zeus");
+    follow_up(&context, &tiers);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(2).task.state, "working");
 
     let after = restarted(&context, &tiers);
-    follow_up(&context, &tiers);
     for _ in 0..3 {
         after.pass().unwrap();
     }
@@ -232,5 +245,128 @@ fn a_line_lost_in_a_turn_after_a_restart_marks_its_result() {
     assert_eq!(
         results(&context, &tiers),
         [marked("Parser done", &worker, place)]
+    );
+}
+
+/// The notification Claude Code begins a turn with when a job of its ends.
+const ENDED: &str =
+    "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>";
+
+/// A job, as a reading counts it.
+const A_JOB: Pending = Pending {
+    agents: 0,
+    jobs: 1,
+    retired: 0,
+    noticed: 0,
+};
+
+/// T-1's turn loses a line, and ends with its job running: the task is held, and
+/// what its job's end wakes the agent to answer is the result, marked.
+fn lost_in_a_held_turn(context: &Context) {
+    let tiers = working(context);
+    let worker = tiers.assignee(1);
+    let place = context.adapter.loses_a_line("zeus");
+    context
+        .adapter
+        .answer_leaving("zeus", "The build runs; I will report when it ends", A_JOB);
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working", "held for its job");
+    assert_eq!(results(context, &tiers), Vec::<String>::new());
+
+    context.adapter.wake("zeus", ENDED);
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "Build green");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(
+        results(context, &tiers),
+        [marked("Build green", &worker, place)]
+    );
+}
+
+#[test]
+fn a_line_lost_in_a_turn_held_for_its_job_marks_the_result_its_jobs_end_brings() {
+    lost_in_a_held_turn(&Context::new());
+}
+
+#[test]
+fn devins_line_lost_in_a_turn_held_for_its_job_marks_the_result_its_jobs_end_brings() {
+    let context = Context::new();
+    context.adapter.says_places.set(false);
+    lost_in_a_held_turn(&context);
+}
+
+/// T-1's turn loses a line and ends with its job running, and the chief finishes
+/// the task: its result is the last complete answer, marked, and then what
+/// ConsensFlow says of the job finishing ends none of.
+fn lost_in_a_finished_turn(context: &Context) {
+    let tiers = working(context);
+    let worker = tiers.assignee(1);
+    let place = context.adapter.loses_a_line("zeus");
+    context
+        .adapter
+        .answer_leaving("zeus", "Serving the docs on 8000", A_JOB);
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working", "held for its job");
+
+    let finished = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .expect("finished");
+    assert_eq!(finished.task.state, "done");
+    let results = results(context, &tiers);
+    assert_eq!(results.len(), 1, "{results:?}");
+    let marked = marked("Serving the docs on 8000", &worker, place);
+    assert!(
+        results[0].starts_with(&format!(
+            "{marked}\n\n(ConsensFlow: Finished at @chief's word while @{worker}'s harness still counted 1 background job running"
+        )),
+        "{results:?}"
+    );
+}
+
+#[test]
+fn a_task_finished_past_a_line_lost_in_its_turn_has_its_result_marked_ahead_of_the_leftovers() {
+    lost_in_a_finished_turn(&Context::new());
+}
+
+#[test]
+fn devins_task_finished_past_a_line_lost_in_its_turn_has_its_result_marked_ahead_of_the_leftovers()
+{
+    let context = Context::new();
+    context.adapter.says_places.set(false);
+    lost_in_a_finished_turn(&context);
+}
+
+#[test]
+fn a_task_finished_past_a_line_lost_before_its_turn_has_its_result_unmarked() {
+    // The record says where the turn began, so a line lost before the task's paste is no
+    // part of what finishing takes.
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = working(&context);
+    context.adapter.answer("zeus", "Parser done");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    context.adapter.loses_a_line("zeus");
+    follow_up(&context, &tiers);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(2).task.state, "working");
+    context
+        .adapter
+        .answer_leaving("zeus", "Lexing in the background", A_JOB);
+    context.pass().unwrap();
+    assert_eq!(tiers.task(2).task.state, "working", "held for its job");
+    context
+        .finish_task(tiers.project.id, 2, "chief")
+        .expect("finished");
+    let results = results(&context, &tiers);
+    assert!(
+        results
+            .iter()
+            .any(|result| result.starts_with("Lexing in the background\n\n(ConsensFlow: Finished")),
+        "{results:?}"
     );
 }

@@ -65,7 +65,7 @@ fn board_usage() -> String {
 
 /// Each board command's words (the ones that name it), and the lines of the
 /// usage it answers with.
-const BOARD: [(&[&str], &str); 17] = [
+const BOARD: [(&[&str], &str); 19] = [
     (
         &["task", "add"],
         concat!(
@@ -84,7 +84,8 @@ const BOARD: [(&[&str], &str); 17] = [
             "  cf task add --design \"…\"          an image from the image designer: what to draw, what\n",
             "                                    to use as reference, where to save it\n",
             "  cf task add --after T-3 \"…\"       a follow-up for the window that did T-3, which\n",
-            "                                    keeps its context; only when that context matters\n",
+            "                                    keeps its context; only when that context matters;\n",
+            "                                    while T-3 is at work it waits for T-3's acceptance\n",
             "  cf task add --self --needs T-3 \"…\" your own later step: its brief comes back to you when T-3 is accepted\n",
             "  … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted\n",
             "  … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task\n",
@@ -92,13 +93,17 @@ const BOARD: [(&[&str], &str); 17] = [
     ),
     (
         &["task", "list"],
-        "  cf task list                      the board: what waits for a member, then every lane\n",
+        concat!(
+            "  cf task list [--all]              the board: what waits for a member, then the lanes\n",
+            "                                    with a task to look at; --all adds the idle sessions\n",
+        ),
     ),
     (
         &["task", "get"],
         concat!(
             "  cf task get T-3                   one task and its whole thread\n",
             "  cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)\n",
+            "                                    --page 2 for older ones, 50 a page; --find \"…\" for those that say it\n",
         ),
     ),
     (
@@ -118,6 +123,10 @@ const BOARD: [(&[&str], &str); 17] = [
         "  cf task reopen T-3 \"…\"            send a finished or failed task back with a follow-up\n",
     ),
     (
+        &["task", "edit"],
+        "  cf task edit T-3 \"…\"              replace the brief of a task no window has yet (open, queued, or paused)\n",
+    ),
+    (
         &["task", "pause"],
         "  cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait\n",
     ),
@@ -126,10 +135,18 @@ const BOARD: [(&[&str], &str); 17] = [
         "  cf task resume T-3 \"…\"            go on with it: the same window, with your words\n",
     ),
     (
+        &["task", "finish"],
+        concat!(
+            "  cf task finish T-3                take what a working task's worker said last as its result;\n",
+            "                                    what its turn left running is not ended\n",
+        ),
+    ),
+    (
         &["tell"],
         concat!(
             "  cf tell T-3 \"…\"                   stop T-3 and put this to its window: its answer arrives as\n",
             "                                    a message; then cf task resume T-3 \"…\"\n",
+            "                                    (queued: kept for its window, to go in after its brief)\n",
         ),
     ),
     (

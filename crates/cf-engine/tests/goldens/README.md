@@ -25,6 +25,12 @@ said "a restart or a crash" (`skill/core/chief.md`): a restart pauses no task an
 more, for the project it suspends comes back by the human's Resume, which opens the
 windows that had work. Changed by hand, in those words alone.
 
+The same twelve rows say, after the heredoc example, "Write a long brief to a file with
+your file tool and pass it with `--file brief.md` instead: a shell can cut a long heredoc"
+(`skill/core/chief.md`): a chief's heredoc that a shell cut sent the board a brief cut at
+about 8.1k characters (the field report of 2026-10-15, B6). Changed by hand, in those
+words alone, on 2026-10-16.
+
 The members' text (worker, advisor, reviewer and image designer), in each of the 27
 `roleInstructions` rows that hold it, has one sentence Node's did not, the last but one of
 its paragraph about a window that is for one task: "Your answer ends your turn's work:
