@@ -1,4 +1,5 @@
 import { button, element, icon, iconButton, redraw } from '../dom.js'
+import { notePanes } from './computer-use.js'
 import { preview, render } from './markdown.js'
 
 /**
@@ -632,6 +633,18 @@ export class BoardView {
     if (message.taskNumber) {
       actions.append(
         button('Open task', 'quiet-button', () => this.#actions.onOpenTask(message.taskNumber)),
+      )
+    }
+    // A note that ConsensFlow lacks a permission Claude Code's computer use needs: the way to
+    // the System Settings pane of each it names.
+    for (const { pane, name } of notePanes(message)) {
+      actions.append(
+        button(
+          'Open System Settings',
+          'primary-button',
+          () => this.#actions.onSystemSettings(pane),
+          `Open System Settings for ${name}`,
+        ),
       )
     }
     if (!gated && acts(board)) {

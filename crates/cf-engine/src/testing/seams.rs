@@ -64,6 +64,35 @@ impl Credentials for FakeCredentials {
     }
 }
 
+/// The machine's computer use as a test says it is: by default a system where no
+/// harness's computer use runs, so no launch is told of it.
+#[derive(Default)]
+pub struct FakeComputerUse {
+    /// ConsensFlow's permissions; none where the system has no computer use.
+    pub permissions: Cell<Option<crate::seams::ScreenPermissions>>,
+    /// The folders where Claude Code's computer use is on.
+    pub on_in: RefCell<HashSet<String>>,
+    /// How often each was asked of, permissions first.
+    pub asked: Cell<(u32, u32)>,
+}
+
+impl crate::seams::ComputerUse for FakeComputerUse {
+    fn permissions(&self) -> Option<crate::seams::ScreenPermissions> {
+        let (permissions, claude) = self.asked.get();
+        self.asked.set((permissions + 1, claude));
+        self.permissions.get()
+    }
+
+    fn claude(&self, directory: &str) -> cf_harness::claude::computer_use::ComputerUse {
+        let (permissions, claude) = self.asked.get();
+        self.asked.set((permissions, claude + 1));
+        cf_harness::claude::computer_use::ComputerUse {
+            folder: directory.to_owned(),
+            on: self.on_in.borrow().contains(directory),
+        }
+    }
+}
+
 /// Each window's environment names its participant.
 pub struct FakePaneEnv {
     pub(crate) recorder: Recorder,

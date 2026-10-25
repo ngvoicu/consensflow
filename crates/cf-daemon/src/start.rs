@@ -47,6 +47,7 @@ use tokio::sync::watch;
 use crate::api;
 use crate::api::context::Context;
 use crate::api::credentials::{random_hex, Credentials};
+use crate::computer_use::{system_opener, MachineComputerUse};
 use crate::console::Console;
 use crate::errors::{contain, Errors};
 use crate::files::{Log, Trace};
@@ -373,6 +374,7 @@ async fn run(
         log: Rc::clone(&log) as _,
         launch_files: Rc::new(LaunchFolders::new(home.clone(), Rc::clone(&errors))),
         spawn: Rc::clone(&spawn) as _,
+        computer_use: Rc::new(MachineComputerUse::new(env.clone())),
         limits,
     };
     let dispatcher = Dispatcher::new(seams);
@@ -453,6 +455,10 @@ async fn run(
         env: env.clone(),
         kick: Rc::clone(&kick),
         specs: page::Specs::new(),
+        computer_use: page::ComputerUsePage {
+            machine: Rc::new(MachineComputerUse::new(env.clone())),
+            open: system_opener(env.clone()),
+        },
     });
     page::register(&bridge, &page, &spawn);
     let exiting = Rc::clone(&dispatcher);

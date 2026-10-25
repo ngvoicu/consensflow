@@ -298,6 +298,19 @@
         </fieldset>
       </fieldset>
       <div data-project-sections></div>
+      <!-- Computer use (core/computer-use.js): a part for each harness of the project's with a
+           computer use of its own, shown only while one of its members runs on it, and
+           ConsensFlow's macOS permissions once for them all. -->
+      <fieldset class="project-section computer-use" hidden>
+        <legend>Computer use</legend>
+        <p class="dialog-help">Lets an agent see and control the screen. It works through ConsensFlow's own macOS permissions.</p>
+        <div class="computer-use-harnesses"></div>
+        <div class="computer-use-permissions" hidden>
+          <h3 class="computer-use-head">ConsensFlow's permissions, for every project</h3>
+          <ul class="computer-use-grants"></ul>
+          <p class="dialog-help">A permission you change in System Settings may need ConsensFlow to be quit and opened again.</p>
+        </div>
+      </fieldset>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Close</button>
       </div>

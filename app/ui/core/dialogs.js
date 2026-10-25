@@ -1,5 +1,6 @@
 import { button, element, redraw } from '../dom.js'
 import { isMember } from './board.js'
+import { ComputerUseSection } from './computer-use.js'
 import { ProjectSections } from './project-sections.js'
 
 /**
@@ -473,6 +474,8 @@ export class ProjectSettingsDialog {
   #wakeUp
   /** What the project says of specs: its own section of the dialog. */
   #specs
+  /** Computer use: a part for each of the project's harnesses that has one. */
+  #computerUse
   /** The project the dialog was last opened for, by id: the one it is for until it closes. */
   #project = null
   /** The board of that project, as the dialog last drew it. */
@@ -511,6 +514,12 @@ export class ProjectSettingsDialog {
     this.#gate = sections.gate
     this.#wakeUp = sections.wakeUp
     this.#specs = sections.specs
+    this.#computerUse = new ComputerUseSection(dialog.querySelector('.computer-use'), {
+      daemon: page.daemon,
+      act: page.act,
+      report: page.report,
+      project: () => (dialog.open ? this.#project : null),
+    })
     // What the dialog changes is its project's, whichever board the page shows now.
     this.#gate.addEventListener('change', () => {
       const project = this.#project
@@ -554,7 +563,11 @@ export class ProjectSettingsDialog {
    * dialog is up already: what was asked for is not what the human is after any more.
    */
   async open(project) {
-    const [calls] = await Promise.all([this.#wakeUp.read(project), this.#page.readSpecs()])
+    const [calls, , computerUse] = await Promise.all([
+      this.#wakeUp.read(project),
+      this.#page.readSpecs(),
+      this.#computerUse.read(project),
+    ])
     const board = this.#page.board()
     if (this.#dialog.open || this.#page.selected() !== project || board?.project.id !== project) {
       return
@@ -563,6 +576,7 @@ export class ProjectSettingsDialog {
     this.#board = board
     this.#removing = null
     this.#wakeUp.show(calls)
+    this.#computerUse.show(computerUse)
     this.#draw()
     this.#specs.draw(board.project, true)
     this.#dialog.showModal()
@@ -599,6 +613,7 @@ export class ProjectSettingsDialog {
     redraw(this.#members, rows)
     this.#gate.checked = board.project.gate ?? false
     this.#specs.draw(board.project)
+    this.#computerUse.draw(board)
     rolePicker(
       this.#page.agents,
       this.#form.elements.role,

@@ -145,6 +145,35 @@ pub trait PaneEnv {
     fn env(&self, participant: &ParticipantView, project: &ProjectView) -> Vec<(String, String)>;
 }
 
+/// What ConsensFlow's own macOS permissions are: whether it may control the
+/// computer (Accessibility) and see the screen (Screen & System Audio
+/// Recording), which a program in its panes is given as its own (a pane's
+/// Claude Code is attributed to ConsensFlow, as a terminal's is to the terminal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScreenPermissions {
+    pub accessibility: bool,
+    pub screen_recording: bool,
+}
+
+impl ScreenPermissions {
+    /// Whether both are given.
+    pub fn all(self) -> bool {
+        self.accessibility && self.screen_recording
+    }
+}
+
+/// What the machine says of a harness's computer use for the project's
+/// windows: ConsensFlow's permissions, and whether Claude Code's computer use
+/// is on for a folder (read from Claude's own configuration, never written).
+pub trait ComputerUse {
+    /// ConsensFlow's permissions; none on a system where no harness's computer
+    /// use runs (Claude Code has none outside macOS).
+    fn permissions(&self) -> Option<ScreenPermissions>;
+    /// Whether Claude Code's computer use is on for a window opened in
+    /// `directory`, and the folder it is kept under.
+    fn claude(&self, directory: &str) -> cf_harness::claude::computer_use::ComputerUse;
+}
+
 /// The adapter for a harness's windows, by the word the ledger names the
 /// harness with: none for one this build opens no windows of.
 pub trait Adapters {
@@ -307,6 +336,7 @@ pub struct Seams {
     pub log: Rc<dyn Log>,
     pub launch_files: Rc<dyn LaunchFiles>,
     pub spawn: Rc<dyn Spawn>,
+    pub computer_use: Rc<dyn ComputerUse>,
     pub limits: Limits,
 }
 

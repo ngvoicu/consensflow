@@ -650,6 +650,13 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 /* Settings, Specs: the Specmint this build brings, its version and its variants. */
 .specmint { gap: 8px; }
 .specmint .specmint-version { margin: 0; font-size: 13px; }
+.computer-use .computer-use-head { margin: 0 0 4px; font-size: 13px; font-weight: 700; }
+.computer-use .computer-use-line { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.computer-use-grants { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.computer-use-grant { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; }
+.computer-use-grant button { margin-left: auto; }
+.computer-use-missing { color: var(--buoy); font-weight: 700; }
+.computer-use-permissions > .dialog-help { margin: 6px 0 0; }
 .specmint .staff { margin: 0; }
 .member-confirm { color: var(--buoy); font-size: 12px; margin-right: 8px; }
 /* Each part of a task is a panel of its own, headed by what it is. */

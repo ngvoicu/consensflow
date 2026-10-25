@@ -802,7 +802,9 @@ The handle line is the first line the daemon prints for the app: JSON, key order
     "specs.open",
     "task.finish",
     "history.get",
-    "history.part"
+    "history.part",
+    "computer_use.get",
+    "computer_use.open"
   ],
   "ping": "{\"ok\":true}"
 }

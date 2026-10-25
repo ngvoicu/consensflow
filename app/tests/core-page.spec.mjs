@@ -360,6 +360,26 @@ async function open(page, data = model()) {
         return answer({ member: lane.participant })
       },
       'board.get': ({ project }) => answer({ board: data.boards[project] }),
+      // A project's computer use, as the daemon reads it (`computerUse` of the model, on macOS
+      // with no grant and Claude Code's off, unless a test says otherwise), and the System
+      // Settings panes it opens, by name.
+      'computer_use.get': ({ project }) => {
+        const said = data.computerUse ?? {}
+        return answer({
+          system: said.system ?? 'macos',
+          permissions:
+            'permissions' in said
+              ? said.permissions
+              : { accessibility: false, screenRecording: false },
+          harnesses: {
+            'claude-code': {
+              on: said.on ?? false,
+              folder: data.boards[project]?.project.directory,
+            },
+          },
+        })
+      },
+      'computer_use.open': ({ pane }) => answer({ opened: pane }),
       'project.gate': ({ project, gate }) => {
         data.boards[project].project.gate = gate
         return answer({ project: data.boards[project].project })
@@ -2980,9 +3000,9 @@ test('adds a saved agent to the staff as a tester, or as one more role of a memb
   await open(page)
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  await expect(dialog.locator('.dialog-help')).toContainText(
-    'a tester checks it by running it when the chief asks',
-  )
+  await expect(
+    dialog.getByRole('group', { name: 'Staff', exact: true }).locator('.dialog-help').first(),
+  ).toContainText('a tester checks it by running it when the chief asks')
   // The tester has its place among the roles, after the reviewer.
   await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
     'Worker',
@@ -3291,19 +3311,22 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
   const markup = (id) =>
     page.evaluate(
       (id) =>
-        [...document.querySelectorAll(`#${id} .project-section`)].slice(1).map((section) => {
-          const copy = section.cloneNode(true)
-          const variant = copy.querySelector('[name="specsVariant"]')
-          if (variant !== null) {
-            const [first] = variant.options
-            first.textContent = ''
-            variant.replaceChildren(first)
-            copy.querySelector('[name="specs"] [value="follow"]').textContent = ''
-            copy.querySelector('[name="specsFolder"]').removeAttribute('placeholder')
-            copy.querySelector('.specs-version').textContent = ''
-          }
-          return copy.outerHTML.replaceAll(' hidden=""', '')
-        }),
+        // The shared sections only: Computer use is Project settings' own.
+        [...document.querySelectorAll(`#${id} .project-section:not(.computer-use)`)]
+          .slice(1)
+          .map((section) => {
+            const copy = section.cloneNode(true)
+            const variant = copy.querySelector('[name="specsVariant"]')
+            if (variant !== null) {
+              const [first] = variant.options
+              first.textContent = ''
+              variant.replaceChildren(first)
+              copy.querySelector('[name="specs"] [value="follow"]').textContent = ''
+              copy.querySelector('[name="specsFolder"]').removeAttribute('placeholder')
+              copy.querySelector('.specs-version').textContent = ''
+            }
+            return copy.outerHTML.replaceAll(' hidden=""', '')
+          }),
       id,
     )
   const [here, there] = [
@@ -3692,11 +3715,13 @@ test("names the board's button and its dialog Project settings, with Staff, Huma
   await button.click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByRole('heading', { name: 'Project settings' })).toBeVisible()
+  // Computer use is last, and there since the project has Claude Code members.
   await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
     'Staff',
     'Human approval',
     'Wake-up calls',
     'Specs',
+    'Computer use',
   ])
   for (const name of ['Staff', 'Human approval', 'Wake-up calls', 'Specs']) {
     await expect(dialog.getByRole('group', { name, exact: true })).toBeVisible()
@@ -5776,11 +5801,13 @@ test('project menu: Project settings… opens the dialog of the board’s Projec
   const dialog = await dialogFrom(page, 1, 'Project settings…', 'Project settings')
   await expect(page.locator('#project-title')).toHaveText('harbour')
   // The same dialog the button opens: its sections, and the project's own staff and calls.
+  // Computer use is last, and there since the project has Claude Code members.
   await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
     'Staff',
     'Human approval',
     'Wake-up calls',
     'Specs',
+    'Computer use',
   ])
   await expect(dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr')).toHaveText([
     /@zeus.*Worker/,
@@ -6183,6 +6210,163 @@ test('Project settings: asked for a project the human has left before its calls 
   await expect(dialog).toBeVisible()
   expect(await shownIn(dialog)).toEqual(HARBOURS)
   expect(await calls(page, 'wakeup.get')).toEqual([{ project: 2 }, { project: 1 }])
+})
+
+/** Every lane of the harbour's board runs on `harness`, the chief's too. */
+function allOn(data, harness) {
+  for (const lane of data.boards[1].lanes) {
+    if (lane.participant.role !== 'human') lane.participant.harness = harness
+  }
+}
+
+/** What the Computer use section of Project settings says, line by line. */
+const computerUseLines = (dialog) =>
+  dialog.locator('fieldset.computer-use').evaluate((section) =>
+    [...section.querySelectorAll('.computer-use-head, .computer-use-line, .computer-use-grant')]
+      .filter((node) => node.closest('[hidden]') === null)
+      .map((node) =>
+        [...node.childNodes]
+          .map((child) => child.textContent)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim(),
+      ),
+  )
+
+test('Project settings: a project with no Claude Code member, the chief included, shows no computer use', async ({
+  page,
+}) => {
+  const data = model()
+  allOn(data, 'codex')
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('fieldset.computer-use')).toBeHidden()
+  expect(await calls(page, 'computer_use.get')).toEqual([{ project: 1 }])
+})
+
+test('Project settings: computer use appears with a Claude Code member and goes when the last one goes', async ({
+  page,
+}) => {
+  const data = model()
+  allOn(data, 'codex')
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const section = dialog.getByRole('group', { name: 'Computer use' })
+  await expect(dialog.locator('fieldset.computer-use')).toBeHidden()
+  // A Claude Code worker joins: the section is there, while the dialog is open.
+  await page.evaluate(() => {
+    const lane = window.__model.boards[1].lanes.find((l) => l.participant.role === 'worker')
+    lane.participant.harness = 'claude-code'
+    window.__listeners.get('state-changed')()
+  })
+  await expect(section).toBeVisible()
+  await expect(section.locator('[data-harness="claude-code"] .computer-use-head')).toHaveText(
+    'Claude Code',
+  )
+  // It leaves the staff: the section goes.
+  await page.evaluate(() => {
+    const board = window.__model.boards[1]
+    board.lanes = board.lanes.filter((l) => l.participant.harness !== 'claude-code')
+    window.__listeners.get('state-changed')()
+  })
+  await expect(dialog.locator('fieldset.computer-use')).toBeHidden()
+  // A Claude Code chief alone is enough.
+  await page.evaluate(() => {
+    const chief = window.__model.boards[1].lanes.find((l) => l.participant.role === 'chief')
+    chief.participant.harness = 'claude-code'
+    window.__listeners.get('state-changed')()
+  })
+  await expect(section).toBeVisible()
+})
+
+test('Project settings: computer use says where Claude Code turns it on, and each macOS permission opens its pane', async ({
+  page,
+}) => {
+  const data = model()
+  data.computerUse = { permissions: { accessibility: true, screenRecording: false } }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  expect(await computerUseLines(dialog)).toEqual([
+    'Claude Code',
+    'Off for this project.',
+    'Turn it on in a Claude Code window in /work/harbour: /mcp → computer-use → Enable.',
+    "ConsensFlow's permissions, for every project",
+    'Accessibility: allowed Open System Settings',
+    'Screen & System Audio Recording: not allowed Open System Settings',
+  ])
+  await dialog
+    .getByRole('button', { name: 'Open System Settings for Screen & System Audio Recording' })
+    .click()
+  await dialog.getByRole('button', { name: 'Open System Settings for Accessibility' }).click()
+  await expect
+    .poll(() => calls(page, 'computer_use.open'))
+    .toEqual([{ pane: 'screen-recording' }, { pane: 'accessibility' }])
+})
+
+test('Project settings: computer use that is on says so, and on Windows says Claude Code has none there', async ({
+  page,
+}) => {
+  const data = model()
+  data.computerUse = { on: true, permissions: { accessibility: true, screenRecording: true } }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  expect(await computerUseLines(dialog)).toEqual([
+    'Claude Code',
+    'On for this project (/work/harbour).',
+    "ConsensFlow's permissions, for every project",
+    'Accessibility: allowed Open System Settings',
+    'Screen & System Audio Recording: allowed Open System Settings',
+  ])
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await page.evaluate(() => {
+    window.__model.computerUse = { system: 'windows', permissions: null }
+  })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  expect(await computerUseLines(dialog)).toEqual([
+    'Claude Code',
+    'Claude Code has no computer use on Windows.',
+  ])
+  await expect(dialog.locator('.computer-use-permissions')).toBeHidden()
+})
+
+test("a note that ConsensFlow lacks computer use's permissions opens the System Settings pane of each it names", async ({
+  page,
+}) => {
+  const data = model()
+  data.inbox[1].push({
+    id: 17,
+    kind: 'note',
+    state: 'queued',
+    sender: null,
+    recipient: 'human',
+    taskNumber: null,
+    body: "Claude Code's computer use is on for this project, but ConsensFlow can't control the screen until you allow it Accessibility and Screen & System Audio Recording in System Settings → Privacy & Security.",
+    questions: null,
+    createdAt: at(1),
+  })
+  await open(page, data)
+  const note = page
+    .getByRole('region', { name: 'For you' })
+    .getByRole('list', { name: 'Notes for you' })
+    .locator('li[data-message="17"]')
+  await note.getByRole('button', { name: 'Open System Settings for Accessibility' }).click()
+  await note
+    .getByRole('button', { name: 'Open System Settings for Screen & System Audio Recording' })
+    .click()
+  await expect
+    .poll(() => calls(page, 'computer_use.open'))
+    .toEqual([{ pane: 'accessibility' }, { pane: 'screen-recording' }])
+  // Any other note has no such button.
+  const other = page.locator('li[data-message]:not([data-message="17"])')
+  await expect(other.getByRole('button', { name: /Open System Settings/ })).toHaveCount(0)
 })
 
 test('Project settings: asked for while the human chooses another project, whose board is on its way, they are not opened, nor when the human is back on the project asked for and its board is on its way', async ({

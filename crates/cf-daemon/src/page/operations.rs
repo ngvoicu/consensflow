@@ -8,8 +8,8 @@ use serde_json::Value;
 
 use super::body::Body;
 use super::{
-    app_specs, board, history, messages, projects, sessions, specs, staff, tasks, viewer, wake_ups,
-    Page, Served,
+    app_specs, board, computer_use, history, messages, projects, sessions, specs, staff, tasks,
+    viewer, wake_ups, Page, Served,
 };
 
 /// Serves `operation`, asked with `body` (an object the page sent, or `{}`).
@@ -68,6 +68,9 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         // A participant's whole history, for the viewer of its window's History button.
         PageOperation::HistoryGet => history::get(page, body).await,
         PageOperation::HistoryPart => history::part(page, body).await,
+        // A project's computer use, for Project settings, and the panes of its grants.
+        PageOperation::ComputerUseGet => computer_use::get(page, body).await,
+        PageOperation::ComputerUseOpen => computer_use::open(page, body).await,
     };
     served.map_err(|said| said.0)
 }

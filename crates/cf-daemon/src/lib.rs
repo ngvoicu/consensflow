@@ -32,6 +32,7 @@
 
 pub mod api;
 pub mod cli;
+pub mod computer_use;
 pub mod console;
 pub mod errors;
 pub mod files;
