@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- What the hardened runtime lets ConsensFlow's own process ask macOS for: the
-     microphone, the camera and Apple Events, as a terminal app is entitled to. A program
+     microphone and Apple Events, as a terminal app is entitled to, and no more: no harness
+     asks for the camera, so it is not entitled (least privilege, T-590). A program
      in its panes (Claude Code's /voice) carries its own signature, and is asked for in the
      words of ConsensFlow's Info.plist. Signed into the bundle by Tauri for a local build
      and by cf-release for a release (`sign_mac::signing::sign_app`), which the release
@@ -9,8 +10,6 @@
 <plist version="1.0">
 <dict>
   <key>com.apple.security.device.audio-input</key>
-  <true/>
-  <key>com.apple.security.device.camera</key>
   <true/>
   <key>com.apple.security.automation.apple-events</key>
   <true/>

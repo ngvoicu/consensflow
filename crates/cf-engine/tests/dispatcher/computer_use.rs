@@ -1,7 +1,8 @@
 //! The note a Claude launch gives the human when Claude Code's computer use is on
 //! for the project's repository and ConsensFlow lacks a macOS permission it needs
-//! (T-540): once for each missing state of a project, not at every launch, and
-//! said again once mended and lost. No case of Node's, which had no such note.
+//! (T-540): once for each missing state of a project, not at every launch nor at
+//! every start of the app, and said again once mended and lost. No case of Node's,
+//! which had no such note.
 
 use cf_engine::computer_use::{note_for, NOTE_OPENING};
 use cf_engine::seams::ScreenPermissions;
@@ -70,7 +71,7 @@ fn each_missing_state_is_said_once_and_a_state_mended_and_lost_is_said_again() {
         .borrow_mut()
         .insert(FOLDER.to_owned());
     context.computer_use.permissions.set(granted(false, false));
-    let tiers = Tiers::new(&context, &["zeus", "diana", "athena", "hermes"]);
+    let tiers = Tiers::new(&context, &["zeus", "diana", "athena", "hermes", "apollo"]);
     launch_once(&tiers, "One");
     // Accessibility given: what is missing now is another state.
     context.computer_use.permissions.set(granted(true, false));
@@ -78,9 +79,10 @@ fn each_missing_state_is_said_once_and_a_state_mended_and_lost_is_said_again() {
     // Both given: nothing is said, and what was said is forgotten.
     context.computer_use.permissions.set(granted(true, true));
     launch_once(&tiers, "Three");
-    // Lost again: said again.
+    // Lost again: said again, and once.
     context.computer_use.permissions.set(granted(true, false));
     launch_once(&tiers, "Four");
+    launch_once(&tiers, "Five");
     let bodies: Vec<String> = computer_use_notes(&context, tiers.project.id)
         .into_iter()
         .map(|note| note.body)
@@ -94,6 +96,85 @@ fn each_missing_state_is_said_once_and_a_state_mended_and_lost_is_said_again() {
         screen_recording: true,
     });
     assert_eq!(bodies, [both, screen.clone(), screen]);
+}
+
+#[test]
+fn a_missing_state_said_before_a_restart_is_not_said_again_and_another_is() {
+    let context = Context::new();
+    context
+        .computer_use
+        .on_in
+        .borrow_mut()
+        .insert(FOLDER.to_owned());
+    context.computer_use.permissions.set(granted(true, false));
+    let tiers = Tiers::new(&context, &["zeus", "diana", "athena"]);
+    launch_once(&tiers, "Write the parser");
+    // The app quits and starts again: a new engine on the same ledger.
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    after.resume_project(tiers.project.id).unwrap();
+    tiers.open_body("Write the lexer");
+    after.pass().unwrap();
+    after.pass().unwrap();
+    assert_eq!(
+        computer_use_notes(&context, tiers.project.id).len(),
+        1,
+        "the state the last note said is not said at the next start"
+    );
+    // Another state is said, by the engine of the new start.
+    context.computer_use.permissions.set(granted(false, false));
+    tiers.open_body("Write the printer");
+    after.pass().unwrap();
+    after.pass().unwrap();
+    let bodies: Vec<String> = computer_use_notes(&context, tiers.project.id)
+        .into_iter()
+        .map(|note| note.body)
+        .collect();
+    assert_eq!(bodies.len(), 2, "{bodies:?}");
+    assert!(
+        bodies[1].contains("allow it Accessibility and Screen"),
+        "{bodies:?}"
+    );
+}
+
+#[test]
+fn a_members_note_with_the_same_words_is_not_consensflows_and_does_not_stand_for_it() {
+    let context = Context::new();
+    // Computer use is off while the project opens: no launch is told yet.
+    context.computer_use.permissions.set(granted(true, false));
+    let tiers = Tiers::new(&context, &["zeus"]);
+    assert!(computer_use_notes(&context, tiers.project.id).is_empty());
+    context
+        .computer_use
+        .on_in
+        .borrow_mut()
+        .insert(FOLDER.to_owned());
+    // The chief writes the human the very words of the note.
+    let words = note_for(ScreenPermissions {
+        accessibility: false,
+        screen_recording: true,
+    });
+    context
+        .ledger
+        .borrow_mut()
+        .note(
+            tiers.project.id,
+            &cf_ledger::NewNote {
+                from: Some("chief".to_owned()),
+                to: "human".to_owned(),
+                task: None,
+                body: words.clone(),
+            },
+        )
+        .unwrap();
+    launch_once(&tiers, "Write the parser");
+    let own: Vec<MessageView> = computer_use_notes(&context, tiers.project.id)
+        .into_iter()
+        .filter(|note| note.sender.is_none())
+        .collect();
+    assert_eq!(own.len(), 1, "ConsensFlow says it itself");
+    assert_eq!(own[0].body, words);
 }
 
 #[test]

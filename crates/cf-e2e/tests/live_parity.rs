@@ -12,12 +12,25 @@
 //!   role's skill and not the folder's, which OpenCode opened in a terminal there has.
 //!   The worker is asked to name the skills it can load; its answer must name both.
 //!
+//! - **Claude Code's window** (`claude.rs`): a window opened as ConsensFlow opens a member's
+//!   loads the MCP servers, plugins, skills and Claude in Chrome that the same Claude Code
+//!   loads opened plainly in that folder, and its role's skill besides, on macOS and on
+//!   Windows (a ConPTY of ConsensFlow's own there).
+//!
 //! ```text
-//! cargo xtask live parity                 OpenCode
-//! cargo xtask live parity opencode
+//! cargo xtask live parity                                   both
+//! cargo xtask live parity -- a_claude_member                Claude Code's alone
+//! cargo xtask windows --host zeewin -- cargo xtask live parity -- a_claude_member
 //! ```
 
 use std::time::Duration;
+
+// The parts are in `live_parity/`: cargo looks for the modules of a test's root file
+// beside it, where each would be a suite of its own.
+#[path = "live_parity/claude.rs"]
+mod claude;
+#[path = "live_parity/terminal_env.rs"]
+mod terminal_env;
 
 use cf_e2e::live::members::{self, find, is_over, last_result, Members, Plan};
 use cf_e2e::live::{self, last_lines, text, Harness, Log, Who};
@@ -154,4 +167,18 @@ fn an_opencode_worker_has_the_skills_its_folders_own_configuration_names_and_its
         ));
     }
     Ok(())
+}
+
+#[test]
+#[ignore = "opt-in: opens the machine's Claude Code twice on a copy of its own config, no message given; cargo xtask live parity -- a_claude_member"]
+fn a_claude_member_window_loads_what_the_same_claude_loads_in_a_terminal() -> Result {
+    let log = Log::begin("live parity (Claude Code)")?;
+    claude::run(&log)
+}
+
+#[test]
+#[ignore = "opt-in: spends the machine's Claude quota on one one-word task; cargo xtask live parity --claude-config <empty folder> -- a_real_claude_member"]
+fn a_real_claude_member_window_has_the_terminals_lang_and_its_rcs_export() -> Result {
+    let log = Log::begin("live parity (the terminal's environment)")?;
+    terminal_env::run(&log)
 }

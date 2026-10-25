@@ -52,6 +52,7 @@ fn rig_with(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs) -> Rig {
     let counted = Rc::clone(&kicks);
     let opened = Rc::new(RefCell::new(Vec::new()));
     let noted = Rc::clone(&opened);
+    let grants_of = crate::computer_use::grants_of(&env);
     let page = Rc::new(Page {
         ledger: Rc::clone(&kit.ledger),
         engine: engine.unwrap_or_else(|| Rc::new(Rc::clone(&kit.dispatcher))),
@@ -64,6 +65,7 @@ fn rig_with(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs) -> Rig {
                 noted.borrow_mut().push(pane);
                 Box::pin(async { Ok(()) })
             }),
+            grants_of,
         },
     });
     Rig {

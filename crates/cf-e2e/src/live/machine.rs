@@ -354,7 +354,12 @@ pub fn rig_with_stand_ins(
             ),
         })?;
     let shim = shimmed_claude(folder, claude.command(), stand_in)?;
-    Ok(rig(installs, shim).stand_ins_write_in(claude.home().join(".claude")))
+    // The stand-ins write where the real Claude does: the run's own config folder where
+    // it was given one, else the machine's.
+    let records = super::option("claude-config")
+        .filter(|folder| !folder.is_empty())
+        .map_or_else(|| claude.home().join(".claude"), PathBuf::from);
+    Ok(rig(installs, shim).stand_ins_write_in(records))
 }
 
 /// The machine's `harness`, found as a person's shell finds it, with the home

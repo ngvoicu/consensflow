@@ -298,6 +298,52 @@ meant = "a_bundle_whose_info_plist_says_no_usage_is_refused_once_signed"
 runs = ["with-apples-tools"]
 
 [[plant.edit]]
+file = "tools/cf-release/src/sign_mac.rs"
+find = '''        verify::asks_as_a_terminal(tools, app)?;'''
+replace = '''        let _ = verify::asks_as_a_terminal;'''
+
+# Round 3 of T-540 (Calliope's review T-590): the bundle's entitlements are the two it
+# needs and no other (no camera), checked as soon as the app is signed, so a bundle the
+# check refuses spends no notarization.
+[[plant]]
+name = "sign-mac: the entitlements are checked only after the notary"
+meant = "a_bundle_signed_with_more_or_less_than_it_needs_is_refused_before_any_notarization"
+runs = ["sign-mac"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/sign_mac.rs"
+find = '''        verify::asks_as_a_terminal(tools, app)?;
+'''
+replace = ''''''
+
+[[plant.edit]]
+file = "tools/cf-release/src/sign_mac.rs"
+find = '''        verify::verify(tools, app, dmg, self.notary.is_some())?;'''
+replace = '''        verify::asks_as_a_terminal(tools, app)?;
+        verify::verify(tools, app, dmg, self.notary.is_some())?;'''
+
+[[plant]]
+name = "sign-mac: an entitlement besides the two needed is taken"
+meant = "a_bundle_signed_with_more_or_less_than_it_needs_is_refused_before_any_notarization"
+runs = ["sign-mac"]
+
+[[plant.edit]]
 file = "tools/cf-release/src/sign_mac/verify.rs"
-find = '''    asks_as_a_terminal(tools, app)?;'''
-replace = '''    let _ = asks_as_a_terminal;'''
+find = '''    if !more.is_empty() {'''
+replace = '''    if !more.is_empty() && more.is_empty() {'''
+
+[[plant]]
+name = "sign-mac: the app is entitled to the camera again"
+meant = "it_signs_every_mach_o_of_the_app_from_the_inside_out_then_makes_the_dmg_again_around_it"
+runs = ["with-apples-tools"]
+
+[[plant.edit]]
+file = "app/src-tauri/Entitlements.plist"
+find = '''  <key>com.apple.security.device.audio-input</key>
+  <true/>
+'''
+replace = '''  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <key>com.apple.security.device.camera</key>
+  <true/>
+'''

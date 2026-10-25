@@ -388,6 +388,25 @@ pub(crate) fn inbox(
     )
 }
 
+/// The newest note ConsensFlow itself left the participant (one with no sender) whose
+/// body opens with `opening`; none where it left none.
+pub(crate) fn newest_own_note(
+    store: &Store,
+    participant_id: i64,
+    opening: &str,
+) -> Result<Option<MessageView>, LedgerError> {
+    let length = i64::try_from(opening.chars().count()).unwrap_or(i64::MAX);
+    Ok(messages(
+        store,
+        &format!(
+            "{MESSAGE_SELECT} WHERE m.recipient_id = ? AND m.sender_id IS NULL AND m.kind = 'note' \
+             AND substr(m.body, 1, ?) = ? ORDER BY m.id DESC LIMIT 1"
+        ),
+        params![participant_id, length, opening],
+    )?
+    .pop())
+}
+
 /// The messages a `MESSAGE_SELECT` finds.
 fn messages(
     store: &Store,

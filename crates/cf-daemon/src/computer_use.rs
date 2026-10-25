@@ -49,10 +49,12 @@ impl Pane {
 /// What opens a System Settings pane: the system's own, or a test's.
 pub type Opens = Rc<dyn Fn(Pane) -> LocalBoxFuture<'static, Result<(), String>>>;
 
-/// The machine's computer use in the daemon's environment.
+/// The machine's computer use in the daemon's environment, with Claude Code's
+/// configuration as it last read it: one for the engine and the page.
 pub struct MachineComputerUse {
     env: Env,
     grants: Rc<dyn Fn() -> Option<ScreenPermissions>>,
+    configuration: computer_use::Configuration,
 }
 
 impl MachineComputerUse {
@@ -71,7 +73,11 @@ impl MachineComputerUse {
 
     /// With `grants` in place of the system's: what a test gives.
     pub fn granting(env: Env, grants: Rc<dyn Fn() -> Option<ScreenPermissions>>) -> Self {
-        Self { env, grants }
+        Self {
+            env,
+            grants,
+            configuration: computer_use::Configuration::default(),
+        }
     }
 }
 
@@ -81,8 +87,26 @@ impl ComputerUse for MachineComputerUse {
     }
 
     fn claude(&self, directory: &str) -> computer_use::ComputerUse {
-        computer_use::computer_use(&self.env, directory)
+        self.configuration.computer_use(&self.env, directory)
     }
+}
+
+/// The bundle identifiers of ConsensFlow's apps: the app's and the Candidate's.
+const OWN_BUNDLE: &str = "dev.ngvoicu.consensflow";
+
+/// The app macOS gives the daemon's grants to where it is not ConsensFlow: the app a
+/// daemon was started from (a `cf ui` in Terminal is Terminal's, and so are its grants),
+/// by the bundle identifier macOS names it with in the environment
+/// (`__CFBundleIdentifier`). None where it is ConsensFlow's, or not named.
+pub fn grants_of(env: &Env) -> Option<String> {
+    let app = env
+        .text("__CFBundleIdentifier")
+        .filter(|app| !app.is_empty())?;
+    let own = app == OWN_BUNDLE
+        || app
+            .strip_prefix(OWN_BUNDLE)
+            .is_some_and(|rest| rest.starts_with('.'));
+    (!own).then(|| app.to_owned())
 }
 
 /// How long `open` is waited for, for what it says when it fails at once.
@@ -114,6 +138,31 @@ pub fn system_opener(env: Env) -> Opens {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_grants_are_another_apps_where_the_daemon_was_started_from_one() {
+        let of = |app: Option<&str>| {
+            grants_of(&Env::from_vars(
+                app.map(|app| ("__CFBundleIdentifier", app)),
+            ))
+        };
+        assert_eq!(
+            of(Some("com.apple.Terminal")),
+            Some("com.apple.Terminal".to_owned())
+        );
+        assert_eq!(
+            of(Some("dev.ngvoicu.consensflowx")),
+            Some("dev.ngvoicu.consensflowx".to_owned())
+        );
+        for own in [
+            Some("dev.ngvoicu.consensflow"),
+            Some("dev.ngvoicu.consensflow.candidate"),
+            Some(""),
+            None,
+        ] {
+            assert_eq!(of(own), None, "{own:?}");
+        }
+    }
 
     #[test]
     fn the_page_names_two_panes_and_each_opens_its_privacy_pane() {

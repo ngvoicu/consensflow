@@ -73,6 +73,28 @@ async fn a_system_with_no_grants_says_none_and_an_unknown_project_is_refused() {
 }
 
 #[tokio::test]
+async fn the_row_is_told_whose_grants_they_are_where_another_app_started_the_daemon() {
+    LocalSet::new()
+        .run_until(async {
+            for (app, said) in [
+                (Some("com.apple.Terminal"), json!("com.apple.Terminal")),
+                (Some("dev.ngvoicu.consensflow"), Value::Null),
+                (None, Value::Null),
+            ] {
+                let mut vars = vec![("HOME", "/home/owner")];
+                vars.extend(app.map(|app| ("__CFBundleIdentifier", app)));
+                let rig = rig_over(Env::from_vars(vars), None);
+                let (daemon, app_end) = bridge_pair_over(&rig.spawn);
+                register(&daemon, &rig.page, &rig.spawn);
+                let project = rig.kit.with_staff(&["zeus"]).id;
+                let answer = ask(&app_end, "computer_use.get", json!({ "project": project })).await;
+                assert_eq!(answer["grantsOf"], said, "{app:?}: {answer}");
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn open_opens_only_the_two_named_panes() {
     LocalSet::new()
         .run_until(async {

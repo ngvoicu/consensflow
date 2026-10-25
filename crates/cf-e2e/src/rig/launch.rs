@@ -119,6 +119,12 @@ impl Rig {
 /// The daemon under test, started and held to being the native one: its handle
 /// line read, and its start line in its log, which says what runtime it is.
 fn start_daemon(config: &Config, env: &[(String, String)]) -> Result<(Daemon, StartLine)> {
+    let mut env = env.to_vec();
+    for (name, value) in &config.daemon_vars {
+        env.retain(|(held, _)| held != name);
+        env.push((name.clone(), value.clone()));
+    }
+    let env = env.as_slice();
     let mut daemon = match &config.daemon {
         Some(program) => Daemon::run(program, [] as [&str; 0], env.iter().cloned())?,
         None => Daemon::run(

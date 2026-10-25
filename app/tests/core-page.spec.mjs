@@ -367,6 +367,7 @@ async function open(page, data = model()) {
         const said = data.computerUse ?? {}
         return answer({
           system: said.system ?? 'macos',
+          grantsOf: said.grantsOf ?? null,
           permissions:
             'permissions' in said
               ? said.permissions
@@ -6335,6 +6336,53 @@ test('Project settings: computer use that is on says so, and on Windows says Cla
     'Claude Code has no computer use on Windows.',
   ])
   await expect(dialog.locator('.computer-use-permissions')).toBeHidden()
+})
+
+test("Project settings: a ConsensFlow started from another app says the permissions shown are that app's", async ({
+  page,
+}) => {
+  const data = model()
+  data.computerUse = {
+    grantsOf: 'com.apple.Terminal',
+    permissions: { accessibility: true, screenRecording: false },
+  }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  expect(await computerUseLines(dialog)).toEqual([
+    'Claude Code',
+    'Off for this project.',
+    'Turn it on in a Claude Code window in /work/harbour: /mcp → computer-use → Enable.',
+    "ConsensFlow's permissions, for every project",
+    "This ConsensFlow was started from com.apple.Terminal, so these are that app's permissions, not ConsensFlow's.",
+    'Accessibility: allowed Open System Settings',
+    'Screen & System Audio Recording: not allowed Open System Settings',
+  ])
+})
+
+test("a member's note with the words of ConsensFlow's computer-use note gets no System Settings button", async ({
+  page,
+}) => {
+  const data = model()
+  data.inbox[1].push({
+    id: 18,
+    kind: 'note',
+    state: 'queued',
+    sender: 'chief',
+    recipient: 'human',
+    taskNumber: null,
+    body: "Claude Code's computer use is on for this project, but ConsensFlow can't control the screen until you allow it Accessibility in System Settings → Privacy & Security.",
+    questions: null,
+    createdAt: at(1),
+  })
+  await open(page, data)
+  const note = page
+    .getByRole('region', { name: 'For you' })
+    .getByRole('list', { name: 'Notes for you' })
+    .locator('li[data-message="18"]')
+  await expect(note).toBeVisible()
+  await expect(note.getByRole('button', { name: /Open System Settings/ })).toHaveCount(0)
 })
 
 test("a note that ConsensFlow lacks computer use's permissions opens the System Settings pane of each it names", async ({

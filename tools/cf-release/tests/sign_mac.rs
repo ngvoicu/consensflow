@@ -95,7 +95,6 @@ mod apple_tools {
 
     /// The usage keys of ConsensFlow's `Info.plist`, which a bundle Tauri built has.
     const USAGE: &str = "<key>NSMicrophoneUsageDescription</key><string>mic</string>\
-                         <key>NSCameraUsageDescription</key><string>camera</string>\
                          <key>NSAppleEventsUsageDescription</key><string>events</string>";
 
     /// [`write_bundle`], its `Info.plist` holding `usage` beside the bundle's keys.
@@ -246,16 +245,22 @@ mod apple_tools {
                 ],
             );
             if name == "app" {
-                for key in [
-                    "com.apple.security.device.audio-input",
-                    "com.apple.security.device.camera",
-                    "com.apple.security.automation.apple-events",
-                ] {
-                    assert!(
-                        entitled.stdout.contains(&format!("<key>{key}</key>")),
-                        "{key}"
-                    );
-                }
+                // Those two and no other: no harness asks for the camera (T-590).
+                let keys: Vec<&str> = entitled
+                    .stdout
+                    .split("<key>")
+                    .skip(1)
+                    .filter_map(|rest| rest.split_once("</key>").map(|(key, _)| key))
+                    .collect();
+                assert_eq!(
+                    keys,
+                    [
+                        "com.apple.security.automation.apple-events",
+                        "com.apple.security.device.audio-input",
+                    ],
+                    "{}",
+                    entitled.stdout
+                );
             } else {
                 assert_eq!(entitled.stdout, "", "{name}");
             }

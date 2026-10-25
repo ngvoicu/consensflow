@@ -58,6 +58,9 @@ fn an_ad_hoc_release_signs_the_code_then_the_app_then_makes_the_dmg_again_with_n
         plutil -extract CFBundleExecutable raw -o - $APP/Contents/Info.plist
         {code}
         {ad_hoc} --options runtime --entitlements $SCRATCH/entitlements.plist $APP
+        codesign -d --entitlements - --xml $APP
+        plutil -extract NSMicrophoneUsageDescription raw -o - $APP/Contents/Info.plist
+        plutil -extract NSAppleEventsUsageDescription raw -o - $APP/Contents/Info.plist
         hdiutil convert $DMG -format UDRW -ov -o $SCRATCH/writable.dmg
         hdiutil attach $SCRATCH/writable.dmg -readwrite -noverify -noautoopen -nobrowse -mountpoint $SCRATCH/volume
         ditto $APP $SCRATCH/volume/ConsensFlow.app
@@ -67,10 +70,6 @@ fn an_ad_hoc_release_signs_the_code_then_the_app_then_makes_the_dmg_again_with_n
         {ad_hoc} $DMG
         codesign --verify --deep --strict $APP
         codesign --verify --strict $DMG
-        codesign -d --entitlements - --xml $APP
-        plutil -extract NSMicrophoneUsageDescription raw -o - $APP/Contents/Info.plist
-        plutil -extract NSCameraUsageDescription raw -o - $APP/Contents/Info.plist
-        plutil -extract NSAppleEventsUsageDescription raw -o - $APP/Contents/Info.plist
         ",
         code = code_signed(ad_hoc),
     );
@@ -100,6 +99,9 @@ fn a_release_under_the_developer_id_is_signed_notarized_and_stapled_in_this_orde
         plutil -extract CFBundleExecutable raw -o - $APP/Contents/Info.plist
         {code}
         {signed} --options runtime --entitlements $SCRATCH/entitlements.plist $APP
+        codesign -d --entitlements - --xml $APP
+        plutil -extract NSMicrophoneUsageDescription raw -o - $APP/Contents/Info.plist
+        plutil -extract NSAppleEventsUsageDescription raw -o - $APP/Contents/Info.plist
         ditto -c -k --keepParent $APP $SCRATCH/ConsensFlow.app.zip
         xcrun notarytool submit $SCRATCH/ConsensFlow.app.zip {notarized}
         xcrun stapler staple $APP
@@ -116,10 +118,6 @@ fn a_release_under_the_developer_id_is_signed_notarized_and_stapled_in_this_orde
         xcrun stapler validate $DMG
         codesign --verify --deep --strict $APP
         codesign --verify --strict $DMG
-        codesign -d --entitlements - --xml $APP
-        plutil -extract NSMicrophoneUsageDescription raw -o - $APP/Contents/Info.plist
-        plutil -extract NSCameraUsageDescription raw -o - $APP/Contents/Info.plist
-        plutil -extract NSAppleEventsUsageDescription raw -o - $APP/Contents/Info.plist
         spctl --assess --verbose=4 --type execute $APP
         spctl --assess --verbose=4 --type open --context context:primary-signature $DMG
         security list-keychains -d user -s {searched}

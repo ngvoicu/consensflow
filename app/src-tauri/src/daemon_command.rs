@@ -13,7 +13,7 @@ use std::sync::{mpsc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use cf_base::env::{path_with_folders, Env};
+use cf_base::env::{path_with_folders, Env, TERMINAL_ENV};
 use tauri::{AppHandle, Manager};
 
 use crate::daemon::DaemonFailure;
@@ -26,6 +26,11 @@ use crate::daemon::DaemonFailure;
 /// shell that never answers costs each start this long, and the daemon then
 /// runs on the app's PATH and the system's folders.
 const LOGIN_PATH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// What starts a console program with no console window of its own (Windows'
+/// `CREATE_NO_WINDOW`): the daemon, and the PowerShell asked for its environment.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// The bundle's `cf` as its folder names it.
 const CF: &str = if cfg!(windows) { "cf.exe" } else { "cf" };
@@ -54,7 +59,6 @@ pub(crate) fn daemon_command(
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
     Ok(command)
@@ -163,21 +167,41 @@ fn on_login_environment(
     lookup: &LoginLookup,
 ) -> Option<String> {
     let shell = env.path("SHELL").filter(|_| !env.on_windows());
+    // One limit for both questions, as `LOGIN_PATH_TIMEOUT` says: the login files' PATH
+    // first, which they rarely hang on and which is the fallback, then the interactive
+    // shell's whole environment in what is left of it.
+    let deadline = Instant::now() + timeout;
+    let left = || deadline.saturating_duration_since(Instant::now());
+    let login_path = shell.and_then(|shell| login_path_in(shell, timeout, lookup));
     let taken = match shell {
-        Some(shell) => login_environment_in(shell, timeout, lookup),
+        Some(shell) if !left().is_zero() => login_environment_in(shell, left(), lookup),
         None if cfg!(windows) => profile_environment_in(&powershell_of(env), timeout, lookup),
-        None => None,
+        _ => None,
     };
-    let login = match &taken {
-        Some(vars) => vars
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
-            .and_then(|(_, value)| value.to_str())
-            .map(str::to_owned),
-        None => shell.and_then(|shell| login_path_in(shell, timeout, lookup)),
-    };
+    let login = taken
+        .iter()
+        .flatten()
+        .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+        .and_then(|(_, value)| value.to_str())
+        .map(str::to_owned)
+        .or(login_path);
+    let mut names = Vec::new();
     for (name, value) in taken.iter().flatten() {
+        if kept_from_the_app(env, name) {
+            continue;
+        }
         command.env(name, value);
+        if !name.eq_ignore_ascii_case("PATH") {
+            names.push(name.to_string_lossy().into_owned());
+        }
+    }
+    // Names only: the daemon has the values, and gives them to every window's pane,
+    // which the app's own terminal starts from the app's environment.
+    if !names.is_empty() {
+        command.env(
+            TERMINAL_ENV,
+            serde_json::to_string(&names).unwrap_or_default(),
+        );
     }
     let given = login
         .as_deref()
@@ -193,12 +217,33 @@ fn on_login_environment(
         .map(|shell| unanswered(shell, timeout, &runs_on))
 }
 
-/// The variables of a login shell's environment the daemon is not given: where the
-/// shell was and how deep, the last command it ran, and the terminal it was asked
-/// in, which is no pane's (a pane says its own, `cf-panes`' `advertise_terminal`).
+/// The harnesses' homes, which a run that starts the app with its own (a test's, a live
+/// run's throwaway config) keeps over what the rc says; where the app has none, the
+/// rc's is taken, as a terminal has it.
+const HOMES: [&str; 2] = ["CLAUDE_CONFIG_DIR", "CODEX_HOME"];
+
+/// Whether `name` is a harness's home the app was started with, which the rc does not
+/// replace.
+fn kept_from_the_app(env: &Env, name: &OsStr) -> bool {
+    let name = name.to_string_lossy();
+    HOMES.contains(&&*name) && env.os(&name).is_some_and(|value| !value.is_empty())
+}
+
+/// The variables of a terminal's environment the daemon is not given: where the shell
+/// was and how deep, the last command it ran, and the terminal it was asked in, which is
+/// no pane's (a pane says its own, `cf-panes`' `advertise_terminal`); ConsensFlow's own
+/// (`CONSENSFLOW_*`, `CF_*`), which the app and the daemon set for themselves, so that an
+/// rc's `CONSENSFLOW_HOME` never replaces the Candidate's own home; the identity of a
+/// Claude Code session the app removes from itself ([`crate::CLAUDE_SESSION_IDENTITY`]);
+/// and the dynamic loader's (`DYLD_*`, `LD_*`), on purpose: a library an rc injects into
+/// its terminal's programs is not given to every agent ConsensFlow starts.
 fn not_taken(name: &OsStr) -> bool {
     let name = name.to_string_lossy();
-    matches!(&*name, "PWD" | "OLDPWD" | "SHLVL" | "_") || name.starts_with("TERM")
+    matches!(&*name, "PWD" | "OLDPWD" | "SHLVL" | "_")
+        || ["TERM", "CONSENSFLOW_", "CF_", "DYLD_", "LD_"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+        || crate::CLAUDE_SESSION_IDENTITY.contains(&&*name)
 }
 
 /// The environment of the human's interactive login shell, as a terminal's shell
@@ -450,6 +495,13 @@ fn asked(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    // PowerShell is a console program: started from a windowed app, it would show a
+    // console of its own for as long as the profile takes, as the daemon would.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        asked.creation_flags(CREATE_NO_WINDOW);
+    }
     let mut output = lookup.start(&mut asked)?;
     let (chunks, printed) = mpsc::channel();
     // Not joined: a process a login file started may hold the output open

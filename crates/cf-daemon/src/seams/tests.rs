@@ -72,6 +72,53 @@ fn a_daemon_with_no_path_gives_its_windows_the_bundle_alone() {
     }
 }
 
+/// What the app took of a terminal's environment for its daemon reaches every window's
+/// pane, which the pane host starts from the app's own environment (T-540): the names
+/// the app said, first, so that ConsensFlow's own and the harness's win over them; never
+/// a variable of ConsensFlow's, nor the PATH twice, nor one the daemon does not have.
+#[test]
+fn every_window_is_given_what_the_app_took_of_a_terminals_environment_before_its_own() {
+    let scene = scene();
+    let env = Env::from_vars([
+        (
+            TERMINAL_ENV,
+            r#"["LANG","PNPM_HOME","CONSENSFLOW_URL","Path","NOT_THERE"]"#,
+        ),
+        ("LANG", "en_GB.UTF-8"),
+        ("PNPM_HOME", "/home/me/Library/pnpm"),
+        ("CONSENSFLOW_URL", "http://elsewhere"),
+        ("Path", "/rc/bin"),
+        ("PATH", "/usr/bin"),
+        ("NOT_NAMED", "kept out"),
+    ]);
+    let window = WindowEnv::new(&env, "http://127.0.0.1:4242", "/bundle/bin");
+    let started = window.env(participant(&scene.project, "zeus"), &scene.project);
+    let names: Vec<&str> = started.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "LANG",
+            "PNPM_HOME",
+            "CONSENSFLOW_URL",
+            "CONSENSFLOW_PROJECT",
+            "CONSENSFLOW_PARTICIPANT",
+            "PATH"
+        ]
+    );
+    assert_eq!(started[0].1, "en_GB.UTF-8");
+    assert_eq!(
+        started[2].1, "http://127.0.0.1:4242",
+        "ConsensFlow's own address"
+    );
+    // A daemon the app said nothing to gives what it always gave.
+    let plain = WindowEnv::new(&Env::from_vars([("LANG", "C")]), "http://127.0.0.1:1", "/b");
+    let started = plain.env(participant(&scene.project, "zeus"), &scene.project);
+    assert!(
+        !started.iter().any(|(name, _)| name == "LANG"),
+        "{started:?}"
+    );
+}
+
 #[test]
 fn the_chief_is_given_its_staff_and_every_role_the_cf_of_its_window() {
     let scene = scene();

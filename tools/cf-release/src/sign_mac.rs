@@ -240,6 +240,7 @@ impl Release<'_> {
             ))
         })?;
         signing::sign_app(tools, &self.signing, app, &entitlements)?;
+        verify::asks_as_a_terminal(tools, app)?;
         if let Some(notary) = &self.notary {
             notary::notarize(tools, app, notary, self.scratch)?;
         }

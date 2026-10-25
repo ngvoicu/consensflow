@@ -21,6 +21,9 @@ use crate::computer_use::{Opens, Pane};
 pub struct ComputerUsePage {
     pub machine: Rc<dyn ComputerUse>,
     pub open: Opens,
+    /// The app the daemon's grants are another's of, where they are not ConsensFlow's
+    /// own ([`crate::computer_use::grants_of`]).
+    pub grants_of: Option<String>,
 }
 
 /// The system, by the page's word for it.
@@ -34,8 +37,9 @@ fn system() -> &'static str {
     }
 }
 
-/// `computer_use.get`: `{system, permissions, harnesses}` for the project the body
-/// names; `permissions` is null where the system keeps no grants.
+/// `computer_use.get`: `{system, permissions, grantsOf, harnesses}` for the project the
+/// body names; `permissions` is null where the system keeps no grants, and `grantsOf`
+/// names the app they are of where it is not ConsensFlow (null where it is).
 pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let id = body.whole("project")?;
     let project = page
@@ -54,6 +58,7 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     merged(json!({
         "system": system(),
         "permissions": permissions,
+        "grantsOf": page.computer_use.grants_of,
         "harnesses": {
             "claude-code": { "on": claude.on, "folder": claude.folder },
         },

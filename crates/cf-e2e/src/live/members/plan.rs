@@ -98,6 +98,9 @@ pub struct Plan {
     /// what the rig sets: a name and its value each, the stand-in agent's own
     /// settings (`CF_TEST_WIND_DOWN_MS`).
     pub vars: Vec<(String, String)>,
+    /// The variables the daemon alone is given, as the app gives its daemon what it took
+    /// of the human's terminal: the pane host and its windows start without them.
+    pub daemon_vars: Vec<(String, String)>,
     /// The agents of the roster.
     pub roster: Vec<Value>,
     /// The id of the agent that is the project's chief.
@@ -117,6 +120,7 @@ impl Plan {
             brief: BRIEF,
             files: Vec::new(),
             vars: Vec::new(),
+            daemon_vars: Vec::new(),
             chief: chief["id"].as_str().unwrap_or_default().to_owned(),
             roster: vec![chief],
             repository: false,
@@ -157,6 +161,13 @@ impl Plan {
     #[must_use]
     pub fn with_var(mut self, name: &str, value: impl Into<String>) -> Self {
         self.vars.push((name.to_owned(), value.into()));
+        self
+    }
+
+    /// With the variable `name` set to `value` in the daemon's environment alone.
+    #[must_use]
+    pub fn with_daemon_var(mut self, name: &str, value: impl Into<String>) -> Self {
+        self.daemon_vars.push((name.to_owned(), value.into()));
         self
     }
 

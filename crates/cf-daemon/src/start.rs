@@ -354,6 +354,7 @@ async fn run(
     // The pane host opens, kills and tells of windows, and says what a window's
     // turn left running: one end of the bridge for the engine's every word to it.
     let host = Rc::new(BridgeHost::new(bridge.clone(), env.clone()));
+    let computer_use = Rc::new(MachineComputerUse::new(env.clone()));
     let seams = Seams {
         ledger: Rc::clone(&ledger),
         host: Rc::clone(&host) as _,
@@ -374,7 +375,7 @@ async fn run(
         log: Rc::clone(&log) as _,
         launch_files: Rc::new(LaunchFolders::new(home.clone(), Rc::clone(&errors))),
         spawn: Rc::clone(&spawn) as _,
-        computer_use: Rc::new(MachineComputerUse::new(env.clone())),
+        computer_use: Rc::clone(&computer_use) as _,
         limits,
     };
     let dispatcher = Dispatcher::new(seams);
@@ -456,8 +457,9 @@ async fn run(
         kick: Rc::clone(&kick),
         specs: page::Specs::new(),
         computer_use: page::ComputerUsePage {
-            machine: Rc::new(MachineComputerUse::new(env.clone())),
+            machine: computer_use,
             open: system_opener(env.clone()),
+            grants_of: crate::computer_use::grants_of(&env),
         },
     });
     page::register(&bridge, &page, &spawn);

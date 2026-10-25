@@ -4,8 +4,11 @@
 //! and Claude Code's computer use then acts through ConsensFlow's own macOS
 //! permissions, which only the human can give. A Claude window that starts in a
 //! repository where it is on, while a permission is missing, gets the human one
-//! note: once for each missing state of each project, not at every launch; a state
-//! the human mends and loses again is said again.
+//! note: once for each missing state of each project, not at every launch nor at
+//! every start of the app (the project's last note of it, in the ledger, says what
+//! was said); a state the human mends and loses again while the app runs is said
+//! again. A mend and a loss both made while the app is closed go unseen, and the
+//! state, the same as the last note's, is not said again.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -24,10 +27,12 @@ const CLAUDE: &str = "claude-code";
 pub const NOTE_OPENING: &str = "Claude Code's computer use is on for this project, but ConsensFlow";
 
 /// What the engine keeps across launches: the missing states each project was
-/// told of already.
+/// told of already, and the projects seen mended since the app started (whose last
+/// note says what is no longer so).
 #[derive(Debug, Default)]
 pub(crate) struct ComputerUseState {
     told: RefCell<HashSet<(i64, bool, bool)>>,
+    mended: RefCell<HashSet<i64>>,
 }
 
 /// The note for `missing`, in plain words.
@@ -63,6 +68,7 @@ impl Dispatcher {
                 .told
                 .borrow_mut()
                 .retain(|(id, ..)| *id != project.id);
+            self.computer_use.mended.borrow_mut().insert(project.id);
             return Ok(());
         }
         if !self.seams.computer_use.claude(&project.directory).on {
@@ -79,16 +85,37 @@ impl Dispatcher {
         )) {
             return Ok(());
         }
+        let body = note_for(missing);
+        if !self.computer_use.mended.borrow().contains(&project.id)
+            && self.last_said(project)?.as_deref() == Some(body.as_str())
+        {
+            // Said before the app last started, and nothing mended since.
+            return Ok(());
+        }
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
                 from: None,
                 to: "human".to_owned(),
                 task: None,
-                body: note_for(missing),
+                body,
             },
         )?;
         self.changed();
         Ok(())
+    }
+
+    /// What the project's last note of computer use said to the human: ConsensFlow's
+    /// own note (no sender), none where there is none.
+    fn last_said(&self, project: &ProjectView) -> Result<Option<String>, EngineError> {
+        let Some(human) = project.participants.iter().find(|p| p.role == "human") else {
+            return Ok(None);
+        };
+        Ok(self
+            .seams
+            .ledger
+            .borrow()
+            .newest_own_note(human.id, NOTE_OPENING)?
+            .map(|note| note.body))
     }
 }

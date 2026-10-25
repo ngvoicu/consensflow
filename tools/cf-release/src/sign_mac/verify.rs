@@ -21,7 +21,6 @@ pub(super) fn verify(
 ) -> Result<(), Failure> {
     tools.run("codesign", args!["--verify", "--deep", "--strict", app])?;
     tools.run("codesign", args!["--verify", "--strict", dmg])?;
-    asks_as_a_terminal(tools, app)?;
     if !notarized {
         return Ok(());
     }
@@ -49,13 +48,19 @@ pub(super) fn verify(
 }
 
 /// Holds the signed `app` to what lets a program in its panes ask macOS for the
-/// microphone, the camera and Apple Events, as a terminal's may (T-540): each
-/// entitlement in its signature, and each `Info.plist` key that says why.
-fn asks_as_a_terminal(tools: &Tools, app: &Path) -> Result<(), Failure> {
+/// microphone and Apple Events, as a terminal's may (T-540): each entitlement in its
+/// signature and no other, and each `Info.plist` key that says why. Run as soon as the
+/// app is signed: a bundle it refuses spends no notarization.
+pub(super) fn asks_as_a_terminal(tools: &Tools, app: &Path) -> Result<(), Failure> {
     let signed = tools.capture("codesign", args!["-d", "--entitlements", "-", "--xml", app])?;
+    let held = if signed.code == 0 {
+        keys(&signed.stdout)
+    } else {
+        Vec::new()
+    };
     let missing: Vec<&str> = ENTITLED
         .into_iter()
-        .filter(|key| signed.code != 0 || !signed.stdout.contains(&format!("<key>{key}</key>")))
+        .filter(|key| !held.contains(key))
         .collect();
     if !missing.is_empty() {
         return Err(fail(format!(
@@ -64,10 +69,29 @@ fn asks_as_a_terminal(tools: &Tools, app: &Path) -> Result<(), Failure> {
             missing.join(", ")
         )));
     }
+    let more: Vec<&str> = held
+        .into_iter()
+        .filter(|key| !ENTITLED.contains(key))
+        .collect();
+    if !more.is_empty() {
+        return Err(fail(format!(
+            "{} is signed with {} besides what it needs",
+            name(app),
+            more.join(", ")
+        )));
+    }
     for key in USAGE {
         if plist(tools, app, key).unwrap_or_default().is_empty() {
             return Err(fail(format!("{}'s Info.plist says no {key}", name(app))));
         }
     }
     Ok(())
+}
+
+/// The keys of the entitlements `xml` names, as `codesign -d --xml` prints them.
+fn keys(xml: &str) -> Vec<&str> {
+    xml.split("<key>")
+        .skip(1)
+        .filter_map(|rest| rest.split_once("</key>").map(|(key, _)| key))
+        .collect()
 }

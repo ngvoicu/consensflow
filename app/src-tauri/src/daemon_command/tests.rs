@@ -553,12 +553,12 @@ fn a_variable_only_the_interactive_shell_sets_reaches_the_daemon_as_it_is_and_is
     let home = tempfile::tempdir().expect("home");
     let shell = shell_with_rc(
         home.path(),
-        "export CF_ONLY_INTERACTIVE='a value = with = signs\nand a second line'; \
+        "export PARITY_ONLY_INTERACTIVE='a value = with = signs\nand a second line'; \
          export LANG=en_GB.UTF-8; export PATH=\"/rc/bin:$PATH\"",
     );
     let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
     assert_eq!(
-        given_of(&command, "CF_ONLY_INTERACTIVE").as_deref(),
+        given_of(&command, "PARITY_ONLY_INTERACTIVE").as_deref(),
         Some("a value = with = signs\nand a second line")
     );
     assert_eq!(given_of(&command, "LANG").as_deref(), Some("en_GB.UTF-8"));
@@ -576,7 +576,7 @@ fn the_shells_place_depth_last_command_and_terminal_are_not_taken() {
     let shell = shell_with_rc(
         home.path(),
         "cd /; export OLDPWD=/tmp SHLVL=7 TERM=dumb TERM_PROGRAM=iTerm.app TERMINFO=/x \
-         CF_KEPT=yes",
+         PARITY_KEPT=yes",
     );
     let (command, _) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
     let names: Vec<String> = given(&command).into_iter().map(|(name, _)| name).collect();
@@ -594,26 +594,27 @@ fn the_shells_place_depth_last_command_and_terminal_are_not_taken() {
             "{dropped} was taken"
         );
     }
-    assert_eq!(given_of(&command, "CF_KEPT").as_deref(), Some("yes"));
+    assert_eq!(given_of(&command, "PARITY_KEPT").as_deref(), Some("yes"));
 }
 
 /// An interactive rc that hangs (one that `exec`s a terminal multiplexer, say) costs
-/// the start no more than its time, and the daemon still gets the login shell's PATH:
-/// it is never worse off than before the environment was asked.
+/// the start no more than its one limit, both questions together, and the daemon still
+/// gets the login shell's PATH: it is never worse off than before the environment was
+/// asked.
 #[cfg(unix)]
 #[test]
 fn an_interactive_rc_that_hangs_falls_back_to_the_login_path_within_its_time() {
     let home = tempfile::tempdir().expect("home");
     let shell = shell_with_rc(home.path(), "exec /bin/sleep 30");
     let started = Instant::now();
-    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(1));
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(2));
     assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "the start waited {:?}",
+        started.elapsed() < Duration::from_millis(2_900),
+        "the start waited {:?}, past its one limit",
         started.elapsed()
     );
     assert_eq!(given_of(&command, "PATH"), std::env::var("PATH").ok());
-    assert_eq!(given_of(&command, "CF_ONLY_INTERACTIVE"), None);
+    assert_eq!(given_of(&command, "PARITY_ONLY_INTERACTIVE"), None);
     assert_eq!(said, None);
 }
 
@@ -693,4 +694,154 @@ fn windows_powershell_says_its_environment_in_utf8_between_the_markers() {
     };
     assert_eq!(value("SystemRoot"), std::env::var_os("SystemRoot"));
     assert!(value("PATH").is_some_and(|path| !path.is_empty()));
+}
+
+/// What the app sets for itself wins over the rc, and the rc over what the app was started
+/// with: ConsensFlow's own variables and the loader's are never taken, nor a Claude
+/// session's identity, while a harness's home is, as in a terminal.
+#[cfg(unix)]
+#[test]
+fn consensflows_own_the_loaders_and_a_claude_sessions_variables_are_never_taken_and_a_harness_home_is(
+) {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "export CONSENSFLOW_HOME=/rc/home CF_ANYTHING=1 DYLD_INSERT_LIBRARIES=/x.dylib \
+         LD_PRELOAD=/x.so CLAUDECODE=1 CLAUDE_CODE_SESSION_ID=s1 \
+         CLAUDE_CONFIG_DIR=/rc/claude CODEX_HOME=/rc/codex",
+    );
+    let (command, _) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    for never in [
+        "CONSENSFLOW_HOME",
+        "CF_ANYTHING",
+        "DYLD_INSERT_LIBRARIES",
+        "LD_PRELOAD",
+        "CLAUDECODE",
+        "CLAUDE_CODE_SESSION_ID",
+    ] {
+        assert_eq!(given_of(&command, never), None, "{never} was taken");
+    }
+    assert_eq!(
+        given_of(&command, "CLAUDE_CONFIG_DIR").as_deref(),
+        Some("/rc/claude")
+    );
+    assert_eq!(
+        given_of(&command, "CODEX_HOME").as_deref(),
+        Some("/rc/codex")
+    );
+}
+
+/// A run that starts the app with a harness home of its own keeps it, whatever the rc
+/// says: the daemon is not given the rc's, nor told its name, so it and every window keep
+/// the app's. A home the app has none of is the rc's.
+#[cfg(unix)]
+#[test]
+fn a_harness_home_the_app_was_started_with_is_kept_over_the_rcs() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "export CLAUDE_CONFIG_DIR=/rc/claude CODEX_HOME=/rc/codex",
+    );
+    let mut vars: Vec<(OsString, OsString)> = finder(Some(shell.as_path()), &[])
+        .iter()
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .collect();
+    vars.push(("CLAUDE_CONFIG_DIR".into(), "/test/claude".into()));
+    let (command, _) = the_daemons(&Env::from_vars(vars), Duration::from_secs(10));
+    assert_eq!(
+        given_of(&command, "CLAUDE_CONFIG_DIR"),
+        None,
+        "the app's is kept"
+    );
+    assert_eq!(
+        given_of(&command, "CODEX_HOME").as_deref(),
+        Some("/rc/codex"),
+        "a home the app has none of is the rc's"
+    );
+    let names = given_of(&command, TERMINAL_ENV).unwrap_or_default();
+    assert!(!names.contains("CLAUDE_CONFIG_DIR"), "{names}");
+    assert!(names.contains("CODEX_HOME"), "{names}");
+}
+
+/// The daemon is told which names it was given of the terminal's environment, by name
+/// only and without the PATH, which it gives every pane itself: so that each window's
+/// pane gets them too.
+#[cfg(unix)]
+#[test]
+fn the_daemon_is_told_the_names_it_was_given_and_never_their_values() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "export PARITY_SECRET=do-not-print LANG=en_GB.UTF-8 PATH=\"/rc/bin:$PATH\"",
+    );
+    let (command, _) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    let said = given_of(&command, TERMINAL_ENV).expect("the names");
+    let names: Vec<String> = serde_json::from_str(&said).expect("a list of names");
+    assert!(
+        names.iter().any(|name| name == "PARITY_SECRET"),
+        "{names:?}"
+    );
+    assert!(names.iter().any(|name| name == "LANG"), "{names:?}");
+    assert!(
+        !names.iter().any(|name| name.eq_ignore_ascii_case("PATH")),
+        "{names:?}"
+    );
+    assert!(!said.contains("do-not-print"), "a value crossed: {said}");
+    // A shell that gave nothing names nothing.
+    let failing = login_shell(home.path(), "/bin/sh -c \"$2\"; exit 3");
+    let (command, _) = the_daemons(
+        &finder(Some(failing.as_path()), &[]),
+        Duration::from_secs(5),
+    );
+    assert_eq!(given_of(&command, TERMINAL_ENV), None);
+}
+
+/// On Windows the PowerShell asked has no console window of its own: started from a
+/// windowed app, one would flash up at every start for as long as the profile takes.
+#[cfg(windows)]
+#[test]
+fn the_powershell_asked_has_no_console_window() {
+    let marker = marker("window");
+    let script = format!(
+        "Add-Type -Namespace Cf -Name Console -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern System.IntPtr GetConsoleWindow();'; \
+         [Console]::Out.Write('{marker}' + [Cf.Console]::GetConsoleWindow() + '{marker}')"
+    );
+    let env = Env::from_process();
+    let said = asked(
+        &powershell_of(&env),
+        &[
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &script,
+        ],
+        &marker,
+        Duration::from_secs(60),
+        &LoginLookup::default(),
+    )
+    .expect("PowerShell answered");
+    assert_eq!(
+        String::from_utf8_lossy(&said),
+        "0",
+        "it had a console window"
+    );
+}
+
+/// A shell whose login files hang too is given one limit in all, not one for each
+/// question: the start waits no longer than `LOGIN_PATH_TIMEOUT` says.
+#[cfg(unix)]
+#[test]
+fn a_shell_that_hangs_on_every_question_costs_the_start_one_limit() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = login_shell(home.path(), "exec /bin/sleep 30");
+    let started = Instant::now();
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(2));
+    assert!(
+        started.elapsed() < Duration::from_millis(2_900),
+        "the start waited {:?}",
+        started.elapsed()
+    );
+    assert_eq!(given_of(&command, "PATH").as_deref(), Some(FINDER_PATH));
+    assert!(said.is_some(), "the log says the shell gave none");
 }

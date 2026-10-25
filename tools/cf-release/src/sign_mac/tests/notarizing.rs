@@ -230,3 +230,35 @@ fn a_ticket_that_cannot_be_stapled_ends_the_run_there() {
         .iter()
         .any(|call| call.starts_with("hdiutil")));
 }
+
+#[test]
+fn a_bundle_signed_with_more_or_less_than_it_needs_is_refused_before_any_notarization() {
+    let camera = super::super::signing::ENTITLEMENTS.replace(
+        "<dict>",
+        "<dict>\n  <key>com.apple.security.device.camera</key>\n  <true/>",
+    );
+    let microphone_only = "<plist><dict><key>com.apple.security.device.audio-input</key>\
+                           <true/></dict></plist>";
+    for (signed, refusal) in [
+        (
+            camera.as_str(),
+            "ConsensFlow.app is signed with com.apple.security.device.camera besides what it needs",
+        ),
+        (
+            microphone_only,
+            "ConsensFlow.app is signed without com.apple.security.automation.apple-events",
+        ),
+    ] {
+        let fake = Fake::new().answering("codesign -d --entitlements", said(signed));
+        let mut trial = Trial::new(fake);
+        let failure = trial.sign(Some(credentials())).unwrap_err();
+        assert_eq!(failure.to_string(), refusal);
+        let calls = trial.transcript();
+        assert!(
+            !calls
+                .iter()
+                .any(|call| call.starts_with("xcrun notarytool")),
+            "a refused bundle spends no notarization: {calls:#?}"
+        );
+    }
+}

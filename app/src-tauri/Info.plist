@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Merged into the bundle's Info.plist by Tauri. macOS asks a person for a program's
-     microphone, camera or control of another app in the words of the app it is attributed
+     microphone or control of another app in the words of the app it is attributed
      to: for a program in ConsensFlow's panes (Claude Code's /voice, say), ConsensFlow's
      own. Without them macOS refuses it outright, as it refuses an app that says nothing
      (T-540). The release holds the built bundle to them (cf-release `sign_mac::verify`). -->
@@ -9,8 +9,6 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>A program running in ConsensFlow would like to use your microphone.</string>
-  <key>NSCameraUsageDescription</key>
-  <string>A program running in ConsensFlow would like to use your camera.</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>A program running in ConsensFlow would like to control another app.</string>
 </dict>

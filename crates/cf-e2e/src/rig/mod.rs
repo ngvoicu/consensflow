@@ -86,6 +86,9 @@ const IDLE: Duration = Duration::from_secs(60);
 pub struct Config {
     stand_in: PathBuf,
     vars: Vec<(String, String)>,
+    /// What only the daemon is given, as the app gives its daemon what it took of a
+    /// terminal's environment: the pane host and its windows have none of it.
+    daemon_vars: Vec<(String, String)>,
     unset: Vec<String>,
     first: Vec<PathBuf>,
     path: Vec<PathBuf>,
@@ -154,6 +157,7 @@ impl Config {
         Self {
             stand_in: stand_in.into(),
             vars: Vec::new(),
+            daemon_vars: Vec::new(),
             unset: Vec::new(),
             first: Vec::new(),
             path: Vec::new(),
@@ -287,6 +291,16 @@ impl Config {
     #[must_use]
     pub fn var(mut self, name: &str, value: impl Into<String>) -> Self {
         self.vars.push((name.to_owned(), value.into()));
+        self
+    }
+
+    /// With the variable `name` set to `value` in the daemon's environment alone, over
+    /// what the rig sets: as the app gives its daemon what it took of the human's
+    /// terminal (`TERMINAL_ENV`), which the pane host, started from the app's own
+    /// environment, never has.
+    #[must_use]
+    pub fn daemon_var(mut self, name: &str, value: impl Into<String>) -> Self {
+        self.daemon_vars.push((name.to_owned(), value.into()));
         self
     }
 

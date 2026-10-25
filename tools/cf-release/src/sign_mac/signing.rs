@@ -51,23 +51,21 @@ pub(super) fn plist(tools: &Tools, app: &Path, key: &str) -> Result<String, Fail
 }
 
 /// What the bundle is signed with (`app/src-tauri/Entitlements.plist`, which a
-/// local build is signed with too): the devices and Apple Events the app's own
+/// local build is signed with too): the microphone and Apple Events the app's own
 /// process may ask macOS for under the hardened runtime, as a terminal app is
 /// entitled to. A program in its panes carries its own signature; what it needs of
 /// ConsensFlow is the `Info.plist`'s word for each ([`USAGE`]), which macOS asks the
 /// person with (T-540).
 pub(super) const ENTITLEMENTS: &str = include_str!("../../../../app/src-tauri/Entitlements.plist");
 
-/// The entitlements the signed bundle must hold ([`ENTITLEMENTS`]), and the
-/// `Info.plist` keys that say why to the person macOS asks.
-pub(super) const ENTITLED: [&str; 3] = [
+/// The entitlements the signed bundle holds, those and no others ([`ENTITLEMENTS`]),
+/// and the `Info.plist` keys that say why to the person macOS asks.
+pub(super) const ENTITLED: [&str; 2] = [
     "com.apple.security.device.audio-input",
-    "com.apple.security.device.camera",
     "com.apple.security.automation.apple-events",
 ];
-pub(super) const USAGE: [&str; 3] = [
+pub(super) const USAGE: [&str; 2] = [
     "NSMicrophoneUsageDescription",
-    "NSCameraUsageDescription",
     "NSAppleEventsUsageDescription",
 ];
 

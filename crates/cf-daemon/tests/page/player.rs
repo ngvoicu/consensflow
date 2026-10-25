@@ -153,6 +153,7 @@ impl Player {
                 open: Rc::new(|_| {
                     Box::pin(async { Err("the trace player opens nothing".to_owned()) })
                 }),
+                grants_of: None,
             },
         });
         let (daemon_end, app_end) = duplex(256 * 1024);

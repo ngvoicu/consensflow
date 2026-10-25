@@ -10,6 +10,11 @@ use serde_json::json;
 use super::*;
 use crate::shared::directory::real_path;
 
+/// What a fresh reading says for a window opened in `directory`.
+fn computer_use(env: &Env, directory: &str) -> ComputerUse {
+    Configuration::default().computer_use(env, directory)
+}
+
 /// A folder made in `home`, as the system names it.
 fn made(home: &Path, name: &str) -> String {
     let folder = home.join(name);
@@ -184,4 +189,55 @@ fn reading_it_writes_nothing() {
         "nothing was made in the project"
     );
     let _: SystemTime = before.1;
+}
+
+#[test]
+fn the_file_is_read_again_only_once_it_changed_size_or_time() {
+    let home = tempfile::tempdir().unwrap();
+    let config = made(home.path(), "config");
+    let project = made(home.path(), "project");
+    let env = claude_in(&config);
+    let file = Path::new(&config).join(".claude.json");
+    let on = json!({ "projects": { project.clone(): { "enabledMcpServers": ["computer-use"] } } })
+        .to_string();
+    // As long as `on`, and off: the server's name with one letter changed.
+    let off = on.replace("computer-use", "computer-usX");
+    assert_eq!(on.len(), off.len());
+    fs::write(&file, &on).unwrap();
+    let kept = Configuration::default();
+    assert!(kept.computer_use(&env, &project).on);
+    // Rewritten with the same size and given its time back: the reading stands.
+    let time = fs::metadata(&file).unwrap().modified().unwrap();
+    fs::write(&file, &off).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&file)
+        .unwrap()
+        .set_modified(time)
+        .unwrap();
+    assert!(
+        kept.computer_use(&env, &project).on,
+        "the same size and time are the same reading"
+    );
+    assert!(!computer_use(&env, &project).on, "a fresh reading says off");
+    // Another time: read again.
+    fs::File::options()
+        .write(true)
+        .open(&file)
+        .unwrap()
+        .set_modified(time + std::time::Duration::from_secs(1))
+        .unwrap();
+    assert!(!kept.computer_use(&env, &project).on, "a new time is read");
+    // Another size: read again.
+    fs::write(&file, format!("{on} ")).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&file)
+        .unwrap()
+        .set_modified(time + std::time::Duration::from_secs(1))
+        .unwrap();
+    assert!(kept.computer_use(&env, &project).on, "a new size is read");
+    // Gone: off.
+    fs::remove_file(&file).unwrap();
+    assert!(!kept.computer_use(&env, &project).on, "no file is off");
 }

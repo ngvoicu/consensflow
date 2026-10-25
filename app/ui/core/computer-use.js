@@ -56,6 +56,7 @@ export class ComputerUseSection {
   #harnesses
   #permissions
   #grants
+  #grantsOf
   #page
   /** What the daemon last said for the project the section is drawn for. */
   #said = null
@@ -71,6 +72,7 @@ export class ComputerUseSection {
     this.#harnesses = section.querySelector('.computer-use-harnesses')
     this.#permissions = section.querySelector('.computer-use-permissions')
     this.#grants = section.querySelector('.computer-use-grants')
+    this.#grantsOf = section.querySelector('.computer-use-grants-of')
     this.#page = page
     // Back from System Settings: what it was given there shows, for the project still open.
     window.addEventListener('focus', () => {
@@ -121,6 +123,14 @@ export class ComputerUseSection {
     )
     const permissions = said?.permissions ?? null
     this.#permissions.hidden = parts.length === 0 || permissions === null
+    // A ConsensFlow started from another app (a `cf ui` in a terminal) has that app's
+    // permissions, which are the ones shown.
+    const grantsOf = typeof said?.grantsOf === 'string' ? said.grantsOf : null
+    this.#grantsOf.hidden = grantsOf === null
+    this.#grantsOf.textContent =
+      grantsOf === null
+        ? ''
+        : `This ConsensFlow was started from ${grantsOf}, so these are that app's permissions, not ConsensFlow's.`
     redraw(
       this.#grants,
       permissions === null
@@ -158,7 +168,9 @@ export const NOTE_OPENING = "Claude Code's computer use is on for this project, 
 
 /** The panes a computer-use note's buttons open: the permissions it names. */
 export function notePanes(message) {
-  if (message.kind !== 'note' || !message.body?.startsWith(NOTE_OPENING)) return []
+  // ConsensFlow's own note only: it has no sender, and a member's with the same words is a member's.
+  if (message.kind !== 'note' || message.sender != null) return []
+  if (!message.body?.startsWith(NOTE_OPENING)) return []
   const named = message.body.slice(message.body.indexOf('allow it '))
   return GRANTS.filter(({ name }) => named.includes(name)).map(({ pane, name }) => ({
     pane,
