@@ -163,14 +163,22 @@ fn line(process: &BackgroundProcess, masked: &mut usize) -> String {
 /// The commands of what a window left running, as a note quotes them: the first
 /// few, each held to one line and a few characters, what looks like a key or a
 /// token in them hidden, and how many were left out or hidden said after them.
-pub(crate) fn quote(left: &[BackgroundProcess]) -> String {
+fn quote(left: &[BackgroundProcess]) -> String {
     quote_of(left, left.len())
 }
 
 /// `closed` (a window closed), and what it left running and what may be its own, as a close
 /// note says them.
 fn closed_leaving(closed: &str, left: &[BackgroundProcess], possibly: &[PossiblyLeft]) -> String {
-    let mut said = closed.to_owned();
+    format!("{closed}{}", leaving(left, possibly))
+}
+
+/// What every note of a window's close says after the window closed (the note to whoever gave
+/// its task, the chief's to the human, the pause note): the work its close ended, which `pane.exit`
+/// lists (`background`), and what may be its own and was not ended (`possiblyLeft`). Nothing for
+/// none.
+pub(crate) fn leaving(left: &[BackgroundProcess], possibly: &[PossiblyLeft]) -> String {
+    let mut said = String::new();
     if !left.is_empty() {
         said.push_str(&format!(
             " with background work running, which its close ended: {}",
@@ -186,7 +194,7 @@ fn closed_leaving(closed: &str, left: &[BackgroundProcess], possibly: &[Possibly
 /// What a note says of the processes the host named as possibly a window's and did not end
 /// (`PaneExit::possibly_left`): `pid 4242 (node) may be this window's and was not ended`,
 /// [`QUOTED`] of them at most and the rest counted. None for none.
-pub(crate) fn possibly_left_words(possibly: &[PossiblyLeft]) -> Option<String> {
+fn possibly_left_words(possibly: &[PossiblyLeft]) -> Option<String> {
     if possibly.is_empty() {
         return None;
     }

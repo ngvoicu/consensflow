@@ -277,8 +277,18 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = "                && message.body.contains(CLOSE_NOTE_SAYS)"
-replace = '                && message.body.contains("never said")'
+find = "message.sender.is_none() && message.kind == \"note\" && is_close_note(&message.body)"
+replace = 'message.sender.is_none() && message.kind == "note" && message.body.contains("never said")'
+
+[[plant]]
+name = "long run 3: a pause note, which says the words of its window's close after the task's pause, is taken for a close note"
+meant = "what_is_no_close_note_is_never_one_the_pause_note_and_the_3_0_5_notes_of_a_turns_end"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = "message.sender.is_none() && message.kind == \"note\" && is_close_note(&message.body)"
+replace = 'message.sender.is_none() && message.kind == "note" && message.body.contains(CLOSE_NOTE_SAYS)'
 
 [[plant]]
 name = "long run 3: a task waiting is not at work, and a close note under it passes"
@@ -343,8 +353,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = "                && message.body.contains(CLOSE_NOTE_SAYS)"
-replace = '                && message.body.contains("background work")'
+find = "message.sender.is_none() && message.kind == \"note\" && is_close_note(&message.body)"
+replace = 'message.sender.is_none() && message.kind == "note" && message.body.contains("background work")'
 
 [[plant]]
 name = "long run 3: a worker's own note is a close note"
@@ -353,8 +363,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = "            message.sender.is_none()\n"
-replace = "            true\n"
+find = "message.sender.is_none() && message.kind == \"note\" && is_close_note(&message.body)"
+replace = 'true && message.kind == "note" && is_close_note(&message.body)'
 
 [[plant]]
 name = "long run 3: a worker's question that quotes the words is a close note"
@@ -363,8 +373,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = '                && message.kind == "note"'
-replace = '                && message.kind != "never"'
+find = "message.sender.is_none() && message.kind == \"note\" && is_close_note(&message.body)"
+replace = 'message.sender.is_none() && message.kind != "never" && is_close_note(&message.body)'
 
 [[plant]]
 name = "long run 3: a task paused or open is taken for one at work, and the close note under it breaks"

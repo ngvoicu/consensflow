@@ -153,7 +153,7 @@ impl Shown {
 
     /// [`Shown::after`], with `besides` said between how the program ended and
     /// what its screen showed: `@zeus's window closed (exit code 3) with
-    /// background work still running: sleep 9; its screen ended with: "…"`.
+    /// background work running, which its close ended: sleep 9; its screen ended with: "…"`.
     pub(crate) fn after_with(&self, because: &str, besides: &str) -> String {
         let mut said = because.to_owned();
         if let Some(outlived) = self.outlived() {

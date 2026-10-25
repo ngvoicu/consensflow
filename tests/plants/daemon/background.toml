@@ -214,8 +214,8 @@ runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '                let mut besides = if left.is_empty() {'
-replace = '                let mut besides = if true {'
+find = "                let besides = leaving(left, shown.possibly_left());"
+replace = "                let besides = leaving(&[], shown.possibly_left());"
 
 # What the daemon makes of the host's answer to an ending, and how long it waits for it.
 
@@ -2094,8 +2094,8 @@ runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "                if let Some(words) = possibly_left_words(shown.possibly_left()) {"
-replace = "                if let Some(words) = possibly_left_words(&[]) {"
+find = "                let besides = leaving(left, shown.possibly_left());"
+replace = "                let besides = leaving(left, &[]);"
 
 [[plant]]
 name = "background possibly-left: the exit's list of what may be the window's is not read"
@@ -2211,6 +2211,17 @@ replace = """
                 &[],
                 &[],
             )?;"""
+
+[[plant]]
+name = "background: the pause note says the work its window's close ended still runs"
+meant = "a_window_that_goes_by_itself_with_the_work_running_says_so_in_the_pause_note"
+runs = ["engine-dispatcher-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                let besides = leaving(left, shown.possibly_left());"
+replace = """                let besides = leaving(left, shown.possibly_left())
+                    .replace("running, which its close ended", "still running");"""
 
 [[plant]]
 name = "background possibly-left: a Windows window's exit holds a handle of its job past the exit"

@@ -254,7 +254,7 @@ fn a_worker_window_that_ends_mid_task_with_work_running_says_both() {
     let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
     assert_match(
         &note.body,
-        r#"^T-1 is paused: @zeus's window closed \(exit code 1\) with background work still running: npm test -- --watch; its screen ended with: "Killed"\. Resume it with"#,
+        r#"^T-1 is paused: @zeus's window closed \(exit code 1\) with background work running, which its close ended: npm test -- --watch; its screen ended with: "Killed"\. Resume it with"#,
     );
 }
 

@@ -20,7 +20,7 @@ fn task(scene: &Scene) -> i64 {
 const CLOSED: &str = "T-14's window closed with background work running, which its close ended: npx stryker run --concurrency 4";
 
 /// The pause note of a window that closed under a working task: a pause, no ending.
-const PAUSED: &str = "T-14 is paused: @long-worker's window closed with background work still running: node serve.mjs. Resume it with: cf task resume T-14 \"…\"";
+const PAUSED: &str = "T-14 is paused: @long-worker's window closed with background work running, which its close ended: node serve.mjs. Resume it with: cf task resume T-14 \"…\"";
 
 /// What 3.0.5 said when a turn's result was taken, which 3.0.6 never writes.
 const ENDED: &str =

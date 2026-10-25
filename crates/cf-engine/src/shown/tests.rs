@@ -260,16 +260,16 @@ fn a_windows_status_is_written_as_windows_writes_it_and_a_program_s_own_code_as_
 
 #[test]
 fn what_else_is_said_goes_between_how_the_program_ended_and_its_screen() {
-    let besides = " with background work still running: sleep 9";
+    let besides = " with background work running, which its close ended: sleep 9";
     assert_eq!(
         shown(Some(3), None, Some(&["panicked"])).after_with("@zeus's window closed", besides),
-        "@zeus's window closed (exit code 3) with background work still running: sleep 9; \
+        "@zeus's window closed (exit code 3) with background work running, which its close ended: sleep 9; \
          its screen ended with: \"panicked\""
     );
     // A host that said nothing leaves it as it was said.
     assert_eq!(
         Shown::default().after_with("@zeus's window closed", besides),
-        "@zeus's window closed with background work still running: sleep 9"
+        "@zeus's window closed with background work running, which its close ended: sleep 9"
     );
     assert_eq!(
         shown(Some(3), None, Some(&["panicked"])).after_with("gone", ""),

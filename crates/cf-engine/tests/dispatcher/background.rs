@@ -305,7 +305,7 @@ fn a_window_that_goes_by_itself_with_the_work_running_says_so_in_the_pause_note(
         tiers.notes("chief").last().map(String::as_str),
         Some(
             format!(
-                "T-1 is paused: @{session}'s window closed with background work still running: {LOCK}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+                "T-1 is paused: @{session}'s window closed with background work running, which its close ended: {LOCK}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
             )
             .as_str()
         )
@@ -352,7 +352,7 @@ fn a_window_that_goes_by_itself_names_in_its_pause_note_what_may_be_its_own_afte
         tiers.notes("chief").last().map(String::as_str),
         Some(
             format!(
-                "T-1 is paused: @{session}'s window closed with background work still running: {LOCK}; pid 4001 (node), pid 4002 (Python) may be this window's and were not ended. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+                "T-1 is paused: @{session}'s window closed with background work running, which its close ended: {LOCK}; pid 4001 (node), pid 4002 (Python) may be this window's and were not ended. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
             )
             .as_str()
         )
