@@ -7,12 +7,16 @@
 //! owner hit in real use), and the daemon under load (`load`, which is ignored
 //! unless asked for). `test daemons` runs the first three together, for a person
 //! and for the gate; CI runs it in two steps, each with a limit of its own: the
-//! daemon's and the rig's (`test daemon-and-rig`), and the regressions. The live tests are ignored too, and what they run is the machine's own
+//! daemon's and the rig's (`test daemon-and-rig`), and the regressions. CI runs
+//! `test daemons` in shards, a part of its cases on each of several runners
+//! at once ([`shard`], named by its variable `CF_TEST_SHARD`). The live tests are ignored too, and what they run is the machine's own
 //! harness on its own login, which spends real quota: they are no part of
 //! `check`, and a person asks for each by name, by [`crate::live`]'s one
 //! command. The packaged smoke (`smoke`) is a test of the same crate, ignored
 //! the same way, and is run by its own command, [`crate::smoke`], which takes
 //! the app to run it on.
+
+mod shard;
 
 use std::ffi::OsString;
 
@@ -135,35 +139,57 @@ pub(crate) fn named(name: &str) -> Option<Suite> {
     }
 }
 
-fn daemons(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
-    run(context, DAEMONS, args)
+fn daemons(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
+    run(context, DAEMONS, args, console)
 }
 
-fn daemon_and_rig(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
-    run(context, DAEMON_AND_RIG, args)
+fn daemon_and_rig(
+    context: &Context,
+    args: &[OsString],
+    console: &mut Console,
+) -> Result<i32, Failure> {
+    run(context, DAEMON_AND_RIG, args, console)
 }
 
-fn integration(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
-    run(context, INTEGRATION, args)
+fn integration(
+    context: &Context,
+    args: &[OsString],
+    console: &mut Console,
+) -> Result<i32, Failure> {
+    run(context, INTEGRATION, args, console)
 }
 
-fn regressions(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
-    run(context, REGRESSIONS, args)
+fn regressions(
+    context: &Context,
+    args: &[OsString],
+    console: &mut Console,
+) -> Result<i32, Failure> {
+    run(context, REGRESSIONS, args, console)
 }
 
-fn clis(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
-    run(context, CLIS, args)
+fn clis(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
+    run(context, CLIS, args, console)
 }
 
-fn agents(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
-    run(context, AGENTS, args)
+fn agents(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
+    run(context, AGENTS, args, console)
 }
 
-fn load(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
-    run(context, LOAD, args)
+fn load(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
+    run(context, LOAD, args, console)
 }
 
-fn run(context: &Context, suite: Suite, args: &[OsString]) -> Result<i32, Failure> {
+/// Runs `suite` with `args`: whole, or the shard [`shard::SHARD`] names.
+fn run(
+    context: &Context,
+    suite: Suite,
+    args: &[OsString],
+    console: &mut Console,
+) -> Result<i32, Failure> {
+    if let Some(named) = context.env.text(shard::SHARD) {
+        let shard = shard::Shard::parse(named)?;
+        return shard::run(context, suite, shard, args, console);
+    }
     Ok(process::run(
         &cargo_test(context, suite, args),
         &context.env,
@@ -412,6 +438,186 @@ mod tests {
                 times, 1,
                 "ci.yml runs the {file} test {times} times: {run:?}"
             );
+        }
+    }
+
+    /// A suite run with the shard's variable set is that shard: a shard it cannot be is
+    /// refused before anything runs, and without the variable the suite runs whole
+    /// (here, in a folder that is not there, which the shard never reaches).
+    #[test]
+    fn the_shard_a_run_is_comes_from_its_variable() {
+        let with = |value: Option<&str>| Context {
+            root: PathBuf::from("no-such-checkout"),
+            env: match value {
+                Some(value) => Env::from_vars([(shard::SHARD, value)]),
+                None => Env::default(),
+            },
+        };
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let mut console = Console {
+            out: &mut out,
+            err: &mut err,
+        };
+        for (value, suite) in [
+            (Some("4/3"), DAEMONS),
+            (Some("1/2"), AGENTS),
+            (Some("1/2"), LOAD),
+        ] {
+            assert!(
+                matches!(
+                    run(&with(value), suite, &[], &mut console),
+                    Err(Failure::Usage(_))
+                ),
+                "{value:?} {suite:?}"
+            );
+        }
+        assert!(matches!(
+            run(&with(None), DAEMONS, &[], &mut console),
+            Err(Failure::Process(_))
+        ));
+    }
+
+    /// CI's workflow, as written.
+    fn workflow() -> String {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        fs::read_to_string(root.join(".github/workflows/ci.yml")).unwrap()
+    }
+
+    /// The jobs of the workflow, by id, each with its lines.
+    fn jobs(workflow: &str) -> Vec<(String, Vec<String>)> {
+        let mut jobs: Vec<(String, Vec<String>)> = Vec::new();
+        let mut inside = false;
+        for line in workflow.lines() {
+            if line.trim_start().starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            if !line.starts_with(' ') {
+                inside = line == "jobs:";
+                continue;
+            }
+            if !inside {
+                continue;
+            }
+            match line.strip_prefix("  ").and_then(|id| id.strip_suffix(':')) {
+                Some(id) if !id.starts_with(' ') => jobs.push((id.to_owned(), Vec::new())),
+                _ => {
+                    if let Some((_, lines)) = jobs.last_mut() {
+                        lines.push(line.trim().to_owned());
+                    }
+                }
+            }
+        }
+        jobs
+    }
+
+    /// The items of a flow list, `[a, 'b']`, after `key: ` in one of `lines`.
+    fn listed(lines: &[String], key: &str) -> Vec<String> {
+        let line = lines
+            .iter()
+            .find_map(|line| line.strip_prefix(&format!("{key}: [")))
+            .unwrap_or_else(|| panic!("no `{key}: [` in {lines:?}"));
+        line.trim_end_matches(']')
+            .split(',')
+            .map(|item| item.trim().trim_matches('\'').to_owned())
+            .collect()
+    }
+
+    /// The daemons' suite runs in shards, and coverage rests on the shards being
+    /// each of N once, `1/N` to `N/N`, on each platform, each named to the suite.
+    #[test]
+    fn ci_runs_the_daemons_in_each_shard_of_n_once_on_each_platform() {
+        let jobs = jobs(&workflow());
+        let (_, daemons) = jobs
+            .iter()
+            .find(|(_, lines)| {
+                lines
+                    .iter()
+                    .any(|line| line == "- run: npm run test:daemons")
+            })
+            .expect("no job runs npm run test:daemons");
+        let shards = listed(daemons, "shard");
+        let count = shards.len();
+        let each: Vec<String> = (1..=count)
+            .map(|index| format!("{index}/{count}"))
+            .collect();
+        assert_eq!(shards, each);
+        for index in 1..=count {
+            assert!(shard::Shard::parse(&each[index - 1]).is_ok());
+        }
+        assert_eq!(listed(daemons, "os"), ["macos-latest", "windows-latest"]);
+        assert!(
+            daemons
+                .iter()
+                .any(|line| line == "CF_TEST_SHARD: ${{ matrix.shard }}"),
+            "{daemons:?}"
+        );
+        assert_eq!(shard::SHARD, "CF_TEST_SHARD");
+    }
+
+    /// The check a release and a branch rule trust, `gate (<os>)`: it waits for
+    /// every other job of the workflow, runs whatever they did, and passes only
+    /// when each passed: a job that failed, was cancelled or was skipped fails it,
+    /// as does a run of none. Its test of the jobs' results is run with jq, the
+    /// runner's, where this machine has one.
+    #[test]
+    fn the_gate_is_green_only_when_every_other_job_of_ci_passed() {
+        let workflow = workflow();
+        let jobs = jobs(&workflow);
+        let (_, gate) = jobs
+            .iter()
+            .find(|(id, _)| id == "gate")
+            .expect("ci.yml has no gate job");
+        let mut others: Vec<String> = jobs
+            .iter()
+            .map(|(id, _)| id.clone())
+            .filter(|id| id != "gate")
+            .collect();
+        let mut needs = listed(gate, "needs");
+        others.sort();
+        needs.sort();
+        assert_eq!(needs, others);
+        assert!(gate.iter().any(|line| line == "if: always()"), "{gate:?}");
+        assert_eq!(listed(gate, "os"), ["macos-latest", "windows-latest"]);
+        assert!(gate
+            .iter()
+            .any(|line| line == "NEEDS: ${{ toJSON(needs) }}"));
+        let program = gate
+            .iter()
+            .find_map(|line| {
+                line.strip_prefix("echo \"$NEEDS\" | jq -e '")?
+                    .strip_suffix("' > /dev/null")
+            })
+            .expect("the gate tests the jobs' results with no `jq -e`");
+        let results = |each: &[&str]| -> String {
+            let entries: Vec<String> = each
+                .iter()
+                .enumerate()
+                .map(|(at, result)| {
+                    format!("\"job{at}\":{{\"result\":\"{result}\",\"outputs\":{{}}}}")
+                })
+                .collect();
+            format!("{{{}}}", entries.join(","))
+        };
+        let passes = |each: &[&str]| -> Option<bool> {
+            let jq = Invocation::new("jq", ".")
+                .args(["-n", "-e", "--argjson", "needs"])
+                .arg(results(each))
+                .arg(format!("$needs | ({program})"));
+            let answered = process::capture(&jq, &Env::from_process()).ok()?;
+            Some(answered.code == 0)
+        };
+        let Some(all) = passes(&["success", "success", "success"]) else {
+            eprintln!("there is no jq here: the gate's test of the results is not run");
+            return;
+        };
+        assert!(all);
+        for each in [
+            &["success", "failure", "success"][..],
+            &["success", "cancelled", "success"],
+            &["skipped", "success", "success"],
+            &[],
+        ] {
+            assert_eq!(passes(each), Some(false), "{each:?}");
         }
     }
 }

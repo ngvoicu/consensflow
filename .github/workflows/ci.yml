@@ -5,8 +5,25 @@
 # (on macOS: it needs no app, and once is enough), and the Rust host's tests,
 # headless ones included, and clippy. The packaged smoke needs a built app and
 # stays with the release build. Rust comes from the runner's own rustup; the
-# one third-party action is pinned to a commit. A release runs this same gate
+# third-party actions are pinned to a commit. A release runs this same gate
 # on the commit it releases.
+#
+# The gate is jobs that run at once on each platform (T-558, 2026-10-25), and
+# `gate (macos-latest)` and `gate (windows-latest)` are the checks to trust:
+# each fails unless every other job of the run passed, so a job that failed,
+# was cancelled or never ran fails both. (A job's result, as `needs` gives it,
+# is the result of all its platforms at once.) It was one job a platform, which
+# ran 66 to 75 minutes in the green runs of 2026-10-24 and 25 (40048912346,
+# 40104125564, 40121152677, 40175643684), of which the daemons' suites were
+# 41 to 55 (their cases take turns, a rig at a time: `cf_e2e::serial`), the
+# workspace's tests 10 to 11 on macOS and 16 to 18 on Windows, Playwright 4 on
+# macOS, the setup and the staging 2 to 4, and the rest 3. Now:
+#   checks     the lint, the Node tests, Playwright, the CLI's and the app's
+#              tests, cf-e2e's own, clippy, and cf-bridge's;
+#   workspace  the workspace's tests, whole (its limit below says why);
+#   daemons    the daemons' suites in three shards, a third of their cases
+#              each (`cargo xtask test daemons` with CF_TEST_SHARD: suites.rs).
+# Five jobs a platform: GitHub runs five macOS jobs of an account at once.
 name: CI
 
 on:
@@ -16,90 +33,32 @@ on:
   workflow_dispatch:
   workflow_call:
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  gate:
+  checks:
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # A hang fails the job in two hours, not GitHub's six. (An hour until B5's
-    # regressions, 2026-10-18: Windows' job had taken about 45 minutes, and they
-    # add about 10. An hour and a half until 2026-10-19, when Windows' job ran
-    # 60 to 69 minutes.)
-    timeout-minutes: 120
-    defaults:
-      run:
-        shell: bash
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            app/package-lock.json
-      - run: rustup update stable --no-self-update && rustup default stable && rustup component add clippy rustfmt
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: ". -> app/src-tauri/target"
+      - uses: ./.github/actions/setup
       # The Rust laid out as rustfmt lays it out, every crate of the
       # workspace, checked before anything builds.
       - run: cargo fmt --all --check
-
-      - run: npm ci
-      - run: npm ci --prefix app
       # The page, and the native cf a window runs, built into bin/ for the
       # page's Playwright suite and staged as the resource the Rust build expects.
       - run: npm --prefix app run bundle:ui
       - run: npm --prefix app run prepare-sidecar
-
       - run: npm run check
       - if: runner.os == 'macOS'
         working-directory: app
         run: npx playwright install chromium && npm run test:ui
-      # The black-box suites of crates/cf-e2e. Each builds the programs it runs
-      # (the native cf, and the pane host consensflow-bridge, a binary of
-      # cf-panes which no Tauri bundle ships). The daemon's, as a process, the
-      # rig's: the daemon and the pane host in real terminals, with
-      # stand-in agents in the windows, and the regressions': a case for each
-      # bug the owner hit in real use, on that rig.
-      # Two steps, a limit for each (`npm run test:daemons` still runs the three
-      # for a person and for `cargo xtask check`). It was one step with 50
-      # minutes, and the regressions grew past them: 26 cases on 2026-10-17, 73
-      # on 2026-10-22, 25 s a case on macOS on average and 32 on Windows, a rig at
-      # a time by design. The step took 21 minutes on Windows before (2026-10-18),
-      # then 44:46 on Windows and 48:55 on macOS at a8c2e3cf, 50:00 on macOS at
-      # 04bc9d66, and was cut at bcf8a1d0.
-      # Measured in the runs of 2026-10-18 to 22, macOS and Windows: the daemon's
-      # 15 cases 26 to 50 s and 33 to 71 s; the rig's 116 to 119 cases (100 to 103
-      # on Windows) 1,041 to 1,165 s and 900 to 962 s; the regressions' 42 cases
-      # in 1,331 s (27 in 1,211 s) at the start, and 70 to 73 cases (53 to 56) in
-      # 1,788 to 1,863 s and 1,658 to 1,781 s in the last three runs; and the
-      # tests' build, 16 s at most in a step. The slowest of each, added up on
-      # macOS, which is the slower:
-      #   daemon and rig: 16 + 50 + 1,165 = 1,231 s = 20.5 min
-      #   regressions:    16 + 1,863 - 591 = 1,288 s = 21.5 min
-      # The 591 are what T-307 took out of the regressions on the Mac, one case at
-      # a time (1,821 s to 1,230 s): the Devin cases' turns outlast the daemon's
-      # arrival window, which is 15 s in them now (CONSENSFLOW_ARRIVAL_TIMEOUT_MS)
-      # and not its minute, and no case waits 15 s to see nothing come. On zeewin
-      # the six longest of them took what they took on the Mac, within 3 s: their
-      # time is the stand-in's timers. Without it the line read 16 + 1,863 =
-      # 1,879 s = 31.3 min.
-      # The limit is 1.4 times that, to the next five minutes: 1.4 * 20.5 = 28.7,
-      # so 30; 1.4 * 21.5 = 30.1, so 35. The runs of one binary differ by 12 % at
-      # most (the rig's, above); the rest is room for the cases that land. Both
-      # worsts are under 80 % of their limit (24 and 28 minutes), where `cargo
-      # xtask ci-times` fails a run. The regressions have 392 s left to that mark
-      # on macOS and 474 s on Windows (1,206 s there): 15 more cases at the
-      # averages above, and 14 on Windows. The daemon and the rig go first: the
-      # build of cf-e2e is theirs.
-      - run: npm run test:daemon-and-rig
-        timeout-minutes: 30
-      - run: npm run test:regressions
-        timeout-minutes: 35
       # The CLI's suites against the native cf, which answers every verb.
       - run: npm run test:clis
         timeout-minutes: 15
@@ -110,12 +69,40 @@ jobs:
       - run: cargo test
         working-directory: app/src-tauri
         timeout-minutes: 15
+      # What is left of crates/cf-e2e when its black-box suites are run by the
+      # daemons' job and the step of the CLI's: its support and the stand-in
+      # agents' own tests.
+      - run: cargo test -p cf-e2e --lib --bins
+        timeout-minutes: 10
+      # Every crate linted, its tests included.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # The harnesses' crate as the daemon builds it, without the test kit
+      # the workspace's tests turn on for it.
+      - run: cargo clippy -p cf-harness --lib -- -D warnings
+      # The daemon's end of the bridge, behind a feature nothing in the
+      # workspace turns on yet: tested and linted here until the daemon does.
+      - run: cargo test -p cf-bridge --features local
+        timeout-minutes: 15
+      - run: cargo clippy -p cf-bridge --features local --all-targets -- -D warnings
+
+  workspace:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: npm --prefix app run bundle:ui
+      - run: npm --prefix app run prepare-sidecar
       # The workspace's other crates, the pane host's tests among them, from
       # its root: they link no dialog code, so they need no manifest. The
       # headless tests (cf-panes/tests/headless.rs) drive the helper; they are
       # Unix-only and build empty on Windows. The black-box suites of
-      # crates/cf-e2e ran above, each with a limit of its own; what is left of
-      # that crate is its support and the stand-in agents' own tests.
+      # crates/cf-e2e run in the daemons' job and the CLI's step, each with a
+      # limit of its own; what is left of that crate is the checks' job's.
       # The limit is a bound over what the step takes on Windows' runner, with a
       # margin, and `cargo xtask ci-times` fails when a run passes 80 % of it (32
       # minutes). The step took 17.8 minutes there in the median (13 to 23) until
@@ -136,25 +123,46 @@ jobs:
       # before the growth (25 minutes) was 1.4 times their median, and 1.4 times 20
       # is 28, under the 32 the check allows. The runs after this one confirm it (`cargo xtask
       # ci-times --step "cargo test --workspace" --binaries`). The step is not
-      # split by crate: each part would build the workspace again (3.5 minutes),
-      # and the largest binary left, the dispatcher's, is about a quarter of it.
+      # split by crate, for now: its job is the longest of Windows' (about 22
+      # minutes in all, 4 of them the build, and xtask's tests 3 to 4 of the
+      # tests' 14), and a part split off would build what it tests again.
       # nextest runs a plant's `cargo test` (tools/xtask's plants), and the plants'
       # own tests run it: built once, then the cache's (~/.cargo/bin).
       - run: cargo install cargo-nextest --version 0.9.148 --locked
       - run: cargo test --workspace --exclude app --exclude cf-e2e
         timeout-minutes: 40
-      - run: cargo test -p cf-e2e --lib --bins
-        timeout-minutes: 10
-      # Every crate linted, its tests included.
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      # The harnesses' crate as the daemon builds it, without the test kit
-      # the workspace's tests turn on for it.
-      - run: cargo clippy -p cf-harness --lib -- -D warnings
-      # The daemon's end of the bridge, behind a feature nothing in the
-      # workspace turns on yet: tested and linted here until the daemon does.
-      - run: cargo test -p cf-bridge --features local
-        timeout-minutes: 15
-      - run: cargo clippy -p cf-bridge --features local --all-targets -- -D warnings
+
+  daemons:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+        shard: ['1/3', '2/3', '3/3']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: npm --prefix app run bundle:ui
+      - run: npm --prefix app run prepare-sidecar
+      # The black-box suites of crates/cf-e2e but the CLI's. Each builds the
+      # programs it runs (the native cf, and the pane host consensflow-bridge, a
+      # binary of cf-panes which no Tauri bundle ships). The daemon's, as a
+      # process, the rig's: the daemon and the pane host in real terminals, with
+      # stand-in agents in the windows, and the regressions': a case for each
+      # bug the owner hit in real use, on that rig. A shard lists the cases of
+      # the three, and runs every third from its own (suites.rs's `shard`), a
+      # rig at a time as on one runner; it says how many of how many it ran.
+      # They were two steps of one job, the daemon's and the rig's (30 minutes)
+      # and the regressions (35): in the runs of 2026-10-24 and 25, 1,140 to
+      # 1,250 s and 1,260 to 2,030 s, 2,400 to 3,200 s together, the macOS ones
+      # the slower. A shard has a third, 800 to 1,070 s, and the build. 30 is the
+      # smaller of the two limits, which no shard comes near; the runs of the
+      # shards set it (`cargo xtask ci-times --step "test:daemons"`).
+      - run: npm run test:daemons
+        env:
+          CF_TEST_SHARD: ${{ matrix.shard }}
+        timeout-minutes: 30
 
       # A rig case that fails keeps a report of what its windows showed beside
       # its home, in the runner's temp folder (cf-e2e's rig/report.rs, `keep`),
@@ -190,3 +198,25 @@ jobs:
           path: app/src-tauri/target/live-reports/consensflow-integration-*-left.txt
           if-no-files-found: ignore
           retention-days: 7
+
+  # The checks a release and a branch rule read, one a platform, named as the
+  # one job a platform was: green only when every job above passed. They run
+  # whatever the jobs above did (`always()`), so that a job that failed, was
+  # cancelled or was skipped makes them red and not skipped, which a rule would
+  # take for passed.
+  gate:
+    needs: [checks, workspace, daemons]
+    if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job of the gate passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'length > 0 and all(.[]; .result == "success")' > /dev/null
