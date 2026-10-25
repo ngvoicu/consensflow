@@ -27,7 +27,8 @@
 //! (`paste_shapes`), the quota wait that keeps a member's task with its
 //! window whoever else is free (`quota_waits`), and an account's quota as every
 //! window's on it, and what waits for a window out of quota said to the human
-//! (`quota_accounts`).
+//! (`quota_accounts`), and a window whose turn is over, which no stop interrupts
+//! or closes (`nothing_to_stop`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -59,6 +60,7 @@ mod looks;
 mod meeting_main;
 mod no_adapter;
 mod not_ready;
+mod nothing_to_stop;
 mod out_of_quota;
 mod own_steps;
 mod participant_leaves;

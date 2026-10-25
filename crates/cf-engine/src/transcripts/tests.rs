@@ -75,6 +75,7 @@ fn look(items: Vec<Item>) -> Observed {
             monitors: Vec::new(),
         }))),
         settled: true,
+        over: false,
         waiting: None,
         failed: false,
         quota: None,

@@ -4,7 +4,13 @@
 //! that window, which dies with it. It is paid when the window is seen at
 //! rest: its turn is over, nothing is asked of it and nothing is being
 //! pasted into it; no key is pressed into a window at rest, and a window
-//! that was opened after the pause owes nothing for it. While the window is
+//! that was opened after the pause owes nothing for it. A turn is over where
+//! its harness's record says so, whatever the window's live status says
+//! (`Observed::over`: Claude says busy while a background agent runs), and
+//! where a refusal for quota ended it: such a window was never interrupted,
+//! and never closed for keys nothing in it could heed, which ended what it
+//! left running in the background (T-502's window, held for quota, and
+//! T-604's, told mid-turn, on 2026-10-25). While the window is
 //! at work, read from what its harness's record shows and never from what
 //! the board says, it is interrupted: Escape, as many presses as its harness
 //! asks for, again a few seconds later, three rounds in all. A window that
@@ -12,8 +18,8 @@
 //! zeewin long run's Pi of 2026-10-19), and ConsensFlow closes it, which ends
 //! its process as any close does; the task keeps its state, paused or queued
 //! behind the words that resume it, and resumed it reopens on its conversation.
-//! The human, and whoever gave the task, are told why. A window the host would
-//! not close is shown on the board, they are told that once, and the close is
+//! Whoever gave the task is told why, in one note. A window the host would
+//! not close is shown on the board, it is told that once, and the close is
 //! tried again once a minute while it works; it pays the stop if its turn ends
 //! meanwhile. An agent still at work on a turn about a task cancelled under it
 //! is interrupted the same way, three rounds at most, and never closed for it.
@@ -172,7 +178,11 @@ impl Dispatcher {
             || record.delivery.borrow().delivering.is_some()
         {
             Look::Neither
-        } else if observed.settled {
+        } else if observed.settled || observed.over || self.cut_short(observed) {
+            // A turn its record says is over, whatever the window's status says, and one
+            // a refusal for quota ended, have nothing left for an interrupt to stop: no
+            // key, and no close for keys nothing heeded (T-502's and T-604's windows,
+            // closed with their background work on 2026-10-25).
             Look::Rest
         } else {
             Look::Work
@@ -374,9 +384,9 @@ impl Dispatcher {
         self.changed();
     }
 
-    /// The human, and whoever gave the task if it was not the human, are told
-    /// that the window did not stop and was closed, and what became of the task
-    /// once the close was taken ([`became_of`]).
+    /// Whoever gave the task is told that the window did not stop and was
+    /// closed, and what became of the task once the close was taken
+    /// ([`became_of`]).
     fn say_closed(
         &self,
         project: &ProjectView,
@@ -410,9 +420,8 @@ impl Dispatcher {
         )
     }
 
-    /// The human, and whoever gave the task if it was not the human, are told
-    /// once that the window did not stop and would not close, and what that
-    /// means.
+    /// Whoever gave the task is told once that the window did not stop and
+    /// would not close, and what that means.
     fn say_kept(
         &self,
         project: &ProjectView,
@@ -440,8 +449,10 @@ impl Dispatcher {
         )
     }
 
-    /// A note of T-`number`'s stop to the human, and one to whoever gave the
-    /// task, `requester`, if it was not the human.
+    /// One note of T-`number`'s stop: to whoever gave the task, `requester`, in
+    /// its words, or to the human in theirs where the human gave it or nobody
+    /// is known to have. The board shows every note of a task to the human, and
+    /// two of one event said it twice (T-502's, 2026-10-25).
     fn tell_stop(
         &self,
         project: &ProjectView,
@@ -450,27 +461,19 @@ impl Dispatcher {
         human: String,
         to_requester: String,
     ) -> Result<(), EngineError> {
-        let mut ledger = self.seams.ledger.borrow_mut();
-        ledger.note(
+        let (to, body) = match requester.filter(|requester| requester != "human") {
+            Some(requester) => (requester, to_requester),
+            None => ("human".to_owned(), human),
+        };
+        self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
                 from: None,
-                to: "human".to_owned(),
+                to,
                 task: Some(number),
-                body: human,
+                body,
             },
         )?;
-        if let Some(requester) = requester.filter(|requester| requester != "human") {
-            ledger.note(
-                project.id,
-                &NewNote {
-                    from: None,
-                    to: requester,
-                    task: Some(number),
-                    body: to_requester,
-                },
-            )?;
-        }
         Ok(())
     }
 

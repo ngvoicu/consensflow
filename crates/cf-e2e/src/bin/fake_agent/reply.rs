@@ -51,7 +51,10 @@
 //!   that leaves some running and ends its turn: the turn's `turn_duration` says
 //!   how many are left, the window's status stays `busy` for them, and when they
 //!   end the window begins a turn of its own (`WOKEN <words>`, which answers
-//!   `woken: <words>`), as Claude Code does.
+//!   `woken: <words>`), as Claude Code does. `AGENTS --then <count> <seconds> <rest>`
+//!   starts them so and goes on with `rest` as the line it was given, as a turn does
+//!   that starts agents and works on (T-604's, 2026-10-25): an Escape or a refusal
+//!   then ends a turn whose agents still run, and whose record counts none of them.
 //! - A line `STEPS <n> <words>` is a turn that writes `n` lines of progress, each a
 //!   message that calls a tool, before its answer, and `CLAUDE-JOB [--silent] <seconds>
 //!   <words> :: <report>` a turn that starts a job in the background as Claude Code does,
@@ -240,6 +243,7 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static JOB: OnceLock<Regex> = OnceLock::new();
     static BACKGROUND: OnceLock<Regex> = OnceLock::new();
     static AGENTS: OnceLock<Regex> = OnceLock::new();
+    static AGENTS_THEN: OnceLock<Regex> = OnceLock::new();
     static WOKEN: OnceLock<Regex> = OnceLock::new();
     static ASK: OnceLock<Regex> = OnceLock::new();
     static ASKED: OnceLock<Regex> = OnceLock::new();
@@ -348,6 +352,21 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
             let _ = wake.send(woken);
         });
         return Ok(Reply::Text(words));
+    }
+    if let Some(agents) =
+        pattern::once(&AGENTS_THEN, r"(?m)^AGENTS --then (\d+) (\d+) (.+)$").captures(text)
+    {
+        let count: u64 = agents[1]
+            .parse()
+            .map_err(|_| format!("AGENTS --then {}", &agents[1]))?;
+        let seconds: u64 = agents[2]
+            .parse()
+            .map_err(|_| format!("AGENTS --then {} {}", &agents[1], &agents[2]))?;
+        let (wake, woken) = (window.wake.clone(), "WOKEN the agents ended".to_owned());
+        window.agents.start(count, seconds, move || {
+            let _ = wake.send(woken);
+        });
+        return reply_to(&agents[3], window);
     }
     if let Some(woken) = pattern::once(&WOKEN, r"(?m)^WOKEN (.+)$").captures(text) {
         return Ok(Reply::Text(format!("woken: {}", &woken[1])));
@@ -594,6 +613,14 @@ mod tests {
         let reply = reply_to("AGENTS 3 600 waiting on three", &window);
         assert_eq!(text(reply), "waiting on three");
         assert_eq!(window.agents.running(), 3);
+    }
+
+    #[test]
+    fn an_agents_then_line_starts_them_and_goes_on_with_the_rest_of_the_line() {
+        let window = window();
+        let reply = reply_to("AGENTS --then 2 600 Reply with exactly: SWEEPING", &window);
+        assert_eq!(text(reply), "SWEEPING", "the rest is the turn's");
+        assert_eq!(window.agents.running(), 2, "and they run on");
     }
 
     #[test]

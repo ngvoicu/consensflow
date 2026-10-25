@@ -164,3 +164,91 @@ fn a_message_is_pasted_into_a_window_busy_with_its_agents_as_into_any_at_rest() 
         Ok(Admission::Admitted { queued: false })
     );
 }
+
+/// The records of a turn that began with the brief, started its agents, and was
+/// interrupted before it answered (T-604, 2026-10-25): the interrupt's record ends
+/// the turn, and no `turn_duration` counts the agents that still run.
+fn interrupted() -> Vec<String> {
+    let message = json!({
+        "id": format!("{SESSION}-message-2"),
+        "role": "assistant",
+        "content": [{ "type": "text", "text": "Three agents are sweeping the docs." }],
+    });
+    let interrupt = json!({
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{ "type": "text", "text": "[Request interrupted by user]" }],
+        },
+    });
+    vec![
+        user_line(SESSION, 1, BRIEF),
+        record(
+            SESSION,
+            2,
+            &json!({ "type": "assistant", "message": message }),
+        ),
+        record(SESSION, 3, &interrupt),
+    ]
+}
+
+/// The records of a turn the API refused for quota, with nothing after the refusal.
+fn refused() -> Vec<String> {
+    let refusal = json!({
+        "type": "assistant",
+        "isApiErrorMessage": true,
+        "apiErrorStatus": 429,
+        "error": "rate_limit",
+        "message": {
+            "id": format!("{SESSION}-message-2"),
+            "role": "assistant",
+            "content": [{ "type": "text", "text": "You've hit your weekly limit · resets Oct 27 at 10am" }],
+        },
+    });
+    vec![user_line(SESSION, 1, BRIEF), record(SESSION, 2, &refusal)]
+}
+
+#[test]
+fn a_turn_interrupted_while_its_agents_run_is_over_though_claude_says_busy_and_is_not_at_rest() {
+    // T-604's window: the stop's Escape ended its turn, Claude stayed busy with
+    // three agents, and the look read it at work through every round.
+    let (_home, window) = window_on(&interrupted(), Some("busy"));
+    let observed = look(&window);
+    assert!(
+        !observed.settled,
+        "busy, and the record counts no agents: nothing goes in yet"
+    );
+    assert!(
+        observed.over,
+        "the record says the turn ended: nothing in it is left to interrupt"
+    );
+}
+
+#[test]
+fn a_refused_turn_is_over_whatever_claude_says_of_its_status() {
+    for word in [Some("busy"), None] {
+        let (_home, window) = window_on(&refused(), word);
+        let observed = look(&window);
+        assert!(observed.failed, "{word:?}");
+        assert!(!observed.settled, "{word:?}");
+        assert!(observed.over, "{word:?}");
+    }
+}
+
+#[test]
+fn a_turn_under_way_is_never_over_and_a_window_at_rest_is_settled_and_no_more() {
+    let (_home, window) = window_on(&turn(None)[..2], Some("busy"));
+    let observed = look(&window);
+    assert!(
+        !observed.settled && !observed.over,
+        "the answer has no end yet"
+    );
+    let (_home, window) = window_on(&interrupted()[..2], Some("busy"));
+    let observed = look(&window);
+    assert!(!observed.settled && !observed.over, "before the interrupt");
+    for word in ["idle", "shell"] {
+        let (_home, window) = window_on(&interrupted(), Some(word));
+        let observed = look(&window);
+        assert!(observed.settled && !observed.over, "{word}");
+    }
+}

@@ -151,7 +151,7 @@ fn paused_then_resumed(at_once: bool) -> Outcome {
         secs(60),
         || {
             let [human, to_chief] = told(&rig, &project)?;
-            Ok(closed_by_the_daemon(&rig, &window) && !human.is_empty() && !to_chief.is_empty())
+            Ok(closed_by_the_daemon(&rig, &window) && human.is_empty() && !to_chief.is_empty())
         },
     )?;
     if at_once {
@@ -160,10 +160,9 @@ fn paused_then_resumed(at_once: bool) -> Outcome {
         assert_eq!(project.task(1)?["state"], "paused");
     }
     let [human, to_chief] = told(&rig, &project)?;
-    assert!(
-        human.len() == 1 && human[0].contains("so ConsensFlow closed its window"),
-        "the human was told: {human:?}"
-    );
+    // One note of the close, to the chief who gave the task, and none of its own to
+    // the human: two of one event said it twice (T-502's, 2026-10-25).
+    assert!(human.is_empty(), "the human was told: {human:?}");
     assert!(
         to_chief.len() == 1 && to_chief[0].contains("so ConsensFlow closed it"),
         "the chief was told: {to_chief:?}"

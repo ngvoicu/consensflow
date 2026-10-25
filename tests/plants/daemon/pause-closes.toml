@@ -133,7 +133,7 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-e2e/tests/regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"
 find = '''
-            Ok(closed_by_the_daemon(&rig, &window) && !human.is_empty() && !to_chief.is_empty())
+            Ok(closed_by_the_daemon(&rig, &window) && human.is_empty() && !to_chief.is_empty())
         },
     )?;
     if at_once {
@@ -142,7 +142,7 @@ find = '''
         assert_eq!(project.task(1)?["state"], "paused");
     }'''
 replace = '''
-            Ok(project.lane("worker")?["pane"].is_null() && !human.is_empty() && !to_chief.is_empty())
+            Ok(project.lane("worker")?["pane"].is_null() && human.is_empty() && !to_chief.is_empty())
         },
     )?;
     let state = if at_once { "queued" } else { "paused" };
