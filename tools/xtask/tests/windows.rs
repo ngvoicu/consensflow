@@ -662,7 +662,12 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
              $running = Join-Path $dir '.windows-run.pid'\n\
              $owner = Join-Path $dir '.windows-run.id'\n\
              $of = @(Get-Content $owner -ErrorAction SilentlyContinue)\n\
-             if ($of[0] -eq '{id}') {{ taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null; Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) {{ Remove-Item -LiteralPath $running -Force }} }}\n\
+             if ($of[0] -eq '{id}') {{\n\
+             \x20 $run = try {{ Get-Process -Id $of[1] -ErrorAction Stop | Where-Object {{ ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime }} }} catch {{}}\n\
+             \x20 $ends = @('/PID', $of[1], '/F'); if ($of[2] -ne 'job') {{ $ends += '/T' }}\n\
+             \x20 if ($run) {{ taskkill @ends 2>&1 | Out-Null }}\n\
+             \x20 Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) {{ Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }}\n\
+             }}\n\
              Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.{id}.tgz') -Force -ErrorAction SilentlyContinue\n\
              exit 0\n"
         )

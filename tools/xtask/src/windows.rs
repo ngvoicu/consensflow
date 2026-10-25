@@ -46,19 +46,42 @@
 //! A stop ends the run and everything it started. The run script puts the run in a job
 //! (`CfJob`, compiled by `Add-Type` in about 150 ms) before it starts anything: a job that
 //! the system ends, every process in it, when the last handle to it closes, and the run's
-//! process holds the only one. The stop kills the run's process, as it did (`taskkill /T
-//! /F`), and the system ends the rest at once, those the stop read and those that were
-//! started while it read them. The stop alone left the second kind: `taskkill /T` reads
-//! the tree, then ends what it read, leaves first and the program that starts the others
-//! last (about 7 ms a process), so that what the run starts while that goes on is never
-//! read. Measured on zeewin, 2026-10-23: a stop that landed on a command that kept
-//! starting programs left 21 to 50 of them running every time, and, of 142 stops of a run that was starting
-//! a single `ping -n 60` (every 10 ms from 0 to 700 ms after it began, twice each), 7 left
-//! it running, for its whole minute and holding the run's output open; with the job, none
-//! of 142 did. At a normal end the run releases the
+//! process holds the only one. The stop kills the run's process (`taskkill /F`), and the
+//! system ends the rest at once, those the stop would have read and those that were started
+//! while it read them. A stop that was `taskkill /T /F` alone left the second kind:
+//! `taskkill /T` reads the tree, then ends what it read, leaves first and the program that
+//! starts the others last (about 7 ms a process), so that what the run starts while that
+//! goes on is never read. Measured on zeewin, 2026-10-23: a stop that landed on a command
+//! that kept starting programs left 21 to 50 of them running every time, and, of 142 stops
+//! of a run that was starting a single `ping -n 60` (every 10 ms from 0 to 700 ms after it
+//! began, twice each), 7 left it running, for its whole minute and holding the run's
+//! output open; with the job, none of 142 did. At a normal end the run releases the
 //! job (the end-on-close is taken away), so a program a command leaves running stays
 //! running, as before. A run that cannot be put in a job says so in its output (`== no
 //! job: …`) and goes on, its stop being the walk alone.
+//!
+//! The walk is also a harm of its own (T-545). It takes seconds under load (5 s for the 33
+//! programs of one case, zeewin, 2026-10-25), long enough for the run to end by itself while
+//! it goes on: the job is released and the records are taken away, the programs the run
+//! started are left running (3,000 of them, in 4 of 20 runs of `windows::script` with the
+//! processor busy), the stop's own `Remove-Item` of a record that has gone says "Cannot find
+//! path", and the walk goes on ending, by the process id it read, what it read. A process id
+//! that a program has been given since is ended with it: in CI (2026-10-24, run
+//! 40132724600) two PowerShells of other cases died in their first seconds while this stop's
+//! case ran, one with 1 and a bare `#< CLIXML` on its error stream, the other never making
+//! the file it was started to make. That is the reading of that run's timing, and not a
+//! reproduction: on zeewin the ids were not given again within a few starts (60 sequential
+//! starts, 60 different ids: `windows-ids.ps1`), and the two programs of other cases that
+//! ended during a walk, once in 20 runs, ended with an access violation, which is a crash
+//! and not what the walk ends a program with (`taskkill` ends one with 1, `Stop-Process`
+//! with -1: `windows-exits.ps1`). What is reproduced, and mended, is the rest. So a run that
+//! is in its job says so, in the third
+//! line of the owner file ([`script::IN_JOB`], written once it is in), and its stop ends its
+//! process and nothing else, in silence; the walk is for a run that has not said it (not in
+//! the job yet, or cannot be). The process is ended only if it is still the run's, a
+//! PowerShell that was started before the owner file was written (as the lock reads the older
+//! file's): the id of a run that has ended, which a stop that landed as the run ended finds in
+//! the record, is some other program's by then (the stop ended a `ping` that way, in a case).
 //!
 //! Two scripts are sent. The bootstrap goes on ssh's command line, which holds 8,000
 //! characters of it ([`script::ENCODED_LIMIT`]) and is the same for every run but for

@@ -607,8 +607,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "taskkill /PID ($of[1]) /T /F"
-replace = "taskkill /PID (Get-Content $running) /T /F"
+find = "$ends = @('/PID', $of[1], '/F'); "
+replace = "$ends = @('/PID', (Get-Content $running), '/F'); "
 
 [[plant]]
 name = "windows runner: a stop takes the older file whoever's it is"
@@ -617,8 +617,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force }"
-replace = "Remove-Item -LiteralPath $running -Force"
+find = "if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }"
+replace = "Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue"
 
 [[plant]]
 name = "windows runner: the end of a run takes the older file whoever's it is"
@@ -789,7 +789,9 @@ runs = ["xtask-lib-windows"]
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
 find = "if (!AssignProcessToJobObject(job, GetCurrentProcess()))"
-replace = "if (false)"
+# Not `if (false)`: Add-Type takes the compiler's warning of unreachable code for an error, and the run is
+# then in no job at all (a stop walks its tree), which is another plant.
+replace = "if (job == IntPtr.Zero)"
 
 [[plant]]
 name = "windows runner: the run is not put in the job that was made (on the machine)"
@@ -800,7 +802,9 @@ platforms = ["windows"]
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
 find = "if (!AssignProcessToJobObject(job, GetCurrentProcess()))"
-replace = "if (false)"
+# Not `if (false)`: Add-Type takes the compiler's warning of unreachable code for an error, and the run is
+# then in no job at all (a stop walks its tree), which is another plant.
+replace = "if (job == IntPtr.Zero)"
 
 [[plant]]
 name = "windows runner: a run that cannot be put in a job ends without its exit line"
@@ -859,14 +863,14 @@ find = "  if ($null -ne $job) { [CfJob]::Release($job) }\n  Remove-Item -Literal
 replace = "  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($null -ne $job) { [CfJob]::Release($job) }\n"
 
 [[plant]]
-name = "windows runner: the stop does not end the tree it reads"
-meant = "the_job_is_released_where_a_run_ends_by_itself_and_not_where_it_is_killed"
+name = "windows runner: the stop does not end the tree of a run that is not in its job"
+meant = "a_run_that_is_in_its_job_is_ended_by_its_process_alone_and_the_tree_is_walked_only_for_one_that_is_not"
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "taskkill /PID ($of[1]) /T /F"
-replace = "taskkill /PID ($of[1]) /F"
+find = "if ($of[2] -ne '«in_job»') { $ends += '/T' }"
+replace = ""
 
 [[plant]]
 name = "windows runner: the stop lets taskkill say what it could not end"
@@ -875,19 +879,11 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null;"
-replace = "taskkill /PID ($of[1]) /T /F | Out-Null;"
+find = "taskkill @ends 2>&1 | Out-Null"
+replace = "taskkill @ends | Out-Null"
 
-[[plant]]
-name = "windows runner: the stop lets taskkill say what it could not end (on the machine)"
-meant = "a_stop_of_a_run_that_has_already_ended_says_nothing_and_takes_its_records_away"
-runs = ["xtask-lib-windows"]
-platforms = ["windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null;"
-replace = "taskkill /PID ($of[1]) /T /F | Out-Null;"
+# There is no plant for it on the machine: `taskkill` now ends a process only if it is the run's, and
+# says something on its error stream only when part of a tree it walks cannot be ended, by chance.
 
 [[plant]]
 name = "windows runner: the stop ends with the status of its last command"
@@ -909,6 +905,143 @@ platforms = ["windows"]
 file = "tools/xtask/src/windows/script.rs"
 find = "-ErrorAction SilentlyContinue\nexit 0\n\"##;"
 replace = "-ErrorAction SilentlyContinue\n\"##;"
+
+# A stop ends the run's process alone when the run is in its job, and only if that process is still
+# the run's (T-545): the walk of a run's tree ended, by process id, programs that had ended since it
+# read the list, and the ids had been given to other programs: two PowerShells of other cases of
+# these tests, in their first seconds, were ended by a stop in CI (2026-10-24, run 40132724600:
+# "the runs were never ready", and a sweep that ended with 1 and `#< CLIXML`). The walk is plant
+# "a stop walks the tree of a run that is in its job", by its text; there is none for it on the
+# machine, for the case that shows it (bystanders ended by a walk of a long tree) goes red by
+# chance only (1 run of 20 under load, zeewin, 2026-10-25).
+
+[[plant]]
+name = "windows runner: a stop walks the tree of a run that is in its job"
+meant = "a_run_that_is_in_its_job_is_ended_by_its_process_alone_and_the_tree_is_walked_only_for_one_that_is_not"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if ($of[2] -ne '«in_job»') { $ends += '/T' }"
+replace = "$ends += '/T'"
+
+[[plant]]
+name = "windows runner: a run does not say it is in its job"
+meant = "a_run_that_is_in_its_job_is_ended_by_its_process_alone_and_the_tree_is_walked_only_for_one_that_is_not"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  try { Add-Content -LiteralPath $owner -Value '«in_job»' } catch {"
+replace = "  try { } catch {"
+
+[[plant]]
+name = "windows runner: a run does not say it is in its job (on the machine)"
+meant = "a_stop_of_a_run_that_is_starting_programs_ends_no_program_that_is_not_the_runs"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  try { Add-Content -LiteralPath $owner -Value '«in_job»' } catch {"
+replace = "  try { } catch {"
+
+[[plant]]
+name = "windows runner: a stop ends the process whatever it is"
+meant = "a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($run) { taskkill @ends"
+replace = "  if ($true) { taskkill @ends"
+
+[[plant]]
+name = "windows runner: a stop ends the process whatever it is (on the machine)"
+meant = "a_stop_ends_the_process_the_owner_file_names_only_if_it_is_a_powershell_older_than_the_file"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($run) { taskkill @ends"
+replace = "  if ($true) { taskkill @ends"
+
+[[plant]]
+name = "windows runner: a stop takes any program for a PowerShell"
+meant = "a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "-ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner)"
+replace = "-ErrorAction Stop | Where-Object { $_.StartTime -le (Get-Item -LiteralPath $owner)"
+
+[[plant]]
+name = "windows runner: a stop takes any program for a PowerShell (on the machine)"
+meant = "a_stop_ends_the_process_the_owner_file_names_only_if_it_is_a_powershell_older_than_the_file"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "-ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner)"
+replace = "-ErrorAction Stop | Where-Object { $_.StartTime -le (Get-Item -LiteralPath $owner)"
+
+[[plant]]
+name = "windows runner: a stop takes a PowerShell started after the record for the run"
+meant = "a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = " -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime"
+replace = ""
+
+[[plant]]
+name = "windows runner: a stop takes a PowerShell started after the record for the run (on the machine)"
+meant = "a_stop_ends_the_process_the_owner_file_names_only_if_it_is_a_powershell_older_than_the_file"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = " -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime"
+replace = ""
+
+# A stop says nothing of its records (T-545): a run that ends by itself takes them away too, and the stop
+# that read them before it did said PowerShell's "Cannot find path" (zeewin under load, 2026-10-25).
+
+[[plant]]
+name = "windows runner: the stop lets Remove-Item say what it could not take away"
+meant = "the_script_that_ends_a_run_there_ends_the_run_the_lock_names_and_takes_its_tarball_away"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if"
+replace = "  Remove-Item -LiteralPath $owner -Force; if"
+
+[[plant]]
+name = "windows runner: the stop lets Remove-Item say what it could not take away (on the machine)"
+meant = "a_stop_that_cannot_take_the_records_away_says_nothing_of_it"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if"
+replace = "  Remove-Item -LiteralPath $owner -Force; if"
+
+[[plant]]
+name = "windows runner: the stop lets Remove-Item say what it could not take away of the older file"
+meant = "the_script_that_ends_a_run_there_ends_the_run_the_lock_names_and_takes_its_tarball_away"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "{ Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n}\n"
+replace = "{ Remove-Item -LiteralPath $running -Force }\n}\n"
 
 # What the reports a run left keep (`script::REPORTS_KEPT_DAYS`, T-34 P3-6): older than the limit
 # is removed by the sweep, in that folder alone, and nothing newer is touched.

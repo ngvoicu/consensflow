@@ -12,6 +12,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
 
 use cf_base::env::Env;
@@ -75,10 +78,13 @@ fn tarball(scratch: &Path, context: &Context, identity: &str, command: &str, id:
     tree::pack(context, &files, identity, &run, &into).unwrap()
 }
 
-/// What one run came to: the status its last line gave, and what it said.
+/// What one run came to: the status its last line gave, what it said, how its process
+/// ended, and what its error stream held (as text).
 struct Came {
     status: Option<i32>,
     said: String,
+    code: Option<i32>,
+    errors: String,
 }
 
 impl Came {
@@ -86,7 +92,81 @@ impl Came {
         let done = run.wait_with_output().unwrap();
         let said = String::from_utf8_lossy(&done.stdout).into_owned();
         let status = said.lines().rev().find_map(exit_said);
-        Self { status, said }
+        let errors = said_on_stderr(&String::from_utf8_lossy(&done.stderr));
+        Self {
+            status,
+            said,
+            code: done.status.code(),
+            errors,
+        }
+    }
+
+    /// Everything the run left, for a failed case to say.
+    fn describe(&self) -> String {
+        format!(
+            "status {:?}, process code {:?}\n--- it said\n{}\n--- its error stream\n{}",
+            self.status, self.code, self.said, self.errors
+        )
+    }
+}
+
+/// The runs a case has started and not yet seen through: ended when the case ends, however it
+/// ends, so that one that fails leaves no PowerShell spinning on its gate (up to
+/// [`GATE_SECONDS`]) to slow down every case that runs after it.
+struct Started(Vec<Child>);
+
+impl Drop for Started {
+    fn drop(&mut self) {
+        for run in &mut self.0 {
+            let _ = run.kill();
+            let _ = run.wait();
+        }
+    }
+}
+
+/// How long the runs of a case have to make their `ready` files, in seconds.
+const READY_SECONDS: u64 = 120;
+
+/// Waits until every run has made its `ready` file. A run whose process ended without making
+/// it never will: the case fails at once, saying how that run ended and what it left (CI run
+/// 40132724600, 2026-10-24: "the runs were never ready" after two minutes, and no word of
+/// what had become of them). A run still alive and not ready after [`READY_SECONDS`] is said
+/// to be that: slow, which is another thing.
+fn all_ready(runs: &mut Started, readies: &[PathBuf]) {
+    let started = Instant::now();
+    loop {
+        let mut waiting = Vec::new();
+        for (at, (run, ready)) in runs.0.iter_mut().zip(readies).enumerate() {
+            if ready.exists() {
+                continue;
+            }
+            if let Some(status) = run.try_wait().unwrap() {
+                let read = |stream: Option<&mut dyn std::io::Read>| {
+                    let mut bytes = Vec::new();
+                    if let Some(stream) = stream {
+                        let _ = stream.read_to_end(&mut bytes);
+                    }
+                    String::from_utf8_lossy(&bytes).into_owned()
+                };
+                let said = read(run.stdout.as_mut().map(|s| s as &mut dyn std::io::Read));
+                let errors = said_on_stderr(&read(
+                    run.stderr.as_mut().map(|s| s as &mut dyn std::io::Read),
+                ));
+                panic!(
+                    "run {at} ended ({status}) {:.1} s after it was started and before it was ready\n--- it said\n{said}\n--- its error stream\n{errors}",
+                    started.elapsed().as_secs_f32()
+                );
+            }
+            waiting.push(at);
+        }
+        if waiting.is_empty() {
+            return;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(READY_SECONDS),
+            "runs {waiting:?} were still starting after {READY_SECONDS} s, alive and not ready"
+        );
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 
@@ -185,15 +265,58 @@ fn gits_usr_bin(env: &Env) -> PathBuf {
     usr_bin
 }
 
-/// A PowerShell that does nothing for a minute: a live process of the kind a run is.
-fn sleeper(env: &Env) -> Child {
+/// How long a program a case holds lives if the case never ends it, in seconds: longer than
+/// any case takes on a machine under load (a case that took more than the minute the sleepers
+/// had found them gone, zeewin, 2026-10-25), and not for ever.
+const HELD_SECONDS: u32 = 300;
+
+/// A program a case started and waits on, ended when the case ends however it ends: a case
+/// that fails must not leave it on the machine for the [`HELD_SECONDS`].
+struct Held {
+    child: Child,
+    since: Instant,
+}
+
+impl Held {
+    fn new(child: Child) -> Self {
+        Self {
+            child,
+            since: Instant::now(),
+        }
+    }
+
+    fn id(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// Whether it still runs, or how long after it was started it was found to have ended.
+    fn runs(&mut self) -> Result<(), String> {
+        match self.child.try_wait().unwrap() {
+            None => Ok(()),
+            Some(status) => Err(format!(
+                "it ended ({status}) {:?} after it was started",
+                self.since.elapsed()
+            )),
+        }
+    }
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// A PowerShell that does nothing for [`HELD_SECONDS`]: a live process of the kind a run is.
+fn sleeper(env: &Env) -> Held {
     let start = Invocation::new("powershell", ".").args([
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        "Start-Sleep 60",
+        &format!("Start-Sleep {HELD_SECONDS}"),
     ]);
-    process::spawn(&start, env, Stdio::null(), false).unwrap()
+    Held::new(process::spawn(&start, env, Stdio::null(), false).unwrap())
 }
 
 /// Ends a process a case started, and waits for it.
@@ -243,7 +366,11 @@ fn marked(env: &Env, mark: &str) -> Vec<u32> {
                 .filter_map(|line| line.trim().parse().ok())
                 .collect();
         }
-        assert!(attempt < 3, "the system would not say: {}", ran.stderr);
+        assert!(
+            attempt < 3,
+            "the system would not say: {}",
+            said_on_stderr(&ran.stderr)
+        );
         std::thread::sleep(Duration::from_millis(500));
     }
     unreachable!("the last attempt panics")
@@ -258,12 +385,19 @@ struct Marks<'a> {
 
 impl Drop for Marks<'_> {
     fn drop(&mut self) {
-        for id in marked(self.env, self.mark) {
-            let _ = process::capture(
-                &Invocation::new("taskkill", ".").args(["/F", "/PID", &id.to_string()]),
-                self.env,
-            );
-        }
+        // Asked and ended in one script: a program ended by a process id found a moment
+        // before (by the next program to start, once the id is given again) may be another's
+        // by then, and the gap between two programs is long on a machine under load.
+        let script = format!(
+            "$ProgressPreference = 'SilentlyContinue'\nGet-CimInstance Win32_Process -Filter \"Name='PING.EXE'\" | Where-Object {{ $_.CommandLine -like '*{}*' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}\n",
+            self.mark
+        );
+        let _ = process::capture(
+            &Invocation::new("powershell", ".")
+                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+                .arg(encode_script(&script).unwrap()),
+            self.env,
+        );
     }
 }
 
@@ -278,11 +412,15 @@ fn stop(case: &Case, id: &str) {
         &case.env,
     )
     .unwrap();
-    assert_eq!(stop.code, 0, "{}{}", stop.stdout, stop.stderr);
+    assert_eq!(stop.code, 0, "{}", said(&stop));
     // It says nothing: what `taskkill` says of the programs the system is ending as it
     // reads them ("could not be terminated", "not supported") is for no one, and the
     // person who stopped the run would have it on their terminal.
-    assert_eq!((stop.stdout.as_str(), stop.stderr.as_str()), ("", ""));
+    assert!(
+        stop.stdout.is_empty() && stop.stderr.is_empty(),
+        "{}",
+        said(&stop)
+    );
 }
 
 /// Waits for the run's own process to be gone (a minute at most): what a stop ends is the run, so
@@ -310,19 +448,18 @@ fn together(scratch: &Path, env: &Env) -> (PathBuf, [Came; 2]) {
     let readies: Vec<PathBuf> = (0..2)
         .map(|at| scratch.join(format!("ready-{at}")))
         .collect();
-    let runs: Vec<Child> = ids
-        .iter()
-        .zip(&readies)
-        .map(|(id, ready)| {
-            let packed = tarball(scratch, &context, &identity, "ping -n 3 127.0.0.1", id);
-            start(scratch, env, &profile, id, &packed, Some((ready, &go)))
-        })
-        .collect();
-    until("the runs were never ready", || {
-        readies.iter().all(|file| file.exists())
-    });
+    let mut runs = Started(
+        ids.iter()
+            .zip(&readies)
+            .map(|(id, ready)| {
+                let packed = tarball(scratch, &context, &identity, "ping -n 3 127.0.0.1", id);
+                start(scratch, env, &profile, id, &packed, Some((ready, &go)))
+            })
+            .collect(),
+    );
+    all_ready(&mut runs, &readies);
     fs::write(&go, "").unwrap();
-    let mut came = runs.into_iter().map(Came::of);
+    let mut came = std::mem::take(&mut runs.0).into_iter().map(Came::of);
     (profile, [came.next().unwrap(), came.next().unwrap()])
 }
 
@@ -335,8 +472,9 @@ fn of_two_runs_started_together_on_one_folder_one_runs_and_the_other_is_refused_
         let statuses = runs.each_ref().map(|came| came.status);
         let describe = || {
             format!(
-                "round {round}: {statuses:?}\n--- first\n{}\n--- second\n{}",
-                runs[0].said, runs[1].said
+                "round {round}: {statuses:?}\n=== first\n{}\n=== second\n{}",
+                runs[0].describe(),
+                runs[1].describe()
             )
         };
         let (won, refused) = match statuses {
@@ -552,7 +690,7 @@ fn a_record_of_the_older_form_that_names_no_process_of_a_run_does_not_stop_a_run
         "a process id given again: {}",
         ran.said
     );
-    end(wanderer);
+    drop(wanderer);
 }
 
 #[test]
@@ -570,7 +708,7 @@ fn a_powershell_that_holds_the_older_file_and_was_started_before_it_was_written_
         None,
         "cmd /c exit 0",
     ));
-    end(holder);
+    drop(holder);
     assert_eq!(ran.status, Some(75), "{}", ran.said);
     assert!(
         ran.said.contains(&format!(
@@ -593,44 +731,55 @@ fn a_stop_ends_the_run_the_owner_file_names_by_its_process_whatever_the_older_fi
         mark: "127.0.0.76",
     };
     let id = "0000b007-00000007";
-    let run = case.run(id, &[("keep.txt", b"kept")], None, "ping -n 60 127.0.0.76");
+    let run = case.run(id, &[("keep.txt", b"kept")], None, "ping -n 300 127.0.0.76");
     // The command is running: its program is there to be ended with the run.
     until("the run never started its command", || {
         !marked(&case.env, "127.0.0.76").is_empty()
     });
-    let other = sleeper(&case.env);
+    let mut other = sleeper(&case.env);
     let other_id = other.id();
     fs::write(case.copy().join(RUNNING), other_id.to_string()).unwrap();
     stop(&case, id);
     gone(run);
-    // Nothing the run started is running: its `ping -n 60` was a minute from its end.
+    // Nothing the run started is running: its `ping -n 300` was five minutes from its end.
     assert_eq!(marked(&case.env, "127.0.0.76"), Vec::<u32>::new());
     assert!(!case.copy().join(OWNER).exists());
     // The process in the older file is alive and its file is as it was written.
     let left = fs::read_to_string(case.copy().join(RUNNING)).unwrap();
     assert_eq!(left.trim(), other_id.to_string());
-    assert!(process::capture(
-        &Invocation::new("powershell", ".").args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            &format!("if (Get-Process -Id {other_id} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 3 }}"),
-        ]),
-        &case.env,
-    )
-    .unwrap()
-    .code
-        == 0);
-    end(other);
+    if let Err(why) = other.runs() {
+        panic!("the process in the older file was ended by the stop, or ended: {why}");
+    }
+    drop(other);
     assert!(tarballs_in(&case.profile).is_empty());
 }
 
-/// A batch file that keeps starting programs, as a test runner does (a thousand pings of a
-/// few seconds each, three thousand starts at the most, so that a stop that fails leaves a
-/// few seconds' worth and not a machine full): `mark` is the address they ping.
-fn spawner(mark: &str) -> Vec<u8> {
-    format!("@echo off\r\nfor /L %%i in (1,1,3000) do start \"\" /b ping -n 12 {mark} >nul\r\n")
-        .into_bytes()
+/// How many programs the batch file of [`spawner`] starts that end by themselves, at the
+/// most, and how many seconds each lives.
+const SPAWNED: usize = 200;
+const SPAWNED_SECONDS: usize = 3;
+
+/// A batch file that keeps starting programs, as a test runner does: first `long` that live
+/// a minute (a long tree, for the walk of one), then [`SPAWNED`] that end by themselves after
+/// [`SPAWNED_SECONDS`], ten a second (so that some thirty are alive at once, as a stop that
+/// landed on a run was seen to find, and never a machine full: it was three thousand pings of
+/// twelve seconds, started as fast as the machine could, and under load a thousand and more
+/// were alive at once, the whole suite took four times as long, and other cases' PowerShells
+/// were starved of their start, zeewin and CI, 2026-10-24/25), and last one program that
+/// the run waits for, five minutes at the most, so that the run is there for the stop to land
+/// on however slow the machine is. `mark` is the address they ping; the wait between two
+/// starts is a ping of an address nothing answers, for a tenth of a second.
+fn spawner(mark: &str, long: usize) -> Vec<u8> {
+    let long = if long == 0 {
+        String::new()
+    } else {
+        format!("for /L %%i in (1,1,{long}) do start \"\" /b ping -n 60 {mark} >nul\r\n")
+    };
+    format!(
+        "@echo off\r\n{long}for /L %%i in (1,1,{SPAWNED}) do (start \"\" /b ping -n {} {mark} >nul & ping -n 1 -w 100 192.0.2.1 >nul)\r\nping -n 300 {mark} >nul\r\n",
+        SPAWNED_SECONDS + 1
+    )
+    .into_bytes()
 }
 
 #[test]
@@ -650,7 +799,9 @@ fn a_stop_that_lands_while_the_run_is_starting_programs_leaves_none_of_them_runn
             mark,
         };
         let id = format!("0000b1{round:02x}-0000000{round}");
-        let spawner = spawner(mark);
+        // Ten of its programs live a minute, so that a run that is not in its job leaves some
+        // alive past the grace below (the short ones are gone in 3 s).
+        let spawner = spawner(mark, 10);
         let run = case.run(&id, &[("spawn.cmd", &spawner)], None, "spawn.cmd");
         until("the run never started its programs", || {
             marked(&case.env, mark).len() >= 6
@@ -673,6 +824,202 @@ fn a_stop_that_lands_while_the_run_is_starting_programs_leaves_none_of_them_runn
         );
         assert!(tarballs_in(&case.profile).is_empty());
     }
+}
+
+/// How many programs of other cases are alive at once at the most, and for how many seconds
+/// they are started at the most (a case that ends without finishing them stops them).
+const BYSTANDERS_ALIVE: usize = 16;
+const BYSTANDERS_SECONDS: u64 = 90;
+
+/// The programs of other cases, as any machine has them: while it is at work, one is started
+/// as soon as one of at most [`BYSTANDERS_ALIVE`] has ended, each ending by itself, with 0,
+/// after about two seconds (`ping -n 3` of the loopback address). Each is given the process id
+/// a program that ended a moment ago had, as the system gives them out again. It counts how
+/// many it started, and which of them ended with anything else: only something that ended it
+/// from outside does.
+struct Bystanders {
+    over: Arc<AtomicBool>,
+    thread: JoinHandle<Seen>,
+}
+
+/// What the programs of other cases came to: how many were started, how many of them were
+/// given a process id that an earlier one of them had had, and which ended otherwise than by
+/// themselves.
+struct Seen {
+    started: usize,
+    reused: usize,
+    ended_otherwise: Vec<String>,
+}
+
+impl Bystanders {
+    fn start(env: &Env) -> Self {
+        let over = Arc::new(AtomicBool::new(false));
+        let thread = std::thread::spawn({
+            let over = Arc::clone(&over);
+            let env = env.clone();
+            move || {
+                let ping = Invocation::new("ping", ".").args(["-n", "3", "127.0.0.9"]);
+                let mut alive: Vec<(usize, Child)> = Vec::new();
+                let mut started = 0;
+                let mut ids = std::collections::HashSet::new();
+                let mut reused = 0;
+                let mut ended_otherwise = Vec::new();
+                let mut reap = |alive: &mut Vec<(usize, Child)>, all: bool| {
+                    let mut kept = Vec::new();
+                    for (at, mut child) in alive.drain(..) {
+                        let status = if all {
+                            Some(child.wait().unwrap())
+                        } else {
+                            child.try_wait().unwrap()
+                        };
+                        match status {
+                            Some(status) if status.code() != Some(0) => {
+                                ended_otherwise.push(format!("#{at}: {status}"));
+                            }
+                            Some(_) => {}
+                            None => kept.push((at, child)),
+                        }
+                    }
+                    *alive = kept;
+                };
+                let until = Instant::now() + Duration::from_secs(BYSTANDERS_SECONDS);
+                while !over.load(Ordering::Relaxed) && Instant::now() < until {
+                    reap(&mut alive, false);
+                    if alive.len() < BYSTANDERS_ALIVE {
+                        let child = process::spawn(&ping, &env, Stdio::null(), false).unwrap();
+                        if !ids.insert(child.id()) {
+                            reused += 1;
+                        }
+                        alive.push((started, child));
+                        started += 1;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                reap(&mut alive, true);
+                Seen {
+                    started,
+                    reused,
+                    ended_otherwise,
+                }
+            }
+        });
+        Self { over, thread }
+    }
+
+    /// Stops starting them, waits for the last to end, and says how many there were and how
+    /// each that did not end by itself ended.
+    fn finish(self) -> Seen {
+        self.over.store(true, Ordering::Relaxed);
+        self.thread.join().unwrap()
+    }
+}
+
+#[test]
+fn a_stop_of_a_run_that_is_starting_programs_ends_no_program_that_is_not_the_runs() {
+    // CI, 2026-10-24 (run 40132724600): two PowerShells that other cases of this binary had
+    // started a moment before were ended by the stop of the case above, one a run of the
+    // lock's case (so that it was never ready) and one the sweep's (it said `#< CLIXML` and
+    // ended with 1, which is what `taskkill /F` ends a program with). The stop read the tree
+    // of a run that was starting programs and ended each program of it by its process id, a
+    // walk of seconds; every program of the list that had ended since had its id given to
+    // the next program to start, and the walk ended that one. The run is in a job: ending
+    // its process ends everything it started, and the tree is not read at all.
+    //
+    // The run has a long tree (LONG programs that live a minute, and the walk is some 7 ms
+    // each), and the short programs it goes on starting end during the walk: their ids go to
+    // the programs of other cases, which the walk then reaches. The stop's duration and how
+    // many programs were alive are said when the case fails.
+    const LONG: usize = 30;
+    let mark = "127.0.0.73";
+    for round in 0..2 {
+        let case = Case::new();
+        let _marks = Marks {
+            env: &case.env,
+            mark,
+        };
+        let id = format!("0000b4{round:02x}-0000000{round}");
+        let spawner = spawner(mark, LONG);
+        let run = case.run(&id, &[("spawn.cmd", &spawner)], None, "spawn.cmd");
+        until("the run never started its long programs", || {
+            marked(&case.env, mark).len() >= LONG
+        });
+        // It says it is in its job, in the owner file, where a stop reads it.
+        let owner = fs::read_to_string(case.copy().join(OWNER)).unwrap();
+        let lines: Vec<&str> = owner.lines().map(str::trim).collect();
+        assert_eq!(lines.len(), 3, "{owner:?}");
+        assert_eq!((lines[0], lines[2]), (id.as_str(), IN_JOB), "{owner:?}");
+        std::thread::sleep(Duration::from_secs(2));
+        let alive = marked(&case.env, mark).len();
+        let bystanders = Bystanders::start(&case.env);
+        let stopping = Instant::now();
+        stop(&case, &id);
+        gone(run);
+        let took = stopping.elapsed();
+        let Seen {
+            started,
+            reused,
+            ended_otherwise,
+        } = bystanders.finish();
+        eprintln!(
+            "round {round}: the stop took {took:?} with {alive} of the run's programs alive; {started} programs of other cases were started meanwhile, {reused} of them with a process id an earlier one had had; {} ended otherwise than by themselves",
+            ended_otherwise.len()
+        );
+        // Some were started while the stop went on: how many depends on how fast the machine
+        // starts a program (8 in the 1.7 s of a stop under load, zeewin, 2026-10-25), and the
+        // case proves nothing if none was.
+        assert!(
+            started >= 1,
+            "round {round}: no program of other cases was started while the stop went on ({took:?}, {alive} of the run's alive when it began)"
+        );
+        assert!(
+            ended_otherwise.is_empty(),
+            "round {round}: {} of the {started} programs of other cases, started while the stop of a run went on ({took:?}, {alive} of the run's alive when it began), ended otherwise than by themselves: {ended_otherwise:?}",
+            ended_otherwise.len()
+        );
+        assert!(tarballs_in(&case.profile).is_empty());
+    }
+}
+
+#[test]
+fn a_stop_ends_the_process_the_owner_file_names_only_if_it_is_a_powershell_older_than_the_file() {
+    // A run that ended leaves its record only if the stop landed as it ended, and its process
+    // id is the next program's by then: a stop that ended what the record names would end
+    // that program.
+    let case = Case::new();
+    let id = "0000b402-00000002";
+    let owner = case.copy().join(OWNER);
+    // A program that is no PowerShell.
+    let mut ping = Held::new(
+        process::spawn(
+            &Invocation::new("ping", ".").args(["-n", &HELD_SECONDS.to_string(), "127.0.0.74"]),
+            &case.env,
+            Stdio::null(),
+            false,
+        )
+        .unwrap(),
+    );
+    fs::write(&owner, format!("{id}\n{}\n", ping.id())).unwrap();
+    stop(&case, id);
+    if let Err(why) = ping.runs() {
+        panic!("a ping the owner file named was ended: {why}");
+    }
+    assert!(!owner.exists(), "the record stayed");
+    drop(ping);
+    // A PowerShell that was started after the file was written.
+    let mut later = sleeper(&case.env);
+    fs::write(&owner, format!("{id}\n{}\n", later.id())).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&owner)
+        .unwrap()
+        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000))
+        .unwrap();
+    stop(&case, id);
+    if let Err(why) = later.runs() {
+        panic!("a PowerShell started after the owner file was written was ended: {why}");
+    }
+    assert!(!owner.exists(), "the record stayed");
+    drop(later);
 }
 
 #[test]
@@ -709,6 +1056,40 @@ fn what_a_command_leaves_running_when_the_run_ends_by_itself_is_left_running() {
         "the program it left is running"
     );
     assert!(tarballs_in(&case.profile).is_empty());
+}
+
+#[test]
+fn a_stop_that_cannot_take_the_records_away_says_nothing_of_it() {
+    // The run that ends by itself takes its records away too, and one that does so between the
+    // stop's reading of the owner file and its removal of it, or holds it open, left PowerShell's
+    // own "Cannot find path" / "being used by another process" on the stop's error stream (CI,
+    // and zeewin under load, 2026-10-25): the stop says nothing, whatever becomes of its records.
+    // The owner file is held open for reading by this test, so that it cannot be removed.
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let case = Case::new();
+    let id = "0000b302-00000002";
+    let mut ended = process::spawn(
+        &Invocation::new("cmd", ".").args(["/c", "exit", "0"]),
+        &case.env,
+        Stdio::null(),
+        false,
+    )
+    .unwrap();
+    ended.wait().unwrap();
+    let pid = ended.id();
+    let owner = case.copy().join(OWNER);
+    fs::write(&owner, format!("{id}\n{pid}\n")).unwrap();
+    fs::write(case.copy().join(RUNNING), pid.to_string()).unwrap();
+    // FILE_SHARE_READ: others may read it, none may write it or remove it.
+    let holding = fs::File::options()
+        .read(true)
+        .share_mode(1)
+        .open(&owner)
+        .unwrap();
+    stop(&case, id);
+    assert!(owner.exists(), "the file was removed while it was held");
+    drop(holding);
 }
 
 #[test]
