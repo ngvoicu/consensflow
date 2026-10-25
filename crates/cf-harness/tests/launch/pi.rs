@@ -114,6 +114,8 @@ struct Request {
     role: &'static str,
     /// The Specmint variant a chief is given, where its project has specs on.
     specs: Option<Variant>,
+    /// The folder the window opens in.
+    directory: String,
 }
 
 impl Default for Request {
@@ -124,6 +126,7 @@ impl Default for Request {
             instructions: ROLE.to_owned(),
             role: "worker",
             specs: None,
+            directory: "/work/app".to_owned(),
         }
     }
 }
@@ -138,7 +141,7 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
         project: 1,
         handle: "zeus",
         role: request.role,
-        directory: "/work/app",
+        directory: &request.directory,
         resume: request.resume.as_deref(),
         previous_gone: false,
         message: request.message.as_deref(),
@@ -308,6 +311,43 @@ fn launches_pi_with_its_extension_a_session_name_of_ours_and_the_task_last() {
     );
     assert_eq!(env("CF_DELIVERY_LAUNCH_ID").as_deref(), Some(LAUNCH));
     assert_eq!(plan.drop_env, Vec::<String>::new());
+}
+
+/// The texts the window is given to append to Pi's system prompt, in order.
+fn appended(argv: &[String]) -> Vec<String> {
+    argv.windows(2)
+        .filter(|pair| pair[0] == "--append-system-prompt")
+        .map(|pair| pair[1].clone())
+        .collect()
+}
+
+#[test]
+fn a_window_keeps_the_append_system_file_pi_finds_by_itself_before_its_role() {
+    // T-549: given `--append-system-prompt`, Pi reads no APPEND_SYSTEM.md, so a
+    // member lost the user's and the project's that a terminal's Pi has.
+    let home = Home::new();
+    let (adapter, _fakes) = adapter(&home);
+    let project = path::join(&[&home.root, "project"]);
+    let request = Request {
+        directory: project.clone(),
+        ..Request::default()
+    };
+    let plan = prepare(&adapter, &request).unwrap();
+    assert_eq!(appended(&plan.argv), [ROLE]);
+    let agent = path::join(&[home.var("HOME"), ".pi", "agent"]);
+    fs::create_dir_all(&agent).unwrap();
+    let user = path::join(&[&agent, "APPEND_SYSTEM.md"]);
+    fs::write(&user, "the user's").unwrap();
+    let plan = prepare(&adapter, &request).unwrap();
+    assert_eq!(appended(&plan.argv), [user.as_str(), ROLE]);
+    // The project's, where there is one, and not the user's: Pi reads one.
+    fs::create_dir_all(path::join(&[&project, ".pi"])).unwrap();
+    let own = path::join(&[&project, ".pi", "APPEND_SYSTEM.md"]);
+    fs::write(&own, "the project's").unwrap();
+    let plan = prepare(&adapter, &request).unwrap();
+    assert_eq!(appended(&plan.argv), [own.as_str(), ROLE]);
+    // Everything else is where it was, the task last.
+    assert_eq!(plan.argv.last().map(String::as_str), Some(TASK));
 }
 
 #[test]

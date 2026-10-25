@@ -1,4 +1,4 @@
-//! The Devin window of a member, asked of the adapter as the live tests ask it:
+//! The Devin and Pi windows of a member, asked of the adapter as the live tests ask it:
 //! the question as JSON, the launch as JSON. Devin's version is scripted, as the
 //! adapter's own tests have it, so no program runs here.
 
@@ -87,7 +87,7 @@ impl Home {
             bundle: bundle_of(&cf),
             ..self.fakes.services(&self.env, Path::new(""))
         };
-        prepared(&asked, &services)
+        prepared(Harness::Devin, &asked, &services)
     }
 
     /// The launch's own config, as it was written.
@@ -285,4 +285,47 @@ fn a_launch_that_is_not_one_or_is_missing_a_part_of_what_it_needs_says_which() {
         assert!(failed.starts_with("the question names no "), "{failed}");
         assert!(failed.contains(name), "{failed}");
     }
+}
+
+#[test]
+fn a_members_pi_window_is_the_adapters_whole_with_the_users_own_append_file_before_its_role() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_string_lossy().into_owned();
+    let at = |name: &str| path::join(&[&root, name]);
+    fs::create_dir_all(dir.path().join("bin")).unwrap();
+    let pi = fake_executable(&dir.path().join("bin").join("pi"));
+    let agent = dir.path().join("home").join(".pi").join("agent");
+    fs::create_dir_all(&agent).unwrap();
+    fs::write(agent.join("APPEND_SYSTEM.md"), "the user's").unwrap();
+    let asked = json!({
+        "op": "pi_launch",
+        "launch": LAUNCH,
+        "role": "worker",
+        "directory": at("work"),
+        "message": null,
+        "agent": { "kind": "pi", "model": "openrouter/x", "thinking": "low" },
+        "instructions": ROLE,
+        "env": { "HOME": at("home"), "CONSENSFLOW_HOME": at("consensflow"), "PATH": at("bin") },
+    });
+    let launched = answer(&asked).unwrap();
+    assert_eq!(launched["command"], json!(shown(&pi)));
+    let args = words(&launched);
+    let appended: Vec<&str> = args
+        .windows(2)
+        .filter(|pair| pair[0] == "--append-system-prompt")
+        .map(|pair| pair[1].as_str())
+        .collect();
+    assert_eq!(
+        appended,
+        [shown(&agent.join("APPEND_SYSTEM.md")).as_str(), ROLE]
+    );
+    let tail = &args[args.len() - 7..];
+    assert_eq!(tail[0], "--session-id");
+    assert_eq!(launched["session"], json!(tail[1].clone()));
+    assert_eq!(
+        tail[2..],
+        ["--model", "openrouter/x", "--thinking", "low", "--approve"]
+    );
+    assert_eq!(launched["env"]["CF_DELIVERY_LAUNCH_ID"], json!(LAUNCH));
+    assert_eq!(launched["dropEnv"], json!([]));
 }

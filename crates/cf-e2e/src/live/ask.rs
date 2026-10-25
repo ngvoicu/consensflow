@@ -23,7 +23,9 @@ use serde_json::{json, Map, Value};
 use crate::process::Run;
 use crate::{cf, Error, Result};
 
-pub use launch::{devin_hooks, devin_launch, devin_ready, DevinLaunch, DevinReady};
+pub use launch::{
+    devin_hooks, devin_launch, devin_ready, pi_launch, DevinLaunch, DevinReady, PiLaunch,
+};
 pub use readiness::{devin_readiness, DevinReadiness};
 
 /// Builds the test binary if it is not built yet, which the first question would

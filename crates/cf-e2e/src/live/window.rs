@@ -9,9 +9,9 @@
 //! which is the product's code), a Claude window has the settings file the app
 //! writes for a launch and the flags that shut the human's MCP servers and
 //! browser out, and Claude Code is asked, in a window of its own that is closed
-//! after, to trust the folder first ([`trust_claude`]). A Devin window may be a
-//! member's ([`Member`]): the launch is then the adapter's whole, its config and
-//! hooks and prompt file among it. What goes in goes in as
+//! after, to trust the folder first ([`trust_claude`]). A Devin or Pi window may
+//! be a member's ([`Member`]): the launch is then the adapter's whole, Devin's
+//! config and hooks and prompt file, Pi's extension and role skill, among it. What goes in goes in as
 //! the daemon sends it ([`Window::send`]: a bracketed paste, then Enter once the
 //! window has drawn it), and nothing presses Enter a second time. What a window
 //! printed is read as the text of its screen, and as it came ([`raw_end`]), which

@@ -126,10 +126,15 @@ impl Adapter for PiAdapter {
                     .into_iter()
                     .flat_map(|copy| ["--skill".to_owned(), copy.file()]),
             );
-            argv.extend([
-                "--append-system-prompt".to_owned(),
-                launch.instructions.to_owned(),
-            ]);
+            // Given an `--append-system-prompt`, Pi appends no file of the
+            // user's own: the one it would have is given first.
+            let appended = paths::append_system_prompt(&self.env, launch.directory);
+            argv.extend(
+                appended
+                    .into_iter()
+                    .chain([launch.instructions.to_owned()])
+                    .flat_map(|text| ["--append-system-prompt".to_owned(), text]),
+            );
             argv.extend(invocation.args);
             Ok(Prepared {
                 argv,

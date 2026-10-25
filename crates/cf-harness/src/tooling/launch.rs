@@ -1,6 +1,9 @@
-//! A member's Devin window as the adapter prepares it: its `--config` (the
-//! owner's, with the hooks ConsensFlow adds to it), its first message in a prompt
-//! file, the conversation it goes on with, and the variables its launch gives it.
+//! A member's Devin or Pi window as the adapter prepares it. Devin's: its
+//! `--config` (the owner's, with the hooks ConsensFlow adds to it), its first
+//! message in a prompt file, the conversation it goes on with, and the variables
+//! its launch gives it. Pi's: its extension, its role skill, the texts it appends
+//! to Pi's system prompt (the user's own `APPEND_SYSTEM.md` among them) and the
+//! variables of its channel.
 //! `start` answers the flags of a bare window, which is all a check of the window
 //! needs; a check of what a member's window does with the launch the daemon gives
 //! it needs the launch whole, so the adapter prepares it here as the daemon has it
@@ -48,7 +51,19 @@ fn system_services(env: &Env, cf: &Path) -> Services {
 /// one: Devin names its own).
 pub(super) fn devin_launch(question: &Value) -> Result<Value, String> {
     let services = system_services(&env(question)?, Path::new(text(question, "cf")?));
-    prepared(question, &services)
+    prepared(Harness::Devin, question, &services)
+}
+
+/// The Pi window of a member the question names, as the daemon opens it: the
+/// program the adapter found, its extension, role skill and system prompt
+/// texts, and the variables of its channel. Pi is asked nothing to prepare it.
+pub(super) fn pi_launch(question: &Value) -> Result<Value, String> {
+    let env = env(question)?;
+    prepared(
+        Harness::Pi,
+        question,
+        &Fakes::new(&env).services(&env, Path::new("")),
+    )
 }
 
 /// What the daemon's readiness reads of a Devin window's wire log (the question's
@@ -80,8 +95,8 @@ pub(super) fn devin_hooks(question: &Value) -> Result<Value, String> {
     Ok(Value::Object(hooks))
 }
 
-/// The launch the question names, prepared by Devin's adapter over `services`.
-fn prepared(question: &Value, services: &Services) -> Result<Value, String> {
+/// The launch the question names, prepared by `harness`'s adapter over `services`.
+fn prepared(harness: Harness, question: &Value, services: &Services) -> Result<Value, String> {
     let id = LaunchId::new(text(question, "launch")?)
         .ok_or("the question's launch is not a launch id (a lowercase uuid)")?;
     let agent = question.get("agent").ok_or("the question names no agent")?;
@@ -97,7 +112,7 @@ fn prepared(question: &Value, services: &Services) -> Result<Value, String> {
         agent: Some(Agent {
             model: optional(agent, "model"),
             effort: optional(agent, "effort"),
-            thinking: None,
+            thinking: optional(agent, "thinking"),
             designer: false,
         }),
         instructions: text(question, "instructions")?,
@@ -109,7 +124,7 @@ fn prepared(question: &Value, services: &Services) -> Result<Value, String> {
         .enable_all()
         .build()
         .map_err(|failed| failed.to_string())?;
-    let adapter = adapter(Harness::Devin, services);
+    let adapter = adapter(harness, services);
     let prepared = runtime.block_on(adapter.prepare(&launch))?;
     let (command, args) = prepared
         .argv

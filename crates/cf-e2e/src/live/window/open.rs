@@ -91,10 +91,12 @@ pub fn session_for(kind: &str) -> Option<String> {
     (kind == "claude-code" || kind == "pi").then(new_session)
 }
 
-/// A member's window as the daemon launches it: the adapter prepares it, with the
-/// owner's config and the hooks ConsensFlow adds to it, the role's text for a
-/// session of it to start with, and its first message in a prompt file
-/// ([`ask::devin_launch`]). Devin's alone.
+/// A member's window as the daemon launches it: the adapter prepares it. Devin's
+/// has the owner's config and the hooks ConsensFlow adds to it, the role's text for
+/// a session of it to start with, and its first message in a prompt file
+/// ([`ask::devin_launch`]); Pi's its extension, its role skill, the texts it
+/// appends to Pi's system prompt and its first message last ([`ask::pi_launch`]).
+/// The owner's hooks are taken out of Devin's alone.
 #[derive(Debug, Clone)]
 pub struct Member {
     role: String,
@@ -285,9 +287,23 @@ impl<'a> Open<'a> {
     ) -> Result<(ask::Start, String)> {
         let harness = self.install.harness();
         if let Some(member) = &self.member {
+            if harness == Harness::Pi {
+                let start = ask::pi_launch(&ask::PiLaunch {
+                    id: &new_session(),
+                    role: &member.role,
+                    directory: workspace,
+                    resume: self.resume.as_deref(),
+                    message: member.message.as_deref(),
+                    agent,
+                    instructions: &member.instructions,
+                    env,
+                })?;
+                let program = start.command.clone();
+                return Ok((start, program));
+            }
             if harness != Harness::Devin {
                 return Err(Error::Daemon(format!(
-                    "a member's launch is prepared for Devin alone, not {}",
+                    "a member's launch is prepared for Devin and Pi alone, not {}",
                     harness.name()
                 )));
             }
@@ -351,6 +367,16 @@ impl<'a> Open<'a> {
         let session = self.resume.clone().or_else(|| session_for(&kind));
         let env = window_env(self.rig, &workspace);
         let (start, executable) = self.command(&agent, session.as_deref(), &workspace, &env)?;
+        // A Pi member's conversation is the one its adapter named.
+        let session = match (&self.member, harness) {
+            (Some(_), Harness::Pi) => start
+                .args
+                .iter()
+                .position(|word| word == "--session-id")
+                .and_then(|at| start.args.get(at + 1))
+                .cloned(),
+            _ => session,
+        };
         let claude = harness == Harness::Claude;
         let alone: &[&str] = if self.claude_alone.is_some() {
             &ALONE
