@@ -225,10 +225,26 @@ fn predicted(directory: &Path) -> Result<(String, bool)> {
     ))
 }
 
-/// The folders Claude Code keeps a yes for in its own record of them (`.claude.json`
-/// in `home`), read and never written: below `under` alone.
+/// Where Claude Code keeps its record of folders (`.claude.json`) and its status files
+/// (`sessions`): in the config folder the run gave its windows (`--claude-config`), or
+/// else in the owner's `home`, the record beside the config folder `~/.claude`.
+fn claude_files(home: &Path) -> (PathBuf, PathBuf) {
+    match live::option("claude-config") {
+        Some(config) => {
+            let config = PathBuf::from(config);
+            (config.join(".claude.json"), config.join("sessions"))
+        }
+        None => (
+            home.join(".claude.json"),
+            home.join(".claude").join("sessions"),
+        ),
+    }
+}
+
+/// The folders Claude Code keeps a yes for in its own record of them (`.claude.json`,
+/// [`claude_files`]), read and never written: below `under` alone.
 fn claude_trusted(home: &Path, under: &str) -> Vec<String> {
-    let record: serde_json::Value = fs::read_to_string(home.join(".claude.json"))
+    let record: serde_json::Value = fs::read_to_string(claude_files(home).0)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
@@ -246,14 +262,14 @@ fn claude_trusted(home: &Path, under: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// What Claude Code's own status files in `home` (`sessions/<pid>.json`) say of the
-/// window whose process is `pid` or that runs in `directory`: the engine reads a window
+/// What Claude Code's own status files (`sessions/<pid>.json`, [`claude_files`]) say of
+/// the window whose process is `pid` or that runs in `directory`: the engine reads a window
 /// at rest only where it says idle, so one that says idle while it asks whether to trust
 /// its folder is held only by the watch for the question (Calliope's review of T-432,
 /// T-520). Read and never written.
 fn claude_status(home: &Path, pid: Option<u32>, directory: &Path) -> Vec<String> {
     let real = fs::canonicalize(directory).unwrap_or_else(|_| directory.to_path_buf());
-    let Ok(entries) = fs::read_dir(home.join("sessions")) else {
+    let Ok(entries) = fs::read_dir(claude_files(home).1) else {
         return vec!["no status files".to_owned()];
     };
     entries

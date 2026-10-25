@@ -1,5 +1,5 @@
 //! Live: the human's Close in the first moments of a worker's window, while its task's
-//! brief is on its way to it, pauses the task, and the Resume delivers the brief once
+//! brief is on its way to it, fails nothing, and the Resume delivers the brief once
 //! (T-534, bug 2; Calliope's review of T-432, T-520). It is opt-in (`cargo xtask live
 //! close-early`): it spends the machine's quota on one short task for each harness and
 //! moment named, and needs each installed and logged in, so it is ignored unless asked
@@ -45,7 +45,7 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
 /// What the table says each worker was checked for.
 const CHECKED: &str =
-    "a Close while the brief is on its way pauses the task; the Resume delivers it once";
+    "a Close while the brief is on its way fails nothing; the Resume delivers it once";
 
 /// How long the brief has to be on its way, the Close to settle, and the task to be done
 /// after the Resume.
@@ -219,7 +219,7 @@ fn steps(members: &mut Members, harness: Harness, at: u64, log: &Log) -> Result<
 
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a short task for each harness and moment named; cargo xtask live close-early"]
-fn a_close_while_a_workers_brief_is_on_its_way_pauses_its_task_and_the_resume_delivers_it_once(
+fn a_close_while_a_workers_brief_is_on_its_way_fails_nothing_and_the_resume_delivers_it_once(
 ) -> Result {
     let log = Log::begin("live close-early")?;
     let at = moments(live::option("at-ms"))?;
