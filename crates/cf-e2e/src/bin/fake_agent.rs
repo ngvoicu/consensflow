@@ -206,6 +206,13 @@ fn run(
         trust::bring_the_record_back(records.transcript());
     }
     let grows = asking && own_var("CF_TEST_RECORD_GROWS_ON_NO").is_some();
+    // A harness whose status says idle from its start, the question on its screen or
+    // not yet drawn: nothing but the screen tells that it asks.
+    if asking && own_var("CF_TEST_TRUST_IDLE_FIRST").is_some() {
+        records
+            .status(pid, "idle")
+            .map_err(|failed| failed.to_string())?;
+    }
     // Its terminal is read from the start, raw, as a TUI reads it: the question
     // before the prompt takes its keys from the same reader.
     let mut keys = Keys::start();

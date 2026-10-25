@@ -25,6 +25,8 @@ fm-engine-delivered = ["cargo", "test", "--offline", "-p", "cf-engine", "--test"
 fm-rig-claude = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_windows_first_message_was_on_its_command_line::a_workers_claude"]
 fm-rig-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_windows_first_message_was_on_its_command_line::a_workers_codex"]
 fm-rig-trust = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked"]
+fm-rig-late-trust = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_whose_question_comes_after_half_a_minute"]
+fm-rig-never-prompt = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_that_never_draws_its_prompt"]
 
 [[plant]]
 name = "first message: Claude Code's adapter puts it on the command line again"
@@ -173,3 +175,70 @@ runs = ["fm-engine-delivered"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = "            self.give_back(first.message, admitting.because())?;\n"
 replace = ""
+
+# Calliope's review of T-432 (T-520), round 2 (T-523): her four P3s.
+
+[[plant]]
+name = "first message: the trust watch lets a window owed its first message go after 30 s with no question"
+meant = "a_worker_whose_question_comes_after_half_a_minute_is_answered_before_its_brief_goes_in"
+runs = ["fm-rig-late-trust"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "self.now() - began > ASKS_WITHIN_MS && !owes_first(record)"
+replace = "self.now() - began > ASKS_WITHIN_MS"
+
+[[plant]]
+name = "first message: a window owed it that shows neither the question nor its prompt spends no launch time"
+meant = "a_worker_that_never_draws_its_prompt_fails_in_its_launch_s_time"
+runs = ["fm-rig-never-prompt"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "|| (trust == Trusting::Looking && delivering.owed.is_none())"
+replace = "|| trust == Trusting::Looking"
+
+[[plant]]
+name = "first message: one held for what the human typed spends the launch's time"
+meant = "a_first_message_held_for_what_the_human_typed_does_not_spend_the_launch_s_time"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                            delivering.since = now;\n                        }\n                    }\n                }"
+replace = "                        }\n                    }\n                }"
+
+[[plant]]
+name = "first message: a Close before any hand-over fails the brief"
+meant = "a_first_message_whose_project_closes_before_any_hand_over_is_given_back_and_goes_in_once_after_the_resume"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "if delivering.chief || (delivering.owed.is_some() && closed_with_project) {"
+replace = "if delivering.chief {"
+
+[[plant]]
+name = "first message: one owed to a window that ended by itself in an open project is given back"
+meant = "a_window_that_ends_by_itself_before_its_first_message_is_handed_over_fails_its_brief"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "(delivering.owed.is_some() && closed_with_project)"
+replace = "delivering.owed.is_some()"
+
+[[plant]]
+name = "first message: a monitor of the turn it begins proves no rest before it"
+meant = "a_monitor_of_the_turn_a_first_message_began_is_left_the_rest_before_the_hand_over"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+        // every monitor of that turn will (`deliver`).
+        record.held.borrow_mut().rests.pasted();"""
+replace = """
+        // every monitor of that turn will (`deliver`)."""

@@ -45,7 +45,7 @@ file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
                 self.settle_gone(delivering, move |delivering| {
                     // A chief's first message (a handoff, most often) waits for its next window.
-                    if delivering.chief {
+                    if delivering.chief || (delivering.owed.is_some() && closed_with_project) {
                         this.give_back(delivering.message, &told)
                     } else {
                         let retry = !delivering.launch;
@@ -56,7 +56,7 @@ find = '''
 replace = '''
                 let _ = (&this, &told);
                 // A chief's first message (a handoff, most often) waits for its next window.
-                if delivering.chief {
+                if delivering.chief || (delivering.owed.is_some() && closed_with_project) {
                     self.give_back(delivering.message, &because)?;
                 } else {
                     let retry = !delivering.launch;

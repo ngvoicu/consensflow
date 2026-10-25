@@ -136,10 +136,10 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
-            if record.window.borrow().trust != Trusting::Past {
-                return Ok(());
-            }'''
-replace = ""
+            if trust == Trusting::Asked || (trust == Trusting::Looking && delivering.owed.is_none())
+            {'''
+replace = '''
+            if trust == Trusting::Looking && delivering.owed.is_none() {'''
 
 [[plant]]
 name = "folder trust: a first message the question held keeps the time it spent waiting"

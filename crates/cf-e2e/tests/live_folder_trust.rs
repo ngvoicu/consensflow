@@ -246,6 +246,31 @@ fn claude_trusted(home: &Path, under: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// What Claude Code's own status files in `home` (`sessions/<pid>.json`) say of the
+/// window whose process is `pid` or that runs in `directory`: the engine reads a window
+/// at rest only where it says idle, so one that says idle while it asks whether to trust
+/// its folder is held only by the watch for the question (Calliope's review of T-432,
+/// T-520). Read and never written.
+fn claude_status(home: &Path, pid: Option<u32>, directory: &Path) -> Vec<String> {
+    let real = fs::canonicalize(directory).unwrap_or_else(|_| directory.to_path_buf());
+    let Ok(entries) = fs::read_dir(home.join("sessions")) else {
+        return vec!["no status files".to_owned()];
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| fs::read_to_string(entry.path()).ok())
+        .filter_map(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .filter(|status| {
+            let ours = pid.is_some_and(|pid| status["pid"] == pid);
+            let here = status["cwd"].as_str().is_some_and(|cwd| {
+                fs::canonicalize(cwd).unwrap_or_else(|_| PathBuf::from(cwd)) == real
+            });
+            ours || here
+        })
+        .map(|status| live::text(&status["status"]))
+        .collect()
+}
+
 /// `git` with `words` in `folder`, which must do what it is asked.
 fn git(folder: &Path, words: &[&str]) -> Result {
     let ran = Run::new(Path::new("git"))
@@ -361,6 +386,13 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     let mut lines = vec![format!("drew: {drew}")];
     lines.extend(first.iter().map(|line| format!("  {line}")));
     let asked = engine_key(harness, &first)?.is_some();
+    if asked && harness == Harness::Claude {
+        let pid = window.process().map(|process| process.pid);
+        lines.push(format!(
+            "Claude Code's status while it asks: {:?}",
+            claude_status(install.home(), pid, &directory)
+        ));
+    }
     let mut keys = 0;
     let mut screen = first.clone();
     while let Some(key) = engine_key(harness, &screen)? {

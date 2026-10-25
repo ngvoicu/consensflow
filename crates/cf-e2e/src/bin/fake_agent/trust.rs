@@ -23,7 +23,9 @@
 //! given, as a window that did not take it; with `CF_TEST_RECORD_GROWS_ON_NO` set its
 //! record grows once as a No ends it, as a process before it the host could not end
 //! writes still; and with `CF_TEST_RECORD_AWAY_MS` set a record a case moved aside
-//! comes back that long after the window starts ([`bring_the_record_back`]).
+//! comes back that long after the window starts ([`bring_the_record_back`]); with
+//! `CF_TEST_TRUST_IDLE_FIRST` set its status says idle from its start, before the
+//! question, so that only the screen tells that it asks.
 
 use std::fs;
 use std::io::{self, Write};

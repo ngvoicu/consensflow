@@ -11,6 +11,7 @@ use std::rc::Rc;
 use cf_engine::delivery_text::marker_of;
 use cf_engine::testing::Context;
 use cf_harness::contract::{FirstMessage, Held, Readiness};
+use cf_harness::records::{End, Monitor, Notice, Pending, Source};
 use cf_proto::trace::{Traced, WindowEvent};
 use serde_json::json;
 
@@ -296,6 +297,140 @@ fn a_first_message_whose_project_closes_while_its_window_takes_it_is_given_back_
             .count(),
         1,
         "it went in once"
+    );
+    context.close();
+}
+
+#[test]
+fn a_first_message_whose_project_closes_before_any_hand_over_is_given_back_and_goes_in_once_after_the_resume(
+) {
+    // Calliope's review of T-432 (T-520) and the tester's T-534, bug 2: a Close in the
+    // first seconds of a Claude window's start failed its task, and Resume brought
+    // nothing back. Zeus's window is up and not ready yet, so no hand-over is tried
+    // before the Close.
+    let context = delivered();
+    let ready = Rc::new(Cell::new(false));
+    let asked = Rc::clone(&ready);
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        Ok(if asked.get() {
+            Readiness::Ready
+        } else {
+            Readiness::Held(Held::Because("starting".to_owned()))
+        })
+    }));
+    let (project, brief) = briefed(&context);
+    passes(&context, 3);
+    assert_eq!(context.message(brief).state, "delivering");
+    assert_eq!(times_handed(&context, SEAM, brief), 0, "nothing tried yet");
+    context.close_project(project).unwrap();
+    context.settle();
+    assert_eq!(context.message(brief).state, "queued", "back in its queue");
+    assert_ne!(context.task(project, 1).task.state, "failed");
+    let chief = context.id(project, "chief");
+    assert!(
+        !context
+            .inbox(chief)
+            .iter()
+            .any(|message| message.body.contains("failed")),
+        "nobody hears it failed: {:?}",
+        context.inbox(chief)
+    );
+    ready.set(true);
+    context.resume_project(project).unwrap();
+    passes(&context, 4);
+    assert_eq!(context.message(brief).state, "delivered");
+    assert_eq!(times_handed(&context, SEAM, brief), 1, "handed once");
+    assert_eq!(context.task(project, 1).task.state, "working");
+    context.close();
+}
+
+#[test]
+fn a_first_message_held_for_what_the_human_typed_does_not_spend_the_launch_s_time() {
+    // Calliope's review of T-432 (T-520): the human's unsent words held the brief while
+    // the launch's time ran, and the task failed for a window never ready.
+    let context = delivered();
+    let typed = Rc::new(Cell::new(true));
+    let asked = Rc::clone(&typed);
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        Ok(if asked.get() {
+            Readiness::Held(Held::Unsent)
+        } else {
+            Readiness::Ready
+        })
+    }));
+    let (project, brief) = briefed(&context);
+    passes(&context, 3);
+    // Twice the launch's time, a step every ten seconds.
+    for _ in 0..24 {
+        context.advance(10_000);
+        passes(&context, 1);
+    }
+    assert_eq!(context.message(brief).state, "delivering", "owed still");
+    assert_ne!(context.task(project, 1).task.state, "failed");
+    typed.set(false);
+    passes(&context, 2);
+    assert_eq!(times_handed(&context, SEAM, brief), 1);
+    assert_eq!(context.message(brief).state, "delivered");
+    context.close();
+}
+
+#[test]
+fn a_window_that_ends_by_itself_before_its_first_message_is_handed_over_fails_its_brief() {
+    // Its project open, the window went on its own (a harness that dies as it starts):
+    // the brief is no message the human's Close held back, and is not given back to be
+    // launched again and again.
+    let context = delivered();
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| {
+        Ok(Readiness::Held(Held::Because("starting".to_owned())))
+    }));
+    let (project, brief) = briefed(&context);
+    passes(&context, 3);
+    assert_eq!(context.message(brief).state, "delivering");
+    context.exit("zeus");
+    passes(&context, 3);
+    assert_eq!(times_handed(&context, SEAM, brief), 0);
+    assert_eq!(context.message(brief).state, "failed");
+    assert_eq!(context.task(project, 1).task.state, "failed");
+    context.close();
+}
+
+#[test]
+fn a_monitor_of_the_turn_a_first_message_began_is_left_the_rest_before_the_hand_over() {
+    // Calliope's review of T-432 (T-520), as turn-end's own case for a paste (Calliope on
+    // 136a7158): the rest taken as the window is first seen at rest comes before the
+    // first message handed over, and so before every monitor of the turn it begins.
+    let context = delivered();
+    context.host.exits_showing(Some(0), None, None);
+    let (project, brief) = briefed(&context);
+    passes(&context, 3);
+    assert_eq!(context.message(brief).state, "delivered");
+    let rested = context.background.rests();
+    assert!(rested >= 1, "a rest before the hand-over");
+    context.background.commands_run(Some(0));
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "The watch ran out",
+        Pending {
+            jobs: 1,
+            noticed: 1,
+            ..Pending::default()
+        },
+        vec![Monitor {
+            id: "ticks".into(),
+            description: "ticks".into(),
+            source: Source::Command,
+            called: Some(1_792_623_750_287),
+            notice: Some(Notice {
+                end: End::Expired,
+                at: Some("2026-10-21T23:03:10.329Z".into()),
+            }),
+        }],
+    );
+    passes(&context, 2);
+    assert_eq!(context.task(project, 1).task.state, "done");
+    assert_eq!(
+        context.background.looked_since(),
+        [Some(u64::try_from(rested - 1).unwrap())]
     );
     context.close();
 }

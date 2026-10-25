@@ -778,11 +778,16 @@ impl Dispatcher {
             None => project,
             Some(delivering) => {
                 let launches = record.window.borrow().launches;
+                // A first message still owed to a window that closed with its project
+                // was never handed over: it waits for the Resume, as one turned away at
+                // its hand-over does (`hand_first`). One whose window ended by itself
+                // in an open project fails, as a launch that did not come up does.
+                let closed_with_project = project.state != "open";
                 // A paste its harness's record shows it took is confirmed (`in_flight`).
                 let (this, told) = (Rc::clone(self), because.clone());
                 self.settle_gone(delivering, move |delivering| {
                     // A chief's first message (a handoff, most often) waits for its next window.
-                    if delivering.chief {
+                    if delivering.chief || (delivering.owed.is_some() && closed_with_project) {
                         this.give_back(delivering.message, &told)
                     } else {
                         let retry = !delivering.launch;

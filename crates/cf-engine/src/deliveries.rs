@@ -585,7 +585,26 @@ impl Dispatcher {
         match ready {
             Readiness::Ready => self.came_up(record),
             Readiness::Held(held) => {
-                record.delivery.borrow_mut().unsent = held == Held::Unsent;
+                let unsent = held == Held::Unsent;
+                {
+                    let mut part = record.delivery.borrow_mut();
+                    part.unsent = unsent;
+                    // What the human typed is theirs to send: the launch's time is not
+                    // spent while it waits for them, as it is not while the window asks
+                    // whether to trust its folder (`trust`), and the box holds their
+                    // words now, so it is no longer known empty (`deliver`).
+                    if unsent {
+                        part.emptied = None;
+                        let now = self.now();
+                        if let Some(delivering) = part
+                            .delivering
+                            .as_mut()
+                            .filter(|delivering| delivering.message == first.message)
+                        {
+                            delivering.since = now;
+                        }
+                    }
+                }
                 let reason = format!(
                     "the window is not ready for its first message: {}",
                     held.sentence()
@@ -595,6 +614,9 @@ impl Dispatcher {
             Readiness::Unfit(reason) => return self.give_up_unfit(record, &message, &reason).await,
         }
         record.delivery.borrow_mut().unsent = false;
+        // The rest the window was seen at came before the turn this message begins, as
+        // every monitor of that turn will (`deliver`).
+        record.held.borrow_mut().rests.pasted();
         let admitting =
             Admitting::new(self, message.project_id).handing(first.message, first.carried.clone());
         let handed = returning(window.deliver(&admitting, &pane, &text)).await;
