@@ -107,9 +107,18 @@ mod on_a_shell {
                     powershell: powershell.display().to_string(),
                     busy: ".compile-lock".into(),
                     node: "node".into(),
+                    floor_gib: 0,
                 }),
             };
             Self { root, machine }
+        }
+
+        /// The machine, with a floor of free disk no disk has.
+        fn short_of_disk(mut self) -> Self {
+            if let Reach::Wsl(wsl) = &mut self.machine.reach {
+                wsl.floor_gib = 1 << 30;
+            }
+            self
         }
 
         fn path(&self, name: &str) -> std::path::PathBuf {
@@ -228,6 +237,42 @@ mod on_a_shell {
     }
 
     #[test]
+    fn a_run_on_a_machine_short_of_disk_is_refused_with_75_and_starts_nothing() {
+        let wsl = Wsl::new().short_of_disk();
+        fs::write(wsl.path("profile/b.tgz"), "tree").unwrap();
+        let ran = wsl.run(&wsl.machine.run_line("QUJD", "b.tgz"));
+        assert_eq!(ran.code, 75);
+        let said: Vec<&str> = ran.stdout.lines().collect();
+        assert_eq!(
+            said[0],
+            "zeewin2 is short of disk: a run needs 1073741824 GiB free there, and no run goes until it has them."
+        );
+        assert!(
+            said[1].starts_with('(') && said[1].ends_with(" GiB free)"),
+            "{said:?}"
+        );
+        assert_eq!(said[2..], ["", "== exit 75"]);
+        assert!(!wsl.path("said").exists(), "no PowerShell was started");
+        assert!(
+            !wsl.path("profile/b.tgz").exists(),
+            "the run's own tarball is removed"
+        );
+    }
+
+    #[test]
+    fn zeewin2s_floor_is_fifty_gib_of_its_c_drive() {
+        let Reach::Wsl(wsl) = Machine::named("zeewin2").unwrap().reach else {
+            panic!("zeewin2 is reached through WSL");
+        };
+        assert_eq!(wsl.floor_gib, 50);
+        let line = Machine::named("zeewin2").unwrap().run_line("QUJD", "b.tgz");
+        assert!(
+            line.contains("set -- $(df -P -k '/mnt/c/Users/AGV' | tail -n 1); if [ \"${4:-0}\" -lt 52428800 ]; then"),
+            "{line}"
+        );
+    }
+
+    #[test]
     fn the_stop_and_the_listing_go_whoever_holds_the_machine() {
         let wsl = Wsl::new();
         fs::create_dir(wsl.path("home/.compile-lock")).unwrap();
@@ -271,6 +316,20 @@ mod on_a_shell {
         assert_eq!(
             said,
             "windows: on zeewin, as zeewin2 is not free: a run goes on there\n"
+        );
+    }
+
+    #[test]
+    fn the_default_is_zeewin_while_zeewin2_is_short_of_disk() {
+        let wsl = Wsl::new().short_of_disk();
+        let (chosen, said) = wsl.choose(&wsl.context(None));
+        assert_eq!(chosen, "zeewin");
+        let why = said
+            .strip_prefix("windows: on zeewin, as zeewin2 is not free: it has ")
+            .unwrap_or_else(|| panic!("{said}"));
+        assert!(
+            why.ends_with(" GiB free, and a run needs 1073741824\n"),
+            "{said}"
         );
     }
 

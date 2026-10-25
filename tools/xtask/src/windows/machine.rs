@@ -22,9 +22,12 @@
 //! started), and the default ([`choose`]) goes to zeewin then. A poker-lab job that starts while
 //! a run goes on is not seen: it is poker-lab's lock, which a run does not hold.
 //!
+//! zeewin2 is Gabriel's laptop, whose C: holds his own files and WSL's disk: a run there starts
+//! only while that disk has [`FLOOR_GIB`] free, and is refused with 75 the same way below it.
+//!
 //! The default, where neither `--machine` nor `--host` is given, is zeewin2 while it is free
-//! (it answers, poker-lab does not hold it, and no run of this runner holds its copy), and else
-//! zeewin, which is slower (7 GB of memory to zeewin2's 27).
+//! (it answers, poker-lab does not hold it, no run of this runner holds its copy, and its disk has
+//! the floor free), and else zeewin, which is slower (7 GB of memory to zeewin2's 31).
 
 use super::script::OWNER;
 use crate::context::Context;
@@ -65,7 +68,15 @@ pub struct Wsl {
     pub busy: String,
     /// The Node the runs use (PowerShell's words): the machine's own in Program Files is not CI's.
     pub node: String,
+    /// How much of the profile's disk must be free for a run to start, in GiB.
+    pub floor_gib: u64,
 }
+
+/// How much of zeewin2's C: must be free for a run to start, in GiB. It is Gabriel's laptop, and
+/// a run's build is tens of GB (zeewin's build folder held 64 GB of `debug` a day after it was
+/// emptied, 2026-10-25): a run that filled the disk would stop the laptop and poker-lab's jobs
+/// with it, whose WSL disk grows on the same C:.
+const FLOOR_GIB: u64 = 50;
 
 /// Node's folder on a machine whose Node is the one in Program Files.
 const PROGRAM_FILES_NODE: &str = r"C:\Program Files\nodejs";
@@ -104,7 +115,8 @@ impl Machine {
     }
 
     /// The line that starts a run, whose tarball was sent as `upload`: [`Machine::line`], but
-    /// on a machine another project may hold, a run refused (75, its tarball removed) while it does.
+    /// on a machine reached through WSL, a run refused (75, its tarball removed, nothing started)
+    /// while another project holds it or while its disk has less than the floor free.
     pub fn run_line(&self, encoded: &str, upload: &str) -> String {
         let line = self.line(encoded);
         match &self.reach {
@@ -114,11 +126,19 @@ impl Machine {
                     "{} is busy: poker-lab's job holds it (~/{}), and no run goes while it does.",
                     self.name, wsl.busy
                 );
+                let short = format!(
+                    "{} is short of disk: a run needs {} GiB free there, and no run goes until it has them.",
+                    self.name, wsl.floor_gib
+                );
                 format!(
-                    "if [ -e \"$HOME\"/{busy} ]; then rm -f -- {tarball}; printf '%s\\n' {said} '' '== exit 75'; exit 75; fi; {line}",
+                    "if [ -e \"$HOME\"/{busy} ]; then rm -f -- {tarball}; printf '%s\\n' {said} '' '== exit 75'; exit 75; fi; \
+                     {free}; if [ \"${{4:-0}}\" -lt {floor} ]; then rm -f -- {tarball}; printf '%s\\n' {short} \"($(( ${{4:-0}} / 1048576 )) GiB free)\" '' '== exit 75'; exit 75; fi; {line}",
                     busy = sh_quoted(&wsl.busy),
                     tarball = sh_quoted(&format!("{}/{upload}", wsl.profile)),
                     said = sh_quoted(&said),
+                    free = free_kib(wsl),
+                    floor = wsl.floor_gib * 1024 * 1024,
+                    short = sh_quoted(&short),
                 )
             }
         }
@@ -148,9 +168,11 @@ impl Machine {
             return Free::Yes;
         };
         let line = format!(
-            "if [ -e \"$HOME\"/{} ]; then echo busy; elif [ -e {} ]; then echo run; else echo free; fi",
+            "{}; if [ -e \"$HOME\"/{} ]; then echo busy; elif [ -e {} ]; then echo run; elif [ \"${{4:-0}}\" -lt {} ]; then echo short $(( ${{4:-0}} / 1048576 )); else echo free; fi",
+            free_kib(wsl),
             sh_quoted(&wsl.busy),
-            sh_quoted(&format!("{}/{dir}/{OWNER}", wsl.profile))
+            sh_quoted(&format!("{}/{dir}/{OWNER}", wsl.profile)),
+            wsl.floor_gib * 1024 * 1024
         );
         let asked = Invocation::new("ssh", &context.root)
             .arg(&self.host)
@@ -160,7 +182,13 @@ impl Machine {
                 "free" => Free::Yes,
                 "busy" => Free::No(format!("poker-lab's job holds it (~/{})", wsl.busy)),
                 "run" => Free::No("a run goes on there".into()),
-                said => Free::No(format!("it answered {said:?}")),
+                said => match said.strip_prefix("short ") {
+                    Some(gib) => Free::No(format!(
+                        "it has {gib} GiB free, and a run needs {}",
+                        wsl.floor_gib
+                    )),
+                    None => Free::No(format!("it answered {said:?}")),
+                },
             },
             Ok(answer) => Free::No(format!(
                 "it did not answer (ssh ended with status {})",
@@ -186,6 +214,7 @@ fn zeewin2() -> Machine {
             powershell: "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe".into(),
             busy: ".compile-lock".into(),
             node: r"$env:USERPROFILE\cf-tools\node".into(),
+            floor_gib: FLOOR_GIB,
         }),
     }
 }
@@ -218,6 +247,12 @@ fn choose_between(
     };
     writeln!(console.err, "windows: on {}{why}", machine.name)?;
     Ok(machine)
+}
+
+/// The shell's words that set `$4` to the KiB free on the disk of `wsl`'s profile, as `df -P -k`
+/// says it (its last line: the file system, its size, what is used, what is free).
+fn free_kib(wsl: &Wsl) -> String {
+    format!("set -- $(df -P -k {} | tail -n 1)", sh_quoted(&wsl.profile))
 }
 
 /// `text` as a POSIX shell takes it between single quotes.
