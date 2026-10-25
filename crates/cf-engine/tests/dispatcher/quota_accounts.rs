@@ -16,9 +16,8 @@ const WAITS: &str = r"^@chief is out of quota until \S+, and m-(\d+) \(the words
 
 /// zeus at work on T-1 on Claude Code, whose windows are on one account; then
 /// the account runs out, refusing zeus's window and the chief's alike, with a
-/// reset two days on. The chief is out, and the note that T-1 waits is queued
-/// for it.
-fn out_together(context: &Context) -> (Tiers<'_>, String) {
+/// reset two days on: the two of them are out until it.
+fn spent_together(context: &Context) -> (Tiers<'_>, String) {
     context.adapter.one_account.set(true);
     let tiers = Tiers::new(context, &["zeus"]);
     tiers.open();
@@ -31,9 +30,16 @@ fn out_together(context: &Context) -> (Tiers<'_>, String) {
     context.adapter.refuse("chief", refused);
     context.pass().unwrap();
     context.pass().unwrap();
-    assert_eq!(tiers.task(1).task.state, "paused");
     assert_eq!(tiers.out_until("zeus"), Some(resets_at.clone()));
     assert_eq!(tiers.out_until("chief"), Some(resets_at));
+    (tiers, session)
+}
+
+/// The same, and T-1 is paused for the reset, the chief out, and the note that
+/// T-1 waits queued for it.
+fn out_together(context: &Context) -> (Tiers<'_>, String) {
+    let (tiers, session) = spent_together(context);
+    assert_eq!(tiers.task(1).task.state, "paused");
     assert_eq!(
         context.dispatcher.activity(tiers.id("chief")).state,
         ActivityState::Out
@@ -646,9 +652,10 @@ fn results_of(tiers: &Tiers<'_>, number: i64) -> Vec<(String, String)> {
 #[test]
 fn a_member_brought_back_by_the_chiefs_turn_goes_on_with_its_task_and_its_refusal_is_no_result() {
     // Turn-end meets the account's news: zeus's window still reads the refusal its turn
-    // ended on when the chief's turn brings zeus back, and that answer is no result.
+    // ended on when the chief's turn brings zeus back, and that answer is no result, nor
+    // its task's failure, however T-1 waited for the reset.
     let context = Context::new();
-    let (tiers, session) = out_together(&context);
+    let (tiers, session) = spent_together(&context);
     context.advance(60_000);
     goes_on(&context.adapter, "chief", &now(&context));
     // The chief's turn on the new account ends with those words.
