@@ -129,6 +129,7 @@ fn sent(run: &Recorded) -> [(String, String); 2] {
         steps: run.steps,
         command: &command_line(run.words),
         env: &env,
+        node: r"C:\Program Files\nodejs",
     };
     [
         (run.golden.to_owned(), remote_script(&script)),

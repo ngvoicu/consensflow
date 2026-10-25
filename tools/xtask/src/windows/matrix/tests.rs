@@ -70,7 +70,7 @@ fn pair(chief: &str, staff: &str) -> Pair {
 
 fn matrix(scenarios: &[&str], pairs: Vec<Pair>) -> MatrixOptions {
     MatrixOptions {
-        host: "zeewin".into(),
+        machine: Some(Machine::at("zeewin")),
         build: false,
         env: vec![],
         scenarios: strings(scenarios),
@@ -135,7 +135,7 @@ fn each_scenario_for_each_pair_is_run_one_after_another_as_the_eval_on_the_machi
     );
     // Each run is the machine's own: its host, the variables named, the usual folder.
     for run in &machine.asked {
-        assert_eq!(run.host, "zeewin");
+        assert_eq!(run.machine, Some(Machine::at("zeewin")));
         assert_eq!(
             run.env,
             [("CONSENSFLOW_TEST_DAEMON".to_owned(), "native".to_owned())]

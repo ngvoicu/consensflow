@@ -26,7 +26,7 @@ struct Rig {
 /// status), and every other time it lists what the machine holds
 /// (`CF_LISTING`), ending with `CF_LIST_STATUS`.
 const SSH: &str = r#"n=$(cat "$CF_COUNT" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$CF_COUNT"
-printf 'ssh\t%s\n' "$n" >> "$CF_LOG"
+printf 'ssh\t%s\n' "$n" >> "$CF_LOG"; printf '%s %s' "$1" "$2" > "$CF_LINE"
 if [ "$n" -eq 1 ] && [ -n "$CF_RUN" ]; then echo out; echo "== tree $(tar -xzOf "$CF_TARBALL" .windows-tree)"; echo "== exit $CF_RUN"; exit 0; fi
 cat "$CF_LISTING"
 exit "${CF_LIST_STATUS:-0}""#;
@@ -39,6 +39,8 @@ case "$2" in
     rel=${2#zeewin:consensflow-build/evals/reports/}
     if grep -qx "$rel" "$CF_FAIL" 2>/dev/null; then echo "scp: no such file" >&2; exit 4; fi
     cp "$CF_REMOTE/$rel" "$3" ;;
+  zeewin2:*)
+    cp "$CF_REMOTE/${2#zeewin2:consensflow-build/evals/reports/}" "$3" ;;
   *) cp "$2" "$CF_TARBALL" ;;
 esac"#;
 
@@ -72,6 +74,7 @@ impl Rig {
                     bin.path().join("remote").into_os_string(),
                 ),
                 ("CF_FAIL".into(), bin.path().join("fail").into_os_string()),
+                ("CF_LINE".into(), bin.path().join("line").into_os_string()),
             ])
             .collect();
         let context = Context {
@@ -190,7 +193,7 @@ impl Rig {
 
     fn options(&self) -> Options {
         Options {
-            host: "zeewin".into(),
+            machine: Some(Machine::at("zeewin")),
             build: false,
             dir: DEFAULT_DIR.into(),
             inside: ".".into(),
@@ -201,9 +204,15 @@ impl Rig {
 
     /// The reports brought back, and what was said of it.
     fn bring(&self) -> (Result<(), Error>, String) {
+        self.bring_from(&Machine::at("zeewin"))
+    }
+
+    /// The reports brought back from `machine`, and what was said of it.
+    fn bring_from(&self, machine: &Machine) -> (Result<(), Error>, String) {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let ended = bring_back(
             &self.context,
+            machine,
             &self.options(),
             &mut Console {
                 out: &mut out,
@@ -289,6 +298,35 @@ fn walk(folder: &Path) -> Vec<PathBuf> {
         }
     }
     files
+}
+
+#[test]
+fn zeewin2s_reports_are_listed_and_copied_from_its_profile_as_zeewins_are() {
+    let rig = Rig::new();
+    rig.remote("2026-10-25T13-00-00-000Z-round-trip-1.json", "{}");
+    rig.lists(&[("2026-10-25T13-00-00-000Z-round-trip-1.json", 2)]);
+    let (ended, said) = rig.bring_from(&Machine::named("zeewin2").unwrap());
+    ended.unwrap();
+    assert_eq!(
+        rig.here("2026-10-25T13-00-00-000Z-round-trip-1.json")
+            .as_deref(),
+        Some("{}")
+    );
+    assert!(said.starts_with("windows: brought back 1"), "{said}");
+    let log = rig.log();
+    let line = fs::read_to_string(rig.bin.path().join("line")).unwrap();
+    assert!(
+        line.starts_with("zeewin2 powershell -NoProfile -NonInteractive -EncodedCommand "),
+        "{line}"
+    );
+    let scp: Vec<&str> = log[1].split('\t').collect();
+    assert_eq!(
+        scp[..2],
+        [
+            "scp",
+            "zeewin2:consensflow-build/evals/reports/2026-10-25T13-00-00-000Z-round-trip-1.json"
+        ]
+    );
 }
 
 #[test]
@@ -455,6 +493,7 @@ fn a_run_that_ended_there_with_a_status_brings_its_reports_back_and_answers_the_
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let ended = run_keeping(
         &rig.context,
+        &Machine::at("zeewin"),
         &rig.options(),
         &mut Console {
             out: &mut out,
@@ -495,14 +534,16 @@ fn a_run_that_ended_there_with_a_status_brings_its_reports_back_and_answers_the_
 /// stays there: it is brought back after each run too.
 #[test]
 fn the_matrixs_machine_brings_the_reports_back_too() {
-    use crate::windows::matrix::{Machine, Remote};
+    use crate::windows::matrix::{Reached, Remote};
 
     let rig = Rig::with_tree().runs_ending_with(0);
     rig.remote("2026-10-21T10-00-00-000Z-simple-fix-1.json", "{}");
     rig.lists(&[("2026-10-21T10-00-00-000Z-simple-fix-1.json", 2)]);
     let interrupt = Interrupt::default();
-    let mut machine = Machine {
+    let zeewin = Machine::at("zeewin");
+    let mut machine = Reached {
         context: &rig.context,
+        machine: &zeewin,
         interrupt: &interrupt,
     };
     let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -529,6 +570,7 @@ fn a_run_that_could_not_be_sent_brings_nothing_back_and_asks_nothing() {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let ended = run_keeping(
         &rig.context,
+        &Machine::at("zeewin"),
         &rig.options(),
         &mut Console {
             out: &mut out,
