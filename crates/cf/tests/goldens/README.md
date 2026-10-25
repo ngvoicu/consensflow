@@ -30,10 +30,12 @@ them.
 
 `cf tell` to a task still queued, its window not up yet, keeps its words for the window
 (the field report of 2026-10-15). Its entry in the usage has a third line that says so,
-`(queued: kept for its window, to go in after its brief)`: added by hand to the six prints
-of `board.json` that hold the usage (`cf task --help` among them, which prints the lines
-that go on from the commands), as `crates/cf/src/board/usage.txt` has it, and to the
-daemon's traces of the same words.
+`(queued or open: kept for its window, to go in with or after its brief)`: added by hand
+to the six prints of `board.json` that hold the usage (`cf task --help` among them, which
+prints the lines that go on from the commands), as `crates/cf/src/board/usage.txt` has
+it, and to the daemon's traces of the same words. It said `(queued: kept for its window, to
+go in after its brief)` until T-534 (2026-10-25), when a task still open, waiting on what
+it needs, was told too: its words are added to its brief.
 
 ## The usage and the replies of 3.0.6's field reports
 

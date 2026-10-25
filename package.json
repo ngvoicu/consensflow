@@ -64,6 +64,7 @@
     "live:commands-at-rest": "cargo xtask live commands-at-rest",
     "live:monitor-wait": "cargo xtask live monitor-wait",
     "live:folder-trust": "cargo xtask live folder-trust",
+    "live:task-working": "cargo xtask live task-working",
     "live:harnesses": "cargo xtask live harnesses",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"

@@ -74,8 +74,9 @@
 //! command and finishing its task with nothing of its own ended, and leaving a
 //! long command running that its answer ends, `live_specs` a real chief of each
 //! harness told of specs where its project has them on, planning one and
-//! carrying it to the board, and `live_notes` a real chief, Devin's or Claude's,
-//! in a turn when two notes come for it, handed each once). Run them with
+//! carrying it to the board, `live_notes` a real chief, Devin's or Claude's,
+//! in a turn when two notes come for it, handed each once, and `live_task_working` a real
+//! worker's task working before its window runs its command). Run them with
 //! `cargo xtask test clis`, `daemons`, `integration`,
 //! `regressions`, `agents` and `load`, and `cargo xtask smoke` (the `npm run`
 //! names are the same), a live one with `cargo xtask live <name>`, or one with

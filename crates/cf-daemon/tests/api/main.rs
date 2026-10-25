@@ -77,8 +77,9 @@ const FINISH_IN_THE_USAGE: &str = "the usage `cf help` prints inside a window li
 /// kept, a command written wrong asks the board nothing, and `cf task get`
 /// prints the brief of a task no window holds under its header; those the
 /// decision on a result moved: the result is withdrawn, not pasted after it;
-/// and those that print the verbs of `cf task`, which have `finish` now. Found
-/// by playing them against the daemon.
+/// those that print the verbs of `cf task`, which have `finish` now; and the one
+/// that tells a task still open, which is told now. Found by playing them against
+/// the daemon.
 const DEPARTED: &[Departed] = &[
     ("core-api-003", RESULT_ACCEPTED),
     (
@@ -94,6 +95,10 @@ const DEPARTED: &[Departed] = &[
     (
         "cf-board-003",
         "a resume carries the brief that never arrived and logs `message.carried`: one more clock reading, so the task's `updatedAt` is a second later",
+    ),
+    (
+        "cf-board-004",
+        "`cf tell` to a task still open is not refused with `T-n has no window to tell: it is open`: its words are added to its brief, for whichever window takes the task (T-534)",
     ),
     (
         "cf-board-015",

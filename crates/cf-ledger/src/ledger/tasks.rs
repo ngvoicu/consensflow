@@ -184,6 +184,18 @@ impl Ledger {
         tasks::edit_task(&mut self.store, project_id, number, by, body)
     }
 
+    /// `from` tells an open task `words`, which no window has yet: they are added
+    /// to its brief and go to whichever window takes the task, once, with it.
+    pub fn tell_open(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        from: &str,
+        words: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::tell_open(&mut self.store, project_id, number, from, words)
+    }
+
     /// A task is called off, its requester told.
     pub fn cancel_task(
         &mut self,

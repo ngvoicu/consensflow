@@ -68,6 +68,13 @@ the commands that take one says `(task add, reopen, resume, edit and tell)`, and
 both sides had changed `cf-board-022`, `-028` and `-029`, each side's hand changes were
 put together, word for word, and nothing else moved.
 
+`cf tell` to a task still open (board task T-543, 3.0.6; the tester's T-534): the board no
+longer refuses it with `T-n has no window to tell: it is open`, its words are added to the
+task's brief. `cf-board-004`, whose run 4 is that refusal, departs (`tests/api/main.rs`);
+the trace itself is as it was recorded. The usage line of `cf tell` says `(queued or open: …)`
+now, in `crates/cf/src/board/usage.txt` and the crates' own goldens; `cf-board-028` and `-029`,
+which depart already, still hold the older line.
+
 `cf task list` with idle sessions (board task T-261, 3.0.6) moved the usage `cf` prints once
 more: its line reads `cf task list [--all]` and says what the flag adds, in every print of it
 in `cf-board-028` and `-029`. Changed by hand, in those words alone. The recordings of the

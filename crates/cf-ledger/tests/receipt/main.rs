@@ -28,6 +28,7 @@ mod gate;
 mod handed;
 mod legacy;
 mod open_questions;
+mod open_tells;
 mod pause_notes;
 mod questions;
 mod queued_tells;

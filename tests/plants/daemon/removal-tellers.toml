@@ -2,8 +2,9 @@
 # item 9 and P3s of T-367): a member's removal (`remove_member` in `crates/cf-ledger/src/staff.rs`),
 # a task cancelled as its window is gone (`cancel_unreachable`) and a task the daemon fails
 # (`fail_task`, both in `crates/cf-ledger/src/tasks/finishing.rs`) tell whoever told them which went,
-# as a cancel tells it (`Dropped`). An edit refused for a task taken back to the board says its next
-# window is told once the task is queued for it (`crates/cf-ledger/src/tasks/editing.rs`).
+# as a cancel tells it (`Dropped`). An edit refused for a task taken back to the board says it is told
+# now, and the window that takes it has the words in its brief (`crates/cf-ledger/src/tasks/editing.rs`;
+# T-534: it said its next window is told once the task is queued for it).
 #
 # Round 2 (T-440, Calliope's review T-437): the told words of a paused task outlive the removal
 # (`kept_through_leaving` in `crates/cf-ledger/src/messages/told.rs`), words on their way at a
@@ -117,7 +118,7 @@ runs = ["ledger-edited-brief"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = '                "tell its next window once the task is queued for it: cf tell T-{number} \"…\""'
+find = '                "tell it now, and the window that takes it has your words in its brief: cf tell T-{number} \"…\""'
 replace = '                "tell its next window once it has begun: cf tell T-{number} \"…\""'
 
 [[plant]]
