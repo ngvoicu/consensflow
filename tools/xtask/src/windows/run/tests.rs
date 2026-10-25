@@ -11,6 +11,9 @@ use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use cf_base::env::Env;
 
@@ -90,6 +93,7 @@ impl Rig {
             bin,
             context,
         };
+        rig.program("waits", WAITS);
         rig.git(&["init", "-q"]);
         rig.file("keep.txt", "kept");
         rig.file("gone.txt", "to be deleted");
@@ -142,6 +146,17 @@ impl Rig {
         self.bin.path().join("tree.tgz")
     }
 }
+
+/// The stand-in `waits FILE [TRIES]`, which goes on when the file is there and fails after
+/// `TRIES` looks at 50 ms (1,200 when none: a minute) without it. A case's stand-ins wait for a
+/// file that the other side of the case makes, and a side that was refused before it got there
+/// never makes it: with no limit the wait is forever.
+const WAITS: &str = r#"n=0
+while [ ! -e "$1" ]; do
+  n=$((n + 1))
+  if [ "$n" -gt "${2:-1200}" ]; then echo "waits: $1 was never made" >&2; exit 1; fi
+  sleep 0.05
+done"#;
 
 /// An scp that keeps what it is sent, and says so: in the rig's own file, and in the
 /// machine's profile folder under the name it was sent to, as scp writes it.
@@ -426,6 +441,37 @@ fn a_run_asks_nothing_of_the_machine_when_the_tree_could_not_be_sent() {
 }
 
 #[test]
+fn a_stand_in_waits_for_a_file_that_is_made_and_gives_up_on_one_that_never_is() {
+    let rig = Rig::new();
+    let waits = |file: &str| {
+        let asked = Invocation::new("waits", &rig.context.root)
+            .arg(rig.checkout.path().join(file))
+            .arg("3");
+        let mut waiting = process::spawn(&asked, &rig.context.env, Stdio::null(), false).unwrap();
+        // Three looks are a moment; a wait that is still going after a minute has no limit.
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while waiting.try_wait().unwrap().is_none() {
+            if std::time::Instant::now() >= until {
+                waiting.kill().unwrap();
+                waiting.wait().unwrap();
+                panic!("the wait for {file} was still going a minute after its three looks");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        waiting.wait_with_output().unwrap()
+    };
+    let found = waits("keep.txt");
+    assert!(
+        found.status.success() && found.stderr.is_empty(),
+        "{found:?}"
+    );
+    let given_up = waits("never-made.txt");
+    assert_eq!(given_up.status.code(), Some(1), "{given_up:?}");
+    let said = String::from_utf8_lossy(&given_up.stderr);
+    assert!(said.ends_with("never-made.txt was never made\n"), "{said}");
+}
+
+#[test]
 fn a_step_that_failed_as_a_stop_ended_it_is_the_stop_when_the_stop_is_heard_a_moment_after() {
     let rig = Rig::new();
     // The scp that is ended by the Ctrl-C: it says it ran, and ends badly.
@@ -435,16 +481,32 @@ fn a_step_that_failed_as_a_stop_ended_it_is_the_stop_when_the_stop_is_heard_a_mo
     let interrupt = Interrupt::graced(std::time::Duration::from_secs(60));
     let late = interrupt.clone();
     let ran = rig.bin.path().join("first");
-    // The program is told of the stop after the scp has failed, not before.
-    let hearing = std::thread::spawn(move || {
-        while !ran.exists() {
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        late.raise();
-    });
+    // The program is told of the stop after the scp has failed, not before. It waits for the
+    // scp for a minute at most, and not past the run's end: a run that was refused before it
+    // sent anything never reaches the scp, and nothing else would end the wait.
+    let over = Arc::new(AtomicBool::new(false));
+    let hearing = {
+        let over = Arc::clone(&over);
+        std::thread::spawn(move || {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while !ran.exists() {
+                if over.load(Ordering::SeqCst) || std::time::Instant::now() >= until {
+                    return false;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            late.raise();
+            true
+        })
+    };
     let (ended, out, err) = run_it(&rig, &interrupt);
-    hearing.join().unwrap();
+    over.store(true, Ordering::SeqCst);
+    assert!(
+        hearing.join().unwrap(),
+        "the stop was never raised, for the scp never ran: the run ended with {:?}",
+        ended.as_ref().map_err(ToString::to_string)
+    );
     assert_eq!(ended.unwrap(), Outcome::Stopped);
     assert_eq!((out.as_str(), err.as_str()), ("", ""));
     assert!(rig.log().is_empty(), "no ssh was asked: {:?}", rig.log());
@@ -641,7 +703,7 @@ fn two_runs_that_overlap_send_their_trees_to_files_of_their_own() {
     a.program(
         "ssh",
         &format!(
-            r#"printf 'ssh\t%s\t%s\n' "$1" "$2" >> "$CF_LOG"; while [ ! -e "$CF_FIRST" ]; do sleep 0.05; done; {SAYS_TREE} echo "== exit 0""#
+            r#"printf 'ssh\t%s\t%s\n' "$1" "$2" >> "$CF_LOG"; waits "$CF_FIRST" || exit 97; {SAYS_TREE} echo "== exit 0""#
         ),
     );
     b.program("ssh", &machine(0));
@@ -696,7 +758,7 @@ const RACES: &str = r#"printf 'ssh\t%s\t%s\n' "$1" "$2" >> "$CF_LOG"
 sent=$(awk -F'\t' '$1 == "scp" { print $3 }' "$CF_LOG"); mine="$CF_HOME/${sent#*:}"
 if ( set -C; : > "$CF_HOME/lock" ) 2>/dev/null; then
   echo "== tree $(tar -xzOf "$mine" .windows-tree)"
-  while [ ! -e "$CF_HOME/refused" ]; do sleep 0.02; done
+  waits "$CF_HOME/refused" || exit 97
   rm -f "$CF_HOME/lock" "$mine"
   printf '\n== exit 0\n'; exit 0
 else

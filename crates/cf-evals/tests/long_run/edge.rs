@@ -132,9 +132,16 @@ fn what_stops_the_run_and_what_its_rig_says_leave_through_the_edge() {
         written[0].contains(r#"eprint!("{where_kept}")"#),
         "{written:?}"
     );
-    assert!(report.contains(
-        "let where_kept = keep(&rig.root, &tell.text(&report), rig.reports.as_deref());"
-    ));
+    // What the rig has to say is told whole through the masker as it is composed, and
+    // kept in a file as it is said, whatever way rustfmt breaks the lines.
+    let flat = report.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("report: tell.text(&report),"), "{flat}");
+    assert!(
+        flat.contains(
+            "let where_kept = keep(&self.root, &self.case, &self.report, self.folder.as_deref());"
+        ),
+        "{flat}"
+    );
     assert!(report.contains("let tell = Tell(rig.masker.as_ref());"));
 }
 

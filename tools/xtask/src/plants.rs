@@ -38,6 +38,7 @@ use std::path::{Path, PathBuf};
 use crate::context::Context;
 use crate::dispatch::{Command, Console, Failure, Run};
 use crate::process;
+pub(crate) use kit::families;
 use kit::Family;
 use runs::{Execute, Runner};
 
@@ -189,7 +190,11 @@ impl Request {
     }
 }
 
-fn run(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
+pub(crate) fn run(
+    context: &Context,
+    args: &[OsString],
+    console: &mut Console,
+) -> Result<i32, Failure> {
     // This xtask is what `cargo xtask` is to the commands that run.
     let own = std::env::current_exe()?;
     plant(context, args, console, |family| {
@@ -229,7 +234,7 @@ fn plant<R: Runner>(
     })?;
     let mut runner = runner(&family)?;
     if request.check {
-        driver::check(context, &chosen, &mut runner, console.out)
+        driver::check(context, &family, &chosen, &mut runner, console.out)
     } else {
         driver::run(context, &family, &chosen, &mut runner, console.out)
     }

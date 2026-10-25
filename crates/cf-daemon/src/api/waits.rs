@@ -54,6 +54,12 @@ impl<'a> Waits<'a> {
         })
     }
 
+    /// Whether the reader's project is closed: only then does a text wait for the
+    /// Resume.
+    pub fn closed(&self) -> bool {
+        self.closed
+    }
+
     /// Whether the text of `message` waits for the Resume: its project is closed,
     /// it is still to be given (queued, or on its way) and no window was handed it,
     /// and the reader did not write it.

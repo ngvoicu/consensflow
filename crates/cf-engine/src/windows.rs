@@ -1065,7 +1065,8 @@ impl Dispatcher {
     /// came in between: the message goes back to wait for the words that resume
     /// the task, with `because`. A task called off meanwhile took the message
     /// with it, and whoever told the window words that rode in it hears that the
-    /// window never had them (`Ledger::launch_called_off`).
+    /// window never had them (`Ledger::launch_called_off`), in a project closed
+    /// meanwhile too (Calliope's review of the merge, T-408).
     fn launch_over(
         &self,
         record: &Rc<Record>,
@@ -1083,6 +1084,12 @@ impl Dispatcher {
                     delivering.message,
                     "its project was closed before its window opened",
                 )?;
+                // A task the human called off while it was closed took the message
+                // with it, and said nothing then of the words that rode in it.
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .launch_called_off(delivering.message)?;
             }
             return Ok(true);
         }

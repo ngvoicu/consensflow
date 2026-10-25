@@ -63,6 +63,34 @@ prints: `(open, blocked or queued)` became `(open, queued, or paused)`, since a 
 before any window had it is editable too (the same number of characters, so the role text's
 documented sizes did not move).
 
+## The task usage without the lines of other commands
+
+`board.json` holds the task usage twice (`cf task --help` and `cf task help`, the cases `task
+usage` and `task usage on help`). Node's, and the Rust `cf`'s after it, printed under `cf task
+resume` four lines that go on from `cf tell`, `cf ask` and `cf history`, whose own lines it
+had left out (board task T-355, 3.0.6). Both cases lost those four lines, by hand and in
+nothing else; the four prints of the whole usage keep them, where they stand under their
+commands. Merged for 3.0.6-alpha.3 with `cf tell`'s third line (`(queued: kept for its window,
+to go in after its brief)`, above), which the old filter printed there too: both cases are
+`task_usage()` of the merged `usage.txt`, five lines fewer than before.
+
+## `cf task list` and its idle sessions
+
+Two things in `board.json` were changed by hand for board task T-261 (3.0.6). After two
+days a board listed 141 sessions of finished tasks and buried the few that held work, so
+`cf task list` now lists only the lanes with a task to look at and says "and N idle
+sessions (`cf task list --all`)" for the rest; `--all` lists every lane, as Node did.
+
+- The usage line of the command, in the six prints named above, reads `cf task list
+  [--all]` and says what the flag adds, as `usage.txt` has it.
+- The case `the board as JSON, keys as JavaScript orders them` (`cf task list --json`)
+  carries the idle sessions under their own key, `idle`, which stands right after `lanes`.
+  Its board has none, so the one change is `"idle": []` in its output.
+
+The cases `an empty board` and `the board, waiting work and lanes` are as Node printed
+them: the second one's only lane holds a working task. What the flag and the idle lanes
+do is held by the tests of `crates/cf/src/board/task.rs`, not by a recording.
+
 ## Two cases changed by hand after Node
 
 In `cli.darwin.json` and `cli.win32.json`, the cases `unknown command: -h`

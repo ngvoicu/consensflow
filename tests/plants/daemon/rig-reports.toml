@@ -2,10 +2,13 @@
 # (T-143, 3.0.6; the Windows run of 2026-10-21, 39616304894). A rig dropped unclosed keeps
 # its report beside its home (`crates/cf-e2e/src/rig/report.rs`); fourteen cases that passed
 # had dropped theirs, and the one report that mattered was lost with the runner, which
-# `.github/workflows/ci.yml` now uploads for a failed job. The tests are
-# `crates/cf-e2e/tests/rig/reports.rs`; the plants of the rig's own `Drop` and of the
-# report's say-so are theirs, as are those of the cases that must close and of the
-# workflow's two steps. The runs build the rig suite's own programs only.
+# `.github/workflows/ci.yml` now uploads for a failed job. T-428: a rig whose case returns an
+# `Outcome` (`crates/cf-e2e/src/outcome.rs`) learns that its case failed when the case's `?`
+# makes a `Failed`, so a rig dropped unclosed by a case that passed keeps no report, and a
+# report names the test that left it. The tests are `crates/cf-e2e/tests/rig/reports.rs`; the
+# plants of the rig's own `Drop` and of the report's say-so are theirs, as are those of the
+# cases that must close and of the workflow's two steps. The runs build the rig suite's own
+# programs only.
 
 [run]
 reports-closed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_its_case_closed"]
@@ -29,6 +32,15 @@ reports-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", 
 reports-sweep = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::sweep"]
 reports-env = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::install"]
 reports-ci = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::ci_uploads"]
+reports-passed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_dropped_unclosed_by_a_case_that_passed"]
+reports-after = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_started_after_a_case_failed"]
+reports-panic = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_dropped_unclosed_while_a_check_fails"]
+reports-not-judged = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_not_judged"]
+reports-named = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_report_names_the_test"]
+reports-returns = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::every_case_of_the_rig"]
+reports-judged = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::every_rig_the_suites"]
+reports-outcome = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "outcome::"]
+reports-step = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_a_step_dropped"]
 
 [[plant]]
 name = "rig reports: a rig whose case closed it keeps a report all the same"
@@ -37,8 +49,14 @@ runs = ["reports-closed"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
-find = "        if std::thread::panicking() || (!self.closed && !failure_expected) {"
-replace = "        if true {"
+find = """
+        if self.closed || failure_expected {
+            return DropSays::Nothing;
+        }"""
+replace = """
+        if self.closed || failure_expected {
+            return DropSays::Now;
+        }"""
 
 [[plant]]
 name = "rig reports: a rig whose case returned an error and left it keeps no report"
@@ -47,8 +65,8 @@ runs = ["reports-error"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
-find = "        if std::thread::panicking() || (!self.closed && !failure_expected) {"
-replace = "        if std::thread::panicking() {"
+find = ".map_or(DropSays::Now, DropSays::OnceItsCaseFails)"
+replace = ".map_or(DropSays::Now, |_| DropSays::Nothing)"
 
 [[plant]]
 name = "rig reports: a rig shut down, whose case then failed a check, keeps no report"
@@ -57,8 +75,13 @@ runs = ["reports-check"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
-find = "        if std::thread::panicking() || (!self.closed && !failure_expected) {"
-replace = "        if !self.closed && !failure_expected {"
+find = """
+        if std::thread::panicking() {
+            return DropSays::Now;
+        }
+        let failure_expected ="""
+replace = """
+        let failure_expected ="""
 
 [[plant]]
 name = "rig reports: where a report is kept is said past the output a test run holds, for a case that passed"
@@ -67,17 +90,17 @@ runs = ["reports-said"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/report.rs"
-find = "use std::fs;\nuse std::path::Path;"
-replace = "use std::fs;\nuse std::io::Write;\nuse std::path::Path;"
+find = "use std::fs;\nuse std::path::{Path, PathBuf};"
+replace = "use std::fs;\nuse std::io::Write;\nuse std::path::{Path, PathBuf};"
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/report.rs"
-find = '    eprint!("{where_kept}");'
-replace = "    let _ = std::io::stderr().write_all(where_kept.as_bytes());"
+find = 'eprint!("{where_kept}");'
+replace = "let _ = std::io::stderr().write_all(where_kept.as_bytes());"
 
 [[plant]]
 name = "rig reports: a folder-trust case ends without closing its rig"
-meant = "every_function_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it_or_hands_it_on"
+meant = "every_function_of_the_suites_that_starts_a_rig_closes_it_or_hands_it_on"
 runs = ["reports-closes"]
 
 [[plant.edit]]
@@ -94,7 +117,7 @@ replace = '''
 
 [[plant]]
 name = "rig reports: the folder-trust case that starts its rig again closes only the first"
-meant = "every_function_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it_or_hands_it_on"
+meant = "every_function_of_the_suites_that_starts_a_rig_closes_it_or_hands_it_on"
 runs = ["reports-closes"]
 
 [[plant.edit]]
@@ -111,7 +134,7 @@ replace = '''
 
 [[plant]]
 name = "rig reports: the follow-up case ends without closing its rig"
-meant = "every_function_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it_or_hands_it_on"
+meant = "every_function_of_the_suites_that_starts_a_rig_closes_it_or_hands_it_on"
 runs = ["reports-closes"]
 
 [[plant.edit]]
@@ -229,7 +252,7 @@ replace = "            self.close_expected_to_fail.load(Ordering::Relaxed);"
 
 [[plant]]
 name = "rig reports: a case whose rig comes from a helper ends without closing it"
-meant = "every_function_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it_or_hands_it_on"
+meant = "every_function_of_the_suites_that_starts_a_rig_closes_it_or_hands_it_on"
 runs = ["reports-closes"]
 
 [[plant.edit]]
@@ -583,3 +606,231 @@ replace = '''    let saved = run_folder()?;
         return Err(Error::NoCheckout { root }.into());
     }
 '''
+
+# T-428 (3.0.6): a rig dropped unclosed by a case that passed keeps no report, one dropped by a
+# case that failed keeps it, and the report says which case it was. A rig learns of its case's
+# failure when the case's `?` makes a `Failed` (`outcome.rs`), before its drop or after it (a
+# rig a step owned), or when a check panics, and is judged so by its suite's configuration.
+
+[[plant]]
+name = "rig reports: a rig dropped unclosed by a case that passed keeps a report of it"
+meant = "a_rig_dropped_unclosed_by_a_case_that_passed_keeps_no_report"
+runs = ["reports-passed"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = ".map_or(DropSays::Now, DropSays::OnceItsCaseFails)"
+replace = ".map_or(DropSays::Now, |_| DropSays::Now)"
+
+[[plant]]
+name = "rig reports: a rig whose case is not judged by what it returns is taken for one that passed"
+meant = "a_rig_not_judged_by_what_its_case_returns_keeps_its_report_for_every_drop_unclosed"
+runs = ["reports-not-judged"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = ".map_or(DropSays::Now, DropSays::OnceItsCaseFails)"
+replace = ".map_or(DropSays::Nothing, DropSays::OnceItsCaseFails)"
+
+[[plant]]
+name = "rig reports: a rig dropped unclosed in a panic keeps no report"
+meant = "a_rig_dropped_unclosed_while_a_check_fails_keeps_its_report"
+runs = ["reports-panic"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = """
+        if std::thread::panicking() {
+            return DropSays::Now;
+        }
+        let failure_expected ="""
+replace = """
+        let failure_expected ="""
+
+[[plant]]
+name = "rig reports: a rig dropped unclosed whose case had failed before the drop holds its report"
+meant = "a_rig_its_case_left_on_an_error_it_returned_keeps_its_report"
+runs = ["reports-error", "reports-outcome"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/outcome.rs"
+find = """
+    if verdict.failed() {
+        say();
+        return;
+    }"""
+replace = ""
+
+[[plant]]
+name = "rig reports: an error a case returns is not counted as its failure"
+meant = "a_rig_its_case_left_on_an_error_it_returned_keeps_its_report"
+runs = ["reports-error", "reports-outcome"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/outcome.rs"
+find = "        FAILURES.with(|failures| failures.set(failures.get() + 1));"
+replace = "        let _ = &FAILURES;"
+
+[[plant]]
+name = "rig reports: a failure of the thread before the rig started is the rig's case's"
+meant = "a_rig_started_after_a_case_failed_on_its_thread_is_judged_by_its_own_case"
+runs = ["reports-after", "reports-outcome"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/outcome.rs"
+find = "            failures: FAILURES.with(Cell::get),"
+replace = "            failures: 0,"
+
+[[plant]]
+name = "rig reports: a verdict read on another thread than its start is taken for a pass"
+meant = "a_verdict_read_on_another_thread_than_its_start_is_taken_for_a_failure"
+runs = ["reports-outcome"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/outcome.rs"
+find = "        thread::current().id() != self.thread || FAILURES.with(Cell::get) > self.failures"
+replace = "        FAILURES.with(Cell::get) > self.failures"
+
+[[plant]]
+name = "rig reports: a report held for a case that has not failed is lost when the case returns its error"
+meant = "a_rig_a_step_dropped_on_an_error_keeps_its_report_once_the_case_returns_the_error"
+runs = ["reports-step", "reports-outcome"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/outcome.rs"
+find = """
+        deliver_held();
+        Self(error.into())"""
+replace = """
+        Self(error.into())"""
+
+[[plant]]
+name = "rig reports: a report held for a case that has not failed is lost when a check fails"
+meant = "a_rig_a_step_dropped_on_an_error_keeps_its_report_once_the_case_fails_a_check_on_it"
+runs = ["reports-step", "reports-outcome"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/outcome.rs"
+find = """
+            deliver_held();
+            before(panic);"""
+replace = """
+            before(panic);"""
+
+[[plant]]
+name = "rig reports: a report held for a case that has not failed is said when the thread ends"
+meant = "a_rig_a_step_dropped_on_an_error_the_case_went_on_from_keeps_no_report"
+runs = ["reports-step", "reports-passed", "reports-outcome"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/outcome.rs"
+find = "    HELD.with(|held| held.borrow_mut().push(Box::new(say)));"
+replace = "    say();"
+
+[[plant]]
+name = "rig reports: a report does not name the case that left it"
+meant = "a_report_names_the_test_that_left_it_and_the_case_a_rig_is_given"
+runs = ["reports-named"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = """
+        "\\n--- the rig, as the failed case left it\\ncase: {}\\n",
+        rig.case
+"""
+replace = """
+        "\\n--- the rig, as the failed case left it\\ncase: {}\\n",
+        "a case"
+"""
+
+[[plant]]
+name = "rig reports: a rig takes no name from the thread that starts it"
+meant = "a_report_names_the_test_that_left_it_and_the_case_a_rig_is_given"
+runs = ["reports-named"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/launch.rs"
+find = """
+                .name()
+                .unwrap_or("an unnamed thread")
+"""
+replace = """
+                .name()
+                .map(|_| "an unnamed thread")
+                .unwrap_or("an unnamed thread")
+"""
+
+[[plant]]
+name = "rig reports: a rig given the name of its case is called by its thread's"
+meant = "a_report_names_the_test_that_left_it_and_the_case_a_rig_is_given"
+runs = ["reports-named"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/launch.rs"
+find = "        let case = config.case.clone().unwrap_or_else(|| {"
+replace = "        let case = None::<String>.unwrap_or_else(|| {"
+
+[[plant]]
+name = "rig reports: the line that says where a report is does not say which case left it"
+meant = "where_a_report_is_kept_is_said_in_the_output_of_the_case_that_failed_and_of_no_other"
+runs = ["reports-said", "reports-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = """
+        Ok(()) => format!(
+            "\\n--- the rig, as the failed case left it, is kept in {} (case: {case})\\n","""
+replace = """
+        Ok(()) => format!(
+            "\\n--- the rig, as the failed case left it, is kept in {}{case}\\n","""
+
+[[plant]]
+name = "rig reports: the rig suite's configuration is not judged by what its cases return"
+meant = "a_rig_dropped_unclosed_by_a_case_that_passed_keeps_no_report"
+runs = ["reports-passed", "reports-judged"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/rig.rs"
+find = "    Config::new(FAKE_AGENT).judged_by_outcome()"
+replace = "    Config::new(FAKE_AGENT)"
+
+[[plant]]
+name = "rig reports: the regressions' configuration is not judged by what its cases return"
+meant = "every_rig_the_suites_of_the_rig_the_regressions_and_the_load_start_is_judged_by_its_case"
+runs = ["reports-judged"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/regressions.rs"
+find = "    Config::new(FAKE_AGENT).judged_by_outcome()"
+replace = "    Config::new(FAKE_AGENT)"
+
+[[plant]]
+name = "rig reports: a case of the regressions returns another kind of result"
+meant = "every_case_of_the_rig_and_the_regressions_returns_nothing_or_an_outcome"
+runs = ["reports-returns"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/regressions/follow_up_refused_behind_a_waiting_follow_up.rs"
+find = """
+fn a_follow_up_put_before_one_that_waits_for_the_same_idle_window_goes_to_it_and_the_waiting_one_after(
+) -> Outcome {"""
+replace = """
+fn a_follow_up_put_before_one_that_waits_for_the_same_idle_window_goes_to_it_and_the_waiting_one_after(
+) -> Result<(), Box<dyn std::error::Error>> {"""
+
+[[plant]]
+name = "rig reports: the live folder-trust windows part ends without closing its rig"
+meant = "every_function_of_the_suites_that_starts_a_rig_closes_it_or_hands_it_on"
+runs = ["reports-closes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_folder_trust.rs"
+find = """
+        folders.push(path.to_string_lossy().into_owned());
+    }
+    rig.close()?;
+    Ok(checks)"""
+replace = """
+        folders.push(path.to_string_lossy().into_owned());
+    }
+    Ok(checks)"""

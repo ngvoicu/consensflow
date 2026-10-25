@@ -93,7 +93,10 @@ const BOARD: [(&[&str], &str); 19] = [
     ),
     (
         &["task", "list"],
-        "  cf task list                      the board: what waits for a member, then every lane\n",
+        concat!(
+            "  cf task list [--all]              the board: what waits for a member, then the lanes\n",
+            "                                    with a task to look at; --all adds the idle sessions\n",
+        ),
     ),
     (
         &["task", "get"],

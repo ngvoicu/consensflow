@@ -13,7 +13,7 @@
 //! request to end it (SIGINT, SIGTERM or SIGHUP) makes it write `<file>.released`
 //! and go, as a tool that releases a lock does; one that kills it leaves nothing.
 //! `<file>.pid` is its process, for whoever asks whether it is still there, and is
-//! written once the job can be asked to end. With `--deaf` it ignores the requests
+//! written whole once the job can be asked to end. With `--deaf` it ignores the requests
 //! and is only ever killed. `cf_e2e::rig::Rig::jobs` reads what it wrote.
 //!
 //! A command the agent runs is started by a shell, in a group of its own, as a
@@ -394,6 +394,17 @@ pub fn until_up(file: &Path) -> Result<(), String> {
 /// How long a job has to write its process once it is started.
 const UP: Duration = Duration::from_secs(30);
 
+/// Writes the process of a job or a build in `file` whole: it is written under another name and
+/// renamed to `file`, for `fs::write` makes the file before it writes into it, and a case that
+/// waits for the file reads what is there at once. The Codex stand-in writes its files the same
+/// way (`fake_codex`'s `say_its_process`).
+pub fn say_its_process(file: &Path) -> io::Result<()> {
+    let mut writing = file.as_os_str().to_owned();
+    writing.push(".writing");
+    fs::write(&writing, std::process::id().to_string())?;
+    fs::rename(writing, file)
+}
+
 /// `program` with `words`, run as a harness's tool runs a command for its agent: by a
 /// shell (a PowerShell on Windows) that waits for it and ends with its code, in a group
 /// of its own on Unix. Where `detached` the shell detaches it as the agents do
@@ -574,8 +585,7 @@ impl Job {
         // request is never lost.
         #[cfg(unix)]
         self.hear()?;
-        fs::write(self.beside("pid"), std::process::id().to_string())
-            .map_err(|failed| failed.to_string())?;
+        say_its_process(&self.beside("pid")).map_err(|failed| failed.to_string())?;
         // Held to the end, as the server holds the browser it launched.
         let _browser = self.launch_browser()?;
         thread::sleep(Duration::from_secs(self.seconds));

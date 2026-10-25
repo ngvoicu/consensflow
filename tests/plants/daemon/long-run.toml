@@ -42,6 +42,7 @@ fake-agent-compact = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features"
 fake-devin-store = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-devin", "store::"]
 # The rig's stranger, which runs beside every window: its own tests, and a real rig's close.
 e2e-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger"]
+e2e-lib-process-shell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell::"]
 rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stranger::"]
 # The rig's last word, once it has closed: a real daemon and pane host.
 e2e-rig-last-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "last_exits"]
@@ -266,89 +267,152 @@ file = "crates/cf-evals/src/long_run/invariants/work.rs"
 find = "                .is_some_and(|said| said[1].parse() == Ok(task.number))"
 replace = "                .is_some()"
 
-# 3 (A3)
+# 3 (A3): no work is ended under a task at work: turn-end's note of a window's close comes once
+# its task has ended (T-118; the 3.0.4 plants of an ended notice after its result went with that rule)
 
 [[plant]]
-name = "long run 3: an ended notice after its result is let pass (A3, T-14's m-132)"
-meant = "an_ended_notice_after_its_result_breaks_the_third"
+name = "long run 3: the words of a window's close are not read, and a close note under a task at work passes (A3)"
+meant = "a_close_note_while_its_task_is_still_at_work_breaks_the_third"
 runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = '        .find(|message| message.kind == "result" && message.id < notice.id)'
-replace = '        .find(|message| message.kind == "result" && message.id > notice.id)'
+find = "                && message.body.contains(CLOSE_NOTE_SAYS)"
+replace = '                && message.body.contains("never said")'
 
 [[plant]]
-name = "long run 3: a notice before any result is paired with the result written after it, and the turn-end work's order breaks"
-meant = "an_ended_notice_before_any_result_or_a_close_note_after_one_holds_the_third"
+name = "long run 3: a task waiting is not at work, and a close note under it passes"
+meant = "a_close_note_while_its_task_is_still_at_work_breaks_the_third"
 runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = '        .find(|message| message.kind == "result" && message.id < notice.id)'
-replace = '        .find(|message| message.kind == "result")'
+find = 'const WORKING_STATES: [&str; 3] = ["queued", "working", "waiting"];'
+replace = 'const WORKING_STATES: [&str; 3] = ["queued", "working", "working"];'
 
 [[plant]]
-name = "long run 3: a notice after a result and a send-back is taken for that result's, and the next attempt's own notice breaks"
-meant = "a_notice_after_a_result_and_a_send_back_is_unresolved_however_near_the_next_result"
+name = "long run 3: a break of the third has no shape, and a list of known breaks cannot tell it from another"
+meant = "a_close_note_while_its_task_is_still_at_work_breaks_the_third"
 runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = '''
-    if sent_back {
-        Whose::Unbound(result)'''
-replace = '''
-    if sent_back {
-        Whose::Of(result)'''
+find = """
+            .with_shape(CLOSE_NOTE)
+"""
+replace = """
+"""
 
 [[plant]]
-name = "long run 3: a notice the next result follows within two seconds is taken for its own, and a late notice passes on proximity alone"
-meant = "a_notice_after_a_result_and_a_send_back_is_unresolved_however_near_the_next_result"
+name = "long run 3: a close note is judged by where its task stood at the last look, not where it stood when the note was written"
+meant = "a_close_note_while_its_task_is_still_at_work_breaks_the_third"
 runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = '''
-    if sent_back {
-        Whose::Unbound(result)
-    } else {'''
-replace = '''
-    let next_at_once = ledger
-        .messages_of(task)
-        .into_iter()
-        .find(|message| message.id > notice.id && message.kind == "result")
-        .and_then(|next| clock::millis(&next.created_at))
-        .is_some_and(|next| next - to <= 2_000);
-    if sent_back && next_at_once {
-        Whose::NoResultBefore
-    } else if sent_back {
-        Whose::Unbound(result)
-    } else {'''
+find = "                && clock::millis(&event.at).is_none_or(|at| at <= written)"
+replace = "                && clock::millis(&event.at).is_none_or(|at| at <= i64::MAX)"
 
 [[plant]]
-name = "long run 3: a send-back the log puts at the notice's own moment is taken for after it, and a notice that may be the next attempt's breaks"
-meant = "a_late_notice_written_before_the_send_back_is_its_results_whatever_comes_after"
+name = "long run 3: a task that ended with no result of its worker's (a Finish, a cancel, a failure) is taken for one at work, and the close note after its end breaks"
+meant = "a_close_note_after_its_tasks_end_holds_the_third_whichever_way_the_task_ended"
 runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = "            && clock::millis(&event.at).is_none_or(|moved| from <= moved && moved <= to)"
-replace = "            && clock::millis(&event.at).is_none_or(|moved| from <= moved && moved < to)"
+find = """
+    if ENDED_STATES.contains(&state) {
+        Standing::Ended
+    } else if"""
+replace = """
+    if ENDED_STATES.contains(&state)
+        && ledger
+            .messages_of(task)
+            .iter()
+            .any(|message| message.kind == "result")
+    {
+        Standing::Ended
+    } else if ENDED_STATES.contains(&state) {
+        Standing::Working(state.to_owned(), event.at.clone())
+    } else if"""
 
 [[plant]]
-name = "long run 3: a task accepted after its result is taken for sent back, and a notice after the acceptance passes"
-meant = "an_ended_notice_after_its_result_breaks_the_third"
+name = "long run 3: every note of background work is a close note, and a pause or a 3.0.5 ended note under a working task breaks"
+meant = "what_is_no_close_note_is_never_one_the_pause_note_and_the_3_0_5_notes_of_a_turns_end"
 runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = 'const AFTER_A_RESULT: [&str; 4] = ["done", "accepted", "cancelled", "failed"];'
-replace = 'const AFTER_A_RESULT: [&str; 4] = ["done", "done", "cancelled", "failed"];'
+find = "                && message.body.contains(CLOSE_NOTE_SAYS)"
+replace = '                && message.body.contains("background work")'
+
+[[plant]]
+name = "long run 3: a worker's own note is a close note"
+meant = "what_is_no_close_note_is_never_one_the_pause_note_and_the_3_0_5_notes_of_a_turns_end"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = "            message.sender.is_none()\n"
+replace = "            true\n"
+
+[[plant]]
+name = "long run 3: a worker's question that quotes the words is a close note"
+meant = "what_is_no_close_note_is_never_one_the_pause_note_and_the_3_0_5_notes_of_a_turns_end"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = '                && message.kind == "note"'
+replace = '                && message.kind != "never"'
+
+[[plant]]
+name = "long run 3: a task paused or open is taken for one at work, and the close note under it breaks"
+meant = "a_close_note_of_a_task_that_is_paused_or_open_is_neither_a_break_nor_an_ending"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = "    } else if !WORKING_STATES.contains(&state) {"
+replace = "    } else if false {"
+
+[[plant]]
+name = "long run 3: a task given to another worker since is taken for the same worker's, and the earlier worker's close breaks"
+meant = "a_close_note_of_a_task_that_was_given_to_another_worker_since_is_neither"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = "    workers.len() > 1"
+replace = "    workers.len() > 100"
+
+[[plant]]
+name = "long run 3: a close note after a send-back is taken for the new attempt's own, and breaks"
+meant = "a_close_note_after_a_send_back_is_unresolved_however_near_the_next_result"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = """
+    } else if ended {
+        Standing::SentBack(state.to_owned())"""
+replace = """
+    } else if false {
+        Standing::SentBack(state.to_owned())"""
+
+[[plant]]
+name = "long run 3: a move the log puts at the note's own moment is taken for after it, and a note that may be the new attempt's passes"
+meant = "a_close_note_written_before_the_send_back_holds_whatever_comes_after"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = "                && clock::millis(&event.at).is_none_or(|at| at <= written)"
+replace = "                && clock::millis(&event.at).is_none_or(|at| at < written)"
 
 [[plant]]
 name = "long run 3: a message's row is cut before it is masked, and a password whose end is past the cut is kept in the report"
-meant = "a_notices_row_is_masked_whole_before_it_is_cut"
+meant = "a_close_notes_row_is_masked_whole_before_it_is_cut"
 runs = ["evals-long-run"]
 
 [[plant.edit]]
@@ -357,7 +421,7 @@ find = "        cut(&plain(&message.body), 200, names)"
 replace = "        { let _ = names; crate::js::first(&plain(&message.body), 200) }"
 
 [[plant]]
-name = "long run 3: what the log ties to no result is said again at every look"
+name = "long run 3: what the log ties to neither attempt is said again at every look"
 meant = "a_notice_the_log_ties_to_no_result_is_said_unresolved_once_and_is_no_break"
 runs = ["evals-lib-long-run"]
 
@@ -367,7 +431,7 @@ find = "            if self.unjudged.iter().any(|kept| kept.key == open.key) {"
 replace = "            if self.unjudged.iter().any(|kept| kept.key == open.key) && false {"
 
 [[plant]]
-name = "long run 3: an unresolved notice is no more than a line of the timeline, and a run that holds one passes"
+name = "long run 3: an unresolved close note is no more than a line of the timeline, and a run that holds one passes"
 meant = "a_run_with_nothing_broken_and_something_unjudged_is_unresolved_never_a_pass"
 runs = ["evals-lib-long-run"]
 
@@ -377,18 +441,18 @@ find = "        } else if !self.unresolved.is_empty() {"
 replace = "        } else if !self.unresolved.is_empty() && false {"
 
 [[plant]]
-name = "long run 3: what a look cannot judge is never said, and an unresolved notice is lost"
+name = "long run 3: what a look cannot judge is never said, and an unresolved close note is lost"
 meant = "a_notice_the_log_ties_to_no_result_is_said_unresolved_once_and_is_no_break"
 runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/conduct.rs"
-find = '''
+find = """
         self.unjudged(floor, look.at, open);
-        for (at, said) in self.stalls.look(&look, settings.idle) {'''
-replace = '''
+        for (at, said) in self.stalls.look(&look, settings.idle) {"""
+replace = """
         let _ = open;
-        for (at, said) in self.stalls.look(&look, settings.idle) {'''
+        for (at, said) in self.stalls.look(&look, settings.idle) {"""
 
 # 4 (A4)
 
@@ -1246,26 +1310,14 @@ find = "    compactions(look) > before"
 replace = "    compactions(look) >= before"
 
 [[plant]]
-name = "long run 10: a suspend whose tasks stay paused after the owner's resume is taken for played"
-meant = "a_suspend_whose_tasks_stay_paused_after_the_owners_resume_failed"
+name = "long run 10: a suspend whose task stays paused after the Resume is taken for played"
+meant = "a_suspend_whose_task_stays_paused_after_the_resume_failed"
 runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/play.rs"
-find = """                unresolved.push(format!("T-{number} stayed paused after the owner's resume"));"""
+find = """                unresolved.push(format!("T-{number} stayed paused after the Resume"));"""
 replace = "                let _ = number;"
-
-[[plant]]
-name = "long run 10: a suspend whose resume of a paused task was refused is taken for played"
-meant = "a_suspend_whose_resume_was_refused_failed_unless_the_task_had_ended"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/play.rs"
-find = """                    unresolved.push(format!(
-                        "the resume of T-{number}, {state}, was refused: {why}"
-                    ));"""
-replace = "                    let _ = why;"
 
 [[plant]]
 name = "long run 10: a Devin cut whose worker's window was not opened again is taken for played"
@@ -1751,8 +1803,8 @@ replace = "        if ran.is_some_and(|ran| ran.held && false) {"
 
 [[plant]]
 name = "long run: the rig's stranger, its own child, is left running when the rig is dropped"
-meant = "a_stranger_dropped_is_ended_through_its_handle"
-runs = ["e2e-lib-stranger"]
+meant = "a_spawned_program_is_ended_when_it_goes_out_of_scope"
+runs = ["e2e-lib-process-shell"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/process/spawned.rs"
@@ -2691,7 +2743,7 @@ find = "    found.extend(windows::untold_exits(look));"
 replace = "    let _ = windows::untold_exits;"
 
 [[plant]]
-name = "long run 3: any A3 is known, whatever its late notice"
+name = "long run 4: any A4 is known, whatever its shape"
 meant = "a_run_whose_only_breaks_are_known_passes_with_them_and_any_other_break_fails_it"
 runs = ["evals-lib-long-run"]
 
@@ -2699,16 +2751,6 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/known.rs"
 find = "        .find(|entry| entry.invariant == found.invariant && entry.shape == shape)"
 replace = "        .find(|entry| entry.invariant == found.invariant && !shape.is_empty())"
-
-[[plant]]
-name = "long run 3: every late notice is said to be the background ended note"
-meant = "a_late_notice_says_which_notice_it_is_the_background_ended_note_or_a_let_go"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = "            .with_shape(if notice.body.contains(ENDED[0]) {"
-replace = "            .with_shape(if !notice.body.is_empty() {"
 
 [[plant]]
 name = "long run: a known break fails the run as any other does"
@@ -3084,10 +3126,10 @@ runs = ["e2e-lib-report"]
 file = "crates/cf-e2e/src/rig/report.rs"
 find = '''
         Ok(()) => format!(
-            "\n--- the rig, as the failed case left it, is kept in {}\n",'''
+            "\n--- the rig, as the failed case left it, is kept in {} (case: {case})\n",'''
 replace = '''
         Ok(()) => format!(
-            "\n--- the rig, as the failed case left it, is kept in {} {report}\n",'''
+            "\n--- the rig, as the failed case left it, is kept in {} (case: {case}) {report}\n",'''
 
 [[plant]]
 name = "the rig: a dropped rig writes its report on the error output whole"
@@ -3096,8 +3138,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/report.rs"
-find = '    eprint!("{where_kept}");'
-replace = '    eprint!("{}", tell.text(&report));'
+find = 'eprint!("{where_kept}");'
+replace = 'eprint!("{}", self.report);'
 
 # The long run, rounds 14 and 15 (both reviewers' looks at rounds 13 and 14): A1 judges a task's
 # rest at its look only, and what that look cannot tell (its window's own record not held to it,
@@ -3310,7 +3352,7 @@ replace = '''
 
 [[plant]]
 name = "long run 4: the list of known breaks names A4 by another shape, and turn-end's A4 fails a run"
-meant = "the_repositorys_list_is_read_and_holds_a3s_ended_note_and_a4s_progress_lines"
+meant = "the_repositorys_list_is_read_and_holds_a4s_progress_lines_alone_for_turn_end_fixed_a3"
 runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
@@ -3656,8 +3698,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/stalls.rs"
-find = '        self.take_at_end(last, prober);'
-replace = '        let _ = prober;'
+find = '        self.take_at_end(last, host, prober);'
+replace = '        let _ = (host, prober);'
 [[plant]]
 name = 'long run stall: a stall that came back to rest is taken again at the end'
 meant = "a_stalled_windows_processes_are_taken_when_it_is_found_and_once_more_at_the_end_and_no_others"
@@ -3861,7 +3903,7 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/stalls.rs"
-find = '''        let mut taking = Taking::new(prober, look.host);
+find = '''        let mut taking = Taking::new(prober, host);
         let labels = self.labels(When::End);'''
 replace = '''        let mut taking = Taking::new(prober, None);
         let labels = self.labels(When::End);'''
@@ -3883,8 +3925,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/stalls.rs"
-find = '            state == "working" && taken.processes.as_ref().is_ok_and(|lines| lines.is_empty());'
-replace = '            state == "never" && taken.processes.as_ref().is_ok_and(|lines| lines.is_empty());'
+find = '        let gone = state == "working"'
+replace = '        let gone = state == "never"'
 
 [[plant]]
 name = 'long run: the timeline counts the readings after the close that held as failed'
@@ -3895,3 +3937,94 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/conduct.rs"
 find = '        .filter(|reading| reading.failed.is_some())'
 replace = '        .filter(|reading| reading.failed.is_none())'
+
+# Round T-118 (Calliope's review of round b9, P3s 1, 3 and 4): the end's take samples the pane
+# host of the app that runs (the stage's), not the last look's, which a restart the app did not
+# survive reaped; a program is gone when its own line is missing from its tree, whatever job of
+# its tree is still listed; the timeline test's fixture tells a failed reading from a held one.
+
+[[plant]]
+name = "long run stall: the pane host sampled at the end is the last look's, reaped by a restart the app did not survive"
+meant = "the_pane_host_is_the_looks_sampled_once_a_take_beside_bytes_unread_or_a_program_gone"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '''        let mut taking = Taking::new(prober, host);
+        let labels = self.labels(When::End);'''
+replace = '''        let mut taking = Taking::new(prober, look.host);
+        let labels = self.labels(When::End);'''
+
+[[plant]]
+name = "long run stall: a program is gone only where the system lists nothing of its tree"
+meant = "a_program_gone_while_its_window_reads_working_is_gone_though_a_job_of_its_tree_is_still_listed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = "                    .is_ok_and(|lines| !lines.iter().any(|line| line.starts_with(&program)))"
+replace = "                    .is_ok_and(|lines| lines.is_empty())"
+
+[[plant]]
+name = "long run stall: a program is gone whenever its window reads working"
+meant = "a_program_gone_while_its_window_reads_working_is_gone_though_a_job_of_its_tree_is_still_listed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = "                    .is_ok_and(|lines| !lines.iter().any(|line| line.starts_with(&program)))"
+replace = "                    .is_ok_and(|lines| !lines.iter().any(|line| line.starts_with(&format!(\"{pid}0 \"))))"
+
+# --- the Suspend play under the Resume's rule (T-413): the Resume moves on by itself the
+# work its Close paused, so the play waits for it, reads each reopened window's command
+# line and its cut note, and leaves a window of several tasks to the chief.
+
+[[plant]]
+name = "long run 10: a suspend whose window came back on another conversation is taken for played"
+meant = "a_suspend_whose_window_did_not_come_back_on_its_own_conversation_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "        if !argv.contains(&session) {"
+replace = "        if argv.is_empty() {"
+
+[[plant]]
+name = "long run 10: a suspend whose window was not opened again is read on its old command line"
+meant = "a_suspend_whose_window_did_not_come_back_on_its_own_conversation_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "        let reopened = hand.wait(|hand| Ok(hand.stage.opened_with(&self.pane).len() > before))?;"
+replace = "        let reopened = hand.wait(|hand| Ok(hand.stage.opened_with(&self.pane).len() >= before))?;"
+
+[[plant]]
+name = "long run 10: a suspend whose window at work was never told its turn was cut is taken for played"
+meant = "a_suspend_whose_window_at_work_was_told_its_turn_was_cut_never_or_twice_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "        if self.working && !hand.wait(|hand| Ok(cut_notes(hand) > 0))? {"
+replace = "        if !self.working && !hand.wait(|hand| Ok(cut_notes(hand) > 0))? {"
+
+[[plant]]
+name = "long run 10: a suspend whose window was told twice its turn was cut is taken for played"
+meant = "a_suspend_whose_window_at_work_was_told_its_turn_was_cut_never_or_twice_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "        if told > 1 {"
+replace = "        if told > 2 {"
+
+[[plant]]
+name = "long run 10: a suspend whose window of several tasks went on is taken for played"
+meant = "a_suspend_of_a_window_that_held_two_tasks_leaves_them_paused_for_the_chief"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = '            "paused" => {}'
+replace = '            "paused" | "working" => {}'

@@ -387,6 +387,10 @@ find = "    mount.replaceWith(sections)"
 replace = '''    if (page === null) sections.querySelector('.wakeup-help').remove()
     mount.replaceWith(sections)'''
 
+# Only the opening after the first keeps what was set. The reset also draws the sections (the
+# specs' variants are listed by it), so a dialog that never resets breaks the page before the
+# test can assert, and the test waits on a list that is never drawn until its time is out.
+
 [[plant]]
 name = "project settings: New project does not reset its sections when it opens"
 meant = "New project opens on the defaults every time: what was set in it before is not kept"
@@ -396,7 +400,9 @@ runs = ["page-new-project"]
 file = "app/ui/core/dialogs.js"
 find = '''    this.#sections.reset()
 '''
-replace = ""
+replace = '''    if (!this.drawn) this.#sections.reset()
+    this.drawn = true
+'''
 
 [[plant]]
 name = "project settings: New project does not send the specs"

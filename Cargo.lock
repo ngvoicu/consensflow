@@ -49,7 +49,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "cf-base",
  "cf-bridge",
@@ -337,7 +337,7 @@ checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
 
 [[package]]
 name = "cf"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "cf-base",
  "cf-board",
@@ -360,7 +360,7 @@ dependencies = [
 
 [[package]]
 name = "cf-base"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "cf-board"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "cf-base",
  "cf-proto",
@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "cf-bridge"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "cf-proto",
  "serde_json",
@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "cf-catalog"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "cf-base",
  "cf-proto",
@@ -410,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "cf-codex-session"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "bytes",
  "cf-base",
@@ -435,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "cf-daemon"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "cf-e2e"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "cf-e2e",
  "jiff",
@@ -494,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "cf-engine"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "cf-base",
  "cf-catalog",
@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "cf-evals"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "cf-e2e",
  "jiff",
@@ -529,7 +529,7 @@ dependencies = [
 
 [[package]]
 name = "cf-harness"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "base64 0.22.1",
  "cf-base",
@@ -559,7 +559,7 @@ dependencies = [
 
 [[package]]
 name = "cf-launcher"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "cf-base",
  "cf-process",
@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "cf-ledger"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "base64 0.22.1",
  "cf-base",
@@ -587,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "cf-panes"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "anyhow",
  "cf-base",
@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "cf-portable"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "flate2",
  "tar",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "cf-process"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "cf-base",
  "libc",
@@ -629,7 +629,7 @@ dependencies = [
 
 [[package]]
 name = "cf-proto"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -638,7 +638,7 @@ dependencies = [
 
 [[package]]
 name = "cf-publish"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "cf-publish",
  "serde_json",
@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "cf-release"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "base64 0.22.1",
  "cf-base",
@@ -5745,7 +5745,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "3.0.6-alpha.1"
+version = "3.0.6-alpha.2"
 dependencies = [
  "base64 0.22.1",
  "cf-base",

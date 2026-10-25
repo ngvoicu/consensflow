@@ -57,6 +57,7 @@ mod plants;
 mod portable;
 pub mod process;
 mod release;
+mod screen;
 mod scrub_transcript;
 mod sidecar;
 mod smoke;

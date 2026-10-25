@@ -4,9 +4,11 @@
 //! own.
 //!
 //! The steps are rustfmt; clippy for the workspace, for the app and for
-//! Windows; the tests of the workspace, of xtask and of the app; then the
-//! linter, the build of the native `cf` (the `bin/cf` the page's Playwright
-//! suite runs, `npm run test:ui`, which is no part of this gate: it is left as
+//! Windows; the tests of the workspace, of xtask and of the app; the plants of
+//! every family, each checked to still apply to the sources (`cargo xtask
+//! plants <family> --check`); then the linter, the build of the native `cf` (the
+//! `bin/cf` the page's Playwright suite runs, `npm run test:ui`, which is no part
+//! of this gate: it is left as
 //! the sources build it) and the Node tests (`npm run lint` and `npm test`: what
 //! `npm run check` runs). The app crate is left out of the
 //! workspace's lint and tests as the
@@ -46,7 +48,7 @@ use std::path::Path;
 use crate::context::Context;
 use crate::dispatch::{Command, Console, Failure, Run};
 use crate::process::{self, Invocation};
-use crate::{app, clippy_windows};
+use crate::{app, clippy_windows, plants};
 
 /// Where xtask's own tests are built, from the checkout's root: beside the
 /// workspace's build folder, not in it. The plants' runs that test xtask whole
@@ -80,8 +82,9 @@ fn run(context: &Context, args: &[OsString], console: &mut Console) -> Result<i3
             "xtask check: no clippy-windows step: on Windows the clippy of the workspace is clippy for Windows"
         )?;
     }
+    let families = plants::families(&context.path("tests/plants"))?;
     run_steps(
-        &steps(context, &clippy_windows::archiver()?, windows),
+        &steps(context, &clippy_windows::archiver()?, windows, &families),
         |step| process::run(step, &context.env),
         console.err,
     )
@@ -89,7 +92,12 @@ fn run(context: &Context, args: &[OsString], console: &mut Console) -> Result<i3
 
 /// What `check` runs, in order. `archiver` is the program cc-rs runs as the
 /// archiver in the lint for Windows, which `windows` leaves out.
-fn steps(context: &Context, archiver: &Path, windows: bool) -> Vec<Invocation> {
+fn steps(
+    context: &Context,
+    archiver: &Path,
+    windows: bool,
+    families: &[String],
+) -> Vec<Invocation> {
     let at = |program: &str, words: &[&str]| {
         Invocation::new(program, &context.root).args(words.iter().copied())
     };
@@ -128,6 +136,15 @@ fn steps(context: &Context, archiver: &Path, windows: bool) -> Vec<Invocation> {
         at("cargo", &["test", "--package", "xtask", "--target-dir"])
             .arg(context.path(XTASK_TARGET)),
         app::test(context, &[]),
+    ]);
+    // Each family's plants still apply to the sources: a plant whose text is gone, or whose
+    // run is refused, fails the gate by its name (`plants::check`).
+    steps.extend(
+        families
+            .iter()
+            .map(|family| at("cargo", &["xtask", "plants", family.as_str(), "--check"])),
+    );
+    steps.extend([
         at("npm", &["run", "lint"]),
         // The page's Playwright suite runs the built cf (`npm run test:ui`, outside this
         // gate): built again from the sources as they are, as the `check:all` this
@@ -175,9 +192,15 @@ fn run_steps(
 mod tests {
     use super::*;
 
+    use std::fs;
     use std::path::PathBuf;
 
     use cf_base::env::Env;
+
+    /// The families the data of this checkout has.
+    fn families() -> Vec<String> {
+        ["cli", "daemon", "release"].map(String::from).to_vec()
+    }
 
     fn context() -> Context {
         Context {
@@ -197,7 +220,7 @@ mod tests {
     #[test]
     fn the_steps_are_the_gates_in_order_and_each_runs_where_and_as_its_own_command_does() {
         let context = context();
-        let steps = steps(&context, Path::new("xtask"), false);
+        let steps = steps(&context, Path::new("xtask"), false, &families());
         let lines: Vec<_> = steps.iter().map(Invocation::display).collect();
         let own_target = context.path(XTASK_TARGET).display().to_string();
         assert_eq!(
@@ -212,6 +235,9 @@ mod tests {
                 "cargo test --workspace --exclude app --exclude xtask".to_string(),
                 format!("cargo test --package xtask --target-dir {own_target}"),
                 "cargo test --offline --".to_string(),
+                "cargo xtask plants cli --check".to_string(),
+                "cargo xtask plants daemon --check".to_string(),
+                "cargo xtask plants release --check".to_string(),
                 "npm run lint".to_string(),
                 "cargo xtask build-cf --offline".to_string(),
                 "npm test".to_string(),
@@ -230,6 +256,9 @@ mod tests {
                 root.clone(),
                 root.clone(),
                 app,
+                root.clone(),
+                root.clone(),
+                root.clone(),
                 root.clone(),
                 root.clone(),
                 root
@@ -252,6 +281,9 @@ mod tests {
                 vec!["TAURI_CONFIG".to_string()],
                 vec![],
                 vec![],
+                vec![],
+                vec![],
+                vec![],
                 vec![]
             ]
         );
@@ -259,7 +291,7 @@ mod tests {
 
     #[test]
     fn the_cf_the_pages_suite_runs_is_built_again_from_the_sources_after_the_lint() {
-        let steps = steps(&context(), Path::new("xtask"), false);
+        let steps = steps(&context(), Path::new("xtask"), false, &families());
         let lines: Vec<_> = steps.iter().map(Invocation::display).collect();
         let [.., lint, build, _] = &lines[..] else {
             panic!("{lines:?}");
@@ -274,7 +306,7 @@ mod tests {
     fn the_lint_for_windows_is_the_one_its_command_runs_with_xtask_as_its_archiver() {
         let context = context();
         let archiver = Path::new("target").join("debug").join("xtask");
-        let steps = steps(&context, &archiver, false);
+        let steps = steps(&context, &archiver, false, &families());
         assert_eq!(steps[3], clippy_windows::lint(&context, &[], &archiver));
         assert_eq!(steps[2], app::clippy(&context, &[]));
         assert_eq!(steps[6], app::test(&context, &[]));
@@ -283,9 +315,9 @@ mod tests {
     #[test]
     fn on_windows_the_workspaces_clippy_is_the_one_for_windows_and_there_is_no_step_of_it() {
         let context = context();
-        let steps = steps(&context, Path::new("xtask"), true);
+        let steps = steps(&context, Path::new("xtask"), true, &families());
         let lines: Vec<_> = steps.iter().map(Invocation::display).collect();
-        assert_eq!(lines.len(), 9);
+        assert_eq!(lines.len(), 12);
         assert!(lines
             .iter()
             .all(|line| !line.contains("x86_64-pc-windows-msvc")));
@@ -302,6 +334,9 @@ mod tests {
             lines[5..],
             [
                 "cargo test --offline --",
+                "cargo xtask plants cli --check",
+                "cargo xtask plants daemon --check",
+                "cargo xtask plants release --check",
                 "npm run lint",
                 "cargo xtask build-cf --offline",
                 "npm test"
@@ -354,7 +389,7 @@ mod tests {
     #[test]
     fn every_step_is_run_outside_a_window_without_the_variables_a_member_is_given() {
         let context = context();
-        let steps = steps(&context, Path::new("xtask"), false);
+        let steps = steps(&context, Path::new("xtask"), false, &families());
         let mut run = Vec::new();
         let status = run_steps(
             &steps,
@@ -431,5 +466,60 @@ mod tests {
             "`npm` was not found: is it installed, and on the PATH?"
         );
         assert_eq!(String::from_utf8(said).unwrap(), "xtask check [1/1]: npm\n");
+    }
+
+    #[test]
+    fn a_plant_whose_anchor_no_longer_matches_fails_the_gate_step_that_checks_its_family() {
+        let folder = tempfile::tempdir().unwrap();
+        let context = Context {
+            root: folder.path().to_path_buf(),
+            env: Env::default(),
+        };
+        let write = |relative: &str, text: &str| {
+            let path = context.path(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        };
+        write("src/a.rs", "one\ntwo\n");
+        write(
+            "tests/plants/demo/kit.toml",
+            "run_limit_minutes = 1\ntables = [\"all\"]\n",
+        );
+        write(
+            "tests/plants/demo/all.toml",
+            "[[plant]]\nname = \"demo: gone\"\nmeant = \"m\"\nruns = [[\"cargo\", \"test\"]]\n\n\
+             [[plant.edit]]\nfile = \"src/a.rs\"\nfind = \"three\"\nreplace = \"3\"\n",
+        );
+        let families = plants::families(&context.path("tests/plants")).unwrap();
+        let gate: Vec<Invocation> = steps(&context, Path::new("xtask"), false, &families)
+            .into_iter()
+            .filter(|step| step.args.get(1).and_then(|word| word.to_str()) == Some("plants"))
+            .collect();
+        assert_eq!(gate.len(), 1, "the gate checks the plants of demo");
+
+        let (mut said, mut answered) = (Vec::new(), Vec::new());
+        let status = run_steps(
+            &gate,
+            |step| -> Result<i32, process::Failure> {
+                let mut err = Vec::new();
+                let mut console = Console {
+                    out: &mut answered,
+                    err: &mut err,
+                };
+                Ok(plants::run(&context, &step.args[2..], &mut console).unwrap())
+            },
+            &mut said,
+        )
+        .unwrap();
+        assert_eq!(status, 1);
+        assert_eq!(
+            String::from_utf8(answered).unwrap(),
+            "demo: gone: src/a.rs holds \"three\" 0 times, not once\n0 of 1 plants apply\n"
+        );
+        assert_eq!(
+            String::from_utf8(said).unwrap(),
+            "xtask check [1/1]: cargo xtask plants demo --check\n\
+             xtask check: step 1 of 1 ended with status 1: cargo xtask plants demo --check\n"
+        );
     }
 }

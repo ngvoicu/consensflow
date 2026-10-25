@@ -223,19 +223,12 @@ fn a_tag_on_upstream_is_refused_with_its_release_run_to_rerun() {
 #[test]
 fn a_version_feed_alpha_does_not_come_before_is_refused_before_ci_is_asked() {
     for (serves, said) in [
-        (Some(ALPHA), format!("feed-alpha serves {ALPHA}, which {ALPHA} does not come after: set a later version")),
-        (Some("3.0.6"), format!("feed-alpha serves 3.0.6, which {ALPHA} does not come after: set a later version")),
-        (Some("3.0.6-alpha.2"), format!("feed-alpha serves 3.0.6-alpha.2, which {ALPHA} does not come after: set a later version")),
+        (ALPHA, format!("feed-alpha serves {ALPHA}, which {ALPHA} does not come after: set a later version")),
+        ("3.0.6", format!("feed-alpha serves 3.0.6, which {ALPHA} does not come after: set a later version")),
+        ("3.0.6-alpha.2", format!("feed-alpha serves 3.0.6-alpha.2, which {ALPHA} does not come after: set a later version")),
     ] {
         let (world, mut fake) = ready();
-        match serves {
-            Some(version) => {
-                fake.feeds.insert("feed-alpha".into(), super::fake::latest(version));
-            }
-            None => {
-                fake.feeds.remove("feed-alpha");
-            }
-        }
+        fake.feeds.insert("feed-alpha".into(), super::fake::latest(serves));
         assert_eq!(refusal(released(&world, &mut fake, true).0), said);
         assert!(fake.when("gh").is_none(), "{:#?}", fake.lines());
     }
@@ -389,6 +382,29 @@ fn a_feed_stable_the_alpha_moved_fails_the_release() {
              an alpha never moves it; read the publish job of run 1002"
         )
     );
+}
+
+#[test]
+fn a_feed_stable_that_answers_no_release_after_a_green_run_says_the_release_is_published() {
+    for (code, last) in [
+        (6, "curl ended 6: curl: (6) the read failed"),
+        (22, "it serves no release"),
+    ] {
+        let (world, mut fake) = ready();
+        fake.failing_after_the_tag = vec![("feed-stable", code); 5];
+        let said = refusal(released(&world, &mut fake, false).0);
+        assert_eq!(
+            said,
+            format!(
+                "feed-stable answered no release in 5 reads ({last}): an outage of the feed or of GitHub, \
+                 not a version to change; release run 1002 ended green, so the release is published; \
+                 read feed-stable by hand, \
+                 `curl -sL https://github.com/ngvoicu/consensflow/releases/download/feed-stable/latest.json`, \
+                 which served 3.0.5 before it, and run nothing again"
+            )
+        );
+        assert_eq!(fake.serves("feed-alpha").as_deref(), Some(ALPHA));
+    }
 }
 
 #[test]

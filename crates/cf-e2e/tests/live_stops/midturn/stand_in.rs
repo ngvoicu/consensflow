@@ -10,8 +10,11 @@ use std::time::{Duration, Instant};
 
 use cf_e2e::live::members::{stand_in_chief, stand_in_worker, Account, Members, Plan};
 use cf_e2e::live::Log;
+#[cfg(unix)]
+use cf_e2e::process::stall;
 
 use super::begin::{begin, Begun};
+use super::judge::lane_went_working_then_closed;
 use super::{numbers, stop_it, Hold};
 use crate::{Ctx, FAKE_AGENT};
 
@@ -135,13 +138,38 @@ fn a_stand_in_paused_in_the_middle_of_its_turn_is_a_stop_the_daemon_pays_and_eac
 /// It says each round all the same, which is what it is for.
 #[test]
 fn a_stand_in_that_goes_on_through_three_rounds_is_a_stop_the_case_fails_and_says_each_round_of() {
-    let (members, log) = project(
-        "stops-midturn-ignored-test",
-        &[("CF_TEST_WIND_DOWN_MS", "90000")],
+    goes_on_through_three_rounds("stops-midturn-ignored-test", |_| ());
+}
+
+/// The same, with the daemon too slow to answer the pause at once: it is stopped (as a
+/// machine too loaded to run it stops it) a fifth of a second before the pause is asked of
+/// it, and answers when it goes on. The first look at the lane, which is the next thing the
+/// case does, then comes a fifth of a second after the pause was asked, not a few
+/// milliseconds: the lane is no less working at it, and the stop no less ignored. Held to
+/// read "working at +0.0 s", the case above failed so in two of T-366's gate runs of
+/// `cargo test --workspace` (T-403), never run alone.
+#[cfg(unix)]
+#[test]
+fn a_pause_the_daemon_answers_a_fifth_of_a_second_late_is_the_same_stop_through_three_rounds() {
+    let said = goes_on_through_three_rounds("stops-midturn-ignored-late-test", |members| {
+        stall(members.rig().daemon_pid(), Duration::from_millis(200)).unwrap();
+    });
+    // The stall was there: the look the lane was first read at came after it.
+    assert!(
+        !said.contains("     the lane over the stop: working at +0.0 s"),
+        "the daemon was not late: {said}"
     );
+}
+
+/// The case of a stand-in that ignores every round of the stop, the account it says (so
+/// that a case can say more of it); `before_the_pause` is run with the project once the
+/// member is at work, just before the task is paused.
+fn goes_on_through_three_rounds(folder: &str, before_the_pause: impl FnOnce(&Members)) -> String {
+    let (members, log) = project(folder, &[("CF_TEST_WIND_DOWN_MS", "90000")]);
     let ctx = context(&members, &log);
     let mut case = Account::new();
     let begun = begin_writing(&ctx, &mut case, WORK, UNSEEN).expect("the member never got to work");
+    before_the_pause(&members);
     stop_it(
         &ctx,
         &mut case,
@@ -169,11 +197,9 @@ fn a_stand_in_that_goes_on_through_three_rounds_is_a_stop_the_case_fails_and_say
         "{said}"
     );
     // The window that did not stop was closed after its third round (whether the notes
-    // that say so had landed by the end of the watch is the host's grace's).
-    assert!(
-        said.contains("     the lane over the stop: working at +0.0 s, closed at +"),
-        "{said}"
-    );
+    // that say so had landed by the end of the watch is the host's grace's). It was
+    // working at the first look at the lane, whenever that came.
+    assert!(lane_went_working_then_closed(&said), "{said}");
     // Each round was looked at, and the window was working at each look.
     assert_eq!(
         said.matches("s after its last key: the lane read working")
@@ -186,6 +212,7 @@ fn a_stand_in_that_goes_on_through_three_rounds_is_a_stop_the_case_fails_and_say
         "{said}"
     );
     members.close().unwrap();
+    said
 }
 
 /// A member whose window never shows its first message (the stand-in prints that it
