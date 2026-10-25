@@ -1370,10 +1370,15 @@ impl Dispatcher {
         pane: &Pane,
     ) -> Result<bool, EngineError> {
         if !record.window.borrow().retiring {
+            // The kill is marked before anything is awaited, the look at the screen
+            // included: an exit that comes while the Close looks is the Close's, as one
+            // that comes while its kill is answered is, and a kill that then fails takes
+            // the mark off the task that exit paused (resume.rs, both reviews of 2026-10-16
+            // and the re-check of 2026-10-25).
+            record.window.borrow_mut().killing = Some(Killing::default());
             // The exit is settled here, and says nothing of the screen the window ends
             // with: where it was asking, the human's yes in it is read off the screen now.
             self.bank_yes_before_close(record, pane).await;
-            record.window.borrow_mut().killing = Some(Killing::default());
             let killed = self.kill(record, pane).await;
             let paused = record
                 .window

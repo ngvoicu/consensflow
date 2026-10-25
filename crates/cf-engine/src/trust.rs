@@ -214,7 +214,9 @@ enum Seen {
 /// its task done and its window closed at once, or ended of itself: the human's yes is
 /// then read off the screen it ended with, and banked ([`TrustState::said_yes`]) as the
 /// watch banks one it saw. A No leaves the question, or nothing, on the screen it ends
-/// with.
+/// with. Only the bank moves here: the watch of a window that ended breaks out of its
+/// loop all the same, and its cleanup after the loop (the grants and servers notes
+/// forgotten, the servers told of) runs as for any window, so none of it is done again.
 pub(crate) fn yes_at_exit(record: &Record, shown: &Shown) -> Option<(String, bool)> {
     let part = record.window.borrow();
     if !part.trust.asks() || part.trust_keys > 0 {

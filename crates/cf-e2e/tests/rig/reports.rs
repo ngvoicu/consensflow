@@ -379,8 +379,11 @@ const HEADING: &str = "--- the rig, as the failed case left it";
 fn a_rig_its_case_ends_as_a_drop_on_purpose_leaves_no_report() -> Outcome {
     // A case about what a drop does (live-keychain's: the Claude config of a rig a failed
     // case dropped is asked what the run came to), merged with the rule that a case that
-    // passes leaves no report (T-501).
-    let rig = crate::rig()?;
+    // passes leaves no report (T-501). Its rig is not judged by what the case returns: an
+    // unjudged rig keeps its report for every drop unclosed, a case that passed included,
+    // so only a drop on purpose that is honoured leaves none here (a judged rig of a case
+    // that passes leaves none whatever, T-503).
+    let rig = Rig::start(Config::new(crate::FAKE_AGENT))?;
     let home = home_of(&rig);
 
     rig.close_as_dropped();
@@ -407,14 +410,6 @@ fn a_case_that_drops_on_purpose_and_then_returns_an_error(home: &mut Option<Path
     Ok(())
 }
 
-/// The same, its rig not judged by what the case returns.
-fn a_case_that_drops_on_purpose_a_rig_that_is_not_judged(home: &mut Option<PathBuf>) -> Outcome {
-    let rig = Rig::start(Config::new(crate::FAKE_AGENT))?;
-    *home = Some(home_of(&rig));
-    rig.close_as_dropped();
-    Ok(())
-}
-
 #[test]
 fn a_rig_its_case_ends_as_a_drop_on_purpose_keeps_no_report_though_the_case_fails_after() -> Outcome
 {
@@ -431,27 +426,6 @@ fn a_rig_its_case_ends_as_a_drop_on_purpose_keeps_no_report_though_the_case_fail
     assert!(
         !report_beside(&home).exists(),
         "a report was kept of a rig its case dropped on purpose, once the case failed"
-    );
-    Ok(())
-}
-
-#[test]
-fn a_rig_not_judged_by_what_its_case_returns_keeps_no_report_of_a_drop_on_purpose() -> Outcome {
-    // A rig not judged keeps its report for every drop unclosed, a case that passed
-    // included (it cannot tell a pass from a failure); the drop on purpose is the case's.
-    let mut home = None;
-
-    let passed = a_case_that_drops_on_purpose_a_rig_that_is_not_judged(&mut home);
-
-    assert!(passed.is_ok(), "the case did not pass");
-    let home = home.ok_or("the case never started its rig")?;
-    assert!(
-        !report_beside(&home).exists(),
-        "a report was kept of a rig its case dropped on purpose"
-    );
-    assert!(
-        !home.exists(),
-        "the home of a rig dropped on purpose is gone"
     );
     Ok(())
 }

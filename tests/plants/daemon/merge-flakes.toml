@@ -23,7 +23,9 @@
 [run]
 process-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell"]
 process-lib-settle = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output_wherever_it_runs"]
-reports-not-judged-drop = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_not_judged_by_what_its_case_returns_keeps_no_report_of_a_drop_on_purpose"]
+reports-not-judged-drop = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_its_case_ends_as_a_drop_on_purpose_leaves_no_report"]
+trust-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::a_window_that_asks_and_ends_by_itself"]
+trust-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--features", "test-support", "--lib", "tooling::tests::the_key_toward"]
 trust-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "trust::"]
 trust-rig-gone = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_the_human_said_yes_in_that_is_gone"]
 trust-rig-no = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_humans_no"]
@@ -258,10 +260,47 @@ replace = "                            record.window.borrow_mut().trust_keys += 
 
 [[plant]]
 name = "merge flakes: a rig not judged by what its case returns keeps a report of a drop on purpose"
-meant = "a_rig_not_judged_by_what_its_case_returns_keeps_no_report_of_a_drop_on_purpose"
+meant = "a_rig_its_case_ends_as_a_drop_on_purpose_leaves_no_report"
 runs = ["reports-not-judged-drop"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
 find = "        if self.closed || failure_expected || self.dropped_on_purpose {"
 replace = "        if self.closed || failure_expected {"
+
+# T-587, Calliope's re-check of the merge (T-503): the Close marks its kill (`Killing`) before it
+# looks at an asking window's screen, so a window that ends by itself during the look is the
+# Close's and a kill that then fails takes the mark off its task (the race of resume.rs, both
+# reviews of 2026-10-16, moved to the snapshot); and the live suite's windows that end read the
+# kept screen as naming the question's choices only where it does (`names_choices`), which the
+# tooling test of the reader stands in for.
+
+[[plant]]
+name = "merge flakes: the Close marks its kill after it looks at an asking window's screen"
+meant = "a_window_that_asks_and_ends_by_itself_while_the_close_looks_at_its_screen_and_whose_kill_fails_leaves_its_task_paused"
+runs = ["trust-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+            record.window.borrow_mut().killing = Some(Killing::default());
+            // The exit is settled here, and says nothing of the screen the window ends
+            // with: where it was asking, the human's yes in it is read off the screen now.
+            self.bank_yes_before_close(record, pane).await;
+'''
+replace = '''
+            // The exit is settled here, and says nothing of the screen the window ends
+            // with: where it was asking, the human's yes in it is read off the screen now.
+            self.bank_yes_before_close(record, pane).await;
+            record.window.borrow_mut().killing = Some(Killing::default());
+'''
+
+[[plant]]
+name = "merge flakes: every screen names the question's choices (the live suite's windows that end read the kept screen by it)"
+meant = "the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about_its_folder"
+runs = ["trust-tooling"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "    offers(screen, YES) && offers(screen, NO)\n}\n\n/// Whether `screen` is Claude's prompt"
+replace = "    true || (offers(screen, YES) && offers(screen, NO))\n}\n\n/// Whether `screen` is Claude's prompt"
