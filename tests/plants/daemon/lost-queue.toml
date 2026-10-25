@@ -417,3 +417,13 @@ find = '''
 replace = '''
     pub(super) fn restart(&mut self) {
         self.queued.clear();'''
+
+[[plant]]
+name = "lost-queue: a window that opens on a conversation leaves the proof of the program before it, for a restart to find"
+meant = "the_proof_a_restart_finds_is_spent_by_the_window_that_opened_after_it"
+runs = ["lost-queue-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            self.seams.ledger.borrow_mut().set_program_gone(id, false)?;"
+replace = "            let _ = id;"
