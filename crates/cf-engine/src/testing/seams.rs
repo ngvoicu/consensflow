@@ -72,6 +72,8 @@ pub struct FakeComputerUse {
     pub permissions: Cell<Option<crate::seams::ScreenPermissions>>,
     /// The folders where Claude Code's computer use is on.
     pub on_in: RefCell<HashSet<String>>,
+    /// Whether Codex's computer use is set up.
+    pub codex_set_up: Cell<bool>,
     /// How often each was asked of, permissions first.
     pub asked: Cell<(u32, u32)>,
 }
@@ -89,6 +91,12 @@ impl crate::seams::ComputerUse for FakeComputerUse {
         cf_harness::claude::computer_use::ComputerUse {
             folder: directory.to_owned(),
             on: self.on_in.borrow().contains(directory),
+        }
+    }
+
+    fn codex(&self) -> cf_harness::codex::computer_use::ComputerUse {
+        cf_harness::codex::computer_use::ComputerUse {
+            set_up: self.codex_set_up.get(),
         }
     }
 }

@@ -1,0 +1,67 @@
+# Codex's and Devin's windows as the human's own terminal has them (T-548, round 2 after
+# Calliope's review T-607). What the human types into a Devin or Codex window on Windows goes as
+# it was typed: the console host the app ships gives such a window every character written as
+# text whole, and a key written in win32-input-mode instead makes that host hold every lone
+# Escape after it, so no interrupt reached the window (zeewin, 2026-10-25). Codex's
+# `config.toml` is read again only when its size or modification time changed. The live kit's
+# long command is the process whose command line ends with its mark: a Codex member's TUI,
+# whose first message quotes the command, is not it. One plant takes one rule out; a test of it
+# fails. Every name holds `codex devin`.
+
+[run]
+# The page's Windows typing, in the browser Playwright keeps.
+page-windows-typing = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "on Windows"]
+# Codex's computer use, read from its configuration.
+harness-codex-computer-use = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::computer_use"]
+# The live kit's long command, found in a window and ended.
+e2e-lib-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::command::"]
+
+[[plant]]
+name = "codex devin: a mark the human types into a Devin window is spelled in ASCII"
+meant = "the human's marks reach a Devin window as typed"
+runs = ["page-windows-typing"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "      onData: (pane, data) => void this.#link.input(pane, data),"
+replace = "      onData: (pane, data) => void this.#link.input(pane, data.replace(/\\u2014/g, '--')),"
+
+[[plant]]
+name = "codex devin: the human's Escape into a Codex window is written as a key"
+meant = "the human's marks and Escape reach a Codex window as typed"
+runs = ["page-windows-typing"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "      onData: (pane, data) => void this.#link.input(pane, data),"
+replace = "      onData: (pane, data) => void this.#link.input(pane, data.replace(/\\u001b/g, '\\u001b[27;1;27;1;0;1_\\u001b[27;1;27;0;0;1_')),"
+
+[[plant]]
+name = "codex devin: config.toml is read again at every look"
+meant = "config_toml_is_read_again_only_when_its_size_or_modification_time_changed"
+runs = ["harness-codex-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/computer_use.rs"
+find = "            .filter(|kept| kept.file == file && kept.stamp == stamp)"
+replace = "            .filter(|_| false)"
+
+[[plant]]
+name = "codex devin: a config.toml that changed is not read again"
+meant = "config_toml_is_read_again_only_when_its_size_or_modification_time_changed"
+runs = ["harness-codex-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/computer_use.rs"
+find = "            .filter(|kept| kept.file == file && kept.stamp == stamp)"
+replace = "            .filter(|kept| kept.file == file)"
+
+[[plant]]
+name = "codex devin: a line that quotes the long command's mark is taken for the command"
+meant = "a_process_outside_the_window_that_holds_the_mark_runs_on_and_the_windows_own_command_is_ended"
+runs = ["e2e-lib-command"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/command.rs"
+find = "        line.trim_end().ends_with(self.mark)"
+replace = "        line.contains(self.mark)"

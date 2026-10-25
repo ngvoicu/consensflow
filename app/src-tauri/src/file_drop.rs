@@ -5,11 +5,11 @@
 //! `PENDING`, which the page types one after the other, and the page asks of a
 //! drop by its number, never of a path it names on its own:
 //!
-//! - the short names (8.3) Windows keeps for its paths (`short_paths`). A window
-//!   that reads key presses through Windows' console (Devin, Codex) does not get
-//!   every character typed into it as it is (`app/ui/core/console-text.js`), so
-//!   the page types a file dropped on one by its short name where the console
-//!   would change the long one. A path that was not one of that drop's is
+//! - the short names (8.3) Windows keeps for its paths (`short_paths`). A Codex
+//!   window on Windows drops a character outside the Basic Multilingual Plane
+//!   typed into it (`untakeable` in `app/ui/core/file-drop.js`), so the page types
+//!   a file dropped on one by its short name where the long one holds such a
+//!   character. A path that was not one of that drop's is
 //!   refused, and so is one that is no whole path to a file or a folder on a
 //!   drive or a share; at most `MOST` are looked up at once, one lookup at a
 //!   time; a path past Windows' old limit is asked in its long form (`\\?\`);

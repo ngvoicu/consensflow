@@ -233,31 +233,31 @@ file = "app/ui/core/file-drop.js"
 find = "return paths.map((path) => word(path, windows)).join(' ')"
 replace = "return paths.map((path) => `${word(path, windows)} `).join('')"
 
-# --- a window that reads key presses on Windows ---
+# --- what a Codex window on Windows drops, and its short names ---
 
 [[plant]]
-name = "file drop: a Devin window on Windows is typed the long path, which its console changes"
-meant = "types a path into a Devin window by its short name where its console would change the long one"
+name = "file drop: a Codex window on Windows is typed the long path, which holds a character Codex drops"
+meant = "types a path into a Codex window by its short name where the long one holds a character Codex drops"
 runs = ["page-drop"]
 
 [[plant.edit]]
 file = "app/ui/core/terminals.js"
-find = "      return { pane: entry.pane, name, readsKeys: readsKeys(entry.harness) }"
-replace = "      return { pane: entry.pane, name, readsKeys: false }"
+find = "      return { pane: entry.pane, name, harness: entry.harness }"
+replace = "      return { pane: entry.pane, name, harness: null }"
 
 [[plant]]
-name = "file drop: a Devin window on a Mac is taken for one that reads key presses through Windows' console"
-meant = "types a path into a Devin window as it is: only Windows’ console changes what it takes"
-runs = ["page-drop"]
+name = "file drop: a Codex window elsewhere is taken for one on Windows"
+meant = "is nothing elsewhere, Codex included"
+runs = ["quoting"]
 
 [[plant.edit]]
-file = "app/ui/core/terminals.js"
-find = "const readsKeys = (harness) => WINDOWS && KEY_READERS.has(harness)"
-replace = "const readsKeys = (harness) => KEY_READERS.has(harness)"
+file = "app/ui/core/file-drop.js"
+find = "  if (!windows || harness !== 'codex') return []"
+replace = "  if (harness !== 'codex') return []"
 
 [[plant]]
 name = "file drop: the short names are not asked for"
-meant = "types a path into a Devin window by its short name where its console would change the long one"
+meant = "types a path into a Codex window by its short name where the long one holds a character Codex drops"
 runs = ["page-drop"]
 
 [[plant.edit]]
@@ -267,27 +267,27 @@ replace = "invoke('short_paths', { id, paths: [] })"
 
 [[plant]]
 name = "file drop: the short names of every path are asked for, and a path that needs none is refused"
-meant = "types a path into a Devin window by its short name where its console would change the long one"
+meant = "types a path into a Codex window by its short name where the long one holds a character Codex drops"
 runs = ["page-drop"]
 
 [[plant.edit]]
 file = "app/ui/core/file-drop.js"
-find = "  const changed = paths.filter((path) => untakeable(path).length > 0)"
+find = "  const changed = paths.filter((path) => untaken(path).length > 0)"
 replace = "  const changed = paths"
 
 [[plant]]
-name = "file drop: a short name the console would change too is typed"
-meant = "types nothing into a Codex window for a path its console would change and that has no short name it takes, and says why in the app’s words"
+name = "file drop: a short name that holds a character Codex drops too is typed"
+meant = "types nothing into a Codex window for a path with a character Codex drops and no short name it takes, and says why in the app’s words"
 runs = ["page-drop"]
 
 [[plant.edit]]
 file = "app/ui/core/file-drop.js"
-find = "    if (untakeable(found.short).length > 0) {"
+find = "    if (untaken(found.short).length > 0) {"
 replace = "    if (false) {"
 
 [[plant]]
-name = "file drop: a path the console would change and that has no short name is typed all the same"
-meant = "types nothing into a Codex window for a path its console would change and that has no short name it takes, and says why in the app’s words"
+name = "file drop: a path with a character Codex drops and no short name is typed all the same"
+meant = "types nothing into a Codex window for a path with a character Codex drops and no short name it takes, and says why in the app’s words"
 runs = ["page-drop"]
 
 [[plant.edit]]
@@ -297,7 +297,7 @@ replace = "    if (found === undefined) {"
 
 [[plant]]
 name = "file drop: why a short name could not be used is not said in the app's words"
-meant = "types nothing into a Codex window for a path its console would change and that has no short name it takes, and says why in the app’s words"
+meant = "types nothing into a Codex window for a path with a character Codex drops and no short name it takes, and says why in the app’s words"
 runs = ["page-drop"]
 
 [[plant.edit]]
@@ -306,8 +306,8 @@ find = "      return { refused: path, why: found?.error ?? 'the app did not answ
 replace = "      return { refused: path, why: 'Windows keeps no short name for it' }"
 
 [[plant]]
-name = "file drop: what a key-reading window cannot take is named without its code point"
-meant = "types nothing into a Codex window for a path its console would change and that has no short name it takes, and says why in the app’s words"
+name = "file drop: what a Codex window cannot take is named without its code point"
+meant = "types nothing into a Codex window for a path with a character Codex drops and no short name it takes, and says why in the app’s words"
 runs = ["page-drop"]
 
 [[plant.edit]]
@@ -316,37 +316,34 @@ find = "        `${character} (U+${character.codePointAt(0).toString(16).toUpper
 replace = "        `${character}`,"
 
 [[plant]]
-name = "file drop: a letter is taken for a character a key-reading window cannot take"
-meant = "is nothing of a path of ASCII and letters, which reaches it as it is, quoted or not"
+name = "file drop: a Devin window on Windows is taken for a Codex one"
+meant = "is nothing for a Devin window on Windows, marks, letters, joining marks and emoji alike"
 runs = ["quoting"]
 
 [[plant.edit]]
 file = "app/ui/core/file-drop.js"
-find = '''      character > '\x7f' && !(/\p{L}/u.test(character) && consoleText(character) === character),'''
-replace = '''      character > '\x7f','''
+find = "  if (!windows || harness !== 'codex') return []"
+replace = "  if (!windows) return []"
 
 [[plant]]
-name = "file drop: a symbol the page leaves as it is is taken for one the console carries"
-meant = "is a symbol the page leaves as it is too, which the console drops all the same"
+name = "file drop: a character of the Basic Multilingual Plane is taken for one Codex drops"
+meant = "is, for a Codex window on Windows, each character outside the Basic Multilingual Plane, once"
 runs = ["quoting"]
 
 [[plant.edit]]
 file = "app/ui/core/file-drop.js"
-find = '''      character > '\x7f' && !(/\p{L}/u.test(character) && consoleText(character) === character),'''
-replace = '''      consoleText(character) !== character,'''
+find = "filter((character) => character.codePointAt(0) > 0xffff)"
+replace = "filter((character) => character > '\\x7f')"
 
 [[plant]]
-name = "file drop: letters written otherwise only together are taken as they are"
-meant = "is what would be written otherwise: a mark that joins a letter, a letter of another form, letters joined"
+name = "file drop: a character Codex drops is named as often as the path holds it"
+meant = "is, for a Codex window on Windows, each character outside the Basic Multilingual Plane, once"
 runs = ["quoting"]
 
 [[plant.edit]]
 file = "app/ui/core/file-drop.js"
-find = '''  if (lost.length === 0 && consoleText(path) !== path) {
-    return characters.filter((character) => character > '\x7f')
-  }
-'''
-replace = ""
+find = "  return [...new Set(path)].filter("
+replace = "  return [...path].filter("
 
 # --- the system, and where the app says the drop is ---
 
@@ -819,7 +816,7 @@ replace = "  if (focused) await focus(id)"
 
 [[plant]]
 name = "file drop: the app is asked to come in front with no drop named"
-meant = "types a path into a Devin window by its short name where its console would change the long one"
+meant = "types a path into a Codex window by its short name where the long one holds a character Codex drops"
 runs = ["page-drop"]
 
 [[plant.edit]]
@@ -829,14 +826,14 @@ replace = "  if (WINDOWS && focused) await focus()"
 
 [[plant]]
 name = "file drop: the app's window is brought in front though nothing was typed"
-meant = "types nothing into a Codex window for a path its console would change and that has no short name it takes, and says why in the app’s words"
+meant = "types nothing into a Codex window for a path with a character Codex drops and no short name it takes, and says why in the app’s words"
 runs = ["page-drop"]
 
 [[plant.edit]]
 file = "app/ui/core/file-drop.js"
-find = "  const typed = target.readsKeys ? await keyed(id, paths, invoke) : { paths }"
-replace = '''  if (WINDOWS) await focus(id)
-  const typed = target.readsKeys ? await keyed(id, paths, invoke) : { paths }'''
+find = "  const typed = await keyed(id, paths, target.harness, invoke)"
+replace = """  if (WINDOWS) await focus(id)
+  const typed = await keyed(id, paths, target.harness, invoke)"""
 
 [[plant]]
 name = "file drop: the page's way of bringing the app's window in front does nothing"
@@ -850,7 +847,7 @@ replace = "        focus: () => {},"
 
 [[plant]]
 name = "file drop: the page asks the app to come in front naming no drop"
-meant = "types a path into a Devin window by its short name where its console would change the long one"
+meant = "types a path into a Codex window by its short name where the long one holds a character Codex drops"
 runs = ["page-drop"]
 
 [[plant.edit]]

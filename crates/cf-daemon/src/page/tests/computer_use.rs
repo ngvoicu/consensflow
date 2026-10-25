@@ -16,7 +16,8 @@ fn held() -> (Bridge, Bridge, Rig) {
 }
 
 #[tokio::test]
-async fn the_row_is_told_the_system_the_grants_and_claudes_word_for_the_projects_folder() {
+async fn the_row_is_told_the_system_the_grants_claudes_word_for_the_folder_and_whether_codexs_is_set_up(
+) {
     LocalSet::new()
         .run_until(async {
             let (_daemon, app, rig) = held();
@@ -53,6 +54,10 @@ async fn the_row_is_told_the_system_the_grants_and_claudes_word_for_the_projects
                 .insert("/work/app".to_owned());
             let answer = ask(&app, "computer_use.get", json!({ "project": project })).await;
             assert_eq!(answer["harnesses"]["claude-code"]["on"], true);
+            assert_eq!(answer["harnesses"]["codex"], json!({ "setUp": false }));
+            rig.kit.computer_use.codex_set_up.set(true);
+            let answer = ask(&app, "computer_use.get", json!({ "project": project })).await;
+            assert_eq!(answer["harnesses"]["codex"], json!({ "setUp": true }));
             assert_eq!(rig.kicks.get(), 0, "a read wakes nothing");
         })
         .await;

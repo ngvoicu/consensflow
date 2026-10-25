@@ -82,8 +82,8 @@ replace = '''            "screen-recording" => Some(Self::ScreenRecording),
             _ => Some(Self::Accessibility),'''
 
 [[plant]]
-name = "parity computer use: the row is shown for a project with no Claude Code member"
-meant = "Project settings: a project with no Claude Code member, the chief included, shows no computer use"
+name = "parity computer use: the row is shown for a project with no member on a harness with computer use"
+meant = "Project settings: a project with no member on a harness with computer use, the chief included, shows no computer use"
 runs = ["page-computer-use"]
 
 [[plant.edit]]

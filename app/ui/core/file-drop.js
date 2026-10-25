@@ -13,8 +13,6 @@
  * path is never typed changed: a drop that cannot type one as it is types
  * nothing, and says why.
  */
-import { consoleText } from './console-text.js'
-
 /** Whether this is Windows, where a path is quoted and the app's positions are in device pixels. */
 const WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? '')
 
@@ -69,23 +67,16 @@ export function droppedText(paths, windows) {
 }
 
 /**
- * The characters of `path` a window that reads key presses on Windows (a
- * Devin or a Codex window) does not get as they are, each once: of all but
- * ASCII and the letters, its console drops some and the page spells the rest
- * in ASCII (console-text.js), and a mark that joins a letter goes with it.
- * None where the path reaches it as it is.
+ * The characters of `path` a window on `harness` does not get as they are typed into it,
+ * each once, on a system that is `windows` or not: on Windows a Codex window drops every
+ * character outside the Basic Multilingual Plane (an emoji, two key events of the console's;
+ * Codex 0.164.0 from the app's pane and from Windows Terminal alike, T-548). Every other
+ * window, and Codex elsewhere, gets every character of a path whole. None where the path
+ * reaches it as it is.
  */
-export function untakeable(path) {
-  const characters = [...new Set(path)]
-  const lost = characters.filter(
-    (character) =>
-      character > '\x7f' && !(/\p{L}/u.test(character) && consoleText(character) === character),
-  )
-  // Letters that are written otherwise only together (a Hangul syllable in its parts): all of them.
-  if (lost.length === 0 && consoleText(path) !== path) {
-    return characters.filter((character) => character > '\x7f')
-  }
-  return lost
+export function untakeable(path, harness, windows) {
+  if (!windows || harness !== 'codex') return []
+  return [...new Set(path)].filter((character) => character.codePointAt(0) > 0xffff)
 }
 
 /** `— (U+2014), “ (U+201C)`: characters as the status line names them, those that show nothing too. */
@@ -136,17 +127,18 @@ export async function askedUntilFree(
 }
 
 /**
- * The paths as a window that reads key presses on Windows takes them: each as
- * it is where it can, else by the short name Windows keeps for it (8.3, made
- * of what the console carries) where that one it can. The app looks them up
+ * The paths as the window on `harness` takes them: each as it is where it can,
+ * else by the short name Windows keeps for it (8.3, made of what the console
+ * carries) where that one it can. The app looks them up
  * (`short_paths`), only for the paths of the drop it heard itself, which the
  * page names by the number `id` the app gave it, and asks again while the app is
  * busy with another lookup. `{ refused, why }` is the first it can take neither
  * way, and why its short name is of no use, in the app's words where the lookup
  * failed.
  */
-async function keyed(id, paths, invoke) {
-  const changed = paths.filter((path) => untakeable(path).length > 0)
+async function keyed(id, paths, harness, invoke) {
+  const untaken = (path) => untakeable(path, harness, WINDOWS)
+  const changed = paths.filter((path) => untaken(path).length > 0)
   if (changed.length === 0) return { paths }
   const answer = await askedUntilFree(() =>
     invoke('short_paths', { id, paths: changed }).catch((cause) => ({
@@ -165,7 +157,7 @@ async function keyed(id, paths, invoke) {
     if (typeof found?.short !== 'string') {
       return { refused: path, why: found?.error ?? 'the app did not answer for its short name' }
     }
-    if (untakeable(found.short).length > 0) {
+    if (untaken(found.short).length > 0) {
       return { refused: path, why: 'its short name holds them too' }
     }
     typed.push(found.short)
@@ -197,9 +189,9 @@ async function type(target, { id, paths }, { invoke, focus, dock, report, still 
     )
     return
   }
-  const typed = target.readsKeys ? await keyed(id, paths, invoke) : { paths }
+  const typed = await keyed(id, paths, target.harness, invoke)
   if (typed.refused !== undefined) {
-    const characters = named(untakeable(typed.refused))
+    const characters = named(untakeable(typed.refused, target.harness, WINDOWS))
     report(
       `Nothing was typed: ${target.name}'s window cannot take ${characters} of ${typed.refused}, and ${typed.why}.`,
     )
