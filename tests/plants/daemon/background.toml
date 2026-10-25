@@ -524,7 +524,7 @@ replace = '                .is_some_and(|holder| Some(holder.identity) == self.r
 
 [[plant]]
 name = "background: what a process of the tree started is of the tree only where the pane started it"
-meant = "a_close_signals_the_windows_by_its_parents_and_its_session_and_none_of_what_the_selection_adds"
+meant = "a_look_that_must_not_miss_a_process_is_hidden_where_one_of_the_windows_cannot_be_read"
 runs = ["panes-lib-tree", "panes-lib-turn"]
 
 [[plant.edit]]
@@ -1611,8 +1611,8 @@ runs = ["panes-lib-job-object"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/job_object.rs"
-find = "        repair_cygwin_parents(&mut fresh, held, ps);"
-replace = "        let _ = (&mut fresh, held, ps);"
+find = "        repair_cygwin_parents(&mut held, ps);"
+replace = "        let _ = (&mut held, ps);"
 
 [[plant]]
 name = "background windows: a parent that began first is not the parent of what it started"
@@ -1633,8 +1633,8 @@ runs = ["panes-lib-job-pane"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/job_object.rs"
-find = "        repair_cygwin_parents(&mut fresh, held, ps);"
-replace = "        let _ = (&mut fresh, held, ps);"
+find = "        repair_cygwin_parents(&mut held, ps);"
+replace = "        let _ = (&mut held, ps);"
 
 # What a window's exit names as possibly the window's and not ended (T-406): a process that
 # carries the window's marker, began after its program, and is in a session whose leader has
