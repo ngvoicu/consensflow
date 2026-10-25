@@ -1,171 +1,172 @@
-//! The machines, their lines and the default. The lines of a machine reached through WSL are
-//! run here by `/bin/sh`, as WSL's shell runs them, with a stand-in for Windows' PowerShell; the
-//! default is asked through an ssh that runs what it is given here.
+//! The machines, what a run asks one it shares before it is sent, and the default. The asking
+//! goes through an ssh stand-in that answers as the laptop's two sides do; on Windows the script
+//! that asks the disk runs in the machine's own PowerShell.
 
 use super::*;
 
 #[test]
 fn the_names_are_the_two_machines_and_a_host_is_reached_as_zeewin_is() {
     let zeewin = Machine::named("zeewin").unwrap();
-    assert_eq!(
-        (zeewin.name.as_str(), zeewin.host.as_str()),
-        ("zeewin", "zeewin")
-    );
-    assert_eq!(zeewin.reach, Reach::OpenSsh);
     assert_eq!(zeewin, Machine::at("zeewin"));
+    assert_eq!(zeewin.node, r"C:\Program Files\nodejs");
+    assert_eq!(zeewin.shared, None);
     let zeewin2 = Machine::named("zeewin2").unwrap();
     assert_eq!(
         (zeewin2.name.as_str(), zeewin2.host.as_str()),
         ("zeewin2", "zeewin2")
     );
-    let Reach::Wsl(wsl) = &zeewin2.reach else {
-        panic!("zeewin2 is reached through WSL: {zeewin2:?}");
-    };
-    assert_eq!(wsl.profile, "/mnt/c/Users/AGV");
-    assert_eq!(wsl.busy, ".compile-lock");
+    assert_eq!(zeewin2.node, r"$env:USERPROFILE\cf-tools\node");
+    assert_eq!(
+        zeewin2.shared,
+        Some(Shared {
+            linux: "zeelin".into(),
+            lock: ".compile-lock/owner".into(),
+            floor_gib: 50,
+        })
+    );
     assert_eq!(Machine::named("laptop"), None);
     for name in NAMES {
         assert_eq!(Machine::named(name).unwrap().name, name);
     }
-    assert_eq!(Machine::at("box").reach, Reach::OpenSsh);
+    assert_eq!(Machine::at("box").shared, None);
 }
 
 #[test]
-fn zeewins_lines_and_paths_are_what_they_were() {
-    let zeewin = Machine::at("zeewin");
-    let line = "powershell -NoProfile -NonInteractive -EncodedCommand QUJD";
-    assert_eq!(zeewin.line("QUJD"), line);
-    assert_eq!(zeewin.run_line("QUJD", "consensflow-build.1.tgz"), line);
+fn what_a_machine_says_of_itself_is_read_for_its_free_disk_and_a_run() {
     assert_eq!(
-        zeewin.in_profile("consensflow-build.1.tgz"),
-        "zeewin:consensflow-build.1.tgz"
+        State::read("free 614\r\n"),
+        Some(State {
+            free_gib: 614,
+            running: false
+        })
     );
-    assert_eq!(zeewin.node(), r"C:\Program Files\nodejs");
+    assert_eq!(
+        State::read("free 30\r\nrun\r\n"),
+        Some(State {
+            free_gib: 30,
+            running: true
+        })
+    );
+    assert_eq!(State::read("run\n"), None);
+    assert_eq!(State::read("free lots\n"), None);
 }
 
 #[test]
-fn zeewin2_is_sent_to_its_windows_profile_and_runs_ci_s_node() {
-    let zeewin2 = Machine::named("zeewin2").unwrap();
-    assert_eq!(
-        zeewin2.in_profile("consensflow-build.1.tgz"),
-        "zeewin2:/mnt/c/Users/AGV/consensflow-build.1.tgz"
+fn the_disk_is_asked_of_the_profiles_drive_and_the_run_of_the_copys_owner_file() {
+    let script = state_script("consensflow-build");
+    assert!(
+        script.contains("(Get-Item $env:USERPROFILE).PSDrive.Free / 1GB"),
+        "{script}"
     );
-    assert_eq!(zeewin2.node(), r"$env:USERPROFILE\cf-tools\node");
-    assert_eq!(
-        zeewin2.line("QUJD"),
-        "cd '/mnt/c/Users/AGV' && exec '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe' -NoProfile -NonInteractive -EncodedCommand QUJD"
+    assert!(
+        script.contains(&format!(
+            "(Join-Path (Join-Path $env:USERPROFILE 'consensflow-build') '{OWNER}')"
+        )),
+        "{script}"
     );
 }
 
+#[cfg(windows)]
 #[test]
-fn a_shell_word_is_quoted_whatever_it_holds() {
-    assert_eq!(sh_quoted("a b"), "'a b'");
-    assert_eq!(sh_quoted("it's"), r"'it'\''s'");
+fn the_disk_script_says_the_free_disk_and_a_run_in_the_machines_own_powershell() {
+    let profile = tempfile::tempdir().unwrap();
+    let ask = || {
+        let asked = Invocation::new("powershell", profile.path())
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg(state_script("copy"));
+        let env = cf_base::env::Env::from_process();
+        let vars: Vec<(std::ffi::OsString, std::ffi::OsString)> = env
+            .iter()
+            .filter(|(name, _)| !name.eq_ignore_ascii_case("USERPROFILE"))
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .chain([("USERPROFILE".into(), profile.path().into())])
+            .collect();
+        let answer = process::capture(&asked, &cf_base::env::Env::from_vars(vars)).unwrap();
+        assert_eq!(answer.code, 0, "{}", answer.stderr);
+        State::read(&answer.stdout).unwrap_or_else(|| panic!("{:?}", answer.stdout))
+    };
+    let state = ask();
+    assert!(state.free_gib > 0, "{state:?}");
+    assert!(!state.running);
+    std::fs::create_dir(profile.path().join("copy")).unwrap();
+    std::fs::write(profile.path().join("copy").join(OWNER), "id\n1\n").unwrap();
+    assert!(ask().running);
 }
 
 #[cfg(unix)]
-mod on_a_shell {
+mod asked {
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
-    use std::path::Path;
 
     use cf_base::env::Env;
 
     use super::*;
 
-    /// A machine reached through WSL whose Windows is folders of the test's: the profile, a home
-    /// for WSL's user, and a PowerShell that writes down where it ran and what it was given, and
-    /// ends with 7.
-    struct Wsl {
-        root: tempfile::TempDir,
-        machine: Machine,
+    /// The laptop's two sides, as the stand-in ssh answers for them: zeelin says `zeelin` (`held`,
+    /// `free`) of poker-lab's lock or does not answer (`none`), and zeewin2 answers the disk
+    /// script with `zeewin2` (`free N`, then `run` if `running`), or does not answer (`none`).
+    struct Laptop {
+        bin: tempfile::TempDir,
+        context: Context,
     }
 
-    impl Wsl {
-        fn new() -> Self {
-            let root = tempfile::tempdir().unwrap();
-            for folder in ["profile", "home", "bin"] {
-                fs::create_dir(root.path().join(folder)).unwrap();
-            }
-            let powershell = root.path().join("bin/powershell.exe");
-            let said = root.path().join("said");
+    impl Laptop {
+        fn new(zeelin: &str, zeewin2: &str) -> Self {
+            let bin = tempfile::tempdir().unwrap();
+            let ssh = bin.path().join("ssh");
             fs::write(
-                &powershell,
+                &ssh,
                 format!(
-                    "#!/bin/sh\npwd > '{0}'\nprintf '%s\\n' \"$@\" >> '{0}'\necho ran\nexit 7\n",
-                    said.display()
+                    r#"#!/bin/sh
+for word; do host=$last; last=$word; done
+printf '%s\t%s\n' "$host" "$last" >> "{log}"
+case "$host" in
+  zeelin) answer='{zeelin}' ;;
+  *) answer='{zeewin2}' ;;
+esac
+case "$answer" in
+  none) echo "ssh: connect to host 10.6.0.6: Operation timed out" >&2; exit 255 ;;
+  *) printf '%b\n' "$answer" ;;
+esac
+"#,
+                    log = bin.path().join("log").display()
                 ),
             )
             .unwrap();
-            fs::set_permissions(&powershell, fs::Permissions::from_mode(0o755)).unwrap();
-            let machine = Machine {
-                name: "zeewin2".into(),
-                host: "zeewin2".into(),
-                reach: Reach::Wsl(super::Wsl {
-                    profile: root.path().join("profile").display().to_string(),
-                    powershell: powershell.display().to_string(),
-                    busy: ".compile-lock".into(),
-                    node: "node".into(),
-                    floor_gib: 0,
-                }),
-            };
-            Self { root, machine }
-        }
-
-        /// The machine, with a floor of free disk no disk has.
-        fn short_of_disk(mut self) -> Self {
-            if let Reach::Wsl(wsl) = &mut self.machine.reach {
-                wsl.floor_gib = 1 << 30;
-            }
-            self
-        }
-
-        fn path(&self, name: &str) -> std::path::PathBuf {
-            self.root.path().join(name)
-        }
-
-        /// `line` run as ssh runs it there: by the shell, in WSL's user's home.
-        fn run(&self, line: &str) -> process::Captured {
-            let asked = Invocation::new("/bin/sh", self.path("home"))
-                .arg("-c")
-                .arg(line);
-            let vars: Vec<(OsString, OsString)> =
-                vec![("HOME".into(), self.path("home").into_os_string())];
-            process::capture(&asked, &Env::from_vars(vars)).unwrap()
-        }
-
-        /// A context whose `ssh` runs the line it is given here, as `run` does, or ends with
-        /// `status` without running it when one is given.
-        fn context(&self, status: Option<i32>) -> Context {
-            let ssh = self.path("bin/ssh");
-            let body = match status {
-                Some(status) => format!("exit {status}"),
-                None => "cd \"$HOME\" && exec /bin/sh -c \"$2\"".into(),
-            };
-            fs::write(&ssh, format!("#!/bin/sh\n{body}\n")).unwrap();
             fs::set_permissions(&ssh, fs::Permissions::from_mode(0o755)).unwrap();
-            let path = std::env::join_paths(std::iter::once(self.path("bin")).chain(
+            let path = std::env::join_paths(std::iter::once(bin.path().to_path_buf()).chain(
                 std::env::split_paths(Env::from_process().os("PATH").unwrap()),
             ))
             .unwrap();
-            let vars: Vec<(OsString, OsString)> = vec![
-                ("PATH".into(), path),
-                ("HOME".into(), self.path("home").into_os_string()),
-            ];
-            Context {
-                root: self.root.path().to_path_buf(),
+            let vars: Vec<(OsString, OsString)> = vec![("PATH".into(), path)];
+            let context = Context {
+                root: bin.path().to_path_buf(),
                 env: Env::from_vars(vars),
-            }
+            };
+            Self { bin, context }
         }
 
-        fn choose(&self, context: &Context) -> (String, String) {
+        /// The hosts asked, in order.
+        fn asked(&self) -> Vec<String> {
+            fs::read_to_string(self.bin.path().join("log"))
+                .unwrap_or_default()
+                .lines()
+                .map(|line| line.split('\t').next().unwrap().to_owned())
+                .collect()
+        }
+
+        fn ready(&self) -> Result<Ready, String> {
+            Machine::named("zeewin2")
+                .unwrap()
+                .ready(&self.context, "consensflow-build")
+        }
+
+        fn choose(&self) -> (String, String) {
             let (mut out, mut err) = (Vec::new(), Vec::new());
-            let chosen = choose_between(
-                context,
+            let chosen = choose(
+                &self.context,
                 "consensflow-build",
-                self.machine.clone(),
-                Machine::at("zeewin"),
                 &mut Console {
                     out: &mut out,
                     err: &mut err,
@@ -177,170 +178,132 @@ mod on_a_shell {
         }
     }
 
-    fn said(path: &Path) -> Vec<String> {
-        fs::read_to_string(path)
-            .unwrap()
-            .lines()
-            .map(str::to_owned)
-            .collect()
+    #[test]
+    fn a_machine_the_runner_does_not_share_is_asked_nothing() {
+        let laptop = Laptop::new("held", "free 1");
+        let zeewin = Machine::named("zeewin").unwrap();
+        assert_eq!(
+            zeewin.ready(&laptop.context, "consensflow-build"),
+            Ok(Ready::Go(Vec::new()))
+        );
+        assert!(laptop.asked().is_empty());
     }
 
     #[test]
-    fn a_free_machines_powershell_runs_in_the_profile_with_the_script_and_its_status_comes_back() {
-        let wsl = Wsl::new();
-        fs::write(wsl.path("profile/b.tgz"), "tree").unwrap();
-        let ran = wsl.run(&wsl.machine.run_line("QUJD", "b.tgz"));
-        assert_eq!(ran.code, 7);
-        assert_eq!(ran.stdout, "ran\n");
-        let profile = fs::canonicalize(wsl.path("profile")).unwrap();
-        let said = said(&wsl.path("said"));
-        assert_eq!(
-            fs::canonicalize(&said[0]).unwrap(),
-            profile,
-            "PowerShell starts in the profile"
-        );
-        assert_eq!(
-            said[1..],
-            ["-NoProfile", "-NonInteractive", "-EncodedCommand", "QUJD"]
-        );
-        assert!(
-            wsl.path("profile/b.tgz").exists(),
-            "it is left for the run's script, which removes it"
-        );
+    fn zeewin2_is_ready_when_poker_lab_does_not_hold_it_and_its_disk_has_the_floor() {
+        let laptop = Laptop::new("free", "free 614");
+        assert_eq!(laptop.ready(), Ok(Ready::Go(Vec::new())));
+        assert_eq!(laptop.asked(), ["zeelin", "zeewin2"]);
     }
 
     #[test]
-    fn a_run_on_a_machine_poker_lab_holds_is_refused_with_75_and_starts_nothing_and_leaves_the_lock_as_it_was(
-    ) {
-        let wsl = Wsl::new();
-        let lock = wsl.path("home/.compile-lock");
-        fs::create_dir(&lock).unwrap();
-        fs::write(lock.join("owner"), "poker-lab job 4242\n").unwrap();
-        fs::write(wsl.path("profile/b.tgz"), "tree").unwrap();
-        fs::write(wsl.path("profile/other.tgz"), "another run's").unwrap();
-        let ran = wsl.run(&wsl.machine.run_line("QUJD", "b.tgz"));
-        assert_eq!(ran.code, 75);
+    fn zeewin2_is_refused_while_poker_lab_holds_it_and_its_disk_is_not_asked() {
+        let laptop = Laptop::new("held", "free 614");
         assert_eq!(
-            ran.stdout,
-            "zeewin2 is busy: poker-lab's job holds it (~/.compile-lock), and no run goes while it does.\n\n== exit 75\n"
+            laptop.ready(),
+            Ok(Ready::Refused(
+                "zeewin2 is busy: poker-lab's job holds it (~/.compile-lock/owner on zeelin), and no run goes while it does.".into()
+            ))
         );
-        assert!(!wsl.path("said").exists(), "no PowerShell was started");
-        assert!(
-            !wsl.path("profile/b.tgz").exists(),
-            "the run's own tarball is removed"
-        );
-        assert!(wsl.path("profile/other.tgz").exists(), "and nothing else");
+        assert_eq!(laptop.asked(), ["zeelin"]);
+    }
+
+    #[test]
+    fn a_zeelin_that_does_not_answer_holds_no_lock_and_is_said() {
+        let laptop = Laptop::new("none", "free 614");
         assert_eq!(
-            fs::read_to_string(lock.join("owner")).unwrap(),
-            "poker-lab job 4242\n"
+            laptop.ready(),
+            Ok(Ready::Go(vec![
+                "zeelin did not answer (ssh ended with status 255: ssh: connect to host 10.6.0.6: Operation timed out), so Ubuntu is not running there and no poker-lab job can hold its lock: going on".into()
+            ]))
         );
     }
 
     #[test]
-    fn a_run_on_a_machine_short_of_disk_is_refused_with_75_and_starts_nothing() {
-        let wsl = Wsl::new().short_of_disk();
-        fs::write(wsl.path("profile/b.tgz"), "tree").unwrap();
-        let ran = wsl.run(&wsl.machine.run_line("QUJD", "b.tgz"));
-        assert_eq!(ran.code, 75);
-        let said: Vec<&str> = ran.stdout.lines().collect();
+    fn zeewin2_is_refused_below_the_floor_and_says_what_it_has() {
+        let laptop = Laptop::new("free", "free 49");
         assert_eq!(
-            said[0],
-            "zeewin2 is short of disk: a run needs 1073741824 GiB free there, and no run goes until it has them."
+            laptop.ready(),
+            Ok(Ready::Refused(
+                "zeewin2 is short of disk: a run needs 50 GiB free there, and it has 49.".into()
+            ))
         );
-        assert!(
-            said[1].starts_with('(') && said[1].ends_with(" GiB free)"),
-            "{said:?}"
-        );
-        assert_eq!(said[2..], ["", "== exit 75"]);
-        assert!(!wsl.path("said").exists(), "no PowerShell was started");
-        assert!(
-            !wsl.path("profile/b.tgz").exists(),
-            "the run's own tarball is removed"
-        );
+        let laptop = Laptop::new("free", "free 50");
+        assert_eq!(laptop.ready(), Ok(Ready::Go(Vec::new())));
     }
 
     #[test]
-    fn zeewin2s_floor_is_fifty_gib_of_its_c_drive() {
-        let Reach::Wsl(wsl) = Machine::named("zeewin2").unwrap().reach else {
-            panic!("zeewin2 is reached through WSL");
-        };
-        assert_eq!(wsl.floor_gib, 50);
-        let line = Machine::named("zeewin2").unwrap().run_line("QUJD", "b.tgz");
+    fn a_zeewin2_that_does_not_say_its_disk_cannot_be_sent_a_run() {
+        let laptop = Laptop::new("free", "none");
+        let refused = laptop.ready().unwrap_err();
         assert!(
-            line.contains("set -- $(df -P -k '/mnt/c/Users/AGV' | tail -n 1); if [ \"${4:-0}\" -lt 52428800 ]; then"),
-            "{line}"
+            refused.starts_with("zeewin2 did not say what it has free (ssh ended with status 255"),
+            "{refused}"
         );
-    }
-
-    #[test]
-    fn the_stop_and_the_listing_go_whoever_holds_the_machine() {
-        let wsl = Wsl::new();
-        fs::create_dir(wsl.path("home/.compile-lock")).unwrap();
-        let ran = wsl.run(&wsl.machine.line("QUJD"));
-        assert_eq!(ran.code, 7);
-        assert!(wsl.path("said").exists());
+        let laptop = Laptop::new("free", "it is Sunday");
+        assert_eq!(
+            laptop.ready(),
+            Err("zeewin2 did not say what it has free: \"it is Sunday\\n\"".into())
+        );
     }
 
     #[test]
     fn the_default_is_zeewin2_while_it_is_free_and_says_so() {
-        let wsl = Wsl::new();
-        let (chosen, said) = wsl.choose(&wsl.context(None));
-        assert_eq!(chosen, "zeewin2");
-        assert_eq!(said, "windows: on zeewin2\n");
-    }
-
-    #[test]
-    fn the_default_is_zeewin_while_poker_lab_holds_zeewin2() {
-        let wsl = Wsl::new();
-        fs::create_dir(wsl.path("home/.compile-lock")).unwrap();
-        let (chosen, said) = wsl.choose(&wsl.context(None));
-        assert_eq!(chosen, "zeewin");
+        let laptop = Laptop::new("free", "free 614");
         assert_eq!(
-            said,
-            "windows: on zeewin, as zeewin2 is not free: poker-lab's job holds it (~/.compile-lock)\n"
+            laptop.choose(),
+            ("zeewin2".into(), "windows: on zeewin2\n".into())
         );
-        assert!(
-            wsl.path("home/.compile-lock").is_dir(),
-            "the lock is left as it was"
-        );
-    }
-
-    #[test]
-    fn the_default_is_zeewin_while_a_run_holds_zeewin2s_copy() {
-        let wsl = Wsl::new();
-        let copy = wsl.path("profile/consensflow-build");
-        fs::create_dir(&copy).unwrap();
-        fs::write(copy.join(OWNER), "0000beef-00000001\n4242\n").unwrap();
-        let (chosen, said) = wsl.choose(&wsl.context(None));
-        assert_eq!(chosen, "zeewin");
+        let laptop = Laptop::new("none", "free 614");
         assert_eq!(
-            said,
-            "windows: on zeewin, as zeewin2 is not free: a run goes on there\n"
+            laptop.choose().0,
+            "zeewin2",
+            "an Ubuntu that is down holds nothing"
         );
     }
 
     #[test]
-    fn the_default_is_zeewin_while_zeewin2_is_short_of_disk() {
-        let wsl = Wsl::new().short_of_disk();
-        let (chosen, said) = wsl.choose(&wsl.context(None));
+    fn the_default_is_zeewin_while_zeewin2_is_not_free_and_says_why() {
+        for (zeelin, zeewin2, why) in [
+            (
+                "held",
+                "free 614",
+                "zeewin2 is busy: poker-lab's job holds it (~/.compile-lock/owner on zeelin), and no run goes while it does.",
+            ),
+            (
+                "free",
+                "free 30",
+                "zeewin2 is short of disk: a run needs 50 GiB free there, and it has 30.",
+            ),
+            ("free", "free 614\\nrun", "a run goes on there"),
+        ] {
+            let laptop = Laptop::new(zeelin, zeewin2);
+            assert_eq!(
+                laptop.choose(),
+                (
+                    "zeewin".into(),
+                    format!("windows: on zeewin, as zeewin2 is not free: {why}\n")
+                ),
+                "{zeelin} {zeewin2}"
+            );
+        }
+        let laptop = Laptop::new("free", "none");
+        let (chosen, said) = laptop.choose();
         assert_eq!(chosen, "zeewin");
-        let why = said
-            .strip_prefix("windows: on zeewin, as zeewin2 is not free: it has ")
-            .unwrap_or_else(|| panic!("{said}"));
         assert!(
-            why.ends_with(" GiB free, and a run needs 1073741824\n"),
+            said.starts_with("windows: on zeewin, as zeewin2 is not free: zeewin2 did not say what it has free (ssh ended with status 255"),
             "{said}"
         );
     }
 
     #[test]
-    fn the_default_is_zeewin_when_zeewin2_does_not_answer() {
-        let wsl = Wsl::new();
-        let (chosen, said) = wsl.choose(&wsl.context(Some(255)));
-        assert_eq!(chosen, "zeewin");
+    fn zeelin_is_asked_of_the_owner_file_and_nothing_else() {
+        let laptop = Laptop::new("free", "free 614");
+        laptop.ready().unwrap();
+        let log = fs::read_to_string(laptop.bin.path().join("log")).unwrap();
         assert_eq!(
-            said,
-            "windows: on zeewin, as zeewin2 is not free: it did not answer (ssh ended with status 255)\n"
+            log.lines().next().unwrap(),
+            "zeelin\tif [ -e ~/.compile-lock/owner ]; then echo held; else echo free; fi"
         );
     }
 }

@@ -1,41 +1,48 @@
-//! The Windows machines a run can go to, and how ssh reaches the PowerShell of each.
+//! The Windows machines a run can go to. Both are reached alike: Windows' own OpenSSH server,
+//! whose default shell is Windows PowerShell 5.1 and whose login folder is the profile, so ssh
+//! hands each the line `powershell -NoProfile -NonInteractive -EncodedCommand …` and what scp
+//! sends to a name lands in the profile, beside the copy.
 //!
-//! - **zeewin** (`ssh zeewin`, user `ngvoi`): Windows' own OpenSSH server, whose default shell
-//!   is PowerShell and whose login folder is the profile. ssh hands it the line
-//!   `powershell -NoProfile -NonInteractive -EncodedCommand …`, and what scp sends to a name
-//!   lands in the profile. A machine named by `--host` is reached the same way.
-//! - **zeewin2** (`ssh zeewin2`, Gabriel's laptop `DESKTOP-HK83944`, user `zee`): ssh lands in
-//!   Ubuntu in WSL2 on that Windows, which has no SSH server of its own. WSL's interop starts
-//!   Windows' programs from Linux, so the line is a shell's there: it goes to the profile
-//!   (`C:\Users\AGV`, which WSL has at `/mnt/c/Users/AGV`) and starts Windows' PowerShell by its
-//!   path, which runs as the user who is signed in at the desktop. scp sends to that folder by
-//!   its WSL path, so the tarball is where the bootstrap looks for it, beside the copy
-//!   (`C:\Users\AGV\consensflow-build`, on the Windows disk: never WSL's own, which Windows
-//!   reads through a network share). Measured there on 2026-10-25: the status PowerShell ends
-//!   with comes back as ssh's (`exit 7` is 7, where zeewin's shell makes it 1; the `== exit N`
-//!   line is read either way), and a PowerShell goes on when its ssh is killed, as on zeewin,
-//!   so a stop ends it there the same way.
+//! - **zeewin** (`ssh zeewin`, 10.6.0.10, user `ngvoi`): the old PC, 7 GB of memory. A machine
+//!   named by `--host` is reached as it is.
+//! - **zeewin2** (`ssh zeewin2`, 10.6.0.6 port 2222, user `AGV`): Gabriel's laptop
+//!   (`DESKTOP-HK83944`, 16 threads, 31 GB), its copy `C:\Users\AGV\consensflow-build`. Its runs
+//!   put CI's Node (`C:\Users\AGV\cf-tools\node`) first on PATH, not the laptop's own. Its ssh
+//!   session has the user's full administrator token and `SeDebugPrivilege` enabled, as zeewin's
+//!   has: the scripts are the same on both and rely on nothing either lacks.
 //!
-//! zeewin2 is poker-lab's machine too, and its jobs hold `~/.compile-lock` (a folder, in WSL)
-//! while they run. A run neither takes it nor waits on it: a run whose line finds it there ends
-//! at once with 75, as the machine's own lock refuses a run (its tarball removed, nothing
-//! started), and the default ([`choose`]) goes to zeewin then. A poker-lab job that starts while
-//! a run goes on is not seen: it is poker-lab's lock, which a run does not hold.
+//! The laptop is poker-lab's too: its jobs hold `~/.compile-lock` (with an `owner` file in it)
+//! in the laptop's Ubuntu, `zeelin` (10.6.0.6 port 22, in WSL2), while they run. So before a run
+//! is sent there zeelin is asked, with a short timeout ([`ZEELIN_TIMEOUT_S`]), whether the owner
+//! file is there: a run that finds it ends at once with 75, as the machine's own lock refuses a
+//! run, having sent nothing. A zeelin that does not answer is an Ubuntu that is not running, and
+//! no poker-lab job can hold a lock in it: that is said, and the run goes on. A run neither takes
+//! the lock nor waits on it, and a poker-lab job that starts while a run goes on is not seen.
 //!
-//! zeewin2 is Gabriel's laptop, whose C: holds his own files and WSL's disk: a run there starts
-//! only while that disk has [`FLOOR_GIB`] free, and is refused with 75 the same way below it.
+//! The laptop's C: holds Gabriel's own files and WSL's disk: a run there is sent only while its
+//! profile's disk has [`FLOOR_GIB`] free, as the laptop's PowerShell says it, and is refused with
+//! 75 below it.
 //!
 //! The default, where neither `--machine` nor `--host` is given, is zeewin2 while it is free
-//! (it answers, poker-lab does not hold it, no run of this runner holds its copy, and its disk has
-//! the floor free), and else zeewin, which is slower (7 GB of memory to zeewin2's 31).
+//! (poker-lab does not hold it, its disk has the floor free, and no run of this runner holds its
+//! copy), and else zeewin.
 
-use super::script::OWNER;
+use super::script::{encode_script, OWNER};
 use crate::context::Context;
 use crate::dispatch::Console;
 use crate::process::{self, Invocation};
 
 /// The machines `--machine` names.
 pub const NAMES: [&str; 2] = ["zeewin2", "zeewin"];
+
+/// How much of zeewin2's C: must be free for a run to be sent, in GiB. It is Gabriel's laptop,
+/// and a run's build is tens of GB (zeewin's build folder held 64 GB of `debug` a day after it was
+/// emptied, 2026-10-25): a run that filled the disk would stop the laptop, and poker-lab's jobs,
+/// whose WSL disk grows on the same C:.
+const FLOOR_GIB: u64 = 50;
+
+/// How long zeelin is waited on to answer, in seconds: it answers only while WSL runs.
+pub const ZEELIN_TIMEOUT_S: u32 = 5;
 
 /// A Windows machine, as a run reaches it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,39 +51,22 @@ pub struct Machine {
     pub name: String,
     /// The ssh host it is.
     pub host: String,
-    /// How ssh reaches its PowerShell.
-    pub reach: Reach,
-}
-
-/// How ssh reaches the machine's PowerShell.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Reach {
-    /// Windows' own SSH server, whose shell is PowerShell and whose login folder is the profile.
-    OpenSsh,
-    /// Linux in WSL on the machine, which starts Windows' programs (WSL's interop).
-    Wsl(Wsl),
-}
-
-/// Where a machine reached through WSL keeps what a run needs, as WSL's shell names it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Wsl {
-    /// The Windows profile (`%USERPROFILE%`), where the copy and the tarballs are.
-    pub profile: String,
-    /// Windows' PowerShell.
-    pub powershell: String,
-    /// What, under the WSL user's home, says that another project's job (poker-lab's) holds the machine.
-    pub busy: String,
-    /// The Node the runs use (PowerShell's words): the machine's own in Program Files is not CI's.
+    /// The folder of the Node a run puts first on its PATH, in PowerShell's words.
     pub node: String,
-    /// How much of the profile's disk must be free for a run to start, in GiB.
+    /// What a run must find before it is sent, on a machine that is not the runner's alone.
+    pub shared: Option<Shared>,
+}
+
+/// A machine another project uses too, and whose disk is its owner's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shared {
+    /// The ssh host of the Linux beside it, where the other project's lock is.
+    pub linux: String,
+    /// The file, from that Linux user's home, that says the other project's job holds the machine.
+    pub lock: String,
+    /// How much of the profile's disk must be free for a run to be sent, in GiB.
     pub floor_gib: u64,
 }
-
-/// How much of zeewin2's C: must be free for a run to start, in GiB. It is Gabriel's laptop, and
-/// a run's build is tens of GB (zeewin's build folder held 64 GB of `debug` a day after it was
-/// emptied, 2026-10-25): a run that filled the disk would stop the laptop and poker-lab's jobs
-/// with it, whose WSL disk grows on the same C:.
-const FLOOR_GIB: u64 = 50;
 
 /// Node's folder on a machine whose Node is the one in Program Files.
 const PROGRAM_FILES_NODE: &str = r"C:\Program Files\nodejs";
@@ -85,137 +75,190 @@ impl Machine {
     /// The machine `--machine` calls `name`, if it is one.
     pub fn named(name: &str) -> Option<Self> {
         match name {
-            "zeewin" => Some(zeewin()),
-            "zeewin2" => Some(zeewin2()),
+            "zeewin" => Some(Self::at("zeewin")),
+            "zeewin2" => Some(Self {
+                name: name.into(),
+                host: name.into(),
+                node: r"$env:USERPROFILE\cf-tools\node".into(),
+                shared: Some(Shared {
+                    linux: "zeelin".into(),
+                    lock: ".compile-lock/owner".into(),
+                    floor_gib: FLOOR_GIB,
+                }),
+            }),
             _ => None,
         }
     }
 
-    /// The machine `--host` names: one that Windows' own SSH server is, as zeewin.
+    /// The machine `--host` names, reached as zeewin is.
     pub fn at(host: &str) -> Self {
         Self {
             name: host.into(),
             host: host.into(),
-            reach: Reach::OpenSsh,
+            node: PROGRAM_FILES_NODE.into(),
+            shared: None,
         }
     }
 
-    /// The line ssh hands the machine for the PowerShell script `encoded` (`-EncodedCommand`'s).
-    pub fn line(&self, encoded: &str) -> String {
-        match &self.reach {
-            Reach::OpenSsh => {
-                format!("powershell -NoProfile -NonInteractive -EncodedCommand {encoded}")
-            }
-            Reach::Wsl(wsl) => format!(
-                "cd {} && exec {} -NoProfile -NonInteractive -EncodedCommand {encoded}",
-                sh_quoted(&wsl.profile),
-                sh_quoted(&wsl.powershell)
-            ),
-        }
+    /// Whether a run may be sent now, for the copy `dir`: on a machine the runner shares, why
+    /// not if it may not ([`Ready::Refused`], which the run ends with 75), and what was found
+    /// that the person is told of if it may. A machine that could not be asked is the error.
+    pub fn ready(&self, context: &Context, dir: &str) -> Result<Ready, String> {
+        Ok(self.look(context, dir)?.0)
     }
 
-    /// The line that starts a run, whose tarball was sent as `upload`: [`Machine::line`], but
-    /// on a machine reached through WSL, a run refused (75, its tarball removed, nothing started)
-    /// while another project holds it or while its disk has less than the floor free.
-    pub fn run_line(&self, encoded: &str, upload: &str) -> String {
-        let line = self.line(encoded);
-        match &self.reach {
-            Reach::OpenSsh => line,
-            Reach::Wsl(wsl) => {
-                let said = format!(
-                    "{} is busy: poker-lab's job holds it (~/{}), and no run goes while it does.",
-                    self.name, wsl.busy
-                );
-                let short = format!(
-                    "{} is short of disk: a run needs {} GiB free there, and no run goes until it has them.",
-                    self.name, wsl.floor_gib
-                );
-                format!(
-                    "if [ -e \"$HOME\"/{busy} ]; then rm -f -- {tarball}; printf '%s\\n' {said} '' '== exit 75'; exit 75; fi; \
-                     {free}; if [ \"${{4:-0}}\" -lt {floor} ]; then rm -f -- {tarball}; printf '%s\\n' {short} \"($(( ${{4:-0}} / 1048576 )) GiB free)\" '' '== exit 75'; exit 75; fi; {line}",
-                    busy = sh_quoted(&wsl.busy),
-                    tarball = sh_quoted(&format!("{}/{upload}", wsl.profile)),
-                    said = sh_quoted(&said),
-                    free = free_kib(wsl),
-                    floor = wsl.floor_gib * 1024 * 1024,
-                    short = sh_quoted(&short),
-                )
-            }
-        }
-    }
-
-    /// Where scp sends a file that the scripts find in the profile as `name`.
-    pub fn in_profile(&self, name: &str) -> String {
-        match &self.reach {
-            Reach::OpenSsh => format!("{}:{name}", self.host),
-            Reach::Wsl(wsl) => format!("{}:{}/{name}", self.host, wsl.profile),
-        }
-    }
-
-    /// The folder of the Node a run puts first on its PATH, in PowerShell's words.
-    pub fn node(&self) -> &str {
-        match &self.reach {
-            Reach::OpenSsh => PROGRAM_FILES_NODE,
-            Reach::Wsl(wsl) => &wsl.node,
-        }
-    }
-
-    /// Whether a run in the copy `dir` may go to this machine now, as far as can be told before
-    /// it is sent: a machine reached through WSL is asked; one that is not answers for itself
-    /// when the run asks for its lock.
-    fn free(&self, context: &Context, dir: &str) -> Free {
-        let Reach::Wsl(wsl) = &self.reach else {
-            return Free::Yes;
+    /// [`Machine::ready`], and whether a run of this runner holds the copy (none is known of a
+    /// machine the runner does not share, or that is refused).
+    fn look(&self, context: &Context, dir: &str) -> Result<(Ready, bool), String> {
+        let Some(shared) = &self.shared else {
+            return Ok((Ready::Go(Vec::new()), false));
         };
+        let mut said = Vec::new();
+        match lock_of(context, shared) {
+            Lock::Held => {
+                let why = format!(
+                    "{} is busy: poker-lab's job holds it (~/{} on {}), and no run goes while it does.",
+                    self.name, shared.lock, shared.linux
+                );
+                return Ok((Ready::Refused(why), false));
+            }
+            Lock::Free => {}
+            Lock::NoAnswer(why) => said.push(format!(
+                "{} did not answer ({why}), so Ubuntu is not running there and no poker-lab job can hold its lock: going on",
+                shared.linux
+            )),
+        }
+        let state = self.state(context, dir)?;
+        if state.free_gib < shared.floor_gib {
+            let why = format!(
+                "{} is short of disk: a run needs {} GiB free there, and it has {}.",
+                self.name, shared.floor_gib, state.free_gib
+            );
+            return Ok((Ready::Refused(why), false));
+        }
+        Ok((Ready::Go(said), state.running))
+    }
+
+    /// What the machine says of its profile's disk and of a run in the copy `dir`.
+    fn state(&self, context: &Context, dir: &str) -> Result<State, String> {
+        let script = state_script(dir);
         let line = format!(
-            "{}; if [ -e \"$HOME\"/{} ]; then echo busy; elif [ -e {} ]; then echo run; elif [ \"${{4:-0}}\" -lt {} ]; then echo short $(( ${{4:-0}} / 1048576 )); else echo free; fi",
-            free_kib(wsl),
-            sh_quoted(&wsl.busy),
-            sh_quoted(&format!("{}/{dir}/{OWNER}", wsl.profile)),
-            wsl.floor_gib * 1024 * 1024
+            "powershell -NoProfile -NonInteractive -EncodedCommand {}",
+            encode_script(&script).map_err(|refusal| refusal.to_string())?
         );
         let asked = Invocation::new("ssh", &context.root)
             .arg(&self.host)
             .arg(line);
-        match process::capture(&asked, &context.env) {
-            Ok(answer) if answer.code == 0 => match answer.stdout.trim() {
-                "free" => Free::Yes,
-                "busy" => Free::No(format!("poker-lab's job holds it (~/{})", wsl.busy)),
-                "run" => Free::No("a run goes on there".into()),
-                said => match said.strip_prefix("short ") {
-                    Some(gib) => Free::No(format!(
-                        "it has {gib} GiB free, and a run needs {}",
-                        wsl.floor_gib
-                    )),
-                    None => Free::No(format!("it answered {said:?}")),
-                },
-            },
-            Ok(answer) => Free::No(format!(
-                "it did not answer (ssh ended with status {})",
-                answer.code
-            )),
-            Err(failure) => Free::No(format!("it could not be asked: {failure}")),
+        let answer =
+            process::capture(&asked, &context.env).map_err(|failure| failure.to_string())?;
+        if answer.code != 0 {
+            return Err(format!(
+                "{} did not say what it has free (ssh ended with status {}{})",
+                self.name,
+                answer.code,
+                said_as(&answer.stderr)
+            ));
+        }
+        State::read(&answer.stdout).ok_or_else(|| {
+            format!(
+                "{} did not say what it has free: {:?}",
+                self.name, answer.stdout
+            )
+        })
+    }
+
+    /// Whether this machine is free for a run in the copy `dir`: [`Machine::ready`], and no run of
+    /// this runner holding its copy.
+    fn free(&self, context: &Context, dir: &str) -> Free {
+        match self.look(context, dir) {
+            Ok((Ready::Go(_), false)) => Free::Yes,
+            Ok((Ready::Go(_), true)) => Free::No("a run goes on there".into()),
+            Ok((Ready::Refused(why), _)) | Err(why) => Free::No(why),
         }
     }
 }
 
-/// zeewin, through Windows' own SSH server.
-fn zeewin() -> Machine {
-    Machine::at("zeewin")
+/// Whether a run may be sent to a machine now.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Ready {
+    /// It may: with what is to be said of it on the error stream.
+    Go(Vec<String>),
+    /// It may not, and why: the run ends with 75, having sent nothing.
+    Refused(String),
 }
 
-/// zeewin2, through WSL on it.
-fn zeewin2() -> Machine {
-    Machine {
-        name: "zeewin2".into(),
-        host: "zeewin2".into(),
-        reach: Reach::Wsl(Wsl {
-            profile: "/mnt/c/Users/AGV".into(),
-            powershell: "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe".into(),
-            busy: ".compile-lock".into(),
-            node: r"$env:USERPROFILE\cf-tools\node".into(),
-            floor_gib: FLOOR_GIB,
-        }),
+/// What the other project's lock is, as its Linux says.
+#[derive(Debug, PartialEq, Eq)]
+enum Lock {
+    Held,
+    Free,
+    /// The Linux did not answer, and why: it is not running.
+    NoAnswer(String),
+}
+
+/// Asks `shared`'s Linux whether its lock is held, waiting [`ZEELIN_TIMEOUT_S`] for it.
+fn lock_of(context: &Context, shared: &Shared) -> Lock {
+    let timeout = format!("ConnectTimeout={ZEELIN_TIMEOUT_S}");
+    let asked = Invocation::new("ssh", &context.root)
+        .args(["-o", &timeout, "-o", "BatchMode=yes"])
+        .args(["-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=1"])
+        .arg(&shared.linux)
+        .arg(format!(
+            "if [ -e ~/{} ]; then echo held; else echo free; fi",
+            shared.lock
+        ));
+    match process::capture(&asked, &context.env) {
+        Ok(answer) if answer.code == 0 => match answer.stdout.trim() {
+            "held" => Lock::Held,
+            "free" => Lock::Free,
+            said => Lock::NoAnswer(format!("it said {said:?}")),
+        },
+        Ok(answer) => Lock::NoAnswer(format!(
+            "ssh ended with status {}{}",
+            answer.code,
+            said_as(&answer.stderr)
+        )),
+        Err(failure) => Lock::NoAnswer(failure.to_string()),
+    }
+}
+
+/// What a machine said of itself.
+#[derive(Debug, PartialEq, Eq)]
+struct State {
+    /// What its profile's disk has free, in whole GiB.
+    free_gib: u64,
+    /// Whether a run of this runner holds the copy (its owner file is there).
+    running: bool,
+}
+
+impl State {
+    /// The state `text` says: a line `free N`, and a line `run` if a run holds the copy.
+    fn read(text: &str) -> Option<Self> {
+        let free_gib = text
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("free ")?.trim().parse().ok())?;
+        let running = text.lines().any(|line| line.trim() == "run");
+        Some(Self { free_gib, running })
+    }
+}
+
+/// The script that says what the machine's profile's disk has free (`free N`, whole GiB) and, if
+/// a run holds the copy `dir` (its owner file, [`OWNER`], is there), `run`.
+pub fn state_script(dir: &str) -> String {
+    format!(
+        "$ProgressPreference = 'SilentlyContinue'\n\
+         \"free $([math]::Floor((Get-Item $env:USERPROFILE).PSDrive.Free / 1GB))\"\n\
+         if (Test-Path -LiteralPath (Join-Path (Join-Path $env:USERPROFILE '{dir}') '{OWNER}')) {{ 'run' }}\n"
+    )
+}
+
+/// What a program said on its error stream, after a colon, or nothing.
+fn said_as(stderr: &str) -> String {
+    let said = stderr.trim();
+    if said.is_empty() {
+        String::new()
+    } else {
+        format!(": {said}")
     }
 }
 
@@ -230,7 +273,10 @@ enum Free {
 /// zeewin, whatever it is (it refuses a run itself while one goes on). Which, and why, is said on
 /// the error stream.
 pub fn choose(context: &Context, dir: &str, console: &mut Console) -> std::io::Result<Machine> {
-    choose_between(context, dir, zeewin2(), zeewin(), console)
+    let (Some(first), Some(other)) = (Machine::named("zeewin2"), Machine::named("zeewin")) else {
+        return Err(std::io::Error::other("the machines are not named"));
+    };
+    choose_between(context, dir, first, other, console)
 }
 
 /// [`choose`] between `first`, if it is free, and `other`.
@@ -247,17 +293,6 @@ fn choose_between(
     };
     writeln!(console.err, "windows: on {}{why}", machine.name)?;
     Ok(machine)
-}
-
-/// The shell's words that set `$4` to the KiB free on the disk of `wsl`'s profile, as `df -P -k`
-/// says it (its last line: the file system, its size, what is used, what is free).
-fn free_kib(wsl: &Wsl) -> String {
-    format!("set -- $(df -P -k {} | tail -n 1)", sh_quoted(&wsl.profile))
-}
-
-/// `text` as a POSIX shell takes it between single quotes.
-fn sh_quoted(text: &str) -> String {
-    format!("'{}'", text.replace('\'', r"'\''"))
 }
 
 #[cfg(test)]

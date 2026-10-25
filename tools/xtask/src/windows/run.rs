@@ -15,7 +15,7 @@
 //! started ends nothing there, for nothing has started.
 
 use super::interrupt::Interrupt;
-use super::machine::Machine;
+use super::machine::{Machine, Ready};
 use super::options::Options;
 use super::script::{
     command_line, encode_script, remote_script, run_id, run_script, stop_script, upload_name,
@@ -62,22 +62,28 @@ impl Plan {
             steps,
             command: &command,
             env: &options.env,
-            node: machine.node(),
+            node: &machine.node,
         };
         let upload = upload_name(&options.dir, id);
         Ok(Self {
-            run: machine.run_line(&encode_script(&remote_script(&script))?, &upload),
+            run: powershell(&remote_script(&script))?,
             script: run_script(&script),
-            stop: powershell(machine, &stop_script(&options.dir, id))?,
-            upload: machine.in_profile(&upload),
+            stop: powershell(&stop_script(&options.dir, id))?,
+            upload: format!("{}:{upload}", machine.host),
         })
     }
 }
 
-/// The line ssh hands `machine`'s shell for `script`.
-pub(super) fn powershell(machine: &Machine, script: &str) -> Result<String, Refusal> {
-    Ok(machine.line(&encode_script(script)?))
+/// The line ssh hands the machine's shell for `script`.
+pub(super) fn powershell(script: &str) -> Result<String, Refusal> {
+    Ok(format!(
+        "powershell -NoProfile -NonInteractive -EncodedCommand {}",
+        encode_script(script)?
+    ))
 }
+
+/// The status of a run the machine could not take now, as its own lock refuses one.
+const REFUSED: i32 = 75;
 
 /// Whether the script a run makes can be sent: the refusal that says why not, before a run
 /// starts and before a machine is chosen. What goes on the line, the bootstrap and the stop, is
@@ -102,6 +108,21 @@ pub fn run(
 ) -> Result<Outcome, Error> {
     let id = run_id();
     let plan = Plan::new(machine, options, &id)?;
+    // A machine the runner shares is asked first, and a run it may not take now is not sent.
+    match machine
+        .ready(context, &options.dir)
+        .map_err(Error::Unready)?
+    {
+        Ready::Refused(why) => {
+            writeln!(console.out, "{why}").map_err(Error::Output)?;
+            return Ok(Outcome::Exited(REFUSED));
+        }
+        Ready::Go(said) => {
+            for line in said {
+                writeln!(console.err, "windows: {line}").map_err(Error::Output)?;
+            }
+        }
+    }
     let scratch = tempfile::tempdir().map_err(Error::Scratch)?;
 
     // A stop is looked for after each step, before what it says is: a Ctrl-C ends

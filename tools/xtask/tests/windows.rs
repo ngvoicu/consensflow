@@ -693,23 +693,6 @@ fn live_on() -> [String; 2] {
     }
 }
 
-/// What ssh hands the live case's machine for the PowerShell `script`: the script itself where
-/// the SSH server's shell is PowerShell, and on zeewin2, whose ssh lands in WSL, Windows'
-/// PowerShell started from the profile with the script encoded.
-#[cfg(unix)]
-fn powershell_line(script: &str) -> String {
-    use base64::Engine;
-
-    if live_machine().as_deref() != Some("zeewin2") {
-        return script.to_owned();
-    }
-    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    format!(
-        "cd /mnt/c/Users/AGV && exec /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -NonInteractive -EncodedCommand {}",
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    )
-}
-
 /// A checkout for a run on the real machine, committed, with a marker only it holds and
 /// a batch file that says it and then holds the machine's lock for about 20 seconds.
 /// Its commit is the second answer.
@@ -802,12 +785,12 @@ fn live_start(tree: &tempfile::TempDir, folder: &str, command: &[&str]) -> std::
         .unwrap()
 }
 
-/// `script` run on the machine by its PowerShell ([`powershell_line`]).
+/// `script` run on the machine, as the shell of its ssh server runs it (PowerShell).
 #[cfg(unix)]
 fn on_the_machine(script: &str) -> String {
     let ran = Command::new("ssh")
         .arg(live_host())
-        .arg(powershell_line(script))
+        .arg(script)
         .output()
         .unwrap();
     assert!(ran.status.success(), "ssh: {}{}", out(&ran), err(&ran));
@@ -825,9 +808,9 @@ impl Drop for Folder {
         let folder = &self.0;
         let _ = Command::new("ssh")
             .arg(live_host())
-            .arg(powershell_line(&format!(
+            .arg(format!(
                 "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $env:USERPROFILE '{folder}'), (Join-Path $env:USERPROFILE '{folder}.*tgz')"
-            )))
+            ))
             .output();
     }
 }

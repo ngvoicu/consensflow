@@ -112,7 +112,7 @@ fn bring_back(
     options: &Options,
     console: &mut Console,
 ) -> Result<(), Error> {
-    let line = run::powershell(machine, &reports_script(&options.dir))?;
+    let line = run::powershell(&reports_script(&options.dir))?;
     let listed = process::capture(&run::ssh(context, &machine.host, &line), &context.env)?;
     if listed.code != 0 {
         writeln!(
@@ -216,7 +216,10 @@ fn fetch(
     let part = partial(to);
     let scp = Invocation::new("scp", &context.root)
         .arg("-q")
-        .arg(machine.in_profile(&format!("{}/evals/reports/{}", options.dir, file.name)))
+        .arg(format!(
+            "{}:{}/evals/reports/{}",
+            machine.host, options.dir, file.name
+        ))
         .arg(&part);
     let copied = process::capture(&scp, &context.env).map_err(|failure| failure.to_string())?;
     let result = if copied.code != 0 {

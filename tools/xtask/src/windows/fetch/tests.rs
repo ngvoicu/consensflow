@@ -40,7 +40,7 @@ case "$2" in
     if grep -qx "$rel" "$CF_FAIL" 2>/dev/null; then echo "scp: no such file" >&2; exit 4; fi
     cp "$CF_REMOTE/$rel" "$3" ;;
   zeewin2:*)
-    cp "$CF_REMOTE/${2#zeewin2:/mnt/c/Users/AGV/consensflow-build/evals/reports/}" "$3" ;;
+    cp "$CF_REMOTE/${2#zeewin2:consensflow-build/evals/reports/}" "$3" ;;
   *) cp "$2" "$CF_TARBALL" ;;
 esac"#;
 
@@ -301,7 +301,7 @@ fn walk(folder: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
-fn zeewin2s_reports_are_listed_through_wsl_and_copied_from_its_windows_profile() {
+fn zeewin2s_reports_are_listed_and_copied_from_its_profile_as_zeewins_are() {
     let rig = Rig::new();
     rig.remote("2026-10-25T13-00-00-000Z-round-trip-1.json", "{}");
     rig.lists(&[("2026-10-25T13-00-00-000Z-round-trip-1.json", 2)]);
@@ -316,7 +316,7 @@ fn zeewin2s_reports_are_listed_through_wsl_and_copied_from_its_windows_profile()
     let log = rig.log();
     let line = fs::read_to_string(rig.bin.path().join("line")).unwrap();
     assert!(
-        line.starts_with("zeewin2 cd '/mnt/c/Users/AGV' && exec '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe' -NoProfile -NonInteractive -EncodedCommand "),
+        line.starts_with("zeewin2 powershell -NoProfile -NonInteractive -EncodedCommand "),
         "{line}"
     );
     let scp: Vec<&str> = log[1].split('\t').collect();
@@ -324,7 +324,7 @@ fn zeewin2s_reports_are_listed_through_wsl_and_copied_from_its_windows_profile()
         scp[..2],
         [
             "scp",
-            "zeewin2:/mnt/c/Users/AGV/consensflow-build/evals/reports/2026-10-25T13-00-00-000Z-round-trip-1.json"
+            "zeewin2:consensflow-build/evals/reports/2026-10-25T13-00-00-000Z-round-trip-1.json"
         ]
     );
 }

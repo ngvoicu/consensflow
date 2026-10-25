@@ -4,8 +4,8 @@
 //!
 //! `--machine zeewin2|zeewin` names the machine, `--host` any ssh host that is reached
 //! as zeewin is, and with neither the run goes to zeewin2 while it is free and else to
-//! zeewin ([`machine`]: zeewin2 is a laptop whose ssh lands in WSL, its PowerShell
-//! started through WSL's interop, and poker-lab's jobs hold it at times). Each machine
+//! zeewin ([`machine`]: zeewin2 is Gabriel's laptop, and poker-lab's jobs hold it at times,
+//! which its Ubuntu beside it says; it is asked before a run is sent). Each machine
 //! is its own copy and its own lock: what follows holds on each.
 //!
 //! `windows` runs a command on a Windows machine, over SSH, on this working tree
@@ -137,8 +137,7 @@
 //! cargo xtask windows --host <ssh host> --env CONSENSFLOW_TEST_DAEMON=native -- cargo xtask eval ...
 //! ```
 //!
-//! The machine needs an OpenSSH server (or, as zeewin2, WSL's ssh and interop), Node, Rust,
-//! git and Windows' own
+//! The machine needs an OpenSSH server, Node, Rust, git and Windows' own
 //! `tar.exe` (System32's, which the script names by its path); the folder is `%USERPROFILE%\consensflow-build` unless `--dir`
 //! names another under it. Run one at a time: a live run's windows are the
 //! machine's.
@@ -269,6 +268,9 @@ pub enum Error {
     },
     #[error("could not wait for ssh: {0}")]
     Wait(io::Error),
+    /// The machine could not be asked whether a run may go to it now.
+    #[error("{0}")]
+    Unready(String),
 }
 
 impl Error {

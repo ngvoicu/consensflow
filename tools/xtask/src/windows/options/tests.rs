@@ -1,5 +1,4 @@
 use super::*;
-use crate::windows::machine::Reach;
 use crate::windows::testing::strings;
 
 fn words(line: &str) -> Vec<OsString> {
@@ -29,10 +28,7 @@ fn a_host_and_a_command_are_all_a_run_needs_and_the_rest_is_the_usual() {
 fn a_machine_is_named_or_a_host_given_and_with_neither_the_default_is_chosen_when_the_run_goes() {
     let named = run("--machine zeewin2 -- cargo test").unwrap();
     assert_eq!(named.machine, Machine::named("zeewin2"));
-    assert!(matches!(
-        named.machine.map(|machine| machine.reach),
-        Some(Reach::Wsl(_))
-    ));
+    assert!(named.machine.and_then(|machine| machine.shared).is_some());
     assert_eq!(
         run("--machine=zeewin -- x").unwrap().machine,
         Some(Machine::at("zeewin"))
