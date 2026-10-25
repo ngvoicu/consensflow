@@ -7,6 +7,7 @@
 [run]
 # The check, as the CLI's suite runs it: the repository's own files, read as they are.
 off-node = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "off_node"]
+e2e-lib-checkout = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "checkout::"]
 
 [[plant]]
 name = "off node: the OpenCode plugin imports a host library of Node's that is gone"
@@ -47,3 +48,26 @@ runs = ["off-node"]
 file = "crates/cf-e2e/tests/cli/off_node.rs"
 find = 'const ROOTS: [&str; 4] = ["tests", "app/tests", "app/scripts", "hosts"];'
 replace = 'const ROOTS: [&str; 3] = ["tests", "app/tests", "app/scripts"];'
+
+# T-71 / T-118: a copy without git (the commit gate's export) holds links to folders
+# (`node_modules`, `app/.cache`); the walk lists each as the link and no look reads through one.
+
+[[plant]]
+name = "off node: a link to a folder is read as the file it points at"
+meant = "a_link_to_a_folder_in_a_copy_without_git_is_listed_as_the_link_and_not_read"
+runs = ["off-node"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/cli/off_node.rs"
+find = "        if !checkout::is_plain_file(&under(root, file)) {"
+replace = "        if false {"
+
+[[plant]]
+name = "off node: a plain file is taken for one that a link to a folder is too"
+meant = "a_plain_file_is_neither_a_folder_nor_a_link_to_one_nor_to_a_file_nor_a_broken_link"
+runs = ["e2e-lib-checkout"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/checkout.rs"
+find = "    fs::symlink_metadata(path).is_ok_and(|kind| kind.is_file())"
+replace = "    path.is_file()"

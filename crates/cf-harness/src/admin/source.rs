@@ -92,16 +92,22 @@ fn npm_package(harness: Harness) -> Option<&'static str> {
     }
 }
 
-/// A harness's own installer (`OWN_INSTALLER`): the folder it puts the CLI
-/// in, as a part of a path written with `/`, and the arguments of the
-/// command that updates it. Claude's is told apart another way.
-fn own_installer(harness: Harness) -> Option<(&'static str, &'static [&'static str])> {
+/// A harness's own installer (`OWN_INSTALLER`): the folders it puts the CLI
+/// in, each a part of a path written with `/` and the arguments of the
+/// command that updates what is in it. Claude's is told apart another way.
+/// Pi has two: its earlier installer's folder, which updates itself with
+/// `--self`, and the managed install its installer writes today (`bin` of the
+/// agent folder), which says it is updated with `pi update`.
+fn own_installer(harness: Harness) -> &'static [(&'static str, &'static [&'static str])] {
     match harness {
-        Harness::Codex => Some(("/.codex/bin/", &["update"])),
-        Harness::Opencode => Some(("/.opencode/bin/", &["upgrade"])),
-        Harness::Pi => Some(("/.pi/bin/", &["update", "--self"])),
-        Harness::Devin => Some(("/devin/cli/", &["update"])),
-        Harness::Claude => None,
+        Harness::Codex => &[("/.codex/bin/", &["update"])],
+        Harness::Opencode => &[("/.opencode/bin/", &["upgrade"])],
+        Harness::Pi => &[
+            ("/.pi/bin/", &["update", "--self"]),
+            ("/.pi/agent/bin/", &["update"]),
+        ],
+        Harness::Devin => &[("/devin/cli/", &["update"])],
+        Harness::Claude => &[],
     }
 }
 
@@ -178,14 +184,35 @@ pub fn release_source(harness: Harness, executable: &str, env: &Env) -> Source {
             ]),
         );
     }
-    if let Some((marker, arguments)) = own_installer(harness) {
-        if real.contains(marker) {
-            let mut update = vec![executable.to_owned()];
-            update.extend(arguments.iter().map(|argument| (*argument).to_owned()));
-            return npm(Some(format!("{}'s installer", name(harness))), Some(update));
-        }
+    if let Some((_, arguments)) = own_installer(harness)
+        .iter()
+        .find(|(marker, _)| real.contains(marker))
+    {
+        let mut update = vec![executable.to_owned()];
+        update.extend(arguments.iter().map(|argument| (*argument).to_owned()));
+        return npm(Some(format!("{}'s installer", name(harness))), Some(update));
+    }
+    if harness == Harness::Pi && is_pi_managed_install(&real) {
+        return npm(
+            Some("Pi's installer".to_owned()),
+            Some(vec![executable.to_owned(), "update".to_owned()]),
+        );
     }
     npm(None, None)
+}
+
+/// Whether the CLI at `real` (written with `/`) is the launcher of a Pi managed install in an
+/// agent folder of any name: `bin/pi` beside `install/managed-install.json`, the file Pi's
+/// installer writes there. It is the installer's own evidence, and holds where the app's
+/// environment names no `PI_CODING_AGENT_DIR` (the shell that ran the installer had it) and
+/// where a link in a folder of the PATH goes into the folder (`real` is where it goes). The
+/// default folder is told by its name alone, above (T-141, P3-5).
+fn is_pi_managed_install(real: &str) -> bool {
+    let bin = Path::new(real).parent();
+    let agent = bin
+        .filter(|bin| bin.file_name().is_some_and(|name| name == "bin"))
+        .and_then(Path::parent);
+    agent.is_some_and(|agent| agent.join("install").join("managed-install.json").is_file())
 }
 
 /// Whether the CLI at `real` (written with `/`) was put where Claude's own

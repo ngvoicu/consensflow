@@ -82,6 +82,122 @@ fn it_is_looked_in_after_every_place_a_pi_was_looked_for_before_so_no_machine_fi
     }
 }
 
+/// Both installers read `PI_CODING_AGENT_DIR` as the agent folder (`install.ps1` when it holds
+/// something, `install.sh` as `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}`), and put the launcher
+/// in its `bin`. The folder named is looked in before the default, which an install made
+/// before the variable was set may still be in; both after every other place.
+#[test]
+fn a_managed_pi_in_the_agent_folder_the_human_named_is_found_and_the_default_is_still_looked_in() {
+    let machine = Machine::new();
+    let named = machine.root.path().join("work").join("pi-agent");
+    let custom = text(&named);
+    let env = machine.env(&[("PI_CODING_AGENT_DIR", Some(custom.as_str()))]);
+    assert_eq!(harness_path(Harness::Pi, &env), None);
+    let in_named = named.join("bin").join("pi.cmd");
+    startable_with(&in_named, MANAGED_CMD);
+    assert_eq!(harness_path(Harness::Pi, &env), Some(in_named.clone()));
+    assert_eq!(executable(Harness::Pi, &env), Ok(text(&in_named)));
+    // Without the variable, or with it empty, as the installers take it, it is not looked in.
+    for changes in [
+        &[][..],
+        &[("PI_CODING_AGENT_DIR", None)][..],
+        &[("PI_CODING_AGENT_DIR", Some(""))][..],
+    ] {
+        assert_eq!(harness_path(Harness::Pi, &machine.env(changes)), None);
+    }
+    // The default is still looked in, and after the one named.
+    let in_default = agent_bin(&machine.home()).join("pi.cmd");
+    startable_with(&in_default, MANAGED_CMD);
+    assert_eq!(harness_path(Harness::Pi, &env), Some(in_named.clone()));
+    assert_eq!(
+        harness_path(Harness::Pi, &machine.env(&[])),
+        Some(in_default.clone())
+    );
+    fs::remove_file(&in_named).unwrap();
+    assert_eq!(harness_path(Harness::Pi, &env), Some(in_default));
+    // A trailing separator on the variable names the same folder.
+    startable_with(&in_named, MANAGED_CMD);
+    let slashed = format!("{custom}{}", std::path::MAIN_SEPARATOR);
+    assert_eq!(
+        harness_path(
+            Harness::Pi,
+            &machine.env(&[("PI_CODING_AGENT_DIR", Some(slashed.as_str()))])
+        ),
+        Some(in_named)
+    );
+    // It is after every other place a Pi was looked for, as the default is, and it is Pi's alone.
+    let env = machine.env(&[("PI_CODING_AGENT_DIR", Some(custom.as_str()))]);
+    let npm = machine.npm().join("pi.cmd");
+    startable(&npm);
+    assert_eq!(harness_path(Harness::Pi, &env), Some(npm));
+    startable(&named.join("bin").join("claude.cmd"));
+    assert_eq!(harness_path(Harness::Claude, &env), None);
+}
+
+/// The agent folder is read as Pi reads it (`pi::paths::agent_dir`): `~` and `~/` are the home,
+/// and `~\` on Windows. A relative one is the home's: both installers read it against where
+/// they ran, which a terminal opens in the home (T-141, P3-4).
+#[test]
+fn the_agent_folder_the_human_named_is_read_as_pi_reads_it_a_tilde_and_a_relative_one_included() {
+    let machine = Machine::new();
+    let home = machine.home();
+    let found = |value: &str| {
+        let env = machine.env(&[("PI_CODING_AGENT_DIR", Some(value))]);
+        harness_path(Harness::Pi, &env)
+    };
+    let launcher = |folder: &Path| {
+        let shim = folder.join("bin").join("pi.cmd");
+        startable_with(&shim, MANAGED_CMD);
+        shim
+    };
+    for (value, folder) in [
+        ("~/work/pi-a", home.join("work").join("pi-a")),
+        // Nothing but the home itself: `~` is the home, whose `bin` is the folder.
+        ("~", home.clone()),
+        ("work/pi-b", home.join("work").join("pi-b")),
+    ] {
+        assert_eq!(found(value), None, "{value}");
+        let shim = launcher(&folder);
+        assert_eq!(found(value), Some(shim.clone()), "{value}");
+        fs::remove_file(shim).unwrap();
+    }
+    // An absolute one is as it is, and a `~` that is not first is no home.
+    let absolute = machine.root.path().join("elsewhere");
+    let shim = launcher(&absolute);
+    assert_eq!(found(&text(&absolute)), Some(shim));
+    assert_eq!(found("work/~/pi"), None);
+}
+
+/// Windows reads `~\` as the home too, which no other system does.
+#[cfg(windows)]
+#[test]
+fn a_tilde_and_a_backslash_is_the_home_on_windows() {
+    let machine = Machine::new();
+    let shim = machine
+        .home()
+        .join("work")
+        .join("pi-c")
+        .join("bin")
+        .join("pi.cmd");
+    startable_with(&shim, MANAGED_CMD);
+    let env = machine.env(&[("PI_CODING_AGENT_DIR", Some(r"~\work\pi-c"))]);
+    assert_eq!(harness_path(Harness::Pi, &env), Some(shim));
+}
+
+/// A relative agent folder is read against the home (the installers read it where they ran, a
+/// terminal's home); with no home there is nothing to read it against, and it is no place: the
+/// daemon's own working folder is none of the installers' (T-194, P3-7).
+#[test]
+fn a_relative_agent_folder_with_no_home_to_read_it_against_is_no_place_and_an_absolute_one_needs_none(
+) {
+    let root = tempfile::tempdir().unwrap();
+    let relative = Env::from_vars([("PI_CODING_AGENT_DIR", "work/pi"), ("PATH", "")]);
+    assert_eq!(managed(Harness::Pi, &relative), Vec::<PathBuf>::new());
+    let absolute = text(root.path());
+    let named = Env::from_vars([("PI_CODING_AGENT_DIR", absolute.as_str()), ("PATH", "")]);
+    assert_eq!(managed(Harness::Pi, &named), [root.path().join("bin")]);
+}
+
 #[test]
 fn the_launcher_the_unix_installer_writes_is_found_there_too_and_is_pis_alone() {
     let root = tempfile::tempdir().unwrap();

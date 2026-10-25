@@ -148,6 +148,52 @@ fn what_stopped_the_run_is_kept_in_the_reports_folder_and_said_by_where_it_is() 
 }
 
 #[test]
+fn the_ledger_is_kept_whole_beside_the_report_and_said_by_where_it_is() {
+    use rusqlite::Connection;
+    let folder = tempfile::tempdir().unwrap();
+    let home = folder.path().join("home-a1b2c3d4e5f6a7b8c9d0");
+    files::make_dir(&home).unwrap();
+    let file = home.join("consensflow.db");
+    // A ledger in write-ahead mode, its last rows in the log and not yet in the file.
+    let live = Connection::open(&file).unwrap();
+    live.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))
+        .unwrap();
+    live.execute_batch(
+        "CREATE TABLE event (kind TEXT); INSERT INTO event VALUES ('window.activity');",
+    )
+    .unwrap();
+    let reports = folder.path().join("reports");
+    let edge = edge();
+    let kept = edge
+        .keep_ledger(
+            &reports,
+            "20261019-212400-long-chief-claude-staff-claude",
+            &file,
+        )
+        .unwrap();
+    assert_eq!(
+        kept,
+        reports.join("20261019-212400-long-chief-claude-staff-claude-ledger.db")
+    );
+    // One database, whole: no log beside it.
+    assert!(!reports
+        .join("20261019-212400-long-chief-claude-staff-claude-ledger.db-wal")
+        .exists());
+    let copy = Connection::open(&kept).unwrap();
+    let kind: String = copy
+        .query_row("SELECT kind FROM event", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(kind, "window.activity");
+    // Where it is, the run's own name.
+    let shown = edge.shown(&kept.display().to_string());
+    assert_eq!(shown, kept.display().to_string());
+    // A ledger there is none of is said.
+    assert!(edge
+        .keep_ledger(&reports, "other", &home.join("none.db"))
+        .is_err());
+}
+
+#[test]
 fn the_masker_the_rig_is_given_masks_a_screen_as_one_text() {
     // The secret's name ends one row and its value is the next: each row told apart
     // would keep the value.

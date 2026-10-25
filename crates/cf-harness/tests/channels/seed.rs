@@ -14,6 +14,7 @@ use std::time::Duration;
 use cf_base::env::Env;
 use cf_harness::opencode::{seed_session, Seed, LIFETIME_MS};
 use cf_harness::seams::SystemProcesses;
+use cf_harness::testing::ScriptedHost;
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -46,7 +47,13 @@ async fn seeded(window: &Window, folder: &TempDir, task: Task<'_>) -> Result<(),
         resume: task.resume,
         lifetime_ms: task.lifetime_ms.unwrap_or(LIFETIME_MS),
     };
-    seed_session(wires(&processes), &window.channel(), &seed).await
+    seed_session(
+        wires(&processes),
+        &window.channel(),
+        &seed,
+        &ScriptedHost::default(),
+    )
+    .await
 }
 
 /// A window whose server is up from the start, and the folder it works in.

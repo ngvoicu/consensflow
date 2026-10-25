@@ -13,7 +13,7 @@ use cf_base::refusal::Refusal;
 use cf_harness::contract::{Adapter, Agent, LaunchId, Pane, Records, Work};
 use cf_harness::seams::Time;
 use cf_ledger::{Ledger, LedgerError, ParticipantView, ProjectView};
-use cf_proto::panes::{Ending, Servers};
+use cf_proto::panes::Servers;
 use cf_proto::specs::AppSpecs;
 use cf_proto::trace::TraceLine;
 
@@ -185,10 +185,16 @@ impl Default for Limits {
 /// would otherwise wait three minutes; nothing in a person's environment sets it.
 pub const LAUNCH_MS_VARIABLE: &str = "CONSENSFLOW_LAUNCH_TIMEOUT_MS";
 
+/// The variable that sets how long a delivered message's header may take to show
+/// in its window's record, in milliseconds. A test of the daemon's reading of a
+/// record that comes late has to outlast it, so with the minute the daemon gives
+/// it, each such case takes minutes; nothing in a person's environment sets it.
+pub const ARRIVAL_MS_VARIABLE: &str = "CONSENSFLOW_ARRIVAL_TIMEOUT_MS";
+
 impl Limits {
-    /// The daemon's limits, with the launch's wait what `env` says it is
-    /// ([`LAUNCH_MS_VARIABLE`]) where it names a number of milliseconds above
-    /// zero; any other value is no value.
+    /// The daemon's limits, with the launch's wait and the arrival's what `env`
+    /// says they are ([`LAUNCH_MS_VARIABLE`], [`ARRIVAL_MS_VARIABLE`]) where it
+    /// names a number of milliseconds above zero; any other value is no value.
     pub fn of(env: &Env) -> Self {
         let named = |variable: &str| {
             env.text(variable)
@@ -197,16 +203,46 @@ impl Limits {
         };
         let default = Self::default();
         Self {
+            arrival_ms: named(ARRIVAL_MS_VARIABLE).unwrap_or(default.arrival_ms),
             launch_ms: named(LAUNCH_MS_VARIABLE).unwrap_or(default.launch_ms),
             ..default
         }
+    }
+
+    /// What the environment cut, in the words the daemon's log says it in at its
+    /// start, so that a variable left in a shell is seen there; none where it cut
+    /// nothing, the daemon of a person's.
+    pub fn cut_by_the_environment(&self) -> Option<String> {
+        let default = Self::default();
+        let cuts: Vec<String> = [
+            (
+                "arrival wait",
+                self.arrival_ms,
+                default.arrival_ms,
+                ARRIVAL_MS_VARIABLE,
+            ),
+            (
+                "launch wait",
+                self.launch_ms,
+                default.launch_ms,
+                LAUNCH_MS_VARIABLE,
+            ),
+        ]
+        .into_iter()
+        .filter(|(_, now, was, _)| now != was)
+        .map(|(what, now, was, variable)| format!("{what} {now} ms, not {was} ({variable})"))
+        .collect();
+        (!cuts.is_empty()).then(|| format!("limits set by the environment: {}", cuts.join(", ")))
     }
 }
 
 /// What a worker's window started that outlives its turn, which only the pane
 /// host can see: it keeps each pane's processes, and the daemon tells it where
-/// a turn begins. It says nothing it cannot know: a host that does not answer
-/// has no background work to tell of.
+/// a turn begins, so that what a window's close and its program's exit say it left
+/// running is the turns' work and not the harness's. Nothing is asked to end: a
+/// turn's end ends nothing (`turn_end`), and a close ends the window's tree. It
+/// says nothing it cannot know: a host that does not answer has no background work
+/// to tell of.
 pub trait BackgroundWork {
     /// A turn is about to begin in `pane`: whatever its tree runs now came
     /// before it, and is no turn's work. `servers` says how the window's harness
@@ -214,14 +250,40 @@ pub trait BackgroundWork {
     /// is: what the host can tell is its own, and what that starts, is no turn's
     /// work either, however late it began.
     fn mark<'a>(&'a self, pane: &'a Pane, servers: Servers, harness: &'a str) -> Work<'a, ()>;
-    /// Ends what `pane`'s turn left running, the window staying open: the host
-    /// chooses what, once, from all of what it can prove the turn's, and ends it and
-    /// what it started meanwhile. It says what it ended and what of it it could not
-    /// end, and nothing of what it cannot tell the turn's from the harness's, which it
-    /// leaves alone; an older host, or one that has no such window, says nothing was
-    /// ended. None where it gave no answer: it may be ending still, which is no word
-    /// that it ended.
-    fn end<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Ending>>;
+
+    /// How many commands of its harness `pane`'s tree runs now, less what ran at the rest
+    /// `since` and what began before `after` (`pane.commands`), where the host can tell
+    /// them ([`CommandsSeen`]).
+    fn commands<'a>(
+        &'a self,
+        pane: &'a Pane,
+        since: Option<u64>,
+        after: Option<i64>,
+    ) -> Work<'a, CommandsSeen>;
+
+    /// `pane` is at rest: the host keeps what its tree runs now, under the number answered,
+    /// for a look at its commands to leave out (`pane.rest`). None where it keeps none.
+    /// The rests `keep` names, which monitors that run are left, are kept however many
+    /// come after them.
+    fn rest<'a>(&'a self, pane: &'a Pane, keep: &'a [u64]) -> Work<'a, Option<u64>>;
+}
+
+/// What a look at the commands of a window's harness found (`pane.commands`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandsSeen {
+    /// So many run in the window.
+    Running(usize),
+    /// The host answered that it cannot tell them: a platform with no groups, or a harness
+    /// that keeps its servers otherwise.
+    Untold,
+    /// The host answered that a process of the window cannot be read (another user's):
+    /// a later look may read them all.
+    Unreadable,
+    /// The host answered that the window's processes kept changing while it read them:
+    /// a later look may read them whole.
+    Unsettled,
+    /// The host did not answer, or answered what is no answer.
+    Unanswered,
 }
 
 /// Everything the engine is made with: each seam shared, so a second
@@ -266,6 +328,54 @@ mod tests {
             (named.arrival_ms, named.max_attempts),
             (60_000, 3),
             "the rest is as it was"
+        );
+    }
+
+    #[test]
+    fn the_arrival_wait_is_a_minute_unless_the_environment_names_a_number_of_milliseconds() {
+        // The variable's name is written out, so that a rename shows here.
+        let wait = |value: &str| {
+            Limits::of(&Env::from_vars([("CONSENSFLOW_ARRIVAL_TIMEOUT_MS", value)])).arrival_ms
+        };
+        assert_eq!(ARRIVAL_MS_VARIABLE, "CONSENSFLOW_ARRIVAL_TIMEOUT_MS");
+        assert_eq!(wait("15000"), 15_000);
+        for refused in ["", "0", "-5", "soon", "1.5", "2s"] {
+            assert_eq!(wait(refused), 60_000, "{refused:?}");
+        }
+        let named = Limits::of(&Env::from_vars([
+            (ARRIVAL_MS_VARIABLE, "15000"),
+            (LAUNCH_MS_VARIABLE, "1500"),
+        ]));
+        assert_eq!(
+            named,
+            Limits {
+                arrival_ms: 15_000,
+                launch_ms: 1_500,
+                max_attempts: 3,
+            },
+            "each variable sets its own wait and nothing else"
+        );
+    }
+
+    #[test]
+    fn a_limit_the_environment_cut_is_told_for_the_log_and_one_it_left_is_not() {
+        let told = |vars: &[(&str, &str)]| {
+            Limits::of(&Env::from_vars(vars.iter().copied())).cut_by_the_environment()
+        };
+        assert_eq!(told(&[]), None);
+        // A value that is no number cuts nothing, and says nothing.
+        assert_eq!(told(&[(ARRIVAL_MS_VARIABLE, "soon")]), None);
+        assert_eq!(
+            told(&[(ARRIVAL_MS_VARIABLE, "15000")]).as_deref(),
+            Some("limits set by the environment: arrival wait 15000 ms, not 60000 (CONSENSFLOW_ARRIVAL_TIMEOUT_MS)")
+        );
+        assert_eq!(
+            told(&[(LAUNCH_MS_VARIABLE, "8000")]).as_deref(),
+            Some("limits set by the environment: launch wait 8000 ms, not 180000 (CONSENSFLOW_LAUNCH_TIMEOUT_MS)")
+        );
+        assert_eq!(
+            told(&[(ARRIVAL_MS_VARIABLE, "15000"), (LAUNCH_MS_VARIABLE, "8000")]).as_deref(),
+            Some("limits set by the environment: arrival wait 15000 ms, not 60000 (CONSENSFLOW_ARRIVAL_TIMEOUT_MS), launch wait 8000 ms, not 180000 (CONSENSFLOW_LAUNCH_TIMEOUT_MS)")
         );
     }
 }

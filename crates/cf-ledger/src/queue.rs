@@ -181,7 +181,11 @@ pub(crate) fn withdraw(store: &Store, message_id: i64, reason: &str) -> Result<(
 
 /// A task's messages still held at the gate, withdrawn; what a withdrawn
 /// carrier carried is its own again.
-pub(crate) fn withdraw_gated(store: &Store, task_id: i64, reason: &str) -> Result<(), LedgerError> {
+pub(crate) fn withdraw_gated(
+    store: &mut Store,
+    task_id: i64,
+    reason: &str,
+) -> Result<(), LedgerError> {
     store.db.execute(
         "UPDATE message SET state = 'cancelled', reason = ? WHERE task_id = ? AND state = 'gated'",
         params![reason, task_id],

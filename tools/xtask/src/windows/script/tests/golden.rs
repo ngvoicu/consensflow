@@ -1,6 +1,8 @@
-//! The scripts recorded for seven runs (`tests/golden/windows`), which the template
+//! The scripts recorded for seven runs (`tests/golden/windows`), which the templates
 //! must make again byte for byte, and the test that records them again after a
-//! change to the script that is meant.
+//! change to the scripts that is meant. A run has two: `<name>.ps1`, the bootstrap that
+//! goes on ssh's command line, and `<name>.run.ps1`, the run script that goes in the
+//! tarball.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -117,32 +119,39 @@ const RECORDED: [Recorded; 7] = [
     },
 ];
 
-/// The script the template makes for a recorded run.
-fn sent(run: &Recorded) -> String {
+/// The two scripts the templates make for a recorded run: the bootstrap, the run script.
+fn sent(run: &Recorded) -> [(String, String); 2] {
     let env = parse_env(&strings(run.env)).unwrap();
-    remote_script(&Script {
+    let script = Script {
+        id: ID,
         dir: run.dir,
         inside: run.inside,
         steps: run.steps,
         command: &command_line(run.words),
         env: &env,
-    })
+        node: r"C:\Program Files\nodejs",
+    };
+    [
+        (run.golden.to_owned(), remote_script(&script)),
+        (format!("{}.run", run.golden), run_script(&script)),
+    ]
 }
 
 #[test]
 fn a_run_is_sent_the_script_that_was_recorded_for_it_byte_for_byte() {
     for run in RECORDED {
-        let (sent, expected) = (sent(&run), golden(run.golden));
-        assert!(
-            sent == expected,
-            "{}: not what was recorded (a change that is meant is recorded again: `record_the_goldens`)\n--- sent\n{sent:?}\n--- recorded\n{expected:?}",
-            run.golden
-        );
+        for (name, sent) in sent(&run) {
+            let expected = golden(&name);
+            assert!(
+                sent == expected,
+                "{name}: not what was recorded (a change that is meant is recorded again: `record_the_goldens`)\n--- sent\n{sent:?}\n--- recorded\n{expected:?}"
+            );
+        }
     }
 }
 
-/// Records the goldens again from what the template makes. It is what to run after
-/// a change to the script that is meant (`cargo test -p xtask --lib
+/// Records the goldens again from what the templates make. It is what to run after
+/// a change to the scripts that is meant (`cargo test -p xtask --lib
 /// windows::script::tests::golden::record_the_goldens -- --ignored`), and the diff
 /// of the files is then the review of the change: a golden is no check of a script
 /// that is read from it.
@@ -150,7 +159,8 @@ fn a_run_is_sent_the_script_that_was_recorded_for_it_byte_for_byte() {
 #[ignore = "records the goldens again: run it after a meant change to the script"]
 fn record_the_goldens() {
     for run in RECORDED {
-        let text = sent(&run).replace('\r', "\u{240d}");
-        fs::write(golden_path(run.golden), text).unwrap();
+        for (name, text) in sent(&run) {
+            fs::write(golden_path(&name), text.replace('\r', "\u{240d}")).unwrap();
+        }
     }
 }

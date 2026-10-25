@@ -6,9 +6,10 @@
 //! The rig is also a page and a terminal. A request the case makes of the
 //! daemon is the page's (`r-test-N`), one it makes of the pane host the
 //! desktop app's own (`n-test-N`), and the answers to them stop here: they
-//! were asked by no one on the other side. A terminal asks where the cursor
-//! is, and ConPTY asks before a program may print at all; the page's xterm
-//! answers, and with no page the rig does.
+//! were asked by no one on the other side. A program may ask where the cursor
+//! is (a ConPTY made to inherit its cursor asks before a program may print at
+//! all; the pane host's are not); the page's xterm answers, and with no page
+//! the rig does.
 //!
 //! And a case can catch one paste of the daemon's ([`Catch`]): passed to the pane
 //! host or kept from it, its answer never reaches the daemon, which goes on

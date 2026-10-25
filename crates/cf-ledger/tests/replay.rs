@@ -26,6 +26,9 @@ use std::collections::{BTreeMap, VecDeque};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+use std::thread;
 
 use base64::Engine;
 use cf_base::js;
@@ -70,12 +73,14 @@ enum Outcome {
 /// `LEFT_THE_PAUSE`, `WAIT_NOTE_TAKEN` or `GOES_ON`, which the notes of a
 /// task's wait moved: Node leaves one queued when another member takes the
 /// task or it is taken back, and tells its requester nothing when a hold ends;
-/// and the 4 that name `WAITED_FOR`, which the refusal of a cancel moved: Node
-/// cancels a task that open tasks wait for, and they stay blocked for good;
-/// and the one that names `FOLLOW_UP_BEHIND_WORK`, which the follow-up queued
-/// behind a window's work moved: Node refuses it; and the one that names
-/// `REMOVAL_CANCELS_WAITING`, which the removal's cancel of the tasks waiting
-/// for a member moved.
+/// and the 4 that name `UNREACHED` or say `reached`, which the transcript of a
+/// task that reached no window moved: Node gave it the whole copy of the window
+/// its brief waited for; and the 4 that name `WAITED_FOR`, which the refusal of
+/// a cancel moved: Node cancels a task that open tasks wait for, and they stay
+/// blocked for good; and the one that names `FOLLOW_UP_BEHIND_WORK`, which the
+/// follow-up queued behind a window's work moved: Node refuses it; and the one
+/// that names `REMOVAL_CANCELS_WAITING`, which the removal's cancel of the tasks
+/// waiting for a member moved.
 /// Departed traces that Node's suite recorded only off Windows: the test
 /// that wrote `home-copies-004` was skipped there, as Windows holds an open
 /// ledger's files. Elsewhere each must be there.
@@ -101,6 +106,8 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-dispatcher-107", 122, KEPT_IN_BRIEF),
     ("core-page-014", 9, REASON_RELEASE),
     ("core-page-023", 8, WAITED_FOR),
+    ("core-page-025", 8, UNREACHED),
+    ("core-page-026", 14, UNREACHED),
     ("evals-measure-001", 20, RESULT_ACCEPTED),
     ("evals-measure-015", 32, RESULT_ACCEPTED),
     ("home-copies-001", 34, KEPT_IN_BRIEF),
@@ -109,6 +116,8 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-conversations-013", 22, RESULT_SENT_BACK),
     ("ledger-conversations-014", 23, RESULT_SENT_BACK),
     ("ledger-conversations-015", 19, WAIT_NOTE_TAKEN),
+    ("ledger-conversations-016", 7, "a task whose brief reached no window says so (`reached: false`) beside its empty transcript; Node said nothing of it"),
+    ("ledger-conversations-019", 15, UNREACHED),
     ("ledger-gate-004", 17, RESULT_ACCEPTED),
     ("ledger-gate-006", 25, DOOR_READ),
     ("ledger-gate-007", 15, DOOR_READ),
@@ -229,6 +238,10 @@ const KEPT_BY_PAUSE: &str =
 /// A pause's event says which stop it asked.
 const STOP_IN_EVENT: &str =
     "a pause's `task.state` event carries `stop`, the sequence of the stop it asked: Node's has no such key";
+/// A task whose brief reached no window has no transcript of its own (the
+/// second review of B3, 2026-10-16): the window's copy was another task's.
+const UNREACHED: &str =
+    "a task whose brief reached no window has no transcript of its own: the copy of the window its brief waits for, which shows none of its headers, is none of its, and it says so (`reached: false`), where Node gave the window's whole copy";
 /// The reason a release gives what the old window still held for the human.
 const WINDOW_ENDED: &str =
     "a release withdraws what the old window still held for the human with the reason `withdrawn: @x's window ended first`; Node gave none";
@@ -336,18 +349,48 @@ fn departure(node: &str, at: usize) -> Option<String> {
     }
 }
 
+/// How many replays run at once.
+const AT_ONCE: usize = 4;
+
+/// `work` of each of `items`, a few at a time, the answers in the order of
+/// `items`. A replay opens a ledger of its own in a folder of its own and shares
+/// nothing with another, so the replays go four at a time: Windows' runner spent
+/// four minutes of its step on the 425 of them, one after another.
+fn alongside<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let threads = thread::available_parallelism().map_or(1, |count| count.get().min(AT_ONCE));
+    let next = AtomicUsize::new(0);
+    let answers: Vec<Mutex<Option<R>>> = items.iter().map(|_| Mutex::new(None)).collect();
+    thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| loop {
+                let at = next.fetch_add(1, Ordering::Relaxed);
+                let Some(item) = items.get(at) else { break };
+                *answers[at].lock().unwrap() = Some(work(item));
+            });
+        }
+    });
+    answers
+        .into_iter()
+        .map(|answer| answer.into_inner().unwrap().expect("every item was worked"))
+        .collect()
+}
+
 #[test]
 fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
     let traces = recorded();
     let (mut replayed, mut skipped, mut failed) = (0, BTreeMap::<String, usize>::new(), Vec::new());
     let mut calls = BTreeMap::<String, usize>::new();
     let mut left = Vec::new();
+    let mut to_replay = Vec::new();
     for (trace, text) in &traces {
-        if let Some((at, why)) = departed(trace) {
-            left.push(format!("  {trace} at call {at}: {why}"));
-            continue;
+        match departed(trace) {
+            Some((at, why)) => left.push(format!("  {trace} at call {at}: {why}")),
+            None => to_replay.push((trace, text)),
         }
-        match replay(text) {
+    }
+    let outcomes = alongside(&to_replay, |(_, text)| replay(text));
+    for ((trace, _), outcome) in to_replay.iter().zip(outcomes) {
+        match outcome {
             Outcome::Replayed(methods) => {
                 replayed += 1;
                 for method in methods {
@@ -359,6 +402,12 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
         }
     }
     let skipped_count: usize = skipped.values().sum();
+    // Every trace is told once, however the replays were shared out.
+    assert_eq!(
+        replayed + left.len() + skipped_count + failed.len(),
+        traces.len(),
+        "a trace was replayed twice or not at all"
+    );
     println!(
         "{replayed} traces replayed, {} departed, {skipped_count} skipped, {} failed of {}",
         left.len(),
@@ -385,6 +434,23 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
     assert!(replayed > 0, "nothing replayed");
 }
 
+/// However the replays are shared out, each is made once, and its answer is
+/// the one given for its trace: a failure names the trace it belongs to.
+#[test]
+fn the_replays_are_shared_out_once_each_and_answered_in_the_order_they_came() {
+    let items: Vec<usize> = (0..500).collect();
+    let made: Vec<AtomicUsize> = items.iter().map(|_| AtomicUsize::new(0)).collect();
+    let answers = alongside(&items, |item| {
+        made[*item].fetch_add(1, Ordering::Relaxed);
+        item * 2
+    });
+    assert_eq!(
+        answers,
+        items.iter().map(|item| item * 2).collect::<Vec<_>>()
+    );
+    assert!(made.iter().all(|times| times.load(Ordering::Relaxed) == 1));
+}
+
 /// A trace is named in [`DEPARTED`] because it differs from Node's, and
 /// for no other reason: one that no longer differs, that differs elsewhere
 /// than at its call, or that is not there, is a line to take out or to
@@ -392,17 +458,19 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
 #[test]
 fn every_departed_trace_is_there_and_still_departs() {
     let traces = recorded();
-    let mut wrong = Vec::new();
-    for (trace, at, why) in DEPARTED {
+    let wrong: Vec<String> = alongside(DEPARTED, |(trace, at, why)| {
         match traces.iter().find(|(name, _)| name == trace) {
             // Not there where its Node test does not run: that is its platform's say.
-            None if cfg!(windows) && RECORDED_OFF_WINDOWS.contains(trace) => {}
-            None => wrong.push(format!("{trace} is not a recorded trace ({why})")),
+            None if cfg!(windows) && RECORDED_OFF_WINDOWS.contains(trace) => None,
+            None => Some(format!("{trace} is not a recorded trace ({why})")),
             Some((_, text)) => {
-                wrong.extend(departure(text, *at).map(|wrong| format!("{trace}: {wrong} ({why})")))
+                departure(text, *at).map(|wrong| format!("{trace}: {wrong} ({why})"))
             }
         }
-    }
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 

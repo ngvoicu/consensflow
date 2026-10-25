@@ -174,9 +174,11 @@ fn a_note_that_rode_in_the_words_that_resume_a_task_goes_in_with_them_after_the_
         .find(|message| message.body == "Resumed: Carry on")
         .unwrap();
     // 3.0.4 stops there, and the upgrade runs migration 0019 on what it left (and
-    // the viewer's 0020).
+    // the viewer's 0020, and the Resume's 0021 and 0022).
     context.edit_ledger(|file| {
         let db = rusqlite::Connection::open(file).unwrap();
+        cf_ledger::testing::undo_migration_0022(&db).unwrap();
+        cf_ledger::testing::undo_migration_0021(&db).unwrap();
         cf_ledger::testing::undo_migration_0020(&db).unwrap();
         db.execute_batch("PRAGMA user_version = 18").unwrap();
     });

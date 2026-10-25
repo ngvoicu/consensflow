@@ -1,6 +1,7 @@
 //! The eval matrix on the machine: each scenario for each chief and staff pair, one
 //! run after another, each run's output kept in `evals/reports/windows/<time>/`
-//! here (the run's own report stays on the machine), and one line per run at the
+//! here (the run's own report is brought back to `evals/reports` as well, [`fetch`](super::fetch)),
+//! and one line per run at the
 //! end: `PASS` when every check passed, else the checks that failed. The status is
 //! 1 when any run did not pass, and 130 when the matrix was stopped.
 //!
@@ -21,8 +22,9 @@ use std::path::{Path, PathBuf};
 use cf_base::time::{iso, Clock};
 
 use super::interrupt::Interrupt;
+use super::machine::Machine;
 use super::options::{MatrixOptions, Options, Pair, DEFAULT_DIR};
-use super::run::{self, Outcome};
+use super::run::Outcome;
 use super::{Error, STOPPED};
 use crate::context::Context;
 use crate::dispatch::Console;
@@ -37,14 +39,15 @@ pub trait Remote {
 }
 
 /// The machine, as `windows` reaches it.
-pub struct Machine<'a> {
+pub struct Reached<'a> {
     pub context: &'a Context,
+    pub machine: &'a Machine,
     pub interrupt: &'a Interrupt,
 }
 
-impl Remote for Machine<'_> {
+impl Remote for Reached<'_> {
     fn run(&mut self, options: &Options, console: &mut Console) -> Result<Outcome, Error> {
-        run::run(self.context, options, console, self.interrupt)
+        super::fetch::run_keeping(self.context, self.machine, options, console, self.interrupt)
     }
 }
 
@@ -84,7 +87,7 @@ pub fn run(
             writeln!(console.out, "{name}…").map_err(Error::Output)?;
             let log = folder.join(format!("{scenario}-{}-{}.log", pair.chief, pair.staff));
             let run = Options {
-                host: options.host.clone(),
+                machine: options.machine.clone(),
                 build,
                 dir: DEFAULT_DIR.to_owned(),
                 inside: ".".to_owned(),
@@ -116,7 +119,7 @@ fn logs_in(root: &Path, clock: &mut dyn Clock) -> PathBuf {
 }
 
 /// The eval of `scenario` for `pair`, as the words that start it on the machine.
-fn eval(options: &MatrixOptions, scenario: &str, pair: &Pair) -> Vec<String> {
+pub(super) fn eval(options: &MatrixOptions, scenario: &str, pair: &Pair) -> Vec<String> {
     let mut words: Vec<String> = [
         "cargo",
         "xtask",

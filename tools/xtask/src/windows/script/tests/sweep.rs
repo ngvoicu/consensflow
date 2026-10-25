@@ -4,6 +4,24 @@
 
 use super::*;
 
+/// Writes the tree's identity for `listed` as the files stand under `dir`, as the tarball
+/// holds it (no commit), so that the sweep finds the files it unpacked to be the tree.
+#[cfg(windows)]
+fn say_the_tree(dir: &std::path::Path, listed: &[&str]) {
+    use cf_base::env::Env;
+
+    use crate::context::Context;
+    use crate::windows::tree;
+
+    let context = Context {
+        root: dir.to_path_buf(),
+        env: Env::from_process(),
+    };
+    let names: Vec<String> = listed.iter().map(|name| (*name).to_owned()).collect();
+    let hash = tree::content(&context, &names).unwrap();
+    std::fs::write(dir.join(TREE), format!("none {hash}\n")).unwrap();
+}
+
 /// The one line of the sweep that holds `what`.
 fn line_with<'a>(text: &'a str, what: &str) -> &'a str {
     let lines: Vec<&str> = text.lines().filter(|line| line.contains(what)).collect();
@@ -17,8 +35,12 @@ fn the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else() {
         KEPT[..],
         [
             ".synced-files",
+            ".windows-tree",
             ".windows-sweep.ps1",
+            ".windows-run.ps1",
             ".windows-run.pid",
+            ".windows-run.id",
+            ".windows-run.lock",
             ".windows-run.cmd",
             ".git",
             "node_modules",
@@ -80,9 +102,18 @@ fn a_file_the_list_names_is_kept_in_any_case_as_the_list_was_written() {
 #[test]
 fn a_folder_that_is_a_link_is_not_looked_into_and_one_left_empty_is_removed() {
     let text = sweep_script();
+    // Neither walk looks into a link: the tree's, and the reports' that is pruned by age.
+    let walks = text
+        .matches(
+            "$deep = $item -is [IO.DirectoryInfo] -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)"
+        )
+        .count();
+    assert_eq!(walks, 2, "{text}");
+    // Nor is the reports folder itself, when it is one: it would be walked to where it goes
+    // (T-141, P3-8).
     assert!(
         text.contains(
-            "$deep = $item -is [IO.DirectoryInfo] -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)"
+            "  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
         ),
         "{text}"
     );
@@ -99,7 +130,12 @@ fn a_folder_that_is_a_link_is_not_looked_into_and_one_left_empty_is_removed() {
 fn what_is_removed_is_removed_without_a_question_and_said_and_what_is_not_ends_the_run() {
     let text = sweep_script();
     // PowerShell's Remove-Item asks before it takes a folder, which a run cannot answer.
-    assert!(!text.contains("Remove-Item"), "{text}");
+    assert!(
+        !text
+            .lines()
+            .any(|line| line.starts_with("      ") && line.contains("Remove-Item")),
+        "{text}"
+    );
     assert!(
         text.contains(
             "      $item.Attributes = $item.Attributes -band -bnot [IO.FileAttributes]::ReadOnly\n      $item.Delete()\n      $removed.Add($name)\n"
@@ -123,16 +159,124 @@ fn what_is_removed_is_removed_without_a_question_and_said_and_what_is_not_ends_t
         text.contains("if ($failed.Count) { Write-Output \"What left the tree could not be removed from the copy: $($failed -join '; ')\" }"),
         "{text}"
     );
-    let run = plain(&[]);
-    let after_unpack = run.split_once("tar.exe -xmzf").unwrap().1;
+    let run = bootstrap();
+    let after_unpack = run.split_once("& $tar -xmzf").unwrap().1;
     assert!(
         after_unpack.contains(
             "\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '.windows-sweep.ps1'))))\nif ($failed.Count) { Exit-Run 1 }\n"
         ),
         "{run}"
     );
-    // Before the build and the command: they see the tree and nothing else.
-    assert!(run.find("Exit-Run 1").unwrap() < run.find("foreach ($step in").unwrap());
+    // Before the run script (the build and the command): they see the tree and nothing else.
+    let read =
+        ". ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '.windows-run.ps1'))))";
+    assert!(run.find("Exit-Run 1").unwrap() < run.find(read).unwrap());
+}
+
+#[test]
+fn the_tarballs_runs_left_beside_the_copy_are_taken_away_an_hour_after_they_were_written() {
+    let text = sweep_script();
+    let at = |what: &str| {
+        text.find(what)
+            .unwrap_or_else(|| panic!("{what} is not there: {text}"))
+    };
+    // Named by the copy's folder, with a dot in it a dot: the names `upload_name` makes,
+    // and the one the runs had before each had its own.
+    assert!(
+        text.contains(
+            r"$own = '^' + [regex]::Escape($root.Name) + '(\.[0-9a-f]{8}-[0-9a-f]{8})?\.tgz$'"
+        ),
+        "{text}"
+    );
+    assert!(text.contains("$beside = $root.Parent.FullName\n"), "{text}");
+    let line = line_with(&text, "$_.Name -match $own");
+    assert!(
+        line.contains("Get-ChildItem -LiteralPath $beside -File"),
+        "{line}"
+    );
+    assert!(
+        line.contains("$_.Name -match $own -and $_.LastWriteTime -lt (Get-Date).AddHours(-1)"),
+        "{line}"
+    );
+    // It never fails the run, and it comes after the sweep has said what it removed.
+    assert!(
+        line.starts_with("try { ") && line.ends_with(" } catch {}"),
+        "{line}"
+    );
+    assert!(at("== removed $name") < at("$_.Name -match $own"));
+    assert!(at("$failed.Count") < at("$_.Name -match $own"));
+}
+
+#[test]
+fn the_uploads_of_a_folder_that_is_gone_are_taken_away_a_day_after_they_were_written() {
+    let text = sweep_script();
+    // Any `<folder>.<id>.tgz` beside the copy whose folder is no folder there any more,
+    // written to more than a day ago (a folder in use keeps its uploads an hour; these
+    // belong to runs of folders nobody removes the tarballs of).
+    assert!(
+        text.contains(r"$left = '^(?<folder>.+)\.[0-9a-f]{8}-[0-9a-f]{8}\.tgz$'"),
+        "{text}"
+    );
+    let line = line_with(&text, "$_.Name -match $left");
+    assert!(
+        line.contains("Get-ChildItem -LiteralPath $beside -File"),
+        "{line}"
+    );
+    assert!(
+        line.contains("-and -not (Test-Path -LiteralPath (Join-Path $beside $Matches.folder))"),
+        "{line}"
+    );
+    assert!(
+        line.contains("-and $_.LastWriteTime -lt (Get-Date).AddDays(-1)"),
+        "{line}"
+    );
+    assert!(
+        line.starts_with("try { ") && line.ends_with(" } catch {}"),
+        "{line}"
+    );
+    // And these two lines are all the sweep removes with `Remove-Item`.
+    assert_eq!(text.matches("Remove-Item").count(), 2, "{text}");
+}
+
+#[test]
+fn the_files_unpacked_are_held_to_the_tree_that_was_sent_and_a_run_whose_files_differ_ends() {
+    let text = sweep_script();
+    let at = |what: &str| {
+        text.find(what)
+            .unwrap_or_else(|| panic!("{what} is not there: {text}"))
+    };
+    // The same hash as the Mac makes (`tree::content`): the list's names in its order, each
+    // as its length (8 bytes, little endian), its name in UTF-8, its kind and its bytes.
+    assert!(
+        text.contains(
+            "foreach ($name in @(Get-Content -Encoding UTF8 (Join-Path $dir '.synced-files'))) {\n"
+        ),
+        "{text}"
+    );
+    for part in [
+        "$bytes = $utf8.GetBytes($name)\n",
+        "$null = $sha.TransformBlock([BitConverter]::GetBytes([uint64]$bytes.Length), 0, 8, $null, 0)\n",
+        "$kind = 'missing'\n",
+        "try { $kind = if ([IO.File]::GetAttributes($path) -band 1040) { 'other' } else { 'file' } } catch {}\n",
+        "if ($kind -eq 'file') { $bytes = [IO.File]::ReadAllBytes($path);",
+        "$unpacked = ($sha.Hash[0..7] | ForEach-Object { $_.ToString('x2') }) -join ''\n",
+    ] {
+        assert!(text.contains(part), "{part}: {text}");
+    }
+    // The identity the tarball held is the second word of its line; a difference is said, with
+    // both, and ends the run through the list that ends it.
+    assert!(
+        text.contains("$sent = (Get-Content -LiteralPath (Join-Path $dir '.windows-tree') -TotalCount 1).Split(' ')[1]\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("if ($unpacked -ne $sent) { Write-Output \"The files unpacked are not the tree that was sent: they hash to $unpacked, and its identity says $sent.\"; $failed.Add('the files unpacked are not the tree that was sent') }\n"),
+        "{text}"
+    );
+    // After what the sweep removed is said (what is removed is not in the list), and before the
+    // tarballs beside the copy are looked at.
+    assert!(at("== removed $name") < at("$sha = "));
+    assert!(at("if ($unpacked -ne $sent)") < at("$beside = "));
 }
 
 #[test]
@@ -226,6 +370,10 @@ fn powershell_makes_the_copy_a_checkout_whose_one_commit_is_what_went_over() {
     fs::write(dir.join(SWEEP), sweep_script()).unwrap();
     let sweep = |listed: &str| {
         fs::write(dir.join(SYNCED), listed).unwrap();
+        // The tarball holds the tree's identity beside the list; the sweep holds the files it
+        // unpacked to it before it makes them a checkout.
+        let names: Vec<&str> = listed.lines().collect();
+        say_the_tree(dir, &names);
         let script = format!(
             "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
             dir.display()
@@ -272,11 +420,102 @@ fn powershell_makes_the_copy_a_checkout_whose_one_commit_is_what_went_over() {
     );
 }
 
+/// The reports a run leaves (`evals/reports`) are kept from one run to the next, and there
+/// were no bounds to what that kept (T-34, P3-6): the sweep removes, in that folder alone,
+/// what was last written more than two weeks before it. It runs under the lock, before
+/// the run's script does anything else, so no run is going on; and what is newer than the
+/// limit is never touched, a run's own files being written now.
+#[test]
+fn the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched() {
+    let text = sweep_script();
+    assert!(
+        text.contains("$cutoff = (Get-Date).ToUniversalTime().AddDays(-14)"),
+        "{text}"
+    );
+    // Only that folder is walked, and only what is in it is removed, never the folder.
+    assert!(
+        text.contains("$reports = Join-Path $dir 'evals/reports'\n"),
+        "{text}"
+    );
+    // After the tree's stale files, and before what was removed is said.
+    let (stale, old, said) = (
+        text.find("$null = Clear-Stale $root").unwrap(),
+        text.find("$null = Clear-Old $folder").unwrap(),
+        text.find("foreach ($name in $removed)").unwrap(),
+    );
+    assert!(stale < old && old < said, "{text}");
+    // A file or a folder as new as the limit stays, and so does a folder with something
+    // left in it. Every folder is walked first, whatever its own time, which is when an entry
+    // was last added to it: a `long` folder a recent run wrote into holds old reports too.
+    assert_eq!(
+        line_with(&text, "Clear-Old $item"),
+        "    $inside = if ($deep) { Clear-Old $item } else { 0 }"
+    );
+    assert_eq!(
+        line_with(&text, "$inside -or"),
+        "    if ($inside -or $written -ge $cutoff) {"
+    );
+    assert!(
+        text.find("$written = ").unwrap() < text.find("$inside = ").unwrap(),
+        "the folder's own time is read before its entries are removed: {text}"
+    );
+    // A report that cannot be removed is said and the run goes on: it is no file of the tree.
+    let body = text
+        .split_once("function Clear-Old")
+        .and_then(|(_, rest)| rest.split_once("\n}\n"))
+        .map(|(body, _)| body)
+        .unwrap();
+    assert!(!body.contains("$failed"), "{body}");
+    assert!(
+        text.contains("$unpruned = [Collections.Generic.List[string]]::new()"),
+        "{text}"
+    );
+    assert!(
+        text.contains("if ($unpruned.Count) { Write-Output \"What the reports held past their age could not be removed: $($unpruned -join '; ')\" }"),
+        "{text}"
+    );
+    // The limit is the sweep's own to say.
+    assert!(!text.contains("«days»"), "{text}");
+}
+
 #[test]
 fn the_sweep_has_no_mark_left_and_is_plain_text() {
     let text = sweep_script();
     assert!(!text.contains('«'), "{text}");
     assert!(text.is_ascii(), "{text}");
+}
+
+/// A file of the copy `name` (its path from `root`, with `/`), made with its folders.
+#[cfg(windows)]
+fn write(root: &std::path::Path, name: &str) {
+    let path = root.join(name);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, name).unwrap();
+}
+
+/// A script run by the machine's PowerShell, as the sweep's own test runs it.
+#[cfg(windows)]
+fn powershell(script: &str) -> crate::process::Captured {
+    use cf_base::env::Env;
+
+    use crate::process::{self, Invocation};
+
+    process::capture(
+        &Invocation::new("powershell", ".")
+            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+            .arg(encode_script(script).unwrap()),
+        &Env::from_process(),
+    )
+    .unwrap()
+}
+
+/// The sweep run on the copy `dir`, which holds the list and the sweep it reads.
+#[cfg(windows)]
+fn run_sweep(dir: &std::path::Path) -> crate::process::Captured {
+    powershell(&format!(
+        "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
+        dir.display()
+    ))
 }
 
 /// The sweep run by the machine's PowerShell on a copy made for it: what the tree has
@@ -288,17 +527,10 @@ fn the_sweep_has_no_mark_left_and_is_plain_text() {
 fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could_not() {
     use std::fs;
     use std::os::windows::fs::OpenOptionsExt;
-    use std::path::Path;
 
     use cf_base::env::Env;
 
     use crate::process::{self, Invocation};
-
-    fn write(root: &Path, name: &str) {
-        let path = root.join(name);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, name).unwrap();
-    }
 
     let copy = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
@@ -314,7 +546,7 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
         "bin/cf.exe.old-1700000000",
         ".windows-run.pid",
         "evals/reports/long/2026-10-20T12-25-35-830Z-long-ledger.db",
-        "evals/reports/windows/run.json",
+        "evals/reports/runs/run.json",
     ] {
         write(dir, name);
     }
@@ -334,21 +566,8 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
     );
     // The tree, as the list names it: `src/lib.rs`, which the copy has as `src/Lib.rs`.
     fs::write(dir.join(SYNCED), "src/lib.rs\nnotes.txt\n").unwrap();
+    say_the_tree(dir, &["src/lib.rs", "notes.txt"]);
     fs::write(dir.join(SWEEP), sweep_script()).unwrap();
-
-    let run = |dir: &Path| {
-        let script = format!(
-            "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
-            dir.display()
-        );
-        process::capture(
-            &Invocation::new("powershell", ".")
-                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
-                .arg(encode_script(&script).unwrap()),
-            &Env::from_process(),
-        )
-        .unwrap()
-    };
 
     // A file of the tree's held open with no sharing: it cannot go, and the run ends.
     let stale_held = dir.join("crates/cf-e2e/tests/stale_probe.rs");
@@ -357,7 +576,7 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
         .share_mode(0)
         .open(&stale_held)
         .unwrap();
-    let ran = run(dir);
+    let ran = run_sweep(dir);
     assert_eq!(ran.code, 1, "{}{}", ran.stdout, ran.stderr);
     assert!(
         ran.stdout.contains("What left the tree could not be removed from the copy: crates/cf-e2e/tests/stale_probe.rs: "),
@@ -366,7 +585,7 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
     );
     drop(held);
 
-    let ran = run(dir);
+    let ran = run_sweep(dir);
     assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
     for gone in [
         "crates/cf-e2e/tests/stale_probe.rs",
@@ -392,7 +611,7 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
         ".windows-run.pid",
         // What a run wrote for its reader, a long run's report and ledger among it.
         "evals/reports/long/2026-10-20T12-25-35-830Z-long-ledger.db",
-        "evals/reports/windows/run.json",
+        "evals/reports/runs/run.json",
         SYNCED,
         SWEEP,
     ] {
@@ -401,7 +620,359 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
     // The folder the link pointed at is no file of the copy.
     assert!(elsewhere.path().join("outside.txt").exists());
     // And a second sweep finds nothing to remove.
-    let again = run(dir);
+    let again = run_sweep(dir);
     assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
     assert!(!again.stdout.contains("== removed"), "{}", again.stdout);
+}
+
+/// The sweep's prune of the reports run by the machine's PowerShell: what was last written
+/// more than the limit ago goes (a file, and a folder left empty that was old itself, but not
+/// `evals/reports`); every folder is walked, one written within the limit too (a `long` folder
+/// that a recent run wrote into holds old reports), and stays where something newer is left in
+/// it; and nothing outside the reports is judged by its age.
+#[cfg(windows)]
+#[test]
+fn powershell_removes_reports_past_their_age_and_nothing_newer_or_outside_them() {
+    use std::fs;
+
+    use cf_base::env::Env;
+
+    use crate::process::{self, Invocation};
+
+    let copy = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let dir = copy.path();
+    let old = [
+        "evals/reports/2026-09-25T20-09-20-351Z-six-decisions.json",
+        "evals/reports/long/2026-09-26T04-46-26-635Z-long.md",
+        "evals/reports/long/2026-09-26T04-46-26-635Z-long.json",
+        "evals/reports/long/2026-09-26T04-46-26-635Z-long-ledger.db",
+        "evals/reports/runs/2026-09-26T10-02-54-255Z/run.json",
+        "evals/reports/runs/2026-09-27T10-02-54-255Z/old.json",
+        "evals/reports/runs/2026-09-28T10-02-54-255Z/old.json",
+    ];
+    let new = [
+        "evals/reports/2026-10-20T20-09-20-351Z-six-decisions.json",
+        "evals/reports/long/2026-10-20T12-25-35-830Z-long.md",
+        "evals/reports/long/2026-10-20T12-25-35-830Z-long-ledger.db",
+        "evals/reports/runs/2026-09-27T10-02-54-255Z/new.json",
+        "evals/reports/runs/2026-09-28T10-02-54-255Z/new.json",
+    ];
+    for name in old.iter().chain(&new) {
+        write(dir, name);
+    }
+    // Not a report, and old: outside the reports it is the list's to keep.
+    write(dir, "notes.txt");
+    fs::create_dir_all(dir.join("evals/reports/runs/empty-old")).unwrap();
+    fs::create_dir_all(dir.join("evals/reports/runs/empty-new")).unwrap();
+    fs::write(dir.join(SYNCED), "notes.txt\n").unwrap();
+    say_the_tree(dir, &["notes.txt"]);
+    fs::write(dir.join(SWEEP), sweep_script()).unwrap();
+    // A link under the reports, to a folder elsewhere that holds an old file: the prune does
+    // not walk into it, and what it points at is no report of the copy (T-141, P3-8).
+    write(elsewhere.path(), "outside-old.txt");
+    let junction = Invocation::new("cmd", dir)
+        .args(["/c", "mklink", "/J", "evals\\reports\\linked"])
+        .arg(elsewhere.path());
+    assert_eq!(
+        process::capture(&junction, &Env::from_process())
+            .unwrap()
+            .code,
+        0
+    );
+    // Their times as runs of days ago left them. The folders are aged last: making a file
+    // in one wrote it now. `long`, `runs` and `2026-09-27...` stay as the newer files made
+    // in them left them, as they are where a recent run has written.
+    let aged = |names: &[&str]| -> String {
+        let list: Vec<String> = names.iter().map(|name| format!("'{name}'")).collect();
+        format!(
+            "foreach ($name in @({})) {{ (Get-Item -LiteralPath (Join-Path $dir $name)).LastWriteTime = (Get-Date).AddDays(-40) }}\n",
+            list.join(", ")
+        )
+    };
+    let times = format!(
+        "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n(Get-Item -LiteralPath '{}').LastWriteTime = (Get-Date).AddDays(-40)\n{}{}{}",
+        dir.display(),
+        elsewhere.path().join("outside-old.txt").display(),
+        aged(&old),
+        aged(&["notes.txt"]),
+        aged(&[
+            "evals/reports/runs/empty-old",
+            "evals/reports/runs/2026-09-26T10-02-54-255Z",
+            "evals/reports/runs/2026-09-28T10-02-54-255Z",
+        ])
+    );
+    let set = powershell(&times);
+    assert_eq!(set.code, 0, "{}{}", set.stdout, set.stderr);
+
+    let ran = run_sweep(dir);
+    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    for gone in [
+        "evals/reports/2026-09-25T20-09-20-351Z-six-decisions.json",
+        "evals/reports/long/2026-09-26T04-46-26-635Z-long.md",
+        "evals/reports/long/2026-09-26T04-46-26-635Z-long.json",
+        "evals/reports/long/2026-09-26T04-46-26-635Z-long-ledger.db",
+        "evals/reports/runs/2026-09-26T10-02-54-255Z/run.json",
+        // The folder it leaves empty, old itself, goes with it; so does an empty old one.
+        "evals/reports/runs/2026-09-26T10-02-54-255Z",
+        "evals/reports/runs/empty-old",
+        // An old file in a folder that something newer is left in, whether the folder is old
+        // itself (`2026-09-28`) or was written within the limit (`2026-09-27`).
+        "evals/reports/runs/2026-09-28T10-02-54-255Z/old.json",
+        "evals/reports/runs/2026-09-27T10-02-54-255Z/old.json",
+    ] {
+        assert!(!dir.join(gone).exists(), "{gone}: {}", ran.stdout);
+    }
+    assert!(
+        ran.stdout
+            .contains("== removed evals/reports/long/2026-09-26T04-46-26-635Z-long-ledger.db"),
+        "{}",
+        ran.stdout
+    );
+    for kept in [
+        "evals/reports/2026-10-20T20-09-20-351Z-six-decisions.json",
+        "evals/reports/long/2026-10-20T12-25-35-830Z-long.md",
+        "evals/reports/long/2026-10-20T12-25-35-830Z-long-ledger.db",
+        "evals/reports/long",
+        "evals/reports/runs/2026-09-28T10-02-54-255Z/new.json",
+        "evals/reports/runs/2026-09-28T10-02-54-255Z",
+        "evals/reports/runs/2026-09-27T10-02-54-255Z/new.json",
+        "evals/reports/runs",
+        // New, though nothing is in it.
+        "evals/reports/runs/empty-new",
+        "evals/reports",
+        // The link is new, and what it points at was not walked: its old file is there.
+        "evals/reports/linked",
+        "notes.txt",
+        SYNCED,
+        SWEEP,
+    ] {
+        assert!(dir.join(kept).exists(), "{kept}: {}", ran.stdout);
+    }
+    assert!(
+        elsewhere.path().join("outside-old.txt").exists(),
+        "{}",
+        ran.stdout
+    );
+    // And a second sweep finds nothing more to remove.
+    let again = run_sweep(dir);
+    assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    assert!(!again.stdout.contains("== removed"), "{}", again.stdout);
+}
+
+/// The reports folder itself a link (a junction to a folder elsewhere): the prune does not walk
+/// where it goes, whatever old it finds there (T-141, P3-8).
+#[cfg(windows)]
+#[test]
+fn powershell_does_not_prune_what_a_reports_folder_that_is_a_link_goes_to() {
+    use std::fs;
+
+    use cf_base::env::Env;
+
+    use crate::process::{self, Invocation};
+
+    let copy = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let dir = copy.path();
+    write(elsewhere.path(), "old.json");
+    write(elsewhere.path(), "folder/old.json");
+    // The list of what went over is never empty (a run sends the tree): one file is in it.
+    write(dir, "keep.txt");
+    fs::create_dir_all(dir.join("evals")).unwrap();
+    let junction = Invocation::new("cmd", dir)
+        .args(["/c", "mklink", "/J", "evals\\reports"])
+        .arg(elsewhere.path());
+    assert_eq!(
+        process::capture(&junction, &Env::from_process())
+            .unwrap()
+            .code,
+        0
+    );
+    fs::write(dir.join(SYNCED), "keep.txt\n").unwrap();
+    say_the_tree(dir, &["keep.txt"]);
+    fs::write(dir.join(SWEEP), sweep_script()).unwrap();
+    let aged = powershell(&format!(
+        "$ErrorActionPreference = 'Stop'\nforeach ($path in @('{0}\\old.json', '{0}\\folder\\old.json', '{0}\\folder')) {{ (Get-Item -LiteralPath $path).LastWriteTime = (Get-Date).AddDays(-40) }}\n",
+        elsewhere.path().display()
+    ));
+    assert_eq!(aged.code, 0, "{}{}", aged.stdout, aged.stderr);
+
+    let ran = run_sweep(dir);
+    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    assert!(!ran.stdout.contains("== removed"), "{}", ran.stdout);
+    for kept in ["old.json", "folder/old.json", "folder"] {
+        assert!(elsewhere.path().join(kept).exists(), "{kept}");
+    }
+    assert!(dir.join("evals/reports").exists());
+}
+
+/// The sweep run by the machine's PowerShell beside tarballs that runs left: only those of
+/// the copy's folder (this run's own among them, which is an hour young), the ones the
+/// runs sent before each had its own, and only when they were written an hour ago.
+#[cfg(windows)]
+#[test]
+fn powershell_takes_away_the_tarballs_runs_left_an_hour_ago_or_of_a_folder_gone_a_day_ago_and_no_other_file(
+) {
+    use std::fs;
+    use std::time::{Duration, SystemTime};
+
+    use cf_base::env::Env;
+
+    use crate::process::{self, Invocation};
+
+    let profile = tempfile::tempdir().unwrap();
+    let dir = profile.path().join("consensflow-build");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join(SYNCED), "keep.txt\n").unwrap();
+    fs::write(dir.join("keep.txt"), "kept").unwrap();
+    say_the_tree(&dir, &["keep.txt"]);
+    // Written long ago (2001), or just now: the time of day is read in one place, and the
+    // case needs only a file that is far older than an hour and one that is not.
+    let old = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+    let make = |name: &str, written: Option<SystemTime>| {
+        let path = profile.path().join(name);
+        fs::write(&path, name).unwrap();
+        if let Some(written) = written {
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(written)
+                .unwrap();
+        }
+    };
+    // Folders beside the copy, of runs that went on: one is there, one is gone.
+    fs::create_dir_all(profile.path().join("other")).unwrap();
+    let (removed, stays) = (
+        [
+            "consensflow-build.0000abcd-12345678.tgz",
+            "consensflow-build.tgz",
+            // The upload of a folder that is gone, written two days ago (the system's
+            // way of saying "a day" is a time in 2001, which is further).
+            "gone.0000abcd-12345678.tgz",
+            "gone.with.dots.0000abcd-12345678.tgz",
+            // A folder of a name like the copy's, which is not there: its upload is gone's too.
+            "consensflow-build2.0000abcd-12345678.tgz",
+        ],
+        [
+            // A run's own tarball, written just now: it is being unpacked, or is on its way.
+            ("consensflow-build.0000abce-12345678.tgz", None),
+            // The upload of a folder that is gone, as old as it should be to go if it were
+            // not just now: it stays, written less than a day ago.
+            ("gone-a-moment-ago.0000abcd-12345678.tgz", None),
+            // Another folder's, which is there: its own runs take theirs away an hour after.
+            ("other.0000abcd-12345678.tgz", Some(old)),
+            // Not of this copy's folder, not a name a run gives, not a tarball.
+            ("consensflow-build.0000abcd-1234567.tgz", Some(old)),
+            ("consensflow-build.0000abcd-12345678.tgz.part", Some(old)),
+            ("consensflow-build.x.tgz", Some(old)),
+            ("consensflow-build.0000abcd-12345678.txt", Some(old)),
+        ],
+    );
+    for name in removed {
+        make(name, Some(old));
+    }
+    for (name, written) in stays {
+        make(name, written);
+    }
+    fs::write(dir.join(SWEEP), sweep_script()).unwrap();
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
+        dir.display()
+    );
+    let ran = process::capture(
+        &Invocation::new("powershell", ".")
+            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+            .arg(encode_script(&script).unwrap()),
+        &Env::from_process(),
+    )
+    .unwrap();
+    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    for name in removed {
+        assert!(!profile.path().join(name).exists(), "{name} stayed");
+    }
+    for (name, _) in stays {
+        assert!(profile.path().join(name).exists(), "{name} went");
+    }
+    assert!(dir.join("keep.txt").exists());
+}
+
+/// The sweep's hash, made by the machine's PowerShell, is the one the Mac makes of the same
+/// files: names with a space and an accent (read from the list as UTF-8), a file with nothing
+/// in it, one with carriage returns, one of bytes that are no text. A file that differs is
+/// refused with both hashes, and so is one that is gone.
+#[cfg(windows)]
+#[test]
+fn powershell_makes_the_hash_the_mac_makes_of_names_and_bytes_and_refuses_files_that_differ() {
+    use std::fs;
+    use std::path::Path;
+
+    use cf_base::env::Env;
+
+    use crate::process::{self, Invocation};
+
+    let copy = tempfile::tempdir().unwrap();
+    let dir = copy.path();
+    let files: [(&str, &[u8]); 5] = [
+        ("keep.txt", b"kept"),
+        ("sub dir/été.txt", b"accent"),
+        ("empty", b""),
+        ("crlf.txt", b"one\r\ntwo\r\n"),
+        ("bytes.bin", &[0, 255, 13, 10, 26, 128]),
+    ];
+    let names: Vec<&str> = files.iter().map(|(name, _)| *name).collect();
+    for (name, bytes) in files {
+        let path = dir.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, bytes).unwrap();
+    }
+    fs::write(dir.join(SYNCED), format!("{}\n", names.join("\n"))).unwrap();
+    fs::write(dir.join(SWEEP), sweep_script()).unwrap();
+    say_the_tree(dir, &names);
+    let run = |dir: &Path| {
+        let script = format!(
+            "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
+            dir.display()
+        );
+        process::capture(
+            &Invocation::new("powershell", ".")
+                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+                .arg(encode_script(&script).unwrap()),
+            &Env::from_process(),
+        )
+        .unwrap()
+    };
+    let ran = run(dir);
+    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    assert!(
+        !ran.stdout.contains("not the tree that was sent"),
+        "{}",
+        ran.stdout
+    );
+    // A file changed by one byte, a file gone, a file added to the list that is not there.
+    let identity = fs::read_to_string(dir.join(TREE)).unwrap();
+    let sent = identity.trim().split(' ').nth(1).unwrap().to_owned();
+    fs::write(dir.join("keep.txt"), b"kept!").unwrap();
+    let changed = run(dir);
+    assert_eq!(changed.code, 1, "{}{}", changed.stdout, changed.stderr);
+    assert!(
+        changed
+            .stdout
+            .contains("The files unpacked are not the tree that was sent: they hash to ")
+            && changed
+                .stdout
+                .contains(&format!("and its identity says {sent}.")),
+        "{}",
+        changed.stdout
+    );
+    fs::write(dir.join("keep.txt"), b"kept").unwrap();
+    fs::remove_file(dir.join("empty")).unwrap();
+    // The sweep removes what the list does not name, so the list's file that is gone is the difference.
+    let gone = run(dir);
+    assert_eq!(gone.code, 1, "{}{}", gone.stdout, gone.stderr);
+    assert!(
+        gone.stdout.contains("not the tree that was sent"),
+        "{}",
+        gone.stdout
+    );
 }

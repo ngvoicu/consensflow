@@ -21,5 +21,7 @@ mod open;
 mod parallel;
 #[path = "measure/placed.rs"]
 mod placed;
+#[path = "measure/questions.rs"]
+mod questions;
 #[path = "measure/recordings.rs"]
 mod recordings;

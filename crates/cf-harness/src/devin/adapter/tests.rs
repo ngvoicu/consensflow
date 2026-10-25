@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::records::{Quota, Reading, Record, Settlement};
-use crate::testing::{finished, Driver, Fakes, EPOCH_MS};
+use crate::testing::{finished, Driver, Fakes, ScriptedHost, EPOCH_MS};
 
 mod bypass;
 
@@ -107,7 +107,10 @@ fn a_window_names_the_conversation_it_opened_after_some_polls() {
     let window = window(&fakes, &wire, None);
     let mut driver = Driver::default();
     let started = Rc::clone(&window);
-    driver.begin(0, async move { started.started().await });
+    driver.begin(
+        0,
+        async move { started.started(&ScriptedHost::default()).await },
+    );
     assert!(driver.run().is_empty());
     assert_eq!(fakes.time.waits(0), [250]);
     assert!(
@@ -131,7 +134,10 @@ fn a_window_that_never_names_one_is_given_up_on_at_its_deadline_and_not_before()
     let fakes = Fakes::new(&Env::default());
     let window = window(&fakes, &wire, None);
     let mut driver = Driver::default();
-    driver.begin(0, async move { window.started().await });
+    driver.begin(
+        0,
+        async move { window.started(&ScriptedHost::default()).await },
+    );
     assert!(driver.run().is_empty());
     let mut polls = 0;
     while fakes.time.fire_next(EPOCH_MS + 59_999) {
@@ -160,7 +166,7 @@ fn a_window_that_never_names_one_is_given_up_on_at_its_deadline_and_not_before()
 fn a_window_that_has_its_conversation_polls_nothing() {
     let fakes = Fakes::new(&Env::default());
     let window = window(&fakes, Path::new("/nowhere/wire.jsonl"), Some("mild-coin"));
-    assert_eq!(finished(window.started()), Ok(None));
+    assert_eq!(finished(window.started(&ScriptedHost::default())), Ok(None));
     assert!(fakes.time.waits(0).is_empty());
 }
 

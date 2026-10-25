@@ -17,6 +17,7 @@
 //! harnesses it found, each break's and each unresolved's key as it is found, the
 //! summary, where the report is), and the report keeps the rest.
 
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
@@ -26,15 +27,18 @@ use cf_e2e::rig::Project;
 
 use super::disruptions::{Choice, Schedule};
 use super::edge::Edge;
-use super::invariants::{self, end, Break, Keeper, Settings, Unjudged, EFFECT};
+use super::invariants::{self, end, Break, Keeper, Settings, Unjudged, EFFECT, END};
 use super::ledger::Ledger;
-use super::look::{Look, Windows};
+use super::look::{Look, Reading, Windows};
 use super::mask::cut;
 use super::options::Options;
 use super::play::{self, Outcome, Stagehand, Watch, With};
+use super::record::Record;
 use super::report::{file_name, ChiefKept, Kept, TIME_UP};
 use super::setup::{self, Cast};
 use super::stage::{self, Stage};
+use super::stalls::held::{Prober, System};
+use super::stalls::Stalls;
 use super::timeline::Timeline;
 use crate::measure::{chief_open_question, on_copy};
 use crate::plan::terminal_answer;
@@ -71,14 +75,23 @@ struct Going {
     deadline: i64,
     /// Why the ledger the app left could not be read, where it could not.
     final_unread: Option<String>,
+    /// What the run keeps of a window that stalled, and of every window at an end the
+    /// project did not reach.
+    stalls: Stalls,
+    /// The ledger the app left, to be copied beside the report where the stalls keep
+    /// anything.
+    ledger: Option<PathBuf>,
+    /// What asks the system of a stalled window's processes.
+    prober: Box<dyn Prober>,
     /// Where all the run says and keeps leaves it.
     edge: Edge,
 }
 
 impl Going {
     /// A look, held to the invariants with `settings`: what changed told, each break
-    /// found recorded and said, and what could not be judged said. It is the last look
-    /// then. The names it shows are the run's from then, shown wherever it says them.
+    /// found recorded and said, what could not be judged said, and each window that
+    /// stalled or no longer does told. It is the last look then. The names it shows are
+    /// the run's from then, shown wherever it says them.
     fn hold(&mut self, floor: &mut Floor, settings: &Settings, look: Look) {
         self.timeline.changes(self.last.as_ref(), &look);
         self.edge.knows(&self.timeline.names);
@@ -87,6 +100,11 @@ impl Going {
         let open = invariants::unjudged(&look, settings);
         self.fill(floor, &look, &open);
         self.unjudged(floor, look.at, open);
+        for (at, said) in self.stalls.look(&look, settings.idle) {
+            let _ = floor.note(&said);
+            self.timeline.add(at, "stall", said);
+        }
+        self.stalls.take(&look, self.prober.as_mut());
         self.last = Some(look);
     }
 
@@ -284,6 +302,16 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
         ending: String::new(),
         deadline: started + millis(options.budget),
         final_unread: None,
+        stalls: Stalls::default(),
+        ledger: None,
+        prober: Box::new(System::new({
+            let (edge, folder) = (edge.clone(), options.reports.clone());
+            let name = file_name(started, &options.chief, &cast.names);
+            move |label| {
+                edge.sample_file(&folder, &name, label)
+                    .map_err(|failed| failed.to_string())
+            }
+        })),
         edge: edge.clone(),
     };
     for planned in &run.schedule.planned {
@@ -309,6 +337,13 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
         (None, Err(failed)) => Some(format!("the app did not close: {failed}")),
         (None, Ok(_)) => run.final_unread.clone(),
     };
+    let name = file_name(started, &options.chief, &cast.names);
+    if let Some(file) = &run.ledger {
+        run.stalls.ledger = Some(
+            edge.keep_ledger(&options.reports, &name, file)
+                .map_err(|failed| failed.to_string()),
+        );
+    }
     let kept = Kept {
         options: &options,
         chief: ChiefKept {
@@ -328,11 +363,11 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
         unresolved: &run.keeper.unjudged,
         filled: &run.keeper.filled,
         timeline: &run.timeline,
+        stalls: &run.stalls,
         ending: run.ending.clone(),
         error,
         log: floor.log(),
     };
-    let name = file_name(started, &options.chief, &cast.names);
     keep_and_say(&kept, edge, &options.reports, &name, &mut floor)
 }
 
@@ -362,8 +397,10 @@ fn keep_and_say(
 /// and to the end within the budget. A ledger the app left that cannot be read is why
 /// the run fails, and only what the close left of the run's processes is held then.
 /// Where the app did not come back, the last look that was is held, and nothing it
-/// told is told again. The disruptions never played are said so. Where the rig's files
-/// are kept, or why the app did not close.
+/// told is told again. Where the project did not reach its end, every window of the last
+/// look before the close is kept as it was ([`Stalls`]); where that or a stall was kept,
+/// the ledger the app left is to be copied beside the report. The disruptions never
+/// played are said so. Where the rig's files are kept, or why the app did not close.
 fn finish(
     stage: &mut Stage,
     run: &mut Going,
@@ -391,11 +428,31 @@ fn finish(
         }
     }
     read_once_more(run, floor, settings, || Stagehand::look(stage));
+    // The pane host sampled is the running app's: the last look's was reaped by a restart
+    // the app did not survive.
+    let host = stage.rig().ok().map(cf_e2e::rig::Rig::host_pid);
+    run.stalls
+        .before_close(run.last.as_ref(), host, run.prober.as_mut());
+    let ledger = stage
+        .rig()
+        .ok()
+        .map(|rig| rig.home().join("consensflow.db"));
     let closed = stage.close();
     let at = now();
     let after = match &closed {
         Ok(closed) => {
             let ledger = on_copy(&closed.home.join("consensflow.db"), Ledger::read);
+            // The records read once more, as the ledger is: a row copied after the last look
+            // is held to a record read past it.
+            let records = ledger
+                .as_ref()
+                .ok()
+                .map(|ledger| {
+                    let records = stage.watcher.records_after_close(ledger);
+                    run.timeline.add(at, "run", read_again(&records.1));
+                    records
+                })
+                .unwrap_or_default();
             if !closed.left.is_empty() {
                 run.timeline.add(
                     at,
@@ -422,7 +479,7 @@ fn finish(
                 at,
                 ledger,
                 windows,
-                run.last.as_ref(),
+                records,
                 (settings, &run.ending, run.deadline),
             )
         }
@@ -453,6 +510,13 @@ fn finish(
         run.fill(floor, &look, &found);
         run.unjudged(floor, look.at, found);
         run.last = Some(look);
+    }
+    let unended = run.keeper.broke(END);
+    if run
+        .stalls
+        .after_close(unended, run.last.as_ref().map(|look| &look.ledger))
+    {
+        run.ledger = ledger;
     }
     let why = match run.ending.as_str() {
         TIME_UP => "time ran out before its moment came",
@@ -513,7 +577,8 @@ struct AfterClose {
     unread: Option<String>,
 }
 
-/// What the run holds once the app has closed at `at`, its ledger read as `ledger`
+/// What the run holds once the app has closed at `at`, its ledger read as `ledger`, its
+/// records as `records` (read once more after the close, or as the last look read them)
 /// and its windows as the close left them, held with `settings` and to the end of a
 /// run that ended `why` by `deadline`. A ledger that could not be read leaves no look:
 /// what the close left of the run's processes, which needs no ledger, is held all the
@@ -522,12 +587,12 @@ fn after_close(
     at: i64,
     ledger: Result<Ledger>,
     windows: Windows,
-    last: Option<&Look>,
+    records: Records,
     (settings, why, deadline): (&Settings, &str, i64),
 ) -> AfterClose {
     match ledger {
         Ok(ledger) => {
-            let look = closed_look(at, ledger, windows, last);
+            let look = closed_look(at, ledger, windows, records);
             let found = final_breaks(&look, settings, why, deadline);
             AfterClose {
                 look: Some(look),
@@ -536,7 +601,7 @@ fn after_close(
             }
         }
         Err(failed) => {
-            let processes = closed_look(at, Ledger::default(), windows, None);
+            let processes = closed_look(at, Ledger::default(), windows, Records::default());
             AfterClose {
                 look: None,
                 found: invariants::check(&processes, &final_settings(settings)),
@@ -551,9 +616,9 @@ fn after_close(
 /// The look at the project once the app has closed, at `at`: its ledger as the app
 /// left it, the `windows` as the close left them (none open: every exit the run saw,
 /// the processes of the run that were left and those it could not judge, and every
-/// close whose host's last word was not read whole), and the records of the last look,
-/// read as far as that look read them.
-fn closed_look(at: i64, ledger: Ledger, windows: Windows, last: Option<&Look>) -> Look {
+/// close whose host's last word was not read whole), and `records`, each with how far it
+/// was read.
+fn closed_look(at: i64, ledger: Ledger, windows: Windows, (records, readings): Records) -> Look {
     Look {
         at,
         ledger,
@@ -562,9 +627,29 @@ fn closed_look(at: i64, ledger: Ledger, windows: Windows, last: Option<&Look>) -
             activity: Vec::new(),
             ..windows
         },
-        records: last.map(|look| look.records.clone()).unwrap_or_default(),
-        readings: last.map(Look::every_reading).unwrap_or_default(),
+        records,
+        readings,
+        host: None,
     }
+}
+
+/// The harnesses' records a look holds, by conversation, and how far each was read.
+type Records = (BTreeMap<i64, Record>, BTreeMap<i64, Reading>);
+
+/// What the run's timeline says of the records read once more after the close, each
+/// reading's by its conversation: how many, and how many of those readings failed.
+fn read_again(readings: &BTreeMap<i64, Reading>) -> String {
+    let failed = readings
+        .values()
+        .filter(|reading| reading.failed.is_some())
+        .count();
+    let plural = |count: usize| if count == 1 { "" } else { "s" };
+    format!(
+        "the records were read once more after the close: {} conversation{}, {failed} reading{} failed",
+        readings.len(),
+        plural(readings.len()),
+        plural(failed)
+    )
 }
 
 /// `settings` for a look once the app has closed: a result is judged however young

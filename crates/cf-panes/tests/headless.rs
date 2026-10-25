@@ -2639,3 +2639,82 @@ fn a_mark_or_a_look_at_a_window_that_is_not_open_is_refused() {
     }
     helper.close_input_and_wait();
 }
+
+/// A worker's window, as the bridge's looks at its commands meet it: a server that leaves
+/// the window's group (`setsid`) before the window is at rest, then, told to go, a command
+/// in a group of its own.
+#[cfg(target_os = "macos")]
+const LEFT_GROUP: &str = "/usr/bin/python3 -c 'import os, time; os.setsid(); time.sleep(40)' & \
+     echo $! > $JOB; sleep 0.5; printf ready; read go; \
+     /usr/bin/python3 -c 'import os; os.setpgrp(); os.execv(\"/bin/sleep\", [\"sleep\", \"41\"])' & \
+     sleep 0.3; printf started; wait";
+
+/// `pane.commands` over the wire leaves out what ran at the rest it names (`since`, which
+/// `pane.rest` answered), and what began before the time it names (`after`, milliseconds
+/// since the epoch: T-301, a worker's first turn, which no rest comes before); a look
+/// that names neither counts the server that left the group.
+#[cfg(target_os = "macos")]
+#[allow(clippy::disallowed_methods)] // The time of the monitor's call, as its record would say it.
+#[test]
+fn a_look_at_the_commands_over_the_wire_leaves_out_the_rest_and_what_began_before_the_time_it_names(
+) {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    static MADE: AtomicU64 = AtomicU64::new(0);
+    let job = std::env::temp_dir().join(format!(
+        "cf-headless-server-{}-{}",
+        std::process::id(),
+        MADE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_file(&job);
+    let mut body = open_body(LEFT_GROUP, 4096);
+    body["env"] = json!({ "JOB": job });
+    let opened = helper.request("pane.open", body, &mut events);
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let pane = json!({"id":pane_id,"generation":generation});
+    output_until(&helper, &mut events, &pane_id, generation, b"ready");
+    let server = detached_job(&job);
+    let mut mark = pane.clone();
+    mark["servers"] = json!("inGroup");
+    mark["harness"] = json!("claude");
+    helper.request("pane.mark", mark, &mut events);
+    let rest = helper.request("pane.rest", pane.clone(), &mut events);
+    assert_eq!(rest["ok"], true, "{rest}");
+    let called = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("after the epoch")
+            .as_millis(),
+    )
+    .expect("a time");
+    helper.request(
+        "pane.input",
+        json!({"id":pane_id,"generation":generation,"bytes":[103,111,10]}),
+        &mut events,
+    );
+    output_until(&helper, &mut events, &pane_id, generation, b"started");
+    let mut total = |asked: Value| {
+        let mut body = pane.clone();
+        for (name, value) in asked.as_object().into_iter().flatten() {
+            body[name] = value.clone();
+        }
+        let answer = helper.request("pane.commands", body, &mut events);
+        assert_eq!(answer["ok"], true, "{answer}");
+        answer["commands"]["total"].clone()
+    };
+    assert_eq!(total(json!({})), 2, "the server and the command");
+    assert_eq!(total(json!({ "since": rest["rest"] })), 1, "the command");
+    assert_eq!(total(json!({ "after": called })), 1, "the command");
+
+    // The server is the test's to end, before the window's close looks at it.
+    kill_process_group(server);
+    assert_eq!(
+        helper.request("pane.kill", pane, &mut events),
+        json!({"ok":true})
+    );
+    helper.close_input_and_wait();
+    let _ = std::fs::remove_file(&job);
+}

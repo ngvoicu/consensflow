@@ -102,7 +102,7 @@ replace = '''
 
 [[plant]]
 name = "pause: the words that first reach a window do not answer a pause asked before them"
-meant = "the_words_that_first_reach_a_window_for_a_task_paused_before_they_came_answer_that_pause"
+meant = "the_words_that_first_reach_a_window_the_human_opened_with_no_task_answer_a_pause_asked_before_them"
 runs = ["engine-dispatcher-stops"]
 
 [[plant.edit]]

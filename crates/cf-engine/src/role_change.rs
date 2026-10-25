@@ -74,7 +74,7 @@
 //! ([`prelude`]).
 //!
 //! A role too long for one message (more than 16,000 units: a staff of more than
-//! 39 rows with specs on, 68 without, two roles to a row, on the real text) is
+//! 37 rows with specs on, 65 without, two roles to a row, on the real text) is
 //! delivered cut to its opening, with the way to read the rest (`cf inbox read`).
 //! That is a role told in part: it is not recorded as told, and the human has a
 //! line on the board that says so. The role is said again at every Resume, and
@@ -104,13 +104,13 @@
 //! a staff whose rows hold two roles each, Windows paths for the skill and for
 //! `cf`, 190 units before the role for what the harness says of it), the word as
 //! Windows quotes it (each of the role's 50 quotes is two more than JSON has it)
-//! comes to 14,335 units for 1 staff row, 15,526 for 25 and 16,526 for 45, about
+//! comes to 14,463 units for 1 staff row, 15,654 for 25 and 16,654 for 45, about
 //! 50 a row. With some 400 units for the rest of the line (the two programs'
-//! paths, the flags, the thread's id, the model) a staff of 356 rows is the most
+//! paths, the flags, the thread's id, the model) a staff of 354 rows is the most
 //! it holds. What Codex's own instructions hold (the human's own, which begin the
 //! developer instructions) is in none of that: 2,500 units of them are some 2,700
-//! on the line, and the most is then 303 rows. Without specs the role is 1,422
-//! units shorter at 25 rows, and the most is 384. (When the note was the
+//! on the line, and the most is then 301 rows. Without specs the role is 1,422
+//! units shorter at 25 rows, and the most is 382. (When the note was the
 //! launch's first message the role was on the line twice, and a staff of 25 with
 //! 2,500 units of Codex's own instructions was over the limit.) A test holds
 //! these numbers to the real text.
@@ -355,32 +355,49 @@ impl Dispatcher {
         message: &MessageView,
         receipt: &Value,
     ) -> Result<(), EngineError> {
+        let tells = self.tells_a_role(message)?;
+        {
+            let mut ledger = self.seams.ledger.borrow_mut();
+            if tells == Some(true) {
+                ledger.confirm_delivery_telling(message.id, Some(receipt))?;
+            } else {
+                ledger.confirm_delivery(message.id, Some(receipt))?;
+            }
+        }
+        if tells == Some(false) {
+            self.told_in_part(message)?;
+        }
+        Ok(())
+    }
+
+    /// Whether `message` says its recipient's conversation a role: whole (`true`),
+    /// which its confirmation records as told, or cut (`false`), which it does not.
+    /// None for a message that says no role.
+    pub(crate) fn tells_a_role(&self, message: &MessageView) -> Result<Option<bool>, EngineError> {
         let says_a_role = self
             .seams
             .ledger
             .borrow()
             .role_notes_to(message.recipient_id)?
             .contains(&message.id);
-        let mut ledger = self.seams.ledger.borrow_mut();
-        if !says_a_role {
-            ledger.confirm_delivery(message.id, Some(receipt))?;
-        } else if goes_whole(message, &[]) {
-            ledger.confirm_delivery_telling(message.id, Some(receipt))?;
-        } else {
-            ledger.confirm_delivery(message.id, Some(receipt))?;
-            ledger.note(
-                message.project_id,
-                &NewNote {
-                    from: None,
-                    to: "human".to_owned(),
-                    task: message.task_number,
-                    body: format!(
-                        "@{} was told its new role in part: the staff is too large for one message (m-{} was cut at 16,000 characters). It is told again at every Resume until the staff is smaller.",
-                        message.recipient, message.id
-                    ),
-                },
-            )?;
-        }
+        Ok(says_a_role.then(|| goes_whole(message, &[])))
+    }
+
+    /// The human is told on the board that `message`, a role cut to fit in one
+    /// message, told its recipient's conversation its role in part.
+    pub(crate) fn told_in_part(&self, message: &MessageView) -> Result<(), EngineError> {
+        self.seams.ledger.borrow_mut().note(
+            message.project_id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: message.task_number,
+                body: format!(
+                    "@{} was told its new role in part: the staff is too large for one message (m-{} was cut at 16,000 characters). It is told again at every Resume until the staff is smaller.",
+                    message.recipient, message.id
+                ),
+            },
+        )?;
         Ok(())
     }
 }
@@ -391,24 +408,73 @@ fn body_of(instructions: &str) -> String {
     format!("{OPENING}\n\n{instructions}")
 }
 
-/// The assistant's items among `items`, a member's record after its brief, that
-/// answer the task: not those of a turn that answers a replacement of the role.
-/// A user's message that says a role begins a turn whose words are the window's
-/// word of its role and none of its task's, and the next user's message ends it.
-/// `replacements` are the ids of the replacements the ledger knows were written
-/// to the member; a message is one by the id of its header, and not by any words.
-pub(crate) fn answers_to_the_task<'a>(items: &'a [Item], replacements: &[i64]) -> Vec<&'a Item> {
+/// What a member wrote in answer to its task: where its answer ends, and its final
+/// answer.
+pub(crate) struct Answers<'a> {
+    /// The last assistant item that answers the task: the answer is over when it is
+    /// complete. None where a message to the member came after it (a notification of
+    /// its harness's that woke a turn), whose answer is still to come.
+    pub(crate) last: Option<&'a Item>,
+    /// What the member wrote after the last tool call or message it was given: its
+    /// final answer, in the items it was written in. What it wrote before is the
+    /// progress of its turn, which stays in the transcript, and so is all it wrote
+    /// of a turn that ended before, which a job's or an agent's end woke it to go on
+    /// after.
+    pub(crate) final_run: Vec<&'a Item>,
+    /// The final answer as it stood at the last complete item the member wrote: what
+    /// Finish takes where the turn after it is still under way (a call open, a
+    /// notification's turn begun). None where it wrote none complete.
+    pub(crate) complete_run: Option<Vec<&'a Item>>,
+}
+
+/// The answer to the task in `items`, a member's record after its latest message: what
+/// is of a turn that answers a replacement of the role is not, and none where nothing
+/// else answers. Where a message to the member came after its last words, what answers
+/// that is still to come (no `last`), and the last complete answer is kept all the
+/// same, for Finish to take. A user's message that says a role begins a turn whose words are the
+/// window's word of its role and none of its task's, and the next user's message ends
+/// it; it ends no answer that came before it, and a tool's output in it ends none
+/// either. `replacements` are the ids of the replacements the ledger knows were written
+/// to the member; a message is one by the id of its header, and not by any words. The
+/// summary a compaction writes in the user's place is no message to the member at all,
+/// and changes nothing of this: Claude Code compacts a conversation that is at rest,
+/// after the answer (Astra's review of round 1). What the harness wrote in the
+/// conversation itself (a hook's context, a notification it wrote to its record alone)
+/// is no message to the member and no answer.
+pub(crate) fn answers_to_the_task<'a>(
+    items: &'a [Item],
+    replacements: &[i64],
+) -> Option<Answers<'a>> {
     let mut of_the_role = false;
-    let mut answers = Vec::new();
-    for item in items {
+    let mut last = None;
+    let mut final_run = Vec::new();
+    let mut complete_run = None;
+    for item in items.iter().filter(|item| !item.compaction) {
         match item.role {
             Role::User => {
                 of_the_role =
                     header_id(&item.text).is_some_and(|message| replacements.contains(&message));
+                // A message to the member (its own, or its harness's notification) is
+                // answered by what follows it, if anything does.
+                if !of_the_role {
+                    final_run.clear();
+                    last = None;
+                }
             }
-            Role::Assistant if !of_the_role => answers.push(item),
+            Role::Tool if !of_the_role => final_run.clear(),
+            Role::Assistant if !of_the_role => {
+                last = Some(item);
+                final_run.push(item);
+                if item.complete {
+                    complete_run = Some(final_run.clone());
+                }
+            }
             _ => {}
         }
     }
-    answers
+    (last.is_some() || complete_run.is_some()).then_some(Answers {
+        last,
+        final_run,
+        complete_run,
+    })
 }

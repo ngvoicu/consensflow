@@ -8,8 +8,10 @@
 //!   `builds` left built from planted sources (none, for a family that builds
 //!   nothing); `tables`, the files of plants in the order they are run, which
 //!   is also the list of them (a file the folder holds that it does not name,
-//!   or the reverse, is an error); and `[run]`, the runs that several tables
-//!   share.
+//!   or the reverse, is an error); `known_unapplied`, the names of the plants
+//!   that do not apply yet, which `--check` says known rather than failing (a
+//!   name that no plant has is an error); and `[run]`, the runs that several
+//!   tables share.
 //! - `<table>.toml` are the plants, one table for each area, and `[run]` there is
 //!   the runs of that table alone.
 //!
@@ -25,7 +27,7 @@
 //! meant = "every_list_of_words_is_read_as_node_reads_it"   # the test it was written for
 //! runs = ["args", ["cargo", "test", "--offline", "-p", "cf"]]   # a name, or the words
 //! builds = true             # optional: its runs build the native `cf`
-//! prepare = [["cargo", "xtask", "smoke-updater", "--export-bridge"]]   # optional: must succeed first
+//! prepare = [["cargo", "xtask", "smoke-updater", "--export-bridge", "--cache", "app/src-tauri/target/updater-smoke"]]   # optional: must succeed first
 //! requires = ["app/src-tauri/target/…"]   # optional: files its runs take as given
 //! platforms = ["macos"]     # optional: the systems it is run on ("macos", "windows", "linux")
 //!
@@ -71,6 +73,10 @@ pub struct Family {
     /// What builds again what a run that builds leaves built from planted sources.
     pub rebuild: Option<Vec<String>>,
     pub plants: Vec<Plant>,
+    /// The plants that do not apply to the sources yet, by name: `check` says them known
+    /// rather than failing, until each is mended and taken off this list (a plant on it
+    /// that applies again fails the check).
+    pub known_unapplied: Vec<String>,
 }
 
 /// One bug, and how it is to be noticed.
@@ -132,6 +138,8 @@ struct KitFile {
     run_limit_minutes: u64,
     rebuild: Option<Vec<String>>,
     tables: Vec<String>,
+    #[serde(default)]
+    known_unapplied: Vec<String>,
     #[serde(default)]
     run: BTreeMap<String, RunSpec>,
 }
@@ -254,6 +262,16 @@ impl Family {
                 found.push(plant);
             }
         }
+        if let Some(name) = kit
+            .known_unapplied
+            .iter()
+            .find(|name| !found.iter().any(|plant| plant.name == name.as_str()))
+        {
+            return Err(Error::data(
+                &folder.join("kit.toml"),
+                format!("known_unapplied names `{name}`, which no plant of the family has"),
+            ));
+        }
         let builds = |plant: &Plant| plant.builds || plant.runs.iter().any(|run| run.builds);
         if kit.rebuild.is_none() && found.iter().any(builds) {
             return Err(Error::data(
@@ -266,6 +284,7 @@ impl Family {
             limit: Duration::from_secs(kit.run_limit_minutes * 60),
             rebuild: kit.rebuild,
             plants: found,
+            known_unapplied: kit.known_unapplied,
         })
     }
 

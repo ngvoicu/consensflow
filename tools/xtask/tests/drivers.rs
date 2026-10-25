@@ -13,6 +13,8 @@ mod common;
 
 use std::fs;
 
+#[cfg(target_os = "macos")]
+use common::ioreg_printing;
 use common::{
     arg_line, arg_lines, assert_ran_in, checkout, err, out, programs, shown, var_line, with_cargo,
     xtask,
@@ -425,6 +427,43 @@ fn smoke_runs_the_smoke_test_from_the_root_asking_for_its_ignored_case_and_the_a
         arg_lines(&out(&ran))[..5],
         ["test", "-p", "cf-e2e", "--test", "smoke"].map(arg_line)
     );
+}
+
+/// What `ioreg -n Root -d1` says of a console, cut to its lock.
+#[cfg(target_os = "macos")]
+const LOCKED: &str = "      \"IOConsoleLocked\" = Yes\n";
+#[cfg(target_os = "macos")]
+const UNLOCKED: &str = "      \"IOConsoleLocked\" = No\n";
+
+#[test]
+#[cfg(target_os = "macos")]
+fn smoke_is_refused_in_words_where_the_screen_is_locked_and_starts_nothing() {
+    let tools = programs(&["cargo"]);
+    ioreg_printing(tools.path(), LOCKED);
+    let ran = xtask(&checkout(), tools.path(), &[], &["smoke"]);
+    assert_eq!(ran.status.code(), Some(1));
+    // The stand-in for cargo says what it was given when it is started: it was not.
+    assert_eq!(out(&ran), "");
+    assert_eq!(
+        err(&ran),
+        "smoke: the screen is locked: a window can't be shown; unlock the Mac and run it again\n"
+    );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn smoke_goes_on_without_a_word_where_the_screen_is_not_locked_or_nothing_says_it_is() {
+    for printed in [UNLOCKED, "nothing of a lock\n"] {
+        let tools = programs(&["cargo"]);
+        ioreg_printing(tools.path(), printed);
+        let ran = xtask(&checkout(), tools.path(), &[], &["smoke"]);
+        assert!(ran.status.success(), "{printed:?}: {}", err(&ran));
+        assert_eq!(
+            arg_lines(&out(&ran))[..5],
+            ["test", "-p", "cf-e2e", "--test", "smoke"].map(arg_line)
+        );
+        assert_eq!(err(&ran), "");
+    }
 }
 
 #[test]

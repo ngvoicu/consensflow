@@ -7,7 +7,10 @@
 //! The window of the participant `CF_TEST_NO_LOGIN` names has no login: it
 //! prints that and stays, doing nothing else (`CF_TEST_NO_LOGIN_EXITS`: and
 //! ends with the code 3). A key pressed in a turn (the Escape that stops it) is
-//! ignored: this window is never stopped.
+//! ignored: this window is never stopped. The windows of the member
+//! `CF_TEST_SLOW_START` names (`worker 8000`) come up that many milliseconds
+//! late, as a harness does on a loaded machine: nothing of one shows, its
+//! status or the message it was launched with, until then.
 //!
 //! With `CF_TEST_MCP_SERVER` set, every window starts a server of its harness,
 //! in the group of its program (`background`): as it opens, before any turn, or,
@@ -78,6 +81,8 @@ mod signals;
 #[path = "fake_agent/status_line.rs"]
 #[cfg(unix)]
 mod status_line;
+#[path = "fake_agent/steps.rs"]
+mod steps;
 #[path = "fake_agent/stop.rs"]
 mod stop;
 #[path = "fake_agent/terminal.rs"]
@@ -104,6 +109,7 @@ use agents::Agents;
 use background::{Jobs, Server};
 use records::{note_process, Records, INTERRUPTED};
 use reply::{is_session_of, reply_to, Reply, Window};
+use steps::Tasks;
 use stop::Stop;
 use terminal::{Event, Keys};
 
@@ -196,6 +202,10 @@ fn run(
         let _ = io::copy(&mut io::stdin().lock(), &mut io::sink());
         leave(&status_file, 0);
     }
+    thread::sleep(slow_start(
+        own_var("CF_TEST_SLOW_START").as_deref(),
+        &participant,
+    ));
 
     // Claude Code's question about a folder it was never told to trust comes first.
     let asking = named("CF_TEST_TRUST");
@@ -267,6 +277,7 @@ fn run(
         wake: turns.clone(),
         stop: Arc::clone(&stop),
         agents: Agents::default(),
+        tasks: Tasks::default(),
     };
     // A server the harness starts with its window, before any turn, as an MCP
     // server may be (one that is late begins with the first message instead).
@@ -351,6 +362,15 @@ fn wait_as_told(name: &str) {
     thread::sleep(wait_of(own_var(name).as_deref()));
 }
 
+/// How late the window of `participant` comes up: the milliseconds `said`
+/// gives its member's windows (`<member> <milliseconds>`), and no time for any
+/// other's.
+fn slow_start(said: Option<&str>, participant: &str) -> Duration {
+    said.and_then(|said| said.split_once(' '))
+        .filter(|(member, _)| is_session_of(participant, member))
+        .map_or(Duration::ZERO, |(_, wait)| wait_of(Some(wait)))
+}
+
 /// How long the message `text` stays in the hooks of its prompt: a line
 /// `HOOKS <seconds> <words>`.
 fn hooks_of(text: &str) -> Option<Duration> {
@@ -381,6 +401,11 @@ const CAVEAT: &str = "<local-command-caveat>The messages below were made by a co
 fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<(), String> {
     if text.trim() == COMPACT {
         return compact(records, pid);
+    }
+    // Written to the transcript alone, a notification is no turn: the window stays as it is.
+    if let Some(notification) = steps::for_the_transcript_alone(text) {
+        return steps::write_for_the_transcript_alone(records, pid, notification)
+            .map_err(|cause| cause.to_string());
     }
     window.stop.begin();
     let done = turn(records, pid, window, text);
@@ -494,12 +519,18 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
     if hooks.is_none() {
         records.status(pid, "busy").map_err(failed)?;
     }
-    records
-        .append(
-            pid,
-            json!({ "type": "user", "message": { "role": "user", "content": text } }),
-        )
-        .map_err(failed)?;
+    if steps::is_notification(text) {
+        // What wakes the window when a job it started in the background ends: Claude Code
+        // queues it and takes it as the turn it begins, as its own.
+        steps::write_notification(records, pid, text).map_err(failed)?;
+    } else {
+        records
+            .append(
+                pid,
+                json!({ "type": "user", "message": { "role": "user", "content": text } }),
+            )
+            .map_err(failed)?;
+    }
     // The harness starts its servers as it takes the first message, which now shows.
     if first {
         window.server.as_the_first_message_shows(&window.jobs);
@@ -512,10 +543,16 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
         }
         records.status(pid, "busy").map_err(failed)?;
     }
-    let reply = match tool::reply(text, window).or_else(|| build::reply(text, window)) {
-        Some(reply) => reply?,
-        None => reply_to(text, window)?,
+    // What it did before it answers: the steps a worker's progress is, among them the call
+    // that runs a job in the background or arms a monitor, and what it answers.
+    let (worked, reply) = match tool::reply(text, window).or_else(|| build::reply(text, window)) {
+        Some(reply) => (Vec::new(), reply?),
+        None => match steps::reply(text, window) {
+            Some(worked) => worked?,
+            None => (Vec::new(), reply_to(text, window)?),
+        },
     };
+    steps::write(records, pid, &window.session, &worked).map_err(failed)?;
     // The message id numbers the records so far, this one not yet among them.
     let id = format!("{}-message-{pid}-{}", window.session, records.ordinal());
     match reply {
@@ -601,8 +638,13 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
             }
         }
     }
+    // Claude Code says `shell` for a window at its prompt that has a job or a monitor
+    // running in the background (2.1.305, the live run of 2026-10-21), and `busy` for as
+    // long as an agent runs.
     let status = if window.agents.running() > 0 {
         "busy"
+    } else if window.tasks.running() > 0 {
+        "shell"
     } else {
         "idle"
     };
@@ -747,6 +789,30 @@ mod tests {
         // A conversation the window is resumed on has what was said in it.
         let resumed = Records::new(config.path(), "s", 8).unwrap();
         assert!(resumed.said());
+    }
+
+    #[test]
+    fn a_slow_start_is_for_the_windows_of_the_member_it_names_alone() {
+        let said = Some("worker 8000");
+        assert_eq!(
+            slow_start(said, "worker-amber-pine"),
+            Duration::from_millis(8000)
+        );
+        assert_eq!(slow_start(said, "worker"), Duration::from_millis(8000));
+        for participant in ["chief", "workers-amber", "reviewer-amber-pine"] {
+            assert_eq!(
+                slow_start(said, participant),
+                Duration::ZERO,
+                "{participant}"
+            );
+        }
+        for said in [None, Some(""), Some("worker"), Some("worker soon")] {
+            assert_eq!(
+                slow_start(said, "worker-amber-pine"),
+                Duration::ZERO,
+                "{said:?}"
+            );
+        }
     }
 
     #[test]

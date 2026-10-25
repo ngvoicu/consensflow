@@ -20,6 +20,7 @@ escape-unsent-adapters = ["cargo", "test", "--offline", "-p", "cf-harness", "--t
 escape-unsent-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "out of quota too"]
 escape-unsent-screen-cursor = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "screen::tests::the_cursor_says_how_much"]
 escape-unsent-headless = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "only_a_host_the_rig_starts_takes_the_humans_keys_over_the_bridge"]
+escape-unsent-paste = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::pane::tests::a_paste_the_host_no_longer_admits"]
 escape-unsent-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "keys_cleared_with_escape_held_every_delivery::"]
 
 # --- the pane host ---
@@ -242,6 +243,18 @@ runs = ["escape-unsent-headless"]
 file = "crates/cf-panes/src/headless.rs"
 find = '    value.is_some_and(|value| value == "1")'
 replace = "    value.is_some() || value.is_none()"
+
+# --- round 3 (T-514, the merge of main's Resume after Close) ---
+
+[[plant]]
+name = "escape-unsent: a paste read empty skips the host's word on whether it admits it"
+meant = "a_paste_the_host_no_longer_admits_is_refused_unwritten_and_never_asked_of_the_pane"
+runs = ["escape-unsent-paste"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/pane.rs"
+find = "    if !host.admits() {\n        return not_admitted();"
+replace = "    if read_empty.is_none() && !host.admits() {\n        return not_admitted();"
 
 # --- the board ---
 
