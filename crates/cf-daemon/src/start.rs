@@ -272,10 +272,13 @@ async fn run(
             }
         })
     };
+    // The engine is built after the API, so what the API asks of it waits for it.
+    let engine: Rc<OnceCell<Rc<Dispatcher>>> = Rc::new(OnceCell::new());
     let context = Rc::new(Context {
         ledger: Rc::clone(&ledger),
         credentials: Rc::clone(&credentials),
         kick: Rc::clone(&kick),
+        finish: finishing::of(&engine, &spawn),
         closing: crate::api::context::Closing::new(),
         roster: Rc::clone(&agents) as Rc<dyn crate::api::context::AgentRows>,
         log: Rc::clone(&log),
@@ -368,6 +371,8 @@ async fn run(
         limits: Limits::of(&env),
     };
     let dispatcher = Dispatcher::new(seams);
+    // Set once, here: nothing asked of the engine before this has been given it.
+    let _ = engine.set(Rc::clone(&dispatcher));
 
     // The stop is armed before the handle line: whatever the app does once it
     // has read it finds a daemon that can stop. Every trigger trips the one
@@ -487,6 +492,8 @@ async fn run(
         },
     })
 }
+
+mod finishing;
 
 #[cfg(test)]
 mod tests;

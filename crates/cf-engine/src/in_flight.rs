@@ -46,15 +46,22 @@ pub(crate) const TOOK_BEFORE_A_RESTART: &str =
 
 impl Dispatcher {
     /// How `message` reads in its window, with the rows it `carried`: as it always does
-    /// ([`delivery_text`]), but for one a start last gave back though its window took it
-    /// ([`TOOK_BEFORE_A_RESTART`]), which says it is sent again ([`delivery_text_sent_again`]).
+    /// ([`delivery_text`]), but for one a start gave back though its window took it
+    /// ([`TOOK_BEFORE_A_RESTART`]), which says it is sent again
+    /// ([`delivery_text_sent_again`]), whatever gave it back since (Resume after Close
+    /// turns a paste away at its hand-over, its project closed): that first copy may be
+    /// there still.
     pub(crate) fn delivery_text_of(
         &self,
         message: &MessageView,
         carried: &[MessageView],
     ) -> Result<String, EngineError> {
-        let reason = self.seams.ledger.borrow().last_retry_reason(message.id)?;
-        Ok(if reason.as_deref() == Some(TOOK_BEFORE_A_RESTART) {
+        let again = self
+            .seams
+            .ledger
+            .borrow()
+            .given_back_because(message.id, TOOK_BEFORE_A_RESTART)?;
+        Ok(if again {
             delivery_text_sent_again(message, carried)
         } else {
             delivery_text(message, carried)

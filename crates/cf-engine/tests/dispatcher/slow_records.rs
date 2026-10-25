@@ -1147,3 +1147,36 @@ fn a_window_opened_with_a_message_a_restart_sent_again_is_given_it_saying_so() {
         [delivery_text_sent_again(&context.message(brief.id), &[])]
     );
 }
+
+/// Where this branch meets Resume after Close (the merge of main after T-82): a paste a
+/// start sent again saying so may be turned away at its hand-over (its project closed,
+/// a row withdrawn) and given back for that. A copy may still be in the conversation it
+/// first went into all the same: the paste that goes after says so still.
+#[test]
+fn a_message_sent_again_after_a_restart_still_says_so_after_another_give_back() {
+    let context = Context::new();
+    let (project, note, _, left) = taken_then_switched(&context);
+    let text = delivery_text(&context.message(note.id), &[]);
+    context.adapter.with("chief", |agent| {
+        agent.records_settled.insert(left.clone(), false);
+        agent.stored.insert(left.clone(), vec![text]);
+    });
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.begin_delivery(note.id).unwrap();
+        ledger
+            .retry_delivery(note.id, "its project was closed before its hand-over", true)
+            .unwrap();
+    }
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        given_after_the_restart(&context, note.id),
+        [delivery_text_sent_again(&context.message(note.id), &[])]
+    );
+}

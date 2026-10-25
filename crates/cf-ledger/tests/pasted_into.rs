@@ -1,4 +1,4 @@
-//! The conversation a message on its way was pasted into (migration 0021): marked as
+//! The conversation a message on its way was pasted into (migration 0023): marked as
 //! a paste goes into an open window, read by a start while the message is on its way,
 //! and cleared by the ledger itself whatever takes it off its way. A start reads that
 //! conversation's record for it, though the window was switched to another since (the
@@ -162,14 +162,17 @@ fn a_message_on_its_way_says_the_second_its_attempt_began() {
     );
 }
 
-/// The engine words a paste by why it was last given back (T-280: a start that gave back
-/// a paste its window took sends it again saying so): the latest give-back's reason,
-/// none for a message never given back.
+/// The engine words a paste by whether it was ever given back for a reason (T-280: a
+/// start that gave back a paste its window took sends it again saying so, and Resume
+/// after Close may turn that paste away at its hand-over after): any give-back's reason
+/// counts, whatever came after it; none for a message never given back for it.
 #[test]
-fn a_message_says_why_it_was_last_given_back() {
+fn a_message_says_whether_it_was_ever_given_back_for_a_reason() {
     let dir = tempfile::tempdir().expect("a folder");
     let (mut ledger, note, _, _) = begun(dir.path());
-    assert_eq!(ledger.last_retry_reason(note).expect("read"), None);
+    assert!(!ledger
+        .given_back_because(note, "first reason")
+        .expect("read"));
     ledger
         .retry_delivery(note, "first reason", true)
         .expect("given back");
@@ -177,8 +180,13 @@ fn a_message_says_why_it_was_last_given_back() {
     ledger
         .retry_delivery(note, "second reason", true)
         .expect("given back again");
-    assert_eq!(
-        ledger.last_retry_reason(note).expect("read").as_deref(),
-        Some("second reason")
-    );
+    assert!(ledger
+        .given_back_because(note, "first reason")
+        .expect("read"));
+    assert!(ledger
+        .given_back_because(note, "second reason")
+        .expect("read"));
+    assert!(!ledger
+        .given_back_because(note, "third reason")
+        .expect("read"));
 }

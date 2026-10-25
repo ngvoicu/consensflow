@@ -5,7 +5,9 @@
 //! (`daemon`), the rig's, with the daemon and the pane host in real terminals
 //! (`rig`), the regressions (`regressions`: the rig's, one case for each bug the
 //! owner hit in real use), and the daemon under load (`load`, which is ignored
-//! unless asked for). The live tests are ignored too, and what they run is the machine's own
+//! unless asked for). `test daemons` runs the first three together, for a person
+//! and for the gate; CI runs it in two steps, each with a limit of its own: the
+//! daemon's and the rig's (`test daemon-and-rig`), and the regressions. The live tests are ignored too, and what they run is the machine's own
 //! harness on its own login, which spends real quota: they are no part of
 //! `check`, and a person asks for each by name, by [`crate::live`]'s one
 //! command. The packaged smoke (`smoke`) is a test of the same crate, ignored
@@ -24,6 +26,12 @@ pub const COMMANDS: &[Command] = &[
         about: "Run the daemon suites, the rig's and the regressions (the daemon, rig and regressions tests of cf-e2e) against the native daemon, built for them",
         usage: "[cargo test arguments: --offline, or a test's name, or -- and libtest's]",
         run: Run::Native(daemons),
+    },
+    Command {
+        words: &["test", "daemon-and-rig"],
+        about: "Run the daemon suites without the regressions (the daemon and rig tests of cf-e2e) against the native daemon, built for them: the part of `test daemons` that CI runs beside `test regressions`",
+        usage: "[cargo test arguments: --offline, or a test's name, or -- and libtest's]",
+        run: Run::Native(daemon_and_rig),
     },
     Command {
         words: &["test", "integration"],
@@ -74,6 +82,11 @@ const DAEMONS: Suite = Suite {
     filter: None,
     ignored: false,
 };
+const DAEMON_AND_RIG: Suite = Suite {
+    tests: &["daemon", "rig"],
+    filter: None,
+    ignored: false,
+};
 const INTEGRATION: Suite = Suite {
     tests: &["rig", "regressions"],
     filter: None,
@@ -112,6 +125,7 @@ pub(crate) const SMOKE: Suite = Suite {
 pub(crate) fn named(name: &str) -> Option<Suite> {
     match name {
         "daemons" => Some(DAEMONS),
+        "daemon-and-rig" => Some(DAEMON_AND_RIG),
         "integration" => Some(INTEGRATION),
         "regressions" => Some(REGRESSIONS),
         "clis" => Some(CLIS),
@@ -123,6 +137,10 @@ pub(crate) fn named(name: &str) -> Option<Suite> {
 
 fn daemons(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
     run(context, DAEMONS, args)
+}
+
+fn daemon_and_rig(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
+    run(context, DAEMON_AND_RIG, args)
 }
 
 fn integration(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
@@ -178,6 +196,7 @@ pub(crate) fn cargo_test(context: &Context, suite: Suite, args: &[OsString]) -> 
 mod tests {
     use super::*;
 
+    use std::fs;
     use std::path::{Path, PathBuf};
 
     use cf_base::env::Env;
@@ -203,6 +222,7 @@ mod tests {
     fn every_suite_runs_in_rust_and_is_no_script() {
         for words in [
             ["test", "daemons"],
+            ["test", "daemon-and-rig"],
             ["test", "integration"],
             ["test", "regressions"],
             ["test", "clis"],
@@ -227,7 +247,15 @@ mod tests {
             })
             .collect();
         assert_eq!(words.len(), COMMANDS.len());
-        let suites = [DAEMONS, INTEGRATION, REGRESSIONS, CLIS, AGENTS, LOAD];
+        let suites = [
+            DAEMONS,
+            DAEMON_AND_RIG,
+            INTEGRATION,
+            REGRESSIONS,
+            CLIS,
+            AGENTS,
+            LOAD,
+        ];
         assert_eq!(words.len(), suites.len());
         for (word, suite) in words.iter().zip(suites) {
             assert_eq!(named(word), Some(suite), "{word}");
@@ -262,6 +290,15 @@ mod tests {
         assert_eq!(
             line(DAEMONS, &["--offline", "core_slice::"]),
             "cargo test -p cf-e2e --test daemon --test rig --test regressions --offline core_slice::"
+        );
+        // CI runs the daemons in two steps with a limit each, and this is the first: all of them but the regressions.
+        assert_eq!(
+            line(DAEMON_AND_RIG, &[]),
+            "cargo test -p cf-e2e --test daemon --test rig"
+        );
+        assert_eq!(
+            line(DAEMON_AND_RIG, &["--offline", "--", "--nocapture"]),
+            "cargo test -p cf-e2e --test daemon --test rig --offline -- --nocapture"
         );
         // The regressions are rig cases, one for each bug the owner met: wherever the rig runs, they do.
         assert_eq!(
@@ -319,11 +356,61 @@ mod tests {
     fn no_suite_here_names_a_live_test_which_only_the_live_command_runs() {
         // Nothing that `check` or the workflows run asks for one: they are ignored,
         // and `live` is the one command that asks for the ignored.
-        for suite in [DAEMONS, INTEGRATION, REGRESSIONS, CLIS, AGENTS, LOAD, SMOKE] {
+        for suite in [
+            DAEMONS,
+            DAEMON_AND_RIG,
+            INTEGRATION,
+            REGRESSIONS,
+            CLIS,
+            AGENTS,
+            LOAD,
+            SMOKE,
+        ] {
             assert!(
                 suite.tests.iter().all(|test| !test.starts_with("live_")),
                 "{:?}",
                 suite.tests
+            );
+        }
+    }
+
+    /// The scripts the gate's steps run, `npm run test:<name>`, each as the suite
+    /// it hands over to.
+    fn suites_the_gate_runs() -> Vec<Suite> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml")).unwrap();
+        let package: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(root.join("package.json")).unwrap()).unwrap();
+        workflow
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("- run: npm run test:"))
+            .map(|script| {
+                let command = package["scripts"][format!("test:{script}")]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("ci.yml runs npm run test:{script}, which is none"));
+                let name = command
+                    .strip_prefix("cargo xtask test ")
+                    .unwrap_or_else(|| panic!("npm run test:{script} is `{command}`"));
+                named(name).unwrap_or_else(|| panic!("npm run test:{script} runs no suite"))
+            })
+            .collect()
+    }
+
+    /// The daemons' test files were one step of the gate and passed its limit, and
+    /// are cut in two. However they are cut, between the steps each file of
+    /// `test daemons` runs once: not left out of the gate, not run twice for the
+    /// gate's time.
+    #[test]
+    fn the_steps_of_the_gate_between_them_run_each_test_file_of_the_daemons_once() {
+        let run: Vec<&str> = suites_the_gate_runs()
+            .iter()
+            .flat_map(|suite| suite.tests.iter().copied())
+            .collect();
+        for file in DAEMONS.tests {
+            let times = run.iter().filter(|ran| *ran == file).count();
+            assert_eq!(
+                times, 1,
+                "ci.yml runs the {file} test {times} times: {run:?}"
             );
         }
     }

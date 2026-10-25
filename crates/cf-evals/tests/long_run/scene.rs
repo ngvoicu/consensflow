@@ -162,6 +162,22 @@ impl Scene {
             .unwrap();
     }
 
+    /// [`Scene::item`], written as the product copies a record (`copy_transcript`'s
+    /// upsert): an item written again under its id keeps the later words.
+    pub fn copied(&self, conversation: i64, seq: i64, role: &str, text: &str, at: &str) {
+        self.db
+            .execute(
+                "INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)
+                 ON CONFLICT (conversation_id, item_id) DO UPDATE
+                   SET seq = excluded.seq, text = excluded.text, complete = excluded.complete,
+                       at = excluded.at, copied_at = excluded.copied_at
+                   WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete",
+                params![conversation, format!("i-{conversation}-{seq}"), seq, role, text, at],
+            )
+            .unwrap();
+    }
+
     /// An entry of the log.
     pub fn event(&self, at: &str, kind: &str, data: &Value) {
         self.db

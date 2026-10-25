@@ -17,6 +17,9 @@ const SUITES: &[&str] = &["one task per member session"];
 fn brings_a_deleted_session_back_when_a_follow_up_comes_with_after_its_window_opens_on_its_own_conversation_and_a_busy_session_still_refuses(
 ) {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the follow-up,
+    // another task, goes on with the session's conversation (`ownership`).
+    context.host.exits_showing(Some(0), None, None);
     let tiers = finished(&context);
     let session = tiers.id("zeus-amber-pine");
     let native = native_of(&context, session);
@@ -93,6 +96,9 @@ fn brings_a_deleted_session_back_when_a_follow_up_comes_with_after_its_window_op
 fn brings_a_deleted_session_back_when_its_task_is_reopened_its_window_opens_on_its_own_conversation(
 ) {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the follow-up,
+    // another task, goes on with the session's conversation (`ownership`).
+    context.host.exits_showing(Some(0), None, None);
     let tiers = finished(&context);
     let session = tiers.id("zeus-amber-pine");
     let native = native_of(&context, session);
@@ -127,6 +133,9 @@ fn brings_a_deleted_session_back_when_its_task_is_reopened_its_window_opens_on_i
 fn fails_a_deleted_sessions_follow_up_as_any_launch_fails_when_its_harness_has_lost_the_conversation_and_the_task_goes_to_its_tier_instead(
 ) {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the follow-up,
+    // another task, goes on with the session's conversation (`ownership`).
+    context.host.exits_showing(Some(0), None, None);
     let tiers = finished(&context);
     context
         .end_session(tiers.project.id, "zeus-amber-pine")
@@ -170,6 +179,9 @@ fn fails_a_deleted_sessions_follow_up_as_any_launch_fails_when_its_harness_has_l
 #[test]
 fn opens_no_sessions_window_in_a_closed_project() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the follow-up,
+    // another task, goes on with the session's conversation (`ownership`).
+    context.host.exits_showing(Some(0), None, None);
     let tiers = finished(&context);
     context.close_project(tiers.project.id).unwrap();
     let opened = context.host.opened().len();
@@ -190,6 +202,9 @@ fn opens_no_sessions_window_in_a_closed_project() {
 #[test]
 fn tells_the_human_why_a_sessions_window_they_opened_did_not_start() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the follow-up,
+    // another task, goes on with the session's conversation (`ownership`).
+    context.host.exits_showing(Some(0), None, None);
     let tiers = finished(&context);
     context.host.refuse.set(true);
     context

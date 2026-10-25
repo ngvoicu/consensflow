@@ -131,7 +131,7 @@ runs = ["lost-queue-adapter", "lost-queue-reader"]
 file = "crates/cf-harness/src/claude/record.rs"
 find = '''
             if let Some(Terminal::Derived { agents, .. }) = self.terminal.as_mut() {
-                *agents = false;
+                *agents = 0;
             }'''
 replace = ""
 

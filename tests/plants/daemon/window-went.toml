@@ -46,7 +46,7 @@ find = '''
                 self.settle_gone(delivering, move |delivering| {
                     // A chief's first message (a handoff, most often) waits for its next window.
                     if delivering.chief {
-                        this.give_back(delivering, &told)
+                        this.give_back(delivering.message, &told)
                     } else {
                         let retry = !delivering.launch;
                         this.settle_failure(delivering, &told, retry)
@@ -57,7 +57,7 @@ replace = '''
                 let _ = (&this, &told);
                 // A chief's first message (a handoff, most often) waits for its next window.
                 if delivering.chief {
-                    self.give_back(delivering, &because)?;
+                    self.give_back(delivering.message, &because)?;
                 } else {
                     let retry = !delivering.launch;
                     self.settle_failure(delivering, &because, retry)?;

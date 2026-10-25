@@ -735,12 +735,10 @@ runs = ["viewer-harness-claude"]
 file = "crates/cf-harness/src/claude/record/replay.rs"
 find = '''        if record.summary {
             self.items.summary(id, &record.text, at, seq);
-        } else {
-            self.items.push(id, Role::User, &record.text, at, seq);
-        }
-'''
-replace = '''        self.items.push(id, Role::User, &record.text, at, seq);
-'''
+        } else if record.transcript_only {'''
+replace = '''        if false {
+            self.items.summary(id, &record.text, at, seq);
+        } else if record.transcript_only {'''
 
 # The page's operations. Round 2, P2 1: another participant's message read out through a header.
 

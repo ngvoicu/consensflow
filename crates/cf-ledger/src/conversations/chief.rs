@@ -6,7 +6,8 @@ use rusqlite::params;
 use serde_json::{json, Value};
 
 use super::transcripts::items_of;
-use crate::model::{self, LedgerError};
+use crate::messages::has_standing_answer;
+use crate::model::{self, sql_list, LedgerError, FINISHED_TASK_STATES};
 use crate::projects::known_project;
 use crate::store::Store;
 use crate::views::{conversation_view, message_view, task_view, MESSAGE_SELECT, TASK_SELECT};
@@ -62,21 +63,28 @@ pub(crate) fn chief_history(
 
 /// What waits on the chief now, for a chief that takes over: members'
 /// questions to it without an answer, results it has not decided on, and
-/// its own unfinished tasks.
+/// its own unfinished tasks. A question waits only while someone waits for
+/// its answer: one on a task that is over (accepted, cancelled or failed)
+/// does not, whatever became of its answer. Otherwise it waits when it has no
+/// answer that stands, by the rule that refuses a second answer
+/// ([`has_standing_answer`]): an answer held at the gate answers it, and one
+/// that failed to arrive or was cancelled does not.
 pub(crate) fn chief_open_work(
     store: &Store,
     project_id: i64,
 ) -> Result<ChiefOpenWork, LedgerError> {
     let chief = store.participant_by_handle(project_id, "chief")?;
+    let finished = sql_list(&FINISHED_TASK_STATES);
+    let standing_answer = has_standing_answer("m");
     let questions = store
         .db
         .prepare(&format!(
             "{MESSAGE_SELECT}
          WHERE m.project_id = ? AND m.recipient_id = ? AND m.kind = 'question'
            AND m.state NOT IN ('gated', 'cancelled')
+           AND NOT {standing_answer}
            AND NOT EXISTS (
-             SELECT 1 FROM message a WHERE a.reply_to = m.id AND a.kind = 'answer'
-               AND a.state NOT IN ('gated', 'cancelled')
+             SELECT 1 FROM task q WHERE q.id = m.task_id AND q.state IN ({finished})
            )
          ORDER BY m.id"
         ))?

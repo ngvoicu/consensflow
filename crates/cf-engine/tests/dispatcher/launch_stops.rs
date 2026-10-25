@@ -60,7 +60,7 @@ fn a_pause_during_a_launchs_preparation_opens_no_pane_and_the_message_is_given_b
 }
 
 #[test]
-fn a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_the_note_is_given_back(
+fn a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_the_note_is_withdrawn(
 ) {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
@@ -98,16 +98,18 @@ fn a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_t
         1,
         "no window is prepared for it again"
     );
+    // A continuation goes with any change to its task: the next Resume of the
+    // task tells its window to go on in words of its own (the lead's design of
+    // 2026-10-17).
     assert_eq!(
         context.message(note.id).state,
-        "queued",
-        "given back, with its attempt"
+        "cancelled",
+        "withdrawn by the pause"
     );
 
     // Nothing opens it while the task is paused.
     after.pass().unwrap();
     assert_eq!(launches_of(&context, "zeus").len(), 1);
-    assert_eq!(context.message(note.id).state, "queued");
     assert_eq!(context.task(project.id, 1).task.state, "paused");
 }
 

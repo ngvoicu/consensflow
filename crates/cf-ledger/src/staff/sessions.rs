@@ -7,10 +7,10 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
 use crate::conversations::current_conversation;
-use crate::model::{sql_list, LedgerError, HELD_TASK_STATES};
+use crate::model::{sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::projects::known_project;
 use crate::store::Store;
-use crate::views::ParticipantRow;
+use crate::views::{ParticipantRow, TaskRow};
 
 /// A member's new session: its own participant, named after the member,
 /// with the member's agent, harness, designer flag and tier and the role
@@ -121,20 +121,60 @@ pub(crate) fn bring_back(
     store.participant_row(session.id)
 }
 
-/// The session that did T-`after`, free to take another task
-/// (`require_free`): on the board, or brought back to it if the human had
-/// deleted it.
-pub(crate) fn continuable_session(
+/// The session that did T-`after`, and whether a follow-up for it goes behind
+/// that task.
+pub(crate) struct FollowUp {
+    pub session: ParticipantRow,
+    /// The window is still on T-`after` (or will be: it waits for its needs, or
+    /// is paused): the follow-up waits for it to be accepted, as it would for
+    /// any task it needs, and goes into the window then.
+    pub behind: bool,
+}
+
+/// The session that did T-`after`, on the board (brought back if the human had
+/// deleted it) for a follow-up. A follow-up of a task whose result is not in
+/// goes behind it (`FollowUp::behind`) and asks nothing of the session. One of
+/// a task whose result is in goes to the session now, and is refused while the
+/// session has another task in hand (`require_free`); unless follow-ups already
+/// wait for that task's acceptance, which the new one lines up behind (by
+/// number), but for those it is put `before`.
+pub(crate) fn follow_up_session(
     store: &mut Store,
     project_id: i64,
     after: i64,
-) -> Result<ParticipantRow, LedgerError> {
+    before: &[i64],
+) -> Result<FollowUp, LedgerError> {
     let previous = store.task_row(project_id, after)?;
-    let found = previous
+    if previous.assignee_id.is_none() {
+        return Err(LedgerError::refused_with(
+            "no-window-yet",
+            format!(
+                "T-{after} has no window yet: nobody has taken it. Add the next step for a tier with --needs T-{after}, and it waits until T-{after} is accepted"
+            ),
+            409,
+        ));
+    }
+    let assignee = previous
         .assignee_id
         .map(|id| store.participant_row(id))
-        .transpose()?
-        .filter(|session| session.member_id.is_some());
+        .transpose()?;
+    // A task given to a member by name runs in its lane, which is no window to
+    // continue; its follow-up waits for it as a task for a tier.
+    if let Some(lane) = assignee
+        .as_ref()
+        .filter(|lane| lane.member_id.is_none() && lane.left_at.is_none())
+        .filter(|lane| MEMBER_ROLES.contains(&lane.role.as_str()))
+    {
+        return Err(LedgerError::refused_with(
+            "no-window-yet",
+            format!(
+                "T-{after} was given to @{} by name, which has no window of its own to continue. Add the next step for a tier with --needs T-{after}, and it waits until T-{after} is accepted",
+                lane.handle
+            ),
+            409,
+        ));
+    }
+    let found = assignee.filter(|session| session.member_id.is_some());
     let session = match found {
         Some(session) if can_continue(store, &session)? => session,
         _ => {
@@ -147,8 +187,42 @@ pub(crate) fn continuable_session(
             ))
         }
     };
-    require_free(store, &session, Giving::Task)?;
-    bring_back(store, session)
+    // A session the human ended is not on a task's work: a task of its that is
+    // paused waits for its resumption, not for a follow-up.
+    let at_work = HELD_TASK_STATES.contains(&previous.state.as_str())
+        || matches!(previous.state.as_str(), "open" | "paused");
+    // A task whose result is in but not accepted still has follow-ups waiting for
+    // it, and one added now lines up behind them (by number), not ahead.
+    let others_wait =
+        previous.state == "done" && others_wait_for(store, &previous, session.id, before)?;
+    let behind = session.left_at.is_none() && (at_work || others_wait);
+    if !behind {
+        require_free(store, &session, Giving::Task)?;
+    }
+    Ok(FollowUp {
+        session: bring_back(store, session)?,
+        behind,
+    })
+}
+
+/// Whether open tasks bound to `session` wait for `task` to be accepted, other
+/// than those the new follow-up is put `before` (the chief says it goes ahead of
+/// them: the rule of 2026-10-15).
+fn others_wait_for(
+    store: &Store,
+    task: &TaskRow,
+    session: i64,
+    before: &[i64],
+) -> Result<bool, LedgerError> {
+    let waiting: Vec<i64> = store
+        .db
+        .prepare(
+            "SELECT t.number FROM task_need n JOIN task t ON t.id = n.task_id
+       WHERE n.needs_id = ? AND t.state = 'open' AND t.assignee_id = ?",
+        )?
+        .query_map(params![task.id, session], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(waiting.iter().any(|number| !before.contains(number)))
 }
 
 /// How a task comes to a session, which is what a refusal can tell it to do
@@ -163,18 +237,25 @@ pub(crate) enum Giving {
     /// given as a new one.
     SentBack(i64),
     /// Task `number`, paused, resumed into its session's window: it counts as in
-    /// hand while paused, and only another task in hand makes the session busy.
-    /// A follow-up paused while it waited on the board for its needs is one: the
-    /// session may have taken another task since.
+    /// hand while paused, and only another task its window is at work on (queued,
+    /// working or waiting) makes the session busy. A follow-up paused while it
+    /// waited on the board for its needs is one: the session may have taken
+    /// another task since. Another task of the session that is paused too does
+    /// not: the session goes on with one, and the other is resumed once that one
+    /// has its result (a ledger written before one task per session left some
+    /// holding several, and the Resume tells the chief to resume them one at a
+    /// time; Astra's review of 2026-10-17).
     Resumed(i64),
 }
 
 /// A member session takes one task at a time, and this is the one rule that
-/// every door giving a session a task holds it to: a follow-up (`--after`), a
-/// task sent back to it (a reopen) and a task named for it are refused
+/// every door giving a session a task holds it to: a follow-up (`--after`, but
+/// for one of the task the window is still on: that waits behind it,
+/// `follow_up_session`), a task sent back to it (a reopen) and a task named for
+/// it are refused
 /// `session-busy` while it has a task in hand ([`has_task_in_hand`]), and so is
-/// a paused task resumed into its window while it has another, so that its
-/// window is never at work on one task while the board speaks of another.
+/// a paused task resumed into its window while the window is at work on another,
+/// so that it is never at work on one task while the board speaks of another.
 /// The refusal says what the door can do instead (`giving`). A task that waits
 /// on the board for what it needs does not make its session busy: the release
 /// (`release_ready`) gives the session's window those one at a time, each once
@@ -209,7 +290,8 @@ pub(crate) fn require_free(
 }
 
 /// Whether a participant has a task in hand that is not the one `giving` gives
-/// it: any, but for a task resumed, which is its own already.
+/// it: any, but for a task resumed, which is its own already, and which only a
+/// task at work keeps out of its window.
 fn on_other_work(store: &Store, participant_id: i64, giving: Giving) -> Result<bool, LedgerError> {
     let Giving::Resumed(number) = giving else {
         return has_task_in_hand(store, participant_id);
@@ -219,7 +301,7 @@ fn on_other_work(store: &Store, participant_id: i64, giving: Giving) -> Result<b
         .query_row(
             &format!(
                 "SELECT 1 FROM task WHERE assignee_id = ? AND number != ? AND state IN ({})",
-                sql_list(&[&HELD_TASK_STATES[..], &["paused"]].concat())
+                sql_list(&HELD_TASK_STATES)
             ),
             params![participant_id, number],
             |_| Ok(()),

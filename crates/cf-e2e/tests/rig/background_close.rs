@@ -32,7 +32,8 @@ fn a_worker_whose_turn_works_with_a_job_running(rig: &Rig) -> cf_e2e::Result<(Pr
 /// Waits until the chief has been told, once, that T-1's window closed with the
 /// job still running, and the note names the job.
 fn until_the_chief_is_told(rig: &Rig, project: &Project) -> Outcome {
-    let closed = Regex::new(r"^T-1's window closed with background work still running: ")?;
+    let closed =
+        Regex::new(r"^T-1's window closed with background work running, which its close ended: ")?;
     rig.wait_for("the chief to be told", secs(30), || {
         Ok(notes(project, &closed)?.len() == 1)
     })?;

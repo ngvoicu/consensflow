@@ -78,6 +78,7 @@ use crate::background::{report, Baseline, Member, ProcessKey};
 use bound::{Bound, Native, System, Table};
 use cf_proto::panes::Ending;
 use native::process;
+pub(crate) use native::{awake_start, clocks};
 pub(crate) use selection::Lineage;
 
 pub(crate) const OWNER_ENV: &str = "CF_PANE_PROCESS_OWNER";
@@ -85,6 +86,36 @@ pub(crate) const OWNER_ENV: &str = "CF_PANE_PROCESS_OWNER";
 /// How long a process that was sent SIGKILL is given to be gone: the signal is
 /// delivered at once, and the process is gone when its system call returns.
 const AFTER_KILL: Duration = Duration::from_secs(2);
+
+/// How many times a look that must read all of the tree is made where a process was born
+/// while it looked ([`ProcessTree::readable_members`]).
+const LOOKS: usize = 3;
+
+/// What a look that must read all of the tree found ([`ProcessTree::readable_members`]).
+#[derive(Debug, PartialEq)]
+pub(crate) enum Readable {
+    /// Every process of the tree, each read.
+    All(Vec<Member>),
+    /// A process of the tree the system will not say what it is (another user's).
+    Unreadable,
+    /// The tree could not be read whole: a child was born since the table at every one of
+    /// [`LOOKS`] looks, or it has no program (Astraeus on 02a6cd4f: no other user's).
+    Unsettled,
+}
+
+/// What the system says of a process another named (`bound::System::looked`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Looked {
+    /// One of ours that runs, which a look reads.
+    Readable,
+    /// It ended (reaped or not), or is no process now.
+    Ended,
+    /// Another user's, as its owner says.
+    Unreadable,
+    /// One of ours that changed while it was read, or one no read said the owner of: the
+    /// look is made again ([`LOOKS`]).
+    Changed,
+}
 
 /// What a tree is asked to end, or ended.
 #[derive(Debug, Clone, Copy)]
@@ -197,6 +228,46 @@ impl ProcessTree {
         self.bound.observe(&Table::of(&snapshot));
         let tree = self.select(&snapshot, &HashMap::new());
         Ok(self.members_in(&snapshot, &tree))
+    }
+
+    /// [`ProcessTree::members`], where every process the pane's program and each of them
+    /// started is one of them ([`Readable`]): hidden where one is not and the system will
+    /// not say what it is (another user's, as a command that `exec`s `sudo` becomes), or
+    /// where the tree has no program. A look that must not take what it cannot read for
+    /// nothing running (`pane.commands`) asks this. A process the system names that ended
+    /// since (reaped or not) is none of it; one born since the table was read (Calliope on
+    /// 136a7158: a race, which would make the look say it cannot tell) has the look made
+    /// again, [`LOOKS`] times at most.
+    pub fn readable_members(&self) -> io::Result<Readable> {
+        self.readable_members_by(&Native)
+    }
+
+    fn readable_members_by(&self, system: &impl System) -> io::Result<Readable> {
+        let Some(root) = self.root else {
+            return Ok(Readable::Unsettled);
+        };
+        for _ in 0..LOOKS {
+            let snapshot = system.processes()?;
+            self.bound.observe(&Table::of(&snapshot));
+            let tree = self.select(&snapshot, &HashMap::new());
+            let mut born = false;
+            for parent in std::iter::once(root.pid).chain(tree.keys().copied()) {
+                for child in system.children(parent)? {
+                    if tree.contains_key(&child) {
+                        continue;
+                    }
+                    match system.looked(child) {
+                        Looked::Unreadable => return Ok(Readable::Unreadable),
+                        Looked::Readable | Looked::Changed => born = true,
+                        Looked::Ended => {}
+                    }
+                }
+            }
+            if !born {
+                return Ok(Readable::All(self.members_in(&snapshot, &tree)));
+            }
+        }
+        Ok(Readable::Unsettled)
     }
 
     /// The turn's work as `baseline` proves it, chosen once: what an ending of the

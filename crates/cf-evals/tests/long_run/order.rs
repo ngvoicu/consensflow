@@ -1,7 +1,8 @@
 //! 3 (A3): an ended notice after its result; 4 (A4): a result that is not its
 //! turn's final answer.
 
-use cf_evals::long_run::invariants;
+use cf_evals::long_run::invariants::{self, Break};
+use cf_evals::long_run::known;
 use cf_evals::long_run::look::Look;
 use serde_json::json;
 
@@ -615,6 +616,232 @@ fn a_header_a_later_prompt_quotes_never_ends_a_turn() {
     }
 }
 
+#[test]
+fn a_header_a_person_quotes_in_a_fence_is_never_the_lost_delivery_that_began_a_turn() {
+    // GPT-6-Astra's review of round b2: m-120's delivery began and never reached the window;
+    // a later message quotes its header on a line of its own, in a fence, and its answer is
+    // taken for T-14's result. Its turn is in no copy: unresolved, never held.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "Why is this one stuck?\n```\n[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding\n```",
+        true,
+        &t(0, 30),
+    );
+    let answer = "It never reached me; I changed nothing.";
+    scene.item(conversation, 1, "assistant", answer, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        answer,
+        &t(1, 5),
+    );
+    let look = scene.look(ms(5, 0));
+    assert!(found(&look, 4).is_empty(), "{:?}", found(&look, 4));
+    assert_eq!(
+        unanswered(&look),
+        [(
+            "4:m-131".to_owned(),
+            "m-131's turn is not in the copy of @long-worker's conversation, which holds no prompt of m-120 after its delivery attempt 1 began: whether it is the turn's final answer cannot be judged".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn a_header_inside_an_attribute_of_a_paste_wrapper_is_never_the_lost_delivery_that_began_a_turn() {
+    // GPT-6-Astra's review of round b4: m-120's delivery began and never reached the window;
+    // a later row opens with a `<pasted_content` tag whose attribute holds a `>` and m-120's
+    // header. The tag is not Claude Code's shape (a `>` ends it only after its attributes, and
+    // none holds a `>`): no wrapper, and the row opens with no header. Unresolved, never held.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "<pasted_content note=\">[ConsensFlow m-120 · T-14 · task from @chief]\">quoted metadata</pasted_content>",
+        true,
+        &t(0, 30),
+    );
+    let answer = "It never reached me; I changed nothing.";
+    scene.item(conversation, 1, "assistant", answer, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        answer,
+        &t(1, 5),
+    );
+    let look = scene.look(ms(5, 0));
+    assert!(found(&look, 4).is_empty(), "{:?}", found(&look, 4));
+    assert_eq!(
+        unanswered(&look),
+        [(
+            "4:m-131".to_owned(),
+            "m-131's turn is not in the copy of @long-worker's conversation, which holds no prompt of m-120 after its delivery attempt 1 began: whether it is the turn's final answer cannot be judged".to_owned()
+        )]
+    );
+}
+
+/// T-14's worker's turn: the brief, then each of `progress` said before a tool's call, then
+/// `answer`; and its result m-131 saying `result`. What the fourth finds of it.
+fn progress_then(progress: &[&str], answer: &str, result: &str) -> Vec<Break> {
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding",
+        true,
+        &t(0, 0),
+    );
+    let mut seq = 1;
+    for (at, line) in (10..).zip(progress) {
+        scene.item(conversation, seq, "assistant", line, false, &t(0, at));
+        scene.item(conversation, seq + 1, "tool", "ok", true, &t(0, at));
+        seq += 2;
+    }
+    scene.item(conversation, seq, "assistant", answer, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        result,
+        &t(1, 5),
+    );
+    found(&scene.look(ms(5, 0)), 4)
+}
+
+#[test]
+fn a_result_whose_final_answer_its_progress_holds_too_is_never_taken_for_turn_ends_a4() {
+    // GPT-6.1-Sol's review of round b3: the final answer `Done.` opens two progress lines, and
+    // the result holds those two alone, no final answer of its own. Taken out last, `Done.`
+    // came out of the second line and left the result read as turn-end's A4: known, a false
+    // PASS. Since round b5 a result whose progress lines hold its final answer is no
+    // turn-end's A4 at all: a break that fails a run, whichever occurrence is taken out.
+    let listed = known::KNOWN.as_deref().unwrap();
+    let breaks = progress_then(
+        &[
+            "Done. Checking the diff carefully.",
+            "Done. Reviewing the final changes.",
+            "Reviewing the final changes.",
+        ],
+        "Done.",
+        "Done. Checking the diff carefully.\n\nDone. Reviewing the final changes.",
+    );
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(breaks[0].shape, None, "{breaks:?}");
+    assert_eq!(known::of(&breaks[0], listed), None);
+    // The cost, accepted (the lead's line of round b4): a true A4 whose progress line holds
+    // the answer's words is read the same, and fails a run the lead reads, never the other
+    // way.
+    let progress = "All 61 tests pass. Checking the diff now.";
+    let breaks = progress_then(
+        &[progress],
+        "All 61 tests pass.",
+        &format!("{progress}\n\nAll 61 tests pass."),
+    );
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(
+        breaks[0].said,
+        "m-131 holds 1 line of its turn's progress; its turn's final answer stands inside a progress line it holds"
+    );
+    assert_eq!(breaks[0].shape, None);
+}
+
+#[test]
+fn a_result_whose_progress_lines_hold_its_final_answer_is_never_taken_for_turn_ends_a4() {
+    // Both reviewers of round b4, as given: the final answer `Done.` stands inside the two
+    // progress lines the result holds, and a third line is the rest of the first. Taken out
+    // where it first stands, then the progress lines, nothing was left: known, a false PASS.
+    // A result whose progress lines hold the answer is no turn-end's A4: a break that fails a
+    // run.
+    let listed = known::KNOWN.as_deref().unwrap();
+    let breaks = progress_then(
+        &[
+            "Done. Checking the diff carefully.",
+            "Done. Reviewing the final changes.",
+            "Checking the diff carefully.",
+        ],
+        "Done.",
+        "Done. Checking the diff carefully.\n\nDone. Reviewing the final changes.",
+    );
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(
+        breaks[0].said,
+        "m-131 holds 3 lines of its turn's progress; its turn's final answer stands inside a progress line it holds"
+    );
+    assert_eq!(breaks[0].shape, None, "{breaks:?}");
+    assert_eq!(known::of(&breaks[0], listed), None);
+    // A line of progress too short to be told as held is a line the result holds all the
+    // same.
+    let breaks = progress_then(
+        &[
+            "Done. Ok now.",
+            "Ok now.",
+            "Reviewing the final changes now.",
+        ],
+        "Done.",
+        "Done. Ok now.\n\nReviewing the final changes now.",
+    );
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(breaks[0].shape, None, "{breaks:?}");
+    assert_eq!(known::of(&breaks[0], listed), None);
+}
+
+#[test]
+fn a_delivery_claude_code_kept_wrapped_as_a_paste_begins_its_turn() {
+    // Claude Code 2.1.303 keeps a long paste wrapped in its record, and the copy with it
+    // (the Mac's run of 2026-10-19): the task's delivery is the prompt that opens with its
+    // header inside the wrapper, and the result is judged against the turn it began.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "\n\n<pasted_content id=\"a1b2\">\n[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding\n</pasted_content id=\"a1b2\">\n",
+        true,
+        &t(0, 0),
+    );
+    let progress = "Found it: half-up instead of half-even. Fixing.";
+    scene.item(conversation, 1, "assistant", progress, false, &t(0, 30));
+    scene.item(
+        conversation,
+        2,
+        "tool",
+        "The file src/money.mjs has been updated.",
+        true,
+        &t(0, 31),
+    );
+    scene.item(conversation, 3, "assistant", ANSWER, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        &format!("{progress}\n\n{ANSWER}"),
+        &t(1, 5),
+    );
+    let look = scene.look(ms(5, 0));
+    assert!(unanswered(&look).is_empty(), "{:?}", unanswered(&look));
+    let breaks = found(&look, 4);
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(breaks[0].said, "m-131 holds 1 line of its turn's progress");
+}
+
 /// The worker's conversation for T-14: its brief, two lines of progress each
 /// before a tool call, and its report after the last call.
 fn worked(scene: &Scene) -> (i64, i64) {
@@ -691,6 +918,11 @@ fn a_result_that_holds_the_progress_of_its_turn_or_not_its_final_answer_breaks_t
         .record
         .iter()
         .any(|line| line.contains("half-even now")));
+    // Turn-end's A4 (field report dip-agentos #5), deferred to 3.0.6: the list of known
+    // breaks names this shape.
+    assert_eq!(breaks[0].shape, Some("progress-lines"));
+    let listed = known::KNOWN.as_deref().unwrap();
+    assert!(known::of(&breaks[0], listed).is_some_and(|entry| entry.issue.contains("3.0.6")));
 
     let scene = Scene::new(&[("long-worker", "claude-code")]);
     let (task, _) = worked(&scene);
@@ -707,6 +939,89 @@ fn a_result_that_holds_the_progress_of_its_turn_or_not_its_final_answer_breaks_t
         breaks[0].said,
         "m-131 is not its turn's final answer, whole"
     );
+    // No part of the known bug: it fails a run.
+    assert_eq!(breaks[0].shape, None);
+    assert_eq!(known::of(&breaks[0], listed), None);
+}
+
+#[test]
+fn a_result_of_progress_without_its_whole_final_answer_is_no_known_a4() {
+    // GPT-6.1-Sol's review of round b1: the known shape is turn-end's A4 alone, the whole
+    // final answer there and nothing besides it but the turn's progress. Progress alone,
+    // progress and the answer cut, progress and another task's answer, and progress and
+    // the answer with words of no part of the turn each fail a run.
+    let listed = known::KNOWN.as_deref().unwrap();
+    let progress = "Reading src/money.mjs to find the rounding.";
+    for (result, said) in [
+        (
+            progress.to_owned(),
+            "m-131 is not its turn's final answer, whole, and holds 1 line of its turn's progress",
+        ),
+        (
+            format!("{progress}\n\nRounding is half-even now"),
+            "m-131 is not its turn's final answer, whole, and holds 1 line of its turn's progress",
+        ),
+        (
+            format!("{progress}\n\nThe totals are rounded half-even too; 62 tests pass."),
+            "m-131 is not its turn's final answer, whole, and holds 1 line of its turn's progress",
+        ),
+        (
+            format!("{progress}\n\nThe totals are rounded half-even too.\n\n{ANSWER}"),
+            "m-131 holds 1 line of its turn's progress, and words that are none of its turn's",
+        ),
+    ] {
+        let scene = Scene::new(&[("long-worker", "claude-code")]);
+        let (task, _) = worked(&scene);
+        scene.message(
+            131,
+            (CHIEF, Some(3)),
+            "result",
+            Some(task),
+            &result,
+            &t(1, 5),
+        );
+        let breaks = found(&scene.look(ms(5, 0)), 4);
+        assert_eq!(breaks.len(), 1, "{result}: {breaks:?}");
+        assert_eq!(breaks[0].said, said, "{result}");
+        assert_eq!(breaks[0].shape, None, "{result}");
+        assert_eq!(known::of(&breaks[0], listed), None, "{result}");
+    }
+    // The shape, where the result is the whole final answer and progress besides, short
+    // lines among it too.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding",
+        true,
+        &t(0, 0),
+    );
+    scene.item(conversation, 1, "assistant", progress, false, &t(0, 10));
+    scene.item(
+        conversation,
+        2,
+        "tool",
+        "src/money.mjs: 120 lines",
+        true,
+        &t(0, 11),
+    );
+    scene.item(conversation, 3, "assistant", "Fixing.", false, &t(0, 30));
+    scene.item(conversation, 4, "tool", "ok", true, &t(0, 31));
+    scene.item(conversation, 5, "assistant", ANSWER, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        &format!("{progress}\n\nFixing.\n\n{ANSWER}"),
+        &t(1, 5),
+    );
+    let breaks = found(&scene.look(ms(5, 0)), 4);
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(breaks[0].shape, Some("progress-lines"));
 }
 
 #[test]

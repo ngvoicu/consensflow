@@ -30,6 +30,7 @@ harness-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "dev
 live-devin-resume-back = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_devin_resume", "back::tests::"]
 ledger-pasted-into = ["cargo", "test", "--offline", "-p", "cf-ledger", "--features", "test-support", "--test", "pasted_into"]
 engine-paste-shapes = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paste_shapes::"]
+ledger-schema = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "schema::"]
 # The rig: a result Devin's chief held queued, the human's /new and the app's quit, and
 # the start after it (`a_paste_devin_held_pasted_again_after_a_switch_and_a_restart`).
 rig-paste-held = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_paste_devin_held_pasted_again_after_a_switch_and_a_restart::"]
@@ -175,8 +176,8 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "            session,\n        };"
-replace = "            session: None,\n        };\n        let _ = session;"
+find = "        delivering.session = session;"
+replace = "        let _ = session;"
 
 [[plant]]
 name = "devin arrival: the conversation left gives the paste back while its record is at work"
@@ -318,7 +319,7 @@ meant = "whatever_takes_a_message_off_its_way_clears_the_conversation_it_went_in
 runs = ["ledger-pasted-into"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0021.sql"
+file = "crates/cf-ledger/migrations/0023.sql"
 find = "      UPDATE message SET pasted_into = NULL WHERE id = NEW.id;"
 replace = "      SELECT 1;"
 
@@ -368,14 +369,14 @@ find = "        let text = self.delivery_text_of(&begun.message, &begun.carried)
 replace = "        let text = crate::delivery_text::delivery_text(&begun.message, &begun.carried);"
 
 [[plant]]
-name = "devin arrival: a message says why it was first given back, not last"
-meant = "a_message_says_why_it_was_last_given_back"
+name = "devin arrival: a message is worded by its last give-back alone, so a paste turned away after a restart's loses its word"
+meant = "a_message_says_whether_it_was_ever_given_back_for_a_reason"
 runs = ["ledger-pasted-into"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "              WHERE m.id = ?\n              ORDER BY e.id DESC LIMIT 1\",\n            [message_id],\n            |row| row.get::<_, Option<String>>(0),"
-replace = "              WHERE m.id = ?\n              ORDER BY e.id LIMIT 1\",\n            [message_id],\n            |row| row.get::<_, Option<String>>(0),"
+find = "                AND json_extract(e.data, '$.reason') = ?2\n"
+replace = "                AND json_extract(e.data, '$.reason') = ?2\n                AND e.id = (SELECT max(f.id) FROM event f WHERE f.kind = 'delivery.retried' AND json_extract(f.data, '$.message') = m.id)\n"
 
 [[plant]]
 name = "devin arrival: a start asks the store of the conversation the window shows now, not the one the paste went into"
@@ -426,3 +427,16 @@ runs = ["rig-paste-held"]
 file = "crates/cf-engine/src/in_flight.rs"
 find = "        let pasted = self.seams.ledger.borrow().pasted_into(message.id)?;"
 replace = "        let pasted: Option<String> = None;"
+
+# 6. The merge of main after T-82 (T-433): the ledger's migrations are applied by their
+# place in its list, so each place holds the file of its number (Calliope's guard, T-275).
+
+[[plant]]
+name = "devin arrival: the ledger's list holds 0023 before 0022"
+meant = "each_migration_is_the_file_of_its_place_and_the_folder_holds_no_other"
+runs = ["ledger-schema"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/schema.rs"
+find = "    include_str!(\"../migrations/0022.sql\"),\n    include_str!(\"../migrations/0023.sql\"),\n"
+replace = "    include_str!(\"../migrations/0023.sql\"),\n    include_str!(\"../migrations/0022.sql\"),\n"

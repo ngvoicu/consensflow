@@ -5,7 +5,7 @@
 //! first ([`super::trust_claude`]).
 
 use std::cell::{Cell, RefCell};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
@@ -157,6 +157,10 @@ pub struct Open<'a> {
     resume: Option<String>,
     member: Option<Member>,
     claude_alone: Option<Value>,
+    /// The MCP servers file a Claude window is given (`--mcp-config`), the only one it has.
+    mcp_config: Option<PathBuf>,
+    /// The window's first message, on its command line ([`Open::seed`]).
+    seed: Option<String>,
 }
 
 impl<'a> Open<'a> {
@@ -176,7 +180,18 @@ impl<'a> Open<'a> {
             resume: None,
             member: None,
             claude_alone: None,
+            mcp_config: None,
+            seed: None,
         }
+    }
+
+    /// The window opens with `message` its first, on its command line, as the daemon
+    /// launches a member's window with its task: its first turn begins as it opens, with
+    /// no rest before it.
+    #[must_use]
+    pub fn seed(mut self, message: &str) -> Self {
+        self.seed = Some(message.to_owned());
+        self
     }
 
     /// A Claude window with none of the owner's own settings (their hooks among them:
@@ -186,6 +201,14 @@ impl<'a> Open<'a> {
     #[must_use]
     pub fn claude_alone_with_hooks(mut self, hooks: Value) -> Self {
         self.claude_alone = Some(hooks);
+        self
+    }
+
+    /// A Claude window has the MCP servers the file `servers` names, and only those:
+    /// `--strict-mcp-config` shuts every other out.
+    #[must_use]
+    pub fn mcp_config(mut self, servers: &Path) -> Self {
+        self.mcp_config = Some(servers.to_owned());
         self
     }
 
@@ -287,7 +310,7 @@ impl<'a> Open<'a> {
         }
         let start = match &self.resume {
             Some(resumed) => ask::resume(agent, resumed)?,
-            None => ask::start(agent, session, None)?,
+            None => ask::start(agent, session, self.seed.as_deref())?,
         }
         .ok_or_else(|| {
             Error::Daemon(format!(
@@ -353,6 +376,10 @@ impl<'a> Open<'a> {
                 None => argv.extend(settings),
             }
             argv.extend(ISOLATION.iter().chain(alone).map(|word| (*word).to_owned()));
+            if let Some(servers) = &self.mcp_config {
+                argv.push("--mcp-config".to_owned());
+                argv.push(servers.to_string_lossy().into_owned());
+            }
         }
         argv.extend(start.args);
         let argv = ask::program(&argv, &env).map_err(|failed| {

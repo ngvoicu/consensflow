@@ -187,6 +187,44 @@ async fn a_poll_claims_the_answer_it_finds_so_the_paste_skips_it_and_wakes_the_d
     assert_eq!(scene.kicks.get(), 1, "the dispatcher is woken");
 }
 
+/// Both reviews of 2026-10-16, round 5: a window the Close could not close kept
+/// its door, and was handed the answer given while its project was closed. The
+/// door waits as one with no answer does, and the Resume lets it have it.
+#[tokio::test(start_paused = true)]
+async fn a_door_of_a_closed_project_is_handed_nothing_until_the_project_opens() {
+    let scene = scene();
+    let question = working_question(&scene);
+    let project = scene.project.id;
+    let set = |state: &str| {
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .set_project_state(project, state)
+            .unwrap();
+    };
+    set("suspended");
+    scene.choose(question.id, "red");
+    let id = question.id.to_string();
+    let target = format!("/api/questions/{id}?wait=3000");
+    let (status, body) = door(&scene, &scene.zeus, &target, &id).await;
+    assert_eq!((status, &body["answer"]), (200, &Value::Null));
+    assert_eq!(
+        scene.next_for_zeus(),
+        Some("H: red".to_owned()),
+        "nothing claimed it: it is kept for the Resume"
+    );
+
+    let started = Instant::now();
+    let target = format!("/api/questions/{id}?wait=20000");
+    let (waiting, ()) = tokio::join!(door(&scene, &scene.zeus, &target, &id), async {
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        set("open");
+    });
+    assert_eq!(waiting.1["answer"]["choices"], json!([["red"]]));
+    assert_eq!(started.elapsed(), Duration::from_millis(1250));
+}
+
 #[tokio::test(start_paused = true)]
 async fn the_same_answer_comes_again_to_a_second_poll_which_writes_nothing() {
     let scene = scene();
@@ -228,6 +266,65 @@ async fn a_door_a_pause_shut_is_refused_at_once_in_the_words_its_model_is_to_hea
                 "message": format!("T-1 was stopped, so m-{id} is not answered here: its answer comes to you as a message when the task goes on. Do not ask it again; end your turn now.")
             })
         )
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_door_the_acceptance_of_its_task_shut_is_told_nothing_waits_on_its_question_and_not_that_the_task_will_go_on(
+) {
+    let scene = scene();
+    let question = working_question(&scene);
+    scene.accept();
+    let id = question.id.to_string();
+    let started = Instant::now();
+    let target = format!("/api/questions/{id}?wait=20000");
+    let (status, body) = door(&scene, &scene.zeus, &target, &id).await;
+    assert_eq!(started.elapsed(), Duration::ZERO, "it does not wait");
+    assert_eq!(
+        (status, body),
+        (
+            409,
+            json!({
+                "error": "door-closed",
+                "message": format!("T-1 is accepted, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now.")
+            })
+        )
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_door_a_pause_shut_on_a_task_accepted_since_is_told_the_task_is_accepted() {
+    let scene = scene();
+    let question = working_question(&scene);
+    scene.pause();
+    {
+        // The chief resumes the task and its window takes the words in: it works on,
+        // its question still unanswered, and the door the pause shut stays shut.
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let words = ledger
+            .resume_task(scene.project.id, 1, Some("chief"), "Go on")
+            .unwrap()
+            .message
+            .unwrap()
+            .id;
+        ledger.begin_delivery(words).unwrap();
+        ledger
+            .confirm_delivery(words, Some(&json!({ "item": "i-9" })))
+            .unwrap();
+    }
+    scene.accept();
+    let id = question.id.to_string();
+    let target = format!("/api/questions/{id}?wait=20000");
+    let (status, body) = door(&scene, &scene.zeus, &target, &id).await;
+    assert_eq!(
+        (
+            status,
+            body["message"]
+                .as_str()
+                .map(|words| words.starts_with("T-1 is accepted"))
+        ),
+        (409, Some(true)),
+        "the task's state now decides the words, not the stop that shut the door first: {body}"
     );
 }
 

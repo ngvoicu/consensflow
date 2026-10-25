@@ -224,7 +224,7 @@ runs = ["engine-resume"]
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
 find = '''        let at_work = self.at_work(&resumed)?;'''
-replace = '''        let at_work: Vec<(i64, Vec<i64>)> = Vec::new();'''
+replace = '''        let at_work: Vec<(i64, Coming)> = Vec::new();'''
 
 [[plant]]
 name = "start suspended: a Resume opens a window that is open already"
@@ -238,7 +238,7 @@ replace = '''project.filter(|project| project.state == "open")'''
 
 [[plant]]
 name = "start suspended: a Resume opens the window of a task the human paused"
-meant = "a_task_the_human_paused_stays_paused_through_a_restart_and_a_resume"
+meant = "a_task_the_human_paused_whose_window_was_at_rest_brings_back_no_window_for_it"
 runs = ["engine-resume"]
 
 [[plant.edit]]
@@ -247,8 +247,8 @@ find = '''matches!(task.state.as_str(), "working" | "waiting")'''
 replace = '''matches!(task.state.as_str(), "working" | "waiting" | "paused")'''
 
 [[plant]]
-name = "start suspended: a Resume opens the window of a task a Close paused"
-meant = "a_resume_after_a_close_brings_back_the_chief_alone_and_the_tasks_the_close_paused_wait_for_it"
+name = "start suspended: a Resume after a Close opens the window of a task the chief paused"
+meant = "a_task_the_human_paused_whose_window_was_at_rest_brings_back_no_window_for_it"
 runs = ["engine-resume"]
 
 [[plant.edit]]
@@ -296,8 +296,8 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        if !cut {'''
-replace = '''        if true {'''
+find = '''        if !cut || '''
+replace = '''        if true || '''
 
 [[plant]]
 name = "start suspended: a member whose record cannot tell a cut is told nothing"
@@ -306,7 +306,7 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            None => matches!(coming, Coming::Member(_)),'''
+find = '''            None => matches!(coming, Coming::Member { .. }),'''
 replace = '''            None => false,'''
 
 [[plant]]
@@ -316,7 +316,7 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            None => matches!(coming, Coming::Member(_)),'''
+find = '''            None => matches!(coming, Coming::Member { .. }),'''
 replace = '''            None => true,'''
 
 [[plant]]
@@ -349,8 +349,8 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            Coming::Member(tasks) => tasks.first().copied(),'''
-replace = '''            Coming::Member(_) => None,'''
+find = '''            Coming::Member { task, .. } => Some(*task),'''
+replace = '''            Coming::Member { .. } => None,'''
 
 [[plant]]
 name = "start suspended: a chief that is given its handoff again is told its turn was cut too"
@@ -434,8 +434,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        if !cut {'''
-replace = '''        if true {'''
+find = '''        if !cut || '''
+replace = '''        if true || '''
 
 # --- the page ---
 

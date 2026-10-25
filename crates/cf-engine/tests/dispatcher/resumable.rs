@@ -181,9 +181,10 @@ fn a_chief_that_never_had_a_turn_is_opened_afresh_by_the_resume_after_a_close_an
     context.close_project(project.id).unwrap();
     context.resume_project(project.id).unwrap();
 
+    // The chief's launch, which the member's, whose task the Close paused, follows.
     assert_eq!(
-        last_launch(&context),
-        ("chief".to_owned(), None),
+        launches_of(&context, "chief").pop().unwrap()["resume"],
+        Value::Null,
         "a conversation its harness holds nothing of has nothing to resume"
     );
     assert_ne!(context.dispatcher.pane(chief), None, "its window is open");
@@ -249,7 +250,7 @@ fn a_member_whose_harness_holds_nothing_of_its_conversation_is_opened_afresh_and
     assert_eq!(launch["resume"], Value::Null, "nothing for it to resume");
     assert_match(
         launch["message"].as_str().unwrap(),
-        r"(?s)Parser.*ConsensFlow quit while you were working on T-1",
+        r"(?s)Parser.*ConsensFlow stopped while you were working on T-1",
     );
     assert_ne!(native_of(&context, zeus).unwrap(), before);
 }

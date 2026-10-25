@@ -9,8 +9,9 @@ use serde_json::{json, Value};
 use super::*;
 use crate::api::callers::caller_of;
 use crate::api::routes::tests::support::{
-    note_for_zeus, question_on, state_of, working_question, working_task,
+    note_for_zeus, project_is, question_on, state_of, working_question, working_task,
 };
+use crate::api::waits::WAITS;
 use crate::testing::{request, said, scene, Scene};
 
 /// `POST /api/answers` from the window of `token`, with `body` as its text.
@@ -371,6 +372,28 @@ async fn a_door_that_did_not_hand_its_answer_over_gives_the_claim_back_and_wakes
     assert_eq!(scene.logged("message.read"), 0);
     assert_eq!(state_of(&scene, 1), "waiting", "nobody received it");
     assert_eq!(scene.kicks.get(), 1);
+}
+
+/// A receipt says back the answer it was about: while the project is closed, a
+/// window that says it was handed nothing of an answer still queued (claimed or
+/// not) is told none of it, which would hand it over all the same (round 6's
+/// look at every route that says a message's text).
+#[tokio::test]
+async fn while_the_project_is_closed_a_receipt_of_nothing_handed_says_none_of_the_answer() {
+    let scene = scene();
+    let question = working_question(&scene);
+    let answer = scene.choose(question.id, "red");
+    project_is(&scene, "suspended");
+
+    let (status, said) =
+        receipt_from(&scene, &scene.zeus, &answer.id.to_string(), NOT_HANDED_OVER).await;
+
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        (&said["message"]["preview"], &said["message"]["choices"]),
+        (&json!(WAITS), &Value::Null)
+    );
+    assert_eq!(scene.message(answer.id).state, "queued");
 }
 
 #[tokio::test]

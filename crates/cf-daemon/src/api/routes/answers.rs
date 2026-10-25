@@ -24,6 +24,7 @@ use serde_json::{json, Value};
 
 use super::{Answer, Caller, Context, Failure, Request};
 use crate::api::views::{value, MessageSummary};
+use crate::api::waits::Waits;
 
 pub(super) async fn handle(
     context: &Context,
@@ -134,9 +135,12 @@ pub(super) async fn receipt(
         .settle_claim(number, caller.participant.id, received)?;
     (context.kick)();
     let answer = context.ledger.borrow().message(number)?;
+    // A claim given back leaves the answer queued: while the project is closed,
+    // its summary says none of its text ([`Waits`]).
+    let waits = Waits::now(context, caller)?;
     Ok(Answer::ok(json!({
         "message": match &answer {
-            Some(answer) => value(&MessageSummary::from(answer))?,
+            Some(answer) => value(&waits.summary(answer))?,
             None => Value::Null,
         },
     })))
