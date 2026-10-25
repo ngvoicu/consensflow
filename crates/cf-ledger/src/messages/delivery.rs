@@ -14,7 +14,7 @@ use super::carrying::{adopt, carried, release_carried};
 use super::continuations::{withdraw_stale_among, withdrawn_if_stale};
 use super::pauses::withdrawn_on_its_way;
 use super::receipt::reconcile;
-use super::told::{behind_held_words, fail_for, kept_for_resume, told};
+use super::told::{arrived_after_all, behind_held_words, fail_for, kept_for_resume, told};
 use super::{known_message, message_task, messages, require_message};
 use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
@@ -399,6 +399,12 @@ pub(crate) fn confirm_sent_by_hand(
         if !withdrawn && !given_up && message.state != "queued" {
             return Ok(None);
         }
+        // What the paste held, as it was before it arrived: told words a cancel
+        // said the window never had are told to have arrived after all.
+        let mut pasted = vec![message.clone()];
+        for row in held.iter().filter(|row| **row != message_id) {
+            pasted.extend(store.message(*row)?);
+        }
         let at = store.at();
         store.db.execute(
             "UPDATE message SET carried_by = NULL WHERE id = ?",
@@ -434,6 +440,7 @@ pub(crate) fn confirm_sent_by_hand(
         } else {
             confirm_delivery(store, message_id, Some(&receipt))?
         };
+        arrived_after_all(store, &pasted)?;
         Ok(Some(confirmed))
     })
 }
@@ -602,7 +609,7 @@ pub(crate) fn cancel_message(
 /// continuation whose task is no longer at work in its window is withdrawn
 /// instead, and so is one that rides in it (`continuations`). A brief of the
 /// chief's own step done while it was on its way is not queued again
-/// (`withdrawn_late`).
+/// (`withdrawn_late`), nor the brief of a task that failed meanwhile.
 pub(crate) fn retry_delivery(
     store: &mut Store,
     message_id: i64,
@@ -614,6 +621,17 @@ pub(crate) fn retry_delivery(
         let message = require_message(store, message_id, "delivering")?;
         if let Some(task) = message_task(store, message_id)? {
             if withdrawn_late(store, &message, &task)? {
+                return known_message(store, message_id);
+            }
+            // The brief of a task the daemon failed while it was being pasted (its pane
+            // died) has no window to go to again: only the task's reopening wants it, and
+            // that brings the brief itself.
+            if message.kind == "task" && task.state == "failed" {
+                cancel_message(
+                    store,
+                    message_id,
+                    &format!("T-{} failed before it landed", task.number),
+                )?;
                 return known_message(store, message_id);
             }
         }

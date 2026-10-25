@@ -69,6 +69,10 @@ mod selftest {
         pub dir: String,
         pub tag: String,
         pub updater_expected_version: Option<String>,
+        /// How long the page waits for each step of the smoke
+        /// (`CONSENSFLOW_SELFTEST_STEP_MS`): the smoke tells it, from the patience it was
+        /// given. None: the page waits its own 45 s (app/ui/core/selftest-wait.js).
+        pub step_ms: Option<u64>,
     }
 
     /// Read at every call, not cached: the guard is the environment the app
@@ -85,6 +89,9 @@ mod selftest {
             dir: std::env::var("CONSENSFLOW_SELFTEST_DIR").unwrap_or_default(),
             tag: std::env::var("CONSENSFLOW_SELFTEST_TAG").unwrap_or_default(),
             updater_expected_version: std::env::var("CONSENSFLOW_SELFTEST_UPDATER_EXPECTED").ok(),
+            step_ms: std::env::var("CONSENSFLOW_SELFTEST_STEP_MS")
+                .ok()
+                .and_then(|value| value.parse().ok()),
         })
     }
 
@@ -109,7 +116,7 @@ mod selftest {
     pub fn initialization_script(config: &Config) -> String {
         format!(
             "window.__CONSENSFLOW_SELFTEST__ = {};\n{}",
-            json!({"dir": config.dir, "tag": config.tag, "updaterExpectedVersion":config.updater_expected_version}),
+            json!({"dir": config.dir, "tag": config.tag, "updaterExpectedVersion":config.updater_expected_version, "stepMs": config.step_ms}),
             PAGE_CHANNEL,
         )
     }
@@ -632,5 +639,27 @@ mod tests {
     #[test]
     fn a_candidate_without_a_home_directory_refuses_to_start() {
         assert!(isolated_home("dev.ngvoicu.consensflow.candidate", false, None, None).is_err());
+    }
+
+    fn selftest_config(step_ms: Option<u64>) -> selftest::Config {
+        selftest::Config {
+            dir: "/workspace".into(),
+            tag: "tag".into(),
+            updater_expected_version: None,
+            step_ms,
+        }
+    }
+
+    #[test]
+    fn the_selftest_tells_the_page_the_step_it_was_given_and_null_where_it_was_given_none() {
+        let told = selftest::initialization_script(&selftest_config(Some(135_000)));
+        assert!(told.contains(r#""stepMs":135000"#), "{told}");
+        let untold = selftest::initialization_script(&selftest_config(None));
+        assert!(untold.contains(r#""stepMs":null"#), "{untold}");
+        // What the page was always told is told as it was.
+        assert!(
+            told.contains(r#""dir":"/workspace""#) && told.contains(r#""tag":"tag""#),
+            "{told}"
+        );
     }
 }

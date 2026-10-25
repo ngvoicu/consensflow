@@ -111,16 +111,11 @@ pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<
 /// whose harnesses a daemon of the rig found there); as the Finder starts it, no
 /// stand-in's folder, and the system's as the Finder gives it.
 fn path(fake_bin: &Path, config: &Config) -> String {
-    let system: Vec<String> = if cfg!(windows) {
-        let root = own_var("SystemRoot").unwrap_or_else(|| "C:\\Windows".to_owned());
-        vec![format!("{root}\\System32")]
-    } else if config.finder {
-        ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
-            .map(str::to_owned)
-            .into()
-    } else {
-        ["/usr/bin", "/bin"].map(str::to_owned).into()
-    };
+    let system = system_folders(
+        cfg!(windows),
+        config.finder,
+        own_var("SystemRoot").as_deref(),
+    );
     (!config.finder)
         .then_some(fake_bin)
         .into_iter()
@@ -130,6 +125,32 @@ fn path(fake_bin: &Path, config: &Config) -> String {
         .chain(system)
         .collect::<Vec<_>>()
         .join(if cfg!(windows) { ";" } else { ":" })
+}
+
+/// The system's own folders at the end of a rig's `PATH`: where `windows`, the ones every
+/// Windows install puts on it under its `system_root` (`System32`, the root itself,
+/// `Wbem`, and Windows PowerShell's folder, which no package manager adds and which an
+/// agent's shell finds `powershell` in: OpenCode's runs a command by cmd.exe, and a
+/// command that starts anything past cmd's own is "not recognized" without it, T-379);
+/// as the Finder starts a program (`finder`) or not elsewhere.
+fn system_folders(windows: bool, finder: bool, system_root: Option<&str>) -> Vec<String> {
+    if windows {
+        let root = system_root.unwrap_or("C:\\Windows");
+        return [
+            format!("{root}\\System32"),
+            root.to_owned(),
+            format!("{root}\\System32\\Wbem"),
+            format!("{root}\\System32\\WindowsPowerShell\\v1.0"),
+        ]
+        .into();
+    }
+    if finder {
+        ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+            .map(str::to_owned)
+            .into()
+    } else {
+        ["/usr/bin", "/bin"].map(str::to_owned).into()
+    }
 }
 
 /// The stand-in `claude` the windows find on their `PATH`, and the folder the
@@ -295,6 +316,54 @@ mod tests {
         let folders: Vec<&str> = var(&env, "PATH").split(delimiter).collect();
         assert_eq!(folders[0], fake_bin.to_string_lossy());
         assert_eq!(folders[1..3], ["/stand-in/cf", "/real/devin"]);
+    }
+
+    #[test]
+    fn the_system_folders_of_a_windows_rig_are_those_every_windows_install_has_powershell_among_them(
+    ) {
+        // OpenCode 1.19.4 runs a command by `%ComSpec% /c` (cmd.exe), and an agent's command
+        // that starts anything past cmd's own (`powershell -Command Start-Process …`, the
+        // brief of the live suite's second step) is found on the `PATH` or "not recognized"
+        // (T-379, zeewin, where the rig's `PATH` ended at `System32`).
+        let expected = [
+            r"C:\WINDOWS\System32",
+            r"C:\WINDOWS",
+            r"C:\WINDOWS\System32\Wbem",
+            r"C:\WINDOWS\System32\WindowsPowerShell\v1.0",
+        ];
+        assert_eq!(system_folders(true, false, Some(r"C:\WINDOWS")), expected);
+        // The Finder is a Mac's, and a Windows machine without `SystemRoot` has its usual.
+        assert_eq!(system_folders(true, true, Some(r"C:\WINDOWS")), expected);
+        assert_eq!(system_folders(true, false, None)[0], r"C:\Windows\System32");
+    }
+
+    /// The field shape (T-379, zeewin): a command interpreter started in the rig's
+    /// environment, as OpenCode's shell tool starts one, finds `powershell`.
+    #[cfg(windows)]
+    #[test]
+    fn a_command_interpreter_in_the_rigs_environment_finds_powershell() {
+        use crate::process::Run;
+
+        let root = Path::new("root");
+        let env = environment(root, &root.join("fake-bin"), &config());
+        let comspec = var(&env, "ComSpec");
+        assert!(!comspec.is_empty(), "the rig passes ComSpec on Windows");
+        let ran = Run::new(comspec)
+            .args(["/d", "/s", "/c"])
+            .raw_arg("\"powershell -NoProfile -Command exit 0\"")
+            .vars(env.iter().map(|(name, value)| (name, value)))
+            .run()
+            .unwrap();
+        assert_eq!(ran.code, Some(0), "{ran}");
+    }
+
+    #[test]
+    fn the_system_folders_of_a_unix_rig_are_the_systems_and_the_finders_are_more() {
+        assert_eq!(system_folders(false, false, None), ["/usr/bin", "/bin"]);
+        assert_eq!(
+            system_folders(false, true, Some(r"C:\WINDOWS")),
+            ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        );
     }
 
     #[test]

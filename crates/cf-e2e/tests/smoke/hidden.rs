@@ -7,7 +7,8 @@
 //! The app is hidden as a person hides it (its `NSRunningApplication`, by its process id),
 //! and only once its page has shown the window; a while later the window prints a flood,
 //! which it counts in a file of its own as it goes. A screen that is locked is refused in
-//! words: every page sleeps behind it, hidden or not, and the case would measure the lock.
+//! words before the case starts (`cargo xtask smoke`, tools/xtask/src/screen.rs): every
+//! page sleeps behind it, hidden or not, and the case would measure the lock.
 
 use std::path::Path;
 use std::thread;
@@ -49,14 +50,7 @@ fn the_built_app_reads_its_windows_while_it_is_hidden() -> Outcome {
         own_var("CONSENSFLOW_SMOKE_APP").as_deref(),
     ))?;
     let patience = patience_of(own_var("CONSENSFLOW_SMOKE_TIMEOUT_MS").as_deref())?;
-    if screen_locked() {
-        return Err(
-            "the screen is locked: every page sleeps behind it, and a hidden app's \
-                    reading cannot be measured; unlock it and run again"
-                .into(),
-        );
-    }
-    let machine = Machine::with_harness(Path::new(PASTE_READER), HARNESS)?;
+    let machine = Machine::with_harness(Path::new(PASTE_READER), patience, HARNESS)?;
     let (go, count) = (machine.root.join("go"), machine.root.join("count"));
     let mut app = App::start(
         Run::new(&bundle.binary)
@@ -116,14 +110,6 @@ fn the_built_app_reads_its_windows_while_it_is_hidden() -> Outcome {
     assert!(ended.is_some(), "the app did not end once its input ended");
     machine.cleanup()?;
     Ok(())
-}
-
-/// Whether the console's screen is locked, as `ioreg` says: only a `Yes` is locked.
-fn screen_locked() -> bool {
-    Run::new("/usr/sbin/ioreg")
-        .args(["-n", "Root", "-d1"])
-        .run()
-        .is_ok_and(|ran| ran.stdout.contains(r#""IOConsoleLocked" = Yes"#))
 }
 
 /// Whether the app of `pid` is hidden, as AppKit says.

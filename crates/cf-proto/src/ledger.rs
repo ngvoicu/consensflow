@@ -460,11 +460,19 @@ pub struct TaskCreated {
 }
 
 /// A task that moved, and the message that moves it on (none when it went
-/// back to the board).
+/// back to the board). Of a step the chief finished by its word: `withdrawn`
+/// is what was still on its way to the chief about it and was taken back (its
+/// brief, and any answer or note carried on it); `landing` is its brief, if it
+/// was being typed in, which cannot be taken back and may still arrive once.
+/// Both are empty, and not serialized, otherwise.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TaskMoved {
     pub task: TaskView,
     pub message: Option<MessageView>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub withdrawn: Vec<MessageView>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub landing: Vec<MessageView>,
 }
 
 /// A task taken back to the board.

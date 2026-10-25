@@ -15,7 +15,8 @@
 //! and reach it as they were set. The smoke's case is the one `cargo test`
 //! ignores, so the command asks for the ignored cases (of the smoke test alone),
 //! and for the test's own output, which says what the daemon that ran was. The
-//! packaged app is a macOS bundle: elsewhere the command refuses, in words.
+//! packaged app is a macOS bundle: elsewhere the command refuses, in words, and so
+//! it does on a Mac whose screen is locked (`screen`): no window can be shown.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -23,6 +24,7 @@ use std::path::{Path, PathBuf};
 use crate::context::Context;
 use crate::dispatch::{Command, Console, Failure, Run};
 use crate::process::{self, Invocation};
+use crate::screen;
 use crate::suites::{cargo_test, SMOKE};
 use crate::updater_smoke;
 
@@ -56,6 +58,9 @@ fn run(context: &Context, args: &[OsString], console: &mut Console) -> Result<i3
     let app = app_of(args).map_err(Failure::Usage)?;
     if !cfg!(target_os = "macos") {
         writeln!(console.err, "{NOT_A_BUNDLE}")?;
+        return Ok(1);
+    }
+    if screen::locked("smoke", context, console.err)? {
         return Ok(1);
     }
     Ok(process::run(
@@ -103,7 +108,18 @@ pub(crate) fn app_of(args: &[OsString]) -> Result<Option<PathBuf>, String> {
 /// --test smoke -- --ignored --nocapture`, from the checkout's root. `candidate`
 /// runs it on the app it built.
 pub(crate) fn invocation(context: &Context, app: Option<&Path>) -> Invocation {
-    let invocation = cargo_test(context, SMOKE, &["--".into(), "--nocapture".into()]);
+    tests(context, app, &["--".into(), "--nocapture".into()])
+}
+
+/// The same `cargo test` without `--nocapture`, for a runner that reports each test
+/// itself: the plants run it under nextest, which keeps what the test wrote with its
+/// result and refuses a run without capture.
+pub(crate) fn captured(context: &Context, app: Option<&Path>) -> Invocation {
+    tests(context, app, &[])
+}
+
+fn tests(context: &Context, app: Option<&Path>, args: &[OsString]) -> Invocation {
+    let invocation = cargo_test(context, SMOKE, args);
     match app {
         Some(app) => invocation.var(APP_VARIABLE, context.root.join(app)),
         None => invocation,
@@ -171,6 +187,21 @@ mod tests {
         assert_eq!(
             invocation(&context(), Some(Path::new("x.app"))).display(),
             invocation(&context(), None).display()
+        );
+    }
+
+    #[test]
+    fn the_smoke_the_plants_run_has_no_nocapture_and_is_otherwise_the_one_a_person_runs() {
+        let captured = captured(&context(), None);
+        assert_eq!(
+            captured.display(),
+            "cargo test -p cf-e2e --test smoke -- --ignored"
+        );
+        assert_eq!(captured.cwd, PathBuf::from("checkout"));
+        // The app it is given is the same variable, from the same root.
+        assert_eq!(
+            self::captured(&context(), Some(Path::new("x.app"))).vars,
+            invocation(&context(), Some(Path::new("x.app"))).vars
         );
     }
 

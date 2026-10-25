@@ -182,19 +182,24 @@ fn a_suite_of_xtask_s_is_the_cargo_test_it_runs_under_nextest_in_its_folder_with
             under_nextest_for(&["cargo", "xtask", "smoke", "--app", "a.app"], &context);
         assert_eq!(
             words,
-            [
-                "-p",
-                "cf-e2e",
-                "--test",
-                "smoke",
-                "--",
-                "--ignored",
-                "--nocapture"
-            ]
+            ["-p", "cf-e2e", "--test", "smoke", "--", "--ignored"]
         );
         assert_eq!(cwd, Path::new("/checkout"));
         let app = Path::new("/checkout").join("a.app");
         assert_eq!(vars, [format!("CONSENSFLOW_SMOKE_APP=Some({:?})", app)]);
+        // Run with capture on, as nextest wants: the `--nocapture` of a person's run is not
+        // given it, and the runner does not refuse it.
+        for line in [
+            &["cargo", "xtask", "smoke"][..],
+            &["cargo", "xtask", "smoke", "--app", "a.app"],
+        ] {
+            let command: Vec<String> = line.iter().map(|word| (*word).to_owned()).collect();
+            assert_eq!(
+                Reporter::of(&command).refused(&command, &context),
+                None,
+                "{line:?}"
+            );
+        }
     }
 }
 

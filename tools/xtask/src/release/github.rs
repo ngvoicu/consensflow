@@ -265,11 +265,34 @@ impl Release<'_> {
     /// The release the feed `name` serves, read again on a 404 or a network
     /// error; a feed that never answers one is an outage, and refused.
     pub(super) fn served_by(&mut self, name: &str) -> Result<Version, Error> {
+        self.served(name, || "nothing was done, run again later".to_owned())
+    }
+
+    /// The same, after the Release run `run` ended green, when `name` served
+    /// `was` before it: an outage then says the release is out, and to read
+    /// the feed by hand.
+    pub(super) fn served_after(
+        &mut self,
+        name: &str,
+        run: u64,
+        was: &Version,
+    ) -> Result<Version, Error> {
+        self.served(name, || {
+            format!(
+                "release run {run} ended green, so the release is published; read {name} by hand, \
+                 `curl -sL {}`, which served {was} before it, and run nothing again",
+                Self::feed_address(name)
+            )
+        })
+    }
+
+    fn served(&mut self, name: &str, then: impl Fn() -> String) -> Result<Version, Error> {
         let reads = self.pace.feed_attempts;
         self.read_until(name, |_| true)?.map_err(|last| {
             refused(format!(
                 "{name} answered no release in {reads} reads ({last}): an outage of the feed or of GitHub, \
-                 not a version to change; nothing was done, run again later"
+                 not a version to change; {}",
+                then()
             ))
         })
     }

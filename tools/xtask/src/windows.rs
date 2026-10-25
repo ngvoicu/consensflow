@@ -1,6 +1,12 @@
-//! `cargo xtask windows` and `cargo xtask windows-matrix`: the Windows machine
-//! this checkout is tried on (`zeewin`, over ssh), and the matrix of the chief
-//! evals run there.
+//! `cargo xtask windows` and `cargo xtask windows-matrix`: the Windows machines
+//! this checkout is tried on (`zeewin` and `zeewin2`, over ssh), and the matrix of
+//! the chief evals run there.
+//!
+//! `--machine zeewin2|zeewin` names the machine, `--host` any ssh host that is reached
+//! as zeewin is, and with neither the run goes to zeewin2 while it is free and else to
+//! zeewin ([`machine`]: zeewin2 is Gabriel's laptop, and poker-lab's jobs hold it at times,
+//! which its Ubuntu beside it says; it is asked before a run is sent). Each machine
+//! is its own copy and its own lock: what follows holds on each.
 //!
 //! `windows` runs a command on a Windows machine, over SSH, on this working tree
 //! as it is now: every tracked file, and new ones not ignored, go over as one
@@ -112,6 +118,7 @@
 //! that is not a plain one said by the machine is said on the error stream.
 //!
 //! ```text
+//! cargo xtask windows --machine zeewin2 [--build] -- cargo test --workspace --exclude app --exclude cf-e2e
 //! cargo xtask windows --host <ssh host> [--build] -- cargo xtask live paste
 //! cargo xtask windows --host <ssh host> -- cargo xtask eval --scenario round-trip --chief devin --staff devin
 //! cargo xtask windows --host <ssh host> --in app/src-tauri -- cargo test
@@ -146,13 +153,15 @@
 //! to each, the output of each kept in `evals/reports/windows/` and one line per
 //! run at the end.
 //!
-//! The modules: [`options`] (the words), [`script`] (the PowerShell that goes, as
+//! The modules: [`options`] (the words), [`machine`] (which machine, and how ssh reaches its
+//! PowerShell), [`script`] (the PowerShell that goes, as
 //! text, and the line it ends by), [`tree`] (the tarball), [`session`] (ssh, as it
 //! goes, and the answer), [`tail`] (the last line of what it said), [`interrupt`]
 //! (a stop), [`run`] (one run), [`fetch`] (the reports brought back) and [`matrix`].
 
 mod fetch;
 mod interrupt;
+mod machine;
 mod matrix;
 mod options;
 mod run;
@@ -173,21 +182,22 @@ use crate::context::Context;
 use crate::dispatch::{Command, Console, Failure, Run};
 use crate::process::{self, Invocation};
 use interrupt::Interrupt;
-use matrix::Machine;
-use options::{MatrixOptions, Options};
+use machine::Machine;
+use matrix::Reached;
+use options::{MatrixOptions, Options, DEFAULT_DIR};
 use run::Outcome;
 
 pub const COMMANDS: &[Command] = &[
     Command {
         words: &["windows"],
         about: "Run a command on the Windows machine this checkout is tried on, over ssh",
-        usage: "--host HOST [--build] [--dir DIR] [--in DIR] [--env NAME=VALUE ...] -- <command ...>",
+        usage: "[--machine zeewin2|zeewin | --host HOST] [--build] [--dir DIR] [--in DIR] [--env NAME=VALUE ...] -- <command ...>",
         run: Run::Native(windows),
     },
     Command {
         words: &["windows-matrix"],
         about: "Run the chief evals on the Windows machine, a pair of chief and staff at a time",
-        usage: "--host HOST [--build] [--env NAME=VALUE ...] --scenario NAME ... --pair CHIEF:STAFF ... [--claude-model M] [--pi-model M]",
+        usage: "[--machine zeewin2|zeewin | --host HOST] [--build] [--env NAME=VALUE ...] --scenario NAME ... --pair CHIEF:STAFF ... [--claude-model M] [--pi-model M]",
         run: Run::Native(windows_matrix),
     },
 ];
@@ -258,6 +268,9 @@ pub enum Error {
     },
     #[error("could not wait for ssh: {0}")]
     Wait(io::Error),
+    /// The machine could not be asked whether a run may go to it now.
+    #[error("{0}")]
+    Unready(String),
 }
 
 impl Error {
@@ -283,10 +296,11 @@ impl Error {
 }
 
 fn windows(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
-    let options = Options::parse(args).map_err(Failure::Usage)?;
+    let mut options = Options::parse(args).map_err(Failure::Usage)?;
     run::check(&options).map_err(|refusal| Failure::Usage(refusal.to_string()))?;
     let interrupt = Interrupt::listen()?;
-    match fetch::run_keeping(context, &options, console, &interrupt) {
+    let machine = on(context, &mut options.machine, &options.dir, console)?;
+    match fetch::run_keeping(context, &machine, &options, console, &interrupt) {
         Ok(Outcome::Exited(status)) => Ok(status),
         Ok(Outcome::Stopped) => Ok(STOPPED),
         Err(error) => {
@@ -301,17 +315,35 @@ fn windows_matrix(
     args: &[OsString],
     console: &mut Console,
 ) -> Result<i32, Failure> {
-    let options = MatrixOptions::parse(args).map_err(Failure::Usage)?;
+    let mut options = MatrixOptions::parse(args).map_err(Failure::Usage)?;
     let interrupt = Interrupt::listen()?;
-    let mut machine = Machine {
+    let machine = on(context, &mut options.machine, DEFAULT_DIR, console)?;
+    let mut reached = Reached {
         context,
+        machine: &machine,
         interrupt: &interrupt,
     };
-    match matrix::run(context, &options, &mut machine, &mut SystemClock, console) {
+    match matrix::run(context, &options, &mut reached, &mut SystemClock, console) {
         Ok(status) => Ok(status),
         Err(error) => {
             writeln!(console.err, "windows-matrix: {error}")?;
             Ok(1)
         }
     }
+}
+
+/// The machine a run goes to: the one `asked` names, or the default, which is then written into
+/// it ([`machine::choose`], which says which).
+fn on(
+    context: &Context,
+    asked: &mut Option<Machine>,
+    dir: &str,
+    console: &mut Console,
+) -> io::Result<Machine> {
+    let machine = match asked {
+        Some(machine) => machine.clone(),
+        None => machine::choose(context, dir, console)?,
+    };
+    *asked = Some(machine.clone());
+    Ok(machine)
 }

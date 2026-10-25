@@ -17,7 +17,8 @@
 //!   the pane host has not read, or is gone while its window still reads working (the pane
 //!   host's own proof that a program went), a sample of the pane host (the process that
 //!   holds the windows' terminals and reads them, `cf-panes`' `output_end`; the one of the
-//!   look, a restart of the app starting another), once for all the windows a look takes,
+//!   look where a stall is found, and the running app's at the end, a restart of the app
+//!   starting another), once for all the windows a take covers,
 //!   says why: its reader thread on the pane table's lock, gone, or in the middle of a read.
 //!   In a sample of a second, a program blocked in its write shows the `write` leaf on its
 //!   main thread at the full count of samples; an idle Node program, `kevent` under
@@ -458,8 +459,9 @@ fn sample(pid: u32, label: &str, keep: &mut Keep) -> Option<Result<PathBuf, Stri
 
 /// A prober of tests: it keeps what it was asked (the program, the others, the label), how
 /// many times it listed, and each sample of the pane host (its process and label); it
-/// answers each time with the program's line and its children's (none where the program
-/// is one of `gone`), `unread` bytes unread, and samples named by their labels.
+/// answers each time with the program's line and its children's (where the program is
+/// one of `gone`, only the others': the jobs of its tree, reparented, are still listed),
+/// `unread` bytes unread, and samples named by their labels.
 #[cfg(test)]
 #[derive(Debug, Default)]
 pub struct Asked {
@@ -484,7 +486,10 @@ impl Prober for Asked {
     fn take(&mut self, _: &Listing, pid: u32, others: &[u32], label: &str) -> Taken {
         self.asked.push((pid, others.to_vec(), label.to_owned()));
         let lines = if self.gone.contains(&pid) {
-            Vec::new()
+            others
+                .iter()
+                .map(|other| format!("{other} 1 S - ttys001 bash"))
+                .collect()
         } else {
             std::iter::once(format!("{pid} 1 S - ttys001 pi"))
                 .chain(

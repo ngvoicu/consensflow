@@ -40,6 +40,17 @@ const PROBE_LIMIT: Duration = Duration::from_secs(30);
 /// The system's own folders of programs, after the harness's.
 const SYSTEM_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 
+/// The share of the patience that the page waits at each step of its half: a
+/// quarter, so that the page fails with its own words before the smoke gives
+/// up on hearing from it. 180 s of patience is the 45 s step the page has when
+/// it is told nothing (app/ui/core/selftest-wait.js).
+const STEP_SHARE: u32 = 4;
+
+/// How much longer than the patience the app lets the whole run last before it
+/// ends itself: 180 s of patience is the 240 s deadline the app has when it is
+/// told nothing (app/src-tauri/src/lib.rs, `selftest`).
+const DEADLINE_OVER_PATIENCE: Duration = Duration::from_secs(60);
+
 /// The machine the app runs in.
 #[derive(Debug)]
 pub struct Machine {
@@ -60,18 +71,22 @@ pub struct Machine {
     /// What the run is told apart by: the harness says it, the page types it.
     pub tag: String,
     paste_reader: PathBuf,
+    /// How long the smoke waits for each thing the app reports: the page's step and the app's
+    /// deadline follow it.
+    patience: Duration,
 }
 
 impl Machine {
     /// A new machine in a folder of its own, with the stand-in harness (as
     /// `claude`) on its PATH. `paste_reader` is the program the harness runs to
-    /// read a large paste.
-    pub fn new(paste_reader: &Path) -> Result<Self> {
-        Self::with_harness(paste_reader, &harness())
+    /// read a large paste. `patience` is how long the smoke waits for each thing
+    /// the app reports, which the page and the app are told (`vars`).
+    pub fn new(paste_reader: &Path, patience: Duration) -> Result<Self> {
+        Self::with_harness(paste_reader, patience, &harness())
     }
 
     /// A new machine as [`Machine::new`] makes one, with `script` as its harness.
-    pub fn with_harness(paste_reader: &Path, script: &str) -> Result<Self> {
+    pub fn with_harness(paste_reader: &Path, patience: Duration, script: &str) -> Result<Self> {
         let root = tempfile::Builder::new()
             .prefix("cf-smoke-")
             .tempdir()
@@ -95,6 +110,7 @@ impl Machine {
             pid_file: root.join("harness.pid"),
             tag: format!("smoke-{}-{suffix}", std::process::id()),
             paste_reader: paste_reader.to_path_buf(),
+            patience,
             root,
         };
         for folder in [
@@ -135,6 +151,19 @@ impl Machine {
             ("CONSENSFLOW_SELFTEST", "1".into()),
             ("CONSENSFLOW_SELFTEST_DIR", own(&self.workspace)),
             ("CONSENSFLOW_SELFTEST_TAG", self.tag.clone().into()),
+            // The waits of the self-test follow the patience, one knob: the page's step, and
+            // the deadline at which the app ends itself.
+            (
+                "CONSENSFLOW_SELFTEST_STEP_MS",
+                (self.patience / STEP_SHARE).as_millis().to_string().into(),
+            ),
+            (
+                "CONSENSFLOW_SELFTEST_DEADLINE_MS",
+                (self.patience + DEADLINE_OVER_PATIENCE)
+                    .as_millis()
+                    .to_string()
+                    .into(),
+            ),
             // What the stand-in harness is told.
             ("CFSMOKE_PIDFILE", own(&self.pid_file)),
             ("CFSMOKE_PASTE_READER", own(&self.paste_reader)),
@@ -208,7 +237,11 @@ mod tests {
     use cf_e2e::process::is_alive;
 
     fn machine() -> Machine {
-        Machine::new(Path::new("/the/paste-reader")).unwrap()
+        machine_waiting(Duration::from_secs(180))
+    }
+
+    fn machine_waiting(patience: Duration) -> Machine {
+        Machine::new(Path::new("/the/paste-reader"), patience).unwrap()
     }
 
     fn text(value: &OsString) -> String {
@@ -234,6 +267,8 @@ mod tests {
                 "CONSENSFLOW_SELFTEST",
                 "CONSENSFLOW_SELFTEST_DIR",
                 "CONSENSFLOW_SELFTEST_TAG",
+                "CONSENSFLOW_SELFTEST_STEP_MS",
+                "CONSENSFLOW_SELFTEST_DEADLINE_MS",
                 "CFSMOKE_PIDFILE",
                 "CFSMOKE_PASTE_READER",
                 "CFSMOKE_TAG",
@@ -271,6 +306,30 @@ mod tests {
         assert_eq!(value("CFSMOKE_TAG"), machine.tag);
         assert_eq!(value("CONSENSFLOW_SELFTEST_TAG"), machine.tag);
         machine.cleanup().unwrap();
+    }
+
+    #[test]
+    fn the_page_is_given_a_quarter_of_the_patience_and_the_app_a_minute_over_it() {
+        let waits = |patience: Duration| {
+            let machine = machine_waiting(patience);
+            let vars = machine.vars();
+            machine.cleanup().unwrap();
+            [
+                "CONSENSFLOW_SELFTEST_STEP_MS",
+                "CONSENSFLOW_SELFTEST_DEADLINE_MS",
+            ]
+            .map(|name| {
+                vars.iter()
+                    .find(|(given, _)| *given == name)
+                    .map(|(_, value)| text(value))
+                    .unwrap()
+            })
+        };
+        // The patience it has told nothing is the page's 45 s and the app's 240 s, as they were.
+        assert_eq!(waits(Duration::from_secs(180)), ["45000", "240000"]);
+        // One knob moves both: three times the patience, three times the step.
+        assert_eq!(waits(Duration::from_secs(540)), ["135000", "600000"]);
+        assert_eq!(waits(Duration::from_millis(2500)), ["625", "62500"]);
     }
 
     #[test]

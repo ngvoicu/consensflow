@@ -80,7 +80,7 @@ pub fn runnable(executable: &Path, args: &[OsString], env: &Env) -> Result<Run, 
     }
     match read_shim(executable, env) {
         Shim::Runs { program, script } => {
-            let mut all = vec![script.into_os_string()];
+            let mut all: Vec<OsString> = script.map(PathBuf::into_os_string).into_iter().collect();
             all.extend(args.iter().cloned());
             return Ok(Run {
                 program,
@@ -133,10 +133,8 @@ pub fn pane_argv(argv: &[String], env: &Env) -> Result<Vec<String>, String> {
             ));
         }
     };
-    let mut opened = vec![
-        program.to_string_lossy().into_owned(),
-        script.to_string_lossy().into_owned(),
-    ];
+    let mut opened = vec![program.to_string_lossy().into_owned()];
+    opened.extend(script.map(|script| script.to_string_lossy().into_owned()));
     opened.extend(args.iter().cloned());
     Ok(opened)
 }
@@ -181,8 +179,12 @@ fn quoted(arg: &str) -> String {
 
 /// What a `.cmd` or a `.bat` is, read for how to start it.
 enum Shim {
-    /// An npm-style shim, read: `program` runs `script`.
-    Runs { program: PathBuf, script: PathBuf },
+    /// An npm-style shim, read: `program` runs `script`, or, where the shim names the program
+    /// alone (a package that ships a native program), `program` is what it starts.
+    Runs {
+        program: PathBuf,
+        script: Option<PathBuf>,
+    },
     /// An npm-style shim that runs on a Node, and none is to be found for it. `bare` says it
     /// was Pi's own installer's, whose `node` is bare: its words name where Pi's installer
     /// puts a Node of its own, and do not speak of npm.
@@ -279,8 +281,10 @@ fn needs_node(shim: &Path, bare: bool) -> String {
 /// `%*` and nothing else, and nothing but white space stands between the program's
 /// quotes and the script's: a word there or after the script is run by cmd.exe, and
 /// dropped by running the script alone. None when the shim is not of that shape, or
-/// names a script that is not there.
-fn shim_target(shim: &Path) -> Option<(Program, PathBuf)> {
+/// names a script that is not there. A shim that quotes one program alone before its `%*`
+/// (opencode-ai 1.19.4's, whose package ships a native program in place of a script) is read
+/// when that program is an `.exe` that is there.
+fn shim_target(shim: &Path) -> Option<(Program, Option<PathBuf>)> {
     let text = String::from_utf8_lossy(&fs::read(shim).ok()?).into_owned();
     let line = text
         .split('\n')
@@ -293,9 +297,10 @@ fn shim_target(shim: &Path) -> Option<(Program, PathBuf)> {
     }
     let (program, script) = match parts.as_slice() {
         [.., program, script] if script.before.trim().is_empty() => {
-            (Some(program.text), script.text)
+            (Some(program.text), Some(script.text))
         }
-        [script] if is_bare_node(script.before) => (None, script.text),
+        [script] if is_bare_node(script.before) => (None, Some(script.text)),
+        [program] if program.before.trim().is_empty() => (Some(program.text), None),
         _ => return None,
     };
     let folder = shim.parent()?.to_string_lossy().into_owned();
@@ -315,10 +320,16 @@ fn shim_target(shim: &Path) -> Option<(Program, PathBuf)> {
         };
         value.replace('\\', MAIN_SEPARATOR_STR)
     };
-    let script = expand(script);
-    if script.contains('%') || !Path::new(&script).exists() {
-        return None;
-    }
+    let script = match script {
+        Some(script) => {
+            let script = expand(script);
+            if script.contains('%') || !Path::new(&script).exists() {
+                return None;
+            }
+            Some(PathBuf::from(script))
+        }
+        None => None,
+    };
     let program = match program {
         None => Program::BareNode,
         Some(program)
@@ -333,10 +344,26 @@ fn shim_target(shim: &Path) -> Option<(Program, PathBuf)> {
             if program.contains('%') {
                 return None;
             }
+            // A shim that names a program alone starts it as it is: a native program that is
+            // there, never a script, which only cmd.exe runs.
+            if script.is_none() && !is_native(Path::new(&program)) {
+                return None;
+            }
             Program::Named(PathBuf::from(program))
         }
     };
-    Some((program, PathBuf::from(script)))
+    if script.is_none() && !matches!(program, Program::Named(_)) {
+        return None;
+    }
+    Some((program, script))
+}
+
+/// Whether `program` is a native program (an `.exe`) that is there.
+fn is_native(program: &Path) -> bool {
+    program
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+        && program.is_file()
 }
 
 /// Whether what a line holds before its first quote is a bare `node` and a space, the
@@ -1008,6 +1035,78 @@ mod tests {
             )
             .unwrap();
             assert!(runnable(&opaque, &[], &Env::default()).unwrap().verbatim);
+        }
+
+        /// The shim npm 11 writes for opencode-ai 1.19.4 (read on zeewin, 2026-10-23, T-353),
+        /// whose package ships a native program where it shipped a script: the shim names that
+        /// program, and nothing else, and passes the arguments on.
+        const PROGRAM_SHIM: &str = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\n\"%dp0%\\node_modules\\opencode-ai\\bin\\opencode.exe\"   %*\r\n";
+
+        /// A folder with that shim; the program it names is there where `program` is true.
+        fn with_program(root: &Path, program: bool) -> (PathBuf, PathBuf) {
+            let bin = root.join("bin");
+            let exe = ["node_modules", "opencode-ai", "bin", "opencode.exe"]
+                .iter()
+                .fold(bin.clone(), |path, part| path.join(part));
+            fs::create_dir_all(exe.parent().unwrap()).unwrap();
+            if program {
+                fs::write(&exe, "").unwrap();
+                startable(&exe);
+            }
+            let shim = bin.join("opencode.cmd");
+            fs::write(&shim, PROGRAM_SHIM).unwrap();
+            (shim, exe)
+        }
+
+        #[test]
+        fn an_npm_shim_that_names_a_native_program_alone_runs_that_program() {
+            // OpenCode 1.19.4 on Windows: no window opened, for the shim was taken for a script
+            // only cmd.exe could run (T-353, found by `live finish opencode` on zeewin).
+            let root = tempfile::tempdir().unwrap();
+            let (shim, exe) = with_program(root.path(), true);
+            assert_eq!(
+                runnable(&shim, &args(&["serve", "a\nb"]), &Env::default()),
+                Ok(Run {
+                    program: exe.clone(),
+                    args: args(&["serve", "a\nb"]),
+                    verbatim: false,
+                })
+            );
+            let text = |path: &Path| path.to_string_lossy().into_owned();
+            let argv = [text(&shim), "run".to_owned(), "a b".to_owned()];
+            assert_eq!(
+                pane_argv(&argv, &Env::default()).unwrap(),
+                [text(&exe), "run".to_owned(), "a b".to_owned()]
+            );
+        }
+
+        #[test]
+        fn a_shim_that_names_a_program_alone_that_is_not_there_or_is_not_one_stays_for_cmd_exe() {
+            let root = tempfile::tempdir().unwrap();
+            let (shim, _) = with_program(root.path(), false);
+            assert!(runnable(&shim, &[], &Env::default()).unwrap().verbatim);
+            let named = shim.to_string_lossy().into_owned();
+            assert_eq!(
+                pane_argv(std::slice::from_ref(&named), &Env::default()).unwrap_err(),
+                format!("{named} is not an npm shim, and only cmd.exe could run it in a window")
+            );
+            // A script named alone is cmd.exe's to run, whatever is there.
+            let other = tempfile::tempdir().unwrap();
+            let (script, _) = with_program(other.path(), true);
+            fs::write(
+                &script,
+                PROGRAM_SHIM.replace("opencode.exe", "opencode.cmd"),
+            )
+            .unwrap();
+            fs::write(
+                script
+                    .parent()
+                    .unwrap()
+                    .join("node_modules/opencode-ai/bin/opencode.cmd"),
+                "",
+            )
+            .unwrap();
+            assert!(runnable(&script, &[], &Env::default()).unwrap().verbatim);
         }
     }
 }

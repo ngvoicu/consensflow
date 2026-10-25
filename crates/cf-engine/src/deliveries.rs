@@ -708,7 +708,7 @@ impl Dispatcher {
     /// A message that will not be delivered. A brief fails its task, and
     /// whoever gave it hears why; so do words told to the window while its
     /// task waits on it (`is_told`): an answer the window gave without them is
-    /// no result. Whoever waits on any other kind would wait forever, so the
+    /// no result, and whoever told them hears too (T-437). Whoever waits on any other kind would wait forever, so the
     /// human hears, once, what it was, for whom and why. Words told to the window
     /// that the ledger kept for their task's resume did not fail: its requester
     /// hears why and which words wait (the ledger's `tell_kept`), and the human,
@@ -744,6 +744,13 @@ impl Dispatcher {
                     )
                 };
                 self.tell_requester(&project, &thread.task, &because)?;
+                // Whoever told the words that failed hears as the requester does:
+                // the human hears below, unless the task was theirs.
+                if let Some(teller) = message.sender.as_deref().filter(|teller| {
+                    message.kind != "task" && *teller != thread.task.requester && *teller != "human"
+                }) {
+                    self.tell_failed(&project, &thread.task, teller, &because)?;
+                }
                 // A task the human gave: that note was theirs.
                 if thread.task.requester == "human" {
                     return Ok(());
@@ -803,11 +810,12 @@ impl Dispatcher {
         task: &TaskView,
         because: &str,
     ) -> Result<(), EngineError> {
+        // The ledger tells the requester, with the words that went (T-437).
         self.seams
             .ledger
             .borrow_mut()
-            .fail_task(project.id, task.number, because)?;
-        self.tell_requester(project, task, because)
+            .give_up_task(project.id, task.number, because)?;
+        Ok(())
     }
 
     fn tell_requester(
@@ -816,11 +824,22 @@ impl Dispatcher {
         task: &TaskView,
         because: &str,
     ) -> Result<(), EngineError> {
+        self.tell_failed(project, task, &task.requester, because)
+    }
+
+    /// `to` hears that `task` failed, `because`, and how to reopen it.
+    fn tell_failed(
+        &self,
+        project: &ProjectView,
+        task: &TaskView,
+        to: &str,
+        because: &str,
+    ) -> Result<(), EngineError> {
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
                 from: None,
-                to: task.requester.clone(),
+                to: to.to_owned(),
                 task: Some(task.number),
                 body: format!(
                     "T-{0} failed: {because}. Reopen it with: cf task reopen T-{0} \"…\"",

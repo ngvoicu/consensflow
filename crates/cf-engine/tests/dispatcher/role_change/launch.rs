@@ -375,14 +375,26 @@ fn a_members_replacement_the_harness_refuses_as_often_as_a_message_is_given_atte
     context.roles.rewritten.replace(" (rewritten)".to_owned());
     refusing_pastes(&context);
     follow_up(&context, &project, "Now the lexer");
-    for _ in 0..8 {
+    for _ in 0..4 {
         context.pass().unwrap();
     }
-
     let notes = replacements(&context, member);
     assert_eq!(notes.len(), 1);
     assert_eq!(context.message(notes[0].id).state, "failed");
     assert_eq!(context.message(notes[0].id).attempts, 3);
+    assert_eq!(
+        context.task(project.id, 2).task.state,
+        "queued",
+        "the look that gives the launch up has not come yet"
+    );
+
+    // The window takes a paste again, as one that refused the note and would take
+    // the follow-up: the launch is given up before the follow-up goes in.
+    context.codex.with(&session, |agent| agent.admit = true);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(notes[0].id).state, "failed");
     assert_eq!(
         said_to(&context, &session),
         Vec::<String>::new(),

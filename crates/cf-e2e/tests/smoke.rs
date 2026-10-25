@@ -22,8 +22,10 @@
 //!
 //! The environment it reads: `CONSENSFLOW_SMOKE_APP` (the app, a relative path
 //! from the checkout's root), `CONSENSFLOW_SMOKE_TIMEOUT_MS` (how long each
-//! wait is given: 180000) and `CONSENSFLOW_SMOKE_KEEP=1` (keep the machine of a
-//! run that passed: a failed one is always kept).
+//! wait is given: 180000; the page's step at each of its own, a quarter of it,
+//! and the app's deadline for the whole run, a minute over it, follow it) and
+//! `CONSENSFLOW_SMOKE_KEEP=1` (keep the machine of a run that passed: a failed
+//! one is always kept).
 //!
 //! It is a macOS bundle's: `Contents/`, `Info.plist`. The Windows app is held by
 //! `app/scripts/windows-smoke.mjs`.
@@ -122,7 +124,7 @@ fn the_built_app_opens_a_pane_renders_a_real_child_takes_input_and_exits_clean()
     // file, the state root and the app's own launchers are the evidence, and
     // rebuilding to look at them again costs minutes. A passing one tidies up
     // (`CONSENSFLOW_SMOKE_KEEP=1` has it keep the machine too).
-    let machine = Machine::new(Path::new(PASTE_READER))?;
+    let machine = Machine::new(Path::new(PASTE_READER), patience)?;
     let outcome = drive(&bundle, &machine, patience, &mut std::io::stdout());
     let keep = own_var("CONSENSFLOW_SMOKE_KEEP").as_deref() == Some("1");
     machine.say_where_kept(&mut std::io::stderr(), outcome.is_err() || keep);
