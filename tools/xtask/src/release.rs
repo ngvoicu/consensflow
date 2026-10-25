@@ -30,9 +30,11 @@
 //! 4. `feed-alpha` serves a version before this one, which the publisher would
 //!    otherwise leave where it is (a feed that answers no release in all its
 //!    reads is an outage, and refused as one);
-//! 5. CI's push run of `main`'s commit, watched to its end, ended green with
-//!    both platforms' summaries (cf-release's `REQUIRED_JOBS`): this is the
-//!    release's gate, which the Release run checks again and does not run;
+//! 5. CI passed `main`'s commit, by the rule the tag's own gate holds it to
+//!    (cf-release's `ci_passed::verdict`: a run of `ci.yml` by a push or by
+//!    hand, green with both platforms' summaries), waited for while a run goes
+//!    on: this is the release's gate, which the Release run checks again and
+//!    does not run;
 //! 6. the annotated tag, its message the notes, pushed to origin and upstream;
 //! 7. the Release run of the tag, watched to its end: its `gate` job finds CI's
 //!    green run of the commit, and its `mac` and `windows` jobs build, sign and

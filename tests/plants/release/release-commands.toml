@@ -127,7 +127,7 @@ replace = "if served.as_str().is_empty() {"
 
 [[plant]]
 name = "release: a run that did not end green is taken"
-meant = "ci_that_ended_red_is_refused_and_nothing_is_tagged"
+meant = "a_release_run_that_fails_says_to_rerun_it_and_a_run_again_says_the_same"
 runs = ["release-commands"]
 
 [[plant.edit]]
@@ -136,17 +136,6 @@ find = '''
 if ended.conclusion != "success" {'''
 replace = '''
 if ended.conclusion == "cancelled" {'''
-
-[[plant]]
-name = "release: CI green on one platform is taken"
-meant = "ci_without_both_platforms_summaries_green_is_refused_and_nothing_is_tagged"
-runs = ["release-commands"]
-
-[[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
-find = "if watched.both_platforms {"
-replace = '''
-if watched.both_platforms && watched.label == "never" {'''
 
 [[plant]]
 name = "release: the run newest before is taken for the new one"
@@ -176,47 +165,8 @@ runs = ["release-commands"]
 
 [[plant.edit]]
 file = "tools/xtask/src/release/alpha.rs"
-find = '''
-    release.watch(&Watched {
-        label: "ci",'''
-replace = '''
-    let _ = release.watch(&Watched {
-        label: "ci",'''
-
-[[plant.edit]]
-file = "tools/xtask/src/release/alpha.rs"
-find = '''
-        left: Left::Nothing,
-    })?;'''
-replace = '''
-        left: Left::Nothing,
-    });'''
-
-[[plant]]
-name = "release: release alpha takes a pull request's CI for main's"
-meant = "ci_of_a_pull_request_on_main_s_commit_is_not_its_gate"
-runs = ["release-commands"]
-
-[[plant.edit]]
-file = "tools/xtask/src/release/alpha.rs"
-find = '''
-        event: Some("push"),
-        before: None,
-        both_platforms: true,'''
-replace = '''
-        event: None,
-        before: None,
-        both_platforms: true,'''
-
-[[plant]]
-name = "release: a platform's summary is any job that names the platform"
-meant = "ci_without_both_platforms_summaries_green_is_refused_and_nothing_is_tagged"
-runs = ["release-commands"]
-
-[[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
-find = ".any(|(job, conclusion)| job == summary && conclusion == \"success\");"
-replace = ".any(|(job, conclusion)| job.contains(&summary[6..13]) && conclusion == \"success\");"
+find = "    release.ci_passed(&commit, Left::Nothing)?;"
+replace = "    let _ = release.ci_passed(&commit, Left::Nothing);"
 
 [[plant]]
 name = "release: a promotion tags whatever CI's run of its commit ended"
@@ -226,22 +176,20 @@ runs = ["release-commands"]
 [[plant.edit]]
 file = "tools/xtask/src/release/promote.rs"
 find = '''
-    // The branch's push started CI on the version commit: the gate, before the tag.
-    release.watch(&Watched {'''
+    release.ci_passed(
+        &promoted,'''
 replace = '''
-    // The branch's push started CI on the version commit: the gate, before the tag.
-    let _ = release.watch(&Watched {'''
+    let _ = release.ci_passed(
+        &promoted,'''
 
 [[plant.edit]]
 file = "tools/xtask/src/release/promote.rs"
 find = '''
-            commit: &promoted,
-        },
-    })?;'''
+    )?;
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
 replace = '''
-            commit: &promoted,
-        },
-    });'''
+    );
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
 
 [[plant]]
 name = "release: a promotion takes the alpha's green CI for its version commit's"
@@ -251,27 +199,11 @@ runs = ["release-commands"]
 [[plant.edit]]
 file = "tools/xtask/src/release/promote.rs"
 find = '''
-        commit: &promoted,
-        event: Some("push"),
-        before: ci_before,'''
+    release.ci_passed(
+        &promoted,'''
 replace = '''
-        commit: &commit,
-        event: Some("push"),
-        before: ci_before,'''
-
-[[plant]]
-name = "release: a promotion's CI green on one platform is taken"
-meant = "ci_without_both_platforms_summaries_green_on_the_version_commit_stops_it_before_the_tag"
-runs = ["release-commands"]
-
-[[plant.edit]]
-file = "tools/xtask/src/release/promote.rs"
-find = '''
-        before: ci_before,
-        both_platforms: true,'''
-replace = '''
-        before: ci_before,
-        both_platforms: false,'''
+    release.ci_passed(
+        &commit,'''
 
 [[plant]]
 name = "release: a promotion's red CI says to rerun nothing"
@@ -696,7 +628,7 @@ find = '''
     // The branch's push started CI on the version commit: the gate, before the tag.
 '''
 replace = '''
-    release.dispatch(CI_WORKFLOW, &branch)?;
+    release.dispatch("ci.yml", &branch)?;
 '''
 
 [[plant]]
@@ -757,7 +689,7 @@ runs = ["release-commands"]
 [[plant.edit]]
 file = "tools/xtask/src/release/promote.rs"
 find = '''
-    let ci_before = release.newest_run(CI_WORKFLOW, Some(&promoted), Some("push"))?;
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
     if options.dry_run {'''
 replace = '''
     if options.dry_run {'''
@@ -765,11 +697,10 @@ replace = '''
 [[plant.edit]]
 file = "tools/xtask/src/release/promote.rs"
 find = '''
-    // The branch's push started CI on the version commit: the gate, before the tag.
-'''
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
 replace = '''
-    let ci_before = release.newest_run(CI_WORKFLOW, Some(&promoted), Some("push"))?;
-'''
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
 
 [[plant]]
 name = "release: a promotion asks gh before its pushes in the dry run alone"
@@ -779,20 +710,19 @@ runs = ["release-commands"]
 [[plant.edit]]
 file = "tools/xtask/src/release/promote.rs"
 find = '''
-    let ci_before = release.newest_run(CI_WORKFLOW, Some(&promoted), Some("push"))?;
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
     if options.dry_run {'''
 replace = '''
     if options.dry_run {
-        release.newest_run(CI_WORKFLOW, Some(&promoted), Some("push"))?;'''
+        release.newest_run("release.yml", Some(&promoted), Some("push"))?;'''
 
 [[plant.edit]]
 file = "tools/xtask/src/release/promote.rs"
 find = '''
-    // The branch's push started CI on the version commit: the gate, before the tag.
-'''
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
 replace = '''
-    let ci_before = release.newest_run(CI_WORKFLOW, Some(&promoted), Some("push"))?;
-'''
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    release.tag_and_push(&tag, &notes, &promoted)?;'''
 
 [[plant]]
 name = "release: a promotion left is finished by hand by its branch's name"
@@ -823,3 +753,44 @@ runs = ["release-commands"]
 file = "tools/xtask/src/release/alpha.rs"
 find = "release.served_after(STABLE_FEED, run, &stable_before)?"
 replace = "release.served_by(STABLE_FEED)?"
+
+[[plant]]
+name = "release: a CI run still going is refused, not waited for"
+meant = "a_ci_run_still_going_is_waited_for_beside_a_red_one"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+                    self.system.pause(self.pace.poll);
+                }
+                Err(Refusal::NeverRan(_)) if looks'''
+replace = '''
+                    return Err(refused("ci: a run goes on"));
+                }
+                Err(Refusal::NeverRan(_)) if looks'''
+
+[[plant]]
+name = "release: GitHub that cannot be asked of CI is taken for CI that never ran"
+meant = "a_github_that_cannot_be_asked_of_ci_stops_it_with_what_gh_said"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''
+                Err(Refusal::Unasked(said)) => {
+                    return Err(Error::Answer {'''
+replace = '''
+                Err(Refusal::Unasked(said)) => {
+                    return Err(refused(format!("CI (ci.yml) never ran: {said}")));
+                    return Err(Error::Answer {'''
+
+[[plant]]
+name = "release: a CI run that has not appeared yet is not waited for"
+meant = "a_ci_run_github_does_not_list_yet_is_waited_for"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = "Err(Refusal::NeverRan(_)) if looks < self.pace.appear_attempts => {"
+replace = "Err(Refusal::NeverRan(_)) if looks > self.pace.appear_attempts => {"

@@ -55,17 +55,19 @@ fn an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone() {
     );
     assert_eq!(fake.serves("feed-alpha").as_deref(), Some(ALPHA));
     assert_eq!(fake.feeds["feed-stable"], stable);
-    // CI's push run, then the tag to origin before upstream, then the release.
-    let ci = fake.when("gh run view 1000").unwrap();
+    // CI asked as the tag's gate asks it, then the tag to origin before upstream, then the release.
+    let ci = fake
+        .when(&format!(
+            "gh api repos/ngvoicu/consensflow/actions/workflows/ci.yml/runs?head_sha={head}&"
+        ))
+        .unwrap();
+    let jobs = fake
+        .when("gh api repos/ngvoicu/consensflow/actions/runs/1000/jobs?")
+        .unwrap();
     let origin = fake.when(&format!("git push -q origin {tag}")).unwrap();
     let upstream = fake.when(&format!("git push -q upstream {tag}")).unwrap();
-    assert!(ci < origin && origin < upstream, "{:#?}", fake.lines());
     assert!(
-        fake.lines()
-            .iter()
-            .any(|line| line.starts_with("gh run list")
-                && line.contains("--workflow ci.yml")
-                && line.contains("--event push")),
+        ci < jobs && jobs < origin && origin < upstream,
         "{:#?}",
         fake.lines()
     );
@@ -79,8 +81,11 @@ fn an_alpha_is_tagged_with_its_notes_watched_and_served_by_feed_alpha_alone() {
     assert_eq!(fake.runs_of("release.yml", "push").len(), 1);
     assert!(fake.pauses > 0);
     for line in [
-        "ci run 1000: success",
-        "  gate (windows-latest) success",
+        &format!(
+            "ci: waiting until CI's run of {} ends (CI did not pass",
+            &head[..8]
+        ),
+        &format!("ci: run 1000 passed {} on both platforms", &head[..8]),
         "release run 1001: success",
         "feed-alpha serves 3.0.6-alpha.1",
     ] {
@@ -102,7 +107,8 @@ fn a_dry_run_watches_ci_and_starts_and_tags_nothing() {
         "{done}"
     );
     assert!(
-        fake.when("gh run view 1000").is_some(),
+        fake.when("gh api repos/ngvoicu/consensflow/actions/runs/1000/jobs?")
+            .is_some(),
         "{:#?}",
         fake.lines()
     );
@@ -278,7 +284,10 @@ fn ci_that_ended_red_is_refused_and_nothing_is_tagged() {
         let said = refusal(released(&world, &mut fake, false).0);
         assert_eq!(
             said,
-            format!("ci run 1000 ended {ended}: nothing after it was done")
+            format!(
+                "CI did not pass {} on both platforms: run 1000 ended {ended}; nothing after it was done",
+                &world.head()[..8]
+            )
         );
         nothing_tagged(&world, &fake);
     }
@@ -286,14 +295,14 @@ fn ci_that_ended_red_is_refused_and_nothing_is_tagged() {
 
 #[test]
 fn ci_without_both_platforms_summaries_green_is_refused_and_nothing_is_tagged() {
-    for (jobs, missing) in [
+    for (jobs, unmet) in [
         // A summary that did not pass, though the run says success.
         (
             vec![
                 ("gate (macos-latest)", "success"),
                 ("gate (windows-latest)", "skipped"),
             ],
-            "gate (windows-latest)",
+            "gate (windows-latest) ended skipped",
         ),
         // A platform's jobs green but no summary: a job that holds its name is not it.
         (
@@ -301,11 +310,11 @@ fn ci_without_both_platforms_summaries_green_is_refused_and_nothing_is_tagged() 
                 ("gate (macos-latest)", "success"),
                 ("test (windows-latest, rig)", "success"),
             ],
-            "gate (windows-latest)",
+            "it has no job gate (windows-latest)",
         ),
         (
             vec![("gate (windows-latest)", "success")],
-            "gate (macos-latest)",
+            "it has no job gate (macos-latest)",
         ),
     ] {
         let world = World::new(ALPHA);
@@ -315,7 +324,11 @@ fn ci_without_both_platforms_summaries_green_is_refused_and_nothing_is_tagged() 
         let said = refusal(released(&world, &mut fake, false).0);
         assert_eq!(
             said,
-            format!("ci run 1000 holds no green {missing}: both platforms must pass; nothing after it was done")
+            format!(
+                "CI did not pass {} on both platforms: run 1000 ended success, but {unmet}; \
+                 nothing after it was done",
+                &world.head()[..8]
+            )
         );
         nothing_tagged(&world, &fake);
     }
@@ -329,7 +342,7 @@ fn a_commit_ci_never_ran_on_is_refused_and_nothing_is_tagged() {
     assert_eq!(
         said,
         format!(
-            "ci: no new run of ci.yml appeared on {}: nothing after it was done",
+            "CI (ci.yml) never ran on {}; nothing after it was done",
             &world.head()[..8]
         )
     );
@@ -344,8 +357,7 @@ fn ci_green_on_another_commit_is_not_main_s_and_nothing_is_tagged() {
     let earlier = world.head();
     super::fake::write(
         &world.root.join("README.md"),
-        "a landing CI has not run on
-",
+        "a landing CI has not run on\n",
     );
     world.commit("a landing");
     for remote in ["origin", "upstream"] {
@@ -356,7 +368,7 @@ fn ci_green_on_another_commit_is_not_main_s_and_nothing_is_tagged() {
     assert_eq!(
         said,
         format!(
-            "ci: no new run of ci.yml appeared on {}: nothing after it was done",
+            "CI (ci.yml) never ran on {}; nothing after it was done",
             &world.head()[..8]
         )
     );
@@ -365,15 +377,87 @@ fn ci_green_on_another_commit_is_not_main_s_and_nothing_is_tagged() {
 
 #[test]
 fn ci_of_a_pull_request_on_main_s_commit_is_not_its_gate() {
-    // A pull request's run tests a merge of the commit, not it: only a push's counts.
+    // A pull request's run tests a merge of the commit, not it: a push's or a hand run's counts.
     let (world, _) = ready();
     let mut fake = Fake::new(&world, "3.0.5", "3.0.5");
     fake.start("ci.yml", &world.head(), "pull_request");
     let said = refusal(released(&world, &mut fake, false).0);
+    assert_eq!(
+        said,
+        format!(
+            "CI (ci.yml) never ran on {} (1 run of a pull request tested a merge of it, which is not it); \
+             nothing after it was done",
+            &world.head()[..8]
+        )
+    );
+    nothing_tagged(&world, &fake);
+}
+
+#[test]
+fn a_green_run_by_hand_passes_main_s_commit_beside_a_red_push_run_as_the_tags_gate_would() {
+    // The push's run of main failed on a flake, and CI was run again by hand,
+    // as the gate's refusal advises: the tag's gate takes the hand run, and so
+    // does the command.
+    let (world, _) = ready();
+    let mut fake = Fake::new(&world, "3.0.5", "3.0.5");
+    fake.conclusions.insert(("ci.yml", "push"), "failure");
+    fake.start("ci.yml", &world.head(), "push");
+    let by_hand = fake.start("ci.yml", &world.head(), "workflow_dispatch");
+    let (outcome, said) = released(&world, &mut fake, false);
+    outcome.unwrap();
     assert!(
-        said.starts_with("ci: no new run of ci.yml appeared on "),
+        said.contains(&format!(
+            "ci: run {by_hand} passed {} on both platforms",
+            &world.head()[..8]
+        )),
         "{said}"
     );
+    assert!(
+        said.contains("ci: run 1000 ended failure, beside it"),
+        "{said}"
+    );
+    assert!(World::tagged(&world.upstream, &format!("v{ALPHA}")).is_some());
+}
+
+#[test]
+fn a_ci_run_github_does_not_list_yet_is_waited_for() {
+    // CI's run of main's commit shows in GitHub's list two looks late.
+    let (world, _) = ready();
+    let mut fake = Fake::new(&world, "3.0.5", "3.0.5");
+    fake.unlisted_for = 2;
+    fake.start("ci.yml", &world.head(), "push");
+    fake.unlisted_for = 0;
+    let (outcome, said) = released(&world, &mut fake, false);
+    outcome.unwrap();
+    assert!(said.contains("ci: run 1000 passed"), "{said}");
+}
+
+#[test]
+fn a_ci_run_still_going_is_waited_for_beside_a_red_one() {
+    // The push's run failed and a hand run goes on: no refusal until it ends.
+    let (world, _) = ready();
+    let mut fake = Fake::new(&world, "3.0.5", "3.0.5");
+    fake.conclusions.insert(("ci.yml", "push"), "failure");
+    fake.start("ci.yml", &world.head(), "push");
+    fake.running_for = 4;
+    fake.start("ci.yml", &world.head(), "workflow_dispatch");
+    fake.running_for = 1;
+    let (outcome, said) = released(&world, &mut fake, false);
+    outcome.unwrap();
+    assert!(said.contains("passed"), "{said}");
+}
+
+#[test]
+fn a_github_that_cannot_be_asked_of_ci_stops_it_with_what_gh_said() {
+    let (world, mut fake) = ready();
+    fake.gh_fails = true;
+    match released(&world, &mut fake, false).0 {
+        Err(Error::Answer { what, said }) => {
+            assert_eq!(what, format!("whether CI passed {}", &world.head()[..8]));
+            assert!(said.contains("gh auth login"), "{said}");
+        }
+        other => panic!("not GitHub's answer: {other:?}"),
+    }
     nothing_tagged(&world, &fake);
 }
 

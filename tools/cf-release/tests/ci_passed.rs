@@ -25,9 +25,13 @@ const OTHER: &str = "a09025c1aaaabbbbccccddddeeeeffff00001111";
 const REPOSITORY: &str = "ngvoicu/consensflow";
 
 /// GitHub's `gh api`, answered from the files in `$FAKE`: `runs.json` for CI's
-/// runs, `jobs-<id>.json` for a run's jobs; every question kept in `asked`.
+/// runs, `jobs-<id>.json` for a run's jobs; every question kept in `asked`. A
+/// file `refused` makes it answer as GitHub does a token it refuses.
 const GH: &str = r#"#!/bin/bash
 echo "$*" >> "$FAKE/asked"
+if [ -e "$FAKE/refused" ]; then
+  echo "gh: Resource not accessible by integration (HTTP 403)" >&2; exit 1
+fi
 case "$2" in
   */actions/workflows/ci.yml/runs\?*) cat "$FAKE/runs.json" ;;
   */actions/runs/*/jobs\?*)
@@ -101,6 +105,7 @@ impl Runner {
             .map(|(id, commit, event, status, conclusion)| {
                 serde_json::json!({
                     "id": id, "head_sha": commit, "event": event,
+                    "head_repository": { "full_name": REPOSITORY },
                     "status": status, "conclusion": conclusion,
                 })
             })
@@ -178,8 +183,8 @@ fn a_tag_on_a_commit_ci_passed_on_both_platforms_goes_on() {
 fn a_tag_on_a_commit_whose_ci_is_red_fails_the_gate() {
     let runner = Runner::new();
     runner.runs(&[(7, COMMIT, "push", "completed", "failure")]);
-    let (status, out, err) = runner.run("push");
-    assert_eq!((status, out.as_str()), (1, ""), "{err}");
+    let (status, _, err) = runner.run("push");
+    assert_eq!(status, 1, "{err}");
     assert!(
         err.starts_with(&format!(
             "cf-release ci-passed: CI did not pass {} on both platforms: run 7 ended failure.",
@@ -231,11 +236,43 @@ fn a_hand_run_is_told_what_a_tag_would_be_refused_for_and_goes_on() {
     let runner = Runner::new();
     runner.runs(&[(7, COMMIT, "push", "completed", "failure")]);
     let (status, out, err) = runner.run("workflow_dispatch");
-    assert_eq!((status, out.as_str()), (0, ""), "{err}");
+    assert_eq!(status, 0, "{err}");
     assert!(
         err.starts_with(&format!(
             "a run by workflow_dispatch publishes nothing; a tag on {COMMIT} would be refused: CI did not pass"
         )),
         "{err}"
+    );
+    // On the run's page, as a warning.
+    assert_eq!(out, format!("::warning::{err}"));
+}
+
+#[test]
+fn a_hand_run_whose_token_github_refuses_fails_the_gate() {
+    // The hand run is the trial of the job's token: a 403 fails it, as on a tag.
+    let runner = Runner::new();
+    fs::write(runner.fake.join("refused"), "").unwrap();
+    for event in ["workflow_dispatch", "push"] {
+        let (status, out, err) = runner.run(event);
+        assert_eq!(status, 1, "{event}: {err}");
+        assert!(
+            out.starts_with("::error::GitHub could not be asked for "),
+            "{out}"
+        );
+        assert!(err.contains("(HTTP 403)"), "{err}");
+    }
+}
+
+#[test]
+fn a_refusal_of_a_tag_is_an_error_on_the_runs_page() {
+    let runner = Runner::new();
+    runner.runs(&[(7, COMMIT, "push", "completed", "failure")]);
+    let (status, out, _) = runner.run("push");
+    assert_eq!(status, 1);
+    assert!(
+        out.starts_with(
+            "::error::CI did not pass 2819dc1f on both platforms: run 7 ended failure."
+        ),
+        "{out}"
     );
 }

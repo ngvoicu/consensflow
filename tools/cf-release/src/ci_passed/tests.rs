@@ -27,13 +27,19 @@ struct Script {
 }
 
 impl Script {
-    fn run(mut self, id: u64, commit: &str, event: &str, ended: &str) -> Self {
+    fn run(self, id: u64, commit: &str, event: &str, ended: &str) -> Self {
+        self.run_from(REPOSITORY, id, commit, event, ended)
+    }
+
+    /// A run whose commit came from the repository `from`.
+    fn run_from(mut self, from: &str, id: u64, commit: &str, event: &str, ended: &str) -> Self {
         let (status, conclusion) = match ended {
             "in_progress" | "queued" => (ended, Value::Null),
             _ => ("completed", json!(ended)),
         };
         self.runs.push(json!({
             "id": id, "head_sha": commit, "event": event,
+            "head_repository": { "full_name": from },
             "status": status, "conclusion": conclusion,
         }));
         self
@@ -167,7 +173,7 @@ fn ci_that_ended_red_is_refused() {
             "{said}"
         );
         assert!(
-            said.contains("`gh run rerun <id> --failed --repo ngvoicu/consensflow`"),
+            said.contains("`gh run rerun 7 --failed --repo ngvoicu/consensflow`"),
             "{said}"
         );
     }
@@ -180,7 +186,7 @@ fn a_commit_ci_never_ran_on_is_refused() {
     assert_eq!(
         said,
         "CI (ci.yml) never ran on 2819dc1f: nothing is published unless CI's full gate passed this very \
-         commit on both platforms. Run CI on it, by a push to main or to a release/ branch or by hand \
+         commit on macOS and Windows. Run CI on it, by a push to main or to a release/ branch or by hand \
          (`gh workflow run ci.yml --ref <branch> --repo ngvoicu/consensflow`), and once it is green rerun \
          this run's failed jobs"
     );
@@ -352,8 +358,174 @@ fn a_github_that_cannot_be_asked_is_a_refusal_with_what_gh_said() {
         said,
         format!(
             "GitHub could not be asked for repos/{REPOSITORY}/actions/workflows/ci.yml/runs?head_sha={COMMIT}\
-             &per_page=100&page=1: gh api ended 1: HTTP 403: Resource not accessible by integration"
+             &per_page=100&page=1: gh api ended 1: HTTP 403: Resource not accessible by integration: nothing \
+             is published unless CI's full gate passed this very commit on macOS and Windows, and whether CI \
+             passed it could not be told. Read the job's token and permissions (actions: read), then rerun \
+             this run's failed jobs"
         )
+    );
+}
+
+#[test]
+fn a_github_that_cannot_be_asked_fails_a_hand_run_too() {
+    // The hand run is the trial of the job's token: a 403 there is no green job.
+    for fails in [
+        "gh api ended 1: HTTP 403: Resource not accessible by integration",
+        "gh was not found: is it installed, and on the PATH?",
+    ] {
+        let mut script = Script {
+            fails: Some(fails),
+            ..Script::default()
+        };
+        let (result, out, _) = answered(&mut script, Some("workflow_dispatch"));
+        let said = result.expect_err("a hand run that could not ask GitHub went on");
+        assert!(said.starts_with("GitHub could not be asked for "), "{said}");
+        assert!(
+            out.starts_with("::error::GitHub could not be asked for "),
+            "{out}"
+        );
+    }
+    // An answer that cannot be read is no answer either.
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let mut console = Console {
+        out: &mut out,
+        err: &mut err,
+    };
+    let failure = answer(
+        &mut NoJson,
+        REPOSITORY,
+        COMMIT,
+        Some("workflow_dispatch"),
+        &mut console,
+    )
+    .expect_err("an answer that could not be read passed a hand run");
+    assert!(
+        failure.to_string().contains("could not be read"),
+        "{failure}"
+    );
+}
+
+/// A GitHub whose every answer is no JSON, as a proxy's page.
+struct NoJson;
+
+impl GitHub for NoJson {
+    fn get(&mut self, _path: &str) -> Result<String, String> {
+        Ok("<html>a proxy's page</html>".to_owned())
+    }
+}
+
+#[test]
+fn a_refusal_is_written_as_an_error_on_the_runs_page_and_a_hand_runs_as_a_warning() {
+    let mut script = Script::default().ci(7, COMMIT, "push", "failure", "failure");
+    let (result, out, _) = answered(&mut script, Some("push"));
+    let said = result.unwrap_err();
+    assert_eq!(out, format!("::error::{said}\n"));
+    let mut script = Script::default().ci(7, COMMIT, "push", "failure", "failure");
+    let (result, out, err) = answered(&mut script, Some("workflow_dispatch"));
+    result.unwrap();
+    assert_eq!(out, format!("::warning::{err}"));
+}
+
+#[test]
+fn what_would_end_a_workflow_command_is_written_as_the_runner_reads_it_back() {
+    assert_eq!(
+        annotation("error", "100% red\r\nthen more"),
+        "::error::100%25 red%0D%0Athen more"
+    );
+}
+
+#[test]
+fn a_run_of_a_commit_from_another_repository_is_not_ci_of_it() {
+    let green = [
+        ("gate (macos-latest)", "success"),
+        ("gate (windows-latest)", "success"),
+    ];
+    // The same commit, pushed in a fork: its CI is the fork's, not this repository's.
+    let mut script = Script::default()
+        .run_from("someone/consensflow", 7, COMMIT, "push", "success")
+        .jobs(7, &green);
+    let said = refusal(&mut script);
+    assert!(
+        said.starts_with("CI (ci.yml) never ran on 2819dc1f: "),
+        "{said}"
+    );
+    // A run with no head repository named is not this repository's either.
+    let mut script = Script::default().ci(7, COMMIT, "push", "success", "success");
+    script.runs[0]
+        .as_object_mut()
+        .unwrap()
+        .remove("head_repository");
+    assert!(refusal(&mut script).starts_with("CI (ci.yml) never ran on 2819dc1f: "));
+    // The repository's name is told apart without its case, as GitHub's are.
+    let mut script = Script::default()
+        .run_from("NGVoicu/ConsensFlow", 7, COMMIT, "push", "success")
+        .jobs(7, &green);
+    answered(&mut script, Some("push")).0.unwrap();
+}
+
+#[test]
+fn a_pass_tells_the_other_runs_of_the_commit_that_ended_red_as_warnings() {
+    let mut script = Script::default()
+        .ci(9, COMMIT, "workflow_dispatch", "failure", "failure")
+        .ci(8, COMMIT, "push", "success", "success")
+        .ci(6, COMMIT, "push", "success", "skipped")
+        .run(5, COMMIT, "push", "in_progress");
+    let (result, out, err) = answered(&mut script, Some("push"));
+    result.unwrap();
+    assert_eq!(err, "");
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), 3, "{out}");
+    assert!(lines[0].starts_with(&format!("CI passed {COMMIT} on both platforms: run 8,")));
+    assert_eq!(
+        lines[1],
+        "::warning::run 9 ended failure, though run 8 passed the same commit: a flake of the same code, \
+         or one to read"
+    );
+    assert_eq!(
+        lines[2],
+        "::warning::run 6 ended success, but gate (macos-latest) ended skipped, gate (windows-latest) ended \
+         skipped, though run 8 passed the same commit: a flake of the same code, or one to read"
+    );
+}
+
+#[test]
+fn the_verdict_tells_ci_never_run_still_going_red_and_unasked_apart() {
+    let mut never = Script::default();
+    assert!(matches!(
+        verdict(&mut never, REPOSITORY, COMMIT),
+        Err(Refusal::NeverRan(_))
+    ));
+    // Going, beside a red one: not passed yet, and waited for.
+    let mut going = Script::default()
+        .ci(8, COMMIT, "push", "failure", "failure")
+        .run(9, COMMIT, "workflow_dispatch", "in_progress");
+    assert!(matches!(
+        verdict(&mut going, REPOSITORY, COMMIT),
+        Err(Refusal::Running(_))
+    ));
+    // Red: the newest red run, to rerun.
+    let mut red = Script::default()
+        .ci(9, COMMIT, "workflow_dispatch", "failure", "failure")
+        .ci(8, COMMIT, "push", "cancelled", "cancelled");
+    assert!(matches!(
+        verdict(&mut red, REPOSITORY, COMMIT),
+        Err(Refusal::Red { run: 9, .. })
+    ));
+    let mut unasked = Script {
+        fails: Some("gh api ended 1: HTTP 403"),
+        ..Script::default()
+    };
+    assert!(matches!(
+        verdict(&mut unasked, REPOSITORY, COMMIT),
+        Err(Refusal::Unasked(_))
+    ));
+    let mut passed = Script::default().ci(8, COMMIT, "push", "success", "success");
+    assert_eq!(
+        verdict(&mut passed, REPOSITORY, COMMIT),
+        Ok(Passed {
+            run: 8,
+            red: vec![]
+        })
     );
 }
 
@@ -362,7 +534,7 @@ fn a_hand_run_of_the_release_is_told_what_a_tag_would_be_refused_for_and_not_fai
     let mut script = Script::default().ci(7, COMMIT, "push", "failure", "failure");
     let (result, out, err) = answered(&mut script, Some("workflow_dispatch"));
     result.unwrap();
-    assert_eq!(out, "");
+    assert_eq!(out, format!("::warning::{err}"));
     assert!(
         err.starts_with(&format!(
             "a run by workflow_dispatch publishes nothing; a tag on {COMMIT} would be refused: CI did not pass"

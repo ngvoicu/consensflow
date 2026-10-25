@@ -10,23 +10,26 @@
 ci-passed = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-release", "--lib", "--", "ci_passed::"]
 # The gate's step as written, the tool built and a gh that answers from files.
 gate-step = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-release", "--test", "ci_passed"]
+# `cargo xtask release`, which asks CI by the same rule before it tags (its library tests build no
+# program).
+xtask-release = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "release::"]
 # The workflows' text: the gate job, the publish job that needs it, CI's triggers.
 workflow-text = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "release_tool", "--test", "release_publish"]
 
 [[plant]]
 name = "ci-gate: a green run of another commit is taken"
 meant = "ci_green_on_another_commit_is_not_this_ones"
-runs = ["ci-passed", "gate-step"]
+runs = ["ci-passed", "gate-step", "xtask-release"]
 
 [[plant.edit]]
 file = "tools/cf-release/src/ci_passed.rs"
-find = "runs.iter().filter(|run| run.commit == commit).collect();"
-replace = "runs.iter().collect();"
+find = ".filter(|run| run.commit == commit && run.repository.eq_ignore_ascii_case(repository))"
+replace = ".filter(|run| run.repository.eq_ignore_ascii_case(repository))"
 
 [[plant]]
 name = "ci-gate: a pull request's run is taken for the commit's"
 meant = "a_pull_requests_run_tested_a_merge_and_is_not_ci_of_the_commit"
-runs = ["ci-passed"]
+runs = ["ci-passed", "xtask-release"]
 
 [[plant.edit]]
 file = "tools/cf-release/src/ci_passed.rs"
@@ -41,9 +44,9 @@ runs = ["ci-passed", "gate-step"]
 [[plant.edit]]
 file = "tools/cf-release/src/ci_passed.rs"
 find = '''
-        if run.conclusion != "success" {'''
+        let why = if run.conclusion != "success" {'''
 replace = '''
-        if run.conclusion == "never" {'''
+        let why = if run.conclusion == "never" {'''
 
 [[plant]]
 name = "ci-gate: a run still going is read as ended"
@@ -80,12 +83,12 @@ replace = '''Some("success" | "skipped") => None,'''
 [[plant]]
 name = "ci-gate: a job that holds a summary's name is taken for it"
 meant = "a_summary_is_its_name_whole_not_a_job_that_holds_it"
-runs = ["ci-passed"]
+runs = ["ci-passed", "xtask-release"]
 
 [[plant.edit]]
 file = "tools/cf-release/src/ci_passed.rs"
-find = '''job.get("name").and_then(Value::as_str) == Some(required)'''
-replace = '''job.get("name").and_then(Value::as_str).is_some_and(|name| name.contains(required))'''
+find = ".find(|(name, _)| name == required)"
+replace = ".find(|(name, _)| name.contains(&required[6..13]))"
 
 [[plant]]
 name = "ci-gate: the jobs are read off their first page alone"
@@ -104,8 +107,8 @@ runs = ["ci-passed", "gate-step"]
 
 [[plant.edit]]
 file = "tools/cf-release/src/ci_passed.rs"
-find = '''Some(event) if event != "push" => {'''
-replace = '''Some(event) if !event.is_empty() => {'''
+find = '''Some(event) if event != "push" && !refusal.is_unasked() => {'''
+replace = '''Some(event) if !event.is_empty() && !refusal.is_unasked() => {'''
 
 [[plant]]
 name = "ci-gate: a hand run is failed by what a tag would be refused for"
@@ -114,8 +117,8 @@ runs = ["ci-passed", "gate-step"]
 
 [[plant.edit]]
 file = "tools/cf-release/src/ci_passed.rs"
-find = '''Some(event) if event != "push" => {'''
-replace = '''Some(event) if event == "never" => {'''
+find = '''Some(event) if event != "push" && !refusal.is_unasked() => {'''
+replace = '''Some(event) if event == "never" && !refusal.is_unasked() => {'''
 
 [[plant]]
 name = "ci-gate: a commit that is not whole is asked for"
@@ -286,3 +289,112 @@ replace = '''
       actions: read
       contents: read
     steps:'''
+
+[[plant]]
+name = "ci-gate: a hand run that could not ask GitHub is told and not failed"
+meant = "a_github_that_cannot_be_asked_fails_a_hand_run_too"
+runs = ["ci-passed", "gate-step"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/ci_passed.rs"
+find = '''Some(event) if event != "push" && !refusal.is_unasked() => {'''
+replace = '''Some(event) if event != "push" => {'''
+
+[[plant]]
+name = "ci-gate: GitHub that could not be asked is taken for CI that never ran"
+meant = "the_verdict_tells_ci_never_run_still_going_red_and_unasked_apart"
+runs = ["ci-passed", "xtask-release"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/ci_passed.rs"
+find = '''
+        "workflow_runs",
+    )
+    .map_err(Refusal::Unasked)?;'''
+replace = '''
+        "workflow_runs",
+    )
+    .map_err(Refusal::NeverRan)?;'''
+
+[[plant]]
+name = "ci-gate: a refusal is not written on the run's page"
+meant = "a_refusal_is_written_as_an_error_on_the_runs_page_and_a_hand_runs_as_a_warning"
+runs = ["ci-passed", "gate-step"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/ci_passed.rs"
+find = '''            writeln!(console.out, "{}", annotation("error", &said))?;'''
+replace = ""
+
+[[plant]]
+name = "ci-gate: a hand run's refusal is not written on the run's page"
+meant = "a_refusal_is_written_as_an_error_on_the_runs_page_and_a_hand_runs_as_a_warning"
+runs = ["ci-passed", "gate-step"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/ci_passed.rs"
+find = '''
+            writeln!(console.out, "{}", annotation("warning", &line))?;
+            writeln!(console.err, "{line}")?;'''
+replace = '''
+            writeln!(console.err, "{line}")?;'''
+
+[[plant]]
+name = "ci-gate: what ends a workflow command is written as it is"
+meant = "what_would_end_a_workflow_command_is_written_as_the_runner_reads_it_back"
+runs = ["ci-passed"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/ci_passed.rs"
+find = '''.replace('%', "%25")'''
+replace = '''.replace('%', "%")'''
+
+[[plant]]
+name = "ci-gate: a run of the commit from another repository is taken"
+meant = "a_run_of_a_commit_from_another_repository_is_not_ci_of_it"
+runs = ["ci-passed"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/ci_passed.rs"
+find = ".filter(|run| run.commit == commit && run.repository.eq_ignore_ascii_case(repository))"
+replace = ".filter(|run| run.commit == commit)"
+
+[[plant]]
+name = "ci-gate: the repository's name is told apart by its case"
+meant = "a_run_of_a_commit_from_another_repository_is_not_ci_of_it"
+runs = ["ci-passed"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/ci_passed.rs"
+find = "run.repository.eq_ignore_ascii_case(repository)"
+replace = "run.repository == repository"
+
+[[plant]]
+name = "ci-gate: a pass is silent about the commit's red runs"
+meant = "a_pass_tells_the_other_runs_of_the_commit_that_ended_red_as_warnings"
+runs = ["ci-passed"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/ci_passed.rs"
+find = "        red.push(why);"
+replace = "        red.push(why);\n        if passed.is_some() { red.clear(); }"
+
+[[plant]]
+name = "ci-gate: a run still going beside a red one is a refusal, not a wait"
+meant = "the_verdict_tells_ci_never_run_still_going_red_and_unasked_apart"
+runs = ["ci-passed", "xtask-release"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/ci_passed.rs"
+find = "Some(run) if going.is_empty() => Err(Refusal::Red { said, run }),"
+replace = "Some(run) => Err(Refusal::Red { said, run }),"
+
+[[plant]]
+name = "ci-gate: a run by hand is not CI of the commit"
+meant = "a_run_by_hand_is_ci_of_the_commit_as_a_push_is"
+runs = ["ci-passed", "xtask-release"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/ci_passed.rs"
+find = '''const EVENTS: [&str; 2] = ["push", "workflow_dispatch"];'''
+replace = '''const EVENTS: [&str; 2] = ["push", "push"];'''

@@ -153,7 +153,12 @@ fn a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_never_writ
         let ci = fake.runs_of("ci.yml", "push");
         let ci: Vec<_> = ci.iter().filter(|run| run.commit == promoted).collect();
         assert_eq!(ci.len(), 1, "{:#?}", fake.runs);
-        let watched = fake.when(&format!("gh run view {}", ci[0].id)).unwrap();
+        let watched = fake
+            .when(&format!(
+                "gh api repos/ngvoicu/consensflow/actions/runs/{}/jobs?",
+                ci[0].id
+            ))
+            .unwrap();
         let branch_pushed = fake
             .when(&format!("git push -q upstream {BRANCH}"))
             .unwrap();
@@ -164,7 +169,11 @@ fn a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_never_writ
             fake.lines()
         );
         assert!(
-            said.contains(&format!("ci run {}: success", ci[0].id)),
+            said.contains(&format!(
+                "ci: run {} passed {} on both platforms",
+                ci[0].id,
+                &promoted[..8]
+            )),
             "{said}"
         );
         assert_eq!(fake.runs_of("release.yml", "push").len(), 1);
@@ -641,7 +650,8 @@ fn ci_that_ended_red_on_the_version_commit_stops_it_before_the_tag() {
         assert_eq!(
             said,
             format!(
-                "ci run {run} ended {ended}: {}",
+                "CI did not pass {} on both platforms: run {run} ended {ended}; {}",
+                &at[..8],
                 ci_not_green(
                     &at,
                     &format!("a flake: rerun it, `gh run rerun {run} --failed --repo ngvoicu/consensflow`")
@@ -672,7 +682,9 @@ fn ci_without_both_platforms_summaries_green_on_the_version_commit_stops_it_befo
     assert_eq!(
         said,
         format!(
-            "ci run {run} holds no green gate (windows-latest): both platforms must pass; {}",
+            "CI did not pass {} on both platforms: run {run} ended success, but it has no job \
+             gate (windows-latest); {}",
+            &at[..8],
             ci_not_green(
                 &at,
                 &format!(
@@ -696,7 +708,7 @@ fn a_version_commit_ci_never_ran_on_is_not_tagged_though_ci_passed_the_alpha() {
     assert_eq!(
         said,
         format!(
-            "ci: no new run of ci.yml appeared on {}: {}",
+            "CI (ci.yml) never ran on {}; {}",
             &at[..8],
             ci_not_green(
                 &at,
@@ -707,4 +719,39 @@ fn a_version_commit_ci_never_ran_on_is_not_tagged_though_ci_passed_the_alpha() {
         )
     );
     no_tag(&world, &fake);
+}
+
+#[test]
+fn a_green_run_by_hand_of_the_version_commit_is_taken_beside_a_red_push_run() {
+    // The branch's push run failed, and CI was run on the branch by hand, as a
+    // refusal advises: the tag's gate takes the hand run, and so does the
+    // promotion, which tags.
+    let (world, mut fake) = released();
+    fake.conclusions.insert(("ci.yml", "push"), "failure");
+    fake.branch_ci_by_hand = true;
+    let (outcome, said) = promoted(&world, &mut fake, ALPHA, false);
+    outcome.unwrap();
+    let at = git(&world.upstream, &["rev-parse", BRANCH]);
+    let by_hand = fake.runs_of("ci.yml", "workflow_dispatch")[0].id;
+    assert!(
+        said.contains(&format!(
+            "ci: run {by_hand} passed {} on both platforms",
+            &at[..8]
+        )),
+        "{said}"
+    );
+    assert_eq!(
+        World::tagged(&world.upstream, &format!("v{PLAIN}")),
+        Some(at)
+    );
+}
+
+#[test]
+fn a_promotion_waits_for_a_run_by_hand_that_goes_on_beside_a_red_push_run() {
+    let (world, mut fake) = released();
+    fake.conclusions.insert(("ci.yml", "push"), "failure");
+    fake.branch_ci_by_hand = true;
+    fake.running_for = 3;
+    promoted(&world, &mut fake, ALPHA, false).0.unwrap();
+    assert!(World::tagged(&world.upstream, &format!("v{PLAIN}")).is_some());
 }

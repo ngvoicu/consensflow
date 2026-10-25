@@ -23,8 +23,9 @@
 //! 5. The branch `release/X.Y.Z` at the version commit, in the checkout and
 //!    pushed to origin and upstream. Its push runs CI (`ci.yml` runs on
 //!    `release/*`), which is the gate of the version commit: the release
-//!    publishes only a commit CI passed on both platforms, and it is watched to
-//!    its end before any tag. A CI run that fails leaves the branch and no tag,
+//!    publishes only a commit CI passed on both platforms, and the command waits
+//!    until it did, by the tag's gate's own rule (a run by the push or by hand),
+//!    before any tag. A CI run that fails leaves the branch and no tag,
 //!    and says how to rerun it and finish by hand, or start over. There is no
 //!    Release dry run (the `release` environment admits `main` and `v*` tags
 //!    alone): the tag's own Release run builds, signs and smoke-tests both
@@ -39,13 +40,13 @@
 //! later), which `release alpha` enforces, as `feed-alpha` then serves `X.Y.Z`.
 //!
 //! `--dry-run` does 1 to 4, the commit made and left in no branch, asks `gh`
-//! for CI's runs as 5 does before its first push, and says what it would push.
+//! for the Release runs as 6 does before its first push, and says what it would
+//! push.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use cf_publish::version::Version;
-use cf_release::ci_passed::CI_WORKFLOW;
 use cf_release::version::source_version;
 
 use super::github::{finish_by_hand, Left, Watched};
@@ -115,7 +116,7 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
     ));
     // Asked before anything is pushed, and in the dry run too: a gh that is not
     // logged in, or no network, then stops it with nothing on a remote.
-    let ci_before = release.newest_run(CI_WORKFLOW, Some(&promoted), Some("push"))?;
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
     if options.dry_run {
         return Ok(format!(
             "dry run: every check passed; {} would be {branch} in the checkout and on origin and upstream, \
@@ -138,20 +139,14 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
         )
     })?;
     // The branch's push started CI on the version commit: the gate, before the tag.
-    release.watch(&Watched {
-        label: "ci",
-        workflow: CI_WORKFLOW,
-        commit: &promoted,
-        event: Some("push"),
-        before: ci_before,
-        both_platforms: true,
-        left: Left::Branch {
+    release.ci_passed(
+        &promoted,
+        Left::Branch {
             branch: &branch,
             tag: &tag,
             commit: &promoted,
         },
-    })?;
-    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
+    )?;
     release.tag_and_push(&tag, &notes, &promoted)?;
     let run = release.watch(&Watched {
         label: "release",
@@ -159,7 +154,6 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
         commit: &promoted,
         event: Some("push"),
         before,
-        both_platforms: false,
         left: Left::Tag(&tag),
     })?;
     release.wait_for_feed(ALPHA_FEED, &plain, run)?;
