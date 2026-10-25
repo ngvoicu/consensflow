@@ -228,7 +228,7 @@ fn a_refusal_of_the_words_that_resumed_the_task_holds_it_again_without_telling_t
     assert_match(
         human.iter().find(|n| n.contains("may need you")).unwrap(),
         &format!(
-            r"^T-1 was refused for quota again as soon as it went on: @{session}'s account may need you \(a plan that includes its model, a balance, or another account\)\. It waits, and ConsensFlow tries it again at each reset; say @zeus is back once its account has quota\.$"
+            r"^T-1 was refused for quota again as soon as it went on: @{session}'s account may need you \(a plan that includes its model, a balance, or another account\)\. It waits, and ConsensFlow tries it again at each reset; press Try again now on @zeus once its account has quota\.$"
         ),
     );
 }
@@ -804,4 +804,80 @@ fn a_resumed_turn_still_at_work_past_the_time_a_refusal_is_the_same_wait_tells_i
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(goes_on_told(&tiers), 1, "{:?}", tiers.notes("chief"));
+}
+
+/// The results of T-1.
+fn results(tiers: &Tiers<'_>) -> Vec<String> {
+    tiers
+        .task(1)
+        .messages
+        .into_iter()
+        .filter(|message| message.kind == "result")
+        .map(|message| message.body)
+        .collect()
+}
+
+#[test]
+fn a_held_tasks_window_whose_words_quoted_its_briefs_header_before_the_brief_went_in_goes_on_by_itself(
+) {
+    // Where the window was given its brief is the item its arrival was proved by, as
+    // turn-end finds it (`delivered_at`, T-531), never words that quote its header:
+    // read by the first item that held its marker, the quotation was the paste, the
+    // real paste after it a message of ConsensFlow's, and the window's own turn none.
+    let context = Context::new();
+    let (tiers, session) = held_for_two_hours(&context);
+    let brief = tiers.task(1).messages[0].id;
+    let quoted = context.adapter.item(
+        Role::User,
+        &format!(
+            "Is {}T-1 the parser task?",
+            cf_engine::delivery_text::marker_of(brief)
+        ),
+    );
+    context
+        .adapter
+        .with(&session, |agent| agent.items.insert(0, quoted));
+    context.advance(60_000);
+    context
+        .adapter
+        .begins_its_own_turn(&session, CONTINUE, &now(&context));
+    context.pass().unwrap();
+    context.advance(10_000);
+    context
+        .adapter
+        .ends_its_own_turn(&session, "The parser is done.", &now(&context));
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(results(&tiers), ["The parser is done."]);
+    assert_eq!(pasted_saying(&context, &session, "Resumed:"), 0);
+}
+
+#[test]
+fn a_held_tasks_window_that_went_on_by_itself_and_compacted_after_its_answer_goes_on() {
+    // A compaction's summary, written in the user's place at rest after the answer, is
+    // no turn of the window's own, as it is none of the answer's (`answers_to_the_task`):
+    // read in one look with the turn and its answer, the summary was taken for the turn,
+    // and nothing answered it.
+    let context = Context::new();
+    let (tiers, session) = held_for_two_hours(&context);
+    context.advance(60_000);
+    context
+        .adapter
+        .begins_its_own_turn(&session, CONTINUE, &now(&context));
+    context
+        .adapter
+        .ends_its_own_turn(&session, "The parser is done.", &now(&context));
+    let mut summary = context
+        .adapter
+        .item(Role::User, "Summary of the conversation so far");
+    summary.compaction = true;
+    context
+        .adapter
+        .with(&session, |agent| agent.items.push(summary));
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(results(&tiers), ["The parser is done."]);
+    assert_eq!(pasted_saying(&context, &session, "Resumed:"), 0);
 }

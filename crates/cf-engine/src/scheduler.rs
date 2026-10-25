@@ -7,7 +7,7 @@
 //! requesters were told they wait.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cf_base::refusal::Refusal;
@@ -15,8 +15,8 @@ use cf_base::time;
 use cf_harness::contract::Observed;
 use cf_harness::records::{Level, Quota, Role};
 use cf_ledger::{
-    Candidate, HeldTask, LedgerError, NewNote, ParticipantView, ProjectView, TaskCard,
-    TaskThread, RESUME_WORDS,
+    Candidate, HeldTask, LedgerError, NewNote, ParticipantView, ProjectView, TaskCard, TaskThread,
+    RESUME_WORDS,
 };
 use serde_json::Value;
 
@@ -37,6 +37,11 @@ const AGAIN_MS: i64 = 5 * 60_000;
 /// How long a quota lasts when its harness names no reset.
 const UNKNOWN_RESET_MS: i64 = 60 * 60_000;
 
+/// How much later one reset must be than another to be a limit of its own: a
+/// harness names a reset to the hour (Claude Code's "resets 3pm"), or none, and
+/// one that names none is an hour from each refusal.
+const SAME_LIMIT_MS: i64 = 60 * 60_000;
+
 /// The record's quota part.
 #[derive(Debug, Default)]
 pub(crate) struct QuotaPart {
@@ -49,13 +54,38 @@ pub(crate) struct QuotaPart {
     /// The words that resumed the window's task whose going on its requester
     /// was told of (`tell_it_went_on`): the ledger tells it once anyway.
     pub(crate) told_going_on: Option<i64>,
+    /// The time of the window's last answer that was looked at as news of its
+    /// account's quota: each answer is news once.
+    pub(crate) answered: Option<String>,
+}
+
+/// News that an account has quota again.
+pub(crate) enum News<'a> {
+    /// A turn of the window `record` got through (`observed`, its look).
+    /// `returned` is the reset its member was out until, where that turn brought
+    /// it back: none where the member was not out.
+    Turn {
+        record: &'a Record,
+        observed: &'a Observed,
+        returned: Option<String>,
+    },
+    /// The human's Try again now.
+    Human,
 }
 
 /// What the scheduler keeps across records: the open tasks whose requester
-/// heard that they wait for a free member, each with its project.
+/// heard that they wait for a free member, each with its project; and the
+/// windows out of quota whose waiting messages the human heard of, each with
+/// the time its participant was marked out.
 #[derive(Debug, Default)]
 pub(crate) struct SchedulerState {
     waiting_noted: RefCell<HashMap<i64, i64>>,
+    out_noted: RefCell<HashSet<(i64, String)>>,
+    /// The participants a window's turn brought back, or left out for a later
+    /// limit, each with the reset it was out until: the same limit again is no
+    /// news a teammate's turn can undo. In memory, so a restart may bring a chief
+    /// on a weekly limit back once more (one refused turn, one note).
+    tried: RefCell<HashMap<i64, String>>,
 }
 
 /// The same refusal: the one a record's reading gave, or one of the same time.
@@ -63,6 +93,62 @@ fn same_refusal(handled: Option<&Arc<Quota>>, quota: &Arc<Quota>) -> bool {
     handled.is_some_and(|handled| {
         Arc::ptr_eq(handled, quota) || quota.at().is_some_and(|at| handled.at() == Some(at))
     })
+}
+
+/// What a message is, as the human is told of it: the result of a task, its words.
+fn what_it_is(kind: &str, task: Option<i64>) -> String {
+    match (kind, task) {
+        ("result", Some(number)) => format!("the result of T-{number}"),
+        ("task", Some(number)) => format!("the words of T-{number}"),
+        (kind, Some(number)) => format!("{} {kind} on T-{number}", article(kind)),
+        (kind, None) => format!("{} {kind}", article(kind)),
+    }
+}
+
+/// The article a kind of message takes: an answer, a note.
+fn article(kind: &str) -> &'static str {
+    if kind.starts_with(['a', 'e', 'i', 'o', 'u']) {
+        "an"
+    } else {
+        "a"
+    }
+}
+
+/// Whether the reset `until` is a later limit's than the reset `returned`: more
+/// than [`SAME_LIMIT_MS`] after it.
+fn later_limit(until: &str, returned: &str) -> bool {
+    time::parse(until)
+        .zip(time::parse(returned))
+        .is_some_and(|(until, returned)| until - returned > SAME_LIMIT_MS)
+}
+
+/// Whether the resets `one` and `other` are one limit's: within [`SAME_LIMIT_MS`]
+/// of each other, as a reset no refusal named is an hour from each refusal.
+fn same_limit(one: &str, other: &str) -> bool {
+    time::parse(one)
+        .zip(time::parse(other))
+        .is_some_and(|(one, other)| (one - other).abs() <= SAME_LIMIT_MS)
+}
+
+/// When a window's last turn that got through answered, as its record names the
+/// time: none for a turn that failed or was refused.
+fn last_answer(observed: &Observed) -> Option<String> {
+    if observed.failed
+        || observed
+            .quota
+            .as_deref()
+            .is_some_and(|quota| quota.level() == Level::Exhausted)
+    {
+        return None;
+    }
+    observed
+        .items()
+        .iter()
+        .rev()
+        .find(|item| item.role == Role::Assistant)
+        .and_then(|item| item.at.as_ref())
+        .and_then(Value::as_str)
+        .map(str::to_owned)
 }
 
 /// Whether the time `later` names comes after the one `earlier` names; a
@@ -282,22 +368,7 @@ impl Dispatcher {
         let Some(since) = owner.out_since.as_deref() else {
             return false;
         };
-        if observed.failed
-            || observed
-                .quota
-                .as_deref()
-                .is_some_and(|quota| quota.level() == Level::Exhausted)
-        {
-            return false;
-        }
-        observed
-            .items()
-            .iter()
-            .rev()
-            .find(|item| item.role == Role::Assistant)
-            .and_then(|item| item.at.as_ref())
-            .and_then(Value::as_str)
-            .is_some_and(|at| after(at, since))
+        last_answer(observed).is_some_and(|at| after(&at, since))
     }
 
     /// Whether a window's last turn ended in a refusal its member is past
@@ -341,6 +412,196 @@ impl Dispatcher {
         quota
             .and_then(Quota::resets_at)
             .map_or_else(|| time::iso(self.now() + UNKNOWN_RESET_MS), str::to_owned)
+    }
+
+    /// News that an account has quota again brings back the others out on it.
+    /// Where every window of `owner`'s harness is logged into the one account
+    /// (`Adapter::one_account`), a quota that came back is theirs too: each other
+    /// member out on that harness, and the chief, is back. A chief at rest takes
+    /// no turn of its own, so a `/login` that brought its members back left it out
+    /// until its reset, with everything sent to it queued (the field report of
+    /// 2026-10-22, T-254).
+    ///
+    /// The human's word brings back all of them. A window's turn that got through
+    /// is news for those marked out before it, read from the ledger as it is now
+    /// (one marked out earlier in this pass too), once for each answer. One
+    /// account is not one quota: a plan may limit one model by the week, so a
+    /// member back from a reset brings back none out until a later one, and the
+    /// human hears it stays out; and a turn brings one back once for each limit
+    /// it is out until: refused again with the same reset, or one within the hour
+    /// of it, its limit is not the teammate's.
+    pub(crate) fn back_on_its_account(
+        &self,
+        project: i64,
+        owner: &ParticipantView,
+        news: &News<'_>,
+    ) -> Result<(), EngineError> {
+        let Some(harness) = owner.harness.as_deref() else {
+            return Ok(());
+        };
+        let one_account = self
+            .seams
+            .adapters
+            .adapter(harness)
+            .is_some_and(|adapter| adapter.one_account());
+        if !one_account {
+            return Ok(());
+        }
+        if let News::Turn {
+            record, observed, ..
+        } = news
+        {
+            let Some(at) = last_answer(observed) else {
+                return Ok(());
+            };
+            let mut quota = record.quota.borrow_mut();
+            if quota.answered.as_deref() == Some(at.as_str()) {
+                return Ok(());
+            }
+            // One read of the project for each new answer of a one-account
+            // window: a turn adds one for each call it makes, bounded by the looks.
+            quota.answered = Some(at);
+        }
+        let because = format!("@{} has quota again on the same account", owner.handle);
+        let mut brought = false;
+        for other in self.known_project(project)?.participants {
+            let marked = other.role != "human" && other.member_id.is_none();
+            if !marked
+                || other.id == owner.id
+                || other.harness.as_deref() != Some(harness)
+                || !self.is_out(&other)
+            {
+                continue;
+            }
+            let until = other.out_until.clone().unwrap_or_default();
+            let back = match news {
+                News::Human => true,
+                News::Turn {
+                    observed,
+                    returned: Some(returned),
+                    ..
+                } => {
+                    if later_limit(&until, returned) {
+                        // A later reset is a limit of its own, which no teammate's turn
+                        // undoes: the human hears it stays out, once for the limit.
+                        if self.tried_anew(other.id, &until) {
+                            self.tell_still_out(project, &other, owner, &until)?;
+                        }
+                        false
+                    } else {
+                        self.answered_since(&other, observed) && self.tried_anew(other.id, &until)
+                    }
+                }
+                News::Turn {
+                    observed,
+                    returned: None,
+                    ..
+                } => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),
+            };
+            if back {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .mark_back(other.id, &because)?;
+                brought = true;
+            }
+        }
+        if brought {
+            self.changed();
+        }
+        Ok(())
+    }
+
+    /// Whether a window's turn is news for `participant`, out until `until`, and
+    /// records it: none where it was tried already for the same limit.
+    fn tried_anew(&self, participant: i64, until: &str) -> bool {
+        let mut tried = self.scheduler.tried.borrow_mut();
+        if tried
+            .get(&participant)
+            .is_some_and(|last| same_limit(until, last))
+        {
+            return false;
+        }
+        tried.insert(participant, until.to_owned());
+        true
+    }
+
+    /// `other` stays out though `owner` came back on its account: its limit
+    /// resets later, a limit of its own (a model's weekly one) or of the account
+    /// the human left. The human hears it, as a `/login` in a member's window
+    /// brings back that member alone.
+    fn tell_still_out(
+        &self,
+        project: i64,
+        other: &ParticipantView,
+        owner: &ParticipantView,
+        until: &str,
+    ) -> Result<(), EngineError> {
+        self.seams.ledger.borrow_mut().note(
+            project,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: format!(
+                    "@{0} is still out of quota until {until}, though @{1} is back on the same account: its limit resets later than @{1}'s. If its account has quota again (another account, a bigger plan), press Try again now on @{0}.",
+                    other.handle, owner.handle
+                ),
+            },
+        )?;
+        self.changed();
+        Ok(())
+    }
+
+    /// A window out of quota with a message waiting for it, in its queue or carried
+    /// by the launch that opened it while out: nothing goes into it
+    /// before the reset unless its account has quota again, which ConsensFlow
+    /// learns only from a window whose turn gets through or from the human's Try
+    /// again now. So the human hears it, once for each time its participant is
+    /// marked out, rather than finding what was sent to it queued for days.
+    pub(crate) fn tell_what_waits(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        owner: &ParticipantView,
+    ) -> Result<(), EngineError> {
+        // What a window opened while out carries as its first message waits in it too.
+        let carried = record
+            .delivery
+            .borrow()
+            .delivering
+            .as_ref()
+            .map(|delivering| delivering.message);
+        let waiting = match self.next_in_line(record)? {
+            Some(next) => Some(next),
+            None => carried.map_or(Ok(None), |id| self.seams.ledger.borrow().message(id))?,
+        };
+        let Some(waiting) = waiting else {
+            return Ok(());
+        };
+        let mark = (participant.id, owner.out_since.clone().unwrap_or_default());
+        if !self.scheduler.out_noted.borrow_mut().insert(mark) {
+            return Ok(());
+        }
+        let until = owner.out_until.clone().unwrap_or_default();
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: format!(
+                    "@{} is out of quota until {until}, and m-{} ({}) waits for it, as does whatever is sent to it until then. If its account has quota again (another account, a bigger plan), press Try again now on @{}: what waits is typed in once it is back.",
+                    participant.handle,
+                    waiting.id,
+                    what_it_is(&waiting.kind, waiting.task_number),
+                    owner.handle
+                ),
+            },
+        )?;
+        self.changed();
+        Ok(())
     }
 
     /// The work a window of a member out of quota until `until` holds, once
@@ -527,7 +788,7 @@ impl Dispatcher {
                 to: human.handle.clone(),
                 task: Some(task.number),
                 body: format!(
-                    "T-{} was refused for quota again as soon as it went on: @{}'s account {MAY_NEED_YOU} (a plan that includes its model, a balance, or another account). It waits, and ConsensFlow tries it again at each reset; say @{} is back once its account has quota.",
+                    "T-{} was refused for quota again as soon as it went on: @{}'s account {MAY_NEED_YOU} (a plan that includes its model, a balance, or another account). It waits, and ConsensFlow tries it again at each reset; press Try again now on @{} once its account has quota.",
                     task.number, participant.handle, owner.handle
                 ),
             },
@@ -724,7 +985,12 @@ impl Dispatcher {
         {
             return Ok(());
         }
-        let Some(own) = after.iter().rposition(|item| item.role == Role::User) else {
+        // A compaction's summary, written in the user's place, is no turn of its own,
+        // as it is none of the answer's (`answers_to_the_task`).
+        let Some(own) = after
+            .iter()
+            .rposition(|item| item.role == Role::User && !item.compaction)
+        else {
             return Ok(());
         };
         let answered = after[own + 1..]
@@ -812,4 +1078,18 @@ fn rank<'a>(mut free: Vec<&'a Candidate>, candidates: &[Candidate]) -> Vec<&'a C
         )
     });
     free
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn what_waits_is_told_by_its_kind_and_task_with_the_article_it_takes() {
+        assert_eq!(what_it_is("result", Some(47)), "the result of T-47");
+        assert_eq!(what_it_is("task", Some(3)), "the words of T-3");
+        assert_eq!(what_it_is("answer", Some(3)), "an answer on T-3");
+        assert_eq!(what_it_is("question", Some(3)), "a question on T-3");
+        assert_eq!(what_it_is("note", None), "a note");
+    }
 }

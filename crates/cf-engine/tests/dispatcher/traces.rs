@@ -199,6 +199,10 @@ const CLOSE_RESUMED: &str = "the human resumes the project the Close suspended: 
 /// has been told to its requester in a note not yet given.
 const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`T-1 was taken back`), where Node pastes it into the chief's window";
 
+/// What waits for a chief out of quota is said to the human (the field report of
+/// 2026-10-22, T-254).
+const OUT_WITH_WORK_WAITING: &str = "the chief is out of quota with a task queued for it: the human is told once that it waits (`@chief is out of quota until …, and m-2 (the words of T-1) waits for it`), where Node says nothing and the task waits for the reset";
+
 /// What the engine gives as a worker's result: its final answer alone, what it wrote after
 /// its last tool call (the owner's decision of 2026-10-15), where Node's is everything the
 /// member wrote in its turn, in order.
@@ -213,8 +217,13 @@ const FINAL_ANSWER: &str = "the member wrote a report, ran a command and ended w
 /// task's result when the chief accepts or sends back the task before it is
 /// given the result, so Node pastes it after the decision it asked for. Node's
 /// hold note names the reset as the time the task goes on and never tells the
-/// requester it did.
+/// requester it did. Node says nothing to the human of what waits for a window
+/// out of quota.
 const DEPARTED: &[(&str, &str)] = &[
+    (
+        "reaches the chief again once the human says it is back before its reset",
+        OUT_WITH_WORK_WAITING,
+    ),
     (
         "keeps everything a member wrote in its turn, not only its last message",
         FINAL_ANSWER,

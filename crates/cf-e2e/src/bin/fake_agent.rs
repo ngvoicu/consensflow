@@ -45,7 +45,8 @@
 //! nothing said since the conversation began or was last compacted it compacts
 //! nothing, as 2.1.304 does, and says so as the system's record.
 //!
-//! A window refused for quota with `CF_TEST_AUTO_CONTINUE_MS` set continues by
+//! A window refused for quota with `CF_TEST_AUTO_CONTINUE_MS` set (milliseconds,
+//! or `<member> <milliseconds>` for that member's windows alone) continues by
 //! itself, as Claude Code 2.1.278 and later do: the refusal is followed by the
 //! notice that it continues automatically, and once its account has quota again
 //! (`CF_TEST_QUOTA_FILE` is gone) and that many milliseconds have passed, it says
@@ -357,6 +358,18 @@ fn wait_as_told(name: &str) {
     thread::sleep(wait_of(own_var(name).as_deref()));
 }
 
+/// How long after its account has quota again the window of `participant`
+/// continues by itself, as `said` tells: its milliseconds for every window, or
+/// for the windows of the member it names (`<member> <milliseconds>`) alone, and
+/// none for any other, which waits for ConsensFlow to resume it (an account
+/// whose windows' timers fire apart).
+fn continues_after(said: &str, participant: &str) -> Option<Duration> {
+    match said.split_once(' ') {
+        Some((member, wait)) => is_session_of(participant, member).then(|| wait_of(Some(wait))),
+        None => Some(wait_of(Some(said))),
+    }
+}
+
 /// How late the window of `participant` comes up: the milliseconds `said`
 /// gives its member's windows (`<member> <milliseconds>`), and no time for any
 /// other's.
@@ -665,7 +678,9 @@ fn notice(content: &str) -> serde_json::Value {
 /// continue by itself, and its timer queues the turn that does once the account
 /// has quota again and the milliseconds have passed.
 fn continue_later(records: &mut Records, pid: u32, window: &Window) -> io::Result<()> {
-    let Some(after) = own_var("CF_TEST_AUTO_CONTINUE_MS") else {
+    let Some(after) = own_var("CF_TEST_AUTO_CONTINUE_MS")
+        .and_then(|said| continues_after(&said, &window.participant))
+    else {
         return Ok(());
     };
     records.append(
@@ -684,7 +699,7 @@ fn continue_later(records: &mut Records, pid: u32, window: &Window) -> io::Resul
         {
             thread::sleep(Duration::from_millis(200));
         }
-        thread::sleep(wait_of(Some(&after)));
+        thread::sleep(after);
         CONTINUING.store(false, Ordering::SeqCst);
         let _ = wake.send(AUTO_CONTINUE_MARK.to_owned());
     });
@@ -829,6 +844,22 @@ mod tests {
         // A conversation the window is resumed on has what was said in it.
         let resumed = Records::new(config.path(), "s", 8).unwrap();
         assert!(resumed.said());
+    }
+
+    #[test]
+    fn a_window_continues_by_itself_after_its_milliseconds_or_its_members_alone() {
+        assert_eq!(
+            continues_after("1000", "chief"),
+            Some(Duration::from_millis(1000))
+        );
+        let said = "worker 1000";
+        assert_eq!(
+            continues_after(said, "worker-amber-pine"),
+            Some(Duration::from_millis(1000))
+        );
+        for participant in ["chief", "workers-amber", "reviewer-amber-pine"] {
+            assert_eq!(continues_after(said, participant), None, "{participant}");
+        }
     }
 
     #[test]

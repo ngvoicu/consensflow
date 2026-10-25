@@ -214,6 +214,14 @@ impl Adapter for ClaudeAdapter {
         }
     }
 
+    /// Claude Code keeps one login for the machine, in the config folder every
+    /// window of ConsensFlow's shares, and each window follows a `/login` typed
+    /// into any of them: on 2026-10-04 (poker-lab) every Claude window logged the
+    /// change, and those at work went on on the new account.
+    fn one_account(&self) -> bool {
+        true
+    }
+
     /// Pasted, and its box cleared with Control-C ([`stopped::CLEAR_INPUT`]).
     fn input(&self) -> Input {
         Input::Pasted {

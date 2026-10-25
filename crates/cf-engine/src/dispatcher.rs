@@ -42,7 +42,7 @@ use crate::chief_switch::SwitchTo;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
-use crate::scheduler::SchedulerState;
+use crate::scheduler::{News, SchedulerState};
 use crate::seams::{EngineError, Seams};
 use crate::shown::Shown;
 use crate::stalls::StallsState;
@@ -417,6 +417,7 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .mark_back(member.id, "by @human")?;
+        self.back_on_its_account(project, &member, &News::Human)?;
         self.changed();
         Ok(back)
     }
@@ -1077,14 +1078,25 @@ impl Dispatcher {
                 .await;
         }
         let mut out = self.is_out(&owner);
+        let mut returned = None;
         // A window that got a turn through after its member was marked out says the quota is back.
         if out && self.answered_since(&owner, &observed) {
             self.seams
                 .ledger
                 .borrow_mut()
                 .mark_back(owner.id, &format!("@{} answered again", participant.handle))?;
+            returned.clone_from(&owner.out_until);
             self.changed();
             out = false;
+        }
+        // A turn that got through is its account's news: whoever else is out on it is back.
+        if !out {
+            let news = News::Turn {
+                record,
+                observed: &observed,
+                returned,
+            };
+            self.back_on_its_account(project.id, &owner, &news)?;
         }
         if out {
             return self
@@ -1213,6 +1225,7 @@ impl Dispatcher {
             self.hold_work(project, participant, owner, &until, None)?;
             self.changed();
         }
+        self.tell_what_waits(project, participant, record, owner)?;
         // The time a launch waits while its member is out is no slowness of its
         // window: the role it was to say first is told when the quota is back.
         if let Some(prelude) = record.delivery.borrow_mut().prelude.as_mut() {
@@ -1289,6 +1302,9 @@ impl Dispatcher {
         observed: &Observed,
     ) -> Result<(), EngineError> {
         self.handled(record);
+        // A refused turn leaves nothing running that wakes its agent: its task waits for
+        // the quota now, not for a job of an earlier turn (`turn_end`).
+        record.held.borrow_mut().reset();
         let reported = record.quota.borrow().reported.clone();
         let reset = self.reset_of(reported.as_deref());
         let marked = self

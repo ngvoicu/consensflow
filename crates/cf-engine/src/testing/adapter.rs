@@ -167,6 +167,10 @@ pub struct FakeAdapter {
     /// conversation began with (`adapter.keeps_first_instructions`, which no
     /// trace of Node's has): not, as an adapter that says no more.
     pub keeps_first_instructions: Cell<bool>,
+    /// Whether every window of its harness is logged into the one account
+    /// (`adapter.one_account`, which no trace of Node's has): not, as an
+    /// adapter that says no more.
+    pub one_account: Cell<bool>,
     /// Whether its windows are asked whether they are ready before they have
     /// drawn their screens too, as Devin's are: not, as an adapter that says no more.
     pub ready_while_drawing: Cell<bool>,
@@ -258,6 +262,7 @@ impl FakeAdapter {
             }),
             servers: Cell::new(Servers::Unknown),
             keeps_first_instructions: Cell::new(false),
+            one_account: Cell::new(false),
             ready_while_drawing: Cell::new(false),
             prepare_holds: Holds::default(),
             observe_holds: Holds::default(),
@@ -822,6 +827,12 @@ impl Adapter for Asked {
     /// traces.
     fn keeps_first_instructions(&self) -> bool {
         self.fake.keeps_first_instructions.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces.
+    fn one_account(&self) -> bool {
+        self.fake.one_account.get()
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the

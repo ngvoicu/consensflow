@@ -541,10 +541,12 @@ runs = ["tem-engine-pending"]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
         if observed.failed {
-            let because = format!("@{}'s harness reported a failure", participant.handle);'''
+            let because = self
+                .why_it_failed(participant, record, observed)'''
 replace = '''
         if observed.failed && false {
-            let because = format!("@{}'s harness reported a failure", participant.handle);'''
+            let because = self
+                .why_it_failed(participant, record, observed)'''
 
 [[plant]]
 name = "turn-end-min finish: a task whose reader says its turn is on is refused"

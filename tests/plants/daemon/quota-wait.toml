@@ -24,7 +24,9 @@
 # itself, in a turn of its own that got through, is the task going on: it
 # resumes with no words, or the daemon's bare words that resume it are withdrawn
 # (`crates/cf-ledger/src/tasks/pausing.rs`, `go_on_in_window`), and its answer is
-# the result (`scheduler.rs`, `went_on_by_itself`; `deliveries.rs`, `collect`).
+# the result (`scheduler.rs`, `went_on_by_itself`; `turn_end.rs`, `collect`, whose
+# final run is what the window wrote after the last user's words since the paste,
+# since the merge with turn-end, T-531).
 #
 # Every name holds `quota wait`, so `cargo xtask plants daemon "quota wait"` runs
 # them all.
@@ -37,6 +39,7 @@ quota-wait-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib"
 quota-wait-refusals = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota"]
 quota-wait-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_quota_wait_ended_failed::"], builds = true }
 quota-wait-continues = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "claude_continues_by_itself_after_its_limit::"], builds = true }
+quota-wait-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "continues"]
 
 [[plant]]
 name = "quota wait: Codex's turn its usage limit cut reads as failed for another reason, and the task waiting out its quota ends failed (the field's)"
@@ -184,7 +187,7 @@ runs = ["quota-wait-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''            self.give_back(delivering, "the harness ran out of quota")?;'''
+find = '''            self.give_back(delivering.message, "the harness ran out of quota")?;'''
 replace = '''            self.settle_failure(delivering, "the harness ran out of quota", true)?;'''
 
 [[plant]]
@@ -239,6 +242,16 @@ find = "    text.contains(\"QUOTA-OUT\")\n"
 replace = "    text.contains(\"QUOTA-OUT-NEVER\")\n"
 
 [[plant]]
+name = "quota wait: the stand-in's timer that names a member fires for every window"
+meant = "a_window_continues_by_itself_after_its_milliseconds_or_its_members_alone"
+runs = ["quota-wait-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = "        Some((member, wait)) => is_session_of(participant, member).then(|| wait_of(Some(wait))),"
+replace = "        Some((_member, wait)) => Some(wait_of(Some(wait))),"
+
+[[plant]]
 name = "quota wait: the stand-in Claude never continues by itself after its limit resets"
 meant = "claude_continuing_before_consensflow_resumes_the_task_its_report_is_the_result"
 runs = ["quota-wait-continues"]
@@ -246,15 +259,11 @@ runs = ["quota-wait-continues"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent.rs"
 find = '''
-    let Some(after) = own_var("CF_TEST_AUTO_CONTINUE_MS") else {
-        return Ok(());
-    };
-'''
+    let Some(after) = own_var("CF_TEST_AUTO_CONTINUE_MS")
+        .and_then(|said| continues_after(&said, &window.participant))'''
 replace = '''
-    let Some(after) = own_var("CF_TEST_AUTO_CONTINUE_MS_NEVER") else {
-        return Ok(());
-    };
-'''
+    let Some(after) = own_var("CF_TEST_AUTO_CONTINUE_MS_NEVER")
+        .and_then(|said| continues_after(&said, &window.participant))'''
 
 [[plant]]
 name = "quota wait: a held task's window that goes on by itself is taken for nothing, and the words that resume it go in after its turn"
@@ -292,10 +301,62 @@ name = "quota wait: the task's turn is read from its latest paste, the refusal b
 meant = "a_held_tasks_own_turn_gives_its_answer_alone_though_the_daemon_restarted_in_it"
 runs = ["quota-wait-engine"]
 
+# Since the merge with turn-end (T-531) the task's turn is turn-end's final run: what the
+# window wrote after the last user's words since the paste, cleared at each of them.
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = "            .map_or(pasted + 1, |at| pasted + 1 + at);"
-replace = "            .map_or(pasted + 1, |_| pasted + 1);"
+file = "crates/cf-engine/src/role_change.rs"
+find = '''
+                if !of_the_role {
+                    final_run.clear();
+                    last = None;
+                }'''
+replace = '''
+                if !of_the_role {
+                    last = None;
+                }'''
+
+[[plant]]
+name = "quota wait: where the window was given the task's latest words is the first item that quotes their header"
+meant = "a_held_tasks_window_whose_words_quoted_its_briefs_header_before_the_brief_went_in_goes_on_by_itself"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        let items = observed.items();
+        let Some(pasted) = self.delivered_at(participant.id, &thread, items)? else {
+            return Ok(());
+        };
+        let after = &items[pasted + 1..];'''
+replace = '''
+        let items = observed.items();
+        let latest = self.seams.ledger.borrow().last_pasted(participant.id, task.id)?;
+        let Some(latest) = latest else { return Ok(()); };
+        let marker = crate::delivery_text::marker_of(latest.id);
+        let Some(pasted) = items.iter().position(|item| item.text.contains(&marker)) else {
+            return Ok(());
+        };
+        let after = &items[pasted + 1..];'''
+
+[[plant]]
+name = "quota wait: a compaction's summary after the window's own answer is taken for its own turn"
+meant = "a_held_tasks_window_that_went_on_by_itself_and_compacted_after_its_answer_goes_on"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "            .rposition(|item| item.role == Role::User && !item.compaction)"
+replace = "            .rposition(|item| item.role == Role::User)"
+
+[[plant]]
+name = "quota wait: the human is told to say the member is back, which no control of theirs is called"
+meant = "a_refusal_of_the_words_that_resumed_the_task_holds_it_again_without_telling_the_requester_again_and_tells_the_human_once"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "press Try again now on @{} once its account has quota."
+replace = "say @{} is back once its account has quota."
 
 [[plant]]
 name = "quota wait: a held task goes on as soon as its window begins a turn of its own, answered or not"

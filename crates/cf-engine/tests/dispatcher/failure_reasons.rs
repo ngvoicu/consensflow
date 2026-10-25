@@ -578,3 +578,83 @@ fn a_long_brief_whose_header_scrolled_off_is_still_no_reason() {
         )]
     );
 }
+
+// Where a failure meets turn-end (T-531): a turn that left work running holds its
+// task, and a turn that failed is its task's failure whatever it left, with why.
+
+/// The notification Claude Code begins a turn with when a job of its ends.
+const ENDED: &str =
+    "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>";
+
+/// What the chief was told of T-1 going on in the background.
+fn held_notes(tiers: &Tiers<'_>) -> usize {
+    told(tiers)
+        .iter()
+        .filter(|note| note.starts_with("T-1 goes on in the background"))
+        .count()
+}
+
+#[test]
+fn a_failed_turn_that_left_a_job_running_fails_its_task_with_its_reason_and_holds_nothing() {
+    let context = Context::new();
+    let tiers = working(&context);
+    context
+        .adapter
+        .answer_leaving_a_job("zeus", "Started the recording run");
+    context.adapter.with("zeus", |agent| {
+        agent.failed = true;
+        agent.failure = Some("Selected model is at capacity.".to_owned());
+    });
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "failed");
+    assert_eq!(held_notes(&tiers), 0, "{:?}", told(&tiers));
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            "@zeus's harness reported a failure; it said: \"Selected model is at capacity.\""
+        )]
+    );
+}
+
+#[test]
+fn a_held_tasks_turn_its_job_woke_that_fails_fails_the_task_with_its_reason_once() {
+    let context = Context::new();
+    let tiers = working(&context);
+    context
+        .adapter
+        .answer_leaving_a_job("zeus", "The build runs; I will report when it ends");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working", "held for its job");
+    assert_eq!(held_notes(&tiers), 1, "{:?}", told(&tiers));
+
+    // The build's end wakes the agent, and that turn fails.
+    context.adapter.wake("zeus", ENDED);
+    context.pass().unwrap();
+    context.adapter.with("zeus", |agent| {
+        agent.failed = true;
+        agent.failure = Some("API Error: 529 Overloaded".to_owned());
+    });
+    context
+        .adapter
+        .answer("zeus", "The build ended; reading its log");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(tiers.task(1).task.state, "failed");
+    assert_eq!(held_notes(&tiers), 1, "told once that it went on");
+    let failures: Vec<String> = told(&tiers)
+        .into_iter()
+        .filter(|note| note.contains("failed"))
+        .collect();
+    assert_eq!(
+        failures,
+        [failed(
+            &tiers,
+            "@zeus's harness reported a failure; it said: \"API Error: 529 Overloaded\""
+        )]
+    );
+}

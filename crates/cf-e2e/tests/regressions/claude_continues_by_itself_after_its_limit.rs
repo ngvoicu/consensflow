@@ -26,7 +26,7 @@
 use std::path::PathBuf;
 
 use cf_e2e::files;
-use cf_e2e::rig::{write_staff, Project, Rig};
+use cf_e2e::rig::{write_staff, Project, Rig, OPEN};
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
@@ -92,16 +92,43 @@ fn results(project: &Project) -> cf_e2e::Result<Vec<Value>> {
     Ok(results)
 }
 
+/// A project whose one account is spent for every window on it, the chief's too, with
+/// T-1 given by the chief's own `cf` (no turn of the chief's) and refused, held, and
+/// the note that it waits given the chief, whose turn on it is refused as well.
+fn held_on_a_spent_account<'a>(rig: &'a Rig) -> cf_e2e::Result<Project<'a>> {
+    write_staff(rig)?;
+    let project = Project::open_with_staff(rig, "chief", None, &[("worker", "worker")])?;
+    let tier = project.tiers()?.remove("worker").unwrap_or_default();
+    let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
+    let ran = rig.cf_in_window(&chief, ["task", "add", "--tier", &tier, BRIEF])?;
+    if ran.code != Some(0) {
+        return Err(cf_e2e::Error::Daemon(format!("cf task add: {ran}")));
+    }
+    rig.wait_for("T-1 to wait", secs(60), || {
+        Ok(project.task(1)?["state"] == "paused")
+    })?;
+    rig.wait_for("the chief to be out of quota too", secs(60), || {
+        Ok(project.lane("chief")?["activity"]["state"] == "out")
+    })?;
+    Ok(project)
+}
+
 #[test]
 fn claude_continuing_before_consensflow_resumes_the_task_its_report_is_the_result() -> Outcome {
+    // Claude Code's windows share one account, and a turn of any of them that gets
+    // through brings the others back (T-295): the chief's answer to the note that T-1
+    // waits brought the worker back, and ConsensFlow resumed it first (the merge with
+    // quota-queued, T-531). Claude goes first where no other window on the account
+    // gets a turn through before it: the account is spent for every window, the
+    // chief's too, and the worker's timer is the one that fires.
     let (_folder, refused) = account()?;
     let rig = Rig::start(
         config()
-            .var("CF_TEST_QUOTA_OUT", "worker")
+            .var("CF_TEST_QUOTA_SPENT", "worker,chief")
             .var("CF_TEST_QUOTA_FILE", refused.to_string_lossy())
-            .var("CF_TEST_AUTO_CONTINUE_MS", "1000"),
+            .var("CF_TEST_AUTO_CONTINUE_MS", "worker 1000"),
     )?;
-    let project = held(&rig)?;
+    let project = held_on_a_spent_account(&rig)?;
     // The account has quota again long before the reset the refusal named: Claude
     // continues by itself, and ConsensFlow has not resumed the task.
     let _ = std::fs::remove_file(&refused);

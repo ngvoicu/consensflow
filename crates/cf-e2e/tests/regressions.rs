@@ -101,6 +101,8 @@ mod idle_compaction_read_as_a_cut_turn;
 mod mcp_servers_held_a_workers_result;
 #[path = "regressions/opencode_updated_itself_to_2.rs"]
 mod opencode_updated_itself_to_2;
+#[path = "regressions/results_stay_queued_after_a_quota_pause.rs"]
+mod results_stay_queued_after_a_quota_pause;
 #[path = "regressions/results_that_began_with_the_workers_progress.rs"]
 mod results_that_began_with_the_workers_progress;
 #[path = "regressions/resume_of_a_chief_with_no_turn.rs"]

@@ -6,7 +6,9 @@
 # (`crates/cf-harness/src/*/record*`, `Record::failure`), and the engine's note
 # quotes them, held to a quote's bounds, or else the window's last screen lines
 # (`crates/cf-engine/src/deliveries.rs`, `why_it_failed`; `shown.rs`,
-# `after_words`). The engine's cases are
+# `after_words`), where turn-end's `collect` fails the task
+# (`crates/cf-engine/src/turn_end.rs`, since the merge with turn-end, T-531). The
+# engine's cases are
 # `crates/cf-engine/tests/dispatcher/failure_reasons.rs`; the rig's case, whose
 # stand-in Codex fails a turn in Codex's shape, is
 # `crates/cf-e2e/tests/regressions/a_failure_said_no_reason.rs`, and its run builds
@@ -35,7 +37,7 @@ runs = ["failure-reason-rig"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
+file = "crates/cf-engine/src/turn_end.rs"
 find = '''
             let because = self
                 .why_it_failed(participant, record, observed)
@@ -98,7 +100,7 @@ meant = "a_task_cancelled_while_its_window_is_looked_at_is_not_failed_after"
 runs = ["failure-reason-engine"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
+file = "crates/cf-engine/src/turn_end.rs"
 find = '''
             if still && !self.forgotten(record) {
 '''
@@ -337,7 +339,7 @@ meant = "a_task_released_to_the_board_while_its_window_is_looked_at_is_not_faile
 runs = ["failure-reason-engine"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
+file = "crates/cf-engine/src/turn_end.rs"
 find = '''
             if still && !self.forgotten(record) {
 '''
@@ -351,7 +353,7 @@ meant = "a_turn_that_fails_while_its_task_waits_tells_whoever_gave_it_once_and_t
 runs = ["failure-reason-engine"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
+file = "crates/cf-engine/src/turn_end.rs"
 find = '''
             if observed.failed {
                 self.tell_failed_turn(project, participant, record, observed)
@@ -948,3 +950,37 @@ find = '''
 replace = '''
                 r"\b\d{1,3}(?:,\d{3})+\b|\b\d+(?:\.\d+)?[kKM]\b",
 '''
+
+# Where a failure meets turn-end (T-531): a failed turn is its task's failure, with why,
+# whatever its turn left running, and a held task's woken turn that fails is one too.
+
+[[plant]]
+name = "failure reason: a failed turn that left a job running holds its task, and is no failure"
+meant = "a_failed_turn_that_left_a_job_running_fails_its_task_with_its_reason_and_holds_nothing"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        if observed.failed {
+            let because = self
+                .why_it_failed(participant, record, observed)'''
+replace = '''
+        if observed.failed && observed.pending().total() == 0 {
+            let because = self
+                .why_it_failed(participant, record, observed)'''
+
+[[plant]]
+name = "failure reason: a held task's woken turn that fails is failed in the field's bare words"
+meant = "a_held_tasks_turn_its_job_woke_that_fails_fails_the_task_with_its_reason_once"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+            let because = self
+                .why_it_failed(participant, record, observed)
+                .await?
+                .said;'''
+replace = '''
+            let because = format!("@{}'s harness reported a failure", participant.handle);'''
