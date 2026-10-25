@@ -219,7 +219,8 @@ fn keeps_starting_every(folder: &Path, pace: Duration) -> Run {
 /// The program [`keeps_starting_programs`] runs, and no test of its own.
 #[test]
 #[ignore = "a program the tests of ending a program start"]
-// The helper starts what the test ends, and waits for none of it.
+// The helper starts what the test ends, and waits for none of it. Bare: what an installer's
+// script starts holds the script's streams, and the helper is that script.
 #[allow(clippy::disallowed_methods, clippy::zombie_processes)]
 fn helper_keeps_starting_programs() {
     use std::io::Write;

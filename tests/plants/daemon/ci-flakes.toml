@@ -99,10 +99,10 @@ runs = ["process-child-ended"]
 file = "crates/cf-process/src/child.rs"
 find = '''
             let _ = self.poll_closing(context);
-            if self.exited.get() {
+            if self.live.exited() {
 '''
 replace = '''
-            if self.poll_closing(context).is_ready() && self.exited.get() {
+            if self.poll_closing(context).is_ready() && self.live.exited() {
 '''
 
 [[plant]]

@@ -46,15 +46,15 @@ runs = ["harness-seams"]
 [[plant.edit]]
 file = "crates/cf-harness/src/seams/mod.rs"
 find = '''
-            return Err("could not choose a loopback port".to_owned());
-        }
-        Ok(port)
+        return Err("could not choose a loopback port".to_owned());
+    }
+    Ok(port)
 '''
 replace = '''
-            return Err("could not choose a loopback port".to_owned());
-        }
-        std::mem::forget(listener);
-        Ok(port)
+        return Err("could not choose a loopback port".to_owned());
+    }
+    std::mem::forget(listener);
+    Ok(port)
 '''
 
 [[plant]]
