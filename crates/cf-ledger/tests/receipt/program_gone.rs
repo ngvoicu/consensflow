@@ -1,5 +1,5 @@
 //! Whether the host proved the program of the last window on a conversation gone, kept
-//! on the conversation (migration 0023), so that a restart keeps it (T-541): written
+//! on the conversation (migration 0024), so that a restart keeps it (T-541): written
 //! for a participant's conversation now, read by the conversation's id, never on another
 //! conversation, and none on a conversation the human switches a window to, where that
 //! window now writes. A ledger from before the column proves nothing.
@@ -81,9 +81,9 @@ fn a_ledger_from_before_the_column_proves_no_program_gone() {
     let mut w = world();
     let first = conversation_of_zeus(&mut w);
     w.edit(|db| {
-        cf_ledger::testing::undo_migration_0023(db).expect("undone");
-        db.execute_batch("PRAGMA user_version = 22")
-            .expect("version 22");
+        cf_ledger::testing::undo_migration_0024(db).expect("undone");
+        db.execute_batch("PRAGMA user_version = 23")
+            .expect("version 23");
     });
     assert!(!w.ledger.program_gone(first).unwrap());
 }

@@ -1,13 +1,4 @@
--- Whether the host proved the program of the last window that ran on a conversation
--- gone: its exit read the program's status, after its output had ended. Only then
--- does another task go on in it: a program that may still run may still write to
--- it. The daemon kept that word in memory alone, and a restart lost it for every
--- window that had closed before (T-541). A window that opens on the conversation,
--- or that the human switches to it, sets it back to 0 before anything of it runs,
--- so a window open when the daemon stopped, which the app's quit ends with no
--- word to anyone, leaves 0. Every row a ledger before this column wrote holds 0:
--- what its daemon knew is gone. Added in place, as 0021 added its own column:
--- nothing of the table moves, and no view of a conversation holds it.
--- The column is one line: the test players that hold a database this ledger left
--- to what Node's did read the line to know what Node's schema never had.
-  ALTER TABLE conversation ADD COLUMN program_gone INTEGER NOT NULL DEFAULT 0 CONSTRAINT conversation_program_gone_check CHECK (program_gone IN (0, 1));
+-- Held for devin-arrival's migration (T-433, `wt/devin-arrival`), which takes this
+-- number: alpha.3's integration B puts its file here in place of this one, and its
+-- hash in the schema's test. It changes nothing.
+SELECT 1;

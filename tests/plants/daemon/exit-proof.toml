@@ -2,7 +2,7 @@
 # follow-up went to a new conversation after the board's restart, m-3891). Another task goes on
 # in a session's conversation only where the host proved the program of the last window on it
 # gone (`crates/cf-engine/src/ownership.rs`). The ledger keeps that word on the conversation
-# (`program_gone`, migration 0023; `crates/cf-ledger/src/conversations.rs`), written as the
+# (`program_gone`, migration 0024; `crates/cf-ledger/src/conversations.rs`), written as the
 # host proves the window's exit (`crates/cf-engine/src/dispatcher.rs`, `exited` and
 # `heard_exit`), set back before a window opens on it (`crates/cf-engine/src/windows.rs`) or the
 # human switches a window to it, and read by `kept_apart` and the next launch's
@@ -165,7 +165,7 @@ meant = "a_ledger_from_before_the_column_proves_no_program_gone"
 runs = ["ep-ledger"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0023.sql"
+file = "crates/cf-ledger/migrations/0024.sql"
 find = "program_gone INTEGER NOT NULL DEFAULT 0 CONSTRAINT"
 replace = "program_gone INTEGER NOT NULL DEFAULT 1 CONSTRAINT"
 

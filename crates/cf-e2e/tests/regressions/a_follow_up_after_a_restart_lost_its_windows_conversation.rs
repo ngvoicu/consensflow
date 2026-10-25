@@ -12,7 +12,7 @@
 //!
 //! What should have happened: the follow-up goes on in the conversation of the window that
 //! did T-1, as it does without a restart. The ledger keeps the host's proof on that
-//! conversation (`program_gone`, migration 0023).
+//! conversation (`program_gone`, migration 0024).
 //!
 //! The case is that shape on the rig: the worker's window closes with T-1's result, the
 //! chief accepts it, the app quits (the daemon killed, then the pane host) and starts

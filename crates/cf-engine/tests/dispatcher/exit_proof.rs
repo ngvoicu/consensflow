@@ -1,5 +1,5 @@
 //! The host's proof that a window's program is gone, kept across a restart (T-541): the
-//! ledger keeps it on the conversation the window ran on (`program_gone`, migration 0023),
+//! ledger keeps it on the conversation the window ran on (`program_gone`, migration 0024),
 //! so a follow-up of another task goes on in that conversation after the app's restart as
 //! it did before it. What was not proven stays so: a window whose program the host could
 //! not end, a window open when the daemon stopped (the window's quit ends it after the

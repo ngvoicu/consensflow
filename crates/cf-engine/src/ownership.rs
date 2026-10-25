@@ -22,7 +22,7 @@
 //! where the host proved the program of the last window on it gone: Claude Code's record
 //! reader then takes what the old process queued and started as gone with it
 //! (`Launch::previous_gone`). The proof is kept on the conversation in the ledger
-//! (`program_gone`, migration 0023), so a restart keeps it: before, the daemon kept it in
+//! (`program_gone`, migration 0024), so a restart keeps it: before, the daemon kept it in
 //! memory alone, and after a restart every follow-up of a window that had closed went to
 //! a new conversation (T-541). A window that opens on the conversation clears it before
 //! its program runs, and so does the human's switch of a window to it. Where the host did

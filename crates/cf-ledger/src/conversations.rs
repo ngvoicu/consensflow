@@ -285,7 +285,7 @@ pub(crate) fn set_conversation_role_text(
 }
 
 /// Whether the host proved the program of the last window that ran on a
-/// conversation gone (migration 0023).
+/// conversation gone (migration 0024).
 pub(crate) fn program_gone(store: &Store, conversation_id: i64) -> Result<bool, LedgerError> {
     store
         .db
@@ -395,7 +395,7 @@ pub(crate) fn follow_conversation(
         let id = match own {
             Some(id) => {
                 // A window writes to it again: what was proven of the last that ran on
-                // it holds no more (migration 0023).
+                // it holds no more (migration 0024).
                 store.db.execute(
                     "UPDATE conversation SET ended_at = NULL, program_gone = 0 WHERE id = ?",
                     [id],

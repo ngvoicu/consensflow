@@ -37,7 +37,7 @@
 //! Node's messages never had: in the rows of those tables and in the text of
 //! their schema.
 //!
-//! And migration 0023's column of the `conversation` table (whether the host proved
+//! And migration 0024's column of the `conversation` table (whether the host proved
 //! the program of the last window on one gone), which Node's conversations never
 //! had: in the rows of that table and in the text of its schema.
 //!
@@ -61,7 +61,7 @@ use serde_json::{Map, Value};
 pub use compaction::undo_migration_0020;
 pub use handed::undo_migration_0022;
 pub use paused_with_project::undo_migration_0021;
-pub use program_gone::undo_migration_0023;
+pub use program_gone::undo_migration_0024;
 
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;
@@ -113,7 +113,7 @@ fn added_columns() -> impl Iterator<Item = &'static str> {
 /// columns of migration 0011, the three wake-up columns of migration 0014, the
 /// three of migration 0015, the one of migration 0016, the description of
 /// migration 0017, the one of migration 0018, the one of migration 0020, the one
-/// of migration 0021, the one of migration 0022 and the one of migration 0023
+/// of migration 0021, the one of migration 0022 and the one of migration 0024
 /// (their name and, in every row, the value at its place), the table migration
 /// 0020 made (a long item's parts), and the stop in the event rows that paused a
 /// task. A dump from before the migrations has none of them, and is left as it
