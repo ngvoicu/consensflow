@@ -232,7 +232,14 @@ impl Release<'_> {
     fn run(&self, tools: &mut Tools) -> Result<(), Failure> {
         let (app, dmg) = (&self.app, &self.dmg);
         tools.say(&format!("signing {}", name(app)));
-        signing::sign_app(tools, &self.signing, app)?;
+        let entitlements = self.scratch.join("entitlements.plist");
+        fs::write(&entitlements, signing::ENTITLEMENTS).map_err(|cause| {
+            fail(format!(
+                "could not write {}: {cause}",
+                entitlements.display()
+            ))
+        })?;
+        signing::sign_app(tools, &self.signing, app, &entitlements)?;
         if let Some(notary) = &self.notary {
             notary::notarize(tools, app, notary, self.scratch)?;
         }

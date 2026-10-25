@@ -57,7 +57,7 @@ fn an_ad_hoc_release_signs_the_code_then_the_app_then_makes_the_dmg_again_with_n
         plutil -extract CFBundleIdentifier raw -o - $APP/Contents/Info.plist
         plutil -extract CFBundleExecutable raw -o - $APP/Contents/Info.plist
         {code}
-        {ad_hoc} --options runtime $APP
+        {ad_hoc} --options runtime --entitlements $SCRATCH/entitlements.plist $APP
         hdiutil convert $DMG -format UDRW -ov -o $SCRATCH/writable.dmg
         hdiutil attach $SCRATCH/writable.dmg -readwrite -noverify -noautoopen -nobrowse -mountpoint $SCRATCH/volume
         ditto $APP $SCRATCH/volume/ConsensFlow.app
@@ -67,6 +67,10 @@ fn an_ad_hoc_release_signs_the_code_then_the_app_then_makes_the_dmg_again_with_n
         {ad_hoc} $DMG
         codesign --verify --deep --strict $APP
         codesign --verify --strict $DMG
+        codesign -d --entitlements - --xml $APP
+        plutil -extract NSMicrophoneUsageDescription raw -o - $APP/Contents/Info.plist
+        plutil -extract NSCameraUsageDescription raw -o - $APP/Contents/Info.plist
+        plutil -extract NSAppleEventsUsageDescription raw -o - $APP/Contents/Info.plist
         ",
         code = code_signed(ad_hoc),
     );
@@ -95,7 +99,7 @@ fn a_release_under_the_developer_id_is_signed_notarized_and_stapled_in_this_orde
         plutil -extract CFBundleIdentifier raw -o - $APP/Contents/Info.plist
         plutil -extract CFBundleExecutable raw -o - $APP/Contents/Info.plist
         {code}
-        {signed} --options runtime $APP
+        {signed} --options runtime --entitlements $SCRATCH/entitlements.plist $APP
         ditto -c -k --keepParent $APP $SCRATCH/ConsensFlow.app.zip
         xcrun notarytool submit $SCRATCH/ConsensFlow.app.zip {notarized}
         xcrun stapler staple $APP
@@ -112,6 +116,10 @@ fn a_release_under_the_developer_id_is_signed_notarized_and_stapled_in_this_orde
         xcrun stapler validate $DMG
         codesign --verify --deep --strict $APP
         codesign --verify --strict $DMG
+        codesign -d --entitlements - --xml $APP
+        plutil -extract NSMicrophoneUsageDescription raw -o - $APP/Contents/Info.plist
+        plutil -extract NSCameraUsageDescription raw -o - $APP/Contents/Info.plist
+        plutil -extract NSAppleEventsUsageDescription raw -o - $APP/Contents/Info.plist
         spctl --assess --verbose=4 --type execute $APP
         spctl --assess --verbose=4 --type open --context context:primary-signature $DMG
         security list-keychains -d user -s {searched}
@@ -136,7 +144,10 @@ fn what_a_bundle_seals_is_signed_before_the_bundle_and_the_ticket_is_on_the_app_
             .unwrap_or_else(|| panic!("no call {start}…{end} in {transcript:#?}"))
     };
 
-    let app = at("codesign --force", "--options runtime $APP");
+    let app = at(
+        "codesign --force",
+        "--entitlements $SCRATCH/entitlements.plist $APP",
+    );
     for (place, line) in transcript.iter().enumerate() {
         if line.starts_with("codesign --force") && line.contains("$APP/") {
             assert!(place < app, "{line} is signed after the app that seals it");

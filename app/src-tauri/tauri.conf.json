@@ -48,7 +48,8 @@
     "macOS": {
       "exceptionDomain": "localhost",
       "minimumSystemVersion": "13.5",
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "entitlements": "./Entitlements.plist"
     },
     "resources": {
       "resources/cli": "cli"

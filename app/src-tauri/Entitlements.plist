@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- What the hardened runtime lets ConsensFlow's bundle, and what it starts in its panes,
+     ask macOS for: the microphone, the camera and Apple Events, which a terminal's
+     programs may (Claude Code's /voice). Signed into the bundle by Tauri for a local build
+     and by cf-release for a release (`sign_mac::signing::sign_app`), which the release
+     then checks the signature for (T-540). -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <key>com.apple.security.device.camera</key>
+  <true/>
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
+</dict>
+</plist>

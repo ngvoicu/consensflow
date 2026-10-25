@@ -44,19 +44,44 @@ pub(super) fn codesign(
 }
 
 /// What a key of the app's `Info.plist` says.
-fn plist(tools: &Tools, app: &Path, key: &str) -> Result<String, Failure> {
+pub(super) fn plist(tools: &Tools, app: &Path, key: &str) -> Result<String, Failure> {
     let file = app.join("Contents").join("Info.plist");
     let raw = tools.run("plutil", args!["-extract", key, "raw", "-o", "-", file])?;
     Ok(raw.trim().to_string())
 }
 
+/// What the bundle is signed with (`app/src-tauri/Entitlements.plist`, which a
+/// local build is signed with too): the devices and Apple Events a program in its
+/// panes may ask macOS for, as a terminal's may (T-540).
+pub(super) const ENTITLEMENTS: &str = include_str!("../../../../app/src-tauri/Entitlements.plist");
+
+/// The entitlements the signed bundle must hold ([`ENTITLEMENTS`]), and the
+/// `Info.plist` keys that say why to the person macOS asks.
+pub(super) const ENTITLED: [&str; 3] = [
+    "com.apple.security.device.audio-input",
+    "com.apple.security.device.camera",
+    "com.apple.security.automation.apple-events",
+];
+pub(super) const USAGE: [&str; 3] = [
+    "NSMicrophoneUsageDescription",
+    "NSCameraUsageDescription",
+    "NSAppleEventsUsageDescription",
+];
+
 /// Signs `app` from the inside out: the Mach-Os it carries, then the bundle,
-/// whose seal covers them. All run under the hardened runtime and none carries
-/// an entitlement: nothing in the app makes executable memory of its own (the
+/// whose seal covers them. All run under the hardened runtime. Its code carries no
+/// entitlement: nothing in the app makes executable memory of its own (the
 /// WebView's engine runs in the system's process), which the bundled Node's V8
-/// did and was given the JIT entitlements for. The main executable is left to
-/// the bundle's own signing, which signs it.
-pub(super) fn sign_app(tools: &Tools, signing: &Signing, app: &Path) -> Result<(), Failure> {
+/// did and was given the JIT entitlements for. The bundle carries `entitlements`
+/// ([`ENTITLEMENTS`], written there by the release), which macOS reads for the
+/// app and for what its panes start. The main executable is left to the
+/// bundle's own signing, which signs it.
+pub(super) fn sign_app(
+    tools: &Tools,
+    signing: &Signing,
+    app: &Path,
+    entitlements: &Path,
+) -> Result<(), Failure> {
     let id = plist(tools, app, "CFBundleIdentifier")?;
     let executable = plist(tools, app, "CFBundleExecutable")?;
     let main = app.join("Contents").join("MacOS").join(executable);
@@ -73,5 +98,11 @@ pub(super) fn sign_app(tools: &Tools, signing: &Signing, app: &Path) -> Result<(
             &["--options", "runtime", "--identifier", &identifier],
         )?;
     }
-    codesign(tools, signing, app, &["--options", "runtime"])
+    let entitlements = entitlements.to_string_lossy();
+    codesign(
+        tools,
+        signing,
+        app,
+        &["--options", "runtime", "--entitlements", &entitlements],
+    )
 }

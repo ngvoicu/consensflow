@@ -205,3 +205,25 @@ impl Trial {
             .collect()
     }
 }
+
+/// What the bundle is held to at the end of a release (`verify`), the repo gives it:
+/// Tauri merges `app/src-tauri/Info.plist` into the bundle's and signs a local build
+/// with the entitlements file the app's configuration names, the one a release signs
+/// the bundle with (T-540).
+#[test]
+fn the_apps_info_plist_and_its_configuration_give_the_bundle_what_the_release_holds_it_to() {
+    let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app/src-tauri");
+    let info = std::fs::read_to_string(app.join("Info.plist")).unwrap();
+    for key in super::signing::USAGE {
+        assert!(info.contains(&format!("<key>{key}</key>")), "{key}");
+    }
+    let config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(app.join("tauri.conf.json")).unwrap())
+            .unwrap();
+    let named = config["bundle"]["macOS"]["entitlements"].as_str().unwrap();
+    let file = std::fs::read_to_string(app.join(named)).unwrap();
+    assert_eq!(file, super::signing::ENTITLEMENTS);
+    for key in super::signing::ENTITLED {
+        assert!(file.contains(&format!("<key>{key}</key>")), "{key}");
+    }
+}
