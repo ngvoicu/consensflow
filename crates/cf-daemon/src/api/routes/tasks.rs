@@ -1,14 +1,23 @@
 //! `GET /api/tasks`, the open tasks and each lane's, and `POST /api/tasks`, a
 //! task given: the chief's alone, refused before its body is read. One task is
-//! [`super::task`].
+//! [`super::task`]: a card says of a brief that waits, at the human's gate or for
+//! the Resume, what the task's own view says, its title in a caller's list as in
+//! its view ([`brief_waits`]).
 
 use cf_base::js;
 use cf_ledger::NewTask;
 use serde_json::{json, Map, Value};
 
-use super::task::whole;
+use cf_ledger::TaskCard;
+
+use super::task::{brief_waits, may_move, whole};
 use super::{Answer, Caller, Context, Failure, Request};
 use crate::api::views::{value, TaskSummary};
+use crate::api::waits::Waits;
+
+/// The states of a task whose brief may still wait for its window: given to it
+/// and not over. One open has no window; one over had its brief, or took it with it.
+const GIVEN: [&str; 4] = ["queued", "working", "waiting", "paused"];
 
 /// `GET /api/tasks`: the tasks no lane has (`open`: those waiting for a
 /// member, those paused, called off or failed before any member had them, and
@@ -20,17 +29,33 @@ pub(super) async fn list(
     _request: Request,
 ) -> Result<Answer, Failure> {
     let board = context.ledger.borrow().board(caller.project.id)?;
+    let waits = Waits::now(context, caller)?;
+    // Nothing waits where nothing is held at the gate and the project is open.
+    let held = !board.gated.is_empty() || waits.closed();
+    let summary = |card: &TaskCard| -> Result<Value, Failure> {
+        let mut summary = TaskSummary::from(card);
+        if held && GIVEN.contains(&card.state.as_str()) && !may_move(caller, &card.requester) {
+            let task = context
+                .ledger
+                .borrow()
+                .task(caller.project.id, card.number)?;
+            if let Some(waiting) = task.as_ref().and_then(|task| brief_waits(task, &waits)) {
+                waiting.clone_into(&mut summary.title);
+            }
+        }
+        value(&summary)
+    };
     let open = board
         .open
         .iter()
-        .map(|card| value(&TaskSummary::from(card)))
+        .map(summary)
         .collect::<Result<Vec<_>, _>>()?;
     let mut lanes = Vec::new();
     for lane in &board.lanes {
         let tasks = lane
             .tasks
             .iter()
-            .map(|card| value(&TaskSummary::from(card)))
+            .map(summary)
             .collect::<Result<Vec<_>, _>>()?;
         lanes.push(json!({
             "handle": lane.participant.handle,

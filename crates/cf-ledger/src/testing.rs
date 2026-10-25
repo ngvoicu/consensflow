@@ -31,6 +31,12 @@
 //! parts) and its indexes (what the history viewer reads through): the table's
 //! rows, and each of them in the schema.
 //!
+//! And migration 0021's column of the `task` table (the mark that a project's
+//! suspension paused a task), which Node's tasks never had, and migration 0022's
+//! of the `message` table (when a message was handed to its window), which
+//! Node's messages never had: in the rows of those tables and in the text of
+//! their schema.
+//!
 //! What only Node's ledger had is held apart the other way round, on both
 //! sides: the mark that a project comes back by itself after a restart
 //! (`resumeOnStart` in what the ledger answers and logs, `resume_on_start` in
@@ -39,6 +45,8 @@
 
 mod compaction;
 mod described;
+mod handed;
+mod paused_with_project;
 mod role_note;
 mod role_text;
 mod specs;
@@ -46,6 +54,8 @@ mod specs;
 use serde_json::{Map, Value};
 
 pub use compaction::undo_migration_0020;
+pub use handed::undo_migration_0022;
+pub use paused_with_project::undo_migration_0021;
 
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;
@@ -96,10 +106,11 @@ fn added_columns() -> impl Iterator<Item = &'static str> {
 /// and its `rows`), without what Node's ledger never writes: the four
 /// columns of migration 0011, the three wake-up columns of migration 0014, the
 /// three of migration 0015, the one of migration 0016, the description of
-/// migration 0017, the one of migration 0018 and the one of migration 0020 (their
-/// name and, in every row, the value at its place), the table migration 0020 made
-/// (a long item's parts), and the stop in the event rows that paused a task. A dump
-/// from before the migrations has none of them, and is left as it is.
+/// migration 0017, the one of migration 0018, the one of migration 0020, the one
+/// of migration 0021 and the one of migration 0022 (their name and, in every row,
+/// the value at its place), the table migration 0020 made (a long item's parts),
+/// and the stop in the event rows that paused a task. A dump from before the
+/// migrations has none of them, and is left as it is.
 pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
     hold_apart_the_stop_of_logged_pauses(tables);
     for (table, column) in NODE_NEVER_WRITES
@@ -108,6 +119,8 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
         .chain(role_text::COLUMNS)
         .chain(role_note::COLUMNS)
         .chain(compaction::COLUMNS)
+        .chain(paused_with_project::COLUMNS)
+        .chain(handed::COLUMNS)
     {
         take_column_out(tables, table, column);
     }
@@ -151,9 +164,10 @@ fn take_column_out(tables: &mut Map<String, Value>, table: &str, column: &str) {
 /// name the roles and the pools, none of the columns of a project's wake-up
 /// calls, of what it says of specs or of its description in the table of the
 /// projects, and not the column of the role text a conversation was last given,
-/// that of the role text a message says, nor that of the mark of a compaction's
-/// summary in a copy, nor the table and the indexes migration 0020 made. A dump
-/// of Node's is left as it is.
+/// that of the role text a message says, that of the mark of a compaction's
+/// summary in a copy, the table and the indexes migration 0020 made, that of the
+/// mark a project's suspension leaves on the tasks it paused, nor that of when a
+/// message was handed to its window. A dump of Node's is left as it is.
 pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
     if let Some(version) = dump.get_mut("userVersion") {
         if version.as_i64().is_some_and(|at| at > NODE_LAST_VERSION) {
@@ -175,8 +189,13 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             continue;
         };
         match name.as_deref() {
-            Some("participant" | "task") => {
+            Some("participant") => {
                 *sql = sql.replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1);
+            }
+            Some("task") => {
+                *sql = sql
+                    .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
+                    .replace(paused_with_project::COLUMN_LINES, "");
             }
             Some("project") => {
                 // SQLite wrote each column after the last one, as a comma and the
@@ -192,7 +211,9 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                 *sql = sql.replace(role_text::COLUMN_LINES, "");
             }
             Some("message") => {
-                *sql = sql.replace(role_note::COLUMN_LINES, "");
+                *sql = sql
+                    .replace(role_note::COLUMN_LINES, "")
+                    .replace(handed::COLUMN_LINES, "");
             }
             Some("transcript") => {
                 *sql = sql.replace(compaction::COLUMN_LINES, "");

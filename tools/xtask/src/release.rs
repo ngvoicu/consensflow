@@ -48,7 +48,7 @@
 mod alpha;
 mod github;
 mod promote;
-mod system;
+pub(crate) mod system;
 #[cfg(test)]
 mod tests;
 

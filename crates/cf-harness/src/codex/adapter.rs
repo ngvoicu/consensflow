@@ -310,7 +310,7 @@ impl Window for CodexWindow {
     /// waits for it too: one whose broker never names it reads as starting, and
     /// has nothing delivered, for good (a Codex chief opened again after the app's
     /// restart on zeewin, 2026-10-19, read "starting" for 78 minutes).
-    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
+    fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
         Box::pin(async move {
             if self.named.get() {
                 return Ok(None);

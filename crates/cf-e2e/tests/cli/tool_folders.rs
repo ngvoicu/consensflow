@@ -125,7 +125,7 @@ fn is_source(file: &Path) -> bool {
     let named = ["rs", "mjs", "js"]
         .iter()
         .any(|extension| file.extension().is_some_and(|its| its == *extension));
-    named && fs::symlink_metadata(file).is_ok_and(|kind| kind.is_file())
+    named && checkout::is_plain_file(file)
 }
 
 #[test]

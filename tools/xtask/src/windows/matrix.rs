@@ -1,6 +1,7 @@
 //! The eval matrix on the machine: each scenario for each chief and staff pair, one
 //! run after another, each run's output kept in `evals/reports/windows/<time>/`
-//! here (the run's own report stays on the machine), and one line per run at the
+//! here (the run's own report is brought back to `evals/reports` as well, [`fetch`](super::fetch)),
+//! and one line per run at the
 //! end: `PASS` when every check passed, else the checks that failed. The status is
 //! 1 when any run did not pass, and 130 when the matrix was stopped.
 //!
@@ -22,7 +23,7 @@ use cf_base::time::{iso, Clock};
 
 use super::interrupt::Interrupt;
 use super::options::{MatrixOptions, Options, Pair, DEFAULT_DIR};
-use super::run::{self, Outcome};
+use super::run::Outcome;
 use super::{Error, STOPPED};
 use crate::context::Context;
 use crate::dispatch::Console;
@@ -44,7 +45,7 @@ pub struct Machine<'a> {
 
 impl Remote for Machine<'_> {
     fn run(&mut self, options: &Options, console: &mut Console) -> Result<Outcome, Error> {
-        run::run(self.context, options, console, self.interrupt)
+        super::fetch::run_keeping(self.context, options, console, self.interrupt)
     }
 }
 
@@ -116,7 +117,7 @@ fn logs_in(root: &Path, clock: &mut dyn Clock) -> PathBuf {
 }
 
 /// The eval of `scenario` for `pair`, as the words that start it on the machine.
-fn eval(options: &MatrixOptions, scenario: &str, pair: &Pair) -> Vec<String> {
+pub(super) fn eval(options: &MatrixOptions, scenario: &str, pair: &Pair) -> Vec<String> {
     let mut words: Vec<String> = [
         "cargo",
         "xtask",

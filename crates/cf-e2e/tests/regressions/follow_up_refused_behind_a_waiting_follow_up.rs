@@ -116,5 +116,6 @@ fn a_follow_up_put_before_one_that_waits_for_the_same_idle_window_goes_to_it_and
         all_in(&project, &[4], "done")
     })?;
     assert_eq!(task(&project, 4)?.1, session, "the same window");
+    rig.close()?;
     Ok(())
 }

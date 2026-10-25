@@ -1,7 +1,8 @@
-//! 3 (A3): an ended notice after its result; 4 (A4): a result that is not its
-//! turn's final answer.
+//! 3 (A3): no work is ended under a task at work, as the note of a window's close says
+//! it under 3.0.6 (turn-end); 4 (A4): a result that is not its turn's final answer.
 
-use cf_evals::long_run::invariants;
+use cf_evals::long_run::invariants::{self, Break};
+use cf_evals::long_run::known;
 use cf_evals::long_run::look::Look;
 use serde_json::json;
 
@@ -14,11 +15,33 @@ fn task(scene: &Scene) -> i64 {
     task
 }
 
+/// What turn-end's note of a window's close says (`tell_left_running`): written once the
+/// task has ended, to the one who gave it.
+const CLOSED: &str = "T-14's window closed with background work running, which its close ended: npx stryker run --concurrency 4";
+
+/// The pause note of a window that closed under a working task: a pause, no ending.
+const PAUSED: &str = "T-14 is paused: @long-worker's window closed with background work still running: node serve.mjs. Resume it with: cf task resume T-14 \"…\"";
+
+/// What 3.0.5 said when a turn's result was taken, which 3.0.6 never writes.
 const ENDED: &str =
     "T-14's turn left background work running. Ended: npx stryker run --concurrency 4.";
 
-/// What the look could not judge of the third: the keys of the notices the log ties
-/// to no result.
+/// T-14 moved from `from` to `to` at `at`, as the ledger logs a move.
+fn moved(scene: &Scene, at: &str, from: &str, to: &str) {
+    scene.event(
+        at,
+        "task.state",
+        &json!({ "task": 14, "from": from, "to": to }),
+    );
+}
+
+/// The close note m-132, written to the chief for T-14 at `at`.
+fn closed(scene: &Scene, task: i64, at: &str) {
+    scene.message(132, (CHIEF, None), "note", Some(task), CLOSED, at);
+}
+
+/// What the look could not judge of the third: the keys of the notes the log ties
+/// to neither attempt.
 fn unbound(look: &Look) -> Vec<String> {
     invariants::unjudged(look, &Default::default())
         .into_iter()
@@ -27,108 +50,163 @@ fn unbound(look: &Look) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn an_ended_notice_after_its_result_breaks_the_third() {
-    let scene = Scene::new(&[("long-worker", "claude-code")]);
-    let task = task(&scene);
-    scene.message(
-        131,
-        (CHIEF, Some(3)),
-        "result",
-        Some(task),
-        "Done.",
-        &t(2, 0),
-    );
-    scene.message(132, (CHIEF, None), "note", Some(task), ENDED, &t(2, 1));
-    // The task began no attempt since the result: the notice is its, at once.
-    let breaks = found(&scene.look(ms(2, 2)), 3);
-    assert_eq!(breaks.len(), 1, "{breaks:?}");
-    assert_eq!(breaks[0].key, "3:m-132");
-    assert_eq!(
-        breaks[0].said,
-        "T-14's ended notice m-132 came after its result m-131"
-    );
-    assert_eq!(breaks[0].evidence.rows.len(), 2);
-    assert!(breaks[0].evidence.rows[0].starts_with("m-131 result"));
-    assert!(unbound(&scene.look(ms(2, 2))).is_empty());
-    // Accepted since: no other attempt either.
-    scene.event(
-        &t(2, 1),
-        "task.state",
-        &json!({ "task": 14, "from": "done", "to": "accepted" }),
-    );
-    assert_eq!(found(&scene.look(ms(4, 0)), 3).len(), 1);
+/// The breaks of the third at `at`.
+fn broke(scene: &Scene, at: i64) -> Vec<Break> {
+    found(&scene.look(at), 3)
 }
 
 #[test]
-fn a_late_notice_says_which_notice_it_is_the_background_ended_note_or_a_let_go() {
-    // What a list of known breaks matches a break of the third by.
-    let late = |body: &str| {
+fn a_close_note_after_its_tasks_end_holds_the_third_whichever_way_the_task_ended() {
+    // A result (done, then accepted), a Finish (done with no result of the worker's), a
+    // cancel and a failure each end a task; a cancelled or failed one has a close note and
+    // no result, so the note must not be taken for one with none before it.
+    for (end, result) in [
+        ("done", true),
+        ("accepted", true),
+        ("done", false),
+        ("cancelled", false),
+        ("failed", false),
+    ] {
         let scene = Scene::new(&[("long-worker", "claude-code")]);
         let task = task(&scene);
-        scene.message(
-            131,
-            (CHIEF, Some(3)),
-            "result",
-            Some(task),
-            "Done.",
-            &t(2, 0),
-        );
-        scene.message(132, (CHIEF, None), "note", Some(task), body, &t(2, 1));
-        found(&scene.look(ms(2, 2)), 3)
-    };
-    assert_eq!(late(ENDED)[0].shape, Some(invariants::ENDED_NOTE));
-    assert_eq!(
-        late("T-14 is let go: its job is gone.")[0].shape,
-        Some(invariants::LET_GO_NOTE)
-    );
-}
-
-/// T-14 sent back for more work at `at`: it leaves done, and an attempt begins.
-fn sent_back(scene: &Scene, at: &str) {
-    scene.event(
-        at,
-        "task.state",
-        &json!({ "task": 14, "from": "done", "to": "queued" }),
-    );
+        moved(&scene, &t(0, 10), "queued", "working");
+        if result {
+            scene.message(
+                131,
+                (CHIEF, Some(3)),
+                "result",
+                Some(task),
+                "Done.",
+                &t(2, 0),
+            );
+        }
+        moved(&scene, &t(2, 0), "working", end);
+        closed(&scene, task, &t(3, 0));
+        let look = scene.look(ms(4, 0));
+        assert!(found(&look, 3).is_empty(), "{end} {result}");
+        assert!(unbound(&look).is_empty(), "{end} {result}");
+    }
 }
 
 #[test]
-fn an_ended_notice_before_any_result_or_a_close_note_after_one_holds_the_third() {
-    // The turn-end work's step: the notice, then its result, the first attempt's.
+fn a_close_note_while_its_task_is_still_at_work_breaks_the_third() {
+    // Work ended under a task that was not done: the mutation run ended mid-edit (T-14's
+    // m-132) A3 was written for, as 3.0.6 can still do it, by a window's close.
+    for state in ["queued", "working", "waiting"] {
+        let scene = Scene::new(&[("long-worker", "claude-code")]);
+        let task = scene.task(14, 3, state, &t(0, 10));
+        scene.briefed(120, 3, task, &t(0, 0));
+        moved(&scene, &t(0, 10), "queued", state);
+        closed(&scene, task, &t(1, 0));
+        let breaks = broke(&scene, ms(1, 5));
+        assert_eq!(breaks.len(), 1, "{state}: {breaks:?}");
+        assert_eq!(breaks[0].key, "3:m-132");
+        assert_eq!(
+            breaks[0].said,
+            format!("T-14's close note m-132 came while T-14 was still {state}: the close ended work under a task at work")
+        );
+        assert_eq!(breaks[0].shape, Some(invariants::CLOSE_NOTE));
+        assert_eq!(breaks[0].evidence.rows.len(), 2);
+        assert!(breaks[0].evidence.rows[0].starts_with("m-132 note"));
+        assert_eq!(
+            breaks[0].evidence.rows[1],
+            format!("T-14 {state} since {}", t(0, 10))
+        );
+        assert!(unbound(&scene.look(ms(1, 5))).is_empty());
+        // And at every look after, the task done since: the note is judged as it was written.
+        moved(&scene, &t(2, 0), state, "done");
+        assert_eq!(broke(&scene, ms(6, 0)).len(), 1, "{state}");
+    }
+}
+
+#[test]
+fn what_is_no_close_note_is_never_one_the_pause_note_and_the_3_0_5_notes_of_a_turns_end() {
+    // A pause, a 3.0.5 "ended" note and a note of no task's close, each while T-14 works.
     let scene = Scene::new(&[("long-worker", "claude-code")]);
-    let task = task(&scene);
-    scene.message(131, (CHIEF, None), "note", Some(task), ENDED, &t(2, 0));
+    let task = scene.task(14, 3, "working", &t(0, 10));
+    scene.briefed(120, 3, task, &t(0, 0));
+    moved(&scene, &t(0, 10), "queued", "working");
+    scene.message(130, (CHIEF, None), "note", Some(task), PAUSED, &t(1, 0));
+    scene.message(131, (CHIEF, None), "note", Some(task), ENDED, &t(1, 1));
     scene.message(
-        132,
-        (CHIEF, Some(3)),
-        "result",
-        Some(task),
-        "Done.",
-        &t(2, 0),
-    );
-    // What a window's close ended is said after the result, as it happens after it.
-    scene.message(
-        140,
+        133,
         (CHIEF, None),
         "note",
         Some(task),
-        "T-14's window closed with background work still running: node serve.mjs",
-        &t(3, 0),
+        "T-14 is let go: its job is gone.",
+        &t(1, 2),
     );
-    let look = scene.look(ms(4, 0));
-    assert!(found(&look, 3).is_empty());
+    // A worker's own words that say the same are no ConsensFlow's note.
+    scene.message(134, (CHIEF, Some(3)), "note", Some(task), CLOSED, &t(1, 3));
+    // And a ConsensFlow message of another kind that says it is none.
+    scene.message(135, (CHIEF, None), "question", Some(task), CLOSED, &t(1, 4));
+    let look = scene.look(ms(2, 0));
+    assert!(found(&look, 3).is_empty(), "{:?}", found(&look, 3));
     assert!(unbound(&look).is_empty());
 }
 
 #[test]
-fn a_notice_after_a_result_and_a_send_back_is_unresolved_however_near_the_next_result() {
+fn a_close_note_of_a_task_that_is_paused_or_open_is_neither_a_break_nor_an_ending() {
+    for state in ["paused", "open"] {
+        let scene = Scene::new(&[("long-worker", "claude-code")]);
+        let task = scene.task(14, 3, state, &t(0, 20));
+        scene.briefed(120, 3, task, &t(0, 0));
+        moved(&scene, &t(0, 10), "queued", "working");
+        moved(&scene, &t(0, 20), "working", state);
+        closed(&scene, task, &t(1, 0));
+        let look = scene.look(ms(2, 0));
+        assert!(found(&look, 3).is_empty(), "{state}");
+        assert!(unbound(&look).is_empty(), "{state}");
+    }
+}
+
+#[test]
+fn a_close_note_of_a_task_that_was_given_to_another_worker_since_is_neither() {
+    // Whose window a close note is the log does not say: the earlier worker's closes under
+    // the new worker's work, which is none of its ending. The same task, given to one
+    // worker only, is the break.
+    let given = |reassigned: bool| {
+        let scene = Scene::new(&[("long-worker", "claude-code")]);
+        let task = scene.task(14, 3, "working", &t(1, 0));
+        scene.briefed(120, 3, task, &t(0, 0));
+        scene.event(
+            &t(0, 5),
+            "task.created",
+            &json!({ "task": 14, "from": "chief", "to": "long-worker", "message": 120 }),
+        );
+        moved(&scene, &t(0, 10), "queued", "working");
+        if reassigned {
+            scene.event(
+                &t(0, 40),
+                "task.assigned",
+                &json!({ "task": 14, "from": "working", "to": "queued", "assignee": "long-worker-2", "member": "long-worker-2", "message": 121 }),
+            );
+            moved(&scene, &t(1, 0), "queued", "working");
+        }
+        closed(&scene, task, &t(1, 30));
+        (broke(&scene, ms(2, 0)), unbound(&scene.look(ms(2, 0))))
+    };
+    let (breaks, open) = given(true);
+    assert!(breaks.is_empty() && open.is_empty(), "{breaks:?}");
+    let (breaks, open) = given(false);
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert!(open.is_empty());
+}
+
+/// T-14 sent back for more work at `at`: it leaves done, and an attempt begins.
+fn sent_back(scene: &Scene, at: &str) {
+    moved(scene, at, "done", "queued");
+}
+
+#[test]
+fn a_close_note_after_a_send_back_is_unresolved_however_near_the_next_result() {
     // The reviewers' sequence: the old result at 0:30, T-14 sent back at 0:40 and at
-    // work at 0:45, an ended notice at 1:00, the next attempt's result at 1:01. The
-    // notice may be the old attempt's, late, or the new one's own: no break, and not
-    // taken to hold, at every look after.
+    // work at 0:45, a close note at 1:00, the next attempt's result at 1:01. The note
+    // may be the old attempt's window, closed late, or the new one's own: no break, and
+    // not taken to hold, at every look after.
     let scene = Scene::new(&[("long-worker", "claude-code")]);
     let task = task(&scene);
+    moved(&scene, &t(0, 10), "queued", "working");
     scene.message(
         100,
         (CHIEF, Some(3)),
@@ -137,13 +215,10 @@ fn a_notice_after_a_result_and_a_send_back_is_unresolved_however_near_the_next_r
         "First round.",
         &t(0, 30),
     );
+    moved(&scene, &t(0, 30), "working", "done");
     sent_back(&scene, &t(0, 40));
-    scene.event(
-        &t(0, 45),
-        "task.state",
-        &json!({ "task": 14, "from": "queued", "to": "working" }),
-    );
-    scene.message(101, (CHIEF, None), "note", Some(task), ENDED, &t(1, 0));
+    moved(&scene, &t(0, 45), "queued", "working");
+    scene.message(101, (CHIEF, None), "note", Some(task), CLOSED, &t(1, 0));
     assert!(found(&scene.look(ms(1, 0)), 3).is_empty());
     assert_eq!(unbound(&scene.look(ms(1, 0))), ["3:m-101"]);
     scene.message(
@@ -154,6 +229,7 @@ fn a_notice_after_a_result_and_a_send_back_is_unresolved_however_near_the_next_r
         "Done.",
         &t(1, 1),
     );
+    moved(&scene, &t(1, 1), "working", "done");
     for at in [ms(1, 2), ms(6, 0)] {
         let look = scene.look(at);
         assert!(found(&look, 3).is_empty());
@@ -170,16 +246,17 @@ fn a_notice_after_a_result_and_a_send_back_is_unresolved_however_near_the_next_r
         .said;
     assert_eq!(
         said,
-        "T-14's ended notice m-101 came after its result m-100 and after T-14 was sent back: whether it is that result's, late, or the next attempt's own, the log does not say"
+        "T-14's close note m-101 came while T-14 was working again, after it had ended and been sent back: whether it is the earlier attempt's window's, closed late, or the new attempt's own, the log does not say"
     );
 }
 
 #[test]
-fn a_late_notice_written_before_the_send_back_is_its_results_whatever_comes_after() {
-    // The late notice m-131 of the result m-100, written before T-14 was sent back,
-    // and the next attempt's result m-132 after: a break, of m-100.
+fn a_close_note_written_before_the_send_back_holds_whatever_comes_after() {
+    // The close note m-131 of the first attempt's window, written before T-14 was sent back,
+    // and the next attempt's result m-132 after: it holds, as the task had ended.
     let scene = Scene::new(&[("long-worker", "claude-code")]);
     let task = self::task(&scene);
+    moved(&scene, &t(0, 10), "queued", "working");
     scene.message(
         100,
         (CHIEF, Some(3)),
@@ -188,8 +265,10 @@ fn a_late_notice_written_before_the_send_back_is_its_results_whatever_comes_afte
         "First round.",
         &t(0, 30),
     );
-    scene.message(131, (CHIEF, None), "note", Some(task), ENDED, &t(0, 31));
+    moved(&scene, &t(0, 30), "working", "done");
+    scene.message(131, (CHIEF, None), "note", Some(task), CLOSED, &t(0, 31));
     sent_back(&scene, &t(1, 0));
+    moved(&scene, &t(1, 5), "queued", "working");
     scene.message(
         132,
         (CHIEF, Some(3)),
@@ -198,17 +277,14 @@ fn a_late_notice_written_before_the_send_back_is_its_results_whatever_comes_afte
         "Done.",
         &t(2, 0),
     );
+    moved(&scene, &t(2, 0), "working", "done");
     let look = scene.look(ms(4, 0));
-    let breaks = found(&look, 3);
-    assert_eq!(breaks.len(), 1, "{breaks:?}");
-    assert_eq!(
-        breaks[0].said,
-        "T-14's ended notice m-131 came after its result m-100"
-    );
+    assert!(found(&look, 3).is_empty());
     assert!(unbound(&look).is_empty());
-    // A send-back the log puts at the notice's own moment may be before it.
+    // A send-back the log puts at the note's own moment may be before it.
     let scene = Scene::new(&[("long-worker", "claude-code")]);
     let task = self::task(&scene);
+    moved(&scene, &t(0, 10), "queued", "working");
     scene.message(
         100,
         (CHIEF, Some(3)),
@@ -217,25 +293,28 @@ fn a_late_notice_written_before_the_send_back_is_its_results_whatever_comes_afte
         "First round.",
         &t(0, 30),
     );
+    moved(&scene, &t(0, 30), "working", "done");
     sent_back(&scene, &t(0, 31));
-    scene.message(131, (CHIEF, None), "note", Some(task), ENDED, &t(0, 31));
+    moved(&scene, &t(0, 31), "queued", "working");
+    scene.message(131, (CHIEF, None), "note", Some(task), CLOSED, &t(0, 31));
     let look = scene.look(ms(4, 0));
     assert!(found(&look, 3).is_empty());
     assert_eq!(unbound(&look), ["3:m-131"]);
 }
 
 #[test]
-fn a_notices_row_is_masked_whole_before_it_is_cut() {
+fn a_close_notes_row_is_masked_whole_before_it_is_cut() {
     // The secret's closing quote is past the 200 characters a row keeps of a body.
     let scene = Scene::new(&[("long-worker", "claude-code")]);
-    let task = task(&scene);
+    let task = scene.task(14, 3, "working", &t(0, 10));
+    scene.briefed(120, 3, task, &t(0, 0));
+    moved(&scene, &t(0, 10), "queued", "working");
     let body = format!(
-        "{}password=\"correct horse battery staple\" in the log.",
-        "Done; ".repeat(27)
+        "{CLOSED}; {}password=\"correct horse battery staple\" in the log.",
+        "node serve.mjs; ".repeat(4)
     );
-    scene.message(131, (CHIEF, Some(3)), "result", Some(task), &body, &t(2, 0));
-    scene.message(132, (CHIEF, None), "note", Some(task), ENDED, &t(2, 1));
-    let look = scene.look(ms(2, 2));
+    scene.message(132, (CHIEF, None), "note", Some(task), &body, &t(1, 0));
+    let look = scene.look(ms(1, 5));
     // As the run keeps it: the keeper masks what it records again.
     let kept = invariants::Keeper::default().keep(&look, found(&look, 3));
     let row = &kept[0].evidence.rows[0];
@@ -615,6 +694,232 @@ fn a_header_a_later_prompt_quotes_never_ends_a_turn() {
     }
 }
 
+#[test]
+fn a_header_a_person_quotes_in_a_fence_is_never_the_lost_delivery_that_began_a_turn() {
+    // GPT-6-Astra's review of round b2: m-120's delivery began and never reached the window;
+    // a later message quotes its header on a line of its own, in a fence, and its answer is
+    // taken for T-14's result. Its turn is in no copy: unresolved, never held.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "Why is this one stuck?\n```\n[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding\n```",
+        true,
+        &t(0, 30),
+    );
+    let answer = "It never reached me; I changed nothing.";
+    scene.item(conversation, 1, "assistant", answer, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        answer,
+        &t(1, 5),
+    );
+    let look = scene.look(ms(5, 0));
+    assert!(found(&look, 4).is_empty(), "{:?}", found(&look, 4));
+    assert_eq!(
+        unanswered(&look),
+        [(
+            "4:m-131".to_owned(),
+            "m-131's turn is not in the copy of @long-worker's conversation, which holds no prompt of m-120 after its delivery attempt 1 began: whether it is the turn's final answer cannot be judged".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn a_header_inside_an_attribute_of_a_paste_wrapper_is_never_the_lost_delivery_that_began_a_turn() {
+    // GPT-6-Astra's review of round b4: m-120's delivery began and never reached the window;
+    // a later row opens with a `<pasted_content` tag whose attribute holds a `>` and m-120's
+    // header. The tag is not Claude Code's shape (a `>` ends it only after its attributes, and
+    // none holds a `>`): no wrapper, and the row opens with no header. Unresolved, never held.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "<pasted_content note=\">[ConsensFlow m-120 · T-14 · task from @chief]\">quoted metadata</pasted_content>",
+        true,
+        &t(0, 30),
+    );
+    let answer = "It never reached me; I changed nothing.";
+    scene.item(conversation, 1, "assistant", answer, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        answer,
+        &t(1, 5),
+    );
+    let look = scene.look(ms(5, 0));
+    assert!(found(&look, 4).is_empty(), "{:?}", found(&look, 4));
+    assert_eq!(
+        unanswered(&look),
+        [(
+            "4:m-131".to_owned(),
+            "m-131's turn is not in the copy of @long-worker's conversation, which holds no prompt of m-120 after its delivery attempt 1 began: whether it is the turn's final answer cannot be judged".to_owned()
+        )]
+    );
+}
+
+/// T-14's worker's turn: the brief, then each of `progress` said before a tool's call, then
+/// `answer`; and its result m-131 saying `result`. What the fourth finds of it.
+fn progress_then(progress: &[&str], answer: &str, result: &str) -> Vec<Break> {
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding",
+        true,
+        &t(0, 0),
+    );
+    let mut seq = 1;
+    for (at, line) in (10..).zip(progress) {
+        scene.item(conversation, seq, "assistant", line, false, &t(0, at));
+        scene.item(conversation, seq + 1, "tool", "ok", true, &t(0, at));
+        seq += 2;
+    }
+    scene.item(conversation, seq, "assistant", answer, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        result,
+        &t(1, 5),
+    );
+    found(&scene.look(ms(5, 0)), 4)
+}
+
+#[test]
+fn a_result_whose_final_answer_its_progress_holds_too_is_never_taken_for_turn_ends_a4() {
+    // GPT-6.1-Sol's review of round b3: the final answer `Done.` opens two progress lines, and
+    // the result holds those two alone, no final answer of its own. Taken out last, `Done.`
+    // came out of the second line and left the result read as turn-end's A4: known, a false
+    // PASS. Since round b5 a result whose progress lines hold its final answer is no
+    // turn-end's A4 at all: a break that fails a run, whichever occurrence is taken out.
+    let listed = known::KNOWN.as_deref().unwrap();
+    let breaks = progress_then(
+        &[
+            "Done. Checking the diff carefully.",
+            "Done. Reviewing the final changes.",
+            "Reviewing the final changes.",
+        ],
+        "Done.",
+        "Done. Checking the diff carefully.\n\nDone. Reviewing the final changes.",
+    );
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(breaks[0].shape, None, "{breaks:?}");
+    assert_eq!(known::of(&breaks[0], listed), None);
+    // The cost, accepted (the lead's line of round b4): a true A4 whose progress line holds
+    // the answer's words is read the same, and fails a run the lead reads, never the other
+    // way.
+    let progress = "All 61 tests pass. Checking the diff now.";
+    let breaks = progress_then(
+        &[progress],
+        "All 61 tests pass.",
+        &format!("{progress}\n\nAll 61 tests pass."),
+    );
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(
+        breaks[0].said,
+        "m-131 holds 1 line of its turn's progress; its turn's final answer stands inside a progress line it holds"
+    );
+    assert_eq!(breaks[0].shape, None);
+}
+
+#[test]
+fn a_result_whose_progress_lines_hold_its_final_answer_is_never_taken_for_turn_ends_a4() {
+    // Both reviewers of round b4, as given: the final answer `Done.` stands inside the two
+    // progress lines the result holds, and a third line is the rest of the first. Taken out
+    // where it first stands, then the progress lines, nothing was left: known, a false PASS.
+    // A result whose progress lines hold the answer is no turn-end's A4: a break that fails a
+    // run.
+    let listed = known::KNOWN.as_deref().unwrap();
+    let breaks = progress_then(
+        &[
+            "Done. Checking the diff carefully.",
+            "Done. Reviewing the final changes.",
+            "Checking the diff carefully.",
+        ],
+        "Done.",
+        "Done. Checking the diff carefully.\n\nDone. Reviewing the final changes.",
+    );
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(
+        breaks[0].said,
+        "m-131 holds 3 lines of its turn's progress; its turn's final answer stands inside a progress line it holds"
+    );
+    assert_eq!(breaks[0].shape, None, "{breaks:?}");
+    assert_eq!(known::of(&breaks[0], listed), None);
+    // A line of progress too short to be told as held is a line the result holds all the
+    // same.
+    let breaks = progress_then(
+        &[
+            "Done. Ok now.",
+            "Ok now.",
+            "Reviewing the final changes now.",
+        ],
+        "Done.",
+        "Done. Ok now.\n\nReviewing the final changes now.",
+    );
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(breaks[0].shape, None, "{breaks:?}");
+    assert_eq!(known::of(&breaks[0], listed), None);
+}
+
+#[test]
+fn a_delivery_claude_code_kept_wrapped_as_a_paste_begins_its_turn() {
+    // Claude Code 2.1.303 keeps a long paste wrapped in its record, and the copy with it
+    // (the Mac's run of 2026-10-19): the task's delivery is the prompt that opens with its
+    // header inside the wrapper, and the result is judged against the turn it began.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "\n\n<pasted_content id=\"a1b2\">\n[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding\n</pasted_content id=\"a1b2\">\n",
+        true,
+        &t(0, 0),
+    );
+    let progress = "Found it: half-up instead of half-even. Fixing.";
+    scene.item(conversation, 1, "assistant", progress, false, &t(0, 30));
+    scene.item(
+        conversation,
+        2,
+        "tool",
+        "The file src/money.mjs has been updated.",
+        true,
+        &t(0, 31),
+    );
+    scene.item(conversation, 3, "assistant", ANSWER, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        &format!("{progress}\n\n{ANSWER}"),
+        &t(1, 5),
+    );
+    let look = scene.look(ms(5, 0));
+    assert!(unanswered(&look).is_empty(), "{:?}", unanswered(&look));
+    let breaks = found(&look, 4);
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(breaks[0].said, "m-131 holds 1 line of its turn's progress");
+}
+
 /// The worker's conversation for T-14: its brief, two lines of progress each
 /// before a tool call, and its report after the last call.
 fn worked(scene: &Scene) -> (i64, i64) {
@@ -691,6 +996,11 @@ fn a_result_that_holds_the_progress_of_its_turn_or_not_its_final_answer_breaks_t
         .record
         .iter()
         .any(|line| line.contains("half-even now")));
+    // Turn-end's A4 (field report dip-agentos #5), deferred to 3.0.6: the list of known
+    // breaks names this shape.
+    assert_eq!(breaks[0].shape, Some("progress-lines"));
+    let listed = known::KNOWN.as_deref().unwrap();
+    assert!(known::of(&breaks[0], listed).is_some_and(|entry| entry.issue.contains("3.0.6")));
 
     let scene = Scene::new(&[("long-worker", "claude-code")]);
     let (task, _) = worked(&scene);
@@ -707,6 +1017,89 @@ fn a_result_that_holds_the_progress_of_its_turn_or_not_its_final_answer_breaks_t
         breaks[0].said,
         "m-131 is not its turn's final answer, whole"
     );
+    // No part of the known bug: it fails a run.
+    assert_eq!(breaks[0].shape, None);
+    assert_eq!(known::of(&breaks[0], listed), None);
+}
+
+#[test]
+fn a_result_of_progress_without_its_whole_final_answer_is_no_known_a4() {
+    // GPT-6.1-Sol's review of round b1: the known shape is turn-end's A4 alone, the whole
+    // final answer there and nothing besides it but the turn's progress. Progress alone,
+    // progress and the answer cut, progress and another task's answer, and progress and
+    // the answer with words of no part of the turn each fail a run.
+    let listed = known::KNOWN.as_deref().unwrap();
+    let progress = "Reading src/money.mjs to find the rounding.";
+    for (result, said) in [
+        (
+            progress.to_owned(),
+            "m-131 is not its turn's final answer, whole, and holds 1 line of its turn's progress",
+        ),
+        (
+            format!("{progress}\n\nRounding is half-even now"),
+            "m-131 is not its turn's final answer, whole, and holds 1 line of its turn's progress",
+        ),
+        (
+            format!("{progress}\n\nThe totals are rounded half-even too; 62 tests pass."),
+            "m-131 is not its turn's final answer, whole, and holds 1 line of its turn's progress",
+        ),
+        (
+            format!("{progress}\n\nThe totals are rounded half-even too.\n\n{ANSWER}"),
+            "m-131 holds 1 line of its turn's progress, and words that are none of its turn's",
+        ),
+    ] {
+        let scene = Scene::new(&[("long-worker", "claude-code")]);
+        let (task, _) = worked(&scene);
+        scene.message(
+            131,
+            (CHIEF, Some(3)),
+            "result",
+            Some(task),
+            &result,
+            &t(1, 5),
+        );
+        let breaks = found(&scene.look(ms(5, 0)), 4);
+        assert_eq!(breaks.len(), 1, "{result}: {breaks:?}");
+        assert_eq!(breaks[0].said, said, "{result}");
+        assert_eq!(breaks[0].shape, None, "{result}");
+        assert_eq!(known::of(&breaks[0], listed), None, "{result}");
+    }
+    // The shape, where the result is the whole final answer and progress besides, short
+    // lines among it too.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding",
+        true,
+        &t(0, 0),
+    );
+    scene.item(conversation, 1, "assistant", progress, false, &t(0, 10));
+    scene.item(
+        conversation,
+        2,
+        "tool",
+        "src/money.mjs: 120 lines",
+        true,
+        &t(0, 11),
+    );
+    scene.item(conversation, 3, "assistant", "Fixing.", false, &t(0, 30));
+    scene.item(conversation, 4, "tool", "ok", true, &t(0, 31));
+    scene.item(conversation, 5, "assistant", ANSWER, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        &format!("{progress}\n\nFixing.\n\n{ANSWER}"),
+        &t(1, 5),
+    );
+    let breaks = found(&scene.look(ms(5, 0)), 4);
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(breaks[0].shape, Some("progress-lines"));
 }
 
 #[test]

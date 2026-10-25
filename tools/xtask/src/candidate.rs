@@ -46,6 +46,7 @@ use serde_json::json;
 use crate::context::Context;
 use crate::dispatch::{Command, Console, Failure, Run};
 use crate::process::Invocation;
+use crate::screen;
 use crate::smoke;
 use crate::updater_smoke::bundle::{plist_value, remove_all};
 use crate::updater_smoke::processes::Row;
@@ -234,6 +235,10 @@ fn run(context: &Context, args: &[OsString], console: &mut Console) -> Result<i3
             console.err,
             "candidate: the candidate build is macOS-only for now"
         )?;
+        return Ok(1);
+    }
+    // Before the build: its smoke shows a window, and that takes minutes to find out.
+    if screen::locked("candidate", context, console.err)? {
         return Ok(1);
     }
     let outcome = plan(context, Path::new(APPLICATIONS))

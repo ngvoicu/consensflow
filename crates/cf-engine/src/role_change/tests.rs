@@ -171,8 +171,8 @@ fn the_staff_a_replacement_holds_whole_is_as_large_as_the_docs_say() {
             .last()
             .unwrap_or(0)
     };
-    assert_eq!(rows_whole(true), 43, "docs: whole to 43 rows with specs on");
-    assert_eq!(rows_whole(false), 72, "docs: whole to 72 rows without");
+    assert_eq!(rows_whole(true), 37, "docs: whole to 37 rows with specs on");
+    assert_eq!(rows_whole(false), 65, "docs: whole to 65 rows without");
 }
 
 /// How many units of a Windows command line a word takes, as the pane host
@@ -254,12 +254,12 @@ fn the_command_line_of_a_windows_launch_is_the_size_the_docs_say() {
     const LIMIT: usize = 32_766;
 
     let word = |rows| on_a_windows_line(rows, true, FRAMING);
-    assert_eq!(word(1), 14_122, "docs: 14,122 units at 1 row");
-    assert_eq!(word(25), 15_313, "docs: 15,313 units at 25 rows");
-    assert_eq!(word(45), 16_313, "docs: 16,313 units at 45 rows");
+    assert_eq!(word(1), 14_463, "docs: 14,463 units at 1 row");
+    assert_eq!(word(25), 15_654, "docs: 15,654 units at 25 rows");
+    assert_eq!(word(45), 16_654, "docs: 16,654 units at 45 rows");
     assert_eq!(
         on_a_windows_line(25, false, FRAMING),
-        13_891,
+        14_232,
         "docs: 1,422 fewer without specs"
     );
 
@@ -272,16 +272,16 @@ fn the_command_line_of_a_windows_launch_is_the_size_the_docs_say() {
             .last()
             .unwrap_or(0)
     };
-    assert_eq!(rows_held(true, FRAMING), 360, "docs: 360 rows");
+    assert_eq!(rows_held(true, FRAMING), 354, "docs: 354 rows");
     assert_eq!(
         rows_held(true, FRAMING + CODEX_OWN + 200),
-        307,
-        "docs: 307 rows with Codex's own instructions"
+        301,
+        "docs: 301 rows with Codex's own instructions"
     );
     assert_eq!(
         rows_held(false, FRAMING),
-        388,
-        "docs: 388 rows without specs"
+        382,
+        "docs: 382 rows without specs"
     );
 }
 
@@ -298,13 +298,51 @@ fn said_by(role: Role, text: &str, complete: bool) -> Item {
     }
 }
 
-/// What the answers of a record, as `answers_to_the_task` says them with
-/// m-4242 the one replacement the ledger knows, say.
+/// What the final answer of a record, as `answers_to_the_task` says it with
+/// m-4242 the one replacement the ledger knows, says.
 fn answers(items: &[Item]) -> Vec<String> {
-    answers_to_the_task(items, &[4242])
-        .into_iter()
-        .map(|item| item.text.to_string())
-        .collect()
+    final_answer(items, &[4242])
+}
+
+/// The words of the final answer of `items`, `replacements` the ledger knows.
+fn final_answer(items: &[Item], replacements: &[i64]) -> Vec<String> {
+    answers_to_the_task(items, replacements).map_or_else(Vec::new, |answers| {
+        answers
+            .final_run
+            .into_iter()
+            .map(|item| item.text.to_string())
+            .collect()
+    })
+}
+
+#[test]
+fn the_summary_of_a_compaction_after_the_answer_leaves_the_answer_whole() {
+    // Astra's review of round 1: a report, then the summary Claude Code writes as it
+    // compacts the conversation at rest, then the look that takes the result.
+    let user = |text: &str| said_by(Role::User, text, true);
+    let assistant = |text: &str| said_by(Role::Assistant, text, true);
+    let summary = Item {
+        compaction: true,
+        ..user("This session is being continued from a previous conversation.")
+    };
+    let items = [
+        user("Review the parser"),
+        assistant("Reading it"),
+        said_by(Role::Tool, "parser.rs", true),
+        assistant("The parser is sound."),
+        summary.clone(),
+    ];
+    let answered = answers_to_the_task(&items, &[]).unwrap();
+    assert_eq!(
+        answered.last.map(|last| &*last.text),
+        Some("The parser is sound.")
+    );
+    assert_eq!(answers(&items), ["The parser is sound."]);
+    // Nor does one between a replacement of the role and its word end the role's turn.
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let mut items = vec![assistant("Parser done"), user(&replacement), summary];
+    items.push(assistant("Understood."));
+    assert_eq!(answers(&items), ["Parser done"]);
 }
 
 #[test]
@@ -325,10 +363,7 @@ fn a_turn_of_a_record_answers_a_replacement_by_the_id_in_its_header_and_no_words
     );
     // The same id, as the ledger says no replacement it knows: no turn of the role.
     assert_eq!(
-        answers_to_the_task(&[user(&replacement), assistant("Understood.")], &[])
-            .into_iter()
-            .map(|item| item.text.to_string())
-            .collect::<Vec<_>>(),
+        final_answer(&[user(&replacement), assistant("Understood.")], &[]),
         ["Understood."]
     );
 }
@@ -360,12 +395,13 @@ fn the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task(
         answers(&[
             user(&replacement),
             assistant("Understood."),
-            user("ConsensFlow quit while you were working on T-1."),
+            user("ConsensFlow stopped while you were working on T-1."),
             assistant("Parser done"),
         ]),
         ["Parser done"]
     );
-    // A turn's several answers, and the tool's output between them, all stay.
+    // The final answer is what comes after the tool's output: what was said before it
+    // is the turn's progress.
     assert_eq!(
         answers(&[
             user(&replacement),
@@ -375,8 +411,110 @@ fn the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task(
             said_by(Role::Tool, "output", true),
             assistant("Second"),
         ]),
-        ["First", "Second"]
+        ["Second"]
     );
+}
+
+#[test]
+fn the_final_answer_is_what_follows_the_last_tool_call_or_message_and_what_is_not_the_roles() {
+    let user = |text: &str| said_by(Role::User, text, true);
+    let assistant = |text: &str| said_by(Role::Assistant, text, true);
+    let tool = |text: &str| said_by(Role::Tool, text, true);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+
+    // Several words after the last tool call are all of it, in order.
+    assert_eq!(
+        answers(&[
+            user("Write the report"),
+            assistant("Still reviewing"),
+            tool("diff"),
+            assistant("Now the tests"),
+            tool("tests"),
+            assistant("The report, first"),
+            assistant("and last"),
+        ]),
+        ["The report, first", "and last"]
+    );
+    // A turn that ended with a word of progress and went on when its agent was woken (a
+    // message of the harness's own begins the turn): the first turn's last word is no part
+    // of the answer.
+    assert_eq!(
+        answers(&[
+            user("Run the mutation tests"),
+            assistant("Running them"),
+            tool("Command running in background with ID: b1"),
+            assistant("Still going; I'll write it up when it ends"),
+            user("<task-notification>b1 completed</task-notification>"),
+            assistant("Reading the output"),
+            tool("33 killed"),
+            assistant("All 33 mutants are killed."),
+        ]),
+        ["All 33 mutants are killed."]
+    );
+    // What the harness put in the conversation itself is neither: it cuts nothing and
+    // is no word of the member's.
+    assert_eq!(
+        answers(&[
+            user("Go"),
+            assistant("Looking"),
+            tool("out"),
+            assistant("Done"),
+            said_by(Role::Custom, "a hook's context", true),
+        ]),
+        ["Done"]
+    );
+    // A tool's output inside the turn of a replacement of the role cuts nothing of the
+    // task's answer, and its words are not the answer.
+    assert_eq!(
+        answers(&[
+            user("Go"),
+            assistant("Parser done"),
+            user(&replacement),
+            assistant("Understood."),
+            tool("out"),
+            assistant("Understood, again"),
+        ]),
+        ["Parser done"]
+    );
+    // No word, or a last word that is none: nothing answers.
+    assert!(answers_to_the_task(&[user("Go"), tool("out")], &[]).is_none());
+    let silent = [user("Go"), assistant("Looking"), tool("out"), assistant("")];
+    let answered = answers_to_the_task(&silent, &[]).expect("a last word");
+    assert_eq!(answered.last.map(|last| last.text.as_ref()), Some(""));
+    assert_eq!(answers(&silent), [""]);
+}
+
+#[test]
+fn a_message_to_the_member_after_its_answer_leaves_the_turn_unanswered_and_its_last_complete_answer_kept(
+) {
+    // T-442's shape: the member answered with its job running, and the job's end woke a
+    // turn that has written nothing yet. That turn's answer is still to come, and the
+    // answer before it is no answer to it; it is still the last complete one after the
+    // task's latest message, which Finish takes.
+    let user = |text: &str| said_by(Role::User, text, true);
+    let items = [
+        said_by(Role::Assistant, "Watching the run", true),
+        user("<task-notification>the run ended</task-notification>"),
+    ];
+    let answered = answers_to_the_task(&items, &[]).expect("a complete answer");
+    assert!(
+        answered.last.is_none(),
+        "nothing answers the notification yet"
+    );
+    assert!(answered.final_run.is_empty());
+    let complete: Vec<&str> = answered
+        .complete_run
+        .expect("the last complete answer")
+        .iter()
+        .map(|item| item.text.as_ref())
+        .collect();
+    assert_eq!(complete, ["Watching the run"]);
+    // With nothing complete before it, there is no answer at all.
+    let items = [
+        said_by(Role::Assistant, "Looking", false),
+        user("<task-notification>the run ended</task-notification>"),
+    ];
+    assert!(answers_to_the_task(&items, &[]).is_none());
 }
 
 #[test]
@@ -409,6 +547,7 @@ fn a_displaced_message_that_rides_in_the_paste_of_another_is_not_begun_and_its_l
         queued: false,
         free_since: None,
         entered_again: false,
+        carried: Vec::new(),
     };
     assert!(
         context

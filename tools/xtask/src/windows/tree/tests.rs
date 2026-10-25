@@ -112,7 +112,14 @@ fn what_goes_over_is_packed_with_the_list_of_it_which_leaves_out_what_was_delete
     let scratch = tempfile::tempdir().unwrap();
 
     let listed = files(&context).unwrap();
-    let tarball = pack(&context, &listed, scratch.path()).unwrap();
+    let tarball = pack(
+        &context,
+        &listed,
+        "none 0123456789abcdef",
+        "the run script\n",
+        scratch.path(),
+    )
+    .unwrap();
 
     let there = unpacked(&context, &tarball);
     let held = |name: &str| fs::read_to_string(there.path().join(name)).ok();
@@ -129,9 +136,14 @@ fn what_goes_over_is_packed_with_the_list_of_it_which_leaves_out_what_was_delete
     assert!(list.ends_with('\n'));
     // Beside it, the sweep that removes from the copy what the list does not name.
     assert_eq!(held(SWEEP), Some(sweep_script()));
-    // And neither is left in the checkout.
-    assert!(!dir.path().join(SYNCED).exists());
-    assert!(!dir.path().join(SWEEP).exists());
+    // And the tree's identity, which the machine holds what it unpacked to and says.
+    assert_eq!(held(TREE).as_deref(), Some("none 0123456789abcdef\n"));
+    // And the run script, which is what the run is asked for.
+    assert_eq!(held(RUN).as_deref(), Some("the run script\n"));
+    // And none of the four is left in the checkout.
+    for name in [SYNCED, SWEEP, TREE, RUN] {
+        assert!(!dir.path().join(name).exists(), "{name}");
+    }
     assert!(git(&context, &["status", "--short"]).contains("new.txt"));
 }
 
@@ -140,7 +152,14 @@ fn a_tarball_that_cannot_be_made_is_said_with_what_tar_said_and_leaves_no_list_b
     let (dir, context) = checkout(&[("keep.txt", "kept")]);
     let scratch = tempfile::tempdir().unwrap();
     // A name with nothing behind it is what the copy broke on before the tree was filtered.
-    let said = pack(&context, &["gone.txt".to_owned()], scratch.path()).unwrap_err();
+    let said = pack(
+        &context,
+        &["gone.txt".to_owned()],
+        "none x",
+        "",
+        scratch.path(),
+    )
+    .unwrap_err();
     let said = said.to_string();
     assert!(said.starts_with("`tar czf "), "{said}");
     // What tar says of it is its own, which differs by system (`gone.txt: Cannot
@@ -148,8 +167,9 @@ fn a_tarball_that_cannot_be_made_is_said_with_what_tar_said_and_leaves_no_list_b
     let (_, after) = said.split_once("` ended with status ").unwrap();
     let words = after.trim_start_matches(|c: char| c.is_ascii_digit());
     assert!(words.starts_with(": ") && words.len() > 2, "{said}");
-    assert!(!dir.path().join(SYNCED).exists());
-    assert!(!dir.path().join(SWEEP).exists());
+    for name in [SYNCED, SWEEP, TREE, RUN] {
+        assert!(!dir.path().join(name).exists(), "{name}");
+    }
 }
 
 #[test]
@@ -309,10 +329,190 @@ fn a_link_whose_target_is_gone_is_still_a_file_of_the_tree() {
     std::os::unix::fs::symlink("nowhere", dir.path().join("dangling")).unwrap();
     assert_eq!(sorted(files(&context).unwrap()), ["dangling", "keep.txt"]);
     let scratch = tempfile::tempdir().unwrap();
-    let tarball = pack(&context, &files(&context).unwrap(), scratch.path()).unwrap();
+    let tarball = pack(
+        &context,
+        &files(&context).unwrap(),
+        "none x",
+        "",
+        scratch.path(),
+    )
+    .unwrap();
     let there = unpacked(&context, &tarball);
     assert_eq!(
         fs::read_link(there.path().join("dangling")).unwrap(),
         Path::new("nowhere")
     );
+}
+
+/// The identity of the tree as the checkout is now.
+fn identity_of(context: &Context) -> String {
+    identity(context, &files(context).unwrap()).unwrap()
+}
+
+/// Commits what is added, as no one in particular.
+fn commit(context: &Context) -> String {
+    git(
+        context,
+        &[
+            "-c",
+            "user.name=windows-test",
+            "-c",
+            "user.email=windows-test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "a commit",
+        ],
+    );
+    git(context, &["rev-parse", "HEAD"]).trim().to_owned()
+}
+
+/// The words of an identity: the commit, and the hash of what goes over.
+fn words(identity: &str) -> (&str, &str) {
+    let (commit, content) = identity.split_once(' ').unwrap();
+    assert!(!content.contains(' '), "{identity}");
+    (commit, content)
+}
+
+#[test]
+fn a_tree_is_the_commit_the_checkout_is_at_and_a_hash_of_what_goes_over() {
+    let (dir, context) = checkout(&[("keep.txt", "kept"), ("src/lib.rs", "fn lib() {}\n")]);
+    // No commit yet: said so, as the first words, and the hash is 16 hex digits.
+    let (commit_before, content) = {
+        let identity = identity_of(&context);
+        let (commit, content) = words(&identity);
+        (commit.to_owned(), content.to_owned())
+    };
+    assert_eq!(commit_before, "none");
+    assert!(
+        content.len() == 16
+            && content
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "{content}"
+    );
+    // At a commit, the commit is what `git rev-parse HEAD` says, whole; what goes over
+    // is the same, so its hash is.
+    let head = commit(&context);
+    let identity = identity_of(&context);
+    assert_eq!(words(&identity), (head.as_str(), content.as_str()));
+    assert_eq!(head.len(), 40);
+    // Asked twice, it says the same.
+    assert_eq!(identity_of(&context), identity);
+    drop(dir);
+}
+
+#[test]
+fn what_goes_over_changing_changes_the_tree_whatever_git_calls_the_change() {
+    let (dir, context) = checkout(&[("keep.txt", "kept"), ("src/lib.rs", "fn lib() {}\n")]);
+    let head = commit(&context);
+    let clean = identity_of(&context);
+    let hash = |identity: &str| words(identity).1.to_owned();
+    let mut seen = vec![hash(&clean)];
+    let mut differs = |what: &str, context: &Context| {
+        let identity = identity_of(context);
+        // The commit is the checkout's, and has not moved: only what goes over has.
+        assert_eq!(words(&identity).0, head, "{what}");
+        assert!(
+            !seen.contains(&hash(&identity)),
+            "{what}: the tree is as one before"
+        );
+        seen.push(hash(&identity));
+    };
+    // A tracked file changed, and not added.
+    write(dir.path(), "keep.txt", "kept, and changed");
+    differs("a tracked file changed", &context);
+    // And back as it was: the same tree as at the commit, whichever way it got there.
+    write(dir.path(), "keep.txt", "kept");
+    assert_eq!(identity_of(&context), clean);
+    // A file that git has never been told of, which goes over all the same.
+    write(dir.path(), "new/file.txt", "not added yet");
+    differs("a new file", &context);
+    // A file of another name with the same bytes is another tree.
+    fs::rename(
+        dir.path().join("new/file.txt"),
+        dir.path().join("new/other.txt"),
+    )
+    .unwrap();
+    differs("a file renamed", &context);
+    fs::remove_file(dir.path().join("new/other.txt")).unwrap();
+    // A tracked file deleted.
+    fs::remove_file(dir.path().join("src/lib.rs")).unwrap();
+    differs("a file deleted", &context);
+    // An ignored file does not go over, and is not part of the tree.
+    write(dir.path(), ".gitignore", "ignored.out\n");
+    let with_ignore = {
+        let before = identity_of(&context);
+        write(dir.path(), "ignored.out", "build output");
+        before
+    };
+    assert_eq!(identity_of(&context), with_ignore);
+}
+
+#[test]
+fn what_one_file_ends_with_and_the_next_begins_with_is_no_other_tree_than_where_each_ends() {
+    // "a" holding "bc" and "ab" holding "c" are not the same bytes to a hash that only
+    // read them end to end: the lengths are part of it.
+    let (_one, first) = checkout(&[("a", "bc")]);
+    let (_two, second) = checkout(&[("ab", "c")]);
+    assert_ne!(
+        words(&identity_of(&first)).1,
+        words(&identity_of(&second)).1
+    );
+    let (_three, third) = checkout(&[("a", "b"), ("c", "d")]);
+    let (_four, fourth) = checkout(&[("a", ""), ("bc", "d")]);
+    assert_ne!(
+        words(&identity_of(&third)).1,
+        words(&identity_of(&fourth)).1
+    );
+}
+
+#[test]
+fn the_same_files_at_another_commit_are_another_tree_by_the_commit_and_the_same_by_the_hash() {
+    let (dir, context) = checkout(&[("keep.txt", "kept")]);
+    let first = commit(&context);
+    let before = identity_of(&context);
+    write(dir.path(), "other.txt", "other");
+    git(&context, &["add", "-A"]);
+    let second = commit(&context);
+    assert_ne!(first, second);
+    // Take the file out again, and commit that: the files are those of the first commit.
+    fs::remove_file(dir.path().join("other.txt")).unwrap();
+    git(&context, &["add", "-A"]);
+    let third = commit(&context);
+    let after = identity_of(&context);
+    assert_ne!(words(&before).0, words(&after).0);
+    assert_eq!(words(&after).0, third);
+    assert_eq!(words(&before).1, words(&after).1);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_is_known_by_its_name_alone_and_never_followed_for_a_machine_makes_no_link_of_it() {
+    let (dir, context) = checkout(&[("keep.txt", "kept")]);
+    // A link, whose target is gone, is part of the tree as it is a file of it; what a
+    // machine's file system makes of it is not what the Mac has, so it is `other`.
+    std::os::unix::fs::symlink("nowhere", dir.path().join("link")).unwrap();
+    let one = identity_of(&context);
+    fs::remove_file(dir.path().join("link")).unwrap();
+    std::os::unix::fs::symlink("elsewhere", dir.path().join("link")).unwrap();
+    assert_eq!(identity_of(&context), one);
+    // But it is there: without it the tree is another.
+    fs::remove_file(dir.path().join("link")).unwrap();
+    assert_ne!(words(&identity_of(&context)).1, words(&one).1);
+    // Nor is a link to a folder read as a file.
+    std::os::unix::fs::symlink(dir.path(), dir.path().join("link")).unwrap();
+    identity(&context, &["keep.txt".to_owned(), "link".to_owned()]).unwrap();
+}
+
+#[test]
+fn a_tree_whose_file_cannot_be_read_is_said_with_the_file() {
+    let (_dir, context) = checkout(&[("keep.txt", "kept")]);
+    let said = identity(&context, &["gone.txt".to_owned()])
+        .unwrap_err()
+        .to_string();
+    assert!(said.starts_with("could not read "), "{said}");
+    assert!(said.contains("gone.txt"), "{said}");
 }

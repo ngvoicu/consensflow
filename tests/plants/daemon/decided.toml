@@ -67,8 +67,12 @@ runs = ["decided-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''       WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')",'''
-replace = '''       WHERE task_id = ? AND state IN ('delivering', 'gated')",'''
+find = '''
+       WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')
+         AND id NOT IN'''
+replace = '''
+       WHERE task_id = ? AND state IN ('delivering', 'gated')
+         AND id NOT IN'''
 
 [[plant]]
 name = "decided result: a decision withdraws a result that is being pasted"

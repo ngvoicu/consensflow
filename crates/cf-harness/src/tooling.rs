@@ -15,6 +15,7 @@
 //! | `console_text` | `text`: as Windows' console carries it to a window | the text |
 //! | `claude_settings` | `env`, `launch`, `boardQuestions`: the settings file of a Claude window | `["--settings", file]`, the file written |
 //! | `interrupt` | `kind`: the keys that interrupt a turn in the harness's window | `{presses, closeAfterMs}`: Escape that many times in a row and, where `closeAfterMs` is not null, once more that long after |
+//! | `input` | `kind`: how the harness's windows take what they are handed | `{pasted, clear}`: whether it is pasted into the window's input box, and the keys that empty the box (null for a harness whose windows take it over a channel) |
 //! | `program` | `argv`, `env`: a program and its arguments to open a window on (the program's absolute path first) | the argv the pane host is asked to open: an npm shim (a `.cmd` on Windows) as the node and the script it runs, anything else as it is; an error for a script of another shape, or a shim that has no node |
 //! | `newest_session` | `kind`, `workspace`, `since`, `env`: the newest top-level conversation a harness of that kind (OpenCode, Devin or Codex) opened in `workspace` at or after `since` (milliseconds), from its own store | the session's id, or null while there is none |
 //! | `specmint` | `kind`, `variant`, `env`: where the harness has the Specmint variant installed for its user (the adapter's own look, in the places the harness reads), with a home that is the one `env` names | `{installed, skill}`: whether the harness has it, and the file of its `SKILL.md` (where ConsensFlow's own copy would be written, for a launch of a made-up id, where it has none) |
@@ -49,7 +50,7 @@ use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 
 use crate::claude::install;
-use crate::contract::{Agent, Interrupt, LaunchId, Skill};
+use crate::contract::{Agent, Input, Interrupt, LaunchId, Skill};
 use crate::launch::adapter;
 use crate::records::{self, Options};
 use crate::shared::record_state::record_state;
@@ -65,6 +66,7 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "console_text" => Ok(json!(console_text(text(question, "text")?))),
         "claude_settings" => claude_settings(question),
         "interrupt" => interrupt(question),
+        "input" => input(question),
         "program" => program(question),
         "newest_session" => newest_session(question),
         "specmint" => specmint(question),
@@ -74,7 +76,7 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "devin_hooks" => launch::devin_hooks(question),
         "trust" => trust(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, program, newest_session, specmint, devin_launch, devin_ready, devin_readiness, devin_hooks and trust"
+            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, devin_ready, devin_readiness, devin_hooks and trust"
         )),
     }
 }
@@ -258,6 +260,18 @@ fn interrupt(question: &Value) -> Result<Value, String> {
         "presses": presses,
         "closeAfterMs": close_after.and_then(|after| u64::try_from(after.as_millis()).ok()),
     }))
+}
+
+/// How the harness's windows take what they are handed, as its adapter says it.
+fn input(question: &Value) -> Result<Value, String> {
+    let env = Env::from_vars::<&str, &str>([]);
+    let services = Fakes::new(&env).services(&env, Path::new(""));
+    Ok(
+        match adapter(harness(text(question, "kind")?)?, &services).input() {
+            Input::Channel => json!({ "pasted": false, "clear": null }),
+            Input::Pasted { clear } => json!({ "pasted": true, "clear": clear }),
+        },
+    )
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@
 //! than a harness shows its model (`cut`) says nothing.
 
 use std::cell::Cell;
+use std::ffi::OsString;
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -67,7 +68,7 @@ struct Ran {
 fn cf_with(words: &[&str], json: bool, replies: Vec<Reply>, fails: Option<io::ErrorKind>) -> Ran {
     let api = scripted(replies);
     let board = Board::new(Some(&api.url), "tok");
-    let words: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
     let mut out = Output::new(&api);
     out.fails = fails;
     let mut err = Vec::new();
@@ -468,9 +469,10 @@ fn a_task_whose_only_task_message_went_to_another_window_prints_its_brief_under_
 
 #[test]
 fn a_brief_the_board_withholds_prints_no_brief_block() {
-    // The daemon sends an empty body only for an assigned task whose brief waits at the
-    // human's gate, and leaves that message out (routes/task.rs:61-65). This test models the
-    // CLI's rule for an empty body on an open task, which the daemon never serves.
+    // The daemon sends an empty body only to a member reading an assigned task whose brief
+    // waits at the human's gate; the chief and whoever gave the task read the brief, and the
+    // message itself is left out for all (routes/task.rs:60-67). This test models the CLI's
+    // rule for an empty body on an open task, which the daemon never serves.
     let ran = cf(&["task", "get", "T-17"], vec![reply(200, open_task(""))]);
     assert_eq!(
         ran.out,

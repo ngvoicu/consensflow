@@ -25,6 +25,8 @@
 // The cases are in `tests/regressions/`: cargo looks for the modules of a test's
 // root file beside it, where each would be a suite of its own.
 // The stand-in's command is a shell of a Unix machine.
+#[path = "regressions/a_brief_could_not_be_edited_once_added.rs"]
+mod a_brief_could_not_be_edited_once_added;
 #[path = "regressions/a_builds_daemon_held_a_workers_task.rs"]
 mod a_builds_daemon_held_a_workers_task;
 #[path = "regressions/a_codex_chief_opened_again_after_a_restart_read_starting_for_good.rs"]
@@ -36,6 +38,12 @@ mod a_command_that_goes_on_reporting_held_a_devin_workers_result;
 mod a_command_that_never_exits_held_a_workers_result;
 #[path = "regressions/a_compact_typed_into_an_idle_chief_held_a_workers_result.rs"]
 mod a_compact_typed_into_an_idle_chief_held_a_workers_result;
+#[path = "regressions/a_compaction_written_beside_an_answer_tore_its_line.rs"]
+mod a_compaction_written_beside_an_answer_tore_its_line;
+#[path = "regressions/a_follow_up_could_not_be_queued_behind_its_windows_own_work.rs"]
+mod a_follow_up_could_not_be_queued_behind_its_windows_own_work;
+#[path = "regressions/a_job_that_still_ran_was_taken_for_ended.rs"]
+mod a_job_that_still_ran_was_taken_for_ended;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
 mod a_pause_a_hung_worker_ignored_stranded_its_task;
 #[path = "regressions/a_result_delivered_twice_to_a_devin_chief.rs"]
@@ -44,10 +52,20 @@ mod a_result_delivered_twice_to_a_devin_chief;
 mod a_result_pasted_again_after_its_window_went;
 #[path = "regressions/a_resumed_devin_worker_skipped_every_call.rs"]
 mod a_resumed_devin_worker_skipped_every_call;
+#[path = "regressions/a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task.rs"]
+mod a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task;
 #[path = "regressions/a_task_stuck_working_after_its_window_was_resumed.rs"]
 mod a_task_stuck_working_after_its_window_was_resumed;
+#[path = "regressions/a_task_waiting_on_a_cancelled_task_stayed_blocked_for_good.rs"]
+mod a_task_waiting_on_a_cancelled_task_stayed_blocked_for_good;
+#[path = "regressions/a_task_waiting_on_a_job_that_never_ends_was_finished_by_the_chief.rs"]
+mod a_task_waiting_on_a_job_that_never_ends_was_finished_by_the_chief;
 #[path = "regressions/a_trust_question_after_git_init_stopped_every_launch.rs"]
 mod a_trust_question_after_git_init_stopped_every_launch;
+#[path = "regressions/a_worker_that_waited_on_its_run_with_monitor_lost_it.rs"]
+mod a_worker_that_waited_on_its_run_with_monitor_lost_it;
+#[path = "regressions/a_workers_still_going_was_given_as_its_result.rs"]
+mod a_workers_still_going_was_given_as_its_result;
 // The stand-in's status line is a `bash`.
 #[cfg(unix)]
 #[path = "regressions/claude_status_line_taken_for_background_work.rs"]
@@ -79,12 +97,18 @@ mod mcp_servers_held_a_workers_result;
 mod opencode_updated_itself_to_2;
 #[path = "regressions/results_stay_queued_after_a_quota_pause.rs"]
 mod results_stay_queued_after_a_quota_pause;
+#[path = "regressions/results_that_began_with_the_workers_progress.rs"]
+mod results_that_began_with_the_workers_progress;
 #[path = "regressions/resume_of_a_chief_with_no_turn.rs"]
 mod resume_of_a_chief_with_no_turn;
 #[path = "regressions/resume_of_a_turn_the_daemon_never_copied.rs"]
 mod resume_of_a_turn_the_daemon_never_copied;
 #[path = "regressions/rows_a_paste_carried_pasted_again_after_a_restart.rs"]
 mod rows_a_paste_carried_pasted_again_after_a_restart;
+#[path = "regressions/tasks_left_paused_by_a_close_and_resume.rs"]
+mod tasks_left_paused_by_a_close_and_resume;
+#[path = "regressions/tell_refused_for_a_queued_task.rs"]
+mod tell_refused_for_a_queued_task;
 #[cfg(unix)]
 #[path = "regressions/whole_history_across_a_compaction_and_a_switch.rs"]
 mod whole_history_across_a_compaction_and_a_switch;
@@ -94,8 +118,9 @@ use std::time::Duration;
 use cf_e2e::rig::Config;
 
 /// What a case ends with: nothing, or why it could not be run. A check that does
-/// not hold is a panic, which is the case's failure.
-type Outcome = Result<(), Box<dyn std::error::Error>>;
+/// not hold is a panic, which is the case's failure. The error a case returns is
+/// how the rigs it started learn that it failed.
+type Outcome = cf_e2e::Outcome;
 
 /// The stand-in for a window's harness program, built for these tests.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
@@ -111,9 +136,10 @@ const FAKE_OPENCODE_2: &str = env!("CARGO_BIN_EXE_fake-opencode-2");
 const FAKE_CODEX: &str = env!("CARGO_BIN_EXE_fake-codex");
 
 /// The configuration of a rig whose windows run the stand-in agent, to add
-/// variables to.
+/// variables to. Its case is judged by what it returns, so a rig it drops unclosed
+/// says nothing of a case that passed.
 fn config() -> Config {
-    Config::new(FAKE_AGENT)
+    Config::new(FAKE_AGENT).judged_by_outcome()
 }
 
 /// [`config`], and the stand-in Codex for the windows of Codex's agents.

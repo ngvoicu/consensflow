@@ -3,7 +3,7 @@
 //! what the test says. What a test does not script it does not call.
 
 use cf_engine::seams::EngineError;
-use cf_engine::{SwitchTo, SwitchWhen};
+use cf_engine::{Finished, SwitchTo, SwitchWhen};
 use cf_harness::contract::Work;
 use cf_ledger::{
     DeletedProject, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
@@ -84,6 +84,10 @@ impl Engine for Scripted {
         None
     }
 
+    fn held(&self, _: i64) -> Option<Value> {
+        None
+    }
+
     fn open_project(&self, _: NewProject) -> Work<'_, Result<Option<ProjectView>, EngineError>> {
         unreachable!("{UNUSED}")
     }
@@ -119,6 +123,10 @@ impl Engine for Scripted {
         _: i64,
         _: &'a str,
     ) -> Work<'a, Result<RemovedMember, EngineError>> {
+        unreachable!("{UNUSED}")
+    }
+
+    fn finish_task(&self, _: i64, _: i64) -> Work<'_, Result<Finished, EngineError>> {
         unreachable!("{UNUSED}")
     }
 

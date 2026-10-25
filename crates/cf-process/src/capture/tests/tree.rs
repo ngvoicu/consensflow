@@ -12,7 +12,8 @@ use std::rc::Rc;
 
 use super::*;
 use crate::testing::{
-    gone, gone_within, pids_in, pids_written_to_soon, Survivors, GONE_WITHIN, STARTS_WITHIN,
+    gone, gone_within, leaves_a_writer, pids_in, pids_written_to_soon, Survivors, GONE_WITHIN,
+    STARTS_WITHIN,
 };
 
 /// How long the capture of a tree that is ended has to end, counted once the
@@ -63,7 +64,7 @@ fn tree(file: &Path) -> Run {
 }
 
 /// What `tree` runs in: PowerShell wants the system's own variables.
-fn tree_env() -> Env {
+pub(super) fn tree_env() -> Env {
     #[cfg(unix)]
     return system_env();
     #[cfg(windows)]
@@ -148,27 +149,52 @@ fn a_parent_that_ended_before_its_grandchild_leaves_the_grandchild_the_stop_s_to
     assert!(gone(left.0[1]), "the grandchild was ended with the stop");
 }
 
-#[cfg(unix)]
+/// How long the program a dropped capture started is given to be gone: the end is not
+/// waited for, and is far from the half minute the program would run.
+const GONE_AFTER_A_DROP: Duration = Duration::from_secs(5);
+
 #[test]
-fn a_capture_dropped_ends_the_tree_it_started() {
+fn a_capture_dropped_ends_the_tree_it_started_and_leaves_nothing_for_its_ender_to_end() {
+    // CI's Windows took 29.5 s over this (T-221): the program was `cmd /c ping -n 30`, the drop
+    // ended the cmd alone, and the ping it left held the streams a read on the runtime's
+    // blocking pool was waiting on, which the runtime's drop waited for in its turn. The
+    // test then asked only the ender, which says nothing of whether the program is gone.
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("pids");
     let (run, env) = (tree(&file), tree_env());
-    let pids = runtime().block_on(async {
-        let capturing = capture(&run, None, &env, ROOMY, |_| {});
+    let kept: Rc<RefCell<Option<Ender>>> = Rc::default();
+    let runtime = runtime();
+    let pids = runtime.block_on(async {
+        let handed = Rc::clone(&kept);
+        let capturing = capture(&run, None, &env, ROOMY, move |ender| {
+            *handed.borrow_mut() = Some(ender);
+        });
         // The wait for the capture is given up as soon as the tree is there.
         tokio::select! {
             _ = capturing => panic!("a program that sleeps for a minute does not end"),
             pids = pids_written_to_soon(&file, 2) => pids,
         }
     });
+    let dropped = Instant::now();
     let _left = Survivors(pids.clone());
-    // The parent is a zombie until tokio reaps what it was told to kill, and
-    // nothing here runs it; the grandchild, which an orphan's init reaps, is
-    // the proof.
     assert!(
-        gone(pids[1]),
+        !kept.borrow().as_ref().expect("handed over").running(),
+        "it is no one's to end"
+    );
+    // The parent is a zombie on Unix until tokio reaps what it was told to kill, and nothing
+    // here runs it; the grandchild, which an orphan's init reaps, is the proof there.
+    assert!(
+        gone_within(pids[1], GONE_AFTER_A_DROP),
         "the grandchild went with the dropped capture"
+    );
+    if cfg!(windows) {
+        assert!(gone_within(pids[0], GONE_AFTER_A_DROP), "the parent");
+    }
+    runtime.shutdown_timeout(Duration::from_secs(10));
+    assert!(
+        dropped.elapsed() < Duration::from_secs(8),
+        "{:?} to be done with the runtime: something held the program's streams",
+        dropped.elapsed()
     );
 }
 
@@ -268,34 +294,30 @@ fn held_whole_a_program_that_ended_with_0_at_the_ask_has_failed_out_of_its_time(
     );
 }
 
-/// A program that leaves a child running and ends at once: the child has none of
-/// its streams, and writes `late` to the file `marked` once `after` has passed;
-/// `pids` gets the program's pid and the child's, as `tree` writes them.
-fn leaves_a_writer(pids: &Path, marked: &Path, after: u32) -> Run {
-    #[cfg(unix)]
-    return shell(&format!(
-        "(sleep {after}; echo late > '{}') </dev/null >/dev/null 2>&1 & printf '%s %s\\n' \"$$\" \"$!\" > '{}'",
-        marked.display(),
-        pids.display()
-    ));
-    #[cfg(windows)]
-    return Run {
-        program: PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
-        args: [
-            "-NoProfile".to_owned(),
-            "-Command".to_owned(),
-            format!(
-                "$p = Start-Process -PassThru -WindowStyle Hidden -FilePath 'C:\\Windows\\System32\\cmd.exe' -ArgumentList '/d','/c','ping -n {} 127.0.0.1 >NUL & echo late> \"{}\"'; \
-                 Set-Content -Path '{}' -Value (@($PID, $p.Id) -join ' ')",
-                after + 1,
-                marked.display(),
-                pids.display().to_string().replace('\'', "''")
-            ),
-        ]
-        .map(OsString::from)
-        .to_vec(),
-        verbatim: false,
+#[test]
+fn a_program_that_ends_of_itself_leaves_what_it_started_running() {
+    // As Node's `execFile` does: the program ends with 0 at once, and what it left runs on
+    // and writes after the capture answered. Only an end of the program's own ends the tree
+    // (a stop, its time, a drop); one that ended by itself has finished its work.
+    let dir = tempfile::tempdir().unwrap();
+    let (file, marked) = (dir.path().join("pids"), dir.path().join("late"));
+    let run = leaves_a_writer(&file, &marked, 2);
+    let limits = Limits {
+        timeout: Duration::from_secs(60),
+        max_buffer: 1024,
     };
+    let answered = runtime().block_on(capture(&run, None, &tree_env(), limits, |_| {}));
+    assert!(answered.is_ok(), "{answered:?}");
+    let pids = pids_in(&file, 2).expect("written before it ended");
+    let _left = Survivors(pids);
+    let until = Instant::now() + Duration::from_secs(15);
+    while !marked.exists() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        marked.exists(),
+        "what it left running was let go of, and wrote"
+    );
 }
 
 #[test]

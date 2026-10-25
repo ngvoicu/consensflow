@@ -1,0 +1,30 @@
+# The brief of a task the daemon failed while it was being pasted (T-270, 3.0.6, on top of B4's
+# `withdrawn_late`, which holds for the chief's own step only): the paste is given back and the brief
+# was queued again for a window the task no longer has. It is cancelled, and only the brief: a note
+# about the failed task still goes (`crates/cf-ledger/src/messages/delivery.rs`; test
+# `failed_briefs::` of the ledger's receipt). One plant takes one rule out, and a test of it fails.
+#
+# Every name begins with `failed brief`, so `npm run plants:daemon -- "failed brief"` runs them.
+
+[run]
+failed-brief-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "failed_briefs::"]
+
+[[plant]]
+name = "failed brief: a brief given back after its task failed is queued again"
+meant = "a_brief_given_back_after_its_task_failed_is_cancelled_not_queued_for_a_window_again"
+runs = ["failed-brief-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '            if message.kind == "task" && task.state == "failed" {'
+replace = '            if false {'
+
+[[plant]]
+name = "failed brief: a note about a failed task is cancelled when it is given back"
+meant = "a_brief_given_back_after_its_task_failed_is_cancelled_not_queued_for_a_window_again"
+runs = ["failed-brief-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '            if message.kind == "task" && task.state == "failed" {'
+replace = '            if task.state == "failed" {'

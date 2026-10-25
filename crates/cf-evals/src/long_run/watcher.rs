@@ -25,7 +25,7 @@ use serde_json::Value;
 
 use super::ledger::Ledger;
 use super::look::{
-    Activity, Exit, Look, OpenWindow, Process, Reading, Stranger, Unread, Unresolved, Windows,
+    Activity, Exit, Lane, Look, OpenWindow, Process, Reading, Stranger, Unread, Unresolved, Windows,
 };
 use super::mask::Names;
 use super::processes;
@@ -200,10 +200,33 @@ impl Watcher {
                 .map(|there| self.tracker.strangers(at, &there))
                 .unwrap_or_default()
         };
-        let names = Names::of_ledger(&ledger);
+        self.read_records(&ledger, at);
+        let (records, readings) = kept(&self.records);
+        Ok(Look {
+            at,
+            records,
+            readings,
+            host: Some(rig.host_pid()),
+            ledger,
+            windows: Windows {
+                open,
+                lanes: lanes(board),
+                exits: self.exits.clone(),
+                strangers: left_running(found.leftovers),
+                unresolved: found.unresolved,
+                unread: self.unread.clone(),
+                activity: activity(rig),
+            },
+        })
+    }
+
+    /// Each Claude Code conversation of `ledger` read on, at `at`, from where its record was
+    /// last read: what its file holds past that.
+    fn read_records(&mut self, ledger: &Ledger, at: i64) {
+        let names = Names::of_ledger(ledger);
         let dropped = self
             .drop
-            .map(|span| dropped(&ledger, at, span))
+            .map(|span| dropped(ledger, at, span))
             .unwrap_or_default();
         for conversation in ledger
             .conversations
@@ -219,21 +242,18 @@ impl Watcher {
                 }
             }
         }
-        let (records, readings) = kept(&self.records);
-        Ok(Look {
-            at,
-            records,
-            readings,
-            ledger,
-            windows: Windows {
-                open,
-                exits: self.exits.clone(),
-                strangers: left_running(found.leftovers),
-                unresolved: found.unresolved,
-                unread: self.unread.clone(),
-                activity: activity(rig),
-            },
-        })
+    }
+
+    /// The records once the app has closed, its ledger read as `ledger`: each read once
+    /// more, as the ledger is, so that a row the daemon copied after the last look is held
+    /// to a record read past it (invariant 7's summary is exempted only by a record read
+    /// through its copy); and how far each was read, or why its reading failed.
+    pub fn records_after_close(
+        &mut self,
+        ledger: &Ledger,
+    ) -> (BTreeMap<i64, Record>, BTreeMap<i64, Reading>) {
+        self.read_records(ledger, jiff::Timestamp::now().as_millisecond());
+        kept(&self.records)
     }
 
     /// The processes the `open` windows show, their trees taken at `shown_at`, each
@@ -453,6 +473,21 @@ fn left_running(leftovers: Vec<Leftover>) -> Vec<Stranger> {
         .collect()
 }
 
+/// Every lane of `board` that reads a state: whose, and the state.
+fn lanes(board: &Value) -> Vec<Lane> {
+    board["lanes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|lane| {
+            Some(Lane {
+                handle: lane["participant"]["handle"].as_str()?.to_owned(),
+                state: lane["activity"]["state"].as_str()?.to_owned(),
+            })
+        })
+        .collect()
+}
+
 /// Every change of a window's state the daemon's trace says, oldest first.
 fn activity(rig: &Rig) -> Vec<Activity> {
     rig.events()
@@ -606,6 +641,52 @@ mod tests {
     use serde_json::json;
 
     use crate::long_run::look::ClosedBy;
+
+    #[test]
+    fn the_records_are_read_once_more_after_the_close_past_what_the_last_look_read() {
+        // Calliope's review of round b5: the last look read the chief's record through
+        // Claude Code's flagged summary under a uuid; a retry came under the same uuid after
+        // it, and the daemon copied it before the close. Read once more after the close, the
+        // record holds both lines, so the summary's uuid is no summary's, and it was read
+        // through the close.
+        use crate::long_run::ledger::Conversation;
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let ledger = Ledger {
+            conversations: vec![Conversation {
+                id: 7,
+                participant: 2,
+                harness: "claude-code".to_owned(),
+                session: Some("s-chief".to_owned()),
+                started_at: None,
+                ended_at: None,
+            }],
+            ..Ledger::default()
+        };
+        let mut watcher = Watcher::new(PathBuf::from("/nowhere"), 1);
+        watcher.records.insert(
+            7,
+            Grown {
+                file: Some(fixtures.join("record-summary-read.jsonl")),
+                ..Grown::default()
+            },
+        );
+        watcher.read_records(&ledger, 0);
+        let (records, _) = kept(&watcher.records);
+        assert!(records[&7].is_summary("u-b"), "the last look's reading");
+        // The file as the close left it: the same line, and the retry after it.
+        watcher.records.get_mut(&7).unwrap().file =
+            Some(fixtures.join("record-summary-retried.jsonl"));
+        let closed = jiff::Timestamp::now().as_millisecond();
+        let (records, readings) = watcher.records_after_close(&ledger);
+        assert!(!records[&7].is_summary("u-b"), "read past the retry");
+        assert!(
+            readings[&7]
+                .through
+                .is_some_and(|through| through >= closed),
+            "{:?}",
+            readings[&7]
+        );
+    }
 
     fn sleeping() -> Spawned {
         Run::new("sleep")

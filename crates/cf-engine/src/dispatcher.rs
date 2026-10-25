@@ -40,8 +40,7 @@ use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 use crate::background::quote;
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
-use crate::resume::Coming;
-use crate::resume::ResumeState;
+use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
 use crate::scheduler::{News, SchedulerState};
 use crate::seams::{EngineError, Seams};
@@ -88,6 +87,10 @@ pub struct Dispatcher {
     /// The records of participants forgotten while their window was still
     /// open, until it exits.
     leaving: RefCell<Vec<Rc<Record>>>,
+    /// The last exit of each participant forgotten since, and whether the host proved its
+    /// program gone: a session the human deleted, brought back for a follow-up, opens
+    /// on its conversation by that word (`ownership`), in a record of its own.
+    left_exits: RefCell<HashMap<i64, (Pane, Option<bool>)>>,
     listeners: RefCell<Vec<Rc<dyn Fn()>>>,
     transcript_listeners: RefCell<Vec<Rc<dyn Fn()>>>,
     /// What the windows keep across records (`windows`).
@@ -96,6 +99,8 @@ pub struct Dispatcher {
     pub(crate) scheduler: SchedulerState,
     /// What the bursts of stalls under way keep (`stalls`).
     pub(crate) stalls: StallsState,
+    /// The Closes under way, which a Resume waits for (`resume`).
+    pub(crate) closings: Closings,
     /// What the human's Resume waits for after a start (`resume`).
     pub(crate) resumes: ResumeState,
     /// What the questions of windows about trusting their folder were said of (`trust`).
@@ -108,11 +113,13 @@ impl Dispatcher {
             seams,
             records: RefCell::new(HashMap::new()),
             leaving: RefCell::new(Vec::new()),
+            left_exits: RefCell::new(HashMap::new()),
             listeners: RefCell::new(Vec::new()),
             transcript_listeners: RefCell::new(Vec::new()),
             windows: WindowsState::default(),
             scheduler: SchedulerState::default(),
             stalls: StallsState::default(),
+            closings: Closings::default(),
             resumes: ResumeState::default(),
             trust: TrustState::default(),
         })
@@ -222,12 +229,17 @@ impl Dispatcher {
         self: &Rc<Self>,
         project: i64,
     ) -> Result<Option<ProjectView>, EngineError> {
+        // The Close as a whole, past its windows' closes: its wake-up withdrawn and
+        // its answer given before a Resume opens the project again.
+        let _closing = self.closings.begin(project);
         let suspended = self
             .seams
             .ledger
             .borrow_mut()
             .set_project_state(project, "suspended")?;
-        let kept = self.close_windows(&suspended.participants, None).await?;
+        let kept = self
+            .close_windows(project, &suspended.participants, None)
+            .await?;
         self.withdraw_wake_up(project)?;
         self.changed();
         if !kept.is_empty() {
@@ -250,15 +262,30 @@ impl Dispatcher {
     /// over: the handles whose windows would not close. What closes is the
     /// window of the record waited on, forgotten meanwhile or not. The tasks
     /// the windows were working on are told to their requesters together, with
-    /// `because` after the word that each window closed where there is one.
+    /// `because` after the word that each window closed where there is one. Each
+    /// window's close is part of `project`'s Close, as a Resume waits for
+    /// ([`Closings`]), from before any of them waits until it is over, though the
+    /// first that fails answers this.
     async fn close_windows(
         self: &Rc<Self>,
+        project: i64,
         participants: &[ParticipantView],
         because: Option<&str>,
     ) -> Result<Vec<String>, EngineError> {
         let _burst = self.stalls.begin_burst();
-        let mut closing = Vec::new();
+        // A box the engine emptied counts as empty no more: what the human types into
+        // a window the close could not close goes unseen until the Resume, and an
+        // interrupt of ours may put a prompt back there. The human's Close and the
+        // chief's own exit alike (Calliope's reviews of 2026-10-21, rounds 13 and 14).
         for participant in participants {
+            self.record_of(participant.id).delivery.borrow_mut().emptied = None;
+        }
+        let parts: Vec<Closing> = participants
+            .iter()
+            .map(|_| self.closings.begin(project))
+            .collect();
+        let mut closing = Vec::new();
+        for (participant, part) in participants.iter().zip(parts) {
             let record = self.record_of(participant.id);
             let (this, held, handle) = (
                 Rc::clone(self),
@@ -267,6 +294,7 @@ impl Dispatcher {
             );
             let because = because.map(str::to_owned);
             let work = async move {
+                let _part = part;
                 let pane = held.window.borrow().pane.clone();
                 let went = match pane {
                     None => true,
@@ -293,6 +321,10 @@ impl Dispatcher {
             let Some(record) = self.records.borrow_mut().remove(id) else {
                 continue;
             };
+            let last = record.window.borrow().last_exit.clone();
+            if let Some(last) = last {
+                self.left_exits.borrow_mut().insert(*id, last);
+            }
             self.leaving.borrow_mut().push(Rc::clone(&record));
             leaving.push(record);
         }
@@ -695,6 +727,8 @@ impl Dispatcher {
         // that exited: the role it was never told.
         let owed = self.owed(&record)?;
         record.delivery.borrow_mut().prelude = None;
+        // The task the window was given, whose requester hears what its close ended.
+        let owner = record.window.borrow().owner;
         self.closed(&record);
         // No door survives its window: what one claimed and none acknowledged is the ledger's again.
         self.seams
@@ -709,6 +743,10 @@ impl Dispatcher {
             leaving.len() != before
         };
         if was_leaving {
+            let last = record.window.borrow().last_exit.clone();
+            if let Some(last) = last {
+                self.left_exits.borrow_mut().insert(record.id, last);
+            }
             return Ok(());
         }
         let Some(project) = self.project_of(record.id)? else {
@@ -746,7 +784,7 @@ impl Dispatcher {
                 self.settle_gone(delivering, move |delivering| {
                     // A chief's first message (a handoff, most often) waits for its next window.
                     if delivering.chief {
-                        this.give_back(delivering, &told)
+                        this.give_back(delivering.message, &told)
                     } else {
                         let retry = !delivering.launch;
                         this.settle_failure(delivering, &told, retry)
@@ -815,7 +853,7 @@ impl Dispatcher {
                     "with the project when @{}'s window closed",
                     participant.handle
                 );
-                self.close_windows(&others, Some(&shown.after(&with)))
+                self.close_windows(project.id, &others, Some(&shown.after(&with)))
                     .await?;
             }
         } else {
@@ -835,6 +873,10 @@ impl Dispatcher {
                 } else {
                     format!(" with background work still running: {}", quote(left))
                 };
+                // A window the engine closed itself: in a suspended project it closed
+                // with the project (the human's Close, or the chief's window ending),
+                // and the ledger marks the pause for the human's Resume to end. One
+                // that closed by itself stays paused.
                 let (own, with) = {
                     let window = record.window.borrow();
                     (window.own_exit, window.closed_with.clone())
@@ -849,9 +891,18 @@ impl Dispatcher {
                 } else {
                     shown.after_with(&closed, &besides)
                 };
-                self.stall(&project, &thread.task, &because)?;
+                self.stall(&project, &thread.task, &because, own)?;
+                // Told while the engine's kill waits for its answer, which decides
+                // whether this exit was the kill's (`close_own`).
+                if let Some(killing) = record.window.borrow_mut().killing.as_mut() {
+                    killing.paused = Some((project.id, thread.task.number));
+                }
             } else {
-                self.tell_left_running(&project, &participant, left)?;
+                let given = match owner {
+                    Some(number) => self.seams.ledger.borrow().task(project.id, number)?,
+                    None => None,
+                };
+                self.tell_left_running(&project, given.as_ref(), left)?;
             }
         }
         self.changed();
@@ -865,6 +916,11 @@ impl Dispatcher {
         let Some(gone) = shown.gone() else {
             return;
         };
+        for (last, said) in self.left_exits.borrow_mut().values_mut() {
+            if last == pane {
+                *said = Some(gone);
+            }
+        }
         let records = self.records.borrow();
         for record in records.values() {
             let mut window = record.window.borrow_mut();
@@ -946,7 +1002,7 @@ impl Dispatcher {
             .active_task(participant.id, false)?;
         if let Some(thread) = task {
             let because = format!("@{}'s window is gone", participant.handle);
-            self.stall(project, &thread.task, &because)?;
+            self.stall(project, &thread.task, &because, false)?;
             self.changed();
         }
         Ok(())
@@ -1067,14 +1123,12 @@ impl Dispatcher {
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
             if self.cut_short(&observed) {
                 self.go_on(project, participant)?;
-            } else if let Some(task) = self.collect(project, participant, &observed)? {
-                // Its answer is its result at once, whatever the turn left running.
-                // What it left is ended, whoever gave the task told and the window
-                // closed if it is free, as work of the window's own apart from this
-                // pass: the grace the host gives what it ends is no other window's wait.
-                self.end_work_apart(project, record, task, observed.agents_pending())
-                    .await;
-                return Ok(());
+            } else {
+                // Its answer is its result, recorded now, unless its harness says the turn
+                // left work running that wakes its agent: then the task goes on. Nothing the
+                // turn left is ended; the window closes below if it is free (`turn_end`).
+                let watching = self.watch_monitors(participant, record, &observed).await;
+                self.collect(project, participant, record, &observed, watching)?;
             }
             if self.close_if_free(record).await? {
                 return Ok(());
@@ -1089,7 +1143,12 @@ impl Dispatcher {
                 .await_switch(project, participant, record, &observed, idle)
                 .await;
         }
-        if idle {
+        // A closed project's window that its Close could not close is given nothing
+        // until the Resume, as no closed project is: what waits for it is the Resume's
+        // to settle first (Sol's review of 2026-10-16: the note that the work was
+        // paused went into the chief's window and reached it after the Resume had
+        // the work at work again).
+        if idle && project.state == "open" {
             // A chief at rest may be due a wake-up: queued here, it is the next
             // message of its queue, delivered by the rules of every message.
             if participant.role == "chief" {
@@ -1097,6 +1156,12 @@ impl Dispatcher {
             }
             let next = self.next_in_line(record)?;
             if let Some(next) = next {
+                // Another task's message goes into a window of its own (`ownership`).
+                if let Some(owner) = self.barred(participant, record, &next) {
+                    return self
+                        .keep_apart(project, participant, record, &next, owner)
+                        .await;
+                }
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
                 self.act(record, async move { this.deliver(&held, next).await })
                     .await;
@@ -1133,7 +1198,8 @@ impl Dispatcher {
             .borrow()
             .as_ref()
             .map(|pending| pending.to.clone());
-        if let Some(to) = pending {
+        // A closed project's switch waits for the Resume, as `await_switch`'s does.
+        if let Some(to) = pending.filter(|_| project.state == "open") {
             return self.perform_switch(project, participant, record, to).await;
         }
         let until = owner.out_until.clone().unwrap_or_default();
@@ -1320,8 +1386,20 @@ impl Dispatcher {
             else {
                 return Ok(());
             };
+            // A window the Resume brings back opens only for work still at work once
+            // its cut was read: a stop asked of it meanwhile (a pause, a cancel, a
+            // release or an end of its task) leaves it closed, and its task with the
+            // chief (Astra's review of 2026-10-16, round 4). What moves after is the
+            // launch's: the move withdraws the continuation (the ledger's), and the
+            // launch watches the stops its window pays.
             let first = match &coming {
-                Some(coming) => this.cut_note(&project, &who, coming).await?,
+                Some(coming) => {
+                    let note = this.cut_note(&project, &who, coming).await?;
+                    if !this.still_coming(&who, coming)? {
+                        return Ok(());
+                    }
+                    note
+                }
                 None => None,
             };
             let (launching, at) = (Rc::clone(&this), Rc::clone(&held));
@@ -1346,7 +1424,12 @@ impl Dispatcher {
             self.records
                 .borrow_mut()
                 .entry(participant)
-                .or_insert_with(|| Record::new(participant)),
+                .or_insert_with(|| {
+                    let record = Record::new(participant);
+                    record.window.borrow_mut().last_exit =
+                        self.left_exits.borrow_mut().remove(&participant);
+                    record
+                }),
         )
     }
 

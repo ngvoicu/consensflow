@@ -12,7 +12,7 @@ use std::rc::{Rc, Weak};
 use std::task::{Context, Poll};
 
 use super::{polling, Later};
-use crate::contract::Work;
+use crate::contract::{PaneHost, Work, NOT_ADMITTED};
 use crate::seams::loopback::{BodyFailed, Loopback, Method, Reply, Request, FETCH_FAILED};
 
 /// What a scripted peer answers a request with.
@@ -53,13 +53,18 @@ struct Held<T> {
 
 /// A peer that answers each request with the next answer scripted for its
 /// route. A request with no answer left gets no head, as Node's scripted
-/// `fetch` threw `fetch failed`.
+/// `fetch` threw `fetch failed`. A request is written, and kept, once its
+/// connection is up: at once, or when the test lets a connection held for its
+/// route be made.
 #[derive(Default)]
 pub struct ScriptedLoopback {
     answers: RefCell<HashMap<String, VecDeque<Served>>>,
     asked: RefCell<Vec<Request>>,
     heads: Rc<RefCell<VecDeque<Held<Served>>>>,
     bodies: HeldBodies,
+    /// How many of the next connections to each route are held.
+    to_hold: RefCell<HashMap<String, usize>>,
+    connecting: Rc<RefCell<VecDeque<Held<()>>>>,
 }
 
 impl ScriptedLoopback {
@@ -100,18 +105,97 @@ impl ScriptedLoopback {
         release(&self.bodies, route, body)
     }
 
-    /// The routes `work` waits on, a head or a body held, in the order
-    /// asked.
+    /// Holds the connection of the next request to `route` until the test lets
+    /// it be made ([`ScriptedLoopback::connect`]): nothing of the request is
+    /// written before.
+    pub fn hold_connection(&self, route: &str) {
+        *self
+            .to_hold
+            .borrow_mut()
+            .entry(route.to_owned())
+            .or_default() += 1;
+    }
+
+    /// Makes the connection held longest for `route`: whether one was.
+    pub fn connect(&self, route: &str) -> bool {
+        release(&self.connecting, route, ())
+    }
+
+    /// The routes `work` waits on, a connection, a head or a body held, in the
+    /// order asked.
     pub fn waits(&self, work: usize) -> Vec<String> {
+        let connecting = self.connecting.borrow();
         let heads = self.heads.borrow();
         let bodies = self.bodies.borrow();
-        heads
+        connecting
             .iter()
             .map(|held| (held.work, &held.route))
+            .chain(heads.iter().map(|held| (held.work, &held.route)))
             .chain(bodies.iter().map(|held| (held.work, &held.route)))
             .filter(|(owner, _)| *owner == Some(work))
             .map(|(_, route)| route.clone())
             .collect()
+    }
+
+    /// Sends `request` once its connection is up, if `host`, where there is one,
+    /// admits it then.
+    fn exchange<'a>(
+        &'a self,
+        request: Request,
+        host: Option<&'a dyn PaneHost>,
+    ) -> Work<'a, Result<Box<dyn Reply>, String>> {
+        let route = route(&request);
+        let held = match self.to_hold.borrow_mut().get_mut(&route) {
+            Some(left) if *left > 0 => {
+                *left -= 1;
+                true
+            }
+            _ => false,
+        };
+        if !held {
+            return self.write(request, host);
+        }
+        let connecting = hold(&self.connecting, &route);
+        Box::pin(async move {
+            connecting.await;
+            self.write(request, host).await
+        })
+    }
+
+    /// `request` written over its connection, now up, and answered as its route
+    /// is scripted; nothing written if `host` does not admit it.
+    fn write<'a>(
+        &'a self,
+        request: Request,
+        host: Option<&'a dyn PaneHost>,
+    ) -> Work<'a, Result<Box<dyn Reply>, String>> {
+        if host.is_some_and(|host| !host.admits()) {
+            return Box::pin(async { Err(NOT_ADMITTED.to_owned()) });
+        }
+        let route = route(&request);
+        self.asked.borrow_mut().push(request);
+        let next = self
+            .answers
+            .borrow_mut()
+            .get_mut(&route)
+            .and_then(VecDeque::pop_front);
+        let bodies = Rc::clone(&self.bodies);
+        let answer = match next {
+            Some(Served::Held) => Box::pin(hold(&self.heads, &route)) as Work<'_, Served>,
+            Some(served) => Box::pin(async move { served }),
+            None => Box::pin(async { Served::NoHead }),
+        };
+        Box::pin(async move {
+            match answer.await {
+                Served::Head { status, body } => Ok(Box::new(ScriptedReply {
+                    route,
+                    status,
+                    body: Some(body),
+                    bodies,
+                }) as Box<dyn Reply>),
+                Served::NoHead | Served::Held => Err(FETCH_FAILED.to_owned()),
+            }
+        })
     }
 }
 
@@ -182,30 +266,15 @@ fn hold<T>(held: &Rc<RefCell<VecDeque<Held<T>>>>, route: &str) -> Slot<T> {
 
 impl Loopback for ScriptedLoopback {
     fn send(&self, request: Request) -> Work<'_, Result<Box<dyn Reply>, String>> {
-        let route = route(&request);
-        self.asked.borrow_mut().push(request);
-        let next = self
-            .answers
-            .borrow_mut()
-            .get_mut(&route)
-            .and_then(VecDeque::pop_front);
-        let bodies = Rc::clone(&self.bodies);
-        let answer = match next {
-            Some(Served::Held) => Box::pin(hold(&self.heads, &route)) as Work<'_, Served>,
-            Some(served) => Box::pin(async move { served }),
-            None => Box::pin(async { Served::NoHead }),
-        };
-        Box::pin(async move {
-            match answer.await {
-                Served::Head { status, body } => Ok(Box::new(ScriptedReply {
-                    route,
-                    status,
-                    body: Some(body),
-                    bodies,
-                }) as Box<dyn Reply>),
-                Served::NoHead | Served::Held => Err(FETCH_FAILED.to_owned()),
-            }
-        })
+        self.exchange(request, None)
+    }
+
+    fn hand_over<'a>(
+        &'a self,
+        request: Request,
+        host: &'a dyn PaneHost,
+    ) -> Work<'a, Result<Box<dyn Reply>, String>> {
+        self.exchange(request, Some(host))
     }
 }
 

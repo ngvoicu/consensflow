@@ -198,6 +198,31 @@ fn a_promotion_dry_run_makes_the_commit_and_pushes_and_tags_nothing() {
 }
 
 #[test]
+fn a_gh_that_fails_stops_a_promotion_before_any_push_in_the_dry_run_too() {
+    for dry_run in [true, false] {
+        let (world, mut fake) = released();
+        fake.gh_fails = true;
+        match promoted(&world, &mut fake, ALPHA, dry_run).0 {
+            Err(Error::Program { command, code, .. }) => {
+                assert!(command.starts_with("gh run list "), "{command}");
+                assert_eq!(code, 4);
+            }
+            other => panic!("not gh's error, dry run {dry_run}: {other:?}"),
+        }
+        assert!(
+            fake.when("git push").is_none() && fake.when("git branch").is_none(),
+            "{:#?}",
+            fake.lines()
+        );
+        for repository in [&world.root, &world.origin, &world.upstream] {
+            assert!(!has_branch(repository));
+            assert_eq!(World::tagged(repository, &format!("v{PLAIN}")), None);
+        }
+        no_tree_left(&world);
+    }
+}
+
+#[test]
 fn a_promotion_asks_nothing_of_the_checkouts_own_branch_or_changes() {
     // It writes no main and reads none: a checkout elsewhere, with changes, promotes the same.
     let (world, mut fake) = released();
@@ -310,11 +335,12 @@ fn a_version_already_released_is_refused() {
 }
 
 /// What a refusal says of the branch a promotion left: where it is, at which
-/// commit, and how to start over or finish.
-fn leftover(places: &str, at: &str, undo: &str) -> String {
+/// commit, and how to start over, or finish when its parent is the alpha's.
+fn leftover(places: &str, at: &str, alpha_commit: &str, undo: &str) -> String {
     format!(
         "{BRANCH} is {places}, at {}: a promotion stopped before its tag. Start over: `{undo}`, and run again; \
-         or finish it by hand: `git tag -a v{PLAIN} -F <notes> {BRANCH} && git push origin v{PLAIN} && git push upstream v{PLAIN}`, \
+         or, if its parent is {alpha_commit}, finish it by hand: \
+         `git tag -a v{PLAIN} -F <notes> {at} && git push origin v{PLAIN} && git push upstream v{PLAIN}`, \
          then watch its Release run and read both feeds",
         &at[..8]
     )
@@ -344,6 +370,7 @@ fn a_branch_a_promotion_left_is_refused_with_how_to_start_over_or_finish() {
     ] {
         let (world, mut fake) = moved_on();
         let at = world.head();
+        let alpha_commit = world.commit_of(&format!("v{ALPHA}"));
         for remote in remotes {
             git(
                 &world.root,
@@ -354,8 +381,21 @@ fn a_branch_a_promotion_left_is_refused_with_how_to_start_over_or_finish() {
             git(&world.root, &["branch", BRANCH, "main"]);
         }
         let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
-        assert_eq!(said, leftover(places, &at, &undo), "{places}");
+        assert_eq!(
+            said,
+            leftover(places, &at, &alpha_commit, &undo),
+            "{places}"
+        );
         assert!(fake.when("git worktree add").is_none());
+        // What the words tag is the branch's commit, wherever the branch is: in
+        // the checkout, or on a remote alone.
+        let tagged = said
+            .split("-F <notes> ")
+            .nth(1)
+            .and_then(|rest| rest.split(' ').next())
+            .unwrap();
+        git(&world.root, &["tag", "-a", "v3.0.6", "-m", "notes", tagged]);
+        assert_eq!(world.commit_of("v3.0.6"), at, "{places}");
     }
 }
 
@@ -376,12 +416,19 @@ fn a_branch_upstream_refuses_says_what_to_delete_and_once_deleted_a_run_again_pr
     // Run again: the half pushed branch is refused with the same deletion.
     fake.refuses_pushes = None;
     let at = git(&world.root, &["rev-parse", BRANCH]);
+    // A version commit the promotion made: its parent is the alpha's, so it may be finished by hand.
+    let alpha_commit = world.commit_of(&format!("v{ALPHA}"));
+    assert_eq!(
+        git(&world.root, &["rev-parse", &format!("{at}^")]),
+        alpha_commit
+    );
     let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
     assert_eq!(
         said,
         leftover(
             "in the checkout and on origin",
             &at,
+            &alpha_commit,
             &format!("git push origin --delete {BRANCH} && git branch -D {BRANCH}")
         )
     );
@@ -432,7 +479,8 @@ fn a_tag_upstream_refuses_is_named_on_the_run_again_with_how_to_push_it() {
             &format!("git tag -d {tag} && git push origin --delete {tag}")
         )
     );
-    // Pushed as it says, its run starts, and the next run says to watch it.
+    // Pushed by hand as it says (past GitHub's script, so no run is started),
+    // the next run finds it on upstream, on the branch's commit.
     let at = git(&world.root, &["rev-parse", BRANCH]);
     git(&world.root, &["push", "-q", "upstream", &tag]);
     let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
