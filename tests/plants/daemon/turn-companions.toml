@@ -16,6 +16,12 @@
 # (the stand-in Claude makes attachments of a paste as Claude Code does, and keeps a launch's first
 # message as it was).
 #
+# The merge with alpha.3 (T-515) added two cases where these rules meet main's: turn-end's result
+# (`paste_shapes.rs` of the dispatcher's tests: a worker resumed with a picture's path ends its turn
+# with its answer for the result, the harness's own items beside it none of it) and the stand-in's
+# notifications (`tests::a_notification_that_names_a_picture_...` of the `fake-agent` bin: a job's
+# notification is no paste, so no picture is attached from it).
+#
 # Every name holds `turn companion`, so `npm run plants:daemon -- "turn companion"` runs them all.
 
 [run]
@@ -28,6 +34,7 @@ engine-lib-delivery-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--
 engine-text-viewer = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "viewer::types_nothing_for_what_claude_put_ahead"]
 harness-ancestry = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::ancestry::"]
 ledger-healing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "whole_history", "healing::"]
+standin-notification = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "a_notification_that_names_a_picture"]
 rig-companions = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed::"]
 
 [[plant]]
@@ -193,8 +200,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent.rs"
-find = '''    let written = if first && window.seeded {'''
-replace = '''    let written = if first && window.seeded && false {'''
+find = '''    record_message(records, pid, first && window.seeded, text).map_err(failed)?;'''
+replace = '''    record_message(records, pid, first && window.seeded && false, text).map_err(failed)?;'''
 
 # Round 3 (T-296, Calliope's review of both rounds, T-289): the history viewer's page drew what
 # Claude put ahead of a delivery as the human's typing (P3-1); a copy of an item made before the
@@ -277,3 +284,46 @@ find = '''        Some(head) => head.strip_prefix("\n\n").map_or(head, unwrapped
 replace = '''        Some(head) => head
             .strip_prefix("\n\n")
             .map_or(head, |rest| if rest.starts_with('<') { unwrapped(rest) } else { "" }),'''
+
+[[plant]]
+name = "turn companion: the answer to the task takes an item of the harness's own for a message to the member"
+meant = "a_worker_resumed_with_words_that_name_a_picture_ends_its_turn_with_its_answer_as_the_result_the_sources_the_harness_wrote_beside_it_being_no_part_of_it"
+runs = ["engine-dispatcher-paste-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            Role::Tool if !of_the_role => final_run.clear(),'''
+replace = '''            Role::Tool if !of_the_role => final_run.clear(),
+            Role::Custom if !of_the_role => {
+                final_run.clear();
+                last = None;
+            }'''
+
+[[plant]]
+name = "turn companion: the stand-in makes attachments of the paths in a job's notification"
+meant = "a_notification_that_names_a_picture_is_written_as_a_notification_and_no_paste_attaches_it"
+runs = ["standin-notification"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = '''    if steps::is_notification(text) {
+        return steps::write_notification(records, pid, text);
+    }
+    let written = if launched {'''
+replace = '''    let written = if launched {'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = '''    for record in written {
+        records.append(pid, record)?;
+    }
+    Ok(())
+}'''
+replace = '''    for record in written {
+        records.append(pid, record)?;
+    }
+    if steps::is_notification(text) {
+        return steps::write_notification(records, pid, text);
+    }
+    Ok(())
+}'''

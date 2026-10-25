@@ -487,6 +487,27 @@ fn user(content: &str, fields: serde_json::Value) -> serde_json::Value {
     record
 }
 
+/// The records a message `text` is written as. What wakes the window when a job it
+/// started in the background ends is queued by Claude Code and taken as the turn it
+/// begins, as its own: no paste, so no path in it is made an attachment. Any other message
+/// is as Claude's input box keeps it: a paste that names images is attached to it, with a
+/// record of their paths after it, unless it is the first message of a launch
+/// (`launched`: no paste, Claude Code 2.1.308 keeps its paths as they are).
+fn record_message(records: &mut Records, pid: u32, launched: bool, text: &str) -> io::Result<()> {
+    if steps::is_notification(text) {
+        return steps::write_notification(records, pid, text);
+    }
+    let written = if launched {
+        vec![images::unattached(text)]
+    } else {
+        images::user_records(text, || records.next_image())
+    };
+    for record in written {
+        records.append(pid, record)?;
+    }
+    Ok(())
+}
+
 /// A turn: the window is busy (not in the hooks of its prompt, where Claude's
 /// status reads idle), records the message, answers it, and is idle, or busy
 /// still while the background agents it started run, as Claude Code is.
@@ -500,23 +521,7 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
     if hooks.is_none() {
         records.status(pid, "busy").map_err(failed)?;
     }
-    if steps::is_notification(text) {
-        // What wakes the window when a job it started in the background ends: Claude Code
-        // queues it and takes it as the turn it begins, as its own.
-        steps::write_notification(records, pid, text).map_err(failed)?;
-    } else {
-        // The message as Claude's input box keeps it: a paste that names images is
-        // attached to it, with a record of their paths after it. The first message of a
-        // launch is no paste (Claude Code 2.1.308 keeps its paths as they are).
-        let written = if first && window.seeded {
-            vec![images::unattached(text)]
-        } else {
-            images::user_records(text, || records.next_image())
-        };
-        for record in written {
-            records.append(pid, record).map_err(failed)?;
-        }
-    }
+    record_message(records, pid, first && window.seeded, text).map_err(failed)?;
     // The harness starts its servers as it takes the first message, which now shows.
     if first {
         window.server.as_the_first_message_shows(&window.jobs);
@@ -640,6 +645,47 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The records `text` is written as, in a conversation of its own.
+    fn recorded(text: &str, launched: bool) -> Vec<serde_json::Value> {
+        let config = tempfile::tempdir().unwrap();
+        let mut records = Records::new(config.path(), "s", 7).unwrap();
+        record_message(&mut records, 7, launched, text).unwrap();
+        written_from(config.path(), 0)
+    }
+
+    #[test]
+    fn a_notification_that_names_a_picture_is_written_as_a_notification_and_no_paste_attaches_it() {
+        // Alpha.3 merged the notification's records (turn-end) with the images a paste is
+        // made into (T-215): a notification is a turn Claude Code begins by itself, so
+        // the path in its report is no attachment, where the same words pasted are one.
+        let folder = tempfile::tempdir().unwrap();
+        let picture = folder.path().join("hero.png");
+        std::fs::write(&picture, cf_e2e::png::SMALL).unwrap();
+        let report = format!("Saved:\n{}\nDone", picture.display());
+        let notified = steps::notification("b1", &report);
+        let written = recorded(&notified, false);
+        assert_eq!(
+            written
+                .iter()
+                .map(|record| record["operation"].as_str().or(record["type"].as_str()))
+                .collect::<Vec<_>>(),
+            [Some("enqueue"), Some("user")]
+        );
+        assert_eq!(written[1]["promptSource"], "system");
+        assert_eq!(written[1]["message"]["content"], notified.as_str());
+        assert!(
+            !written
+                .iter()
+                .any(|record| record.to_string().contains("[Image")),
+            "{written:?}"
+        );
+        // The same words pasted are attached, so that the notification's is no accident
+        // of there being no picture.
+        let pasted = recorded(&format!("{report}\nlook"), false);
+        assert_eq!(pasted.len(), 2, "{pasted:?}");
+        assert!(pasted[0].to_string().contains("[Image #1]"), "{pasted:?}");
+    }
 
     #[test]
     fn a_message_stays_in_the_hooks_of_its_prompt_as_long_as_its_line_says() {

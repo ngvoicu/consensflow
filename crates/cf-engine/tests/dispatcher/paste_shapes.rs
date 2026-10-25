@@ -219,3 +219,77 @@ fn a_start_confirms_the_first_message_a_fresh_window_was_given_behind_its_brief_
         "the record shows it behind the brief"
     );
 }
+
+/// Words that resume a task and name a picture by its path, on a line of their own.
+const WITH_A_PICTURE: &str = "Carry on\n/work/images/desk.png";
+
+#[test]
+fn a_worker_resumed_with_words_that_name_a_picture_ends_its_turn_with_its_answer_as_the_result_the_sources_the_harness_wrote_beside_it_being_no_part_of_it(
+) {
+    // Turn-end (3.0.6-alpha.2): the result is the final answer to the task's latest
+    // message once the turn ends. Here that message is behind Claude Code's placeholders,
+    // and the harness wrote its own item after it (the sources of the picture) and
+    // another in the middle of the turn and after the answer (a tool's `turnCompanion`):
+    // none of them is a message to the worker, so none cuts the answer off, and none is
+    // in it.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    context.adapter.attaches_images.set(true);
+    context.adapter.busy_until_interrupted("zeus");
+    context.pause_task(project.id, 1);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.resume_task(project.id, 1, WITH_A_PICTURE);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    let items = context.adapter.agent("zeus").items;
+    let roles: Vec<Role> = items.iter().map(|item| item.role).collect();
+    let at = items.len() - 2;
+    assert!(
+        items[at].text.starts_with("[Image #1][ConsensFlow m-"),
+        "{items:?}"
+    );
+    assert_eq!((roles[at], roles[at + 1]), (Role::User, Role::Custom));
+
+    // The turn the words began: a step toward the answer that stopped for a tool, the
+    // tool's output, the harness's item for the picture the tool made, and the answer.
+    let companion = |source: &str| {
+        context
+            .adapter
+            .item(Role::Custom, &format!("[Image: source: {source}]"))
+    };
+    let mut step = context.adapter.item(Role::Assistant, "Reading the grammar");
+    step.complete = false;
+    let steps = [
+        step,
+        context.adapter.item(Role::Tool, "output of a tool"),
+        companion("/work/images/made.png"),
+    ];
+    context
+        .adapter
+        .with("zeus", |agent| agent.items.extend(steps));
+    context.adapter.answer("zeus", "Parser, finished");
+    let after = companion("/work/images/last.png");
+    context
+        .adapter
+        .with("zeus", |agent| agent.items.push(after));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(context.task(project.id, 1).task.state, "done");
+    let results: Vec<String> = context
+        .inbox(chief)
+        .into_iter()
+        .filter(|message| message.kind == "result")
+        .map(|message| message.body)
+        .collect();
+    assert_eq!(results, ["Parser, finished"]);
+}
