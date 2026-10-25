@@ -82,11 +82,13 @@ impl Dispatcher {
         record: &Record,
         session: &str,
     ) -> Result<(), EngineError> {
-        self.seams.ledger.borrow_mut().follow_conversation(
+        let followed = self.seams.ledger.borrow_mut().follow_conversation(
             participant.id,
             participant.harness.as_deref().unwrap_or_default(),
             session,
         )?;
+        // Its program writes to that one now: its end is kept there (`ownership`).
+        record.window.borrow_mut().conversation = Some(followed.id);
         let window = record.window.borrow().window.clone();
         if let Some(window) = window {
             window.follow(session);

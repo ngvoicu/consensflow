@@ -194,11 +194,16 @@ pub(crate) struct WindowPart {
     /// The stop it ignored in every round, while it lasts.
     pub(crate) unstopped: Option<Unstopped>,
     pub(crate) activity: Activity,
-    /// The pane of the last window that ended, which the host's word on how it
-    /// ended may come after, once the engine's own close has settled the window
-    /// ([`Dispatcher::heard_exit`]). Whether its program is gone is kept on the
-    /// participant's conversation ([`Shown::gone`], `ownership`).
-    pub(crate) last_exit: Option<Pane>,
+    /// The conversation the window's program writes to, by its id: the one it opened
+    /// on, or the one the human switched it to since (`transcripts`). Whether that
+    /// program is gone is kept on it when the window ends ([`Shown::gone`],
+    /// `ownership`); none for a window opened on a conversation that was never written
+    /// down (its participant was forgotten as it opened).
+    pub(crate) conversation: Option<i64>,
+    /// The pane of the last window that ended and the conversation it wrote to,
+    /// which the host's word on how it ended may come after, once the engine's own
+    /// close has settled the window ([`Dispatcher::heard_exit`]).
+    pub(crate) last_exit: Option<(Pane, Option<i64>)>,
     /// The task whose work the window holds, by its number (`ownership`): no other
     /// task's message goes into it.
     pub(crate) owner: Option<i64>,
@@ -235,6 +240,7 @@ impl Default for WindowPart {
             interrupted: None,
             unstopped: None,
             activity: Activity::of(ActivityState::Closed),
+            conversation: None,
             last_exit: None,
             owner: None,
             told_waiting: None,
@@ -357,6 +363,7 @@ impl Dispatcher {
             window.interrupted = None;
             window.unstopped = None;
             window.owner = None;
+            window.conversation = None;
             window.told_waiting = None;
             window.activity = Activity::of(ActivityState::Closed);
             window.trust = Trusting::Past;
@@ -562,24 +569,25 @@ impl Dispatcher {
             assign(&mut env, key, value);
         }
         assign(&mut env, "CONSENSFLOW_TOKEN", &token);
-        // The program of the window that opens will write to the conversation it goes
-        // on with: what was proven of the last one on it holds no more, kept so before
-        // anything of the new one runs, so that a restart while it is open does not
-        // take it for gone (`ownership`). A host that refuses the open ran nothing, and
-        // the proof is kept again; one whose answer never came may have.
-        let proven = match self
-            .seams
-            .ledger
-            .borrow()
-            .current_conversation(participant.id)?
-        {
-            Some(current) => self.seams.ledger.borrow().program_gone(current.id)?,
+        // The program of a window that opens on a conversation will write to it: what
+        // was proven of the last one on it holds no more, kept so before anything of
+        // the new one runs, so that a restart while it is open does not take it for
+        // gone (`ownership`). A host that refuses the open ran nothing, and the proof
+        // is kept again; one whose answer never came may have. A window on a new
+        // conversation leaves the one before as it was.
+        let resumed = resume.is_some() && planned.native_session == resume;
+        let resumed_on = planned
+            .conversation
+            .as_ref()
+            .filter(|_| resumed)
+            .map(|conversation| conversation.id);
+        let proven = match resumed_on {
+            Some(id) => self.seams.ledger.borrow().program_gone(id)?,
             None => false,
         };
-        self.seams
-            .ledger
-            .borrow_mut()
-            .set_program_gone(participant.id, false)?;
+        if let Some(id) = resumed_on {
+            self.seams.ledger.borrow_mut().set_program_gone(id, false)?;
+        }
         // The host watches a window's process before it answers the open, so
         // an exit can come first, even in the same read: the exit finds it here.
         record.window.borrow_mut().opening = Some(Opening {
@@ -605,11 +613,8 @@ impl Dispatcher {
         let pid = match opened {
             Ok(Opened::Open { pid }) => pid,
             Ok(Opened::Refused { error }) => {
-                if proven {
-                    self.seams
-                        .ledger
-                        .borrow_mut()
-                        .set_program_gone(participant.id, true)?;
+                if let Some(id) = resumed_on.filter(|_| proven) {
+                    self.seams.ledger.borrow_mut().set_program_gone(id, true)?;
                 }
                 return self.not_opened(
                     record,
@@ -642,6 +647,7 @@ impl Dispatcher {
                 part.pane = Some(pane.clone());
                 part.launch_id = Some(launch_id);
                 part.token = Some(token);
+                part.conversation = resumed_on;
             }
             // One that exited before its open was answered has gone already.
             if let Some(shown) = exited {
@@ -649,7 +655,6 @@ impl Dispatcher {
             }
             return Ok(());
         }
-        let resumed = resume.is_some() && planned.native_session == resume;
         let mut conversation_id = planned
             .conversation
             .as_ref()
@@ -689,6 +694,7 @@ impl Dispatcher {
             part.named = false;
             part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));
             part.owner = planned.owner;
+            part.conversation = conversation_id;
         }
         // The first message that goes in once the window is up, where there is one.
         let posted = delivering

@@ -7,7 +7,7 @@
 //! the one whose late word proved it gone. Node's dispatcher had none of it, so none of
 //! these is held to a Node trace.
 
-use cf_engine::testing::{Context, Restarted};
+use cf_engine::testing::{Context, Gate, Restarted};
 use cf_ledger::NewTask;
 
 use crate::fixtures::{closed, native_of, Tiers};
@@ -322,4 +322,203 @@ fn an_open_the_host_refused_keeps_the_proof_of_the_window_before() {
         .filter(|note| note.contains("in a new conversation"))
         .collect();
     assert_eq!(told, Vec::<String>::new());
+}
+
+/// The program gone of the conversation the participant `session` has now.
+fn current_proven(context: &Context, tiers: &Tiers<'_>, session: &str) -> (i64, bool) {
+    let current = context
+        .ledger
+        .borrow()
+        .current_conversation(tiers.id(session))
+        .unwrap()
+        .expect("a conversation now");
+    let gone = context.ledger.borrow().program_gone(current.id).unwrap();
+    (current.id, gone)
+}
+
+/// Calliope's P3-1 on 0181cd9a (T-573): the human deletes a session whose idle window
+/// the human kept open, and before that window's exit comes, a follow-up of another
+/// task brings the session back in a window of its own, on a new conversation. The
+/// first window's exit proves its own program gone, not that of the window open on the
+/// new conversation, which may still write to it when the daemon stops.
+#[test]
+fn the_exit_of_a_deleted_sessions_window_proves_nothing_of_the_window_that_brought_it_back() {
+    let context = Context::new();
+    context.host.exits_showing(Some(0), None, None);
+    let (tiers, session) = session_at_work(&context);
+    // The human keeps the window open; T-1 has its result and is accepted.
+    context.open_window(tiers.project.id, &session).unwrap();
+    context.adapter.answer(&session, "Recorded");
+    passes(&context, 2);
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(tiers.project.id, 1, "chief")
+        .unwrap();
+    let first = context.host.last(&session).unwrap().pane;
+    let (old, _) = current_proven(&context, &tiers, &session);
+    // The human deletes the session; its window's kill is held.
+    let kill = Gate::default();
+    *context.host.hold_kill.borrow_mut() = Some((first.generation, kill.clone()));
+    let ending = context.begin_end_session(tiers.project.id, &session);
+    context.settle();
+    // A follow-up of another task brings it back, in a new window on a new conversation.
+    follow_up(&context, &tiers, 1, "Write the docs");
+    passes(&context, 3);
+    let second = context.host.last(&session).unwrap().pane;
+    assert_ne!(second, first, "a window of its own");
+    assert_eq!(
+        resumed(&context),
+        serde_json::Value::Null,
+        "a new conversation"
+    );
+    let (new, _) = current_proven(&context, &tiers, &session);
+    assert_ne!(new, old);
+    // Then the first window's kill is taken, and its exit comes.
+    kill.open();
+    context.finish(ending).unwrap();
+    context.settle();
+    assert!(closed(&context, &first));
+    assert_eq!(
+        current_proven(&context, &tiers, &session),
+        (new, false),
+        "the window on it still runs"
+    );
+}
+
+/// Calliope's P3-2 on 0181cd9a (T-573): the host's word on a deleted session's window,
+/// which the engine's own close settled, comes after a follow-up brought the session
+/// back and before its window opens: the record made again carries the pane that word
+/// is for, and the follow-up goes on in the conversation.
+#[test]
+fn the_hosts_word_after_a_deleted_session_is_brought_back_and_before_its_window_opens_is_kept() {
+    let context = Context::new();
+    context.host.exits_showing(Some(0), None, None);
+    let (tiers, session) = session_at_work(&context);
+    let native = native_of(&context, tiers.id(&session)).expect("bound");
+    context.open_window(tiers.project.id, &session).unwrap();
+    context.adapter.answer(&session, "Recorded");
+    passes(&context, 2);
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(tiers.project.id, 1, "chief")
+        .unwrap();
+    let window = context.host.last(&session).unwrap().pane;
+    // The human's Close settles the window itself, the host's word held; the human
+    // deletes the session, and a follow-up brings it back while the project is closed.
+    context.host.hold_exits.set(true);
+    context.close_project(tiers.project.id).unwrap();
+    assert!(closed(&context, &window));
+    context.end_session(tiers.project.id, &session).unwrap();
+    follow_up(&context, &tiers, 1, "Write the docs");
+    passes(&context, 2);
+    assert!(tiers.participant(&session).is_some(), "back on the board");
+    assert_eq!(
+        context.host.last(&session).unwrap().pane,
+        window,
+        "no window yet"
+    );
+    // The word comes now, and then the human's Resume.
+    context.host.hold_exits.set(false);
+    let host = std::rc::Rc::clone(&context.host);
+    context.run(async move { host.exited(window).await });
+    context.resume_project(tiers.project.id).unwrap();
+    passes(&context, 3);
+    assert_eq!(tiers.task(2).task.state, "working");
+    assert_eq!(
+        resumed(&context),
+        serde_json::Value::String(native),
+        "T-1's conversation"
+    );
+    assert_eq!(told_new(&tiers, &session), Vec::<String>::new());
+}
+
+/// Calliope's sibling of P3-1 on 0181cd9a (T-573): a window that opens on a new
+/// conversation, whose session the human deletes while it opens, and which exits before
+/// its open is answered, wrote to no conversation the ledger holds. Its end proves
+/// nothing of the conversation before, whose last window's end said nothing.
+#[test]
+fn a_window_forgotten_as_it_opened_on_a_new_conversation_proves_nothing_of_the_one_before() {
+    let context = Context::new();
+    let (tiers, session) = session_at_work(&context);
+    // T-1's window closes with its result, and the host says nothing of how it ended.
+    context.adapter.answer(&session, "Recorded");
+    passes(&context, 2);
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(tiers.project.id, 1, "chief")
+        .unwrap();
+    let (old, before) = current_proven(&context, &tiers, &session);
+    assert!(!before, "no word on the window before");
+    // The harness holds nothing of the conversation: the human's Open starts a new one.
+    // Its open is held, and its window exits before the open is answered.
+    context.adapter.holds_nothing(&session);
+    let opening = context
+        .host
+        .open_holds
+        .hold_instead(|_| true, session.clone());
+    context.open_window(tiers.project.id, &session).unwrap();
+    context.settle();
+    assert_eq!(
+        resumed(&context),
+        serde_json::Value::Null,
+        "a new conversation"
+    );
+    let ending = context.begin_end_session(tiers.project.id, &session);
+    context.settle();
+    context.host.exits_showing(Some(0), None, None);
+    opening.open();
+    context.finish(ending).unwrap();
+    context.settle();
+    assert!(tiers.participant(&session).is_none(), "off the board");
+    assert!(
+        !context.ledger.borrow().program_gone(old).unwrap(),
+        "the window that ended never wrote to it"
+    );
+}
+
+/// A window the human switched to another conversation (/clear) writes to that one: its
+/// end proven is kept there, and the next task of its session goes on in it after a
+/// restart.
+#[test]
+fn the_end_of_a_window_the_human_switched_is_kept_on_the_conversation_it_switched_to() {
+    let context = Context::new();
+    context.host.exits_showing(Some(0), None, None);
+    let (tiers, session) = session_at_work(&context);
+    let (old, _) = current_proven(&context, &tiers, &session);
+    context.adapter.switch_to(&session, "native-cleared");
+    passes(&context, 1);
+    let (cleared, _) = current_proven(&context, &tiers, &session);
+    assert_ne!(cleared, old, "the conversation it shows");
+    // The chief calls T-1 off; the window stops, and closes with nothing in hand.
+    let window = context.host.last(&session).unwrap().pane;
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(tiers.project.id, 1, "chief")
+        .unwrap();
+    context.adapter.answer(&session, "Stopped");
+    passes(&context, 3);
+    assert!(closed(&context, &window));
+    assert_eq!(current_proven(&context, &tiers, &session), (cleared, true));
+
+    let after = restart(&context, &tiers);
+    context.create_task(
+        tiers.project.id,
+        NewTask {
+            from: "human".to_owned(),
+            to: Some(session.clone()),
+            body: "Write the docs".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    again(&after, 3);
+    assert_eq!(tiers.task(2).task.state, "working");
+    assert_eq!(
+        resumed(&context),
+        serde_json::Value::String("native-cleared".to_owned()),
+        "the conversation it switched to"
+    );
 }

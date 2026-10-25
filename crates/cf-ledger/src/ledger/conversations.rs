@@ -152,11 +152,15 @@ impl Ledger {
         conversations::program_gone(&self.store, conversation_id)
     }
 
-    /// Whether the program of a participant's window is gone, kept on its conversation
-    /// now: `true` as the host proves it, `false` before a window opens on it. It logs
-    /// no event.
-    pub fn set_program_gone(&mut self, participant_id: i64, gone: bool) -> Result<(), LedgerError> {
-        conversations::set_program_gone(&mut self.store, participant_id, gone)
+    /// Whether the program of the last window that ran on a conversation is gone:
+    /// `true` as the host proves it, `false` before a window opens on it. It logs no
+    /// event.
+    pub fn set_program_gone(
+        &mut self,
+        conversation_id: i64,
+        gone: bool,
+    ) -> Result<(), LedgerError> {
+        conversations::set_program_gone(&mut self.store, conversation_id, gone)
     }
 
     /// A participant's conversation now, if one has not ended.

@@ -299,19 +299,19 @@ pub(crate) fn program_gone(store: &Store, conversation_id: i64) -> Result<bool, 
         .ok_or_else(|| unknown_conversation(conversation_id))
 }
 
-/// Whether the program of a participant's window is gone, as the host proved it, kept
-/// on the participant's conversation now: `true` as the host proves it, `false` before
-/// a window opens on it. A participant with no conversation now has none to keep it on.
-/// It logs no event: no trace of Node's has one.
+/// Whether the program of the last window that ran on a conversation is gone, as the
+/// host proved it: `true` as the host proves it, `false` before a window opens on it.
+/// A conversation that is not there has nothing to keep it on. It logs no event: no
+/// trace of Node's has one.
 pub(crate) fn set_program_gone(
     store: &mut Store,
-    participant_id: i64,
+    conversation_id: i64,
     gone: bool,
 ) -> Result<(), LedgerError> {
     store.write(|store| {
         store.db.execute(
-            "UPDATE conversation SET program_gone = ? WHERE participant_id = ? AND ended_at IS NULL",
-            params![i64::from(gone), participant_id],
+            "UPDATE conversation SET program_gone = ? WHERE id = ?",
+            params![i64::from(gone), conversation_id],
         )?;
         Ok(())
     })

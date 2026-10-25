@@ -43,10 +43,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''
-                .set_program_gone(record.id, gone)?;'''
-replace = '''
-                .set_program_gone(record.id, gone && false)?;'''
+find = "            self.keep_proof(record.id, conversation, gone, Some(&record))?;"
+replace = "            self.keep_proof(record.id, conversation, gone && false, Some(&record))?;"
 
 [[plant]]
 name = "exit proof: a window's exit proven gone is not kept on its conversation"
@@ -55,10 +53,8 @@ runs = ["ep-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''
-                .set_program_gone(record.id, gone)?;'''
-replace = '''
-                .set_program_gone(record.id, gone && false)?;'''
+find = "            self.keep_proof(record.id, conversation, gone, Some(&record))?;"
+replace = "            self.keep_proof(record.id, conversation, gone && false, Some(&record))?;"
 
 [[plant]]
 name = "exit proof: a window whose program the host could not end is kept as proven gone"
@@ -67,12 +63,8 @@ runs = ["ep-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''
-        if let Some(gone) = shown.gone() {
-            self.seams'''
-replace = '''
-        if let Some(gone) = shown.gone().map(|_| true) {
-            self.seams'''
+find = "        if let (Some(gone), Some(conversation)) = (shown.gone(), conversation) {"
+replace = "        if let (Some(gone), Some(conversation)) = (shown.gone().map(|_| true), conversation) {"
 
 [[plant]]
 name = "exit proof: a window that opens on the conversation leaves the proof of the one before"
@@ -81,13 +73,8 @@ runs = ["ep-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''
-        self.seams
-            .ledger
-            .borrow_mut()
-            .set_program_gone(participant.id, false)?;
-'''
-replace = ""
+find = "            self.seams.ledger.borrow_mut().set_program_gone(id, false)?;"
+replace = "            let _ = id;"
 
 [[plant]]
 name = "exit proof: the host's late word on a closed window proves the one open since gone"
@@ -96,8 +83,8 @@ runs = ["ep-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "            if !windowed {"
-replace = "            if !windowed || true {"
+find = "        if !windowed {"
+replace = "        if !windowed || true {"
 
 [[plant]]
 name = "exit proof: the host's word on a window the engine closed itself is not kept"
@@ -106,8 +93,10 @@ runs = ["ep-engine-windows"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "                self.seams.ledger.borrow_mut().set_program_gone(id, gone)?;"
-replace = "                self.seams.ledger.borrow_mut().set_program_gone(id, false)?;"
+find = '''
+                .set_program_gone(conversation, gone)?;'''
+replace = '''
+                .set_program_gone(conversation, false)?;'''
 
 [[plant]]
 name = "exit proof: the host's late word on a deleted session's window is not kept"
@@ -116,8 +105,8 @@ runs = ["ep-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "            .filter(|(_, last)| *last == pane)\n"
-replace = "            .filter(|(_, last)| *last == pane && false)\n"
+find = "            .filter(|(_, (last, _))| last == pane)\n"
+replace = "            .filter(|(_, (last, _))| last == pane && false)\n"
 
 [[plant]]
 name = "exit proof: an open the host refused takes the proof of the window before with it"
@@ -126,8 +115,8 @@ runs = ["ep-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "                if proven {\n"
-replace = "                if proven && false {\n"
+find = "                if let Some(id) = resumed_on.filter(|_| proven) {"
+replace = "                if let Some(id) = resumed_on.filter(|_| proven && false) {"
 
 [[plant]]
 name = "exit proof: a window opened again is told the program before it is gone where it may run"
@@ -141,13 +130,13 @@ replace = "            None => false,\n        } || true;\n        let launch = 
 
 [[plant]]
 name = "exit proof: the proof is written on every conversation of the participant"
-meant = "the_proof_is_kept_on_the_participants_conversation_now_and_taken_back_before_a_window_opens"
+meant = "the_proof_is_kept_on_the_conversation_named_and_taken_back_before_a_window_opens_on_it"
 runs = ["ep-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations.rs"
-find = '"UPDATE conversation SET program_gone = ? WHERE participant_id = ? AND ended_at IS NULL",'
-replace = '"UPDATE conversation SET program_gone = ? WHERE participant_id = ?",'
+find = '"UPDATE conversation SET program_gone = ? WHERE id = ?",'
+replace = '"UPDATE conversation SET program_gone = ? WHERE participant_id = (SELECT participant_id FROM conversation WHERE id = ?)",'
 
 [[plant]]
 name = "exit proof: a conversation the human switches a window back to keeps the proof of the window before"
@@ -178,3 +167,69 @@ runs = ["ep-ledger-testing"]
 file = "crates/cf-ledger/src/testing.rs"
 find = "        .chain(program_gone::COLUMNS)\n"
 replace = ""
+
+# Calliope's review of 0181cd9a (T-573): the proof is kept on the conversation the window
+# wrote to (`WindowPart::conversation`, from the open and the human's switch), and not where
+# another window of the participant has opened since (`Dispatcher::keep_proof`).
+
+[[plant]]
+name = "exit proof: the exit of a deleted session's window is kept on the conversation its participant has now, whatever window is open"
+meant = "the_exit_of_a_deleted_sessions_window_proves_nothing_of_the_window_that_brought_it_back"
+runs = ["ep-engine"]
+
+# 0181cd9a's write, which neither keyed the proof by the window's conversation nor looked
+# for another window: the guard alone, or the keying alone, holds the test.
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.keep_proof(record.id, conversation, gone, Some(&record))?;"
+replace = """            if let Some(now) = self.seams.ledger.borrow().current_conversation(record.id)? {
+                self.seams.ledger.borrow_mut().set_program_gone(now.id, gone)?;
+            }"""
+
+[[plant]]
+name = "exit proof: a window forgotten as it opened keeps its end on the conversation before"
+meant = "a_window_forgotten_as_it_opened_on_a_new_conversation_proves_nothing_of_the_one_before"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "                part.conversation = resumed_on;"
+replace = """                part.conversation = self
+                    .seams
+                    .ledger
+                    .borrow()
+                    .current_conversation(participant.id)?
+                    .map(|now| now.id);"""
+
+[[plant]]
+name = "exit proof: a window keeps no conversation of its own"
+meant = "a_follow_up_goes_on_in_its_sessions_conversation_after_a_restart_where_the_window_before_closed_proven_gone"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            part.conversation = conversation_id;"
+replace = "            part.conversation = None;"
+
+[[plant]]
+name = "exit proof: a window the human switched keeps its end on the conversation it opened on"
+meant = "the_end_of_a_window_the_human_switched_is_kept_on_the_conversation_it_switched_to"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/transcripts.rs"
+find = "        record.window.borrow_mut().conversation = Some(followed.id);"
+replace = "        let _ = followed;"
+
+[[plant]]
+name = "exit proof: a deleted session brought back forgets the pane of its last window"
+meant = "the_hosts_word_after_a_deleted_session_is_brought_back_and_before_its_window_opens_is_kept"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = """
+                    record.window.borrow_mut().last_exit =
+                        self.left_exits.borrow_mut().remove(&participant);"""
+replace = """
+                    let _ = self.left_exits.borrow_mut().remove(&participant);"""
