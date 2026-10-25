@@ -1,4 +1,5 @@
 use super::*;
+use crate::windows::machine::Reach;
 use crate::windows::testing::strings;
 
 fn words(line: &str) -> Vec<OsString> {
@@ -14,7 +15,7 @@ fn a_host_and_a_command_are_all_a_run_needs_and_the_rest_is_the_usual() {
     assert_eq!(
         run("--host zeewin -- npm run live:paste"),
         Ok(Options {
-            host: "zeewin".into(),
+            machine: Some(Machine::at("zeewin")),
             build: false,
             dir: "consensflow-build".into(),
             inside: ".".into(),
@@ -25,14 +26,33 @@ fn a_host_and_a_command_are_all_a_run_needs_and_the_rest_is_the_usual() {
 }
 
 #[test]
+fn a_machine_is_named_or_a_host_given_and_with_neither_the_default_is_chosen_when_the_run_goes() {
+    let named = run("--machine zeewin2 -- cargo test").unwrap();
+    assert_eq!(named.machine, Machine::named("zeewin2"));
+    assert!(matches!(
+        named.machine.map(|machine| machine.reach),
+        Some(Reach::Wsl(_))
+    ));
+    assert_eq!(
+        run("--machine=zeewin -- x").unwrap().machine,
+        Some(Machine::at("zeewin"))
+    );
+    assert_eq!(run("-- npm test").unwrap().machine, None);
+    assert_eq!(run("--build npm test").unwrap().machine, None);
+    let options = matrix("--machine zeewin2 --scenario s --pair a:b").unwrap();
+    assert_eq!(options.machine, Machine::named("zeewin2"));
+    assert_eq!(matrix("--scenario s --pair a:b").unwrap().machine, None);
+}
+
+#[test]
 fn every_option_is_read_by_name_with_its_value_after_it_or_after_an_equals_sign() {
     let options = run(
         "--host=zeewin --build --dir build-2 --in=app/src-tauri --env A=1 --env=B=x=y -- cargo test",
     )
     .unwrap();
     assert_eq!(
-        (options.host.as_str(), options.build),
-        ("zeewin", true),
+        (options.machine.clone(), options.build),
+        (Some(Machine::at("zeewin")), true),
         "{options:?}"
     );
     assert_eq!(options.dir, "build-2");
@@ -42,7 +62,10 @@ fn every_option_is_read_by_name_with_its_value_after_it_or_after_an_equals_sign(
         [("A".into(), "1".into()), ("B".into(), "x=y".into())]
     );
     // Given twice, a text option is the last one given.
-    assert_eq!(run("--host a --host b -- x").unwrap().host, "b");
+    assert_eq!(
+        run("--host a --host b -- x").unwrap().machine,
+        Some(Machine::at("b"))
+    );
 }
 
 #[test]
@@ -66,16 +89,29 @@ fn the_command_begins_at_the_first_word_that_is_no_option_when_there_is_no_doubl
 fn what_is_missing_or_wrong_is_refused_in_words() {
     for (line, said) in [
         (
-            "--build -- npm test",
-            "windows takes --host <ssh host> and the command to run there after a --",
-        ),
-        (
             "--host zeewin",
-            "windows takes --host <ssh host> and the command to run there after a --",
+            "windows takes the command to run there after a --",
         ),
         (
             "--host zeewin --",
-            "windows takes --host <ssh host> and the command to run there after a --",
+            "windows takes the command to run there after a --",
+        ),
+        (
+            "--machine zeewin2 --",
+            "windows takes the command to run there after a --",
+        ),
+        (
+            "--machine laptop -- x",
+            "--machine is one of zeewin2, zeewin, not laptop",
+        ),
+        (
+            "--machine zeewin2 --host zeewin -- x",
+            "--machine and --host name the same thing: give one",
+        ),
+        ("--host= -- x", "--host is an ssh host, not an empty word"),
+        (
+            "--machine",
+            "--machine takes a value (to start one with a dash: --machine=-value)",
         ),
         (
             "--host",
@@ -152,7 +188,7 @@ fn a_matrix_is_a_host_scenarios_and_pairs_each_as_many_as_there_are() {
     assert_eq!(
         options,
         MatrixOptions {
-            host: "zeewin".into(),
+            machine: Some(Machine::at("zeewin")),
             build: true,
             env: vec![("CONSENSFLOW_TEST_DAEMON".into(), "native".into())],
             scenarios: strings(&["round-trip", "question-trip"]),
@@ -174,11 +210,13 @@ fn a_matrix_is_a_host_scenarios_and_pairs_each_as_many_as_there_are() {
 
 #[test]
 fn a_matrix_that_is_missing_what_it_needs_or_names_a_pair_wrongly_is_refused_before_a_run() {
-    let usage =
-        "windows-matrix takes --host <ssh host>, a --scenario <name> and a --pair <chief>:<staff>";
+    let usage = "windows-matrix takes a --scenario <name> and a --pair <chief>:<staff>";
     for (line, said) in [
-        ("--scenario s --pair a:b", usage),
         ("--host h --pair a:b", usage),
+        (
+            "--machine zeewin3 --scenario s --pair a:b",
+            "--machine is one of zeewin2, zeewin, not zeewin3",
+        ),
         ("--host h --scenario s", usage),
         (
             "--host h --scenario s --pair devin",

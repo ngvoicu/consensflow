@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use cf_base::time::{iso, Clock};
 
 use super::interrupt::Interrupt;
+use super::machine::Machine;
 use super::options::{MatrixOptions, Options, Pair, DEFAULT_DIR};
 use super::run::Outcome;
 use super::{Error, STOPPED};
@@ -38,14 +39,15 @@ pub trait Remote {
 }
 
 /// The machine, as `windows` reaches it.
-pub struct Machine<'a> {
+pub struct Reached<'a> {
     pub context: &'a Context,
+    pub machine: &'a Machine,
     pub interrupt: &'a Interrupt,
 }
 
-impl Remote for Machine<'_> {
+impl Remote for Reached<'_> {
     fn run(&mut self, options: &Options, console: &mut Console) -> Result<Outcome, Error> {
-        super::fetch::run_keeping(self.context, options, console, self.interrupt)
+        super::fetch::run_keeping(self.context, self.machine, options, console, self.interrupt)
     }
 }
 
@@ -85,7 +87,7 @@ pub fn run(
             writeln!(console.out, "{name}…").map_err(Error::Output)?;
             let log = folder.join(format!("{scenario}-{}-{}.log", pair.chief, pair.staff));
             let run = Options {
-                host: options.host.clone(),
+                machine: options.machine.clone(),
                 build,
                 dir: DEFAULT_DIR.to_owned(),
                 inside: ".".to_owned(),

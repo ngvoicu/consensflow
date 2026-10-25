@@ -168,13 +168,13 @@ fn the_commands_refuse_the_words_they_do_not_take_and_start_nothing() {
     for (args, said) in [
         (
             vec!["windows"],
-            "xtask: windows takes --host <ssh host> and the command to run there after a --: \
-             cargo xtask windows --host <ssh host> [--build] [--env NAME=VALUE] -- <command>\n",
+            "xtask: windows takes the command to run there after a --: cargo xtask windows \
+             [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--env NAME=VALUE] -- <command>\n",
         ),
         (
             vec!["windows", "--host", "zeewin"],
-            "xtask: windows takes --host <ssh host> and the command to run there after a --: \
-             cargo xtask windows --host <ssh host> [--build] [--env NAME=VALUE] -- <command>\n",
+            "xtask: windows takes the command to run there after a --: cargo xtask windows \
+             [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--env NAME=VALUE] -- <command>\n",
         ),
         (
             vec!["windows", "--host", "zeewin", "--nope", "--", "x"],
@@ -190,9 +190,9 @@ fn the_commands_refuse_the_words_they_do_not_take_and_start_nothing() {
         ),
         (
             vec!["windows-matrix", "--host", "zeewin"],
-            "xtask: windows-matrix takes --host <ssh host>, a --scenario <name> and a --pair \
-             <chief>:<staff> (each as many times as there are): cargo xtask windows-matrix \
-             --host <ssh host> [--env NAME=VALUE] --scenario <name>... --pair <chief>:<staff>...\n",
+            "xtask: windows-matrix takes a --scenario <name> and a --pair <chief>:<staff> (each \
+             as many times as there are): cargo xtask windows-matrix [--machine zeewin2|zeewin | \
+             --host <ssh host>] [--env NAME=VALUE] --scenario <name>... --pair <chief>:<staff>...\n",
         ),
         (
             vec![
@@ -669,10 +669,45 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
     );
 }
 
-/// The Windows machine the live case below runs on: `CF_WINDOWS_HOST`, else zeewin.
+/// The Windows machine the live case below runs on: `CF_WINDOWS_MACHINE` (zeewin2 or zeewin,
+/// as `--machine` names them), else the ssh host `CF_WINDOWS_HOST`, else zeewin.
+#[cfg(unix)]
+fn live_machine() -> Option<String> {
+    std::env::var("CF_WINDOWS_MACHINE").ok()
+}
+
+/// The ssh host of the machine the live case runs on.
 #[cfg(unix)]
 fn live_host() -> String {
-    std::env::var("CF_WINDOWS_HOST").unwrap_or_else(|_| "zeewin".into())
+    live_machine()
+        .or_else(|| std::env::var("CF_WINDOWS_HOST").ok())
+        .unwrap_or_else(|| "zeewin".into())
+}
+
+/// The words that name the live case's machine to the runner.
+#[cfg(unix)]
+fn live_on() -> [String; 2] {
+    match live_machine() {
+        Some(machine) => ["--machine".into(), machine],
+        None => ["--host".into(), live_host()],
+    }
+}
+
+/// What ssh hands the live case's machine for the PowerShell `script`: the script itself where
+/// the SSH server's shell is PowerShell, and on zeewin2, whose ssh lands in WSL, Windows'
+/// PowerShell started from the profile with the script encoded.
+#[cfg(unix)]
+fn powershell_line(script: &str) -> String {
+    use base64::Engine;
+
+    if live_machine().as_deref() != Some("zeewin2") {
+        return script.to_owned();
+    }
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    format!(
+        "cd /mnt/c/Users/AGV && exec /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -NonInteractive -EncodedCommand {}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
 }
 
 /// A checkout for a run on the real machine, committed, with a marker only it holds and
@@ -747,7 +782,9 @@ fn live_start(tree: &tempfile::TempDir, folder: &str, command: &[&str]) -> std::
             tree.path().join("tools").join("xtask"),
         )
         .current_dir(tree.path())
-        .args(["windows", "--host", &live_host(), "--dir", folder])
+        .arg("windows")
+        .args(live_on())
+        .args(["--dir", folder])
         // Twelve variables of a hundred characters: more than the command line of ssh could
         // hold with the build, which they ride in the tarball instead of.
         .args((0..12).flat_map(|at| {
@@ -765,12 +802,12 @@ fn live_start(tree: &tempfile::TempDir, folder: &str, command: &[&str]) -> std::
         .unwrap()
 }
 
-/// `script` run on the machine, as the shell of its ssh server runs it (PowerShell).
+/// `script` run on the machine by its PowerShell ([`powershell_line`]).
 #[cfg(unix)]
 fn on_the_machine(script: &str) -> String {
     let ran = Command::new("ssh")
         .arg(live_host())
-        .arg(script)
+        .arg(powershell_line(script))
         .output()
         .unwrap();
     assert!(ran.status.success(), "ssh: {}{}", out(&ran), err(&ran));
@@ -788,9 +825,9 @@ impl Drop for Folder {
         let folder = &self.0;
         let _ = Command::new("ssh")
             .arg(live_host())
-            .arg(format!(
+            .arg(powershell_line(&format!(
                 "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $env:USERPROFILE '{folder}'), (Join-Path $env:USERPROFILE '{folder}.*tgz')"
-            ))
+            )))
             .output();
     }
 }
@@ -804,7 +841,7 @@ impl Drop for Folder {
 /// `cargo test -p xtask --test windows -- --ignored two_runs_started_together`.
 #[cfg(unix)]
 #[test]
-#[ignore = "runs on the Windows machine over ssh (zeewin, or CF_WINDOWS_HOST), for about a minute"]
+#[ignore = "runs on the Windows machine over ssh (zeewin, or CF_WINDOWS_MACHINE, or CF_WINDOWS_HOST), for about a minute"]
 fn two_runs_started_together_from_two_trees_each_run_their_own_tree_or_are_refused() {
     let folder = format!("cf-test-two-runs-{}", std::process::id());
     let _cleanup = Folder(folder.clone());

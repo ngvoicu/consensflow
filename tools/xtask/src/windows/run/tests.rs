@@ -128,7 +128,7 @@ impl Rig {
 
     fn options(&self) -> Options {
         Options {
-            host: "zeewin".into(),
+            machine: Some(Machine::at("zeewin")),
             build: false,
             dir: DEFAULT_DIR.into(),
             inside: ".".into(),
@@ -199,9 +199,19 @@ exec sleep 120"#
 }
 
 fn run_it(rig: &Rig, interrupt: &Interrupt) -> (Result<Outcome, Error>, String, String) {
+    run_on(rig, &Machine::at("zeewin"), interrupt)
+}
+
+/// A run of the rig's options on `machine`: how it ended, and what it wrote on each stream.
+fn run_on(
+    rig: &Rig,
+    machine: &Machine,
+    interrupt: &Interrupt,
+) -> (Result<Outcome, Error>, String, String) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let ended = run(
         &rig.context,
+        machine,
         &rig.options(),
         &mut Console {
             out: &mut out,
@@ -244,6 +254,7 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
             steps: &[],
             command: &command,
             env: &env,
+            node: r"C:\Program Files\nodejs",
         })
     );
 
@@ -280,6 +291,7 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
             steps: &[],
             command: &command,
             env: &env,
+            node: r"C:\Program Files\nodejs",
         })
     );
     assert!(
@@ -291,6 +303,61 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
     for name in [SYNCED, TREE, RUN] {
         assert!(!rig.checkout.path().join(name).exists(), "{name}");
     }
+}
+
+#[test]
+fn a_run_on_zeewin2_is_sent_to_its_windows_profile_and_started_through_wsl_with_ci_s_node() {
+    let rig = Rig::new();
+    // An scp that keeps what it is sent, whatever the path there.
+    rig.program(
+        "scp",
+        r#"printf 'scp\t%s\t%s\n' "$1" "$3" >> "$CF_LOG"; cp "$2" "$CF_TARBALL""#,
+    );
+    rig.program("ssh", &machine(0));
+    let zeewin2 = Machine::named("zeewin2").unwrap();
+    let (ended, _, _) = run_on(&rig, &zeewin2, &Interrupt::default());
+    assert_eq!(ended.unwrap(), Outcome::Exited(0));
+    let log = rig.log();
+    assert_eq!(log.len(), 2, "{log:?}");
+    let scp: Vec<&str> = log[0].split('\t').collect();
+    let name = scp[2]
+        .strip_prefix(&format!("zeewin2:/mnt/c/Users/AGV/{DEFAULT_DIR}."))
+        .and_then(|rest| rest.strip_suffix(".tgz"))
+        .unwrap_or_else(|| panic!("not sent to the Windows profile: {}", scp[2]));
+    let ssh: Vec<&str> = log[1].split('\t').collect();
+    assert_eq!(ssh[1], "zeewin2");
+    let refusal = format!(
+        "if [ -e \"$HOME\"/'.compile-lock' ]; then rm -f -- '/mnt/c/Users/AGV/{DEFAULT_DIR}.{name}.tgz'; "
+    );
+    assert!(ssh[2].starts_with(&refusal), "{}", ssh[2]);
+    let (_, encoded) = ssh[2]
+        .split_once("; cd '/mnt/c/Users/AGV' && exec '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe' -NoProfile -NonInteractive -EncodedCommand ")
+        .unwrap_or_else(|| panic!("no PowerShell started through WSL: {}", ssh[2]));
+    let command = command_line(&["cargo", "xtask", "test", "integration"]);
+    let env = rig.options().env;
+    let script = Script {
+        id: name,
+        dir: DEFAULT_DIR,
+        inside: ".",
+        steps: &[],
+        command: &command,
+        env: &env,
+        node: r"$env:USERPROFILE\cf-tools\node",
+    };
+    assert_eq!(script_of(encoded), remote_script(&script));
+    let there = tempfile::tempdir().unwrap();
+    let untar = Invocation::new("tar", there.path())
+        .arg("xzf")
+        .arg(rig.tarball())
+        .arg("-C")
+        .arg(there.path());
+    assert_eq!(process::capture(&untar, &rig.context.env).unwrap().code, 0);
+    let run = fs::read_to_string(there.path().join(RUN)).unwrap();
+    assert_eq!(run, run_script(&script));
+    assert!(
+        run.contains(r#"$env:Path = "$env:USERPROFILE\cf-tools\node;$env:USERPROFILE\.cargo\bin;" + $env:Path"#),
+        "{run}"
+    );
 }
 
 #[test]
@@ -535,6 +602,7 @@ fn a_stop_ends_the_run_there_by_a_second_ssh_that_runs_the_script_that_ends_it()
     }
     let ended = run(
         &rig.context,
+        &Machine::at("zeewin"),
         &rig.options(),
         &mut Console {
             out: &mut Then(&mut out, raise),
@@ -576,6 +644,7 @@ fn a_stop_the_machine_could_not_be_asked_to_carry_out_is_said() {
     let mut err = Vec::new();
     let ended = run(
         &rig.context,
+        &Machine::at("zeewin"),
         &rig.options(),
         &mut Console {
             out: &mut Then(raise),
@@ -621,6 +690,7 @@ fn a_run_whose_output_cannot_be_written_is_ended_there_too_and_says_why() {
     let mut err = Vec::new();
     let ended = run(
         &rig.context,
+        &Machine::at("zeewin"),
         &rig.options(),
         &mut Console {
             out: &mut Closed,
@@ -653,6 +723,7 @@ fn what_cannot_be_sent_is_refused_before_anything_is_done() {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let ended = run(
         &rig.context,
+        &Machine::at("zeewin"),
         &options,
         &mut Console {
             out: &mut out,
