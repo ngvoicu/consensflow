@@ -205,12 +205,128 @@ pub fn show(case: &mut Account, seen: &Seen, watched: &Watched, events: &[Value]
     ));
 }
 
+/// The words the lane read over the stop, in the order they were first seen, from the
+/// account `said` of a case: the line [`show`] says them in, `the lane over the stop:
+/// working at +0.1 s, closed at +9.4 s`. None where `said` has no such line or a word of
+/// it has no time.
+pub fn lane_words(said: &str) -> Option<Vec<&str>> {
+    let line = said
+        .lines()
+        .find_map(|line| line.strip_prefix("     the lane over the stop: "))?;
+    line.split(", ")
+        .map(|entry| {
+            let (word, seconds) = entry.rsplit_once(" at +")?;
+            seconds
+                .strip_suffix(" s")?
+                .parse::<f64>()
+                .ok()
+                .map(|_| word)
+        })
+        .collect()
+}
+
+/// Whether the lane read working over the stop and then closed: the window was at work
+/// when the stop was first looked at, and the daemon closed it. When that look came is no
+/// part of it: it is looked at as soon as the pause is answered, and the answer is the
+/// daemon's to give when its machine lets it (a daemon that took a fifth of a second to
+/// answer is a stop like any other).
+pub fn lane_went_working_then_closed(said: &str) -> bool {
+    lane_words(said).is_some_and(|words| words.starts_with(&["working", "closed"]))
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::super::printed::Printed;
     use super::*;
+
+    fn lane(words: &str) -> String {
+        format!("round 1: 1 Escape: +0.3 s\n     the lane over the stop: {words}\n     at the end")
+    }
+
+    #[test]
+    fn a_lane_that_read_working_and_then_closed_did_so_whenever_it_was_first_looked_at() {
+        // The first look is the pause's answer and the next thing the case does: a daemon
+        // that answers in a few milliseconds is looked at "+0.0 s", one that took longer
+        // (a loaded machine, a daemon stopped for a moment) at "+0.1 s", "+0.2 s", or more.
+        for first in ["+0.0 s", "+0.1 s", "+0.2 s", "+1.5 s"] {
+            let said = lane(&format!("working at {first}, closed at +9.4 s"));
+            assert!(lane_went_working_then_closed(&said), "{said}");
+            assert_eq!(lane_words(&said), Some(vec!["working", "closed"]));
+        }
+        // And more after it, as the line may say if the lane changed again.
+        let said = lane("working at +0.2 s, closed at +9.4 s, idle at +11.0 s");
+        assert!(lane_went_working_then_closed(&said), "{said}");
+    }
+
+    #[test]
+    fn a_lane_that_never_closed_or_that_closed_without_working_is_not_that() {
+        for words in [
+            // The window that ignored the stop and was left open.
+            "working at +0.1 s",
+            // Looked at once it was closed, or at rest.
+            "closed at +0.1 s",
+            "working at +0.1 s, idle at +2.1 s",
+            // Closed first, then working again.
+            "closed at +0.1 s, working at +3.0 s",
+            // Working, something else, and only then closed.
+            "working at +0.1 s, idle at +2.1 s, closed at +9.4 s",
+        ] {
+            let said = lane(words);
+            assert!(!lane_went_working_then_closed(&said), "{said}");
+        }
+        // No line, a word with no time, a time that is no number.
+        assert_eq!(lane_words("round 1: 1 Escape: +0.3 s"), None);
+        assert_eq!(lane_words(&lane("working, closed at +9.4 s")), None);
+        assert_eq!(
+            lane_words(&lane("working at +soon s, closed at +9.4 s")),
+            None
+        );
+        assert!(!lane_went_working_then_closed("no such line"));
+    }
+
+    #[test]
+    fn the_line_the_account_says_is_the_line_the_case_reads() {
+        let seen = Seen {
+            made: 0,
+            until: 0,
+            presses: vec![],
+            rested: None,
+            flagged: None,
+            told_human: 0,
+            told_requester: 0,
+            task_state: "paused".to_owned(),
+        };
+        let end = Look {
+            at: 9_400,
+            lane: "closed".to_owned(),
+            printed: Printed {
+                numbers: 0,
+                others: vec![],
+            }
+            .line(),
+            drawn: vec![],
+            tree: None,
+            also: vec![],
+        };
+        let watched = Watched {
+            words: vec![
+                "working at +0.2 s".to_owned(),
+                "closed at +9.4 s".to_owned(),
+            ],
+            looks: vec![],
+            end,
+            flagged: None,
+            ended_at: 9_400,
+            command_gone: None,
+        };
+        let mut case = Account::new();
+        show(&mut case, &seen, &watched, &[], "p");
+        let said = case.text();
+        assert_eq!(lane_words(&said), Some(vec!["working", "closed"]), "{said}");
+        assert!(lane_went_working_then_closed(&said), "{said}");
+    }
 
     fn seen() -> Seen {
         Seen {

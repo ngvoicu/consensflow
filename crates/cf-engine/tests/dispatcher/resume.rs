@@ -1883,3 +1883,203 @@ fn a_member_opened_again_at_rest_whose_window_never_comes_up_is_closed_and_said(
         "not at work with no window"
     );
 }
+
+/// Zeus's T-1 in its window as the Close finds it: `answered`, a complete answer its turn
+/// wrote, then the turn still under way or at rest.
+fn zeus_wrote(context: &Context, answered: &str, settled: bool) {
+    let item = context
+        .adapter
+        .item(cf_harness::records::Role::Assistant, answered);
+    context.adapter.with("zeus", |agent| {
+        agent.items.push(item);
+        agent.settled = settled;
+    });
+}
+
+/// The results of T-`number` the ledger holds.
+fn results(tiers: &Tiers<'_>, number: i64) -> Vec<String> {
+    tiers
+        .task(number)
+        .messages
+        .into_iter()
+        .filter(|message| message.kind == "result")
+        .map(|message| message.body)
+        .collect()
+}
+
+/// R1 of the merge of turn-end with Resume after Close (T-408): the Resume's word to go
+/// on is ConsensFlow's own note, which no start of a result is taken from, so the latest
+/// message is still the brief, and the reopened conversation already holds a complete
+/// answer after it. It is no result: the continuation in the record is a message to the
+/// worker, and an answer is the result only where it answers the last of them; read at
+/// rest before its turn, the window yields nothing, and the answer after the continuation
+/// is the result.
+#[test]
+fn a_window_the_resume_reopens_yields_no_result_before_the_turn_after_its_continuation() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    zeus_wrote(&context, "The lexer is half done", false);
+
+    closed_and_resumed(&context, project);
+    // The reopened window, its record and the continuation in it, is read at rest
+    // before its turn: the reader's rule would hold it, and this holds without it.
+    context.adapter.with("zeus", |agent| agent.settled = true);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert_eq!(results(&tiers, 1), Vec::<String>::new(), "no result yet");
+
+    context.adapter.answer("zeus", "The lexer is done");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(results(&tiers, 1), ["The lexer is done"]);
+}
+
+/// L10 of T-405, the cut turn: Finish took the answer written before the Close, though the
+/// worker had been told to go on and had not answered that. A message ConsensFlow pasted
+/// into the window is answered by what follows it, for Finish as for the turn's end (the
+/// harness's own notifications, which wake a held task's turns, are no such message).
+#[test]
+fn finish_of_a_task_the_resume_brought_back_waits_for_the_answer_to_its_continuation() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    zeus_wrote(&context, "The lexer is half done", false);
+    closed_and_resumed(&context, project);
+    context.adapter.with("zeus", |agent| agent.settled = true);
+    context.pass().unwrap();
+    let refused = context.finish_task(project, 1, "chief").unwrap_err();
+    assert_eq!(
+        refused.to_string(),
+        "cannot finish T-1: @zeus-amber-pine has written no complete answer since its latest message about it; wait for one, or cancel it"
+    );
+    assert_eq!(results(&tiers, 1), Vec::<String>::new());
+    let item = context
+        .adapter
+        .item(cf_harness::records::Role::Assistant, "The lexer is done");
+    context.adapter.with("zeus", |agent| {
+        agent.items.push(item);
+        agent.settled = false;
+    });
+    let finished = context.finish_task(project, 1, "chief").expect("finished");
+    assert_eq!(finished.task.state, "done");
+    assert!(
+        results(&tiers, 1)[0]
+            .starts_with("The lexer is done\n\n(ConsensFlow: Finished at @chief's word"),
+        "{:?}",
+        results(&tiers, 1)
+    );
+}
+
+/// L10 of T-405, the fresh window: a conversation the harness cannot open again is a new
+/// one, given the brief first, and the answer after it is the result.
+#[test]
+fn a_task_the_resume_brings_back_in_a_fresh_window_takes_the_answer_to_its_brief_given_again() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.adapter.holds_nothing("zeus");
+    closed_and_resumed(&context, project);
+    let launch = launch_of(&context, "zeus-amber-pine");
+    assert_eq!(launch["resume"], Value::Null, "a fresh conversation");
+    assert_match(
+        launch["message"].as_str().unwrap(),
+        r"^\[ConsensFlow m-1 · T-1 · task from @chief\]\nWrite the parser\n\n\[ConsensFlow m-\d+ · T-1 · note from ConsensFlow\]\nConsensFlow stopped while you were working on T-1\. Go on where you stopped\.$",
+    );
+    context.adapter.answer("zeus", "The lexer, from the start");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(results(&tiers, 1), ["The lexer, from the start"]);
+}
+
+/// L9 of T-405: a task held at the Close for a job, its worker at rest with a complete
+/// answer, comes back with that job retired: the old answer is the result, with the
+/// retired caveat (the chief's decision on T-405).
+#[test]
+fn a_task_held_for_a_job_at_the_close_is_done_after_the_resume_with_its_answer_and_the_job_said_retired(
+) {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.adapter.answer_leaving(
+        "zeus",
+        "The build runs; I will report when it ends",
+        cf_harness::records::Pending {
+            agents: 0,
+            jobs: 1,
+            retired: 0,
+            noticed: 0,
+        },
+    );
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working", "held for its job");
+    closed_and_resumed(&context, project);
+    context.adapter.with("zeus", |agent| {
+        agent.pending.retired = 1;
+        agent.settled = true;
+    });
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(
+        results(&tiers, 1),
+        ["The build runs; I will report when it ends\n\n(ConsensFlow: no word came that the 1 background job an earlier window of @zeus-amber-pine's conversation started had ended; that window was closed, which ends what the host could tell was the window's, and may not have ended a job its shell detached.)"]
+    );
+}
+
+/// L9's other half: where the reading after the Resume still counts the job (the host could
+/// not prove the program that started it gone), the task is held again, for that job, and
+/// the chief is told so again: the Close ended the hold the window was in (`HeldPart`).
+#[test]
+fn a_task_held_for_a_job_at_the_close_whose_job_the_resume_could_not_retire_is_held_again() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let job = cf_harness::records::Pending {
+        agents: 0,
+        jobs: 1,
+        retired: 0,
+        noticed: 0,
+    };
+    context
+        .adapter
+        .answer_leaving("zeus", "The build runs; I will report when it ends", job);
+    context.pass().unwrap();
+    let held = |tiers: &Tiers<'_>| {
+        tiers
+            .notes("chief")
+            .into_iter()
+            .filter(|note| note.starts_with("T-1 goes on in the background: @zeus-amber-pine ended its turn with 1 background job running"))
+            .count()
+    };
+    assert_eq!(held(&tiers), 1, "told of the hold before the Close");
+    closed_and_resumed(&context, project);
+    context.adapter.with("zeus", |agent| {
+        agent.pending = job;
+        agent.settled = true;
+    });
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "working", "held again");
+    assert_eq!(results(&tiers, 1), Vec::<String>::new());
+    assert_eq!(held(&tiers), 2, "told again, once, after the Resume");
+    // A hold that ends only at Finish, which takes the answer and says the job may run on.
+    let finished = context.finish_task(project, 1, "chief").expect("finished");
+    assert_eq!(finished.task.state, "done");
+    assert_eq!(
+        results(&tiers, 1),
+        ["The build runs; I will report when it ends\n\n(ConsensFlow: Finished at @chief's word while @zeus-amber-pine's harness still counted 1 background job running, which finishing ends none of: it may run on until its window closes, or past it where the host cannot tell what is the window's.)"]
+    );
+}

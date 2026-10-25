@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde_json::json;
 
 use super::*;
-use crate::long_run::ledger::{Conversation, Event, Participant};
+use crate::long_run::ledger::{Conversation, Event, Message, Participant};
 use crate::long_run::record::Record;
 
 #[test]
@@ -124,16 +124,6 @@ fn a_compaction_counts_only_when_it_is_new_since_the_keys() {
     assert!(!compacted_after(&Look::default(), 0, pressed));
 }
 
-/// What the owner's resume of a task does on the stage written by hand.
-#[derive(Clone, Copy)]
-enum Resume {
-    GoesOn,
-    StaysPaused,
-    Refused,
-    /// Refused, the task having been done in the hold.
-    RefusedDone,
-}
-
 /// A stage written by hand: a chief, a Devin worker with T-7, and what the owner's
 /// asks do to them.
 struct Script {
@@ -141,7 +131,6 @@ struct Script {
     chief_pane: RefCell<Value>,
     worker_pane: RefCell<Value>,
     states: RefCell<BTreeMap<i64, String>>,
-    resume: Resume,
     /// The windows the app opens again at the Resume after a restart.
     reopens: Vec<String>,
     opened: RefCell<Vec<String>>,
@@ -153,30 +142,45 @@ struct Script {
     killed: bool,
     /// What the chief's lane reads.
     chief_state: &'static str,
+    /// Each window the app opened since it started: its id and its command line.
+    frames: RefCell<Vec<(String, Vec<String>)>>,
+    /// Whether the human's Resume moves on the tasks the Close paused, as the ledger
+    /// does where their window held one; and where it held several.
+    resume_goes_on: bool,
+    several_go_on: bool,
+    /// The command line the worker's window opens again with at the Resume, which
+    /// brings back a window that held one task; none where it is not opened again.
+    reopen_with: Option<Vec<String>>,
 }
 
 impl Script {
-    fn new(resume: Resume) -> Self {
+    fn new() -> Self {
         Self {
             project: RefCell::new("open"),
             chief_pane: RefCell::new(json!({ "id": "p1-chief", "generation": 1 })),
             worker_pane: RefCell::new(json!({ "id": "p1-long-devin-1", "generation": 1 })),
             states: RefCell::new(BTreeMap::from([(7, "working".to_owned())])),
-            resume,
             reopens: Vec::new(),
             opened: RefCell::new(Vec::new()),
             paused_to: None,
             killed_then: None,
             killed: false,
             chief_state: "idle",
+            frames: RefCell::new(vec![(
+                "p1-long-devin-1".to_owned(),
+                words(&["devin", "--model", "swe"]),
+            )]),
+            resume_goes_on: true,
+            several_go_on: false,
+            reopen_with: Some(words(&["devin", "--resume", "s-devin", "--model", "swe"])),
         }
     }
 
     /// [`Script::new`], T-7 in `to` after the owner's pause.
-    fn pausing(resume: Resume, to: Option<&'static str>) -> Self {
+    fn pausing(to: Option<&'static str>) -> Self {
         Self {
             paused_to: to,
-            ..Self::new(resume)
+            ..Self::new()
         }
     }
 }
@@ -220,6 +224,18 @@ impl Stagehand for Script {
                 self.opened
                     .borrow_mut()
                     .extend(self.reopens.iter().cloned());
+                let mut states = self.states.borrow_mut();
+                let alone = states.len() == 1;
+                if (alone && self.resume_goes_on) || (!alone && self.several_go_on) {
+                    for state in states.values_mut().filter(|state| *state == "paused") {
+                        *state = "working".to_owned();
+                    }
+                }
+                if let Some(argv) = self.reopen_with.as_ref().filter(|_| alone) {
+                    self.frames
+                        .borrow_mut()
+                        .push(("p1-long-devin-1".to_owned(), argv.clone()));
+                }
             }
             "task.pause" => {
                 let number = body["task"].as_i64().unwrap_or_default();
@@ -237,17 +253,7 @@ impl Stagehand for Script {
                         "task.resume: {{\"ok\":false,\"error\":\"cannot resume T-{number}: it is {state}\"}}"
                     )));
                 }
-                match self.resume {
-                    Resume::GoesOn => *state = "working".to_owned(),
-                    Resume::StaysPaused => {}
-                    Resume::Refused => {
-                        return Err(Error::Refused(format!("task.resume: T-{number} refused")))
-                    }
-                    Resume::RefusedDone => {
-                        *state = "done".to_owned();
-                        return Err(Error::Refused(format!("task.resume: T-{number} is done")));
-                    }
-                }
+                *state = "working".to_owned();
             }
             _ => {}
         }
@@ -290,6 +296,15 @@ impl Stagehand for Script {
 
     fn opened(&self, pane: &str) -> bool {
         self.opened.borrow().iter().any(|opened| opened == pane)
+    }
+
+    fn opened_with(&self, pane: &str) -> Vec<Vec<String>> {
+        self.frames
+            .borrow()
+            .iter()
+            .filter(|(id, _)| id == pane)
+            .map(|(_, argv)| argv.clone())
+            .collect()
     }
 
     fn restart(&mut self) -> Result {
@@ -349,56 +364,184 @@ fn said(outcome: &Outcome) -> &str {
     }
 }
 
+/// `words` as a command line.
+fn words(words: &[&str]) -> Vec<String> {
+    words.iter().map(|&word| word.to_owned()).collect()
+}
+
+/// A look whose ledger has the Devin worker on the conversation `session`, and `cut`
+/// notes that tell it its turn on T-7 was cut, written now.
+fn worker_look(session: Option<&str>, cut: usize) -> Look {
+    let mut look = Look::default();
+    look.ledger.participants.push(Participant {
+        id: 3,
+        handle: "long-devin-1".to_owned(),
+        role: "worker".to_owned(),
+        harness: Some("devin".to_owned()),
+        agent: Some("long-devin".to_owned()),
+    });
+    look.ledger.conversations.push(Conversation {
+        id: 2,
+        participant: 3,
+        harness: "devin".to_owned(),
+        session: session.map(str::to_owned),
+        started_at: None,
+        ended_at: None,
+    });
+    let now = crate::clock::iso(jiff::Timestamp::now());
+    look.ledger.messages = (0..cut)
+        .map(|at| Message {
+            id: 40 + i64::try_from(at).unwrap(),
+            recipient: 3,
+            sender: None,
+            kind: "note".to_owned(),
+            task: Some(7),
+            body: "ConsensFlow stopped while you were working on T-7. Go on where you stopped."
+                .to_owned(),
+            state: "delivered".to_owned(),
+            created_at: now.clone(),
+        })
+        .collect();
+    look
+}
+
+/// A suspend played on `stage`, the watch's look [`worker_look`].
+fn suspended(stage: &mut Script, session: Option<&str>, cut: usize) -> Outcome {
+    let mut watch = Looks {
+        last: Some(worker_look(session, cut)),
+        then: None,
+    };
+    played(stage, &mut watch, Disruption::Suspend, &Target::Project)
+}
+
 #[test]
-fn a_suspend_whose_tasks_stay_paused_after_the_owners_resume_failed() {
-    let outcome = played(
-        &mut Script::new(Resume::StaysPaused),
-        &mut Looks::default(),
-        Disruption::Suspend,
-        &Target::Project,
+fn a_suspend_whose_task_went_on_by_itself_in_its_window_on_its_conversation_told_once_was_played() {
+    let outcome = suspended(&mut Script::new(), Some("s-devin"), 1);
+    assert_eq!(
+        outcome,
+        Outcome::Played(
+            "the owner closed the project, and resumed it 0 s later; the close paused T-7, and they went on with the Resume, each window on its own conversation"
+                .to_owned()
+        )
     );
+}
+
+#[test]
+fn a_suspend_whose_task_stays_paused_after_the_resume_failed() {
+    // The Resume moves the work its Close paused on by itself (the merge of T-82); the
+    // play resumes nothing, so a task left paused is a failure, never resumed by hand.
+    let mut stage = Script {
+        resume_goes_on: false,
+        ..Script::new()
+    };
+    let outcome = suspended(&mut stage, Some("s-devin"), 1);
     assert!(matches!(outcome, Outcome::Failed { .. }), "{outcome:?}");
     assert!(
-        said(&outcome)
-            .ends_with("the close paused T-7, and T-7 stayed paused after the owner's resume"),
+        said(&outcome).ends_with("the close paused T-7, and T-7 stayed paused after the Resume"),
         "{}",
         said(&outcome)
     );
 }
 
 #[test]
-fn a_suspend_whose_resume_was_refused_failed_unless_the_task_had_ended() {
-    let refused = played(
-        &mut Script::new(Resume::Refused),
-        &mut Looks::default(),
-        Disruption::Suspend,
-        &Target::Project,
+fn a_suspend_whose_window_did_not_come_back_on_its_own_conversation_failed() {
+    let not_again = suspended(
+        &mut Script {
+            reopen_with: None,
+            ..Script::new()
+        },
+        Some("s-devin"),
+        1,
     );
-    assert!(matches!(refused, Outcome::Failed { .. }), "{refused:?}");
-    assert!(said(&refused).contains("the resume of T-7, paused, was refused"));
-    let ended = played(
-        &mut Script::new(Resume::RefusedDone),
-        &mut Looks::default(),
-        Disruption::Suspend,
-        &Target::Project,
+    assert!(matches!(not_again, Outcome::Failed { .. }), "{not_again:?}");
+    assert!(
+        said(&not_again).ends_with("@long-devin-1's window p1-long-devin-1 was not opened again"),
+        "{}",
+        said(&not_again)
     );
-    assert!(matches!(ended, Outcome::Played(_)), "{ended:?}");
+    let afresh = suspended(
+        &mut Script {
+            reopen_with: Some(words(&["devin", "--model", "swe"])),
+            ..Script::new()
+        },
+        Some("s-devin"),
+        1,
+    );
+    assert!(matches!(afresh, Outcome::Failed { .. }), "{afresh:?}");
+    assert!(
+        said(&afresh).ends_with(
+            "@long-devin-1's window opened again on [\"devin\", \"--model\", \"swe\"], not on its conversation s-devin"
+        ),
+        "{}",
+        said(&afresh)
+    );
 }
 
 #[test]
-fn a_suspend_whose_tasks_went_on_was_played() {
-    let outcome = played(
-        &mut Script::new(Resume::GoesOn),
-        &mut Looks::default(),
-        Disruption::Suspend,
-        &Target::Project,
+fn a_suspend_whose_window_at_work_was_told_its_turn_was_cut_never_or_twice_failed() {
+    for (cut, ending) in [
+        (
+            0,
+            "@long-devin-1's window, at work on T-7 at the Close, was never told its turn was cut",
+        ),
+        (
+            2,
+            "@long-devin-1's window was told 2 times that its turn on T-7 was cut",
+        ),
+    ] {
+        let outcome = suspended(&mut Script::new(), Some("s-devin"), cut);
+        assert!(matches!(outcome, Outcome::Failed { .. }), "{outcome:?}");
+        assert!(said(&outcome).ends_with(ending), "{}", said(&outcome));
+    }
+}
+
+#[test]
+fn a_suspend_whose_window_had_no_conversation_yet_was_played_saying_it_opened_afresh() {
+    // A Codex window before its first turn holds no thread: the Resume opens it afresh.
+    let outcome = suspended(
+        &mut Script {
+            reopen_with: Some(words(&["codex", "--model", "luna"])),
+            ..Script::new()
+        },
+        None,
+        0,
     );
+    assert!(matches!(outcome, Outcome::Played(_)), "{outcome:?}");
+    assert!(
+        said(&outcome).ends_with("(opened afresh, with no conversation yet: @long-devin-1)"),
+        "{}",
+        said(&outcome)
+    );
+}
+
+#[test]
+fn a_suspend_of_a_window_that_held_two_tasks_leaves_them_paused_for_the_chief() {
+    // The Resume tells a window to go on only where it held one task: T-7 and T-8 stay
+    // paused, for the chief to resume one at a time, and the play resumes neither.
+    let mut stage = Script::new();
+    stage.states.borrow_mut().insert(8, "working".to_owned());
+    let outcome = suspended(&mut stage, Some("s-devin"), 0);
     assert_eq!(
         outcome,
         Outcome::Played(
-            "the owner closed the project, and resumed it 0 s later; the close paused T-7, and the owner resumed them"
+            "the owner closed the project, and resumed it 0 s later; T-7, T-8 stayed paused for the chief, their windows holding several tasks"
                 .to_owned()
         )
+    );
+    assert_eq!(stage.state_of(7).unwrap(), "paused");
+
+    let mut stage = Script {
+        several_go_on: true,
+        ..Script::new()
+    };
+    stage.states.borrow_mut().insert(8, "working".to_owned());
+    let outcome = suspended(&mut stage, Some("s-devin"), 0);
+    assert!(matches!(outcome, Outcome::Failed { .. }), "{outcome:?}");
+    assert!(
+        said(&outcome)
+            .contains("T-7 went on, working, though @long-devin-1's window held T-7, T-8"),
+        "{}",
+        said(&outcome)
     );
 }
 
@@ -433,7 +576,7 @@ fn a_pause_another_resumed_before_the_owner_was_played_and_the_owners_refused_re
         then: None,
     };
     let outcome = played(
-        &mut Script::pausing(Resume::GoesOn, Some("queued")),
+        &mut Script::pausing(Some("queued")),
         &mut watch,
         Disruption::Pause,
         &Target::Task(7),
@@ -485,7 +628,7 @@ fn a_pause_the_owners_ask_did_not_make_is_a_break_whoever_else_paused_the_task()
             last: Some(moves_of_seven(&[BEFORE])),
             then: Some(moves_of_seven(moves)),
         };
-        let mut stage = Script::pausing(Resume::GoesOn, None);
+        let mut stage = Script::pausing(None);
         stage.states.borrow_mut().insert(7, "queued".to_owned());
         let outcome = played(&mut stage, &mut watch, Disruption::Pause, &Target::Task(7));
         assert!(
@@ -512,7 +655,7 @@ fn a_kill_whose_task_another_resumed_before_any_read_of_it_is_proven_by_consensf
             CHIEFS,
         ])),
     };
-    let mut stage = Script::new(Resume::GoesOn);
+    let mut stage = Script::new();
     stage.killed_then = Some("queued");
     let outcome = played(&mut stage, &mut watch, Disruption::Kill, &target);
     assert!(matches!(outcome, Outcome::Played(_)), "{outcome:?}");
@@ -529,7 +672,7 @@ fn a_kill_whose_task_another_resumed_before_any_read_of_it_is_proven_by_consensf
             (75, "working", "waiting", None, 1),
         ])),
     };
-    let mut stage = Script::new(Resume::GoesOn);
+    let mut stage = Script::new();
     stage.killed_then = Some("waiting");
     let outcome = played(&mut stage, &mut watch, Disruption::Kill, &target);
     assert!(matches!(outcome, Outcome::Failed { .. }), "{outcome:?}");
@@ -580,7 +723,7 @@ fn a_kill_whose_task_another_resumed_to_working_before_any_read_ends_its_wait_at
         },
         ticks: 0,
     };
-    let mut stage = Script::new(Resume::GoesOn);
+    let mut stage = Script::new();
     stage.killed_then = Some("working");
     let outcome = play(
         &mut stage,
@@ -613,7 +756,7 @@ fn a_pause_resumed_by_another_before_any_read_of_it_is_proven_by_its_move_to_pau
         then: Some(moves_of_seven(&[BEFORE, PAUSE, CHIEFS])),
     };
     let outcome = played(
-        &mut Script::pausing(Resume::GoesOn, Some("queued")),
+        &mut Script::pausing(Some("queued")),
         &mut watch,
         Disruption::Pause,
         &Target::Task(7),
@@ -633,7 +776,7 @@ fn a_pause_that_never_moved_the_task_to_paused_failed() {
         ])),
     };
     let outcome = played(
-        &mut Script::pausing(Resume::GoesOn, None),
+        &mut Script::pausing(None),
         &mut watch,
         Disruption::Pause,
         &Target::Task(7),
@@ -652,7 +795,7 @@ fn a_devin_cut_whose_workers_window_was_not_opened_again_failed() {
         handle: "long-devin-1".to_owned(),
         task: Some(7),
     };
-    let mut stage = Script::new(Resume::GoesOn);
+    let mut stage = Script::new();
     let outcome = played(
         &mut stage,
         &mut Looks::default(),
@@ -662,7 +805,7 @@ fn a_devin_cut_whose_workers_window_was_not_opened_again_failed() {
     assert!(matches!(outcome, Outcome::Failed { .. }), "{outcome:?}");
     assert!(said(&outcome).ends_with("@long-devin-1's window p1-long-devin-1 was not opened again"));
     // Its task paused, or done, is no recovered window either: the window is asked for.
-    let mut stage = Script::new(Resume::GoesOn);
+    let mut stage = Script::new();
     stage.states.borrow_mut().insert(7, "paused".to_owned());
     let outcome = played(
         &mut stage,
@@ -672,7 +815,7 @@ fn a_devin_cut_whose_workers_window_was_not_opened_again_failed() {
     );
     assert!(matches!(outcome, Outcome::Failed { .. }), "{outcome:?}");
     // The Resume opened it again.
-    let mut stage = Script::new(Resume::GoesOn);
+    let mut stage = Script::new();
     stage.reopens = vec!["p1-long-devin-1".to_owned()];
     let outcome = played(
         &mut stage,
@@ -694,7 +837,7 @@ fn a_compact_whose_chief_wrote_no_new_compaction_failed() {
         then: Some(old),
     };
     let outcome = played(
-        &mut Script::new(Resume::GoesOn),
+        &mut Script::new(),
         &mut watch,
         Disruption::Compact,
         &Target::Project,
@@ -707,7 +850,7 @@ fn a_compact_whose_chief_wrote_no_new_compaction_failed() {
         then: Some(chief_look(&[boundary(now - 500), boundary(now + 60_000)])),
     };
     let outcome = played(
-        &mut Script::new(Resume::GoesOn),
+        &mut Script::new(),
         &mut watch,
         Disruption::Compact,
         &Target::Project,
@@ -728,7 +871,7 @@ fn a_compact_whose_chief_never_came_to_rest_after_it_failed() {
     };
     let mut stage = Script {
         chief_state: "working",
-        ..Script::new(Resume::GoesOn)
+        ..Script::new()
     };
     let outcome = played(
         &mut stage,

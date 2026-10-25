@@ -260,6 +260,18 @@ file = "crates/cf-e2e/src/rig/install.rs"
 find = '        ["/usr/bin", "/bin"].map(str::to_owned).into()'
 replace = '        ["/usr/local/bin", "/usr/bin", "/bin"].map(str::to_owned).into()'
 
+# The rig's PATH on Windows: Windows PowerShell's folder, which an agent's cmd.exe needs to run `powershell`
+# (OpenCode 1.19.4 on zeewin, T-379: the rig's PATH ended at System32).
+[[plant]]
+name = "login path: the rig's Windows PATH has no folder of Windows PowerShell"
+meant = "the_system_folders_of_a_windows_rig_are_those_every_windows_install_has_powershell_among_them"
+runs = ["rig-install"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/install.rs"
+find = '            format!("{root}\\System32\\WindowsPowerShell\\v1.0"),'
+replace = ""
+
 # The page: the menu's Check for Updates before anything waits on the daemon.
 [[plant]]
 name = "login path: the page sets up updates only once the daemon has answered"

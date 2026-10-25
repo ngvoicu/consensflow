@@ -1,5 +1,5 @@
 //! One task: `GET /api/tasks/<n>`, its `/transcript`, and the `POST`s that move
-//! it (`done`, `accept`, `reopen`, `edit`, `cancel`, `pause`, `resume`, `tell`). It
+//! it (`done`, `accept`, `reopen`, `edit`, `cancel`, `pause`, `resume`, `finish`, `tell`). It
 //! reads the task first, so an unknown one is 404 before anything else is
 //! asked; and it takes the task as it was then, awaiting the body after: who
 //! may do what is decided on the task as it was read, and the ledger decides on
@@ -10,7 +10,8 @@
 //! received when `cf` says it wrote it whole (`POST /api/answers/read`), not
 //! when the thread was served. What the human has not passed on is not for an
 //! agent to read: the thread leaves out a gated message, and the brief is
-//! not given to a caller who may not move the task while it waits at the gate.
+//! not given to a caller who may not move the task while it waits at the gate,
+//! nor its first line, the task's title, which says it waits instead.
 //! The chief, and whoever else gave the task, wrote the brief: they read it.
 //! Nor is what waits for the Resume: while the project is closed, the thread
 //! leaves out a message no window was handed yet, and the brief while it is one
@@ -26,7 +27,7 @@ use serde_json::{json, Map, Value};
 
 use super::{Answer, Caller, Context, Failure, Request, TaskAction};
 use crate::api::views::{value, MessageSummary, TaskSummary};
-use crate::api::waits::Waits;
+use crate::api::waits::{Waits, WAITS};
 use pages::Asked;
 
 /// A task in one of these states has a window a `tell` reaches and stops.
@@ -35,6 +36,10 @@ const WINDOWED: [&str; 3] = ["working", "waiting", "paused"];
 /// A task in this state has no window yet: a `tell` keeps its words for the one
 /// coming up.
 const QUEUED: &str = "queued";
+
+/// What a task's title says in place of its brief's first line while the brief
+/// waits at the human's gate, for a caller who did not write it.
+pub const GATED: &str = "(this waits for the human to pass it on)";
 
 /// The most items of a transcript one request may ask for: a page's.
 #[allow(clippy::cast_precision_loss)]
@@ -79,8 +84,9 @@ pub(super) async fn handle(
         let held_back = brief_waits(&task, &waits);
         task.messages
             .retain(|message| message.state != "gated" && !waits.holds(message));
-        if held_back && !may_move(caller, &task) {
+        if let Some(held) = held_back.filter(|_| !may_move(caller, &task.task.requester)) {
             task.task.body.clear();
+            task.task.title = held.to_owned();
         }
         return Ok(Answer::ok(json!({ "task": value(&task)? })));
     }
@@ -98,7 +104,7 @@ pub(super) async fn handle(
     let words = body.get("body").and_then(Value::as_str);
     match action {
         TaskAction::Done => done(context, caller, &task, words.unwrap_or_default()),
-        _ if !may_move(caller, &task) => Err(Failure::refuse(
+        _ if !may_move(caller, &task.task.requester) => Err(Failure::refuse(
             403,
             "not-a-coordinator",
             format!(
@@ -109,32 +115,34 @@ pub(super) async fn handle(
             ),
         )),
         TaskAction::Tell => tell(context, caller, &task, words),
+        TaskAction::Finish => finish(context, caller, &task).await,
         _ => moved(context, caller, &task, action, words.unwrap_or_default()),
     }
 }
 
-/// Whether the task's brief still waits: for the human to pass it on (a task
-/// message for the window that has the task is held at the gate), or for the
+/// Whether the task's brief still waits, and what its title says in place of the
+/// brief's first line while it does: for the human to pass it on (a task message
+/// for the window that has the task is held at the gate, [`GATED`]), or for the
 /// Resume (one no window was handed yet, read while the project is closed,
-/// [`Waits`]), and none was received by the window. A window that received the
-/// brief has it, and a later task message that waits (the words of a resume)
-/// does not take it back. The brief is `TaskView.body`: the human and the board
-/// read it from the ledger, and so do the chief and whoever gave the task, who
-/// wrote it; an agent who did not does not until it has passed.
-fn brief_waits(task: &TaskThread, waits: &Waits) -> bool {
-    let Some(window) = task.task.assignee.as_deref() else {
-        return false;
-    };
-    let mut held = false;
+/// [`Waits`] and [`WAITS`]), and none was received by the window. A window that
+/// received the brief has it, and a later task message that waits (the words of a
+/// resume) does not take it back. The brief is `TaskView.body`, and its first line
+/// the title (Calliope's review of the merge, T-408: a window of a closed project
+/// read a line of a brief it was never handed in the title): the human and the
+/// board read them from the ledger, and so do the chief and whoever gave the task,
+/// who wrote it; an agent who did not does not until it has passed.
+pub(super) fn brief_waits(task: &TaskThread, waits: &Waits) -> Option<&'static str> {
+    let window = task.task.assignee.as_deref()?;
+    let mut held = None;
     for message in task
         .messages
         .iter()
         .filter(|message| message.kind == "task" && message.recipient == window)
     {
         match message.state.as_str() {
-            "delivered" | "read" => return false,
-            "gated" => held = true,
-            _ if waits.holds(message) => held = true,
+            "delivered" | "read" => return None,
+            "gated" => held = Some(GATED),
+            _ if waits.holds(message) => held = held.or(Some(WAITS)),
             _ => {}
         }
     }
@@ -149,7 +157,7 @@ fn transcript(
     task: &TaskThread,
     request: &Request,
 ) -> Result<Answer, Failure> {
-    if !may_move(caller, task) {
+    if !may_move(caller, &task.task.requester) {
         return Err(Failure::refuse(
             403,
             "not-a-coordinator",
@@ -189,7 +197,10 @@ fn items_of(asked: Option<&str>) -> usize {
 }
 
 /// `POST /api/tasks/<n>/done`: the assignee's answer finishes the task. Only
-/// its assignee may finish it.
+/// its assignee may finish it. The chief's own step is accepted with it, and
+/// the answer names what was still on its way and is withdrawn (`withdrawn`:
+/// its brief, and any answer or note carried on it), and its brief if it was
+/// being typed in and may still land once (`landing`), each as a message.
 fn done(
     context: &Context,
     caller: &Caller,
@@ -213,9 +224,18 @@ fn done(
             .borrow_mut()
             .record_result(caller.project.id, task.task.number, words)?;
     (context.kick)();
-    Ok(Answer::ok(
-        json!({ "task": value(&TaskSummary::from(&done.task))? }),
-    ))
+    let mut answer = Map::new();
+    answer.insert("task".to_owned(), value(&TaskSummary::from(&done.task))?);
+    for (key, messages) in [("withdrawn", &done.withdrawn), ("landing", &done.landing)] {
+        if !messages.is_empty() {
+            let named: Result<Vec<_>, _> = messages
+                .iter()
+                .map(|message| value(&MessageSummary::from(message)))
+                .collect();
+            answer.insert(key.to_owned(), Value::Array(named?));
+        }
+    }
+    Ok(Answer::ok(Value::Object(answer)))
 }
 
 /// `POST /api/tasks/<n>/tell`: stop the task and put this to its window. The
@@ -291,6 +311,27 @@ fn tell(
     Ok(Answer::ok(Value::Object(answer)))
 }
 
+/// `POST /api/tasks/<n>/finish`: what the worker of a working task said last is its result,
+/// and what its turn left running is not ended (the owner's decision of 2026-10-18: the
+/// chief can finish any working task). Only the engine reads the window, so it is asked,
+/// and answers with the task done, or with why it is not one to finish (not working, no
+/// member's open window works on it, no complete answer since its latest message). `jobs`
+/// and `agents` count what the worker's harness still counted running.
+async fn finish(context: &Context, caller: &Caller, task: &TaskThread) -> Result<Answer, Failure> {
+    let asked = (context.finish)(
+        caller.project.id,
+        task.task.number,
+        caller.participant.handle.clone(),
+    )
+    .await?;
+    (context.kick)();
+    Ok(Answer::ok(json!({
+        "task": value(&TaskSummary::from(&asked.task))?,
+        "jobs": asked.jobs,
+        "agents": asked.agents,
+    })))
+}
+
 /// Whether a tell reaches the task's window: one that has it, which it stops,
 /// or one coming up, which it keeps the words for.
 fn reaches(task: &TaskView) -> bool {
@@ -344,8 +385,8 @@ fn moved(
 
 /// Whether the window may do what only the chief or the one who gave the task
 /// may: read what it did, and move it.
-fn may_move(caller: &Caller, task: &TaskThread) -> bool {
-    caller.participant.role == "chief" || task.task.requester == caller.participant.handle
+pub(super) fn may_move(caller: &Caller, requester: &str) -> bool {
+    caller.participant.role == "chief" || requester == caller.participant.handle
 }
 
 /// A task route's last word, as the path spells it.
@@ -358,6 +399,7 @@ fn word(action: TaskAction) -> &'static str {
         TaskAction::Cancel => "cancel",
         TaskAction::Pause => "pause",
         TaskAction::Resume => "resume",
+        TaskAction::Finish => "finish",
         TaskAction::Tell => "tell",
         TaskAction::Transcript => "transcript",
     }

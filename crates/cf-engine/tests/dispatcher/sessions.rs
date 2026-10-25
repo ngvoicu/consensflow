@@ -184,6 +184,9 @@ fn reopens_a_finished_task_on_its_own_session_resumed_with_the_follow_up_and_not
 #[test]
 fn continues_a_finished_tasks_session_with_after_the_same_window_comes_back_on_its_conversation() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the follow-up, another
+    // task, goes on with the session's conversation (`ownership`).
+    context.host.exits_showing(Some(0), None, None);
     let tiers = finished(&context);
     let native = native_of(&context, tiers.id("zeus-amber-pine"));
     context.create_task(

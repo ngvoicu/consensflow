@@ -477,6 +477,8 @@ pub(crate) fn resume_task(
             return Ok(TaskMoved {
                 task: task_by_id(store, task.id)?,
                 message: None,
+                withdrawn: Vec::new(),
+                landing: Vec::new(),
             });
         };
         if assignee.left_at.is_some() {
@@ -533,6 +535,8 @@ pub(crate) fn resume_task(
             return Ok(TaskMoved {
                 task: task_by_id(store, task.id)?,
                 message: None,
+                withdrawn: Vec::new(),
+                landing: Vec::new(),
             });
         }
         require_free(store, &assignee, Giving::Resumed(number))?;
@@ -561,6 +565,8 @@ pub(crate) fn resume_task(
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,
+            withdrawn: Vec::new(),
+            landing: Vec::new(),
         })
     })
 }

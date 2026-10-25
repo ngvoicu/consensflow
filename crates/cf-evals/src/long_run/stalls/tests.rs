@@ -251,7 +251,7 @@ fn at_an_end_not_reached_every_window_of_the_last_look_is_kept_and_the_ledgers_l
         vec![change(50, "chief", "working", None)],
     );
     let mut stalls = Stalls::default();
-    stalls.before_close(Some(&last), &mut Asked::default());
+    stalls.before_close(Some(&last), last.host, &mut Asked::default());
     let closed = ledger(45, 59);
     assert!(stalls.after_close(true, Some(&closed)));
     assert_eq!(
@@ -289,7 +289,7 @@ fn at_an_end_not_reached_every_window_of_the_last_look_is_kept_and_the_ledgers_l
     );
     // A project that reached its end, with no stall, keeps none of it.
     let mut ended = Stalls::default();
-    ended.before_close(Some(&last), &mut Asked::default());
+    ended.before_close(Some(&last), last.host, &mut Asked::default());
     assert!(!ended.after_close(false, Some(&closed)));
     assert!(ended.at_the_end.is_empty() && ended.events.is_empty());
     assert_eq!(ended.to_value(&timeline), Value::Null);
@@ -304,7 +304,7 @@ fn at_an_end_not_reached_every_window_of_the_last_look_is_kept_and_the_ledgers_l
         &look(21, vec![lane("chief", "working")], Vec::new(), Vec::new()),
         IDLE,
     );
-    stalled.before_close(Some(&last), &mut Asked::default());
+    stalled.before_close(Some(&last), last.host, &mut Asked::default());
     assert!(stalled.after_close(false, Some(&closed)));
     assert!(stalled.at_the_end.is_empty());
     assert_eq!(stalled.events.len(), EVENTS);
@@ -366,7 +366,7 @@ fn a_stalled_windows_processes_are_taken_when_it_is_found_and_once_more_at_the_e
     let last = at_work(40, "idle", "idle");
     stalls.look(&last, IDLE);
     stalls.take(&last, &mut prober);
-    stalls.before_close(Some(&last), &mut prober);
+    stalls.before_close(Some(&last), last.host, &mut prober);
     assert_eq!(prober.asked.len(), 3, "{:?}", prober.asked);
     assert_eq!(
         prober.asked[2],
@@ -533,7 +533,7 @@ fn a_window_that_stalls_again_keeps_each_stalls_samples_and_one_listing_serves_e
     );
     let last = seen(53, "working", "idle");
     stalls.look(&last, IDLE);
-    stalls.before_close(Some(&last), &mut prober);
+    stalls.before_close(Some(&last), last.host, &mut prober);
     assert_eq!(prober.lists, 3);
     assert_eq!(prober.asked[3].2, "chief-2-end");
     let value = stalls.to_value(&Timeline::new(at(0, 0)));
@@ -603,15 +603,16 @@ fn the_pane_host_is_the_looks_sampled_once_a_take_beside_bytes_unread_or_a_progr
         .collect();
     let file = Some(Ok(PathBuf::from("chief-1-found-host-sample.txt")));
     assert_eq!(hosts, [file.clone(), file.clone(), file]);
-    // The app restarted: the last look's pane host is another process. Nothing unread now,
+    // The app restarted: the pane host that runs now (200, the stage's) is another process
+    // than the last look's (100, reaped with the app that restarted). Nothing unread now,
     // and the second worker's program gone while it reads starting, the chief's while it
-    // reads working: the host sampled for the chief alone, the new one.
+    // reads working: the host sampled for the chief alone, the running one.
     let mut last = look(40, lanes(), open, traced);
-    last.host = Some(200);
+    last.host = Some(100);
     prober.unread = 0;
     prober.gone = vec![4242, 6161];
     stalls.look(&last, IDLE);
-    stalls.before_close(Some(&last), &mut prober);
+    stalls.before_close(Some(&last), Some(200), &mut prober);
     assert_eq!(
         prober.hosts,
         [
@@ -631,6 +632,27 @@ fn the_pane_host_is_the_looks_sampled_once_a_take_beside_bytes_unread_or_a_progr
             None,
             None
         ]
+    );
+    // Where the app is not running at the end (a restart it did not survive, the stage's rig
+    // gone), the last look's host is a reaped process and is never sampled: why is kept.
+    let mut gone = Stalls::default();
+    let mut dead = Asked {
+        unread: 1,
+        ..Asked::default()
+    };
+    let mut chief = look(
+        26,
+        vec![lane("chief", "working")],
+        vec![window("chief", &["Working…"])],
+        vec![change(5, "chief", "working", None)],
+    );
+    chief.host = Some(100);
+    gone.look(&chief, IDLE);
+    gone.before_close(Some(&chief), None, &mut dead);
+    assert_eq!(dead.hosts, []);
+    assert_eq!(
+        gone.kept[0].held[0].host,
+        Some(Err("the pane host's process is not known".to_owned()))
     );
     // Where the look knew no pane host, why is kept.
     let mut unknown = Stalls::default();
@@ -652,5 +674,55 @@ fn the_pane_host_is_the_looks_sampled_once_a_take_beside_bytes_unread_or_a_progr
     assert_eq!(
         unknown.kept[0].held[0].host,
         Some(Err("the pane host's process is not known".to_owned()))
+    );
+}
+
+#[test]
+fn a_program_gone_while_its_window_reads_working_is_gone_though_a_job_of_its_tree_is_still_listed()
+{
+    // Calliope's review of round b9 (T-84, P3 3): the pane host's proof that a program went is
+    // its own line missing from its tree. A job it started that outlived it is reparented and
+    // still listed, so the tree is not empty, and the host went unsampled on its own proof.
+    let at_work = |program: u32| {
+        let mut chief = window("chief", &["Working…"]);
+        chief.pid = Some(program);
+        chief.background = vec![Process {
+            pid: 7001,
+            command: "sleep 600".to_owned(),
+        }];
+        look(
+            26,
+            vec![lane("chief", "working")],
+            vec![chief],
+            vec![change(5, "chief", "working", None)],
+        )
+    };
+    let mut found = at_work(4242);
+    found.host = Some(100);
+    // The program gone, its job still listed: the host is sampled.
+    let mut stalls = Stalls::default();
+    let mut prober = Asked {
+        gone: vec![4242],
+        ..Asked::default()
+    };
+    stalls.look(&found, IDLE);
+    stalls.take(&found, &mut prober);
+    assert_eq!(prober.hosts, [(100, "chief-1-found-host".to_owned())]);
+    assert_eq!(
+        stalls.kept[0].held[0].processes,
+        Ok(vec!["7001 1 S - ttys001 bash".to_owned()])
+    );
+    // The program there with its job: nothing proves it went, and nothing is sampled.
+    let mut there = Stalls::default();
+    let mut prober = Asked::default();
+    there.look(&found, IDLE);
+    there.take(&found, &mut prober);
+    assert_eq!(prober.hosts, []);
+    assert_eq!(
+        there.kept[0].held[0].processes,
+        Ok(vec![
+            "4242 1 S - ttys001 pi".to_owned(),
+            "7001 4242 S - ttys001 bash".to_owned()
+        ])
     );
 }

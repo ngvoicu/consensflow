@@ -56,6 +56,10 @@
 //!   how many are left, the window's status stays `busy` for them, and when they
 //!   end the window begins a turn of its own (`WOKEN <words>`, which answers
 //!   `woken: <words>`), as Claude Code does.
+//! - A line `STEPS <n> <words>` is a turn that writes `n` lines of progress, each a
+//!   message that calls a tool, before its answer, and `CLAUDE-JOB [--silent] <seconds>
+//!   <words> :: <report>` a turn that starts a job in the background as Claude Code does,
+//!   whose end wakes the window with a turn that answers the report (`steps` says how).
 //! - A task saying `QUOTA-OUT` is refused with a 429, Claude's way, by the
 //!   window whose participant `CF_TEST_QUOTA_OUT` names, for as long as the
 //!   file `CF_TEST_QUOTA_FILE` names is there when it is set (taking it away is
@@ -80,6 +84,7 @@ use serde_json::{json, Value};
 
 use crate::agents::Agents;
 use crate::background::{until_up, Jobs, Server, THINKING};
+use crate::steps::Tasks;
 use crate::stop::Stop;
 
 /// How long the shell that detaches a job may take to end: a PowerShell's
@@ -109,6 +114,8 @@ pub struct Window {
     pub server: Server,
     /// The background agents the window starts.
     pub agents: Agents,
+    /// The jobs it starts in the background that its harness wakes it for.
+    pub tasks: Tasks,
     /// Where a turn the window begins by itself is queued: the message that
     /// wakes it when the job it left running ends.
     pub wake: Sender<String>,
@@ -488,6 +495,7 @@ mod tests {
             jobs: Arc::new(Jobs::new(Path::new("/nowhere/consensflow"), 1)),
             server: Server::Never,
             agents: Agents::default(),
+            tasks: Tasks::default(),
             wake: std::sync::mpsc::channel().0,
             stop: Arc::new(Stop::default()),
         }

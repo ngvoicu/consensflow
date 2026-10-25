@@ -109,6 +109,53 @@ fn descends_from_a_server(
     false
 }
 
+/// The commands of a window whose harness keeps its servers in the window's group
+/// ([`Servers::InGroup`], Claude Code): the processes of `tree` the window's program
+/// started that lead a process group of their own, and what is outside the window's
+/// group and was left with no parent in the tree that leads one. Claude Code runs every
+/// command so (a Bash call's shell, a Monitor's, a background job's, `/bin/zsh -c … eval
+/// '…'`, as a session of its own), and what a command `exec`s takes its place in its
+/// group; it runs its hooks and its status line so too, for the moment each runs. Its MCP
+/// servers and its own helpers (`caffeinate`) it starts in the window's group, and what a
+/// command starts stays in the command's group (T-203's probes of 2.1.307 in a pane's
+/// shape: a Monitor of `exec sleep 300`, one of a loop, a background `sleep 50`, a Python
+/// MCP server, a `*` PostToolUse hook, a Stop hook and a status line). A process whose
+/// group could not be read is not known to be outside the window's, nor in it: one the
+/// program started is counted.
+///
+/// What ran when the window was last at rest before the monitors asked of began
+/// (`rest`, [`super::Baseline::rest`]) is none of them: a server or a helper that left
+/// the window's group (`setsid`) and runs for good is no command (Astraeus on 472b1d96),
+/// and no command a monitor asked of runs began before it. Nor is what `before` proves
+/// began before the monitors' calls: the daemon names the earliest of them, less a margin,
+/// where no rest proves them, as none does in a worker's first turn (its message is on
+/// Claude Code's command line, and Claude Code starts its servers as it takes it): a
+/// monitor's command begins after its call (the chief on T-301), and the pane's clock says
+/// whether a start can be read against the call (`super::clock`). Hooks and the status
+/// line begin and end in a moment, and need none of it.
+///
+/// Limits. A process another left when it ended, which keeps the group of the process
+/// that started it and does not lead one (a job a command's shell started and left), is
+/// none of them: the command it was started by has ended, which ended its monitor by its
+/// status.
+pub(super) fn commands(
+    kept: Kept,
+    tree: &[Member],
+    rest: &HashSet<ProcessKey>,
+    before: &dyn Fn(&Member) -> bool,
+) -> Vec<Member> {
+    tree.iter()
+        .filter(|member| !rest.contains(&member.key))
+        .filter(|member| !before(member))
+        .filter(|member| member.group != Some(kept.group))
+        .filter(|member| match member.parent {
+            Some(parent) => i32::try_from(parent.pid) == Ok(kept.group),
+            None => member.group == i32::try_from(member.key.pid).ok(),
+        })
+        .cloned()
+        .collect()
+}
+
 /// Whether `member` is a server in the way the harness keeps them.
 fn is_server(kept: Kept, launch: &HashSet<ProcessKey>, member: &Member) -> bool {
     match kept.servers {

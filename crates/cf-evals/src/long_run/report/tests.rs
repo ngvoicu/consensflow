@@ -110,7 +110,7 @@ fn a_run_with_nothing_broken_and_something_unjudged_is_unresolved_never_a_pass()
     let mut notice = Unjudged::new(
         3,
         "3:m-101",
-        "T-14's ended notice m-101 came after its result m-100 and after T-14 was sent back: whether it is that result's, late, or the next attempt's own, the log does not say",
+        "T-14's close note m-101 came while T-14 was working again, after it had ended and been sent back: whether it is the earlier attempt's window's, closed late, or the new attempt's own, the log does not say",
     );
     notice.at = STARTED + 30 * 60_000;
     let gap = Unjudged::new(
@@ -139,10 +139,9 @@ fn a_run_with_nothing_broken_and_something_unjudged_is_unresolved_never_a_pass()
     assert_eq!(value["unresolved"][0]["key"], "3:m-101");
     let text = kept.markdown();
     assert!(text.starts_with("# Long run of 2026-10-11T10:00:00.000Z: UNRESOLVED\n"));
-    assert!(text.contains(
-        "| 3 | an ended notice comes with or before its result | A3 | **unresolved** (1) | 0 |"
-    ));
-    assert!(text.contains("## Unresolved\n\n- 3 · T-14's ended notice m-101"));
+    assert!(text
+        .contains("| 3 | no work is ended under a task at work | A3 | **unresolved** (1) | 0 |"));
+    assert!(text.contains("## Unresolved\n\n- 3 · T-14's close note m-101"));
     // A break fails it, whatever is unjudged besides.
     let found = [Break::new(2, "2:m-131", "T-14 was done while its job ran")];
     let failed = Kept {
@@ -178,65 +177,14 @@ fn a_run_with_every_disruption_played_and_nothing_broken_holds() {
 
 #[test]
 fn a_run_whose_only_breaks_are_known_passes_with_them_and_any_other_break_fails_it() {
-    use crate::long_run::invariants::{ENDED_NOTE, LET_GO_NOTE};
+    use crate::long_run::invariants::CLOSE_NOTE;
     let mut scene = scene();
     scene.schedule.played(
         Disruption::DevinCut,
         Duration::from_secs(1300),
         "loose".to_owned(),
     );
-    let late = |key: &str, shape: &'static str| {
-        let mut found = Break::new(
-            3,
-            key,
-            format!("{key}'s ended notice came after its result"),
-        )
-        .with_shape(shape);
-        found.at = STARTED + 60_000;
-        found
-    };
-    // The dry run's two: the background "ended" note after the result, each.
-    let found = [late("3:m-20", ENDED_NOTE), late("3:m-21", ENDED_NOTE)];
-    let kept = kept(&scene, &found, None);
-    assert_eq!(kept.verdict(), "PASS with 2 known");
-    assert!(kept.held());
-    assert!(kept.why().is_empty(), "{:?}", kept.why());
-    let value = kept.value();
-    assert_eq!(value["verdict"], "PASS with 2 known");
-    assert_eq!(value["invariants"][2]["held"], true);
-    assert_eq!(value["invariants"][2]["breaks"], 0);
-    assert_eq!(value["invariants"][2]["known"], 2);
-    assert_eq!(value["breaks"][0]["shape"], ENDED_NOTE);
-    assert!(value["breaks"][0]["known"]
-        .as_str()
-        .unwrap()
-        .contains("3.0.6"));
-    let said = kept.say(Path::new("long.json"), Path::new("long.md"));
-    assert!(said[0].ends_with(" · PASS with 2 known"), "{said:?}");
-    assert!(
-        said.iter()
-            .any(|line| line.starts_with("  known: 3:m-20 (")),
-        "{said:?}"
-    );
-    let text = kept.markdown();
-    assert!(text.starts_with("# Long run of 2026-10-11T10:00:00.000Z: PASS with 2 known\n"));
-    assert!(text.contains(" · KNOWN: "), "{text}");
-    assert!(text.contains("| known (2) | 2 |"), "{text}");
-    // An A3 of another notice fails the run, the known one beside it; so does an A3 of
-    // no shape.
-    for other in [late("3:m-22", LET_GO_NOTE), Break::new(3, "3:m-22", "late")] {
-        let found = [late("3:m-20", ENDED_NOTE), other];
-        let failed = self::kept(&scene, &found, None);
-        assert_eq!(failed.verdict(), "FAIL");
-        assert!(!failed.held());
-        assert_eq!(
-            failed.why(),
-            ["invariant 3 broke (A3, an ended notice comes with or before its result): 1"]
-        );
-    }
-    // Turn-end's A4: a result that holds its turn's progress is known; any other break
-    // of the fourth fails the run, beside it (one not the turn's final answer, whole, and
-    // one of no shape).
+    // Turn-end's A4: a result that holds its turn's progress is known.
     let progress = |key: &str| {
         let mut found = Break::new(4, key, format!("{key} holds 1 line of its turn's progress"))
             .with_shape("progress-lines");
@@ -244,12 +192,35 @@ fn a_run_whose_only_breaks_are_known_passes_with_them_and_any_other_break_fails_
         found
     };
     let found = [progress("4:m-6"), progress("4:m-9")];
-    let kept = self::kept(&scene, &found, None);
+    let kept = kept(&scene, &found, None);
     assert_eq!(kept.verdict(), "PASS with 2 known");
-    assert_eq!(kept.value()["invariants"][3]["known"], 2);
+    assert!(kept.held());
+    assert!(kept.why().is_empty(), "{:?}", kept.why());
+    let value = kept.value();
+    assert_eq!(value["verdict"], "PASS with 2 known");
+    assert_eq!(value["invariants"][3]["held"], true);
+    assert_eq!(value["invariants"][3]["breaks"], 0);
+    assert_eq!(value["invariants"][3]["known"], 2);
+    assert_eq!(value["breaks"][0]["shape"], "progress-lines");
+    assert!(value["breaks"][0]["known"]
+        .as_str()
+        .unwrap()
+        .contains("3.0.6"));
+    let said = kept.say(Path::new("long.json"), Path::new("long.md"));
+    assert!(said[0].ends_with(" · PASS with 2 known"), "{said:?}");
+    assert!(
+        said.iter().any(|line| line.starts_with("  known: 4:m-6 (")),
+        "{said:?}"
+    );
+    let text = kept.markdown();
+    assert!(text.starts_with("# Long run of 2026-10-11T10:00:00.000Z: PASS with 2 known\n"));
+    assert!(text.contains(" · KNOWN: "), "{text}");
+    assert!(text.contains("| known (2) | 2 |"), "{text}");
+    // Any other break of the fourth fails the run, the known one beside it (one not the
+    // turn's final answer, whole, and one of another shape).
     for other in [
         Break::new(4, "4:m-22", "m-22 is not its turn's final answer, whole"),
-        Break::new(4, "4:m-22", "m-22 holds 1 line").with_shape("ended-note"),
+        Break::new(4, "4:m-22", "m-22 holds 1 line").with_shape(CLOSE_NOTE),
     ] {
         let found = [progress("4:m-6"), other];
         let failed = self::kept(&scene, &found, None);
@@ -259,8 +230,23 @@ fn a_run_whose_only_breaks_are_known_passes_with_them_and_any_other_break_fails_
             ["invariant 4 broke (A4, a result is the last turn's final answer): 1"]
         );
     }
+    // The third has no known break (turn-end fixed it): a close note's, and one of no
+    // shape, fail the run.
+    for third in [
+        Break::new(3, "3:m-20", "closed under work").with_shape(CLOSE_NOTE),
+        Break::new(3, "3:m-22", "late"),
+    ] {
+        let found = [progress("4:m-6"), third];
+        let failed = self::kept(&scene, &found, None);
+        assert_eq!(failed.verdict(), "FAIL");
+        assert!(!failed.held());
+        assert_eq!(
+            failed.why(),
+            ["invariant 3 broke (A3, no work is ended under a task at work): 1"]
+        );
+    }
     // Known breaks and something unjudged: no pass.
-    let found = [late("3:m-20", ENDED_NOTE), late("3:m-21", ENDED_NOTE)];
+    let found = [progress("4:m-6"), progress("4:m-9")];
     let open = [Unjudged::new(4, "4:m-131", "not judged")];
     let unresolved = Kept {
         unresolved: &open,

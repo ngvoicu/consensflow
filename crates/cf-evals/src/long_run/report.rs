@@ -4,8 +4,8 @@
 //! when an invariant broke (a disruption that had no effect is a break, of the tenth),
 //! when a disruption it was asked to play was not played, when its time ran out before
 //! its end, or when it could not be run to its end; the verdict says which. A run that
-//! did not fail but holds what the watch could not judge (an ended notice the log ties
-//! to no result, a window's tree it could not see) is `UNRESOLVED`, each said: missing
+//! did not fail but holds what the watch could not judge (a close note the log ties
+//! to neither attempt of a task, a window's tree it could not see) is `UNRESOLVED`, each said: missing
 //! evidence never passes. Only a run with neither is `PASS`. A break the list of known
 //! breaks names, by its invariant and its shape ([`super::known`]), is kept with its
 //! issue and fails nothing: a run whose only breaks are known is `PASS with N known`,

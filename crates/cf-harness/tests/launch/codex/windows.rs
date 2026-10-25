@@ -358,7 +358,8 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         failed: false,
         quota,
         settlement,
-        agents_pending: false,
+        pending: Default::default(),
+        monitors: Vec::new(),
     }))
 }
 

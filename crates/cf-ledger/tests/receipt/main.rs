@@ -22,6 +22,7 @@ mod continuations;
 mod decided;
 mod doors;
 mod edited_brief;
+mod failed_briefs;
 mod fixture;
 mod gate;
 mod handed;

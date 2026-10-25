@@ -65,7 +65,7 @@ fn board_usage() -> String {
 
 /// Each board command's words (the ones that name it), and the lines of the
 /// usage it answers with.
-const BOARD: [(&[&str], &str); 18] = [
+const BOARD: [(&[&str], &str); 19] = [
     (
         &["task", "add"],
         concat!(
@@ -93,7 +93,10 @@ const BOARD: [(&[&str], &str); 18] = [
     ),
     (
         &["task", "list"],
-        "  cf task list                      the board: what waits for a member, then every lane\n",
+        concat!(
+            "  cf task list [--all]              the board: what waits for a member, then the lanes\n",
+            "                                    with a task to look at; --all adds the idle sessions\n",
+        ),
     ),
     (
         &["task", "get"],
@@ -130,6 +133,13 @@ const BOARD: [(&[&str], &str); 18] = [
     (
         &["task", "resume"],
         "  cf task resume T-3 \"…\"            go on with it: the same window, with your words\n",
+    ),
+    (
+        &["task", "finish"],
+        concat!(
+            "  cf task finish T-3                take what a working task's worker said last as its result;\n",
+            "                                    what its turn left running is not ended\n",
+        ),
     ),
     (
         &["tell"],

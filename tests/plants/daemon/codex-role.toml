@@ -817,38 +817,16 @@ meant = "a_session_resumed_on_a_task_it_holds_is_not_read_to_answer_it_by_the_wo
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = '''        let written = answers_to_the_task(&items[start + 1..], &replacements);'''
-replace = '''        let _ = &replacements;
-        let written: Vec<_> = items[start + 1..]
-            .iter()
-            .filter(|item| item.role == cf_harness::records::Role::Assistant)
-            .collect();'''
-
-# Where this meets the ending of what a turn left running (a worker's answer is its task's
-# result at once, and the host is asked to end what its turn left with it): a word given the
-# role is no result and has the host asked nothing, which the plant above breaks too (the test
-# of the meeting, in `role_change/members.rs`, fails with it), and an answer that is the result
-# has the host asked, whichever word came after it, which this plant holds: it is the edit of
-# `background rig: what the turn left running is not asked to end`, run on the tests of the
-# role's launch.
-
-[[plant]]
-name = "codex role: the result taken from the answer that came before the role's word ends nothing of what the turn left"
-meant = "the_answer_a_session_gave_its_task_before_its_role_was_said_is_the_result_and_asks_the_host_to_end_what_its_turn_left"
-runs = ["engine-role-change"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
+file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-            if let Some(ending) = self.seams.background.end(&pane).await {
-                return ending;
-            }'''
+        let Some(answers) = answers_to_the_task(&items[start + 1..], &replacements)'''
 replace = '''
-            let _ = &pane;
-            if let Some(ending) = None::<Ending> {
-                return ending;
-            }'''
+        let Some(answers) = answers_to_the_task(&items[start + 1..], &replacements[..0])'''
+
+# Where this met the ending of what a turn left running, a plant held that the answer before
+# the role's word had the host asked to end what its turn left; since turn-end's smallest
+# rule (2026-10-21) a turn's end asks the host nothing, and it is retired with the ending
+# (`turn-end-min: a turn's end asks the host to end what it left` holds that none is asked).
 
 [[plant]]
 name = "codex role: what a member answered its task before the role came is dropped with the word it gave the role"
@@ -857,15 +835,19 @@ runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''                of_the_role =
+find = '''
+                of_the_role =
                     header_id(&item.text).is_some_and(|message| replacements.contains(&message));
-            }'''
-replace = '''                of_the_role =
+                // A message to the member'''
+replace = '''
+                of_the_role =
                     header_id(&item.text).is_some_and(|message| replacements.contains(&message));
                 if of_the_role {
-                    answers.clear();
+                    final_run.clear();
+                    last = None;
                 }
-            }'''
+                // A message to the member'''
+
 
 [[plant]]
 name = "codex role: a member's words after the role are no answer to its task however many messages come after it"
@@ -874,12 +856,15 @@ runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''                of_the_role =
+find = '''
+                of_the_role =
                     header_id(&item.text).is_some_and(|message| replacements.contains(&message));
-            }'''
-replace = '''                of_the_role = of_the_role
+                // A message to the member'''
+replace = '''
+                of_the_role = of_the_role
                     || header_id(&item.text).is_some_and(|message| replacements.contains(&message));
-            }'''
+                // A message to the member'''
+
 
 # A note whose window closed before it was seen: the conversation's own record says whether it
 # was told.
@@ -1115,11 +1100,14 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''                of_the_role =
+find = '''
+                of_the_role =
                     header_id(&item.text).is_some_and(|message| replacements.contains(&message));
-            }'''
-replace = '''                of_the_role = item.text.contains(OPENING);
-            }'''
+                // A message to the member'''
+replace = '''
+                of_the_role = item.text.contains(OPENING);
+                // A message to the member'''
+
 
 [[plant]]
 name = "codex role: a turn of a member's record answers a replacement by any header it quotes"
@@ -1128,13 +1116,16 @@ runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''                of_the_role =
+find = '''
+                of_the_role =
                     header_id(&item.text).is_some_and(|message| replacements.contains(&message));
-            }'''
-replace = '''                of_the_role = replacements
+                // A message to the member'''
+replace = '''
+                of_the_role = replacements
                     .iter()
                     .any(|message| item.text.contains(&crate::delivery_text::marker_of(*message)));
-            }'''
+                // A message to the member'''
+
 
 [[plant]]
 name = "codex role: the message an item of a record is, is the one whose header comes last in it"

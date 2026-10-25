@@ -479,6 +479,18 @@ impl Members {
     pub fn close_within(self, within: Duration) -> Result {
         closing::end_within(self.rig, within)
     }
+
+    /// [`Members::close_within`], with `within` counted from the moment `happened` says an
+    /// event of the close has (`what` it is): for a case that reads what the close left at
+    /// a point of it, whenever a loaded machine gets there.
+    pub fn close_after(
+        self,
+        what: &str,
+        happened: impl Fn(&Rig) -> bool,
+        within: Duration,
+    ) -> Result {
+        closing::end_after(self.rig, what, happened, within)
+    }
 }
 
 /// The machine's `harness`, found, with its version and where its login is read

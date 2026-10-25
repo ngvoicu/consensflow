@@ -207,6 +207,10 @@ mod tests {
             settlement: "in-flight".to_owned(),
             failed: Value::Null,
             quota: Value::Null,
+            agents_pending: false,
+            jobs_pending: 0,
+            jobs_retired: 0,
+            monitors_noticed: 0,
         }
     }
 

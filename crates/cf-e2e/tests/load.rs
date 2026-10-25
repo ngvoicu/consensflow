@@ -20,7 +20,7 @@ use cf_e2e::{files, Error};
 use regex::Regex;
 use serde_json::{json, Value};
 
-type Outcome = Result<(), Box<dyn std::error::Error>>;
+type Outcome = cf_e2e::Outcome;
 
 /// The stand-in for a window's harness program, built for these tests.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
@@ -52,7 +52,7 @@ fn the_daemon_stays_up_delivers_every_task_and_logs_nothing_wrong_while_several_
     let projects = size("CONSENSFLOW_LOAD_PROJECTS", 3);
     let waves = size("CONSENSFLOW_LOAD_WAVES", 3);
     let tasks = size("CONSENSFLOW_LOAD_TASKS", 3);
-    let mut rig = Rig::start(Config::new(FAKE_AGENT))?;
+    let mut rig = Rig::start(Config::new(FAKE_AGENT).judged_by_outcome())?;
     let workers: Vec<String> = (1..=WORKERS).map(|at| format!("worker{at}")).collect();
     let agents: Vec<Value> = std::iter::once("chief".to_owned())
         .chain(workers.iter().cloned())
@@ -269,8 +269,8 @@ fn the_daemon_stays_up_delivers_every_task_and_logs_nothing_wrong_while_several_
 /// default; 256 for a noisy window of the long run's two hours), and the rig that holds what it
 /// printed (T-139, the rig's capture was unbounded: every byte a window printed was kept
 /// for the rig's life, and a failure's report made a string of each of its lines). What
-/// this process holds once the window is done, and at its peak as the rig, dropped
-/// unclosed, makes its report, stays under [`CAPTURE_LIMIT_MB`]: zeewin has 7 GB.
+/// this process holds once the window is done, and at its peak as the rig makes the report
+/// a failed case leaves of it, stays under [`CAPTURE_LIMIT_MB`]: zeewin has 7 GB.
 #[cfg(unix)]
 #[test]
 #[ignore = "opt-in: cargo xtask test load (npm run load)"]
@@ -294,7 +294,7 @@ fn a_window_that_prints_for_hours_holds_the_rig_and_its_report_to_a_bound() -> O
         })
     };
     let before = resident_mb(own)?;
-    let rig = Rig::start(Config::new(FAKE_AGENT))?;
+    let rig = Rig::start(Config::new(FAKE_AGENT).judged_by_outcome())?;
     let (daemon, host) = (rig.daemon_pid(), rig.host_pid());
     let done = rig.workspace().join("noise-done");
     let pane = json!({ "id": "noisy-1", "generation": 1 });
@@ -321,21 +321,19 @@ fn a_window_that_prints_for_hours_holds_the_rig_and_its_report_to_a_bound() -> O
     let held = resident_mb(own)?;
     let (daemon, host) = (resident_mb(daemon)?, resident_mb(host)?);
     let kept = rig.printed("noisy-1").len();
-    let home = rig.workspace().parent().map(std::path::Path::to_path_buf);
-    // A rig dropped unclosed makes its report of what its windows printed.
-    drop(rig);
-    thread::sleep(Duration::from_millis(300));
+    // The report a failed case leaves of the rig, made as a drop unclosed makes it, held
+    // while this process is measured once more.
+    let report = rig.failure_report();
+    let with_report = resident_mb(own)?;
     sampling.store(false, Ordering::SeqCst);
     let _ = sampler.join();
-    let peak = peak.load(Ordering::SeqCst).max(held);
-    if let Some(home) = home {
-        let name = home
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
-        let _ = std::fs::remove_file(home.with_file_name(format!("{name}-left.txt")));
-    }
+    let peak = peak.load(Ordering::SeqCst).max(held).max(with_report);
+    assert!(
+        report.contains("the noise is over"),
+        "the report holds no end of what the window printed"
+    );
+    drop(report);
+    rig.close()?;
     println!(
         "capture: a window printed {mib} MiB in {seconds:.0} s; the rig kept {} MiB of it; this process went from {before} MB to {held} MB, and peaked at {peak} MB with the report; the daemon was at {daemon} MB and the pane host at {host} MB",
         kept / (1024 * 1024)

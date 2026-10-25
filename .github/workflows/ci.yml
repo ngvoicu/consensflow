@@ -80,20 +80,26 @@ jobs:
       # tests' build, 16 s at most in a step. The slowest of each, added up on
       # macOS, which is the slower:
       #   daemon and rig: 16 + 50 + 1,165 = 1,231 s = 20.5 min
-      #   regressions:    16 + 1,863 = 1,879 s = 31.3 min
+      #   regressions:    16 + 1,863 - 591 = 1,288 s = 21.5 min
+      # The 591 are what T-307 took out of the regressions on the Mac, one case at
+      # a time (1,821 s to 1,230 s): the Devin cases' turns outlast the daemon's
+      # arrival window, which is 15 s in them now (CONSENSFLOW_ARRIVAL_TIMEOUT_MS)
+      # and not its minute, and no case waits 15 s to see nothing come. On zeewin
+      # the six longest of them took what they took on the Mac, within 3 s: their
+      # time is the stand-in's timers. Without it the line read 16 + 1,863 =
+      # 1,879 s = 31.3 min.
       # The limit is 1.4 times that, to the next five minutes: 1.4 * 20.5 = 28.7,
-      # so 30; 1.4 * 31.3 = 43.8, so 45. The runs of one binary differ by 12 % at
-      # most (the rig's, above); the rest is room for the cases that land before
-      # the regressions are made faster. Both worsts are under 80 % of their
-      # limit (24 and 36 minutes), where `cargo xtask ci-times` fails a run. The
-      # regressions have 281 s left to that mark on macOS and 363 s on Windows
-      # (1,797 s there): 11 more cases at the averages above, and 32 before the
-      # cut (28 on Windows). The daemon and the rig go first: the build of
-      # cf-e2e is theirs.
+      # so 30; 1.4 * 21.5 = 30.1, so 35. The runs of one binary differ by 12 % at
+      # most (the rig's, above); the rest is room for the cases that land. Both
+      # worsts are under 80 % of their limit (24 and 28 minutes), where `cargo
+      # xtask ci-times` fails a run. The regressions have 392 s left to that mark
+      # on macOS and 474 s on Windows (1,206 s there): 15 more cases at the
+      # averages above, and 14 on Windows. The daemon and the rig go first: the
+      # build of cf-e2e is theirs.
       - run: npm run test:daemon-and-rig
         timeout-minutes: 30
       - run: npm run test:regressions
-        timeout-minutes: 45
+        timeout-minutes: 35
       # The CLI's suites against the native cf, which answers every verb.
       - run: npm run test:clis
         timeout-minutes: 15

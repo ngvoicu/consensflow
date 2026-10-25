@@ -209,6 +209,27 @@ impl Stagehand for Stage {
             .is_ok_and(|rig| rig.window_pids().iter().any(|window| window["id"] == pane))
     }
 
+    /// The command lines the daemon asked the pane host to open the window with
+    /// (`pane.open`'s `argv`).
+    fn opened_with(&self, pane: &str) -> Vec<Vec<String>> {
+        let Ok(rig) = self.rig() else {
+            return Vec::new();
+        };
+        rig.open_frames()
+            .into_iter()
+            .filter(|frame| frame["id"] == pane)
+            .map(|frame| {
+                frame["argv"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .collect()
+    }
+
     /// The app quit and started again on the same home: the daemon killed, the pane
     /// host ended with its windows (and read to its last word), and both started
     /// again. The daemon that starts suspends the project, which waits for the human's
