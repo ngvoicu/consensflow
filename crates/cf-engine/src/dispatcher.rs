@@ -1282,6 +1282,9 @@ impl Dispatcher {
         owner: &ParticipantView,
     ) -> Result<(), EngineError> {
         self.handled(record);
+        // A refused turn leaves nothing running that wakes its agent: its task waits for
+        // the quota now, not for a job of an earlier turn (`turn_end`).
+        record.held.borrow_mut().reset();
         let reported = record.quota.borrow().reported.clone();
         let reset = self.reset_of(reported.as_deref());
         let marked = self

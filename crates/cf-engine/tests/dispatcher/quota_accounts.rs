@@ -627,3 +627,181 @@ fn a_chief_refused_again_with_no_reset_named_within_the_hour_is_not_brought_back
         "the same limit within the hour: no news a teammate's turn undoes"
     );
 }
+
+/// The notification Claude Code begins a turn with when a job of its ends.
+const ENDED: &str =
+    "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>";
+
+/// The results of T-`number` the chief was given or is to be given, with their states.
+fn results_of(tiers: &Tiers<'_>, number: i64) -> Vec<(String, String)> {
+    tiers
+        .task(number)
+        .messages
+        .into_iter()
+        .filter(|message| message.kind == "result")
+        .map(|message| (message.body, message.state))
+        .collect()
+}
+
+#[test]
+fn a_member_brought_back_by_the_chiefs_turn_goes_on_with_its_task_and_its_refusal_is_no_result() {
+    // Turn-end meets the account's news: zeus's window still reads the refusal its turn
+    // ended on when the chief's turn brings zeus back, and that answer is no result.
+    let context = Context::new();
+    let (tiers, session) = out_together(&context);
+    context.advance(60_000);
+    goes_on(&context.adapter, "chief", &now(&context));
+    // The chief's turn on the new account ends with those words.
+    context.adapter.with("chief", |agent| {
+        if let Some(said) = agent.items.last_mut() {
+            said.complete = true;
+        }
+    });
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), None);
+    assert_eq!(tiers.out_until("zeus"), None, "zeus is back with it");
+    assert!(
+        context.adapter.agent(&session).failed,
+        "its record still reads the refusal"
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working", "T-1 went on");
+    assert_eq!(
+        results_of(&tiers, 1),
+        Vec::new(),
+        "the refusal is no result"
+    );
+    context.adapter.answer(&session, "Parser done.");
+    for _ in 0..6 {
+        context.pass().unwrap();
+        context.adapter.answer("chief", "Noted.");
+    }
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(
+        results_of(&tiers, 1),
+        [("Parser done.".to_owned(), "delivered".to_owned())],
+        "its final answer alone, typed into the chief"
+    );
+}
+
+#[test]
+fn what_a_held_task_says_to_a_chief_out_of_quota_and_its_result_wait_and_the_human_hears_it_once() {
+    // Turn-end meets the queue of a chief out of quota on another account: the note that
+    // T-1 goes on in the background and then its result wait for the chief, the human is
+    // told once what waits, and both are typed in, the result its final answer, once back.
+    let context = Context::new();
+    let (tiers, session) = {
+        let tiers = Tiers::new(&context, &["zeus"]);
+        tiers.open();
+        context.pass().unwrap();
+        context.pass().unwrap();
+        let session = tiers.assignee(1);
+        (tiers, session)
+    };
+    let resets_at = after(&context, 48 * 3_600_000);
+    context
+        .adapter
+        .refuse("chief", exhausted(Some(&now(&context)), Some(&resets_at)));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), Some(resets_at));
+    assert_eq!(tiers.out_until("zeus"), None, "zeus is on another account");
+
+    context.advance(60_000);
+    context
+        .adapter
+        .answer_leaving_a_job(&session, "The build runs; I will report when it ends");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working", "held for its job");
+    let held = tiers.task(1).messages.into_iter().find(|message| {
+        message.kind == "note" && message.body.starts_with("T-1 goes on in the background")
+    });
+    let held = held.expect("the chief is to be told T-1 goes on in the background");
+    assert_eq!(
+        held.state, "queued",
+        "nothing goes into a window out of quota"
+    );
+    let told = || -> Vec<String> {
+        tiers
+            .notes("human")
+            .into_iter()
+            .filter(|note| note.starts_with("@chief is out of quota"))
+            .collect()
+    };
+    let said = told();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].contains(&format!("m-{} (a note on T-1) waits", held.id)),
+        "{said:?}"
+    );
+
+    context.adapter.wake(&session, ENDED);
+    context.pass().unwrap();
+    context
+        .adapter
+        .answer(&session, "Build green; committed as fe76a3c");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(
+        results_of(&tiers, 1),
+        [(
+            "Build green; committed as fe76a3c".to_owned(),
+            "queued".to_owned()
+        )],
+        "its final answer, waiting for the chief"
+    );
+    assert_eq!(told().len(), 1, "told once for the mark");
+
+    context.back_from_quota(tiers.project.id, "chief").unwrap();
+    goes_on(&context.adapter, "chief", &now(&context));
+    for _ in 0..6 {
+        context.pass().unwrap();
+        context.adapter.answer("chief", "Noted.");
+    }
+    assert_eq!(
+        results_of(&tiers, 1),
+        [(
+            "Build green; committed as fe76a3c".to_owned(),
+            "delivered".to_owned()
+        )],
+        "typed into the chief once it is back"
+    );
+}
+
+#[test]
+fn a_held_task_whose_wake_up_is_refused_for_quota_is_held_for_its_job_no_more() {
+    // Turn-end's hold meets a refusal: the turn the job's end woke is refused, the task
+    // waits for the quota, and the lane no longer says it goes on in the background.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let zeus = tiers.id(&session);
+    context
+        .adapter
+        .answer_leaving_a_job(&session, "The build runs; I will report when it ends");
+    context.pass().unwrap();
+    assert_eq!(
+        context.dispatcher.held_for(zeus).map(|hold| hold.task),
+        Some(1)
+    );
+    context.adapter.wake(&session, ENDED);
+    context.pass().unwrap();
+    let resets_at = after(&context, 48 * 3_600_000);
+    context
+        .adapter
+        .refuse(&session, exhausted(Some(&now(&context)), Some(&resets_at)));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), Some(resets_at));
+    assert_ne!(tiers.task(1).task.state, "working");
+    assert_eq!(
+        context.dispatcher.held_for(zeus),
+        None,
+        "held for quota, not its job"
+    );
+}

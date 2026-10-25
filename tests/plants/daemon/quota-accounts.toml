@@ -313,3 +313,74 @@ find = '''        "an"
 '''
 replace = '''        "a"
 '''
+
+# Where these rules meet turn-end's (T-530's merge of 3.0.6-alpha.3): a refusal is no result, what a
+# held task tells a chief out of quota waits and is said to the human, and a refused turn ends its
+# task's hold.
+
+# The refusal is kept from the result rule twice: the refused task is held, so its resume's
+# words are pasted before any answer is read (mark_back makes the hold due), and a task still
+# at work when its window reads a refusal goes on (cut_short) before turn_end::collect. The
+# plant takes both away, so a refusal reaches collect.
+[[plant]]
+name = "quota-accounts: a member brought back by a teammate's turn takes the refusal its window still reads for its turn's answer"
+meant = "a_member_brought_back_by_the_chiefs_turn_goes_on_with_its_task_and_its_refusal_is_no_result"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            if self.cut_short(&observed) {"
+replace = "            if false && self.cut_short(&observed) {"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            if soon || !teammate {
+                self.seams.ledger.borrow_mut().hold_task(
+                    project.id,
+                    task.number,
+                    until,
+                    "out of quota",
+                )?;
+'''
+replace = '''
+            if soon || !teammate {
+'''
+
+[[plant]]
+name = "quota-accounts: a window out of quota is marked told before anything waits for it, so a held task's note to it is never said"
+meant = "what_a_held_task_says_to_a_chief_out_of_quota_and_its_result_wait_and_the_human_hears_it_once"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        let Some(waiting) = waiting else {
+            return Ok(());
+        };
+        let mark = (participant.id, owner.out_since.clone().unwrap_or_default());
+        if !self.scheduler.out_noted.borrow_mut().insert(mark) {
+'''
+replace = '''
+        let mark = (participant.id, owner.out_since.clone().unwrap_or_default());
+        let fresh = self.scheduler.out_noted.borrow_mut().insert(mark);
+        let Some(waiting) = waiting else {
+            return Ok(());
+        };
+        if !fresh {
+'''
+
+[[plant]]
+name = "quota-accounts: a refused turn leaves its task held for the job of an earlier turn"
+meant = "a_held_task_whose_wake_up_is_refused_for_quota_is_held_for_its_job_no_more"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        record.held.borrow_mut().reset();
+        let reported = record.quota.borrow().reported.clone();
+'''
+replace = '''
+        let reported = record.quota.borrow().reported.clone();
+'''
