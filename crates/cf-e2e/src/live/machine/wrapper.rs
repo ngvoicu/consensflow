@@ -25,10 +25,10 @@ pub fn isolated_claude(folder: &Path, claude: &Path) -> Result<PathBuf> {
 }
 
 /// A program called `claude-shimmed` that runs the stand-in agent at `stand_in`,
-/// with the Claude config folder of the machine (`$HOME/.claude`, where the
-/// daemon looks for the records of a window), for the window whose agent's model
-/// is `fake` or `fake-chief`, and the real Claude Code at `claude` as
-/// [`isolated_claude`] does for every other: a project whose chief and some
+/// as it is given the environment (its `CLAUDE_CONFIG_DIR` is the one the rig gives
+/// every window, where the daemon looks for the records of a window), for the window
+/// whose agent's model is `fake` or `fake-chief`, and the real Claude Code at `claude`
+/// as [`isolated_claude`] does for every other: a project whose chief and some
 /// members are stand-ins and whose other members are real. Made in `folder`.
 /// Where it is.
 pub fn shimmed_claude(folder: &Path, claude: &Path, stand_in: &Path) -> Result<PathBuf> {
@@ -96,11 +96,12 @@ fn shimming_script(claude: &Path, stand_in: &Path, servers: Option<&Path>) -> St
     format!(
         "#!/bin/sh\n\
          # Written by a live test: a window whose agent's model is fake or fake-chief is the\n\
-         # stand-in's, which writes its records where the daemon reads Claude's; every other\n\
-         # Claude window reaches no MCP server and no browser.\n\
+         # stand-in's, which writes its records where the daemon reads Claude's (the folder\n\
+         # CLAUDE_CONFIG_DIR names, as it does for the real Claude); every other Claude window\n\
+         # reaches no MCP server and no browser.\n\
          for arg in \"$@\"; do\n\
          \x20 case \"$arg\" in\n\
-         \x20   fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec {} \"$@\" ;;\n\
+         \x20   fake | fake-chief) exec {} \"$@\" ;;\n\
          \x20 esac\n\
          done\n\
          exec {} {servers}{} \"$@\"\n",
@@ -149,9 +150,7 @@ mod tests {
         );
         // The stand-in's window is as it was: it has no server of the harness's.
         assert!(
-            script.contains(
-                "fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec '/the/fake-agent' \"$@\" ;;"
-            ),
+            script.contains("fake | fake-chief) exec '/the/fake-agent' \"$@\" ;;"),
             "{script}"
         );
         assert!(
@@ -161,16 +160,14 @@ mod tests {
     }
 
     #[test]
-    fn the_shim_hands_the_stand_in_the_machines_claude_folder_and_the_real_claude_the_flags() {
+    fn the_shim_hands_the_stand_in_the_environment_as_it_is_and_the_real_claude_the_flags() {
         let script = shimming_script(
             Path::new("/real/claude"),
             Path::new("/the/fake-agent"),
             None,
         );
         assert!(
-            script.contains(
-                "fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec '/the/fake-agent' \"$@\" ;;"
-            ),
+            script.contains("fake | fake-chief) exec '/the/fake-agent' \"$@\" ;;"),
             "{script}"
         );
         assert!(
@@ -204,8 +201,9 @@ mod tests {
     }
 
     /// What the shim made for `/bin/sh` as the stand-in and `/bin/echo` as Claude
-    /// says to the words `words`, with `HOME` the folder `/h`: the stand-in is a
-    /// shell that prints the Claude folder it was given.
+    /// says to the words `words`, with `HOME` the folder `/h` and `CLAUDE_CONFIG_DIR`
+    /// the folder `/rig/claude`: the stand-in is a shell that prints the Claude folder
+    /// it was given.
     #[cfg(unix)]
     fn shimmed(words: &[&str]) -> String {
         let folder = tempfile::tempdir().unwrap();
@@ -216,6 +214,7 @@ mod tests {
             .arg(&shim)
             .args(words)
             .var("HOME", "/h")
+            .var("CLAUDE_CONFIG_DIR", "/rig/claude")
             .run()
             .unwrap()
             .stdout
@@ -223,11 +222,11 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_window_of_a_fake_model_is_the_stand_ins_with_the_machines_claude_folder() {
+    fn a_window_of_a_fake_model_is_the_stand_ins_with_the_claude_folder_the_rig_gave_it() {
         for model in ["fake", "fake-chief"] {
             assert_eq!(
                 shimmed(&["-c", "echo $CLAUDE_CONFIG_DIR", model]),
-                "/h/.claude\n",
+                "/rig/claude\n",
                 "{model}"
             );
         }
@@ -264,6 +263,7 @@ mod tests {
                 .arg(&shim)
                 .args(words)
                 .var("HOME", "/h")
+                .var("CLAUDE_CONFIG_DIR", "/rig/claude")
                 .run()
                 .unwrap()
                 .stdout
@@ -276,7 +276,7 @@ mod tests {
         // stand-in is a shell here, which prints the Claude folder it was given).
         assert_eq!(
             run(&["-c", "echo $CLAUDE_CONFIG_DIR", "fake"]),
-            "/h/.claude\n"
+            "/rig/claude\n"
         );
     }
 

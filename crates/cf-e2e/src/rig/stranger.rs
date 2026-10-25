@@ -83,7 +83,7 @@ impl Stranger {
     /// How something else ended it, where something did: none while it runs, and none
     /// where it left of itself.
     pub(super) fn ended_by_another(&mut self) -> Option<String> {
-        let status = self.spawned.wait(Duration::ZERO).ok().flatten()?;
+        let status = self.spawned.status()?;
         #[cfg(unix)]
         let signal = std::os::unix::process::ExitStatusExt::signal(&status);
         #[cfg(windows)]
@@ -188,12 +188,7 @@ mod tests {
         assert!(is_alive(id));
         stranger.release();
         assert!(
-            wait::until(Duration::from_secs(10), || stranger
-                .spawned
-                .wait(Duration::ZERO)
-                .ok()
-                .flatten()
-                .is_some()),
+            wait::until(Duration::from_secs(10), || stranger.spawned.has_exited()),
             "it left once its input ended"
         );
         assert_eq!(stranger.ended_by_another(), None);

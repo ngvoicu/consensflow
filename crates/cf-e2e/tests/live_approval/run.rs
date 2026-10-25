@@ -266,32 +266,21 @@ pub fn project(planned: &Planned, machine: &Machine, log: &Log) -> Done {
             seconds: 0,
         });
     }
-    forget(machine, &known, &log);
+    forget(&known, &log);
     done
 }
 
-/// Has the harnesses forget what they kept of a project's folder, now that its
-/// windows are gone: Claude Code by its own `purge` (its entry in
-/// `~/.claude.json`, which holds the trust the run asked of it, and the
-/// prompts the human typed in the folder), and, where they are, the sessions
-/// Claude Code and Pi wrote in their own folders.
-fn forget(machine: &Machine, known: &[String], log: &Log) {
+/// Has Pi forget what it kept of a project's folder, now that its windows are gone: its
+/// sessions, in its own folder. (Claude Code's are in the config folder of the run, which
+/// goes with it, and so are the trust the run asked of it and the prompts the human typed.)
+fn forget(known: &[String], log: &Log) {
     let Some(home) = own_var("HOME").map(PathBuf::from) else {
         return;
     };
-    if let Some(claude) = machine.of(Harness::Claude) {
-        let purged = cleanup::forget_in_claude(claude.command(), &home, known);
-        if !purged.is_empty() {
-            log.say(format!(
-                "Claude Code forgot the project at {}",
-                purged.join(", ")
-            ));
-        }
-    }
     let removed = cleanup::remove(&cleanup::records(&home, known));
     if !removed.is_empty() {
         log.say(format!(
-            "removed what Claude Code and Pi kept of the folder: {}",
+            "removed what Pi kept of the folder: {}",
             removed
                 .iter()
                 .map(|path| path.display().to_string())

@@ -23,7 +23,6 @@ panes-lib-snapshot = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "
 panes-lib-handlers = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::"]
 e2e-lib-route = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::route::"]
 harness-reading = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::reading::"]
-e2e-lib-process-shell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell::"]
 harness-contract = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "contract::tests::"]
 rig-regression-load-retype = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_message_the_chief_took_was_typed_in_again_under_load::"]
 
@@ -254,23 +253,6 @@ find = "            Arc::new(if reason == MISSING_SESSION {"
 replace = "            Arc::new(if reason == MISSING_SESSION && false {"
 
 # The rig's.
-
-[[plant]]
-name = "load retype: a program's exit is read before the rest of its error output is (a refused second `cf ui` said nothing, under load)"
-meant = "a_spawned_program_that_ended_has_said_all_of_its_error_output"
-runs = ["e2e-lib-process-shell"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/process/spawned.rs"
-find = """
-                Ok(Some(status)) => {
-                    self.errors_read();
-                    return Ok(Some(status));
-                }"""
-replace = """
-                Ok(Some(status)) => {
-                    return Ok(Some(status));
-                }"""
 
 [[plant]]
 name = "load retype: a rig stall waits out its time though the daemon pasted the same words again"

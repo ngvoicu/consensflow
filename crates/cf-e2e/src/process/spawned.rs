@@ -5,15 +5,14 @@
 //! itself waiting for its output to be read; what it said on its error output
 //! is kept as it arrives; its output is the case's to read, a line at a time.
 
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Write};
 use std::process::{Child, ChildStdout, ExitStatus};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use super::{pid, Signal, POLL};
+use super::{drain, ended_by, pid, Drain, Signal, HELD, POLL};
 use crate::{Error, Result};
 
 /// What goes down the queue to a program's input.
@@ -51,15 +50,11 @@ pub struct Spawned {
     /// None when the input was never a pipe.
     input: Option<Sink>,
     output: Option<BufReader<ChildStdout>>,
-    errors: Arc<Mutex<String>>,
-    /// Whether its error output has ended (or was never a pipe).
-    errors_ended: Arc<AtomicBool>,
+    errors: Arc<Mutex<Vec<u8>>>,
+    /// The thread that keeps its error output, until an end of the program has
+    /// waited for it.
+    reader: Option<JoinHandle<()>>,
 }
-
-/// How long a program that ended is given for the rest of its error output to be
-/// read: what it wrote last may still be in the pipe, or come from a process of its
-/// own that outlives it. One that holds the pipe open longer is not waited for.
-const ERRORS_END: Duration = Duration::from_secs(5);
 
 impl Spawned {
     /// The running `child` of `program`, with `first` queued to its input.
@@ -85,24 +80,10 @@ impl Spawned {
         if let (Some(sink), Some(bytes)) = (&input, first) {
             sink.send(bytes);
         }
-        let errors = Arc::new(Mutex::new(String::new()));
-        let errors_ended = Arc::new(AtomicBool::new(true));
-        if let Some(mut pipe) = child.stderr.take() {
-            errors_ended.store(false, Ordering::Release);
-            let (said, ended) = (Arc::clone(&errors), Arc::clone(&errors_ended));
-            thread::spawn(move || {
-                let mut chunk = [0_u8; 4096];
-                while let Ok(read) = pipe.read(&mut chunk) {
-                    if read == 0 {
-                        break;
-                    }
-                    said.lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push_str(&String::from_utf8_lossy(&chunk[..read]));
-                }
-                ended.store(true, Ordering::Release);
-            });
-        }
+        let Drain {
+            read: errors,
+            thread: reader,
+        } = drain(child.stderr.take());
         let output = child.stdout.take().map(BufReader::new);
         Self {
             child,
@@ -110,7 +91,7 @@ impl Spawned {
             input,
             output,
             errors,
-            errors_ended,
+            reader: Some(reader),
         }
     }
 
@@ -144,36 +125,34 @@ impl Spawned {
         self.output.take()
     }
 
-    /// Waits for its error output to end, [`ERRORS_END`] at most.
-    fn errors_read(&self) {
-        let started = Instant::now();
-        while !self.errors_ended.load(Ordering::Acquire) && started.elapsed() < ERRORS_END {
-            thread::sleep(POLL);
-        }
-    }
-
-    /// Everything it has said on its error output so far.
+    /// Everything it has said on its error output so far: all of it once
+    /// [`Spawned::wait`] has seen it end.
     pub fn errors(&self) -> String {
-        self.errors
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        String::from_utf8_lossy(&self.errors.lock().unwrap_or_else(PoisonError::into_inner))
+            .into_owned()
     }
 
-    /// Whether it has ended.
+    /// How it ended, if it has. It is a look, not a wait: what it said on its error
+    /// output may not all be kept yet, and a process it left that holds the pipe is
+    /// not waited for ([`Spawned::wait`] does both, once).
+    pub fn status(&mut self) -> Option<ExitStatus> {
+        self.child.try_wait().ok().flatten()
+    }
+
+    /// Whether it has ended ([`Spawned::status`]).
     pub fn has_exited(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(Some(_)))
+        self.status().is_some()
     }
 
     /// Waits for it to end, up to `within`: how it ended, or none if it was
-    /// still running then. Once it has ended, its error output is read to its end
-    /// ([`ERRORS_END`] at most), so [`Spawned::errors`] holds all it said.
+    /// still running then. An end is seen once what it said on its error output
+    /// is all kept ([`Spawned::settle_errors`]).
     pub fn wait(&mut self, within: Duration) -> Result<Option<ExitStatus>> {
         let started = Instant::now();
         loop {
             match self.child.try_wait() {
                 Ok(Some(status)) => {
-                    self.errors_read();
+                    self.settle_errors();
                     return Ok(Some(status));
                 }
                 Ok(None) => {}
@@ -189,6 +168,17 @@ impl Spawned {
                 return Ok(None);
             }
             thread::sleep(POLL);
+        }
+    }
+
+    /// Once it has ended, waits for the thread that keeps its error output to read
+    /// to the end of the pipe: what it said is in the pipe by then, but a thread the
+    /// system has not run yet has not kept it, and a case that read it at once found
+    /// it short. A process it left that holds the pipe open is waited for [`HELD`]
+    /// at most. Only the first end seen waits.
+    fn settle_errors(&mut self) {
+        if let Some(reader) = self.reader.take() {
+            ended_by(reader, Instant::now() + HELD);
         }
     }
 

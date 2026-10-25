@@ -7,7 +7,7 @@ fn the_window_is_opened_with_the_fields_the_pane_host_takes_and_no_other() {
     let body = pane_open(
         Path::new("/work/space"),
         &["/bin/claude".to_owned(), "--session-id".to_owned()],
-        &["CLAUDE_CONFIG_DIR".to_owned()],
+        &["ANTHROPIC_API_KEY".to_owned()],
     );
     // The pane host refuses a request that has a field it does not know (`launch`
     // was sent once: `invalid-body: unknown field`, found by playing the arm against
@@ -28,5 +28,5 @@ fn the_window_is_opened_with_the_fields_the_pane_host_takes_and_no_other() {
     assert_eq!(body["cwd"], "/work/space");
     assert_eq!(body["argv"], json!(["/bin/claude", "--session-id"]));
     assert_eq!(body["env"], json!({}));
-    assert_eq!(body["dropEnv"], json!(["CLAUDE_CONFIG_DIR"]));
+    assert_eq!(body["dropEnv"], json!(["ANTHROPIC_API_KEY"]));
 }

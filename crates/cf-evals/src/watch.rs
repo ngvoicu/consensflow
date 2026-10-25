@@ -5,6 +5,7 @@
 //! ```text
 //! cargo xtask watch --project poker-lab
 //! cargo xtask watch --project 5 --minutes 30 --tokens
+//! cargo xtask watch --project long-chief --home DIR --tokens --claude-config DIR
 //! ```
 //!
 //! It says: the tasks not finished, and who holds each; the messages still on their
@@ -12,7 +13,11 @@
 //! working and idle is flagged), the last one and why; the windows that stopped on a
 //! prompt; deliveries held, retried or failed; members out of quota. With
 //! `--tokens`, what each Claude window's own record says it used: its first turn's
-//! context, what it read from the cache, wrote and output.
+//! context, what it read from the cache, wrote and output. The records are read in the user's
+//! `~/.claude` (the app's own windows keep them there), or in `--claude-config` where the project
+//! is an eval's: its Claude windows run on a throwaway config folder, which the run says at its
+//! start (`claude config: …`), and whose conversations are copied, once the run's home is kept,
+//! beside it: the report's `home` is `<root>/consensflow`, and they are in `<root>/home/.claude`.
 
 mod tokens;
 
@@ -34,11 +39,12 @@ use crate::measure::on_copy;
 use crate::{clock, Error, Result};
 
 /// The flags of `watch`.
-const FLAGS: [Flag; 4] = [
+const FLAGS: [Flag; 5] = [
     Flag::value("project"),
     Flag::or("minutes", "60"),
     Flag::switch("tokens"),
     Flag::value("home"),
+    Flag::value("claude-config"),
 ];
 
 /// A window flips when its state keeps changing within seconds, most of its changes
@@ -57,13 +63,16 @@ struct Asked {
     tokens: bool,
     /// The ConsensFlow home to watch: the app's own, unless another is named.
     home: PathBuf,
+    /// The Claude config folder whose `projects` hold the windows' records: the user's own
+    /// `~/.claude`, unless another is named.
+    claude_config: PathBuf,
 }
 
 fn asked(words: &[String]) -> Result<Asked> {
     let flags = cli::parse(&FLAGS, words)?;
     let Some(project) = flags.get("project").filter(|project| !project.is_empty()) else {
         return Err(Error::Usage(
-            "usage: cargo xtask watch --project <name or id> [--minutes 60] [--tokens] [--home DIR]"
+            "usage: cargo xtask watch --project <name or id> [--minutes 60] [--tokens] [--home DIR] [--claude-config DIR]"
                 .to_owned(),
         ));
     };
@@ -74,11 +83,16 @@ fn asked(words: &[String]) -> Result<Asked> {
             None => machine::home()?.join(".consensflow"),
         },
     };
+    let claude_config = match flags.get("claude-config") {
+        Some(folder) => PathBuf::from(folder),
+        None => machine::home()?.join(".claude"),
+    };
     Ok(Asked {
         project: project.to_owned(),
         minutes: flags.get("minutes").unwrap_or("60").to_owned(),
         tokens: flags.has("tokens"),
         home,
+        claude_config,
     })
 }
 
@@ -155,7 +169,7 @@ fn watch(asked: &Asked, minutes: f64, out: &mut dyn Write) -> Result {
         deliveries(&events, out)?;
         out_of_quota(db, id, out)?;
         if asked.tokens {
-            tokens::say(db, id, out)?;
+            tokens::say(db, id, &asked.claude_config.join("projects"), out)?;
         }
         Ok(())
     })

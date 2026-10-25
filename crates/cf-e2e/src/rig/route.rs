@@ -18,7 +18,7 @@
 //! between the two wait here for a while, then go on in the order they came.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -102,6 +102,9 @@ pub(super) struct Seen {
     pub kills: Vec<Value>,
     /// Every key the daemon pressed into a window, in order.
     pub presses: Vec<Press>,
+    /// When the daemon told the page the board moved (`state.changed`, its reason
+    /// `core`), in milliseconds since the epoch, in order.
+    pub moves: Vec<i64>,
     /// Everything each pane printed, by the pane's id.
     pub printed: HashMap<String, Vec<u8>>,
     /// The body of each `pane.exit` the pane host told.
@@ -178,6 +181,8 @@ pub(super) struct Shared {
     hosts: AtomicU64,
     catch: Mutex<Catch>,
     stall: Arc<Mutex<Stall>>,
+    /// The daemon's looks at a window's screen are refused here while it is set.
+    refusing_snapshots: AtomicBool,
 }
 
 impl Shared {
@@ -268,6 +273,12 @@ impl Shared {
         stall.holding
     }
 
+    /// From now on, while `refused`, the daemon's every `pane.snapshot` is answered
+    /// here, not ok, as a host that could not read the screen answers it.
+    pub fn refuse_snapshots(&self, refused: bool) {
+        self.refusing_snapshots.store(refused, Ordering::Relaxed);
+    }
+
     /// Whether the paste set out to be caught was.
     pub fn paste_caught(&self) -> bool {
         self.catch
@@ -305,8 +316,9 @@ impl Shared {
     }
 
     /// A line the daemon wrote: kept, and passed to the pane host unless it is
-    /// the answer to a request of the case's, or a paste caught to go nowhere, or
-    /// held by a stall of the host's until it is over.
+    /// the answer to a request of the case's, a paste caught to go nowhere, a
+    /// look at a screen refused, which is answered to the `daemon` here, or held by
+    /// a stall of the host's until it is over.
     pub fn route_daemon(&self, line: &str, host: &Sink, daemon: &Sink) {
         let Ok(frame) = serde_json::from_str::<Value>(line) else {
             self.seen().stray.push(line.to_owned());
@@ -325,6 +337,12 @@ impl Shared {
             }
             if frame["kind"] == "req" && frame["op"] == "pane.kill" {
                 seen.kills.push(frame["body"].clone());
+            }
+            if frame["kind"] == "evt"
+                && frame["op"] == "state.changed"
+                && frame["body"]["reason"] == "core"
+            {
+                seen.moves.push(jiff::Timestamp::now().as_millisecond());
             }
             if frame["kind"] == "req" && frame["op"] == "pane.input" {
                 if let Some(bytes) = bytes_of(&frame["body"]["bytes"]) {
@@ -346,6 +364,14 @@ impl Shared {
         }
         let line = format!("{line}\n");
         if self.stalls_daemon(&frame, &line, host, daemon) {
+            return;
+        }
+        if frame["kind"] == "req"
+            && frame["op"] == "pane.snapshot"
+            && self.refusing_snapshots.load(Ordering::Relaxed)
+        {
+            let refused = json!({ "ok": false, "error": "the rig refused the snapshot" });
+            daemon.send(wire::response(id, "pane.snapshot", &refused));
             return;
         }
         host.send(line);
@@ -463,6 +489,38 @@ mod tests {
     }
 
     #[test]
+    fn a_look_at_a_screen_is_refused_while_the_case_says_so_and_passed_on_after() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, daemon_lines) = sinks();
+        let look = r#"{"v":1,"id":"d-4","kind":"req","op":"pane.snapshot","body":{"id":"p1-worker","generation":1,"tail":12}}"#;
+        shared.refuse_snapshots(true);
+        shared.route_daemon(look, &host, &daemon);
+        let refused: Value =
+            serde_json::from_str(&daemon_lines.recv_timeout(Duration::from_secs(10)).unwrap())
+                .unwrap();
+        assert_eq!(
+            (&refused["id"], &refused["kind"], &refused["body"]["ok"]),
+            (&json!("d-4"), &json!("res"), &json!(false))
+        );
+        // Any other request goes on.
+        let key = r#"{"v":1,"id":"d-5","kind":"req","op":"pane.input","body":{"id":"p1-worker","generation":1,"bytes":[13]}}"#;
+        shared.route_daemon(key, &host, &daemon);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            key
+        );
+        shared.refuse_snapshots(false);
+        shared.route_daemon(look, &host, &daemon);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            look
+        );
+        assert!(daemon_lines
+            .recv_timeout(Duration::from_millis(100))
+            .is_err());
+    }
+
+    #[test]
     fn a_frame_the_daemon_wrote_is_kept_and_passed_to_the_pane_host() {
         let shared = Shared::default();
         let (host, host_lines, daemon, _) = sinks();
@@ -475,6 +533,29 @@ mod tests {
         let seen = shared.seen();
         assert_eq!(seen.daemon, 1);
         assert_eq!(seen.opened, [json!({"id": "p1-chief", "argv": ["x"]})]);
+    }
+
+    #[test]
+    fn a_word_to_the_page_that_the_board_moved_is_kept_with_its_time_and_passed_on() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, _daemon_lines) = sinks();
+        let before = jiff::Timestamp::now().as_millisecond();
+        let moved =
+            r#"{"v":1,"id":"e-1","kind":"evt","op":"state.changed","body":{"reason":"core"}}"#;
+        shared.route_daemon(moved, &host, &daemon);
+        // A window's work written is no move of the board.
+        let written = r#"{"v":1,"id":"e-2","kind":"evt","op":"state.changed","body":{"reason":"transcript"}}"#;
+        shared.route_daemon(written, &host, &daemon);
+        let moves = shared.seen().moves.clone();
+        assert!(moves.len() == 1 && moves[0] >= before, "{moves:?}");
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            moved
+        );
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            written
+        );
     }
 
     #[test]

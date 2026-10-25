@@ -212,27 +212,17 @@ fn steps_of(ctx: &Ctx, planned: &Planned, log: &Log) -> Vec<Check> {
     checks
 }
 
-/// Has the harnesses forget what they kept of a project's folder, now that its
-/// windows are gone: Claude Code by its own `purge` (its entry in `~/.claude.json`,
-/// which holds the trust the run asked of it), and the sessions Claude Code and Pi
-/// wrote in their own folders.
-fn forget(machine: &Machine, known: &[String], log: &Log) {
+/// Has Pi forget what it kept of a project's folder, now that its windows are gone: its
+/// sessions, in its own folder. (Claude Code's are in the config folder of the run, which
+/// goes with it.)
+fn forget(known: &[String], log: &Log) {
     let Some(home) = own_var("HOME").map(PathBuf::from) else {
         return;
     };
-    if let Some(claude) = machine.of(Harness::Claude) {
-        let purged = cleanup::forget_in_claude(claude.command(), &home, known);
-        if !purged.is_empty() {
-            log.say(format!(
-                "Claude Code forgot the project at {}",
-                purged.join(", ")
-            ));
-        }
-    }
     let removed = cleanup::remove(&cleanup::records(&home, known));
     if !removed.is_empty() {
         log.say(format!(
-            "removed what Claude Code and Pi kept of the folder: {}",
+            "removed what Pi kept of the folder: {}",
             removed
                 .iter()
                 .map(|path| path.display().to_string())
@@ -279,7 +269,6 @@ pub fn project(planned: &Planned, machine: &Machine, options: &Options, log: &Lo
             checks.push(failed(planned, "setup", why));
         }
         Ok((settings, folder)) => {
-            rig.forget_claude_memory_of(&folder);
             log.say(format!(
                 "plans with {} in {}: {}",
                 settings.variant.name,
@@ -318,6 +307,6 @@ pub fn project(planned: &Planned, machine: &Machine, options: &Options, log: &Lo
         log.say(format!("closing the rig: {why}"));
         checks.push(failed(planned, "close", why));
     }
-    forget(machine, &known, &log);
+    forget(&known, &log);
     checks
 }

@@ -5,8 +5,8 @@
 use std::cell::Cell;
 
 use super::open::{
-    add_hooks, asked_for, consensflows_hooks_of, new_session, pasted_into, session_for, trust_line,
-    with_hooks, Member,
+    add_hooks, asked_for, claude_flags, consensflows_hooks_of, new_session, pasted_into,
+    session_for, trust_line, with_hooks, Member,
 };
 use super::*;
 
@@ -320,4 +320,33 @@ fn a_probes_hooks_go_after_consensflows_own_in_the_launchs_one_settings_file() {
         config.to_string()
     );
     assert!(with_hooks(&words[..1], &json!({})).is_err());
+}
+
+#[test]
+fn a_claude_window_shuts_out_every_mcp_server_but_its_files_and_where_asked_its_projects() {
+    // The run's windows reach no server of the owner's (`--strict-mcp-config`), and no
+    // browser; a file of servers given them is the only one they have (the long run).
+    let servers = Path::new("/run/servers.json");
+    assert_eq!(
+        claude_flags(false, None, &[]),
+        ["--strict-mcp-config", "--no-chrome"]
+    );
+    assert_eq!(
+        claude_flags(false, Some(servers), &["--setting-sources", "local"]),
+        [
+            "--strict-mcp-config",
+            "--no-chrome",
+            "--setting-sources",
+            "local",
+            "--mcp-config",
+            "/run/servers.json"
+        ]
+    );
+    // A window that reads its folder's `.mcp.json` (T-383) has no `--strict-mcp-config`,
+    // and keeps a file of servers given it too.
+    assert_eq!(claude_flags(true, None, &[]), ["--no-chrome"]);
+    assert_eq!(
+        claude_flags(true, Some(servers), &[]),
+        ["--no-chrome", "--mcp-config", "/run/servers.json"]
+    );
 }

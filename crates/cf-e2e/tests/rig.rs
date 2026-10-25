@@ -93,6 +93,9 @@ mod devin_bypass_first;
 mod help;
 #[path = "rig/homes.rs"]
 mod homes;
+#[cfg(unix)]
+#[path = "rig/kept_config.rs"]
+mod kept_config;
 #[path = "rig/last_exits.rs"]
 mod last_exits;
 #[path = "rig/live_base.rs"]

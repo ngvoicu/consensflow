@@ -1,19 +1,13 @@
-//! What the real harnesses leave of a run where they keep their own records:
-//! a Claude Code window writes its conversations in a folder of `~/.claude`,
-//! keeps what was typed in a project in `~/.claude/history.jsonl` and the trust
-//! the run asked of it in `~/.claude.json`, and a Pi window writes its sessions
-//! in `~/.pi/agent/sessions`. The project's folders are in a home that goes with
-//! the run; these would stay, and be read by nobody. Claude Code is asked to
-//! forget the folder (`claude purge`, which is how it deletes a project's
-//! state), and Pi's folder of it is taken away. The others (OpenCode's and
-//! Devin's databases, Codex's session files) are not taken apart: they belong
-//! to a database or to a day's folder that is the person's. The approval suite
-//! and the specs suite both clean up so.
+//! What the real harnesses leave of a run where they keep their own records: a Pi
+//! window writes its sessions in `~/.pi/agent/sessions`. The project's folders are in
+//! a home that goes with the run; these would stay, and be read by nobody, so Pi's
+//! folder of it is taken away. The others (OpenCode's and Devin's databases, Codex's
+//! session files) are not taken apart: they belong to a database or to a day's folder
+//! that is the person's. Claude Code's are not here: its windows run on a config
+//! folder of the run's own, which goes with the run ([`super::login`]). The approval
+//! suite and the specs suite both clean up so.
 
 use std::path::{Path, PathBuf};
-
-use crate::process::{own_var, Run};
-use crate::rig::project_name as claude_name;
 
 /// The name Pi gives a folder under its `sessions`: the path without its first
 /// slash and with the others made dashes, between two dashes at each end.
@@ -43,25 +37,18 @@ pub fn paths(folder: &Path) -> Vec<String> {
     paths
 }
 
-/// The places `home`'s harnesses keep their sessions of the folders known by
-/// `paths`, which are taken away: Claude Code's, which `claude purge` does not
-/// always find by a path the folder no longer has, and Pi's.
+/// The places `home`'s Pi keeps its sessions of the folders known by `paths`, which are
+/// taken away.
 pub fn records(home: &Path, paths: &[String]) -> Vec<PathBuf> {
-    let mut records = Vec::new();
-    for path in paths {
-        records.push(
-            home.join(".claude")
-                .join("projects")
-                .join(claude_name(path)),
-        );
-        records.push(
+    paths
+        .iter()
+        .map(|path| {
             home.join(".pi")
                 .join("agent")
                 .join("sessions")
-                .join(pi_name(path)),
-        );
-    }
-    records
+                .join(pi_name(path))
+        })
+        .collect()
 }
 
 /// Removes the `records` that are there, and says which.
@@ -69,25 +56,6 @@ pub fn remove(records: &[PathBuf]) -> Vec<PathBuf> {
     records
         .iter()
         .filter(|record| record.is_dir() && std::fs::remove_dir_all(record).is_ok())
-        .cloned()
-        .collect()
-}
-
-/// Has the Claude Code at `claude` forget the projects at `paths` in the home
-/// `home`: `claude purge --yes` for each, which deletes the project's entry in
-/// `~/.claude.json` (the trust the run asked of it) and the prompts typed in it
-/// in `~/.claude/history.jsonl`. The paths it had something to forget of.
-pub fn forget_in_claude(claude: &Path, home: &Path, paths: &[String]) -> Vec<String> {
-    paths
-        .iter()
-        .filter(|path| {
-            Run::new(claude)
-                .args(["purge", "--yes", path.as_str()])
-                .var("HOME", home)
-                .var("PATH", own_var("PATH").unwrap_or_default())
-                .run()
-                .is_ok_and(|ran| ran.code == Some(0))
-        })
         .cloned()
         .collect()
 }
@@ -125,64 +93,29 @@ mod tests {
     }
 
     #[test]
-    fn what_a_run_left_in_the_harness_records_of_its_own_folder_goes_and_nothing_else() {
+    fn what_a_run_left_in_pis_records_of_its_own_folder_goes_and_nothing_else() {
         let home = tempfile::tempdir().unwrap();
         let ours = records(
             home.path(),
             &["/var/folders/x/consensflow-integration-X/workspace/p1".to_owned()],
         );
-        let (claude, pi) = (&ours[0], &ours[1]);
+        let pi = &ours[0];
         let other = home
             .path()
-            .join(".claude")
-            .join("projects")
-            .join("-people-work");
-        for dir in [claude, pi, &other] {
+            .join(".pi")
+            .join("agent")
+            .join("sessions")
+            .join("--people-work--");
+        for dir in [pi, &other] {
             std::fs::create_dir_all(dir).unwrap();
             std::fs::write(dir.join("one.jsonl"), "{}").unwrap();
         }
         let removed = remove(&ours);
-        assert!(
-            removed.contains(claude) && removed.contains(pi),
-            "{removed:?}"
-        );
-        assert!(!claude.exists() && !pi.exists());
+        assert_eq!(&removed, &ours);
+        assert!(!pi.exists());
         assert!(
             other.join("one.jsonl").is_file(),
-            "another folder's records stay"
+            "another folder's sessions stay"
         );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn claude_is_asked_to_purge_each_path_in_the_home_it_is_given_and_says_which_it_knew() {
-        let folder = tempfile::tempdir().unwrap();
-        let asked = folder.path().join("asked");
-        // A stand-in Claude that knows the project of the path `/known` only.
-        let program = folder.path().join("claude");
-        crate::files::write_executable(
-            &program,
-            format!(
-                "#!/bin/sh\necho \"$HOME $*\" >> '{}'\n[ \"$3\" = /known ]\n",
-                asked.display()
-            ),
-        )
-        .unwrap();
-        let home = folder.path().join("home");
-        let purged = forget_in_claude(
-            &program,
-            &home,
-            &["/known".to_owned(), "/unknown".to_owned()],
-        );
-        assert_eq!(purged, ["/known"]);
-        let said = std::fs::read_to_string(&asked).unwrap();
-        let named = home.to_string_lossy();
-        assert_eq!(
-            said,
-            format!("{named} purge --yes /known\n{named} purge --yes /unknown\n")
-        );
-        // A Claude that is not there knows nothing.
-        let none = folder.path().join("none");
-        assert!(forget_in_claude(&none, &home, &["/known".to_owned()]).is_empty());
     }
 }
