@@ -1,0 +1,115 @@
+# What `cf task done` tells the chief of its own step (T-270, 3.0.6, on top of B4 of
+# `decisions-306.toml`): the step is accepted with the chief's words and the brief that was still on
+# its way back is withdrawn; the answer and the reply now say which messages were withdrawn (the
+# brief, and any answer or note carried on it, or held at the gate) and which brief was being typed
+# in, which cannot be taken back and may still land once (`TaskMoved::withdrawn` and `landing`,
+# `crates/cf-ledger/src/tasks/own_steps.rs`; tests `self_steps::` of the ledger's receipt,
+# `routes::task::tests::own_steps`, `crates/cf/tests/own_step.rs`). One plant takes one rule out, and
+# a test of it fails.
+#
+# Every name begins with `own step naming`, so `npm run plants:daemon -- "own step naming"` runs them.
+
+[run]
+naming-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "self_steps::"]
+naming-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task::tests::own_steps"]
+naming-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "own_step"]
+
+[[plant]]
+name = "own step naming: what the finish withdrew is not named"
+meant = "everything_that_was_on_its_way_to_the_chief_when_it_finished_its_step_is_named"
+runs = ["naming-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/own_steps.rs"
+find = "        withdrawn: views(store, &withdrawn)?,\n"
+replace = "        withdrawn: Vec::new(),\n"
+
+[[plant]]
+name = "own step naming: only the brief is named of what the finish withdrew"
+meant = "everything_that_was_on_its_way_to_the_chief_when_it_finished_its_step_is_named"
+runs = ["naming-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/own_steps.rs"
+find = "               AND state IN ('queued', 'gated') ORDER BY id\","
+replace = "               AND kind = 'task' AND state IN ('queued', 'gated') ORDER BY id\","
+
+[[plant]]
+name = "own step naming: a note held at the gate is withdrawn and not named"
+meant = "a_note_held_at_the_gate_about_the_step_is_withdrawn_and_named_too"
+runs = ["naming-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/own_steps.rs"
+find = "               AND state IN ('queued', 'gated') ORDER BY id\","
+replace = "               AND state = 'queued' ORDER BY id\","
+
+[[plant]]
+name = "own step naming: a brief being typed in is not named as landing"
+meant = "a_brief_being_typed_in_when_the_step_was_finished_is_named_as_landing"
+runs = ["naming-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/own_steps.rs"
+find = "        landing: views(store, &landing)?,\n"
+replace = "        landing: Vec::new(),\n"
+
+[[plant]]
+name = "own step naming: a note being typed in is named as landing"
+meant = "a_note_being_typed_in_when_the_step_was_finished_is_not_named_as_landing"
+runs = ["naming-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/own_steps.rs"
+find = "               AND state = 'delivering' AND kind = 'task' ORDER BY id\","
+replace = "               AND state = 'delivering' ORDER BY id\","
+
+[[plant]]
+name = "own step naming: the daemon's answer does not name what was withdrawn"
+meant = "the_answer_names_what_was_withdrawn_with_the_brief_and_nothing_is_landing"
+runs = ["naming-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "        if !messages.is_empty() {\n"
+replace = "        if messages.is_empty() {\n"
+
+[[plant]]
+name = "own step naming: the daemon's answer does not say a brief is being typed in"
+meant = "the_answer_names_a_brief_that_was_being_typed_in_as_landing"
+runs = ["naming-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '    for (key, messages) in [("withdrawn", &done.withdrawn), ("landing", &done.landing)] {'
+replace = '    for (key, messages) in [("withdrawn", &done.withdrawn)] {'
+
+[[plant]]
+name = "own step naming: cf does not say what was withdrawn"
+meant = "what_was_withdrawn_with_the_brief_is_named_with_its_kind"
+runs = ["naming-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '    if let Some(withdrawn) = named(said.get("withdrawn")) {'
+replace = '    if let Some(withdrawn) = named(None) {'
+
+[[plant]]
+name = "own step naming: cf does not say a brief is being typed in"
+meant = "a_brief_that_was_being_typed_in_is_said_to_land_once"
+runs = ["naming-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '    if let Some(landing) = named(said.get("landing")) {'
+replace = '    if let Some(landing) = named(None) {'
+
+[[plant]]
+name = "own step naming: cf names a note that rode on the brief as a message"
+meant = "what_was_withdrawn_with_the_brief_is_named_with_its_kind"
+runs = ["naming-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '                Some("note") => "a note",'
+replace = '                Some("note") => "a message",'

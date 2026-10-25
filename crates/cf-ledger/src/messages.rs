@@ -1,24 +1,29 @@
 //! Messages: notes, questions and their answers, delivered into a window one at
 //! a time and oldest first, except the human's, which wait in the app until
-//! read (`delivery`); what a window keeps, which rides in the paste of the
+//! read (`delivery`), or taken back out of a window that had them
+//! (`taken_back`); what a window keeps, which rides in the paste of the
 //! words that send it on (`carrying`); what makes a message received, and what
 //! that does to its task (`receipt`); the human's gate, which holds one agent's
 //! word to another until the human passes it on or declines it (`gate`); the
 //! one asked, told to answer again when an answer did not stand (`again`); and
 //! the note that tells a requester its tasks stalled, one for the tasks of a
 //! pass, which goes when they are resumed (`pauses`); the note that tells
-//! it a task is held for its member's quota, and that it goes on (`holds`); and
-//! the note that says a conversation its role again, which the ledger knows for
-//! one (`roles`).
+//! it a task is held for its member's quota, and that it goes on (`holds`); the
+//! note that says a conversation its role again, which the ledger knows for one
+//! (`roles`); and the words told to a task's window before the window has it,
+//! kept for it (`told`).
 
 mod again;
 mod carrying;
+mod continuations;
 mod delivery;
 mod gate;
 mod holds;
 mod pauses;
 mod receipt;
 mod roles;
+mod taken_back;
+mod told;
 
 use cf_proto::ledger::{MessageView, Question};
 use rusqlite::{params, OptionalExtension};
@@ -28,27 +33,43 @@ use crate::model::{self, require_active, LedgerError, FINISHED_TASK_STATES, MAX_
 use crate::questions::{render_choices, render_questions, require_choices, require_questions};
 use crate::queue::{queue, send, withdraw, Queued, Sent};
 use crate::store::Store;
-use crate::tasks::pause_task;
+use crate::tasks::{pause_task, take_over_pause};
 use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
 pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{
     adopt, fold, reconcile_released, release_carried, release_stranded, transfer,
 };
+pub use continuations::{continuation, continuation_tasks};
+pub(crate) use continuations::{withdraw_continuations, withdraw_stale};
+#[cfg(feature = "test-support")]
+pub(crate) use delivery::forget_receipt;
+pub use delivery::GivenUp;
 pub(crate) use delivery::{
-    begin_delivery, cancel_message, confirm_delivery, confirm_delivery_telling, fail_delivery,
-    first_received, in_flight, last_pasted, next_delivery, next_delivery_of, retry_delivery,
-    take_back, with_work,
+    admit, begin_delivery, cancel_message, confirm_delivery, confirm_delivery_telling,
+    confirm_sent_by_hand, fail_delivery, first_received, give_up_delivery, handed_over, in_flight,
+    last_pasted, next_delivery, next_delivery_of, received_of, retry_delivery, with_work,
 };
+pub use delivery::{HandOver, WITHDRAWN_AFTER_HANDED};
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub(crate) use holds::{note_hold, tell_goes_on};
-pub(crate) use pauses::{join_pause_note, leave_pause_notes, note_pause};
+pub use pauses::MAY_STILL_RUN;
+pub(crate) use pauses::{
+    join_pause_note, leave_pause_notes, note_pause, say_again, warnings_on_their_way,
+    warnings_queued,
+};
 pub use receipt::Read;
 pub(crate) use receipt::{
     claim_answer, door_born_closed, receive_read, reconcile, release_all_claims, release_claims,
     settle_claim,
 };
 pub(crate) use roles::{note_role, role_notes_to};
+pub(crate) use taken_back::take_back;
+pub use told::is_told;
+pub(crate) use told::{
+    drop_queued_but_told, kept_through_leaving, launch_called_off, tell_queued, told_unreceived,
+    told_waiting, Dropped,
+};
 
 /// A note: from a participant (ConsensFlow itself when none) to another,
 /// about one of the project's tasks or none.
@@ -132,7 +153,12 @@ pub(crate) fn ask(
                     404,
                 ));
             };
-            if store.task_row(project_id, number)?.state != "paused" {
+            // A task paused already is paused for the tell all the same: one its
+            // project's suspension paused is the teller's from now on.
+            let task = store.task_row(project_id, number)?;
+            if task.state == "paused" {
+                take_over_pause(store, &task, from)?;
+            } else {
                 pause_task(store, project_id, number, Some(from), None)?;
             }
         }

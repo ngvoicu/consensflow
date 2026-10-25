@@ -12,8 +12,12 @@
 ledger-board = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "cancelled"]
 # The page's rules for the cards it is given.
 board-ui = ["node", "--test", "--test-reporter=tap", "tests/board-ui.test.mjs"]
-# `cf task list`, over what waits for a member and what does not.
+# `cf task list`, over what waits for a member and what does not, and over the
+# lanes with a task to look at and the idle sessions (T-261: a board of two days
+# listed 141 sessions of finished tasks and buried the few that held work).
 board-task-list = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
+# The usage `cf task list --help` answers with, in a window as a window runs it.
+board-task-list-usage = ["cargo", "test", "--offline", "-p", "cf", "--test", "help"]
 
 [[plant]]
 name = "board: the ledger leaves a task paused before any member had it off the board"
@@ -97,3 +101,162 @@ runs = ["board-task-list"]
 file = "crates/cf/src/board/task.rs"
 find = ' && matches!(task.get("assignee"), Some(Value::Null))'
 replace = ""
+
+[[plant]]
+name = "board: cf task list takes a session for idle when any one of its tasks is over"
+meant = "a_session_with_one_task_left_to_look_at_stays_listed_whatever_the_rest_say"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+            .iter()
+            .all(|task| OVER.contains('''
+replace = '''
+            .iter()
+            .any(|task| OVER.contains('''
+
+[[plant]]
+name = "board: cf task list takes a failed task for one that is over"
+meant = "a_session_with_one_task_left_to_look_at_stays_listed_whatever_the_rest_say"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = 'const OVER: [&str; 2] = ["accepted", "cancelled"];'
+replace = 'const OVER: [&str; 3] = ["accepted", "cancelled", "failed"];'
+
+[[plant]]
+name = "board: cf task list takes a cancelled task for one to look at"
+meant = "a_session_with_one_task_left_to_look_at_stays_listed_whatever_the_rest_say"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = 'const OVER: [&str; 2] = ["accepted", "cancelled"];'
+replace = 'const OVER: [&str; 2] = ["accepted", "accepted"];'
+
+[[plant]]
+name = "board: cf task list takes a task done and not yet decided for one that is over"
+meant = "a_session_with_one_task_left_to_look_at_stays_listed_whatever_the_rest_say"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = 'const OVER: [&str; 2] = ["accepted", "cancelled"];'
+replace = 'const OVER: [&str; 3] = ["accepted", "cancelled", "done"];'
+
+[[plant]]
+name = "board: cf task list takes the chief's lane for an idle session"
+meant = "the_sessions_with_nothing_to_look_at_are_one_line_and_the_members_with_work_stay_listed"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+    js::text(lane.get("role")) != "chief"
+        && !tasks.is_empty()'''
+replace = '''
+    !tasks.is_empty()'''
+
+[[plant]]
+name = "board: cf task list counts a session with no task among the idle"
+meant = "the_sessions_with_nothing_to_look_at_are_one_line_and_the_members_with_work_stay_listed"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+        && !tasks.is_empty()
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "board: cf task list lists an idle session as well as counting it"
+meant = "the_sessions_with_nothing_to_look_at_are_one_line_and_the_members_with_work_stay_listed"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+            idle.push(lane);
+            continue;
+'''
+replace = '''
+            idle.push(lane);
+'''
+
+[[plant]]
+name = "board: cf task list says how many idle sessions there are when there are none"
+meant = "what_waits_for_a_member_is_listed_apart_from_the_other_tasks_no_lane_has"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "    if !idle.is_empty() {"
+replace = "    if idle.is_empty() || !idle.is_empty() {"
+
+[[plant]]
+name = "board: cf task list says one idle session in the plural"
+meant = "one_idle_session_is_said_in_the_singular_and_a_board_of_nothing_else_says_only_that"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = 'if idle.len() == 1 { "" } else { "s" }'
+replace = '"s"'
+
+[[plant]]
+name = "board: cf task list --all leaves the idle sessions out of the list"
+meant = "all_lists_every_session_with_a_task_as_the_board_always_did"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '        if !words.on("--all") && is_idle(lane, lane_tasks) {'
+replace = "        if is_idle(lane, lane_tasks) {"
+
+[[plant]]
+name = "board: cf task list --all --json adds an idle key to the board's answer"
+meant = "all_lists_every_session_with_a_task_as_the_board_always_did"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '    let data = if words.on("--all") {'
+replace = "    let data = if false {"
+
+[[plant]]
+name = "board: cf task list --json leaves the idle sessions out of its answer"
+meant = "the_json_holds_the_idle_sessions_under_a_key_of_their_own"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '            apart.insert("idle".to_owned(), Value::Array(idle.clone()));'
+replace = "            let _ = &idle;"
+
+[[plant]]
+name = "board: cf task list --json keeps the idle sessions among the lanes as well"
+meant = "the_json_holds_the_idle_sessions_under_a_key_of_their_own"
+runs = ["board-task-list"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+            if lanes_key {
+                Value::Array(lanes.clone())'''
+replace = '''
+            if lanes_key {
+                Value::Array(lanes.iter().chain(idle.iter()).cloned().collect())'''
+
+[[plant]]
+name = "board: cf task list's usage does not name --all"
+meant = "every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing"
+runs = ["board-task-list-usage"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = "  cf task list [--all]              the board:"
+replace = "  cf task list                      the board:"

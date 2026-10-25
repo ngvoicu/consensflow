@@ -218,7 +218,7 @@ runs = ["engine-dispatcher"]
 [[plant.edit]]
 file = "crates/cf-engine/src/chief_switch.rs"
 find = """
-        if !idle {
+        if !idle || project.state != "open" {
             return Ok(());
         }
         let Some(pending) = record.pending_switch.borrow().clone() else {"""
@@ -228,7 +228,7 @@ replace = """
             .borrow()
             .as_ref()
             .is_some_and(|pending| pending.ask && pending.note.is_none());
-        if !idle && !unwritten {
+        if (!idle && !unwritten) || project.state != "open" {
             return Ok(());
         }
         let Some(pending) = record.pending_switch.borrow().clone() else {"""

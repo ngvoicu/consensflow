@@ -454,6 +454,7 @@ fn windows(
         let path = live_folder_in(&home, &format!("{base}/{folder}"))?;
         folders.push(path.to_string_lossy().into_owned());
     }
+    rig.close()?;
     Ok(checks)
 }
 

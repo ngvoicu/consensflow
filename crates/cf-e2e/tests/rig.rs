@@ -50,7 +50,9 @@
 //! window's beside them, which every case that ends a window holds the pane host to
 //! leaving as it was, and whose end of its own is no end the pane host gave it. So is
 //! `last_exits`: the exits the pane host tells as a rig closes, which the long run of
-//! the evals reads after the close.)
+//! the evals reads after the close. So is `reports`: a rig keeps a report of a case
+//! that failed and none of one that passed, and every case here and in the
+//! regressions that starts a rig closes it.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -89,6 +91,8 @@ mod described;
 mod devin_bypass_first;
 #[path = "rig/help.rs"]
 mod help;
+#[path = "rig/homes.rs"]
+mod homes;
 #[path = "rig/last_exits.rs"]
 mod last_exits;
 #[path = "rig/live_base.rs"]
@@ -101,6 +105,8 @@ mod live_members;
 mod live_support;
 #[path = "rig/pending_agents.rs"]
 mod pending_agents;
+#[path = "rig/reports.rs"]
+mod reports;
 #[path = "rig/specs.rs"]
 mod specs;
 #[cfg(unix)]
@@ -126,8 +132,9 @@ use std::time::Duration;
 use cf_e2e::rig::{Config, Rig};
 
 /// What a case ends with: nothing, or why it could not be run. A check that
-/// does not hold is a panic, which is the case's failure.
-type Outcome = Result<(), Box<dyn std::error::Error>>;
+/// does not hold is a panic, which is the case's failure. The error a case returns
+/// is how the rigs it started learn that it failed.
+type Outcome = cf_e2e::Outcome;
 
 /// The stand-in for a window's harness program, built for these tests.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
@@ -138,13 +145,14 @@ const FAKE_OPENCODE: &str = env!("CARGO_BIN_EXE_fake-opencode-1");
 
 /// A rig whose windows run the stand-in agent.
 fn rig() -> cf_e2e::Result<Rig> {
-    Rig::start(Config::new(FAKE_AGENT))
+    Rig::start(config())
 }
 
 /// The configuration of a rig whose windows run the stand-in agent, to add
-/// variables to.
+/// variables to. Its case is judged by what it returns, so a rig it drops unclosed
+/// says nothing of a case that passed.
 fn config() -> Config {
-    Config::new(FAKE_AGENT)
+    Config::new(FAKE_AGENT).judged_by_outcome()
 }
 
 /// `n` seconds.

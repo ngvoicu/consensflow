@@ -19,8 +19,13 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::pausing::shut_doors;
-use super::{carrier_body, delivery_body, require_on_board, require_task_state, task_by_id};
-use crate::messages::{fold, leave_pause_notes, tell_sent_back};
+use super::{
+    carrier_body, delivery_body, own_steps, require_on_board, require_task_state, task_by_id,
+};
+use crate::messages::{
+    drop_queued_but_told, fold, leave_pause_notes, say_again, tell_sent_back, told_waiting,
+    warnings_on_their_way, warnings_queued, Dropped,
+};
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
     MAX_BODY, MEMBER_ROLES,
@@ -30,7 +35,12 @@ use crate::staff::{bring_back, can_continue, has_task_in_hand, require_free, Giv
 use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
 
-/// The assignee's answer finishes the task and is queued for whoever asked for it.
+/// The assignee's answer finishes the task and is queued for whoever asked for
+/// it; the chief's own step is finished by its word (`own_steps`). While words
+/// told to its window are on their way to it (`told_waiting`), the answer is to
+/// a task without them and is refused, whoever gives it (Astra's look at round
+/// 4, 2026-10-16: a worker's `cf task done` finished the task before the words
+/// came, and they never did).
 pub(crate) fn record_result(
     store: &mut Store,
     project_id: i64,
@@ -40,7 +50,21 @@ pub(crate) fn record_result(
     model::require_text(body, "body", MAX_BODY)?;
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
+        if own_steps::is_own_step(store, &task)? {
+            return own_steps::finish(store, project_id, &task, body);
+        }
         require_task_state(&task, &ACTIVE_TASK_STATES, "record a result for")?;
+        if let Some(assignee) = task.assignee_id {
+            if told_waiting(store, assignee, task.id)? {
+                return Err(LedgerError::refused_with(
+                    "words-on-their-way",
+                    format!(
+                        "T-{number} has words on their way to you: run cf task done again once you have read them"
+                    ),
+                    409,
+                ));
+            }
+        }
         let message_id = queue(
             store,
             project_id,
@@ -58,6 +82,8 @@ pub(crate) fn record_result(
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,
+            withdrawn: Vec::new(),
+            landing: Vec::new(),
         })
     })
 }
@@ -202,10 +228,12 @@ fn a_members_window(window: &ParticipantRow) -> bool {
 }
 
 /// A task that waited on the board for its needs and cannot go to its window,
-/// which left: it is cancelled, its requester told, and the tasks that wait for
-/// it are told to the chief as stranded. The note says what is true: the member
-/// left the staff (a lane, or a session whose member went), or the member stays
-/// and the conversation of the session the human deleted was lost.
+/// which left: it is cancelled, its requester told, whoever told its window
+/// words it never had told which went, as a cancel tells them (T-389), and the
+/// tasks that wait for it are told to the chief as stranded. The note says what
+/// is true: the member left the staff (a lane, or a session whose member went),
+/// or the member stays and the conversation of the session the human deleted
+/// was lost.
 fn cancel_unreachable(
     store: &mut Store,
     project_id: i64,
@@ -222,9 +250,14 @@ fn cancel_unreachable(
     } else {
         format!("the conversation of @{} was lost", window.handle)
     };
+    let dropped = Dropped::of(store, task)?;
     drop_queued(store, task.id)?;
     store.move_task(task, "cancelled", json!({ "reason": why }))?;
     let requester = store.participant_row(task.requester_id)?;
+    let lead = format!(
+        "T-{} was cancelled: {why}, so no window can take it.",
+        task.number
+    );
     send(
         store,
         project_id,
@@ -232,13 +265,11 @@ fn cancel_unreachable(
             to: &requester.handle,
             task: Some(task.number),
             kind: "note",
-            body: &format!(
-                "T-{} was cancelled: {why}, so no window can take it.",
-                task.number
-            ),
+            body: &format!("{lead}{}", dropped.said_to(&requester.handle)),
             ..Sent::default()
         },
     )?;
+    dropped.tell_the_others(store, task, &lead, &[&requester.handle])?;
     tell_stranded_waiters(store, project_id, task)
 }
 
@@ -303,6 +334,8 @@ pub(crate) fn reopen_task(
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,
+            withdrawn: Vec::new(),
+            landing: Vec::new(),
         })
     })
 }
@@ -310,8 +343,9 @@ pub(crate) fn reopen_task(
 /// A task is called off, and whoever asked for it hears so in the same
 /// step, unless it cancelled the task itself: what was cancelled, and the
 /// window that was stopped when a member's had begun on it (the daemon
-/// stops that window on its next look). Refused, `waited-for`, while an
-/// open or paused task waits for it.
+/// stops that window on its next look). Whoever told the window words it
+/// never had hears that they went, but the one who called the task off.
+/// Refused, `waited-for`, while an open or paused task waits for it.
 pub(crate) fn cancel_task(
     store: &mut Store,
     project_id: i64,
@@ -319,12 +353,15 @@ pub(crate) fn cancel_task(
     by: &str,
 ) -> Result<TaskView, LedgerError> {
     store.write(|store| {
-        let (task, window) = call_off(store, project_id, number, by, Ending::Cancelled)?;
+        let off = call_off(store, project_id, number, by, Ending::Cancelled)?;
+        let task = &off.task;
         let requester = store.participant_row(task.requester_id)?;
+        let lead = format!("@{by} cancelled T-{number} ({})", task.title);
         if requester.handle != by {
-            let stopped = window.map_or_else(String::new, |window| {
+            let stopped = off.window.as_ref().map_or_else(String::new, |window| {
                 format!(": @{}'s window was stopped", window.handle)
             });
+            let dropped = off.dropped.said_to(&requester.handle);
             send(
                 store,
                 project_id,
@@ -332,11 +369,13 @@ pub(crate) fn cancel_task(
                     to: &requester.handle,
                     task: Some(number),
                     kind: "note",
-                    body: &format!("@{by} cancelled T-{number} ({}){stopped}.", task.title),
+                    body: &format!("{lead}{stopped}.{dropped}"),
                     ..Sent::default()
                 },
             )?;
         }
+        off.dropped
+            .tell_the_others(store, task, &format!("{lead}."), &[by, &requester.handle])?;
         task_by_id(store, task.id)
     })
 }
@@ -348,27 +387,36 @@ pub(crate) enum Ending {
     Declined,
 }
 
+/// What a cancel called off: the task as it was, the member's window that had
+/// begun on it, if one had and is still on the board, and the words told to its
+/// window that it never had.
+pub(crate) struct CalledOff {
+    pub(crate) task: TaskRow,
+    pub(crate) window: Option<ParticipantRow>,
+    pub(crate) dropped: Dropped,
+}
+
 /// The cancel itself, for an operation that tells the requester in its own
 /// words (the human's decline of a brief). Whatever of the task is still on
 /// its way, a delivery into a window included, is withdrawn, so nothing of
-/// it is delivered or tried again. The task as it was, and the member's
-/// window that had begun on it, if one had: its brief or the words that
-/// resume it went in. Refused, `waited-for`, while an open or paused task waits
-/// for it, the human's decline of its brief included: the waiter is released
-/// when the task is accepted, never when it is cancelled. `ending` is how it
-/// ends, which the refusal says in its words.
+/// it is delivered or tried again. The member's window it gives is one whose
+/// brief or the words that resume the task went in. Refused, `waited-for`, while
+/// an open or paused task waits for it, the human's decline of its brief included:
+/// the waiter is released when the task is accepted, never when it is cancelled.
+/// `ending` is how it ends, which the refusal says in its words.
 pub(crate) fn call_off(
     store: &mut Store,
     project_id: i64,
     number: i64,
     by: &str,
     ending: Ending,
-) -> Result<(TaskRow, Option<ParticipantRow>), LedgerError> {
+) -> Result<CalledOff, LedgerError> {
     store.participant_by_handle(project_id, by)?;
     let task = store.task_row(project_id, number)?;
     let cancellable = [&["open", "queued"], &ACTIVE_TASK_STATES[..], &["paused"]].concat();
     require_task_state(&task, &cancellable, "cancel")?;
     require_unawaited(store, &task, ending)?;
+    let dropped = Dropped::of(store, &task)?;
     let assignee = task
         .assignee_id
         .map(|id| store.participant_row(id))
@@ -383,16 +431,32 @@ pub(crate) fn call_off(
             .exists(params![task.id, assignee.id])?,
         _ => false,
     };
+    // A warning its pause notes say is kept before they go with the rest; one
+    // that says it on its way runs its course, and says it again only if it
+    // does not arrive (`withdrawn_on_its_way`).
+    let warnings = warnings_queued(store, &task)?;
+    let on_their_way = warnings_on_their_way(store, &task)?;
     store.db.execute(
         "UPDATE message SET state = 'cancelled', reason = ?
-       WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')",
-        params![format!("cancelled by @{by}"), task.id],
+       WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')
+         AND id NOT IN (SELECT value FROM json_each(?))",
+        params![
+            format!("cancelled by @{by}"),
+            task.id,
+            json!(on_their_way).to_string()
+        ],
     )?;
     // A note of several that names it, still queued, names it no more.
     leave_pause_notes(store, &task, "cancelled")?;
+    say_again(store, &task, "cancelled", warnings)?;
     store.move_task(&task, "cancelled", json!({ "by": by }))?;
     release_ready(store, project_id)?;
-    Ok((task, assignee.filter(|_| began)))
+    Ok(CalledOff {
+        task,
+        // A window that left the board with its member is no window to stop.
+        window: assignee.filter(|window| began && window.left_at.is_none()),
+        dropped,
+    })
 }
 
 /// The tasks that wait for `task`, oldest first: those still open or paused
@@ -543,26 +607,74 @@ pub(crate) fn note_stranded_waits(store: &mut Store) -> Result<(), LedgerError> 
     })
 }
 
-/// The daemon gives up on a task: its pane died, or its launch never came up.
-/// The tasks that wait for it (a follow-up queued behind it, a task that
-/// needs it) stay on the board: they are released when it is accepted, which
-/// a reopening can still bring about. Each one's requester is told once that
-/// it waits for a failed task, and what to do: cancel the waiter, or reopen
-/// the task.
+/// A task fails: its pane died, or its launch never came up. Words told to its
+/// window that it never had go with what was queued, and whoever told them hears
+/// which, as a cancel tells it (T-389), but its requester. The tasks that wait for
+/// it (a follow-up queued behind it, a task that needs it) stay on the board: they
+/// are released when it is accepted, which a reopening can still bring about. Each
+/// one's requester is told once that it waits for a failed task, and what to do:
+/// cancel the waiter, or reopen the task. This is Node's ledger's `failTask`, which
+/// its recordings call, and only they: the daemon gives up with [`give_up_task`].
 pub(crate) fn fail_task(
     store: &mut Store,
     project_id: i64,
     number: i64,
     reason: &str,
 ) -> Result<TaskView, LedgerError> {
+    fail(store, project_id, number, reason, false)
+}
+
+/// The daemon gives up on a task, as [`fail_task`] fails it, but for the words
+/// told to its window that it never had: they wait for its reopen, which carries
+/// them, as those a delivery given up for good leaves do (the chief's decision on
+/// Calliope's P3-4 of T-446). Its requester hears why in the same step, which
+/// words wait and how to reopen it, in one note (her review of T-437), and each
+/// other teller hears the same of its own.
+pub(crate) fn give_up_task(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    reason: &str,
+) -> Result<TaskView, LedgerError> {
+    fail(store, project_id, number, reason, true)
+}
+
+fn fail(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    reason: &str,
+    given_up: bool,
+) -> Result<TaskView, LedgerError> {
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
         let failable = [&["open", "queued"], &ACTIVE_TASK_STATES[..]].concat();
         require_task_state(&task, &failable, "fail")?;
-        drop_queued(store, task.id)?;
+        let told = Dropped::of(store, &task)?;
+        if given_up {
+            drop_queued_but_told(store, task.id)?;
+        } else {
+            drop_queued(store, task.id)?;
+        }
         store.move_task(&task, "failed", json!({ "reason": reason }))?;
         release_ready(store, project_id)?;
+        let requester = store.participant_row(task.requester_id)?;
+        let reopen = format!(" Reopen it with: cf task reopen T-{number} \"…\"");
+        let failed = |waiting: String| format!("T-{number} failed: {reason}{waiting}.{reopen}");
+        if given_up {
+            told.tell_each(store, &task, &[&requester.handle], |teller| {
+                failed(told.waiting_for_the_reopen(Some(teller)))
+            })?;
+        } else {
+            // A reopening carries none of them.
+            told.tell_the_others(
+                store,
+                &task,
+                &format!("T-{number} failed: {reason}."),
+                &[&requester.handle],
+            )?;
+        }
         for waiting in waiters(store, &task)? {
             let waiter = store.task_row(project_id, waiting)?;
             let requester = store.participant_row(waiter.requester_id)?;
@@ -576,6 +688,20 @@ pub(crate) fn fail_task(
                     body: &format!(
                         "T-{waiting} waits for T-{number}, which failed: cancel T-{waiting}, or reopen T-{number} and let it finish."
                     ),
+                    ..Sent::default()
+                },
+            )?;
+        }
+        // Last, where the engine's note was.
+        if given_up {
+            send(
+                store,
+                project_id,
+                &Sent {
+                    to: &requester.handle,
+                    task: Some(number),
+                    kind: "note",
+                    body: &failed(told.waiting_for_the_reopen(None)),
                     ..Sent::default()
                 },
             )?;

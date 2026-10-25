@@ -7,7 +7,9 @@
 //! - `.pid`: its process, written once it can be asked to end;
 //! - `.released`: it was asked to end (a signal) and said so before it went, as a
 //!   tool that releases a lock does;
-//! - `.finished`: it ran to its end by itself.
+//! - `.finished`: it ran to its end by itself;
+//! - `.monitor-may-end`: written by a case, it lets the monitor that watches the job end
+//!   (a `CLAUDE-MONITOR`'s, [`Job::let_its_monitor_end`]).
 //!
 //! A job that was killed outright wrote neither of the last two. That is every
 //! job of a window on Windows, which is ended at once with its window and never
@@ -50,6 +52,13 @@ impl Job {
     /// Whether it ran to its end by itself.
     pub fn finished(&self) -> bool {
         self.beside("finished").exists()
+    }
+
+    /// Lets the monitor that watches it end, as a `CLAUDE-MONITOR`'s stand-in waits to be
+    /// let: the case has seen what the turn its end woke led to, which the monitor's end
+    /// would otherwise race.
+    pub fn let_its_monitor_end(&self) -> crate::Result {
+        files::write(&self.beside("monitor-may-end"), "")
     }
 
     /// Its file of the kind `kind`: `<file>.<kind>`.

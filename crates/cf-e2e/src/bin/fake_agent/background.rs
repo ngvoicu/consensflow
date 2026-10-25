@@ -13,7 +13,7 @@
 //! request to end it (SIGINT, SIGTERM or SIGHUP) makes it write `<file>.released`
 //! and go, as a tool that releases a lock does; one that kills it leaves nothing.
 //! `<file>.pid` is its process, for whoever asks whether it is still there, and is
-//! written once the job can be asked to end. With `--deaf` it ignores the requests
+//! written whole once the job can be asked to end. With `--deaf` it ignores the requests
 //! and is only ever killed. `cf_e2e::rig::Rig::jobs` reads what it wrote.
 //!
 //! A command the agent runs is started by a shell, in a group of its own, as a
@@ -24,7 +24,11 @@
 //! agents of the harnesses do when they leave a job (`nohup … &`, `Start-Process`)
 //! and ends a moment after, which leaves the job with no parent: no chain of processes
 //! that run leads from it to a shell the harness started, so the host does not take it
-//! for the turn's work and leaves it running (`cf-panes`' `background`). On Unix that
+//! for the turn's work and leaves it running (`cf-panes`' `background`). A command
+//! whose shell `exec`s it ([`Jobs::start_in_place_of_its_shell`], `exec sleep 120`) is the
+//! shell from then on, in the shell's group, with the harness its parent and no shell above
+//! it (Astra's review of round 1); PowerShell has no `exec`, and on Windows it is a command
+//! as any. On Unix that
 //! shell is in a session of its own, as Pi's Bash tool starts each command (the window's
 //! does not hold it), and the job is started without the marker the pane host puts in
 //! the environment of what a window starts, as a job that is a system program shows
@@ -177,6 +181,8 @@ struct How {
     /// The agent detaches it from that shell (`nohup … &`, `Start-Process`), which
     /// ends at once and leaves it with no parent.
     detached: bool,
+    /// The shell `exec`s it, and is it from then on.
+    in_place: bool,
 }
 
 /// The jobs one window starts.
@@ -243,6 +249,7 @@ impl Jobs {
             browser: self.browser,
             command: false,
             detached: false,
+            in_place: false,
         };
         self.begin(SERVER, SERVER_SECONDS, false, group, how, || {})
             .map(|_| ())
@@ -265,8 +272,27 @@ impl Jobs {
             browser: false,
             command: true,
             detached,
+            in_place: false,
         };
         self.begin(label, seconds, deaf, Group::Own, how, then)
+    }
+
+    /// [`Jobs::start`] of a command whose shell `exec`s it: the job is the shell from
+    /// then on, with the harness its parent (a command run as Claude Code's Bash tool runs
+    /// `exec sleep 120`). PowerShell has no `exec`: on Windows it is a command as any.
+    pub fn start_in_place_of_its_shell(
+        &self,
+        label: &str,
+        seconds: u64,
+        then: impl FnOnce() + Send + 'static,
+    ) -> Result<PathBuf, String> {
+        let how = How {
+            browser: false,
+            command: true,
+            detached: false,
+            in_place: true,
+        };
+        self.begin(label, seconds, false, Group::Own, how, then)
     }
 
     /// [`Jobs::start`], as `how` says: the browser the job launches, if it launches
@@ -329,7 +355,13 @@ impl Jobs {
     /// The program that runs the job `words` say: this one, as it is, or where `how`
     /// says it is a command of the agent's, a shell that runs it ([`in_a_shell`]).
     fn running(program: &Path, words: Vec<OsString>, how: How) -> Result<Run, String> {
-        if how.command {
+        if how.in_place && cfg!(unix) {
+            Ok(Run::new("/bin/sh")
+                .args(["-c", IN_PLACE])
+                .arg(program)
+                .args(words)
+                .own_group())
+        } else if how.command {
             in_a_shell(program, words, how.detached)
         } else {
             Ok(Run::new(program).args(words))
@@ -361,6 +393,17 @@ pub fn until_up(file: &Path) -> Result<(), String> {
 
 /// How long a job has to write its process once it is started.
 const UP: Duration = Duration::from_secs(30);
+
+/// Writes the process of a job or a build in `file` whole: it is written under another name and
+/// renamed to `file`, for `fs::write` makes the file before it writes into it, and a case that
+/// waits for the file reads what is there at once. The Codex stand-in writes its files the same
+/// way (`fake_codex`'s `say_its_process`).
+pub fn say_its_process(file: &Path) -> io::Result<()> {
+    let mut writing = file.as_os_str().to_owned();
+    writing.push(".writing");
+    fs::write(&writing, std::process::id().to_string())?;
+    fs::rename(writing, file)
+}
 
 /// `program` with `words`, run as a harness's tool runs a command for its agent: by a
 /// shell (a PowerShell on Windows) that waits for it and ends with its code, in a group
@@ -394,6 +437,10 @@ pub fn in_a_shell(program: &Path, words: Vec<OsString>, detached: bool) -> Resul
         }
     }
 }
+
+/// What the shell of a command that `exec`s it is told to run: the shell is the program
+/// from then on, with the job's words.
+const IN_PLACE: &str = "exec \"$0\" \"$@\"";
 
 /// What the shell of a command is told to run, with the program as its `$0` and the
 /// job's words after it: the program, which the shell waits for and ends with the
@@ -538,8 +585,7 @@ impl Job {
         // request is never lost.
         #[cfg(unix)]
         self.hear()?;
-        fs::write(self.beside("pid"), std::process::id().to_string())
-            .map_err(|failed| failed.to_string())?;
+        say_its_process(&self.beside("pid")).map_err(|failed| failed.to_string())?;
         // Held to the end, as the server holds the browser it launched.
         let _browser = self.launch_browser()?;
         thread::sleep(Duration::from_secs(self.seconds));

@@ -500,6 +500,143 @@ mod windows {
         table.kill(&key).expect("close the pane");
     }
 
+    /// Git Bash's `bash.exe`, where Git for Windows puts it.
+    fn git_bash() -> Option<std::path::PathBuf> {
+        [
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+        ]
+        .iter()
+        .map(std::path::PathBuf::from)
+        .find(|bash| bash.is_file())
+    }
+
+    /// Whether the process `pid` is gone: none has the number, or its handle is signalled.
+    fn gone(pid: u32) -> bool {
+        use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+        };
+        // SAFETY: a handle to wait on, closed below.
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+        if handle.is_null() {
+            return true;
+        }
+        // SAFETY: the handle is open; a wait of no time only asks.
+        let exited = unsafe { WaitForSingleObject(handle, 0) } == WAIT_OBJECT_0;
+        // SAFETY: opened above, closed once.
+        unsafe { CloseHandle(handle) };
+        exited
+    }
+
+    /// A command of Git Bash's, in a real pane whose program is in its job from its first
+    /// instruction (T-323, P3-7 of T-194, the question of whether that made the repair of a
+    /// Cygwin program's parent moot): `sh ./s.sh` runs `sleep 30`, and the sleep names the
+    /// forked copy of the shell that started it, which has gone. It is in the job all the
+    /// same, so the job's members without the repair have it with no parent; with the repair
+    /// (what the host does) it is the script's, the host lists it as the turn's work, and a
+    /// stop ends it with the script.
+    #[test]
+    fn a_git_bash_scripts_sleep_in_a_pane_whose_program_is_in_its_job_from_the_first_instruction_still_names_a_parent_that_has_gone_and_a_stop_ends_it_all(
+    ) {
+        let Some(bash) = git_bash() else {
+            eprintln!("no Git Bash here: nothing to try the repair on");
+            return;
+        };
+        let _pty_guard = serial_pty_test();
+        let folder = std::env::temp_dir().join(format!("cf-panes-gitbash-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder for the script");
+        std::fs::write(folder.join("s.sh"), "#!/bin/sh\nsleep 30\n").expect("the script");
+        let table = Arc::new(PaneTable::new());
+        let (key, output) = open(
+            &table,
+            &powershell(&format!(
+                // Once told to go, the agent's command: Git Bash's shell runs a script.
+                "Write-Output 'READY#'; [Console]::In.ReadLine() | Out-Null; \
+                 Write-Output 'STARTED#'; Set-Location '{}'; & '{}' -c 'sh ./s.sh'; \
+                 Write-Output 'ALIVE#'; Start-Sleep 1000",
+                folder.display(),
+                bash.display()
+            )),
+            &HashMap::new(),
+            1 << 20,
+        );
+        read_until(&table, &key, &output, "READY#");
+        table
+            .mark(&key, Servers::Unknown, None)
+            .expect("mark the turn");
+        table.write(&key, b"\r").expect("go on");
+        read_until(&table, &key, &output, "STARTED#");
+
+        // The pane's job as Windows names the parents: the sleep is a member, with none.
+        let job = {
+            let panes = table.lock_panes().expect("the panes");
+            Arc::clone(&panes.get(&key).expect("the pane").job)
+        };
+        let is_sleep = |member: &Member| member.program.eq_ignore_ascii_case("sleep.exe");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let sleep = loop {
+            let members = job.members_with(&|_| None).expect("what the job holds");
+            if let Some(sleep) = members.iter().find(|member| is_sleep(member)) {
+                break sleep.clone();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the script's sleep never began: {members:?}"
+            );
+            std::thread::sleep(Duration::from_millis(250));
+        };
+        assert_eq!(
+            sleep.parent, None,
+            "in the job from the first instruction, and its parent a process that has gone"
+        );
+
+        // As the host reads the job: the sleep is the script's.
+        let members = held(&table, &key);
+        let sleep = members
+            .iter()
+            .find(|member| is_sleep(member))
+            .expect("the sleep");
+        let script = members
+            .iter()
+            .find(|member| Some(member.key) == sleep.parent)
+            .unwrap_or_else(|| panic!("the sleep has no parent among {members:?}"));
+        assert!(
+            script.program.eq_ignore_ascii_case("sh.exe") && script.command.contains("s.sh"),
+            "{script:?}"
+        );
+        let listed = listed(&table, &key);
+        assert!(
+            listed
+                .iter()
+                .any(|(pid, command)| *pid == sleep.key.pid && command.contains("sleep.exe")),
+            "the host does not name the sleep as the turn's work: {listed:?}"
+        );
+
+        // A stop ends it with the script, and the window and its program go on.
+        let ending = table.end_background(&key).expect("end it");
+        assert!(
+            ending
+                .ended
+                .processes
+                .iter()
+                .any(|process| process.pid == sleep.key.pid),
+            "{ending:?}"
+        );
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !gone(sleep.key.pid) {
+            assert!(
+                Instant::now() < deadline,
+                "the sleep runs on after the stop"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        table.write(&key, b"\r").expect("go on");
+        read_until(&table, &key, &output, "ALIVE#");
+        table.kill(&key).expect("close the pane");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
     /// What the pane's job holds now: the window's own program, and what it started
     /// that runs.
     fn held(table: &PaneTable, key: &PaneKey) -> Vec<Member> {

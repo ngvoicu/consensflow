@@ -129,3 +129,18 @@ fn says_the_exit_code_of_a_window_that_ended_and_that_its_screen_named_a_secret(
     rig.close()?;
     Ok(())
 }
+
+#[test]
+fn a_window_that_never_came_up_names_its_failure_events_and_the_daemons_reasons_in_the_report(
+) -> Outcome {
+    let (rig, _project, _session) = a_task_that_failed("CF_TEST_NO_LOGIN")?;
+    // Each failure event of the run, by its place, its kind, its project and its message, and the
+    // reason the daemon gave: the window never showed its first message.
+    let failure = Regex::new(
+        r"(?m)^  \d+ delivery\.(failed|retried) project \d+ message \d+: the window never showed its first message",
+    )?;
+    let report = rig.failure_report();
+    assert!(failure.is_match(&report), "{report}");
+    rig.close()?;
+    Ok(())
+}

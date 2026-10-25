@@ -9,8 +9,9 @@ use serde_json::{json, Value};
 use super::*;
 use crate::api::callers::caller_of;
 use crate::api::routes::tests::support::{
-    note_for_zeus, question_on, state_of, working_question, working_task,
+    api, note_for_zeus, project_is, question_on, state_of, working_question, working_task,
 };
+use crate::api::waits::WAITS;
 use crate::testing::{request, said, scene, Scene};
 
 /// `POST /api/answers` from the window of `token`, with `body` as its text.
@@ -373,6 +374,28 @@ async fn a_door_that_did_not_hand_its_answer_over_gives_the_claim_back_and_wakes
     assert_eq!(scene.kicks.get(), 1);
 }
 
+/// A receipt says back the answer it was about: while the project is closed, a
+/// window that says it was handed nothing of an answer still queued (claimed or
+/// not) is told none of it, which would hand it over all the same (round 6's
+/// look at every route that says a message's text).
+#[tokio::test]
+async fn while_the_project_is_closed_a_receipt_of_nothing_handed_says_none_of_the_answer() {
+    let scene = scene();
+    let question = working_question(&scene);
+    let answer = scene.choose(question.id, "red");
+    project_is(&scene, "suspended");
+
+    let (status, said) =
+        receipt_from(&scene, &scene.zeus, &answer.id.to_string(), NOT_HANDED_OVER).await;
+
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        (&said["message"]["preview"], &said["message"]["choices"]),
+        (&json!(WAITS), &Value::Null)
+    );
+    assert_eq!(scene.message(answer.id).state, "queued");
+}
+
 #[tokio::test]
 async fn a_receipt_that_does_not_say_whether_it_was_handed_over_is_refused_and_changes_nothing() {
     let scene = scene();
@@ -616,6 +639,67 @@ async fn a_question_a_result_or_a_note_named_in_a_read_of_the_inbox_is_received_
     assert_eq!(status, 200);
     assert_eq!(scene.message(brief.id).state, "queued");
     assert_eq!(scene.kicks.get(), kicks, "nothing was read");
+}
+
+/// Where the read in the inbox (T-260) meets the Resume after the Close: a
+/// question or a result for the chief that no window was handed waits for the
+/// Resume, and `cf inbox read` is refused it (409 `waits`) with none of its
+/// text, so nothing of it is received. Once the project is open again it is
+/// served whole, and the read of it receives it, as any read in the inbox does.
+#[tokio::test]
+async fn a_question_or_a_result_that_waits_for_the_resume_is_received_by_a_read_in_the_inbox_only_once_it_is_served(
+) {
+    let scene = scene();
+    let task = working_task(&scene);
+    let result = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .record_result(scene.project.id, task, "Parser done")
+        .unwrap()
+        .message
+        .unwrap();
+    for (message, kind) in [(scene.question.clone(), "question"), (result, "result")] {
+        let reads = scene.logged("message.read");
+        let target = format!("/api/inbox/{}", message.id);
+        project_is(&scene, "suspended");
+        let (status, said) = api(&scene, Method::GET, &target, &scene.chief, "").await;
+        assert_eq!(
+            (status, &said["error"]),
+            (409, &json!("waits")),
+            "{kind}: {said}"
+        );
+        assert_eq!(
+            said["message"]
+                .as_str()
+                .map(|text| text.contains(&message.body)),
+            Some(false),
+            "{kind}"
+        );
+        assert_eq!(scene.message(message.id).state, "queued", "{kind}");
+        assert_eq!(
+            scene.logged("message.read"),
+            reads,
+            "{kind}: a refused read receives nothing"
+        );
+
+        project_is(&scene, "open");
+        let (status, said) = api(&scene, Method::GET, &target, &scene.chief, "").await;
+        assert_eq!(
+            (status, &said["message"]["body"]),
+            (200, &json!(message.body)),
+            "{kind}"
+        );
+        let (status, _) = read_from(&scene, &scene.chief, &said_read(&[message.id], "inbox")).await;
+        assert_eq!(status, 200, "{kind}");
+        let read = scene.message(message.id);
+        assert_eq!(
+            (read.state.as_str(), &read.receipt),
+            ("read", &json!({ "read": "inbox" })),
+            "{kind}"
+        );
+    }
+    assert_eq!(scene.logged("message.read"), 2);
 }
 
 #[tokio::test]

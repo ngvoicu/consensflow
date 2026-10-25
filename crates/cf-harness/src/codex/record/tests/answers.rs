@@ -106,6 +106,52 @@ fn the_progress_notes_of_a_turn_read_as_text_too_and_stay_marked_as_notes() {
 }
 
 #[test]
+fn a_turns_progress_notes_and_its_tools_come_before_its_final_answer_which_alone_is_complete() {
+    // What Codex wrote for a review (the owner's decision of 2026-10-15: a result is what
+    // the member wrote after its last tool call): notes as it works, each marked, a
+    // command between, and the final answer the turn ends with.
+    let record = read(&[
+        started(json!("t1")),
+        codex(
+            "item_a",
+            "I'll read the commit, then check it on disk.",
+            "commentary",
+        ),
+        call("c1"),
+        output("c1"),
+        codex(
+            "item_b",
+            "The diff matches; checking the counts now.",
+            "commentary",
+        ),
+        call("c2"),
+        output("c2"),
+        codex("item_z", "PASS: no findings.", "final_answer"),
+        finished("PASS: no findings."),
+    ])
+    .unwrap();
+
+    assert_eq!(record.settlement, Settlement::Settled);
+    let shape: Vec<(Role, bool, bool)> = record
+        .items
+        .iter()
+        .map(|item| (item.role, item.complete, item.commentary))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            (Role::Assistant, false, true),
+            (Role::Tool, true, false),
+            (Role::Assistant, false, true),
+            (Role::Tool, true, false),
+            (Role::Assistant, true, false),
+        ],
+        "the notes are marked and never complete; the final answer is complete and no note"
+    );
+    assert_eq!(&*record.items[4].text, "PASS: no findings.");
+}
+
+#[test]
 fn what_is_not_the_models_stays_as_it_was_written() {
     // The brief a worker was given, and what a tool printed, may hold the
     // markup as text: neither is the model's answer.

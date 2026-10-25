@@ -1,12 +1,16 @@
 //! `GET /api/inbox/<id>`: one message, whole, to its recipient or its sender,
 //! unless it still waits for the human. The id is the digits as the path had
 //! them: the 404 quotes them as typed. It changes nothing: a message read here
-//! is received when `cf` says it wrote it whole (`POST /api/answers/read`).
+//! is received when `cf` says it wrote it whole (`POST /api/answers/read`). A
+//! message no window was handed yet, read while the project is closed, waits for
+//! the Resume: the reader is told so (409 `waits`), and is given none of its text
+//! ([`Waits`]).
 
 use serde_json::json;
 
 use super::{Answer, Caller, Context, Failure, Request};
 use crate::api::views::value;
+use crate::api::waits::Waits;
 
 pub(super) async fn handle(
     context: &Context,
@@ -27,6 +31,14 @@ pub(super) async fn handle(
             && !(message.state == "gated" && Some(message.recipient.as_str()) == handle)
     });
     match visible {
+        Some(message) if Waits::now(context, caller)?.holds(&message) => Err(Failure::refuse(
+            409,
+            "waits",
+            format!(
+                "m-{} waits until the human resumes the project: it comes to you then. Do not ask for it again now.",
+                message.id
+            ),
+        )),
         Some(message) => Ok(Answer::ok(json!({ "message": value(&message)? }))),
         None => Err(Failure::refuse(
             404,

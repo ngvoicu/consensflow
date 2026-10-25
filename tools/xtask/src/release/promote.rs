@@ -33,8 +33,9 @@
 //! `main`'s next alpha needs a version after `X.Y.Z` (`X.Y.(Z+1)-alpha.1` or
 //! later), which `release alpha` enforces, as `feed-alpha` then serves `X.Y.Z`.
 //!
-//! `--dry-run` does 1 to 4, the commit made and left in no branch, and says
-//! what it would push.
+//! `--dry-run` does 1 to 4, the commit made and left in no branch, asks `gh`
+//! for the Release runs as 5 does before its first push, and says what it would
+//! push.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -99,7 +100,7 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
         )));
     }
     let branch = format!("release/{plain}");
-    branch_is_new(release, &branch, &tag)?;
+    branch_is_new(release, &branch, &tag, &commit)?;
 
     let promoted = version_commit(release, &commit, alpha, &plain)?;
     release.say(&format!(
@@ -107,6 +108,9 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
         short(&promoted),
         short(&commit)
     ));
+    // Asked before anything is pushed, and in the dry run too: a gh that is not
+    // logged in, or no network, then stops it with nothing on a remote.
+    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
     if options.dry_run {
         return Ok(format!(
             "dry run: every check passed; {} would be {branch} in the checkout and on origin and upstream, \
@@ -128,7 +132,6 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
              `git push origin --delete {branch} && git branch -D {branch}`, and run again"
         )
     })?;
-    let before = release.newest_run("release.yml", Some(&promoted), Some("push"))?;
     release.tag_and_push(&tag, &notes, &promoted)?;
     let run = release.watch(&Watched {
         label: "release",
@@ -152,8 +155,14 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
 
 /// Refuses a `branch` a promotion that stopped left, in the checkout, on
 /// origin or on upstream: it stopped before its tag `tag` (which no remote has),
-/// and is finished by hand or deleted and the promotion run again.
-fn branch_is_new(release: &mut Release, branch: &str, tag: &str) -> Result<(), Error> {
+/// and is deleted and the promotion run again, or, when its commit is the
+/// version commit on the alpha's `alpha_commit`, finished by hand.
+fn branch_is_new(
+    release: &mut Release,
+    branch: &str,
+    tag: &str,
+    alpha_commit: &str,
+) -> Result<(), Error> {
     let heads = format!("refs/heads/{branch}");
     let mut places = Vec::new();
     let mut undo = Vec::new();
@@ -177,7 +186,8 @@ fn branch_is_new(release: &mut Release, branch: &str, tag: &str) -> Result<(), E
     };
     Err(refused(format!(
         "{branch} is {}, at {}: a promotion stopped before its tag. Start over: `{}`, and run again; \
-         or finish it by hand: `git tag -a {tag} -F <notes> {branch} && git push origin {tag} && git push upstream {tag}`, \
+         or, if its parent is {alpha_commit}, finish it by hand: \
+         `git tag -a {tag} -F <notes> {at} && git push origin {tag} && git push upstream {tag}`, \
          then watch its Release run and read both feeds",
         places.join(" and "),
         short(&at),

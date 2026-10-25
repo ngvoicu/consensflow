@@ -95,8 +95,8 @@ runs = ["pause-notes-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = '''         AND state = 'queued' AND body != ?",'''
-replace = '         AND body != ?",'
+find = '''         AND state = 'queued' AND body != ? RETURNING body",'''
+replace = '         AND body != ? RETURNING body",'
 
 [[plant]]
 name = "pause notes: a resume leaves a note of several naming the task"
@@ -179,8 +179,9 @@ runs = ["pause-notes-engine"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
         let _burst = self.stalls.begin_burst();
-        let mut closing = Vec::new();'''
-replace = "        let mut closing = Vec::new();"
+        // A box the engine emptied counts as empty no more: what the human types into'''
+replace = '''
+        // A box the engine emptied counts as empty no more: what the human types into'''
 
 [[plant]]
 name = "pause notes: what a burst told outlives it"

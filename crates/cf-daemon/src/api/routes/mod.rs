@@ -47,6 +47,9 @@ pub enum TaskAction {
     Cancel,
     Pause,
     Resume,
+    /// Which Node's API had no twin of: the chief takes what the worker of a working
+    /// task said last as its result.
+    Finish,
     Tell,
     Transcript,
 }
@@ -61,6 +64,7 @@ impl TaskAction {
             "cancel" => Self::Cancel,
             "pause" => Self::Pause,
             "resume" => Self::Resume,
+            "finish" => Self::Finish,
             "tell" => Self::Tell,
             "transcript" => Self::Transcript,
             _ => return None,
@@ -163,7 +167,7 @@ fn answer_receipt(path: &str) -> Option<String> {
     is_digits(id).then(|| id.to_owned())
 }
 
-/// `/api/tasks/(\d+)(?:/(done|accept|reopen|cancel|pause|resume|tell|transcript))?`
+/// `/api/tasks/(\d+)(?:/(done|accept|reopen|cancel|pause|resume|finish|tell|transcript))?`
 /// whole.
 fn task_path(path: &str) -> Option<(String, Option<TaskAction>)> {
     let rest = path.strip_prefix("/api/tasks/")?;

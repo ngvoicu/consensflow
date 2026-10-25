@@ -108,10 +108,14 @@ fn require_not_given(store: &Store, task: &TaskRow) -> Result<(), LedgerError> {
         )?
         .exists([task.id])?;
     if begun {
+        // A queued task's window, coming up, keeps what it is told for after its
+        // brief (`tell_queued`, B3): it is told now. One taken back to the board is
+        // told as soon as it is queued for its next window.
         let instead = match task.state.as_str() {
-            "paused" => tell,
-            "queued" => format!("tell its window once it has begun: cf tell T-{number} \"…\""),
-            _ => format!("tell its next window once it has begun: cf tell T-{number} \"…\""),
+            "paused" | "queued" => tell,
+            _ => format!(
+                "tell its next window once the task is queued for it: cf tell T-{number} \"…\""
+            ),
         };
         return Err(given(store, task, instead)?);
     }

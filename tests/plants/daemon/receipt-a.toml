@@ -105,8 +105,8 @@ runs = ["cf-lib-board"]
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
 find = '''
-    let last = if words.on("--transcript") {
-        Some(items_asked(&words)?)
+    let asked = if words.on("--transcript") {
+        Some(transcript::asked(&words)?)
     } else {
         None
     };
@@ -117,8 +117,8 @@ replace = '''
     let path = format!("/api/tasks/{number}");
     let mut answer = board.get(&path)?;
     let task = answer.take("task")?;
-    let last = if words.on("--transcript") {
-        Some(items_asked(&words)?)
+    let asked = if words.on("--transcript") {
+        Some(transcript::asked(&words)?)
     } else {
         None
     };'''
@@ -129,12 +129,14 @@ meant = "a_transcript_says_nothing_of_any_answer_whether_it_prints_the_thread_or
 runs = ["cf-lib-board"]
 
 [[plant.edit]]
-file = "crates/cf/src/board/task.rs"
+file = "crates/cf/src/board/transcript.rs"
 find = '''
     Ok(Said::new(Value::Object(data), text))
 }'''
 replace = '''
-    let answers = waiting_answers(&[json!({ "id": 12, "kind": "answer", "state": "queued" })]);
+    let answers = super::lines::waiting_answers(&[
+        serde_json::json!({ "id": 12, "kind": "answer", "state": "queued" }),
+    ]);
     Ok(Said::new(Value::Object(data), text).having_written("task", answers))
 }'''
 
@@ -329,13 +331,11 @@ runs = ["daemon-lib-routes-task"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
 find = '''
-        if held_back && !may_move(caller, &task) {
-            task.task.body.clear();
-        }'''
+        if let Some(held) = held_back.filter(|_| !may_move(caller, &task.task.requester)) {
+            task.task.body.clear();'''
 replace = '''
-        if held_back && !may_move(caller, &task) && false {
-            task.task.body.clear();
-        }'''
+        if let Some(held) = held_back.filter(|_| false) {
+            task.task.body.clear();'''
 
 [[plant]]
 name = "gate: a later message held at the gate takes the received brief back"
@@ -344,5 +344,5 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = '            "delivered" | "read" => return false,'
+find = '            "delivered" | "read" => return None,'
 replace = '            "delivered" | "read" => {}'

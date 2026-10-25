@@ -13,7 +13,8 @@ fn proc(pid: u64, command: &str) -> Proc {
     }
 }
 
-const ENDED: &str = "T-1's turn left background work running. Ended: sleep 4711.";
+const CLOSED: &str =
+    "T-1's window closed with background work running, which its close ended: sleep 4711";
 
 /// A worker whose command was listed, ended, and told to the chief.
 fn good() -> Left {
@@ -22,7 +23,8 @@ fn good() -> Left {
         took: Duration::from_secs(20),
         listed: vec![proc(41, "sleep 4711")],
         result: Some("I started it.".to_owned()),
-        notes: vec![ENDED.to_owned()],
+        finished: false,
+        notes: vec![CLOSED.to_owned()],
         alive: Vec::new(),
         escaped: Vec::new(),
         after_close: None,
@@ -30,11 +32,11 @@ fn good() -> Left {
 }
 
 #[test]
-fn a_task_done_with_the_command_listed_gone_and_the_chief_told_it_was_ended_passes() {
+fn a_task_done_with_the_command_listed_gone_and_the_chief_told_of_the_close_passes() {
     assert_eq!(judge(&good()), Ok(()));
     assert_eq!(
         summary(&good(), &judge(&good())),
-        "T-1 done after 20.0 s; the command (41) was ended and the chief told: T-1's turn left background work running. Ended: sleep 4711."
+        "T-1 done after 20.0 s; the command (41) was ended by the window's close and the chief told: T-1's window closed with background work running, which its close ended: sleep 4711"
     );
 }
 
@@ -107,6 +109,7 @@ fn running(pid: u32, started: u64, ppid: u32, command: &str) -> Running {
         identity: Identity { pid, started },
         ppid,
         command: command.to_owned(),
+        exe: None,
     }
 }
 
@@ -364,40 +367,13 @@ fn a_command_still_running_once_the_chief_was_told_is_named_with_its_command_lin
 }
 
 #[test]
-fn a_chief_told_nothing_or_told_nothing_was_ended_is_a_run_that_fails() {
+fn a_chief_told_nothing_of_the_close_is_a_run_that_fails() {
     let mut left = good();
     left.notes.clear();
     assert_eq!(
         judge(&left).unwrap_err(),
-        ["the chief was told nothing of the work the turn left"]
+        ["the chief was told nothing of the work the window closed with"]
     );
-    left.notes = vec!["T-1's turn left background agents running.".to_owned()];
-    let problems = judge(&left).unwrap_err();
-    assert_eq!(problems.len(), 1, "{problems:#?}");
-    assert!(
-        problems[0]
-            .starts_with("the chief was told the turn left work, but not that any of it was ended"),
-        "{}",
-        problems[0]
-    );
-}
-
-#[test]
-fn a_chief_told_part_of_it_was_not_ended_gets_a_failure_that_says_so_beside_what_was_ended() {
-    let mut left = good();
-    left.notes = vec![
-        "T-1's turn left background work running. Ended: sleep 4711. Still running, not ended: node server.js."
-            .to_owned(),
-    ];
-    let problems = judge(&left).unwrap_err();
-    assert_eq!(problems.len(), 1, "{problems:#?}");
-    assert!(problems[0].contains("part of what the turn left was not ended, and still runs"));
-    // Said alone, it is not that anything was ended.
-    left.notes = vec![
-        "T-1's turn left background work running. Still running, not ended: sleep 4711.".to_owned(),
-    ];
-    let problems = judge(&left).unwrap_err();
-    assert_eq!(problems.len(), 2, "{problems:#?}");
 }
 
 #[test]
@@ -454,7 +430,7 @@ fn what_the_chief_was_told_is_said_a_line_to_each_note_or_that_it_was_told_none(
     let mut left = good();
     assert_eq!(
         at_the_chief(&left),
-        format!("what the chief was told of work the turn left:\n    {ENDED}")
+        format!("what the chief was told of work the turn left:\n    {CLOSED}")
     );
     left.notes.clear();
     assert_eq!(

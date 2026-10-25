@@ -185,16 +185,23 @@ fn a_task_a_window_was_given_is_not_edited_and_the_refusal_says_what_to_do_inste
     let session = moved.task.assignee.clone().expect("a session");
     let message = moved.message.expect("its brief").id;
 
-    // Its brief is being pasted: the window has it, or is about to.
+    // Its brief is being pasted: the window has it, or is about to. What it is told
+    // now is kept for it and goes in after the brief (B3, merged with `edit` on
+    // T-340): the refusal says to tell it, and the tell is taken.
     w.begin(message);
     assert_eq!(
         refused(&mut w, task),
         (
             "already-given",
-            format!("cannot edit T-{task}: it was given to @{session}, which has the brief; tell its window once it has begun: cf tell T-{task} \"…\"")
+            format!("cannot edit T-{task}: it was given to @{session}, which has the brief; tell its window: cf tell T-{task} \"…\"")
         )
     );
+    assert_eq!(w.state(task), "queued");
+    w.ledger
+        .tell_queued(w.project, task, "chief", "Parse it the new way")
+        .expect("the words are kept for its window");
     w.confirm(message);
+    w.deliver(w.next(&session).expect("the words told it"));
     assert_eq!(w.state(task), "working");
     let told = format!(
         "cannot edit T-{task}: it was given to @{session}, which has the brief; tell its window: cf tell T-{task} \"…\""
@@ -252,12 +259,19 @@ fn a_task_taken_back_from_a_window_that_had_its_brief_is_not_edited() {
         .release_task(w.project, task, "out of quota")
         .expect("taken back");
     assert_eq!(w.state(task), "open");
-    let (code, said) = refused(&mut w, task);
-    assert_eq!(code, "already-given");
-    assert!(
-        said.starts_with(&format!("cannot edit T-{task}: it was given to a window")),
-        "{said}"
+    // Its next window is told as soon as the task is queued for it (B3), not once
+    // it has begun (Calliope's P3 of T-367).
+    assert_eq!(
+        refused(&mut w, task),
+        (
+            "already-given",
+            format!("cannot edit T-{task}: it was given to a window, which has the brief; tell its next window once the task is queued for it: cf tell T-{task} \"…\"")
+        )
     );
+    w.assign(task, "diana");
+    w.ledger
+        .tell_queued(w.project, task, "chief", "Parse it the new way")
+        .expect("the words are kept for its next window");
 }
 
 #[test]
