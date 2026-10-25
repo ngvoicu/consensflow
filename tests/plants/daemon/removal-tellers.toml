@@ -222,7 +222,7 @@ find = '''
         Ok(())'''
 replace = '''
             .give_up_task(project.id, task.number, because)?;
-        self.tell_requester(project, task, because)'''
+        self.tell_failed(project, task, &task.requester, because, &[], None)'''
 
 [[plant]]
 name = "removal tellers: the daemon gives up on a task and its requester hears nothing of it"

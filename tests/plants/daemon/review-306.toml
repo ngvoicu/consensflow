@@ -733,7 +733,7 @@ runs = ["engine-dispatcher-resume"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''                    .position(|killing| killing.pane == *pane);'''
-replace = '''                    .position(|_| true);'''
+replace = '''                    .rposition(|_| true);'''
 
 [[plant]]
 name = "review 306: a give-up's pause in an open project is taken back as a suspension's"
