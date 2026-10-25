@@ -984,3 +984,35 @@ find = '''
                 .said;'''
 replace = '''
             let because = format!("@{}'s harness reported a failure", participant.handle);'''
+
+[[plant]]
+name = "failure reason: a quotation of the task's latest header is taken for its paste, and a failed turn there told as the task's"
+meant = "a_turn_that_fails_while_its_task_waits_is_no_turn_of_the_task_where_only_a_quotation_holds_its_header"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if self
+            .delivered_at(participant.id, &thread, observed.items())?
+            .is_none()
+        {
+            return Ok(());
+        }'''
+replace = '''
+        let latest = self
+            .seams
+            .ledger
+            .borrow()
+            .last_pasted(participant.id, thread.task.id)?;
+        let Some(latest) = latest else {
+            return Ok(());
+        };
+        let marker = marker_of(latest.id);
+        if !observed
+            .items()
+            .iter()
+            .any(|item| item.text.contains(&marker))
+        {
+            return Ok(());
+        }'''

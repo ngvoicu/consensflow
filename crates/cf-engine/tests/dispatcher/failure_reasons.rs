@@ -658,3 +658,40 @@ fn a_held_tasks_turn_its_job_woke_that_fails_fails_the_task_with_its_reason_once
         )]
     );
 }
+
+#[test]
+fn a_turn_that_fails_while_its_task_waits_is_no_turn_of_the_task_where_only_a_quotation_holds_its_header(
+) {
+    // Where the task's latest message went in is the item its arrival was proved by, as
+    // turn-end finds it (`delivered_at`, T-531), never words that quote its header: a
+    // record that lost the paste, and holds a quotation of it, has no turn of the task
+    // in it, and a failed turn there is told nobody as the task's.
+    let context = Context::new();
+    let tiers = working(&context);
+    let zeus = tiers.assignee(1);
+    context.ask(tiers.project.id, &zeus, "chief", 1, "Which format?");
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    let brief = tiers.task(1).messages[0].id;
+    let marker = cf_engine::delivery_text::marker_of(brief);
+    let quoted = context.adapter.item(
+        cf_harness::records::Role::User,
+        &format!("Why is {marker}T-1 still open?"),
+    );
+    context.adapter.with("zeus", |agent| {
+        let at = agent
+            .items
+            .iter()
+            .position(|item| item.text.contains(&marker))
+            .expect("the paste of the brief");
+        agent.items[at] = quoted;
+    });
+    fails(&context, Some("The model is busy, try another."));
+    context.pass().unwrap();
+
+    let failures: Vec<String> = told(&tiers)
+        .into_iter()
+        .filter(|note| note.contains("failed"))
+        .collect();
+    assert_eq!(failures, Vec::<String>::new());
+    assert_eq!(tiers.task(1).task.state, "waiting");
+}
