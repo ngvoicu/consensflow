@@ -10,7 +10,10 @@
 //! its name, the pane host and its windows have neither.
 //!
 //! What a member should have: the variable, in its `pane.open` and, where the system
-//! shows a process's environment to its owner, in the window's own process.
+//! shows a process's environment to its owner, in the window's own process. A billing
+//! key an rc exports reaches the `pane.open` too, and the window's own process never:
+//! the harness's `dropEnv` takes it out last. No value is written in the daemon's home
+//! (its ledger, trace and log).
 
 use cf_e2e::rig::{Project, Rig};
 use cf_e2e::Error;
@@ -25,6 +28,35 @@ const TERMINAL_ENV: &str = "CONSENSFLOW_TERMINAL_ENV";
 /// The variable only the human's terminal sets, and what it says there.
 const NAME: &str = "PARITY_FROM_THE_RC";
 const VALUE: &str = "set-by-the-rc";
+
+/// A key an rc exports, which a Claude window drops (`cf-harness`' window args), and a
+/// value no key has.
+const KEY: &str = "ANTHROPIC_API_KEY";
+const KEY_VALUE: &str = "parity-not-a-key";
+
+/// The files under `folder` that hold `text`, by their names.
+fn holding(folder: &std::path::Path, text: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut folders = vec![folder.to_path_buf()];
+    while let Some(folder) = folders.pop() {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                folders.push(path);
+            } else if std::fs::read(&path).is_ok_and(|bytes| {
+                bytes
+                    .windows(text.len())
+                    .any(|window| window == text.as_bytes())
+            }) {
+                found.push(path.display().to_string());
+            }
+        }
+    }
+    found
+}
 
 /// The names a `pane.open` gives its window, never their values.
 fn names(frame: &Value) -> Vec<String> {
@@ -53,7 +85,8 @@ fn a_member_window_is_given_what_the_app_took_of_the_humans_terminal() -> Outcom
     let rig = Rig::start(
         config()
             .daemon_var(NAME, VALUE)
-            .daemon_var(TERMINAL_ENV, json!([NAME]).to_string()),
+            .daemon_var(KEY, KEY_VALUE)
+            .daemon_var(TERMINAL_ENV, json!([NAME, KEY]).to_string()),
     )?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
@@ -88,6 +121,18 @@ fn a_member_window_is_given_what_the_app_took_of_the_humans_terminal() -> Outcom
         "the worker's pane.open has no {NAME}: it names {:?}",
         names(&opened)
     );
+    // The key is given with the rest, and taken out last.
+    assert!(
+        opens_with(&opened, KEY, KEY_VALUE),
+        "the worker's pane.open has no {KEY}"
+    );
+    assert!(
+        opened["dropEnv"]
+            .as_array()
+            .is_some_and(|dropped| dropped.iter().any(|name| name == KEY)),
+        "the worker's pane.open drops no {KEY}: {}",
+        opened["dropEnv"]
+    );
     // And its own process has it, where the system shows a process's environment.
     #[cfg(target_os = "macos")]
     {
@@ -108,6 +153,10 @@ fn a_member_window_is_given_what_the_app_took_of_the_humans_terminal() -> Outcom
             shown.contains(&format!("{NAME}={VALUE}")),
             "the worker's process (pid {pid}) has no {NAME}"
         );
+        assert!(
+            !shown.contains(&format!("{KEY}=")),
+            "the worker's process (pid {pid}) has {KEY}"
+        );
     }
     // The chief's window is a window too.
     let chief = rig
@@ -120,6 +169,14 @@ fn a_member_window_is_given_what_the_app_took_of_the_humans_terminal() -> Outcom
         "the chief's pane.open has no {NAME}: it names {:?}",
         names(&chief)
     );
+    // The daemon's home holds no value it was given: its ledger, its trace, its log.
+    for value in [VALUE, KEY_VALUE] {
+        let found = holding(&rig.home(), value);
+        assert!(
+            found.is_empty(),
+            "a value given the daemon is written in {found:?}"
+        );
+    }
     rig.close()?;
     Ok(())
 }

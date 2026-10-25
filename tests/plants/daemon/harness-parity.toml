@@ -252,3 +252,14 @@ runs = ["live-kit-shim"]
 file = "crates/cf-e2e/src/live/machine/wrapper.rs"
 find = '''CLAUDE_CONFIG_DIR=\"${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}\" exec {}'''
 replace = '''CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec {}'''
+
+[[plant]]
+name = "parity env: a Claude window keeps the billing key an rc exports"
+meant = "a_member_window_is_given_what_the_app_took_of_the_humans_terminal"
+runs = ["regression-terminal-env"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/window_args.rs"
+find = '''                drop_env: &["ANTHROPIC_API_KEY"],'''
+replace = '''                drop_env: &[],'''
