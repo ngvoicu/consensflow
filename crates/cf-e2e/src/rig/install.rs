@@ -356,7 +356,7 @@ mod tests {
         use crate::process::Run;
 
         let root = Path::new("root");
-        let env = environment(root, &root.join("fake-bin"), &config());
+        let env = environment(root, &root.join("fake-bin"), &config(), None);
         let comspec = var(&env, "ComSpec");
         assert!(!comspec.is_empty(), "the rig passes ComSpec on Windows");
         let ran = Run::new(comspec)
