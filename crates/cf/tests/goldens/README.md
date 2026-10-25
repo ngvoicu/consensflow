@@ -118,3 +118,16 @@ commands that take a file names it, `(task add, reopen, resume, edit and tell)`,
 next says `Those five say how many characters went`: changed by hand, in those words
 alone, in the four prints of `board.json` that hold that tail and in the daemon's trace
 of the same words (`crates/cf-daemon/tests/goldens/cf-board-028.json.gz`).
+
+## `cf task finish` takes a paused task too
+
+Board task T-442 (3.0.6): the chief's `cf task finish T-3` takes what a worker said last as
+the task's result for a paused task as well as a working one, since a tell pauses a task and
+the window's last complete answer, written after it, would otherwise reach nobody. The
+usage's entry says it, `take what a working or paused task's worker said last as its
+result`, in the six prints of `board.json` that hold it (`cf`, `cf help`, `cf --help`, `cf
+-h --json`, `cf task --help`, `cf task help`): each is what the built `cf` prints from
+`crates/cf/src/board/usage.txt` (`task_usage()` for the two task prints), written back by a
+script from the binary's own output, and nothing else in them moved. The daemon's traces
+hold no `cf task finish` line (`cf-board-028` and `-029` are departed for that, and are not
+played), so none was changed.

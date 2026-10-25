@@ -24,7 +24,7 @@ use super::{
 };
 use crate::messages::{
     drop_queued_but_told, fold, leave_pause_notes, say_again, tell_sent_back, told_waiting,
-    warnings_on_their_way, warnings_queued, Dropped,
+    warnings_on_their_way, warnings_queued, withdraw_paused_answers, Dropped,
 };
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
@@ -92,8 +92,10 @@ fn record(
                 ));
             }
         }
-        // A refusal above writes nothing, this withdrawal with it.
+        // A refusal above writes nothing, these withdrawals with it. The words the paused
+        // task's window ended its turn with are the result: the note that gave them is moot.
         if task.state == "paused" {
+            withdraw_paused_answers(store, &task, "finished")?;
             leave_pause_notes(store, &task, "finished")?;
         }
         let message_id = queue(

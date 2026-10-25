@@ -14,6 +14,11 @@
 //! worker's turn is over, a note that holds the words it ended with, once; the task still
 //! paused, with no result; and `cf task finish T-1` makes those words the result.
 //!
+//! The chief may resume before it has read that note (round 2, the chief's review of the
+//! first fix): its answer to the tell tells it to, and the resume withdrew every note of the
+//! pause it was not given yet, the one that holds the answer with them. The note stays, in
+//! words true of a task that has moved on, and reaches the chief.
+//!
 //! The stand-in writes the shape: its record holds the question, then the final text after
 //! the answer (`REPLY … THEN …` of the fake agent).
 
@@ -115,6 +120,75 @@ fn the_final_answer_a_worker_ends_the_turn_of_a_tell_with_reaches_the_chief_and_
             .is_some_and(|body| body.starts_with(REPORT)),
         "the answer after the tell is the result: {result}"
     );
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_resume_before_the_chief_read_the_note_keeps_it_in_words_true_of_the_resumed_task_and_it_reaches_the_chief(
+) -> Outcome {
+    let rig = Rig::start(config())?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    rig.tell(
+        project.id(),
+        &format!(
+            "DISPATCH --tier {} SLEEP 15 Reply with exactly: ONE",
+            tier(&added)
+        ),
+    )?;
+    rig.wait_for("T-1 to be working", secs(30), || {
+        Ok(project.task(1)?["state"] == "working")
+    })?;
+
+    let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
+    let words = format!("Stop now. REPLY {ANSWER} THEN SLEEP 2 Reply with exactly: {REPORT}");
+    let tell = rig.cf_in_window(&chief, ["tell", "T-1", words.as_str()])?;
+    assert_eq!(tell.code, Some(0), "{tell}");
+    // The chief is at work on a turn of its own: nothing is given it until that is over.
+    rig.tell(project.id(), "SLEEP 40 Reply with exactly: BUSY")?;
+
+    let note = |project: &Project| -> cf_e2e::Result<Option<Value>> {
+        Ok(project.inbox("chief")?.into_iter().find(|message| {
+            message["kind"] == "note"
+                && message["body"]
+                    .as_str()
+                    .is_some_and(|body| body.contains(REPORT))
+        }))
+    };
+    rig.wait_for("the note to wait for the busy chief", secs(60), || {
+        Ok(note(&project)?.is_some())
+    })?;
+    let waiting = note(&project)?.unwrap_or_default();
+    assert_eq!(waiting["state"], "queued", "{waiting}");
+    assert!(
+        waiting["body"]
+            .as_str()
+            .is_some_and(|body| body.starts_with("T-1 is paused, and @")),
+        "{waiting}"
+    );
+
+    // The human resumes the task from its drawer before the chief has read the note.
+    let resumed = rig.page("task.resume", json!({ "project": project.id(), "task": 1 }))?;
+    assert_eq!(resumed["ok"], true, "{resumed}");
+    let kept = note(&project)?.unwrap_or_default();
+    assert_eq!(kept["id"], waiting["id"], "the same note");
+    assert_eq!(
+        kept["state"], "queued",
+        "the resume does not take it back: {kept}"
+    );
+    let body = kept["body"].as_str().unwrap_or_default();
+    assert!(
+        body.starts_with("T-1, paused when @")
+            && body.contains("has moved on since")
+            && body.ends_with(REPORT),
+        "{kept}"
+    );
+
+    // The chief's turn ends, and it is given the words the window ended its turn with.
+    rig.wait_for("the chief to be given the note", secs(90), || {
+        Ok(note(&project)?.is_some_and(|message| message["state"] == "delivered"))
+    })?;
     rig.close()?;
     Ok(())
 }

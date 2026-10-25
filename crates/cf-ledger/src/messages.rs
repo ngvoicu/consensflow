@@ -7,7 +7,9 @@
 //! word to another until the human passes it on or declines it (`gate`); the
 //! one asked, told to answer again when an answer did not stand (`again`); and
 //! the note that tells a requester its tasks stalled, one for the tasks of a
-//! pass, which goes when they are resumed (`pauses`); the note that tells
+//! pass, which goes when they are resumed (`pauses`); the note that gives it the
+//! last complete answer of a paused task's window, which a resume does not take
+//! back (`paused_answers`); the note that tells
 //! it a task is held for its member's quota, and that it goes on (`holds`); the
 //! note that says a conversation its role again, which the ledger knows for one
 //! (`roles`); and the words told to a task's window before the window has it,
@@ -19,6 +21,7 @@ mod continuations;
 mod delivery;
 mod gate;
 mod holds;
+mod paused_answers;
 mod pauses;
 mod receipt;
 mod roles;
@@ -53,6 +56,7 @@ pub(crate) use delivery::{
 pub use delivery::{HandOver, WITHDRAWN_AFTER_HANDED};
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub(crate) use holds::{note_hold, tell_goes_on};
+pub(crate) use paused_answers::{note as note_paused_answer, withdraw as withdraw_paused_answers};
 pub use pauses::MAY_STILL_RUN;
 pub(crate) use pauses::{
     join_pause_note, leave_pause_notes, note_pause, say_again, warnings_on_their_way,

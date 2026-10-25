@@ -15,7 +15,7 @@ use cf_ledger::NewTask;
 use cf_proto::ledger::MessageView;
 use serde_json::json;
 
-use crate::fixtures::notes;
+use crate::fixtures::{given, notes, Tiers};
 
 /// What the window ends its turn with, after the answer to the tell.
 const FINAL: &str = "FINAL-RESULT: the parser is done on grammar v2";
@@ -31,22 +31,23 @@ fn told_at_work(context: &Context) -> (i64, MessageView) {
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(context.task(project.id, 1).task.state, "working");
+    (project.id, tell_working(context, project.id, "zeus"))
+}
+
+/// The chief tells the window of T-1, at work, `Stop, answer, and carry on to the end`: the
+/// turn the stop cut ends, the question goes in once the window is at rest, and the window
+/// begins its turn on it. The tell.
+fn tell_working(context: &Context, project: i64, window: &str) -> MessageView {
     context.adapter.busy("zeus");
-    let told = context.tell(
-        project.id,
-        "zeus",
-        1,
-        "Stop, answer, and carry on to the end",
-    );
+    let told = context.tell(project, window, 1, "Stop, answer, and carry on to the end");
     context.pass().unwrap();
-    // The turn the stop cut ends; the question goes in once the window is at rest.
     context.adapter.answer("zeus", "Half a parser");
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(context.message(told.id).state, "delivered");
-    assert_eq!(context.task(project.id, 1).task.state, "paused");
+    assert_eq!(context.task(project, 1).task.state, "paused");
     context.adapter.busy("zeus");
-    (project.id, told)
+    told
 }
 
 /// The window answers the tell with `cf answer`, works on, and ends its turn with `FINAL`:
@@ -78,7 +79,9 @@ fn answers_then_goes_on_to_the_end(context: &Context, told: &MessageView) {
 fn kept_notes(context: &Context, project: i64) -> Vec<String> {
     notes(context, context.id(project, "chief"))
         .into_iter()
-        .filter(|note| note.starts_with("T-1 is paused, and @"))
+        .filter(|note| {
+            note.starts_with("T-1 is paused, and @") || note.starts_with("T-1, paused when @")
+        })
         .collect()
 }
 
@@ -93,12 +96,23 @@ fn results(context: &Context, project: i64) -> Vec<String> {
         .collect()
 }
 
+/// The chief ends the turn it is in, and the dispatcher gives it what waits: the answer to
+/// the tell first, then the note, a message at a turn.
+fn chief_ends_its_turn(context: &Context) {
+    context.adapter.answer("chief", "Read.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+}
+
 /// The note of T-1's paused turn, in the chief's inbox, as it is now.
 fn kept_note(context: &Context, project: i64) -> MessageView {
     context
         .inbox(context.id(project, "chief"))
         .into_iter()
-        .find(|message| message.body.starts_with("T-1 is paused, and @"))
+        .find(|message| {
+            message.body.starts_with("T-1 is paused, and @")
+                || message.body.starts_with("T-1, paused when @")
+        })
         .expect("the note")
 }
 
@@ -161,8 +175,17 @@ fn finish_takes_the_final_answer_of_a_paused_task_as_its_result() {
     assert_eq!(results(&context, project).len(), 1);
 }
 
+/// The note T-1's paused turn left, as the words of a task that has moved on say it.
+fn moved_on_words(handle: &str, told: &MessageView) -> String {
+    format!(
+        "T-1, paused when @{handle}'s turn on the words put to its window (m-{}) began, has moved on since (resumed, or back on the board): its result will be its next complete answer, not this. What that turn ended with:\n\n{FINAL}",
+        told.id
+    )
+}
+
 #[test]
-fn a_resume_withdraws_the_note_the_chief_has_not_read_and_the_resumed_turn_is_the_result() {
+fn a_resume_before_the_chief_read_the_note_keeps_it_in_words_true_of_the_resumed_task_and_the_resumed_turn_is_the_result(
+) {
     let context = Context::new();
     let (project, told) = told_at_work(&context);
     // The chief is at work on a turn of its own: the note waits in its queue.
@@ -172,10 +195,11 @@ fn a_resume_withdraws_the_note_the_chief_has_not_read_and_the_resumed_turn_is_th
     let note = kept_note(&context, project);
     assert_eq!(note.state, "queued");
 
+    // The chief resumes the task, as the answer it was given told it to, before the note.
     context.resume_task(project, 1, "Go on, or say you finished");
-    let withdrawn = context.message(note.id);
-    assert_eq!(withdrawn.state, "cancelled");
-    assert_eq!(withdrawn.reason.as_deref(), Some("T-1 resumed"));
+    let kept = context.message(note.id);
+    assert_eq!(kept.state, "queued", "the resume does not take it back");
+    assert_eq!(kept.body, moved_on_words("zeus", &told));
     context.pass().unwrap();
     context.adapter.answer("zeus", "ALREADY-FINISHED");
     for _ in 0..3 {
@@ -183,6 +207,117 @@ fn a_resume_withdraws_the_note_the_chief_has_not_read_and_the_resumed_turn_is_th
     }
     assert_eq!(context.task(project, 1).task.state, "done");
     assert_eq!(results(&context, project), ["ALREADY-FINISHED"]);
+
+    // The chief's turn ends, and it is given the note: the words the window wrote before.
+    for _ in 0..3 {
+        chief_ends_its_turn(&context);
+    }
+    assert_eq!(context.message(note.id).state, "delivered");
+    let pasted: Vec<String> = given(&context, "chief")
+        .into_iter()
+        .filter(|text| text.contains(&moved_on_words("zeus", &told)))
+        .collect();
+    assert_eq!(pasted.len(), 1, "given once: {pasted:?}");
+}
+
+#[test]
+fn a_resume_after_the_chief_read_the_note_leaves_it_as_it_was_read_and_the_resumed_turn_is_the_result(
+) {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    answers_then_goes_on_to_the_end(&context, &told);
+    context.pass().unwrap();
+    // The chief ends its turn on the answer, and is given the note, and reads it.
+    for _ in 0..2 {
+        chief_ends_its_turn(&context);
+    }
+    let note = kept_note(&context, project);
+    assert_eq!(note.state, "delivered", "the chief has it");
+    let paused_words = note.body.clone();
+    assert!(paused_words.starts_with("T-1 is paused, and @zeus's turn"));
+
+    context.resume_task(project, 1, "Go on, or say you finished");
+    assert_eq!(
+        context.message(note.id).body,
+        paused_words,
+        "what was read stays"
+    );
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "ALREADY-FINISHED");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 1).task.state, "done");
+    assert_eq!(results(&context, project), ["ALREADY-FINISHED"]);
+    let pasted = given(&context, "chief")
+        .into_iter()
+        .filter(|text| text.contains(FINAL))
+        .count();
+    assert_eq!(pasted, 1, "the chief was given the words once");
+}
+
+#[test]
+fn a_resume_while_the_window_is_still_at_work_on_its_answer_loses_nothing_of_the_turns_end() {
+    // The chief is given the answer to its tell and resumes at once, as the tell told it to,
+    // while the window goes on in the same turn: the resume waits behind the turn, and the
+    // turn's final answer is not the answer to the resume's words (T-429's shape, with the
+    // resume first).
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context
+        .ledger
+        .borrow_mut()
+        .answer(told.id, told.recipient_id, Some(&json!(ANSWER)), None)
+        .unwrap();
+    context.resume_task(project, 1, "Go on, or say you finished");
+    assert_eq!(context.task(project, 1).task.state, "queued");
+    context.adapter.answer("zeus", FINAL);
+    context.pass().unwrap();
+
+    assert_eq!(
+        kept_notes(&context, project),
+        [moved_on_words("zeus", &told)],
+        "the turn on the tell ended with these words, though the task had moved on"
+    );
+    // The resume's words go in next; the follow-up they get is the result.
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    context.adapter.answer("zeus", "ALREADY-FINISHED");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 1).task.state, "done");
+    assert_eq!(results(&context, project), ["ALREADY-FINISHED"]);
+    assert_eq!(kept_notes(&context, project).len(), 1, "told once");
+}
+
+#[test]
+fn a_task_taken_back_to_the_board_keeps_the_note_the_chief_has_not_read_in_the_words_of_a_task_that_moved_on(
+) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let window = tiers.assignee(1);
+    let told = tell_working(&context, tiers.project.id, &window);
+    context.adapter.busy("chief");
+    answers_then_goes_on_to_the_end(&context, &told);
+    context.pass().unwrap();
+    let note = kept_note(&context, tiers.project.id);
+    assert_eq!(note.state, "queued");
+
+    context
+        .ledger
+        .borrow_mut()
+        .release_task(tiers.project.id, 1, "reassigned by the human")
+        .unwrap();
+    let kept = context.message(note.id);
+    assert_eq!(
+        (kept.state.as_str(), kept.body),
+        ("queued", moved_on_words(&window, &told))
+    );
 }
 
 #[test]
@@ -197,6 +332,23 @@ fn finishing_a_paused_task_withdraws_the_note_the_chief_has_not_read() {
 
     context.finish_task(project, 1, "chief").expect("finished");
     assert_eq!(context.message(note.id).state, "cancelled");
+}
+
+#[test]
+fn finishing_after_the_chief_read_the_note_leaves_the_note_as_it_was_read() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    answers_then_goes_on_to_the_end(&context, &told);
+    context.pass().unwrap();
+    for _ in 0..2 {
+        chief_ends_its_turn(&context);
+    }
+    let note = kept_note(&context, project);
+    assert_eq!(note.state, "delivered");
+
+    context.finish_task(project, 1, "chief").expect("finished");
+    assert_eq!(context.message(note.id).state, "delivered");
+    assert_eq!(context.message(note.id).body, note.body);
 }
 
 #[test]

@@ -17,16 +17,23 @@
 //! while its task is paused and nothing is pending that its harness wakes it for, puts
 //! that answer to whoever gave the task, once, in a note about the task: the words, and
 //! the two ways on. Finish takes the words as the task's result (a paused task is finished
-//! as a working one is, `finish`), and a resume sends the window on, which withdraws the
-//! note if it is still queued (`leave_pause_notes`). What the window wrote before its last
-//! tool call, or in an earlier turn, stays in the transcript, as everywhere else.
+//! as a working one is, `finish`), and a resume sends the window on. The ledger writes the
+//! note and keeps its words true as the task moves (`cf-ledger`'s `paused_answers`): a
+//! resume does not take it back unread, it says the task has moved on and that its result
+//! will be the next complete answer; Finish withdraws it. What the window wrote before its
+//! last tool call, or in an earlier turn, stays in the transcript, as everywhere else.
 //!
-//! Told once for each tell and each answer: the note's words name the tell and hold the
-//! answer, and the thread says whether they were written, so a daemon that restarts says
-//! nothing again.
+//! **The chief may resume at once**, on the answer it was given, while the window is still
+//! at work on the rest of its turn: the resume waits behind the turn, the task is queued
+//! when the turn ends, and its answer is the follow-up to the resume's words, not the turn
+//! on the tell. That turn's end is told all the same, in the words of a task that has
+//! moved on.
+//!
+//! Told once for each tell: the ledger writes none where the task's thread has a note of
+//! this tell, whatever became of it, so a daemon that restarts says nothing again.
 
 use cf_harness::contract::Observed;
-use cf_ledger::{NewNote, ParticipantView, ProjectView};
+use cf_ledger::{ParticipantView, ProjectView};
 
 use super::{words_of, WITHOUT_ANSWER};
 use crate::delivery_text::header_id;
@@ -35,10 +42,11 @@ use crate::role_change::answers_to_the_task;
 use crate::seams::EngineError;
 
 impl Dispatcher {
-    /// The turn of the window of a paused task, looked at: if it ended with a complete
-    /// answer after the chief's tell, whoever gave the task is told it (see above). Nothing
-    /// where the task is not paused, no tell is the latest message the window was pasted,
-    /// the turn goes on, left work pending, or was told already.
+    /// The turn of the window of a paused task (or of one resumed, whose resume waits behind
+    /// the turn), looked at: if it ended with a complete answer after the chief's tell,
+    /// whoever gave the task is told it (see above). Nothing where the task is neither, no
+    /// tell is the latest message the window was pasted, the turn goes on, left work pending,
+    /// or was told already.
     pub(super) fn tell_paused_answer(
         &self,
         project: &ProjectView,
@@ -48,8 +56,11 @@ impl Dispatcher {
         if !observed.settled || observed.failed || observed.pending().total() > 0 {
             return Ok(());
         }
-        let found = self.seams.ledger.borrow().paused_task(participant.id)?;
-        let Some(thread) = found else {
+        // Paused, or resumed already with the resume queued behind the turn that just ended.
+        let found = self.seams.ledger.borrow().task_in_hand(participant.id)?;
+        let Some(thread) =
+            found.filter(|thread| matches!(thread.task.state.as_str(), "paused" | "queued"))
+        else {
             return Ok(());
         };
         let tells: Vec<i64> = thread
@@ -85,36 +96,16 @@ impl Dispatcher {
         if words == WITHOUT_ANSWER {
             return Ok(());
         }
-        let number = thread.task.number;
-        let next = if thread.task.requester == "human" {
-            "To send it on, Resume it in the task's drawer.".to_owned()
-        } else {
-            format!(
-                "If that is the result, take it: cf task finish T-{number}. To send it on: cf task resume T-{number} \"…\"."
-            )
-        };
-        let body = format!(
-            "T-{number} is paused, and @{}'s turn on the words put to its window (m-{tell}) is over. What it said last:\n\n{words}\n\n{next}",
-            participant.handle
-        );
-        let told = thread.messages.iter().any(|message| {
-            message.kind == "note"
-                && message.sender.is_none()
-                && message.recipient == thread.task.requester
-                && message.body == body
-        });
-        if told {
+        let written = self.seams.ledger.borrow_mut().note_paused_answer(
+            project.id,
+            thread.task.number,
+            &participant.handle,
+            tell,
+            &words,
+        )?;
+        if written.is_none() {
             return Ok(());
         }
-        self.seams.ledger.borrow_mut().note(
-            project.id,
-            &NewNote {
-                from: None,
-                to: thread.task.requester.clone(),
-                task: Some(number),
-                body,
-            },
-        )?;
         self.changed();
         Ok(())
     }
