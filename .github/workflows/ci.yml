@@ -145,6 +145,18 @@ jobs:
       - uses: ./.github/actions/setup
       - run: npm --prefix app run bundle:ui
       - run: npm --prefix app run prepare-sidecar
+      # The stand-in Claude's status line runs `git` from the PATH, which on the
+      # Mac's runner is Xcode's /usr/bin/git: a shim that finds its git through
+      # `xcodebuild -find git` until xcrun has it in its cache, for seconds a run,
+      # where the regressions' case of the status line holds the script to a
+      # second (claude_status_line_taken_for_background_work). In the one job a
+      # platform, what ran before the regressions had filled the cache; a shard
+      # with its build cached starts on a runner where nothing has (run
+      # 40195925291: two shards red, the reports showing each status line's git
+      # waiting on xcodebuild). So the cache is filled first, and the times say
+      # what the first look cost.
+      - if: runner.os == 'macOS'
+        run: time /usr/bin/git --version && time /usr/bin/git --version
       # The black-box suites of crates/cf-e2e but the CLI's. Each builds the
       # programs it runs (the native cf, and the pane host consensflow-bridge, a
       # binary of cf-panes which no Tauri bundle ships). The daemon's, as a
