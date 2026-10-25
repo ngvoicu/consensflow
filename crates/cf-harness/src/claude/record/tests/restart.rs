@@ -651,3 +651,72 @@ fn a_resume_in_the_window_retires_no_job() {
         (Settlement::Settled, 2, 0)
     );
 }
+
+/// T-526's shape (the consensflow board, Claude Code 2.1.310, 2026-10-25), with made-up
+/// words: the close ended the worker's background job, whose notification the closing
+/// process queued and took, beginning no turn. The process the reopen started told the
+/// job's end again, and took the reopen's paste, each with an operation of its own, and
+/// its turn ended at its answer. Told nothing, the reader keeps the closed process's taken
+/// notification as a turn still to begin (four hours on the board, until the chief's
+/// Finish); told where the new process began, the turn is over at its answer.
+#[test]
+fn a_notification_the_closing_process_took_and_never_began_holds_no_turn_after_the_relaunch() {
+    let notice = "<task-notification>\n<task-id>bland0001</task-id>\n<status>failed</status>\n<summary>Background command \"Land it\" failed with exit code 143</summary>\n</task-notification>";
+    let reopen = "[ConsensFlow m-2 · T-1 · task from @chief]\nLand it again";
+    let mut records = vec![
+        hello(),
+        answer("a1", "u1"),
+        duration("d1", "a1"),
+        // The closing process: the notification queued and taken.
+        queue("enqueue", json!(notice)),
+        queue("dequeue", Value::Null),
+    ];
+    let relaunch = records.len();
+    records.extend([
+        queue("enqueue", json!(notice)),
+        queue("dequeue", Value::Null),
+        queue("enqueue", json!("")),
+        queue("dequeue", Value::Null),
+        having(
+            user("u2", json!("d1"), json!(notice)),
+            json!({ "promptSource": "system", "origin": { "kind": "task-notification" } }),
+        ),
+        having(
+            user("u3", json!("u2"), json!(reopen)),
+            json!({ "promptSource": "queued" }),
+        ),
+        assistant(
+            "a3",
+            "u3",
+            json!("m3"),
+            json!([text(json!("LANDED"))]),
+            json!("end_turn"),
+        ),
+        summary("s3", "a3"),
+        duration("d3", "s3"),
+    ]);
+    assert_eq!(
+        settlement_of(&records),
+        Settlement::InFlight,
+        "told nothing"
+    );
+    let mut untaken = records.clone();
+    untaken.remove(relaunch - 1);
+    untaken.remove(relaunch - 2);
+    assert_eq!(
+        settlement_of(&untaken),
+        Settlement::Settled,
+        "the taken notification is what holds it"
+    );
+    let read = record_told(&records, &relaunched(&records, relaunch));
+    assert_eq!(
+        read.settlement,
+        Settlement::Settled,
+        "the reopen's turn ended"
+    );
+    let last = read.items.last().unwrap();
+    assert_eq!(
+        (last.role, &*last.text, last.complete),
+        (Role::Assistant, "LANDED", true)
+    );
+}

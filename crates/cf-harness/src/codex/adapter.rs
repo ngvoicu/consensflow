@@ -406,6 +406,7 @@ impl Window for CodexWindow {
                     switched: None,
                     unnamed: false,
                     took_back: false,
+                    at_prompt: false,
                 });
             };
             // The broker's word first, then the record, which is then never

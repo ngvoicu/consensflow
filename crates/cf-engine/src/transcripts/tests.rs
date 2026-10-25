@@ -80,6 +80,7 @@ fn look(items: Vec<Item>) -> Observed {
         switched: None,
         unnamed: false,
         took_back: false,
+        at_prompt: false,
     }
 }
 

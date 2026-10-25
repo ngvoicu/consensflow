@@ -255,3 +255,42 @@ fn a_window_on_a_new_conversation_tells_no_relaunch() {
     home.status(&session, &json!({ "status": "idle" }), me());
     assert!(!at_rest(&prepared.window));
 }
+
+/// T-526 (the consensflow board, Claude Code 2.1.310, 2026-10-25): a window opened again on
+/// the conversation with no proof that the closed process was gone is told no relaunch, so
+/// the message that process had queued holds every turn of the new one, its answer
+/// written and Claude at its prompt. The look says the turn is not over, as the record
+/// does, and that the window waits at its prompt, as Claude's status does: what the engine
+/// tells a window at rest whose record never reads its turn as over by.
+#[test]
+fn a_window_opened_again_without_a_proof_is_at_its_prompt_though_the_closed_process_had_a_message_queued(
+) {
+    let home = Home::new();
+    let mut lines = vec![
+        user_line(SESSION, 1, TASK),
+        answer_line(SESSION, 2, "Done"),
+        stop_line(SESSION, 3),
+        queued_line(SESSION, 4),
+    ];
+    home.transcript(SESSION, &lines);
+    let request = Request {
+        message: Some(REOPENED.to_owned()),
+        previous_gone: false,
+        ..Request::resumed(SESSION)
+    };
+    let window = window(&home.adapter(), &request);
+    lines.extend([
+        user_line(SESSION, 5, REOPENED),
+        answer_line(SESSION, 6, "Done again"),
+        stop_line(SESSION, 7),
+    ]);
+    home.transcript(SESSION, &lines);
+    home.status(SESSION, &json!({ "status": "busy" }), me());
+    let observed = finished(window.observe()).unwrap();
+    assert!(!observed.settled, "busy");
+    assert!(!observed.at_prompt, "busy");
+    home.status(SESSION, &json!({ "status": "idle" }), me());
+    let observed = finished(window.observe()).unwrap();
+    assert!(!observed.settled, "the queued message holds the turn");
+    assert!(observed.at_prompt, "Claude waits at its prompt");
+}

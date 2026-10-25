@@ -330,6 +330,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             switched: Some(shows.clone()),
             unnamed: false,
             took_back: false,
+            at_prompt: false,
         };
     }
     let waiting = match &agent.unnamed {
@@ -347,6 +348,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
         switched: None,
         unnamed: agent.unnamed.is_some(),
         took_back: agent.took_back,
+        at_prompt: agent.at_prompt,
     }
 }
 
@@ -367,6 +369,10 @@ fn observed_json(observed: &Observed) -> Value {
     }
     if observed.took_back {
         written["tookBack"] = json!(true);
+    }
+    // No trace of Node's has it: written only where it is said.
+    if observed.at_prompt {
+        written["atPrompt"] = json!(true);
     }
     written
 }

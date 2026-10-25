@@ -204,6 +204,11 @@ pub(crate) struct WindowPart {
     /// which the host's word on how it ended may come after, once the engine's own
     /// close has settled the window ([`Dispatcher::heard_exit`]).
     pub(crate) last_exit: Option<(Pane, Option<i64>)>,
+    /// It opened on a conversation whose last window's program the host never proved
+    /// gone: what that program had queued may stay in its record for good, and read its
+    /// turns as never over (T-526). Its requester is told once where a turn looks finished
+    /// all the same (`turn_end`).
+    pub(crate) unproven: bool,
     /// The task whose work the window holds, by its number (`ownership`): no other
     /// task's message goes into it.
     pub(crate) owner: Option<i64>,
@@ -242,6 +247,7 @@ impl Default for WindowPart {
             activity: Activity::of(ActivityState::Closed),
             conversation: None,
             last_exit: None,
+            unproven: false,
             owner: None,
             told_waiting: None,
         }
@@ -364,6 +370,7 @@ impl Dispatcher {
             window.unstopped = None;
             window.owner = None;
             window.conversation = None;
+            window.unproven = false;
             window.told_waiting = None;
             window.activity = Activity::of(ActivityState::Closed);
             window.trust = Trusting::Past;
@@ -695,6 +702,7 @@ impl Dispatcher {
             part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));
             part.owner = planned.owner;
             part.conversation = conversation_id;
+            part.unproven = resumed_on.is_some() && !proven;
         }
         // The first message that goes in once the window is up, where there is one.
         let posted = delivering

@@ -435,7 +435,7 @@ impl Window for ClaudeWindow {
                 ),
                 Reading::Unknown(_) => (true, false, false, None, false),
             };
-            let observed = |settled, waiting, took_back| Observed {
+            let observed = |settled, waiting, took_back, at_prompt| Observed {
                 reading: Some(Arc::clone(&reading)),
                 settled,
                 waiting,
@@ -444,10 +444,11 @@ impl Window for ClaudeWindow {
                 switched: None,
                 unnamed: false,
                 took_back,
+                at_prompt,
             };
             Ok(match live {
                 Some(live) if self.elsewhere(&live) => {
-                    switched_to(observed(false, None, false), live.session)
+                    switched_to(observed(false, None, false, false), live.session)
                 }
                 live => {
                     // Claude's own status is the word on whether the window
@@ -494,6 +495,7 @@ impl Window for ClaudeWindow {
                         at_prompt && (settled || empty || left) || by_press,
                         waiting,
                         by_press,
+                        at_prompt,
                     )
                 }
             })
