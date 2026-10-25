@@ -472,7 +472,7 @@ fn a_member_launch_without_the_owners_hooks_keeps_the_ones_consensflow_adds_and_
 }
 
 #[test]
-fn the_launch_of_a_member_is_prepared_for_devin_alone() -> Outcome {
+fn the_launch_of_a_member_is_prepared_for_devin_and_pi_alone() -> Outcome {
     let rig = crate::rig()?;
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     let claude = Installed::at(Harness::Claude, "/nowhere/claude", &home);
@@ -483,7 +483,7 @@ fn the_launch_of_a_member_is_prepared_for_devin_alone() -> Outcome {
         .map(|failed| failed.to_string());
     assert_eq!(
         refused.as_deref(),
-        Some("a member's launch is prepared for Devin alone, not claude")
+        Some("a member's launch is prepared for Devin and Pi alone, not claude")
     );
     rig.close()?;
     Ok(())
