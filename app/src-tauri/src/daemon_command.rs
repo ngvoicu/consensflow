@@ -1,10 +1,12 @@
 //! What the app starts as its daemon: the bundled `cf` running `cf ui --json
-//! --no-open`, on the PATH the human's login shell sets up, else the app's own.
+//! --no-open`, in the environment the human's interactive login shell sets up
+//! (a terminal's: its PATH, LANG and what the human's rc files export), else on
+//! that shell's login PATH, else on the app's own.
 //! The daemon puts the system's folders of programs after it for everything it
 //! runs, and looks for a harness on it as given (`cf_base::env`). The portable
 //! Windows app carries the `cf` inside its exe and unpacks it first.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::{mpsc, Mutex, MutexGuard};
@@ -43,7 +45,7 @@ pub(crate) fn daemon_command(
     eprintln!("consensflow: {}", starting(&cf));
     let mut command = command_for(&cf);
     let env = Env::from_process();
-    if let Some(said) = on_login_path(&mut command, &env, LOGIN_PATH_TIMEOUT, lookup) {
+    if let Some(said) = on_login_environment(&mut command, &env, LOGIN_PATH_TIMEOUT, lookup) {
         eprintln!("consensflow: {said}");
     }
     // cf.exe is a console program: started from a windowed app it gets a
@@ -134,26 +136,43 @@ pub(crate) fn plain_path(path: PathBuf) -> PathBuf {
     path
 }
 
-/// Gives the daemon's `command` the PATH of the daemon and every pane it opens:
-/// the one the human's login shell (`SHELL` of `env`) sets up, where their
-/// harness CLIs live, else the app's own, as it is. The daemon puts the
-/// system's folders after it itself, and looks for a harness on it as given:
-/// one the human keeps in the home comes before an older one of Homebrew's.
-/// What the app's log is to say when a login shell was asked and gave none
-/// within `timeout`: the PATH the daemon then runs on, with those folders.
+/// Gives the daemon's `command` the environment of the daemon and every pane it
+/// opens: the one the human's interactive login shell (`SHELL` of `env`) sets up,
+/// as a terminal's shell does, so a member window has what the same harness has
+/// when the human opens it in a terminal (T-540: a Finder-started app had the
+/// login PATH alone, and its windows lacked LANG, the `.zshrc` PATH and what the
+/// human exports there). Where that shell gives none, the PATH its login files set
+/// up ([`login_path_in`]), where their harness CLIs live; else the app's own, as
+/// it is. The daemon puts the system's folders after the PATH itself, and looks
+/// for a harness on it as given: one the human keeps in the home comes before an
+/// older one of Homebrew's. What the app's log is to say when a login shell was
+/// asked and gave no PATH within `timeout`: the PATH the daemon then runs on,
+/// with those folders. Nothing of the environment's values is said: a variable
+/// the human exports may be a key.
 ///
 /// On Windows no shell is asked, though `SHELL` names one (Git Bash's): an app
-/// started from the Start menu has the PATH of the user and the machine, which
-/// a terminal there has too, and a POSIX shell's (`/c/…`, joined by `:`) is
+/// started from the Start menu has the environment of the user and the machine,
+/// which a terminal there has too, and a POSIX shell's (`/c/…`, joined by `:`) is
 /// none a Windows program can use.
-fn on_login_path(
+fn on_login_environment(
     command: &mut Command,
     env: &Env,
     timeout: Duration,
     lookup: &LoginLookup,
 ) -> Option<String> {
     let shell = env.path("SHELL").filter(|_| !env.on_windows());
-    let login = shell.and_then(|shell| login_path_in(shell, timeout, lookup));
+    let taken = shell.and_then(|shell| login_environment_in(shell, timeout, lookup));
+    let login = match &taken {
+        Some(vars) => vars
+            .iter()
+            .find(|(name, _)| name == "PATH")
+            .and_then(|(_, value)| value.to_str())
+            .map(str::to_owned),
+        None => shell.and_then(|shell| login_path_in(shell, timeout, lookup)),
+    };
+    for (name, value) in taken.iter().flatten() {
+        command.env(name, value);
+    }
     let given = login
         .as_deref()
         .map(OsStr::new)
@@ -166,6 +185,61 @@ fn on_login_path(
     shell
         .filter(|_| login.is_none())
         .map(|shell| unanswered(shell, timeout, &runs_on))
+}
+
+/// The variables of a login shell's environment the daemon is not given: where the
+/// shell was and how deep, the last command it ran, and the terminal it was asked
+/// in, which is no pane's (a pane says its own, `cf-panes`' `advertise_terminal`).
+fn not_taken(name: &OsStr) -> bool {
+    let name = name.to_string_lossy();
+    matches!(&*name, "PWD" | "OLDPWD" | "SHLVL" | "_") || name.starts_with("TERM")
+}
+
+/// The environment of the human's interactive login shell, as a terminal's shell
+/// has it once its login and rc files have run (`-ilc`), each variable as the
+/// shell holds it but those [`not_taken`]. It is read as `env -0` prints it between
+/// markers, as [`login_path_in`] reads the PATH, with the same bounds: none from a
+/// shell that fails, hangs, or prints no PATH.
+pub(crate) fn login_environment_in(
+    shell: &Path,
+    timeout: Duration,
+    lookup: &LoginLookup,
+) -> Option<Vec<(OsString, OsString)>> {
+    let marker = marker("env");
+    let printed = asked(
+        shell,
+        "-ilc",
+        &format!("printf '{marker}'; /usr/bin/env -0; printf '{marker}'"),
+        &marker,
+        timeout,
+        lookup,
+    )?;
+    let vars: Vec<(OsString, OsString)> = printed
+        .split(|&byte| byte == 0)
+        .filter_map(variable)
+        .filter(|(name, _)| !not_taken(name))
+        .collect();
+    vars.iter().any(|(name, _)| name == "PATH").then_some(vars)
+}
+
+/// A `NAME=value` of `env -0`'s, as the variable it is: none for an entry with no
+/// name.
+fn variable(entry: &[u8]) -> Option<(OsString, OsString)> {
+    let equals = entry.iter().position(|&byte| byte == b'=')?;
+    (equals > 0).then(|| (os(&entry[..equals]), os(&entry[equals + 1..])))
+}
+
+/// `bytes` as the platform's text of a variable.
+#[cfg(unix)]
+fn os(bytes: &[u8]) -> OsString {
+    use std::os::unix::ffi::OsStringExt;
+    OsString::from_vec(bytes.to_vec())
+}
+
+/// `bytes` as the platform's text of a variable: no shell is asked on Windows.
+#[cfg(not(unix))]
+fn os(bytes: &[u8]) -> OsString {
+    OsString::from(String::from_utf8_lossy(bytes).into_owned())
 }
 
 /// What the app's error log says of a login shell that gave no PATH: how long
@@ -280,16 +354,45 @@ pub(crate) fn login_path_in(
     timeout: Duration,
     lookup: &LoginLookup,
 ) -> Option<String> {
+    let marker = marker("path");
+    let printed = asked(
+        shell,
+        "-lc",
+        &format!("printf '{marker}%s{marker}' \"$PATH\""),
+        &marker,
+        timeout,
+        lookup,
+    )?;
+    (!printed.is_empty()).then(|| String::from_utf8_lossy(&printed).into_owned())
+}
+
+/// A marker no login file prints, for what is read of `what`.
+fn marker(what: &str) -> String {
     use std::hash::BuildHasher;
+
+    format!(
+        "<consensflow-{what}-{:016x}>",
+        std::hash::RandomState::new().hash_one(std::process::id())
+    )
+}
+
+/// What `shell` started with `flags` and `script` printed between two `marker`s,
+/// from a shell that exits cleanly, all within `timeout` and before the app quits
+/// (`lookup`); none otherwise, and the shell is ended if it still runs. Only the
+/// shell: what its login files started is the user's ([`LoginLookup`]).
+fn asked(
+    shell: &Path,
+    flags: &str,
+    script: &str,
+    marker: &str,
+    timeout: Duration,
+    lookup: &LoginLookup,
+) -> Option<Vec<u8>> {
     use std::io::Read;
 
-    let marker = format!(
-        "<consensflow-path-{:016x}>",
-        std::hash::RandomState::new().hash_one(std::process::id())
-    );
     let mut asked = Command::new(shell);
     asked
-        .args(["-lc", &format!("printf '{marker}%s{marker}' \"$PATH\"")])
+        .args([flags, script])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -316,11 +419,11 @@ pub(crate) fn login_path_in(
             _ => break None,
         }
     };
-    let path = status
+    let said = status
         .filter(ExitStatus::success)
-        .and_then(|_| between(&marker, &printed, deadline));
+        .and_then(|_| between(marker.as_bytes(), &printed, deadline));
     lookup.finish();
-    path
+    said
 }
 
 /// What the shell printed between the markers, once they are there: none
@@ -328,13 +431,14 @@ pub(crate) fn login_path_in(
 /// so what it printed is in the pipe a moment from the reader at most; a
 /// process it started may hold the output open and write on for ever, and is
 /// read no longer than the deadline lets.
-fn between(marker: &str, printed: &mpsc::Receiver<Vec<u8>>, deadline: Instant) -> Option<String> {
+fn between(marker: &[u8], printed: &mpsc::Receiver<Vec<u8>>, deadline: Instant) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
     loop {
-        let text = String::from_utf8_lossy(&bytes);
-        let mut parts = text.split(marker);
-        if let (Some(_), Some(path), Some(_)) = (parts.next(), parts.next(), parts.next()) {
-            return (!path.is_empty()).then(|| path.to_string());
+        if let Some(first) = find(&bytes, marker) {
+            let after = first + marker.len();
+            if let Some(second) = find(&bytes[after..], marker) {
+                return Some(bytes[after..after + second].to_vec());
+            }
         }
         let left = deadline.checked_duration_since(Instant::now())?;
         bytes.extend(
@@ -343,6 +447,13 @@ fn between(marker: &str, printed: &mpsc::Receiver<Vec<u8>>, deadline: Instant) -
                 .ok()?,
         );
     }
+}
+
+/// Where `needle` first is in `bytes`.
+fn find(bytes: &[u8], needle: &[u8]) -> Option<usize> {
+    bytes
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 #[cfg(test)]

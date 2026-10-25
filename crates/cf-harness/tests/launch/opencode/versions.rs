@@ -36,6 +36,15 @@ fn asked(stage: &Stage) -> Vec<String> {
         .collect()
 }
 
+/// The questions of its version the stage's adapter has asked: each launch
+/// asks OpenCode its configuration too (`skills`), which is no question of this.
+fn versions_asked(stage: &Stage) -> Vec<String> {
+    asked(stage)
+        .into_iter()
+        .filter(|question| question.ends_with(" --version"))
+        .collect()
+}
+
 #[test]
 fn an_opencode_that_says_it_is_2_is_refused_in_words_that_say_what_to_do_and_nothing_is_made() {
     for wanted in [Wanted::default(), Wanted::resuming("ses_old")] {
@@ -72,7 +81,7 @@ fn an_opencode_of_1_x_is_asked_its_version_once_and_launches_as_before_one_updat
     stage.fresh("ses_first");
     stage.fresh("ses_second");
     assert_eq!(
-        asked(&stage),
+        versions_asked(&stage),
         std::slice::from_ref(&question),
         "one question for an unchanged OpenCode"
     );
@@ -89,7 +98,7 @@ fn an_opencode_of_1_x_is_asked_its_version_once_and_launches_as_before_one_updat
         stage.prepare(&Wanted::default()).err().as_deref(),
         Some(REFUSED)
     );
-    assert_eq!(asked(&stage), std::slice::from_ref(&question));
+    assert_eq!(versions_asked(&stage), std::slice::from_ref(&question));
 }
 
 #[test]
@@ -99,11 +108,11 @@ fn an_opencode_that_cannot_be_asked_or_says_no_version_is_launched_as_before() {
     // does, and the launch is not refused on a guess.
     stage.fresh("ses_first");
     let name = called(Path::new(&stage.home.executable));
-    assert_eq!(asked(&stage), [format!("{name} --version")]);
+    assert_eq!(versions_asked(&stage), [format!("{name} --version")]);
     // It answers, and says no version.
     says(&stage, "opencode");
     stage.fresh("ses_second");
-    assert_eq!(asked(&stage), [format!("{name} --version")]);
+    assert_eq!(versions_asked(&stage), [format!("{name} --version")]);
     // It says one that exits with a code, and is read all the same.
     stage.fakes.processes.every_answer(
         &name,

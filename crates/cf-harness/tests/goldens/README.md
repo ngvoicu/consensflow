@@ -110,6 +110,24 @@ once, with the reason here and in the commit.
   recording has one (the feed of the one 1.x scenario is offline), so none moved
   for it.
 
+- **An OpenCode window keeps the human's skill paths** (2026-10-25, T-540's
+  harness parity). OpenCode reads `OPENCODE_CONFIG_CONTENT` after its global and
+  project files, and a list in it replaces theirs, so a window told only of the
+  role's skills folder lost the `skills.paths` the human's files name, which the
+  same OpenCode opened in a terminal in that folder has. Node's adapter merged the
+  role into the environment's configuration alone. The Rust adapter asks OpenCode
+  its configuration for the window's folder first (`opencode debug config`, run
+  there with the environment's configuration and its updates off), and puts the
+  paths it names before the role's; an OpenCode that cannot be asked, or answers
+  no configuration with a list of texts there, gives none, and the window goes on
+  as it did. `launch/` moved for it in both platforms' recordings, in 155 of the
+  158 OpenCode scenarios: each of their 159 prepares that get past the version
+  gained a `ran` of `opencode debug config`, right after its `opencode --version`,
+  in the folder the window works in (the stand-ins answer nothing: the question
+  fails, and the launch goes on). Nothing else moved: with that `ran` taken out,
+  each record reads as it did, and the other 357 scenarios are as they were, byte
+  for byte.
+
 - **A Devin wire log replaced** (2026-10-16, Astra's and Sol's reviews of the fix of
   the field report B1). Node took a wire log that shrank for one replaced and read it
   from its start, and any other for the one it had read: one as long as the last was

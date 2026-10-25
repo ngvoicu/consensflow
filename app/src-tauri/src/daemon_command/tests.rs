@@ -318,14 +318,23 @@ fn finder(shell: Option<&Path>, folders: &[PathBuf]) -> Env {
 #[cfg(unix)]
 fn the_daemons(app: &Env, timeout: Duration) -> (Command, Option<String>) {
     let mut command = command_for(Path::new("/bundle/cli/bin/cf"));
-    let said = on_login_path(&mut command, app, timeout, &LoginLookup::default());
+    let said = on_login_environment(&mut command, app, timeout, &LoginLookup::default());
     (command, said)
 }
 
-/// The PATH the daemon's `command` is given, and nothing else.
+/// The variables the daemon's `command` is given.
 #[cfg(unix)]
 fn given(command: &Command) -> Vec<(String, String)> {
     described(command).2
+}
+
+/// The value the daemon's `command` is given of the variable `name`.
+#[cfg(unix)]
+fn given_of(command: &Command, name: &str) -> Option<String> {
+    given(command)
+        .into_iter()
+        .find(|(held, _)| held == name)
+        .map(|(_, value)| value)
 }
 
 /// A loaded machine's login shell, slower than the five seconds it was
@@ -346,7 +355,7 @@ fn a_login_shell_slower_than_five_seconds_still_gives_its_path() {
         LOGIN_PATH_TIMEOUT,
     );
     assert!(started.elapsed() >= Duration::from_secs(6), "it answered");
-    assert_eq!(given(&command), [("PATH".to_owned(), login)]);
+    assert_eq!(given_of(&command, "PATH"), Some(login));
     assert_eq!(said, None);
 }
 
@@ -522,4 +531,103 @@ fn a_verbatim_windows_path_is_spelled_plainly() {
         plain_path(PathBuf::from("/Applications/ConsensFlow.app/cf")),
         PathBuf::from("/Applications/ConsensFlow.app/cf")
     );
+}
+
+/// A stand-in for a shell whose interactive rc file runs `rc` before the command it
+/// is given, as zsh runs `.zshrc` for `-i`; started without `-i` it runs the command
+/// alone, as a login shell's `-lc` does.
+#[cfg(unix)]
+fn shell_with_rc(home: &Path, rc: &str) -> PathBuf {
+    login_shell(
+        home,
+        &format!("case \"$1\" in *i*) {rc} ;; esac\nexec /bin/sh -c \"$2\""),
+    )
+}
+
+/// What a terminal's shell gives a harness, a member window has (T-540): a
+/// variable only the interactive rc exports reaches the daemon, a value of any
+/// bytes as it is, and the app's log says nothing of it.
+#[cfg(unix)]
+#[test]
+fn a_variable_only_the_interactive_shell_sets_reaches_the_daemon_as_it_is_and_is_not_logged() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "export CF_ONLY_INTERACTIVE='a value = with = signs\nand a second line'; \
+         export LANG=en_GB.UTF-8; export PATH=\"/rc/bin:$PATH\"",
+    );
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    assert_eq!(
+        given_of(&command, "CF_ONLY_INTERACTIVE").as_deref(),
+        Some("a value = with = signs\nand a second line")
+    );
+    assert_eq!(given_of(&command, "LANG").as_deref(), Some("en_GB.UTF-8"));
+    let path = given_of(&command, "PATH").expect("a PATH");
+    assert!(path.starts_with("/rc/bin:"), "{path}");
+    assert_eq!(said, None, "the log says nothing of a shell that answered");
+}
+
+/// What says where the shell was, how deep, its last command and its terminal is no
+/// pane's, and is not taken.
+#[cfg(unix)]
+#[test]
+fn the_shells_place_depth_last_command_and_terminal_are_not_taken() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "cd /; export OLDPWD=/tmp SHLVL=7 TERM=dumb TERM_PROGRAM=iTerm.app TERMINFO=/x \
+         CF_KEPT=yes",
+    );
+    let (command, _) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    let names: Vec<String> = given(&command).into_iter().map(|(name, _)| name).collect();
+    for dropped in [
+        "PWD",
+        "OLDPWD",
+        "SHLVL",
+        "_",
+        "TERM",
+        "TERM_PROGRAM",
+        "TERMINFO",
+    ] {
+        assert!(
+            !names.iter().any(|name| name == dropped),
+            "{dropped} was taken"
+        );
+    }
+    assert_eq!(given_of(&command, "CF_KEPT").as_deref(), Some("yes"));
+}
+
+/// An interactive rc that hangs (one that `exec`s a terminal multiplexer, say) costs
+/// the start no more than its time, and the daemon still gets the login shell's PATH:
+/// it is never worse off than before the environment was asked.
+#[cfg(unix)]
+#[test]
+fn an_interactive_rc_that_hangs_falls_back_to_the_login_path_within_its_time() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(home.path(), "exec /bin/sleep 30");
+    let started = Instant::now();
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(1));
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the start waited {:?}",
+        started.elapsed()
+    );
+    assert_eq!(given_of(&command, "PATH"), std::env::var("PATH").ok());
+    assert_eq!(given_of(&command, "CF_ONLY_INTERACTIVE"), None);
+    assert_eq!(said, None);
+}
+
+/// An entry of `env -0` is a variable by its first `=`; one with no name is none.
+#[test]
+fn an_entry_is_named_by_its_first_equals_sign_and_one_without_a_name_is_none() {
+    assert_eq!(
+        variable(b"A=b=c"),
+        Some((OsString::from("A"), OsString::from("b=c")))
+    );
+    assert_eq!(
+        variable(b"EMPTY="),
+        Some((OsString::from("EMPTY"), OsString::new()))
+    );
+    assert_eq!(variable(b"=x"), None);
+    assert_eq!(variable(b"no-equals"), None);
 }
