@@ -340,21 +340,31 @@ fn a_window_keeps_the_append_system_file_pi_finds_by_itself_before_its_role() {
         ..Request::default()
     };
     let plan = prepare(&adapter, &request).unwrap();
-    assert_eq!(appended(&plan.argv), [ROLE]);
+    // The role by its file (T-432), after what Pi would have found by itself.
+    let role = path::join(&[
+        &home.launch_folder(),
+        "role",
+        ".claude",
+        "skills",
+        "consensflow-worker",
+        "SKILL.md",
+    ]);
+    assert_eq!(appended(&plan.argv), [role.as_str()]);
     let agent = path::join(&[home.var("HOME"), ".pi", "agent"]);
     fs::create_dir_all(&agent).unwrap();
     let user = path::join(&[&agent, "APPEND_SYSTEM.md"]);
     fs::write(&user, "the user's").unwrap();
     let plan = prepare(&adapter, &request).unwrap();
-    assert_eq!(appended(&plan.argv), [user.as_str(), ROLE]);
+    assert_eq!(appended(&plan.argv), [user.as_str(), role.as_str()]);
     // The project's, where there is one, and not the user's: Pi reads one.
     fs::create_dir_all(path::join(&[&project, ".pi"])).unwrap();
     let own = path::join(&[&project, ".pi", "APPEND_SYSTEM.md"]);
     fs::write(&own, "the project's").unwrap();
     let plan = prepare(&adapter, &request).unwrap();
-    assert_eq!(appended(&plan.argv), [own.as_str(), ROLE]);
-    // Everything else is where it was, the task last.
-    assert_eq!(plan.argv.last().map(String::as_str), Some(TASK));
+    assert_eq!(appended(&plan.argv), [own.as_str(), role.as_str()]);
+    // Everything else is where it was, and the task on no word of it (it goes in through
+    // the extension's inbox once the window is up).
+    assert!(plan.argv.iter().all(|word| !word.contains(TASK)));
 }
 
 #[test]
