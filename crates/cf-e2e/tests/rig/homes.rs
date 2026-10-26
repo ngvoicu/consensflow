@@ -124,8 +124,11 @@ mod sweeping {
         std::os::unix::fs::symlink(&elsewhere, &link)?;
 
         // A process working in one, and one that has the other's name in its command line.
+        // Each lasts until the case ends it: the rig sweeps once its turn comes, after every
+        // rig before it in the suite, which took longer than a sleeper of two minutes once
+        // the suite had four Devin cases more (T-655's gate, twice).
         let mut sleeper = Run::new("sleep")
-            .arg("120")
+            .arg("86400")
             .cwd(worked_in.join("workspace"))
             .spawn()?;
         let mut namer = Run::new("sh")
