@@ -78,14 +78,9 @@ runs = ["rig-lib-spawned"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/process/spawned.rs"
-find = '''
-                    while !self.errors_read.load(Ordering::Acquire) && Instant::now() < until {
-                        thread::sleep(POLL);
-                    }
+find = '''                    self.settle_errors();
 '''
-replace = '''
-                    let _ = until;
-'''
+replace = ''''''
 
 [[plant]]
 name = "load flakes: a file said whole is written in place"

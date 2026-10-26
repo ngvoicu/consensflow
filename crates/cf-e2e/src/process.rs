@@ -85,7 +85,7 @@ const PROGRAM_LOOKUP_ON_WINDOWS: [&str; 2] = ["COMSPEC", "PATHEXT"];
 /// The environment variable `name` of this process, or none when it is not set
 /// (or is not text). A stand-in program reads what the window it stands in for
 /// gave it, a suite its size, and a run the programs built for it before it
-/// (`cf::BUILT`), here and nowhere else.
+/// (`cf::BUILT`) or the id nextest gave it (`cf::RUN`), here and nowhere else.
 pub fn own_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }

@@ -82,6 +82,11 @@ impl Machine {
     /// read a large paste. `patience` is how long the smoke waits for each thing
     /// the app reports, which the page and the app are told (`vars`).
     pub fn new(paste_reader: &Path, patience: Duration) -> Result<Self> {
+        Self::with_harness(paste_reader, patience, &harness())
+    }
+
+    /// A new machine as [`Machine::new`] makes one, with `script` as its harness.
+    pub fn with_harness(paste_reader: &Path, patience: Duration, script: &str) -> Result<Self> {
         let root = tempfile::Builder::new()
             .prefix("cf-smoke-")
             .tempdir()
@@ -117,7 +122,7 @@ impl Machine {
         ] {
             files::make_dir(folder)?;
         }
-        files::write_executable(&machine.bin.join("claude"), harness())?;
+        files::write_executable(&machine.bin.join("claude"), script)?;
         Ok(machine)
     }
 

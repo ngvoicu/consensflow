@@ -35,6 +35,9 @@
 //! ```text
 //! cargo test -p cf-evals --test long_dry_run -- --ignored --nocapture
 //! ```
+//!
+//! With `CF_EVALS_KEEP_DRY_RUN` set, the whole run's folder (its reports) is left on the
+//! machine, and its place said.
 
 #![cfg(unix)]
 // A failure in the scaffolding is the test's; and what the run said is shown, with
@@ -157,6 +160,19 @@ fn long_run(folder: &Path, words: &[&str], held: Option<u64>) -> cf_e2e::process
     ran
 }
 
+/// The folder of a run, `made`, and the guard that takes it away when the case ends:
+/// none where `CF_EVALS_KEEP_DRY_RUN` is set, the folder left on the machine and its place
+/// said, for a person to read its report and the ledger a FAIL keeps beside it (T-139 read
+/// the breaks of the sixth there).
+fn kept_if_asked(made: tempfile::TempDir) -> (PathBuf, Option<tempfile::TempDir>) {
+    if own_var("CF_EVALS_KEEP_DRY_RUN").is_none() {
+        return (made.path().to_path_buf(), Some(made));
+    }
+    let kept = made.keep();
+    eprintln!("the run's folder is kept in {}", kept.display());
+    (kept, None)
+}
+
 /// The files `folder` keeps, by name.
 fn kept_in(folder: &Path) -> Vec<PathBuf> {
     let mut kept: Vec<PathBuf> = std::fs::read_dir(folder)
@@ -170,10 +186,10 @@ fn kept_in(folder: &Path) -> Vec<PathBuf> {
 #[test]
 #[ignore = "plays a whole long run against the stand-ins: about fifteen minutes, and nothing spent"]
 fn the_long_run_is_played_against_the_stand_ins_to_its_end_with_every_disruption_and_a_report() {
-    let folder = tempfile::tempdir().unwrap();
-    let reports = folder.path().join("reports");
+    let (folder, _made) = kept_if_asked(tempfile::tempdir().unwrap());
+    let reports = folder.join("reports");
     let ran = long_run(
-        folder.path(),
+        &folder,
         &[
             "--chief",
             "claude",

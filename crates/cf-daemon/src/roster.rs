@@ -76,6 +76,13 @@ impl cf_engine::seams::Roster for Agents {
         }))
     }
 
+    /// The catalog's word for a ready-made agent it no longer carries: why it went.
+    fn retired(&self, name: &str) -> Option<String> {
+        self.catalog
+            .retired(name)
+            .map(|retired| retired.why.clone())
+    }
+
     /// What the file keeps of specs for every project, read as it is now: off,
     /// naming no folder and no variant, where it says nothing, and where it
     /// cannot be read (a launch reads the saved agent from the same file, and is

@@ -338,6 +338,40 @@ fn a_verb_answers_help_before_it_reads_its_words_or_looks_at_the_home() {
 }
 
 #[test]
+fn an_agent_list_row_keeps_two_spaces_between_its_columns_however_long_they_run() {
+    // A name, harness or model of the column's old fixed width or more was
+    // padded to nothing and ran into the next column: the model
+    // `openrouter/anthropic/claude-fable-5.1` came out `…5.1low`.
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("consensflow");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        home.join("agents.json"),
+        r#"{"schemaVersion":1,"agents":[{"id":"long","name":"Long","kind":"codex","createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z","model":"openrouter/example/a-model-id-far-longer-than-the-guess","effort":"high"}]}"#,
+    )
+    .unwrap();
+    let (code, said, wrong) = ran_in(dir.path(), &["agent", "list"]);
+    assert_eq!((code, wrong.as_str()), (0, ""));
+    for line in said.lines().filter(|line| !line.is_empty()) {
+        // A row is name, harness, model, effort: columns run together come
+        // out as one word.
+        let words: Vec<&str> = line.split_whitespace().collect();
+        assert_eq!(words.len(), 4, "{line:?}");
+        let mut at = 0;
+        for (word, next) in words.iter().zip(&words[1..]) {
+            at += line[at..].find(word).unwrap() + word.len();
+            assert!(line[at..].find(next).unwrap() >= 2, "{line:?}");
+        }
+    }
+    assert!(
+        said.contains("openrouter/anthropic/claude-fable-5.1")
+            && !said.contains("claude-fable-5.1low")
+            && !said.contains("than-the-guesshigh"),
+        "{said}"
+    );
+}
+
+#[test]
 fn a_double_dash_makes_the_word_a_positional_as_it_was() {
     let (code, said, wrong) = ran(&NONE, &["catalog", "--", "--help"]);
     assert_eq!((code, wrong.as_str()), (0, ""));

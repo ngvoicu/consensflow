@@ -397,7 +397,11 @@ fn kill(hand: &mut Hand<'_>, handle: &str, task: Option<i64>, hold: Duration) ->
     let Some(number) = task else {
         return Ok(Outcome::Played(said));
     };
-    hand.wait(|hand| Ok(hand.stage.state_of(number)? != "working"))?;
+    // A task another resumed to working before any read of it is paused in the ledger: the
+    // wait for it to leave working ends there too, not when its time is up.
+    hand.wait(|hand| {
+        Ok(hand.stage.state_of(number)? != "working" || hand.paused_by(number, None, killed_at))
+    })?;
     let state = hand.stage.state_of(number)?;
     if state != "paused" && !hand.wait(|hand| Ok(hand.paused_by(number, None, killed_at)))? {
         return Ok(hand.failed(

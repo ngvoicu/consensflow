@@ -1,0 +1,165 @@
+# A tell refused for a task still open (T-534 item 4, 2026-10-25: a task waiting on `--needs`
+# with no member yet answered "T-n has no window to tell: it is open", while the release notes
+# promised that words told to a task that has not started wait for its window). An open task has
+# no window to keep a message for (a message is addressed to a participant, and the daemon picks
+# the member when the task goes), so the words are added to its brief, as the words a resume says
+# to a task with no window are, and whichever window takes the task is given them once, with the
+# brief (`Ledger::tell_open`, `crates/cf-ledger/src/tasks/editing.rs`). The tests are the
+# ledger's (`crates/cf-ledger/tests/receipt/open_tells.rs`), the route's
+# (`crates/cf-daemon/src/api/routes/task/tests/verbs.rs`) and `cf`'s (`crates/cf/tests/tell.rs`).
+# Every name holds `tell open`, so `npm run plants:daemon -- "tell open"` runs them all.
+
+[run]
+ledger-open-tells = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "open_tells::"]
+cf-tell-open = ["cargo", "test", "--offline", "-p", "cf", "--test", "tell"]
+
+[[plant]]
+name = "tell open: a tell to an open task is refused, as 3.0.6-alpha.2 refused it"
+meant = "an_open_task_is_told_with_no_pause_and_its_words_wait_in_its_brief_for_the_window_that_takes_it"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "    if state == OPEN {"
+replace = "    if false && state == OPEN {"
+
+[[plant]]
+name = "tell open: a task taken back to the board while its words come in is told as it was read"
+meant = "a_queued_task_taken_back_to_the_board_while_its_words_come_in_is_told_as_an_open_one"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "        .filter(|now| tellable(now))"
+replace = "        .filter(|now| reaches(now))"
+
+[[plant]]
+name = "tell open: the words are said and kept nowhere"
+meant = "words_told_to_an_open_task_wait_in_its_brief_and_the_member_that_takes_it_is_given_them_once"
+runs = ["ledger-open-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "            params![told, at, task.id],"
+replace = "            params![task.body, at, task.id],"
+
+[[plant]]
+name = "tell open: the words go ahead of the brief"
+meant = "words_told_to_an_open_task_wait_in_its_brief_and_the_member_that_takes_it_is_given_them_once"
+runs = ["ledger-open-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+            "{}\n\nTold by @{from} before a window had it: {words}",
+            task.body
+        );'''
+replace = '''
+            "Told by @{from} before a window had it: {words}\n\n{}",
+            task.body
+        );'''
+
+[[plant]]
+name = "tell open: a later tell replaces the earlier ones instead of following them"
+meant = "several_tells_keep_the_order_they_were_told_in_and_each_goes_in_once"
+runs = ["ledger-open-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+            "{}\n\nTold by @{from} before a window had it: {words}",
+            task.body
+        );'''
+replace = '''
+            "{}\n\nTold by @{from} before a window had it: {words}",
+            task.body.split("\n\nTold by ").next().unwrap_or_default()
+        );'''
+
+[[plant]]
+name = "tell open: a follow-up that waits is told, and its window is given nothing of the words"
+meant = "a_follow_up_waiting_on_the_board_is_told_and_its_window_has_the_words_once_what_it_needs_is_accepted"
+runs = ["ledger-open-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "            params![told, at, task.id],"
+replace = "            params![task.body, at, task.id],"
+
+[[plant]]
+name = "tell open: a task a window has is told as an open one"
+meant = "a_task_a_window_has_is_not_told_as_an_open_one_and_says_where_its_words_go"
+runs = ["ledger-open-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''        require_task_state(&task, &["open"], "tell the window of")?;
+'''
+replace = ""
+
+[[plant]]
+name = "tell open: no words, and words that outgrow the brief, are added to it"
+meant = "no_words_and_words_that_would_outgrow_the_brief_are_refused_and_change_nothing"
+runs = ["ledger-open-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''        model::require_text(&told, "body", MAX_BODY)?;
+'''
+replace = ""
+
+[[plant]]
+name = "tell open: blank words are added to the brief"
+meant = "no_words_and_words_that_would_outgrow_the_brief_are_refused_and_change_nothing"
+runs = ["ledger-open-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''    model::require_text(words, "body", MAX_BODY)?;
+    store.write(|store| {
+        store.participant_by_handle(project_id, from)?;
+        let task = store.task_row(project_id, number)?;
+        require_task_state'''
+replace = '''    store.write(|store| {
+        store.participant_by_handle(project_id, from)?;
+        let task = store.task_row(project_id, number)?;
+        require_task_state'''
+
+[[plant]]
+name = "tell open: the chief's own step is told"
+meant = "the_chiefs_own_step_is_not_told_its_brief_is_the_chiefs_to_change"
+runs = ["ledger-open-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "        if is_own_step(store, &task)? {"
+replace = "        if false && is_own_step(store, &task)? {"
+
+[[plant]]
+name = "tell open: the log keeps no word of what was told"
+meant = "words_told_to_an_open_task_wait_in_its_brief_and_the_member_that_takes_it_is_given_them_once"
+runs = ["ledger-open-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''            "task.told",'''
+replace = '''            "task.edited",'''
+
+[[plant]]
+name = "tell open: cf takes the answer of an open task for a message's"
+meant = "a_tell_to_an_open_task_says_the_words_are_added_to_its_brief_for_whichever_window_takes_it"
+runs = ["cf-tell-open"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''    if answer.value().get("message").is_none() {'''
+replace = '''    if answer.value().get("message").is_none() && false {'''
+
+[[plant]]
+name = "tell open: cf tells of an open task that it is queued"
+meant = "a_tell_to_an_open_task_says_the_words_are_added_to_its_brief_for_whichever_window_takes_it"
+runs = ["cf-tell-open"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''"T-{number} is open: no window has it yet, so your words'''
+replace = '''"T-{number} is queued: no window has it yet, so your words'''

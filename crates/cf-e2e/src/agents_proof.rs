@@ -20,7 +20,7 @@ use crate::{files, Error, Result};
 
 /// What the catalog holds, as the packaged build has it (every agent is in the
 /// roster as the catalog has it).
-const CATALOG_SIZE: usize = 121;
+const CATALOG_SIZE: usize = 251;
 
 /// The agent the proof saves by hand, and deletes.
 const MINE: &str = "my-maia";

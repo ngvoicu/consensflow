@@ -360,6 +360,7 @@ fn says_why_codexs_server_could_not_start_in_the_window_and_leaves_nothing_behin
 fn ends_both_processes_when_its_window_is_closed(signal: Signal) -> Outcome {
     let _turn = serial::turn();
     let mut s = Supervised::start(&[], &[("CF_TEST_CODEX_TUI", "wait".to_owned())], None)?;
+    let _left = EndsWhatTheLogNames(s.log.clone());
     let seen = s.until(|runs| runs.iter().any(|run| run.get("session").is_some()))?;
     let server = of(&seen, "server")[0].clone();
     let tui = of(&seen, "tui")[0].clone();
@@ -383,6 +384,62 @@ fn ends_both_codex_processes_when_its_window_is_closed_sigterm() -> Outcome {
 #[cfg_attr(windows, ignore = "no SIGTERM on Windows")]
 fn ends_both_codex_processes_when_its_window_is_closed_sigint() -> Outcome {
     ends_both_processes_when_its_window_is_closed(Signal::Interrupt)
+}
+
+/// A terminal that hangs up: SIGHUP left to its default ended the supervisor, and
+/// left both of Codex's processes running (T-542).
+#[test]
+#[cfg_attr(windows, ignore = "no SIGHUP on Windows")]
+fn ends_both_codex_processes_when_its_window_is_closed_sighup() -> Outcome {
+    ends_both_processes_when_its_window_is_closed(Signal::Hangup)
+}
+
+/// The window closed as the pane host closes one, SIGTERM and then SIGHUP at once to
+/// each of its processes, with a server that takes neither, as Codex's stalled in its
+/// own shutdown when it was closed soon after it started (T-542). The supervisor
+/// lives through the SIGHUP, ends the server once its grace (1.5 s) is over, and the
+/// window is gone in a moment, not when the pane host's grace (10 s) ends in a kill:
+/// the human's Close waits for it.
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "no SIGTERM on Windows: the pane's job object ends it"
+)]
+fn ends_a_codex_server_that_does_not_end_when_asked_when_the_pane_host_closes_its_window() -> Outcome
+{
+    let _turn = serial::turn();
+    let mut s = Supervised::start(
+        &[],
+        &[
+            ("CF_TEST_CODEX_BACKEND", "deaf".to_owned()),
+            ("CF_TEST_CODEX_TUI", "wait".to_owned()),
+        ],
+        None,
+    )?;
+    let _left = EndsWhatTheLogNames(s.log.clone());
+    let seen = s.until(|runs| runs.iter().any(|run| run.get("session").is_some()))?;
+    let server = of(&seen, "server")[0].clone();
+    let tui = of(&seen, "tui")[0].clone();
+    let window = [s.child.id(), pid(&tui), pid(&server)];
+    let started = Instant::now();
+    for signal in [Signal::Terminate, Signal::Hangup] {
+        for process in window {
+            // One that has gone already has nothing to be asked.
+            let _ = cf_e2e::process::signal(process, signal);
+        }
+    }
+    let code = s.child.wait(secs(9))?.map(|status| status.code());
+    let took = started.elapsed();
+    assert_eq!(
+        code,
+        Some(Some(0)),
+        "the window ended by itself, closed and not failed, before the pane host's kill: {}",
+        s.stderr()
+    );
+    assert!(took < secs(5), "the window took {took:?} to end");
+    assert!(!is_alive(pid(&server)), "the server went with the window");
+    assert!(!socket_folder(&server).exists());
+    Ok(())
 }
 
 /// The board's API, with a question it is asked and never answers: the polls
