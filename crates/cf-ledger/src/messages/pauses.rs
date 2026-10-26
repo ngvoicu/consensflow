@@ -26,6 +26,7 @@ use serde_json::json;
 
 use super::holds::goes_on;
 use super::paused_answers::{keep_moved, prefixes as answer_prefixes};
+use super::told::keep_waiting;
 use crate::model::LedgerError;
 use crate::queue::{send, withdraw, Sent};
 use crate::store::Store;
@@ -158,21 +159,99 @@ pub(crate) fn join_pause_note(
     })
 }
 
+/// ConsensFlow paused T-`number` as its window went away (`because`): its requester
+/// is told in a note of the pause, `join` (the note of the stalls before it in the
+/// same burst) where that can take it, or one of its own; and the words told to its
+/// window that wait for it still are named in it, as waiting for the resume, `why`
+/// said once ([`keep_waiting`]), but `except` (what the give-up that closed the
+/// window settles itself, and names as it does): the teller is never left to think
+/// they went in, however the window went (the chief, T-77). The note, and the words
+/// named, for the engine to tell the human of.
+pub(crate) fn note_stall(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    because: &str,
+    why: &str,
+    join: Option<i64>,
+    except: Option<i64>,
+) -> Result<(MessageView, Vec<MessageView>), LedgerError> {
+    store.write(|store| {
+        let joined = match join {
+            Some(id) => join_pause_note(store, id, number, because)?,
+            None => None,
+        };
+        let note = match joined {
+            Some(note) => note,
+            None => {
+                let task = store.task_row(project_id, number)?;
+                let requester = store.participant_row(task.requester_id)?.handle;
+                note_pause(store, project_id, &requester, number, because)?
+            }
+        };
+        let kept = keep_waiting(store, project_id, number, why, except)?;
+        Ok((note, kept))
+    })
+}
+
 /// What a pause note says, after why its task stopped, of the words told to the
 /// task's window that are kept for its resume (`told.rs`): their ids.
 const KEPT: &str = "; the words told its window wait for the resume: ";
 
-/// What `because` says once told words `id`, kept for the resume as their paste
-/// failed (`why`, on one line, so a note of several tasks still reads back), are
-/// named in it: the why and the words, the why said once, and later words added
-/// to the first.
-fn with_kept(because: &str, id: i64, why: &str) -> String {
-    if because.contains(KEPT) {
-        format!("{because}, m-{id}")
-    } else {
-        let why = why.lines().collect::<Vec<_>>().join(" ");
-        format!("{because}: {why}{KEPT}m-{id}")
+/// What it says of the words told to the window that are held for the human still
+/// (`gated`): they wait for the human's word, and then for the resume.
+const HELD: &str = "; the words told its window wait for the human, then the resume: ";
+
+/// The ids `clause` names in `rest`, the clauses after why a task stopped: none
+/// where it is not there.
+fn named_in(rest: &str, clause: &str) -> Vec<i64> {
+    let Some(at) = rest.find(clause) else {
+        return Vec::new();
+    };
+    rest[at + clause.len()..]
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .split(", ")
+        .filter_map(|named| named.strip_prefix("m-")?.parse().ok())
+        .collect()
+}
+
+/// What `because` says once told words `id`, kept for the resume (`why`, on one
+/// line, so a note of several tasks still reads back), are named in it: the why
+/// and the words, the why said once (a `because` that says it already, or that
+/// names words already, is not told it again), and the words in the order they
+/// were told. Words `held` for the human are named apart, as waiting for the
+/// human first.
+fn with_kept(because: &str, id: i64, why: &str, held: bool) -> String {
+    let why = why.lines().collect::<Vec<_>>().join(" ");
+    let at = [because.find(KEPT), because.find(HELD)]
+        .into_iter()
+        .flatten()
+        .min();
+    let (head, rest) = at.map_or((because, ""), |at| because.split_at(at));
+    let (mut kept, mut waiting) = (named_in(rest, KEPT), named_in(rest, HELD));
+    let mut head = head.to_owned();
+    if kept.is_empty() && waiting.is_empty() && !head.contains(&why) {
+        head = format!("{head}: {why}");
     }
+    let list = if held { &mut waiting } else { &mut kept };
+    if !list.contains(&id) {
+        list.push(id);
+        list.sort_unstable();
+    }
+    let ids = |ids: &[i64]| {
+        ids.iter()
+            .map(|id| format!("m-{id}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    for (clause, named) in [(KEPT, &kept), (HELD, &waiting)] {
+        if !named.is_empty() {
+            head = format!("{head}{clause}{}", ids(named));
+        }
+    }
+    head
 }
 
 /// Told words `message`, kept for `task`'s resume as their paste failed (`why`):
@@ -181,13 +260,15 @@ fn with_kept(because: &str, id: i64, why: &str) -> String {
 /// closed: a window given up as unfit for work); otherwise in a note of its own
 /// about the task (that note given already, or a pause of the human's, which
 /// writes none). Main told the human only, that the words "did not reach" the
-/// window; they reach it at the resume.
+/// window; they reach it at the resume. Words held for the human (`gated`) wait
+/// for the human's word first, and are said to.
 pub(crate) fn tell_kept(
     store: &mut Store,
     task: &TaskRow,
     message: &MessageView,
     why: &str,
 ) -> Result<(), LedgerError> {
+    let held = message.state == "gated";
     let queued = store
         .db
         .prepare(
@@ -207,12 +288,17 @@ pub(crate) fn tell_kept(
         let Some(named) = paused.iter_mut().find(|named| named.number == task.number) else {
             continue;
         };
-        named.because = with_kept(&named.because, message.id, why);
+        named.because = with_kept(&named.because, message.id, why, held);
         return set(store, id, task.project_id, &paused);
     }
     let requester = store.participant_row(task.requester_id)?.handle;
+    let waits = if held {
+        format!("waits for the human, then T-{}'s resume", task.number)
+    } else {
+        format!("waits for T-{}'s resume", task.number)
+    };
     let body = format!(
-        "m-{0}, what @{1} told T-{2}'s window, waits for T-{2}'s resume: {why}.",
+        "m-{0}, what @{1} told T-{2}'s window, {waits}: {why}.",
         message.id,
         message.sender.as_deref().unwrap_or("null"),
         task.number
@@ -631,12 +717,12 @@ mod tests {
 
     #[test]
     fn the_words_kept_for_a_resume_are_named_after_the_why_said_once_and_read_back() {
-        let first = with_kept("@zeus's window closed", 2, "unfit\nfor work");
+        let first = with_kept("@zeus's window closed", 2, "unfit\nfor work", false);
         assert_eq!(
             first,
             "@zeus's window closed: unfit for work; the words told its window wait for the resume: m-2"
         );
-        let second = with_kept(&first, 3, "unfit for work");
+        let second = with_kept(&first, 3, "unfit for work", false);
         assert_eq!(
             second,
             "@zeus's window closed: unfit for work; the words told its window wait for the resume: m-2, m-3"

@@ -39,6 +39,14 @@ pub const TAIL_LINES: usize = 12;
 /// margin, and holds the window until it has it.
 pub const ENDING_BOUND: Duration = Duration::from_secs(20);
 
+/// How long the host gives a window's programs, once asked to end, before what is left
+/// of them is killed: a close that finds them all gone sooner does not wait, and on
+/// Windows, where nothing is asked, there is no grace (`cf-panes`' `close`). A kill is
+/// answered only after it, and the engine waits for that answer no longer than three
+/// times this before a member's give-up goes on without the window's exit (its
+/// `KILL_ANSWER_WAIT`, derived from this: T-414 P3-6).
+pub const CLOSE_GRACE: Duration = Duration::from_secs(10);
+
 /// The most processes the host names when it says what a window left running
 /// (it says how many there are besides): a note quotes a few, and a frame is
 /// no place for a build's hundred processes.

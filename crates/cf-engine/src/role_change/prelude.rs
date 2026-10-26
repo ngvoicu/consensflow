@@ -44,7 +44,6 @@ use cf_ledger::{LedgerError, MessageView, ParticipantView, ProjectView};
 use crate::deliveries::Delivering;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
-use crate::runtime::begin;
 use crate::seams::EngineError;
 
 /// What a launch put ahead of its window's queue: the replacement of the role,
@@ -235,7 +234,7 @@ impl Dispatcher {
     /// launch's first message, and the replacement is withdrawn. A chief's stays
     /// in its queue, and the chief is tried again at the backoff
     /// (`launch_failed`); its exit closes no project, where the exit was neither
-    /// the human's (a project already closed) nor the engine's own.
+    /// the human's (a project already closed) nor the engine's own (`own`).
     pub(crate) fn settle_exited_launch(
         &self,
         record: &Rc<Record>,
@@ -243,9 +242,10 @@ impl Dispatcher {
         participant: &ParticipantView,
         prelude: &Prelude,
         because: &str,
+        own: bool,
     ) -> Result<(), EngineError> {
         if participant.role == "chief" {
-            let went_by_itself = project.state == "open" && !record.window.borrow().own_exit;
+            let went_by_itself = project.state == "open" && !own;
             return if went_by_itself {
                 self.launch_failed(record, project, participant, None, because)
             } else {
@@ -266,7 +266,10 @@ impl Dispatcher {
     /// One look at what a launch that says the role first still owes, with its
     /// window open: the replacement given up is a launch that did not come up, and
     /// so is a member's window that has not been ready for it within the time a
-    /// launch is given. Says whether the launch was given up, its window closing.
+    /// launch is given. Says whether the launch was given up, its window closing. A
+    /// member's is given up apart from the pass, as a delivery goes (`act`): its close
+    /// waits on the window's kill, and the pass is every window's (T-414 P3-1: the
+    /// pass waited, up to the close grace of a window that left a job running).
     pub(crate) async fn watch_prelude(
         self: &Rc<Self>,
         project: &ProjectView,
@@ -290,15 +293,31 @@ impl Dispatcher {
             Some("queued") if slow => "the window was never ready for the note that says its role",
             _ => return Ok(false),
         };
-        self.abandon_launch(project, participant, record, because)
-            .await?;
+        if participant.role == "chief" {
+            self.abandon_launch(project, participant, record, because)
+                .await?;
+            return Ok(true);
+        }
+        let (this, at, who, held) = (
+            Rc::clone(self),
+            project.clone(),
+            participant.clone(),
+            Rc::clone(record),
+        );
+        self.act(record, async move {
+            this.abandon_launch(&at, &who, &held, because).await
+        })
+        .await;
         Ok(true)
     }
 
     /// A launch that was to say the role first and cannot: its window is closed
     /// and the launch settled as one that did not come up. What the window shows is
     /// asked first, for the screen goes with it. An exit that came while the host
-    /// answered settled the launch already.
+    /// answered settled the launch already. A member's exit is settled at the close,
+    /// before the message the role went ahead of fails, so that words told to its
+    /// window wait for the resume of the task the exit paused; a kill the host refuses,
+    /// or does not answer in its time, leaves the message to fail as before.
     pub(crate) async fn abandon_launch(
         self: &Rc<Self>,
         project: &ProjectView,
@@ -328,10 +347,17 @@ impl Dispatcher {
             }
             return self.launch_failed(record, project, participant, failing, &said);
         }
-        let (this, held) = (Rc::clone(self), Rc::clone(record));
-        let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
-        self.launch_failed(record, project, participant, failing, &said)?;
-        closing.await?;
-        Ok(())
+        // A member's exit is settled at the close, before the message the role went ahead
+        // of fails: the exit pauses its task, and words told to its window wait for the
+        // resume, as at an unfit window's close (T-47 P2-1). The prelude is out of the
+        // record already, or the exit would fail that message itself. A kill refused, or
+        // not answered in its time, leaves no exit to pause the task: the message fails,
+        // and whoever gave it hears why (T-63). Words still waiting for the window wait for
+        // the resume of the task the exit paused, for why it was given up (`stall`).
+        if let Some(pane) = &pane {
+            let settling = failing.as_ref().map(|failing| failing.message);
+            self.close_own_within(record, pane, &said, settling).await?;
+        }
+        self.launch_failed(record, project, participant, failing, &said)
     }
 }

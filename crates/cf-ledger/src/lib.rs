@@ -57,13 +57,14 @@ pub use conversations::{
 pub use ledger::Watcher;
 pub use ledger::{open_ledger, Event, Ledger, Options};
 pub use messages::{
-    continuation, continuation_tasks, is_told, GivenUp, HandOver, NewNote, NewQuestion, Read,
-    MAY_STILL_RUN, WITHDRAWN_AFTER_HANDED,
+    continuation, continuation_tasks, is_told, waiting_for_the_reopen, GivenUp, HandOver, NewNote,
+    NewQuestion, Read, MAY_STILL_RUN, WITHDRAWN_AFTER_HANDED,
 };
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
 pub use projects::{parse_description, parse_name, NewChief, NewMember, NewProject};
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
 pub use specs::SpecsChange;
+pub use tasks::resumed_in_vain;
 pub use tasks::{NewTask, RESUME_WORDS};
 pub use wake_ups::{NewWakeUp, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT, WAKE_UP_FLOOR_MS};

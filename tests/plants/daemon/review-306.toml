@@ -35,6 +35,15 @@ cf-transcript-pages = ["cargo", "test", "--offline", "-p", "cf", "--test", "tran
 daemon-own-steps = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task::tests::own_steps"]
 engine-dispatcher-unfit = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unfit::"]
 ledger-lib-pauses = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::pauses::"]
+engine-dispatcher-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::"]
+engine-role-change-members = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::members::"]
+ledger-receipt-carrying = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "carrying::"]
+engine-dispatcher-window-closes = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "window_closes::"]
+engine-dispatcher-approval = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "approval::"]
+engine-lib-stalls = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "stalls::"]
+engine-lib-windows = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "windows::"]
+engine-dispatcher-stale-box = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stale_box::"]
+ledger-receipt-suspended = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "suspended::"]
 
 # B4: a brief on its way when the chief's own step is done.
 
@@ -303,8 +312,11 @@ runs = ["ledger-told-kept", "engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "        return set(store, id, task.project_id, &paused);\n    }\n    let requester = store.participant_row(task.requester_id)?.handle;"
-replace = "        return set(store, id, task.project_id, &paused);\n    }\n    if true { return Ok(()); }\n    let requester = store.participant_row(task.requester_id)?.handle;"
+find = '''    let requester = store.participant_row(task.requester_id)?.handle;
+    let waits = if held {'''
+replace = '''    if true { return Ok(()); }
+    let requester = store.participant_row(task.requester_id)?.handle;
+    let waits = if held {'''
 
 [[plant]]
 name = "review 306: a pause note says the why again for each word kept"
@@ -313,8 +325,8 @@ runs = ["ledger-lib-pauses", "ledger-told-kept"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "    if because.contains(KEPT) {"
-replace = "    if false && because.contains(KEPT) {"
+find = '''    if kept.is_empty() && waiting.is_empty() && !head.contains(&why) {'''
+replace = '''    if true {'''
 
 [[plant]]
 name = "review 306: the human is not told of told words kept for the resume"
@@ -333,22 +345,19 @@ runs = ["engine-dispatcher-unfit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/unstarted.rs"
-find = """        let closed = match &pane {
-            Some(pane) => self.close_own(record, pane).await?,
-            None => true,
-        };
-        // A chief's window the host would not kill is looked at again; a member's
-        // message goes all the same, its task never paused by an exit that never came
-        // (T-47 P3-1: left at work, asked and killed again at every pass, nobody told).
-        if !closed && participant.role == "chief" {
-            return Ok(());
+find = '''        if let Some(pane) = &pane {
+            self.close_own_within(record, pane, &said, Some(message.id))
+                .await?;
         }
-        self.launch_failed(record, &project, &participant, Some(failing), &said)"""
-replace = """        let (this, held) = (Rc::clone(self), Rc::clone(record));
-        let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
+        self.launch_failed(record, &project, &participant, Some(failing), &said)
+    }'''
+replace = '''        let _ = &pane;
+        let (this, held) = (Rc::clone(self), Rc::clone(record));
+        let closing = crate::runtime::begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
         self.launch_failed(record, &project, &participant, Some(failing), &said)?;
         closing.await?;
-        Ok(())"""
+        Ok(())
+    }'''
 
 # Calliope's look at 876286f4 (T-47): a member's unfit window whose kill the host refuses goes with
 # its message all the same (P3-1, `give_up_unfit`); and the ledger says what a delivery given up came
@@ -361,8 +370,11 @@ runs = ["engine-dispatcher-unfit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/unstarted.rs"
-find = "        if !closed && participant.role == \"chief\" {"
-replace = "        if !closed {"
+find = '''            self.close_own_within(record, pane, &said, Some(message.id))
+                .await?;'''
+replace = '''            if self.close_own_within(record, pane, &said, Some(message.id)).await? == Some(false) {
+                return Ok(());
+            }'''
 
 [[plant]]
 name = "review 306: the ledger says words it kept for a resume failed"
@@ -404,3 +416,361 @@ file = "crates/cf-ledger/src/tasks/editing.rs"
 find = '            "paused" | "queued" => tell,'
 replace = '''            "paused" => tell,
             "queued" => format!("tell its window once it has begun: cf tell T-{number} \"…\""),'''
+
+# T-77 (T-47 P2-1): the two give-up paths left with the old shape. A member's launch given up
+# with the role unsaid (`abandon_launch`, `crates/cf-engine/src/role_change/prelude.rs`) and a
+# member's window that never came up (`give_up_unstarted`, `crates/cf-engine/src/unstarted.rs`)
+# settle the window's exit at its close, before the message the launch was for fails: the exit
+# pauses the task, and words told to the window wait for its resume, the chief and the human
+# told why, as at an unfit window's close (T-46). The kill's answer is waited for no longer than
+# `KILL_ANSWER_WAIT` (`close_own_within`, `crates/cf-engine/src/windows.rs`), and a kill refused
+# or not answered in that time leaves the message to fail as before (T-63). The tests hold the
+# host's exits, as the bridge host sends one after it answers the kill (`resume.rs`,
+# `role_change/members.rs`).
+
+[[plant]]
+name = "review 306: a member's launch that cannot say its role fails its message before its exit"
+meant = "a_session_whose_launch_cannot_say_its_role_ahead_of_a_note_told_it_pauses_its_task_and_keeps_the_note_for_its_resume"
+runs = ["engine-role-change-members"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change/prelude.rs"
+find = '''        if let Some(pane) = &pane {
+            let settling = failing.as_ref().map(|failing| failing.message);
+            self.close_own_within(record, pane, &said, settling).await?;
+        }
+        self.launch_failed(record, project, participant, failing, &said)
+    }'''
+replace = '''        let _ = &pane;
+        let (this, held) = (Rc::clone(self), Rc::clone(record));
+        let closing =
+            crate::runtime::begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
+        self.launch_failed(record, project, participant, failing, &said)?;
+        closing.await?;
+        Ok(())
+    }'''
+
+[[plant]]
+name = "review 306: a member's window that never came up fails its message before its exit"
+meant = "a_member_whose_window_never_comes_up_with_a_note_told_it_as_its_first_message_pauses_its_task_and_keeps_the_note_for_its_resume"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = '''            self.close_own_within(record, &pane, &said, settling)
+                .await?;'''
+replace = '''            let _ = settling;
+            let this = Rc::clone(self);
+            drop(
+                crate::runtime::begin(&*self.seams.spawn, async move {
+                    let _ = this.seams.host.kill(&pane).await;
+                })
+                .await,
+            );'''
+
+[[plant]]
+name = "review 306: a member's launch given up waits for a kill that never answers"
+meant = "a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it_fail_after_the_wait"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        match select(closing, self.seams.time.sleep(KILL_ANSWER_WAIT)).await {"
+replace = "        match select(closing, std::future::pending::<()>()).await {"
+
+[[plant]]
+name = "review 306: a member's launch given up never waits for its kill's answer"
+meant = "a_member_whose_window_never_comes_up_with_a_note_told_it_as_its_first_message_pauses_its_task_and_keeps_the_note_for_its_resume"
+runs = ["engine-dispatcher-resume", "engine-role-change-members"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        match select(closing, self.seams.time.sleep(KILL_ANSWER_WAIT)).await {"
+replace = "        match select(closing, std::future::ready(())).await {"
+
+[[plant]]
+name = "review 306: a member's window that never came up whose kill is refused is left at work"
+meant = "a_member_whose_window_never_comes_up_and_whose_kill_is_refused_has_the_note_told_it_fail_and_says_why"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = '''            self.close_own_within(record, &pane, &said, settling)
+                .await?;'''
+replace = '''            if self.close_own_within(record, &pane, &said, settling).await? == Some(false) {
+                return Ok(());
+            }'''
+
+[[plant]]
+name = "review 306: a member's launch that cannot say its role whose kill is refused is left at work"
+meant = "a_session_whose_launch_cannot_say_its_role_and_whose_kill_is_refused_has_the_note_told_it_fail_and_says_why"
+runs = ["engine-role-change-members"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change/prelude.rs"
+find = '''            self.close_own_within(record, pane, &said, settling).await?;'''
+replace = '''            if self.close_own_within(record, pane, &said, settling).await? == Some(false) {
+                return Ok(());
+            }'''
+
+# T-77, round 2 (the chief's answers): words still waiting for a member's window when a give-up
+# of it pauses the task wait for its resume and are named in the note of the pause, the human
+# told once (`keep_waiting`, the engine's in `crates/cf-engine/src/deliveries.rs` and the
+# ledger's in `crates/cf-ledger/src/messages/told.rs`), in each of the three give-ups; the words
+# that resume a paused task, given up before its window had them, pause it again and never fail
+# it (`pause_again`, `crates/cf-ledger/src/tasks/pausing.rs`), the why said once in the note
+# (`with_kept`, `pauses.rs`); and the give-up of an unfit member's window is no longer held for a
+# kill that never answers (`give_up_unfit`, `close_own_within`).
+
+[[plant]]
+name = "review 306: the words a give-up kept as their paste failed are named again as waiting"
+meant = "a_members_window_unfit_for_work_with_a_second_note_waiting_names_both_words_kept_for_its_resume"
+runs = ["engine-dispatcher-unfit"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = '''                   AND m.state IN ('queued', 'gated') AND m.id IS NOT ?3'''
+replace = '''                   AND m.state IN ('queued', 'gated') AND ?3 IS NOT -1'''
+
+[[plant]]
+name = "review 306: an unfit member's give-up waits for a kill that never answers"
+meant = "a_members_unfit_window_whose_kill_is_never_answered_has_its_message_fail_after_the_wait"
+runs = ["engine-dispatcher-unfit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = '''            self.close_own_within(record, pane, &said, Some(message.id))
+                .await?;'''
+replace = '''            self.close_own(record, pane).await?;'''
+
+[[plant]]
+name = "review 306: the words that resume a paused task fail it when its window never had them"
+meant = "a_resume_whose_window_never_comes_up_pauses_its_task_again_and_the_note_it_carried_waits_for_the_next"
+runs = ["engine-dispatcher-resume", "ledger-receipt-carrying", "engine-dispatcher-stale-box", "ledger-receipt-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '    if message.kind != "task" || task.state != "queued" {'
+replace = '    if message.kind != "task" || task.state != "queued" || task.state == "queued" {'
+
+[[plant]]
+name = "review 306: the note of a pause says the why twice"
+meant = "a_resume_whose_window_never_comes_up_pauses_its_task_again_and_the_note_it_carried_waits_for_the_next"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''    if kept.is_empty() && waiting.is_empty() && !head.contains(&why) {'''
+replace = '''    if kept.is_empty() && waiting.is_empty() {'''
+
+
+# T-77, round 3 (Calliope's review T-414, its eight P3s): a member's launch that cannot say its role
+# is given up apart from the pass (`watch_prelude` under `act`); the words still waiting for a
+# window are named in ConsensFlow's note of the pause itself (`note_stall`, the ledger's), however
+# the window went, the give-up's why carried by its own exit (`OwnExit`, keyed to its window) and
+# the message it settles itself left out; words held for the human are named as waiting for the
+# human first; a failed task's note says which words wait for the reopen; a resume's pause is told
+# with the stalls of its burst; the engine's wait for a kill is three times the host's close
+# grace (`cf_proto::panes::CLOSE_GRACE`); and the close a give-up left going writes down what it
+# fails with.
+
+[[plant]]
+name = "review 306: a member's launch that cannot say its role is given up inside the pass"
+meant = "a_session_whose_launch_cannot_say_its_role_and_whose_kill_is_never_answered_is_given_up_apart_from_the_pass"
+runs = ["engine-role-change-members"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change/prelude.rs"
+find = '''        if participant.role == "chief" {
+            self.abandon_launch(project, participant, record, because)
+                .await?;
+            return Ok(true);
+        }'''
+replace = '''        if participant.role == "chief" || participant.role != "chief" {
+            self.abandon_launch(project, participant, record, because)
+                .await?;
+            return Ok(true);
+        }'''
+
+[[plant]]
+name = "review 306: a window's exit leaves the words waiting for it unnamed"
+meant = "a_member_window_that_closes_by_itself_names_the_note_still_waiting_for_it_in_the_note_of_the_pause"
+runs = ["engine-dispatcher-window-closes", "engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''        let kept = keep_waiting(store, project_id, number, why, except)?;'''
+replace = '''        let _ = (why, except);
+        let kept = Vec::new();'''
+
+[[plant]]
+name = "review 306: the words waiting for a window a give-up closed wait for its exit, not for why it was given up"
+meant = "a_member_opened_again_whose_window_never_comes_up_is_given_nothing_and_the_note_told_it_waits_for_its_resume"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''                    Some(own) => (own.why.unwrap_or_else(|| because.clone()), own.settling),'''
+replace = '''                    Some(own) => (because.clone(), own.settling),'''
+
+[[plant]]
+name = "review 306: the message a give-up settles itself is named as waiting too"
+meant = "a_members_window_unfit_for_work_with_a_second_note_waiting_names_both_words_kept_for_its_resume"
+runs = ["engine-dispatcher-unfit", "engine-role-change-members"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''                    Some(own) => (own.why.unwrap_or_else(|| because.clone()), own.settling),'''
+replace = '''                    Some(own) => (own.why.unwrap_or_else(|| because.clone()), None),'''
+
+[[plant]]
+name = "review 306: words held for the human are not named"
+meant = "a_note_held_for_the_human_when_the_window_closes_is_named_as_waiting_for_the_human_then_the_resume"
+runs = ["engine-dispatcher-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = '''                   AND m.state IN ('queued', 'gated') AND m.id IS NOT ?3'''
+replace = '''                   AND m.state IN ('queued') AND m.id IS NOT ?3'''
+
+[[plant]]
+name = "review 306: words held for the human are named as waiting for the resume alone"
+meant = "a_note_held_for_the_human_when_the_window_closes_is_named_as_waiting_for_the_human_then_the_resume"
+runs = ["engine-dispatcher-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''    let held = message.state == "gated";'''
+replace = '''    let held = message.state == "never";'''
+
+[[plant]]
+name = "review 306: a failed task's note says nothing of the words that wait for its reopen"
+meant = "words_told_before_a_window_that_never_comes_up_are_said_to_wait_for_the_reopen"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        let waiting = waiting_for_the_reopen(told, of);'''
+replace = '''        let waiting = String::new();'''
+
+[[plant]]
+name = "review 306: a resume's pause is told past the stalls of its burst"
+meant = "resumes_whose_windows_never_come_up_in_one_burst_are_told_in_one_note"
+runs = ["engine-lib-stalls"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                    self.tell_stall(&project, &thread.task, &paused_because, because, None)?;'''
+replace = '''                    self.seams.ledger.borrow_mut().note_pause(
+                        project.id,
+                        &thread.task.requester,
+                        thread.task.number,
+                        &paused_because,
+                    )?;'''
+
+[[plant]]
+name = "review 306: the wait for a kill's answer is not three times the close grace"
+meant = "a_kills_answer_is_waited_for_three_times_the_grace_the_host_gives_a_close"
+runs = ["engine-lib-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''const KILL_ANSWER_WAIT: Duration = Duration::from_secs(3 * CLOSE_GRACE.as_secs());'''
+replace = '''const KILL_ANSWER_WAIT: Duration = Duration::from_secs(2 * CLOSE_GRACE.as_secs());'''
+
+[[plant]]
+name = "review 306: a launch that cannot say its role stops at a kill not answered in its time"
+meant = "a_session_whose_launch_cannot_say_its_role_and_whose_kill_is_never_answered_is_given_up_apart_from_the_pass"
+runs = ["engine-role-change-members"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change/prelude.rs"
+find = '''            self.close_own_within(record, pane, &said, settling).await?;'''
+replace = '''            if self.close_own_within(record, pane, &said, settling).await?.is_none() {
+                return Ok(());
+            }'''
+
+[[plant]]
+name = "review 306: a close left going after the kill's wait fails unwritten"
+meant = "a_close_that_fails_after_its_kill_was_waited_for_in_vain_is_written_down"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                        this.write_down(&cause);'''
+replace = '''                        let _ = (&this, cause);'''
+
+[[plant]]
+name = "review 306: a window is taken for the engine's own close by a close of an earlier one"
+meant = "a_window_closed_while_a_kill_of_an_earlier_one_is_never_answered_is_no_close_of_the_engines"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        self.own_exit.as_ref().filter(|own| own.pane == *pane)'''
+replace = '''        self.own_exit.as_ref().filter(|own| own.pane.id == pane.id)'''
+
+# The alpha.3 merge (T-509): where give-up-paths' rules meet main's turn-end, Resume after Close
+# and removal-tellers.
+
+[[plant]]
+name = "review 306: a resume's words given up in a suspended project are paused again for the project's resume"
+meant = "a_resume_whose_words_are_given_up_in_a_suspended_project_is_paused_again_for_its_requester"
+runs = ["ledger-receipt-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''    pause(store, task, detail, false)?;
+    Ok(true)'''
+replace = '''    pause(store, task, detail, true)?;
+    Ok(true)'''
+
+[[plant]]
+name = "review 306: a later window's kill under way is taken for the earlier one's"
+meant = "a_kill_of_an_earlier_window_refused_at_last_leaves_a_later_windows_close_its_own"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                    .position(|killing| killing.pane == *pane);'''
+replace = '''                    .rposition(|_| true);'''
+
+[[plant]]
+name = "review 306: a give-up's pause in an open project is taken back as a suspension's"
+meant = "a_kill_of_an_earlier_window_refused_at_last_leaves_a_later_windows_close_its_own"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''                    .find(|killing| marked && killing.pane == *pane)'''
+replace = '''                    .find(|killing| killing.pane == *pane)'''
+
+[[plant]]
+name = "review 306: a give-up's exit after a Close is the window's own, not the Close's"
+meant = "a_give_up_whose_kill_is_taken_after_a_close_pauses_its_task_once_for_the_resume"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''                let is_own = own.is_some();'''
+replace = '''                let is_own = own.is_some() && project.state == "open";'''
+
+[[plant]]
+name = "review 306: the teller of words that never reach the window hears of everyone's that wait"
+meant = "the_teller_of_words_that_never_reach_the_window_hears_which_of_its_own_wait_for_the_reopen"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                    self.tell_failed(&project, task, teller, &because, &told, Some(teller))?;'''
+replace = '''                    self.tell_failed(&project, task, teller, &because, &told, None)?;'''
+
+[[plant]]
+name = "review 306: the teller of words that never reach the window hears nothing of its own that wait"
+meant = "the_teller_of_words_that_never_reach_the_window_hears_which_of_its_own_wait_for_the_reopen"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                    self.tell_failed(&project, task, teller, &because, &told, Some(teller))?;'''
+replace = '''                    self.tell_failed(&project, task, teller, &because, &[], Some(teller))?;'''

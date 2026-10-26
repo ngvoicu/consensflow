@@ -207,7 +207,7 @@ runs = ["engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''message.kind != "task" && *teller != thread.task.requester && *teller != "human"'''
+find = '''message.kind != "task" && *teller != task.requester && *teller != "human"'''
 replace = "false"
 
 [[plant]]
@@ -222,7 +222,7 @@ find = '''
         Ok(())'''
 replace = '''
             .give_up_task(project.id, task.number, because)?;
-        self.tell_requester(project, task, because)'''
+        self.tell_failed(project, task, &task.requester, because, &[], None)'''
 
 [[plant]]
 name = "removal tellers: the daemon gives up on a task and its requester hears nothing of it"

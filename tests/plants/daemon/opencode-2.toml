@@ -333,8 +333,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "                self.tell_requester(&project, &thread.task, &because)?;"
-replace = "                let _ = &because;"
+find = "                self.tell_failed(&project, task, &task.requester, &because, &told, None)?;"
+replace = "                let _ = (&because, &told);"
 
 [[plant]]
 name = "opencode 2: the words of the refusal end with a full stop of their own, and the board's follow with another"

@@ -305,6 +305,48 @@ mod unix {
         let _ = fs::remove_file(&started);
         let _ = fs::remove_file(&released);
     }
+
+    /// How long a kill takes with the real grace ([`PaneTable::new`]), which is how
+    /// long the pane host takes to answer `pane.kill` (`pane_handlers`): what a member's
+    /// give-up waits for, no longer than the engine's `KILL_ANSWER_WAIT` (T-77). A window
+    /// whose program ends when asked, one that leaves a job that ends when asked, and one
+    /// that leaves a job that ignores the request, which is ended after the grace. Ignored:
+    /// it measures, and the last waits out the grace. Run with
+    /// `cargo test -p cf-panes --lib kill_answer -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "measures how long a kill is answered in (T-77); the last case waits out the grace"]
+    fn kill_answer_times_with_the_real_grace() {
+        let _serial = serial_pty_test();
+        let table = PaneTable::new();
+        let cases = [
+            ("ends when asked", "printf ready; exec sleep 300"),
+            (
+                "leaves a job that ends when asked",
+                "sleep 300 & printf ready; wait",
+            ),
+            (
+                "leaves a job that ignores the request",
+                "trap '' TERM HUP; sleep 300 & printf ready; wait",
+            ),
+        ];
+        for (case, script) in cases {
+            let mut took = Vec::new();
+            for _ in 0..3 {
+                let OpenedPane { key, mut reader } = open(&table, script);
+                until_shown(&mut reader, "ready");
+                let closing = Instant::now();
+                table.kill(&key).expect("close the pane");
+                took.push(closing.elapsed());
+            }
+            took.sort();
+            println!("kill answered, a window that {case}: {took:?}");
+            assert!(
+                took.iter()
+                    .all(|took| *took < crate::pty::CLOSE_GRACE + Duration::from_secs(5)),
+                "{case}: {took:?}"
+            );
+        }
+    }
 }
 
 /// The same on Windows, where a window is ended at once and what ends it is the
@@ -367,5 +409,65 @@ mod windows {
             "nothing was waited for: the job ended the tree ({closed_in:?})"
         );
         assert!(table.list().expect("list the panes").is_empty());
+    }
+
+    /// How long a kill takes, which is how long the pane host takes to answer
+    /// `pane.kill`: what a member's give-up waits for, no longer than the engine's
+    /// `KILL_ANSWER_WAIT` (T-77). A window behind a `.cmd` shim, as a harness is, and
+    /// PowerShell opened itself. Ignored: it measures. Run with
+    /// `cargo test -p cf-panes --lib kill_answer -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "measures how long a kill is answered in (T-77)"]
+    fn kill_answer_times_with_the_real_grace() {
+        let _pty_guard = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let name = format!("cf-shim-timing-{}.cmd", std::process::id());
+        let shim = std::env::temp_dir().join(&name);
+        let powershell = system(r"WindowsPowerShell\v1.0\powershell.exe");
+        fs::write(
+            &shim,
+            format!(
+                "@echo off\r\n\"{powershell}\" -NoProfile -Command \"Write-Output 'READY#'; Start-Sleep 1000\"\r\n"
+            ),
+        )
+        .expect("write the shim");
+        let cases = [
+            (
+                "behind a .cmd shim",
+                vec![
+                    system("cmd.exe"),
+                    "/d".into(),
+                    "/s".into(),
+                    "/c".into(),
+                    name.clone(),
+                ],
+            ),
+            (
+                "of PowerShell",
+                vec![
+                    powershell.clone(),
+                    "-NoProfile".into(),
+                    "-Command".into(),
+                    "Write-Output 'READY#'; Start-Sleep 1000".into(),
+                ],
+            ),
+        ];
+        for (case, argv) in cases {
+            let mut took = Vec::new();
+            for _ in 0..3 {
+                let (key, output) = open(&table, &argv, &HashMap::new(), 1 << 20);
+                read_until(&table, &key, &output, "READY#");
+                let closing = Instant::now();
+                table.kill(&key).expect("close the pane");
+                took.push(closing.elapsed());
+            }
+            took.sort();
+            println!("kill answered, a window {case}: {took:?}");
+            assert!(
+                took.iter().all(|took| *took < Duration::from_secs(10)),
+                "{case}: {took:?}"
+            );
+        }
+        let _ = fs::remove_file(&shim);
     }
 }

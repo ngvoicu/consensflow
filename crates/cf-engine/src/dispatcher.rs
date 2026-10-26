@@ -839,13 +839,14 @@ impl Dispatcher {
         };
         let launch_owed = owed.is_some();
         if let Some(prelude) = owed {
-            self.settle_exited_launch(&record, &project, &participant, &prelude, &because)?;
+            let own = record.window.borrow().own_exit_of(pane).is_some();
+            self.settle_exited_launch(&record, &project, &participant, &prelude, &because, own)?;
         }
         if participant.role == "chief" {
             // The chief's own exit closes the project as Close does, but for the
             // window of a launch that was to say the role: it did not come up, and
             // is tried again (`settle_exited_launch`).
-            let own = record.window.borrow().own_exit;
+            let own = record.window.borrow().own_exit_of(pane).is_some();
             if project.state == "open" && !own && !launch_owed {
                 self.seams
                     .ledger
@@ -904,22 +905,42 @@ impl Dispatcher {
                 // that closed by itself stays paused.
                 let (own, with) = {
                     let window = record.window.borrow();
-                    (window.own_exit, window.closed_with.clone())
+                    (
+                        window.own_exit_of(pane).cloned(),
+                        window.closed_with.clone(),
+                    )
                 };
                 let closed = match with {
                     Some(with) => format!("@{}'s window closed {with}", participant.handle),
                     None => format!("@{}'s window closed", participant.handle),
                 };
-                let because = if own {
+                let because = if own.is_some() {
                     let outlived = shown.outlived().unwrap_or_default();
                     format!("{closed}{outlived}{besides}")
                 } else {
                     shown.after_with(&closed, &besides)
                 };
-                self.stall(&project, &thread.task, &because, own)?;
-                // Told while the engine's kill waits for its answer, which decides
-                // whether this exit was the kill's (`close_own`).
-                if let Some(killing) = record.window.borrow_mut().killing.as_mut() {
+                // The words told to the window that wait for it still wait for the resume,
+                // for why a give-up closed it where one did.
+                let is_own = own.is_some();
+                let (why, except) = match own {
+                    Some(own) => (own.why.unwrap_or_else(|| because.clone()), own.settling),
+                    None => (because.clone(), None),
+                };
+                self.stall(&project, &thread.task, &because, &why, except, is_own)?;
+                // Told while the engine's kill of this window waits for its answer, which
+                // decides whether this exit was the kill's (`close_own`), where the pause
+                // is the suspension's: an own exit in a suspended project. An earlier
+                // window's kill, answered late, is no answer of this one's, and a pause
+                // it made in an open project was no suspension's to take back (T-509).
+                let marked = is_own && project.state == "suspended";
+                if let Some(killing) = record
+                    .window
+                    .borrow_mut()
+                    .killing
+                    .iter_mut()
+                    .find(|killing| marked && killing.pane == *pane)
+                {
                     killing.paused = Some((project.id, thread.task.number));
                 }
             } else {
@@ -1066,7 +1087,7 @@ impl Dispatcher {
             .active_task(participant.id, false)?;
         if let Some(thread) = task {
             let because = format!("@{}'s window is gone", participant.handle);
-            self.stall(project, &thread.task, &because, false)?;
+            self.stall(project, &thread.task, &because, &because, None, false)?;
             self.changed();
         }
         Ok(())

@@ -1161,7 +1161,8 @@ runs = ["engine-role-change"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''        if let Some(prelude) = owed {
-            self.settle_exited_launch(&record, &project, &participant, &prelude, &because)?;
+            let own = record.window.borrow().own_exit_of(pane).is_some();
+            self.settle_exited_launch(&record, &project, &participant, &prelude, &because, own)?;
         }'''
 replace = '''        let _ = owed;'''
 
@@ -1212,8 +1213,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change/prelude.rs"
-find = '''            let went_by_itself = project.state == "open" && !record.window.borrow().own_exit;'''
-replace = '''            let went_by_itself = false;'''
+find = '''            let went_by_itself = project.state == "open" && !own;'''
+replace = '''            let went_by_itself = !own && false;'''
 
 [[plant]]
 name = "codex role: a chief's window that went by itself after its project was closed is a launch that failed"
@@ -1222,8 +1223,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change/prelude.rs"
-find = '''            let went_by_itself = project.state == "open" && !record.window.borrow().own_exit;'''
-replace = '''            let went_by_itself = !record.window.borrow().own_exit;'''
+find = '''            let went_by_itself = project.state == "open" && !own;'''
+replace = '''            let went_by_itself = !own;'''
 
 [[plant]]
 name = "codex role: a member's window that exits with the role on its way is no launch that failed"
@@ -1334,12 +1335,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change/prelude.rs"
-find = '''        let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;'''
-replace = '''        let closing = begin(&*self.seams.spawn, async move {
-            let _ = (&this, &held);
-            Ok::<bool, EngineError>(true)
-        })
-        .await;'''
+find = '''            self.close_own_within(record, pane, &said, settling).await?;'''
+replace = '''            let _ = (pane, settling);'''
 
 [[plant]]
 name = "codex role: a chief's window of a launch given up is left open"

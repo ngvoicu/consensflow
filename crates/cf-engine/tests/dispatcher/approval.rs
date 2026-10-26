@@ -12,7 +12,7 @@ use cf_engine::testing::Context;
 use cf_engine::SwitchWhen;
 use cf_harness::contract::Pane;
 use cf_harness::records::Role;
-use cf_ledger::MessageView;
+use cf_ledger::{MessageView, NewNote};
 use serde_json::{json, Value};
 
 use crate::chiefs::{handoffs_of, to, with_codex};
@@ -885,4 +885,73 @@ fn a_result_waiting_at_the_gate_is_there_after_a_restart_and_reaches_the_chief_o
     after.pass().unwrap();
     assert_eq!(headed(&context, "chief", result.id), 1);
     assert_eq!(context.message(result.id).state, "delivered");
+}
+
+/// A note the chief tells zeus's window about T-1, held for the human, when the window
+/// closes by itself: the task is paused, and the note waits for the human's word and then
+/// for the resume, named so in the chief's note of the pause, and the human hears of it
+/// once, as waiting for their approval first (T-414 P3-3: a held note went unnamed).
+#[test]
+fn a_note_held_for_the_human_when_the_window_closes_is_named_as_waiting_for_the_human_then_the_resume(
+) {
+    let context = Context::new();
+    let project = working(&context);
+    let note = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project,
+            &NewNote {
+                from: Some("chief".to_owned()),
+                to: "zeus".to_owned(),
+                task: Some(1),
+                body: "Use the grammar in the docs".to_owned(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        context.message(note.id).state,
+        "gated",
+        "held for the human"
+    );
+
+    context.host.exits_showing(Some(3), None, None);
+    context.exit("zeus");
+    context.pass().unwrap();
+
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    let held = context.message(note.id);
+    assert_eq!(
+        (held.state.as_str(), held.reason.as_deref()),
+        ("gated", None),
+        "still the human's, the gate's own reason kept"
+    );
+    let why = "@zeus's window closed (exit code 3)";
+    let chief = context.id(project, "chief");
+    let paused: Vec<String> = context
+        .inbox(chief)
+        .into_iter()
+        .map(|message| message.body)
+        .filter(|said| said.starts_with("T-1 is paused: "))
+        .collect();
+    assert_eq!(
+        paused,
+        [format!(
+            "T-1 is paused: {why}; the words told its window wait for the human, then the resume: m-{}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation.",
+            note.id
+        )]
+    );
+    let human = context.id(project, "human");
+    assert_eq!(
+        context
+            .inbox(human)
+            .into_iter()
+            .map(|message| message.body)
+            .filter(|said| said.starts_with(&format!("m-{},", note.id)))
+            .collect::<Vec<_>>(),
+        [format!(
+            "m-{}, a note from @chief on T-1, waits for your approval, then T-1's resume, to reach @zeus: {why}.",
+            note.id
+        )]
+    );
 }

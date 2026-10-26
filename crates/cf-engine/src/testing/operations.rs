@@ -483,4 +483,18 @@ impl Restarted<'_> {
                 engine.resume_project(project).await
             })
     }
+
+    /// The human's Close, of a project this engine resumed, begun where it is called.
+    pub fn begin_close_project(
+        &self,
+        project: i64,
+    ) -> Answer<Result<Option<ProjectView>, EngineError>> {
+        let engine = self.engine();
+        let closing =
+            self.context
+                .operation("closeProject", json!([project]), answer, async move {
+                    engine.close_project(project).await
+                });
+        self.context.executor.start_now(closing)
+    }
 }

@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use cf_engine::testing::Context;
 use cf_harness::contract::Pane;
-use cf_ledger::NewTask;
+use cf_ledger::{NewNote, NewTask};
 
 use crate::fixtures::Tiers;
 use crate::traces::held_to;
@@ -148,4 +148,84 @@ fn closed_with_its_task_done_and_its_exit_late_pauses_nothing_its_session_is_giv
             "in a window of its own"
         );
     }
+}
+
+/// A member's window that closes by itself (its harness crashed) with a note the chief
+/// told it about its task still waiting for it: the task is paused, and the note waits
+/// for the resume, named in the chief's note of the pause, why said once, and the human
+/// hears of it once, as when a give-up closes the window (T-414 P3-2: only the give-ups
+/// named such words; a crash left them unnamed). Not held to a Node recording: Node
+/// named none.
+#[test]
+fn a_member_window_that_closes_by_itself_names_the_note_still_waiting_for_it_in_the_note_of_the_pause(
+) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context.adapter.busy(&session);
+    let note = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project,
+            &NewNote {
+                from: Some("chief".to_owned()),
+                to: session.clone(),
+                task: Some(1),
+                body: "Use the grammar in the docs".to_owned(),
+            },
+        )
+        .unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        context.message(note.id).state,
+        "queued",
+        "its window is busy"
+    );
+
+    context
+        .host
+        .exits_showing(Some(3), None, Some(&["Segmentation fault"]));
+    context.exit(&session);
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let paused: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|said| said.starts_with("T-1 is paused: "))
+        .collect();
+    let why = format!(
+        "@{session}'s window closed (exit code 3); its screen ended with: \"Segmentation fault\""
+    );
+    assert_eq!(
+        paused,
+        [format!(
+            "T-1 is paused: {why}; the words told its window wait for the resume: m-{}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation.",
+            note.id
+        )]
+    );
+    let kept = context.message(note.id);
+    assert_eq!(
+        (kept.state.as_str(), kept.reason.as_deref()),
+        (
+            "queued",
+            Some(format!("kept for T-1's resume: {why}").as_str())
+        )
+    );
+    assert_eq!(
+        tiers
+            .notes("human")
+            .into_iter()
+            .filter(|said| said.contains(&format!("m-{}", note.id)))
+            .collect::<Vec<_>>(),
+        [format!(
+            "m-{}, a note from @chief on T-1, waits for T-1's resume to reach @{session}: {why}.",
+            note.id
+        )]
+    );
 }

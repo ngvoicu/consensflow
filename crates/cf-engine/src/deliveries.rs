@@ -14,7 +14,8 @@ use cf_harness::contract::{
 };
 use cf_harness::records::Role;
 use cf_ledger::{
-    is_told, GivenUp, HandOver, MessageView, NewNote, ParticipantView, ProjectView, TaskView,
+    is_told, resumed_in_vain, waiting_for_the_reopen, GivenUp, HandOver, MessageView, NewNote,
+    ParticipantView, ProjectView, TaskView,
 };
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
@@ -987,8 +988,10 @@ impl Dispatcher {
     /// that the ledger kept for their task's resume did not fail: its requester
     /// hears why and which words wait (the ledger's `tell_kept`), and the human,
     /// once, as of a failure, that they wait for the resume ([`Dispatcher::tell_kept`]).
-    /// What the ledger withdrew did not fail, and nobody hears of it. The ledger says
-    /// which it did ([`GivenUp`]): no state is read for it.
+    /// What the ledger withdrew did not fail, and nobody hears of it. The words that
+    /// resume a paused task paused it again: its requester hears why in the note of the
+    /// pause (the ledger's), and the human, once, that they did not reach the window.
+    /// The ledger says which it did ([`GivenUp`]): no state is read for it.
     fn fail_delivery(&self, message: &MessageView, because: &str) -> Result<(), EngineError> {
         let (_, given_up) = self
             .seams
@@ -999,6 +1002,21 @@ impl Dispatcher {
             GivenUp::Failed => {}
             GivenUp::Kept => return self.tell_kept(message, because),
             GivenUp::Withdrawn => return Ok(()),
+            GivenUp::Paused => {
+                let project = self.known_project(message.project_id)?;
+                if !self.given_by_the_human(&project, message)? {
+                    self.tell_not_reached(&project, message, because)?;
+                }
+                let paused = match message.task_number {
+                    Some(number) => self.seams.ledger.borrow().task(project.id, number)?,
+                    None => None,
+                };
+                if let Some(thread) = paused {
+                    let paused_because = resumed_in_vain(message, because);
+                    self.tell_stall(&project, &thread.task, &paused_because, because, None)?;
+                }
+                return Ok(());
+            }
         }
         let project = self.known_project(message.project_id)?;
         if let Some(number) = message.task_number {
@@ -1017,13 +1035,22 @@ impl Dispatcher {
                         message.id
                     )
                 };
-                self.tell_requester(&project, &thread.task, &because)?;
-                // Whoever told the words that failed hears as the requester does:
-                // the human hears below, unless the task was theirs.
+                // Whoever gave it hears which words told its window wait for the reopen,
+                // which carries them (T-414 P3-4: they were left unsaid, as a cancel says
+                // those it drops), and whoever told the words that failed hears as the
+                // requester does, of its own: the human hears below, unless the task was
+                // theirs.
+                let told = self
+                    .seams
+                    .ledger
+                    .borrow()
+                    .told_unreceived(project.id, number)?;
+                let task = &thread.task;
+                self.tell_failed(&project, task, &task.requester, &because, &told, None)?;
                 if let Some(teller) = message.sender.as_deref().filter(|teller| {
-                    message.kind != "task" && *teller != thread.task.requester && *teller != "human"
+                    message.kind != "task" && *teller != task.requester && *teller != "human"
                 }) {
-                    self.tell_failed(&project, &thread.task, teller, &because)?;
+                    self.tell_failed(&project, task, teller, &because, &told, Some(teller))?;
                 }
                 // A task the human gave: that note was theirs.
                 if thread.task.requester == "human" {
@@ -1031,6 +1058,16 @@ impl Dispatcher {
                 }
             }
         }
+        self.tell_not_reached(&project, message, because)
+    }
+
+    /// The human hears, once, that `message` did not reach its window, and why.
+    fn tell_not_reached(
+        &self,
+        project: &ProjectView,
+        message: &MessageView,
+        because: &str,
+    ) -> Result<(), EngineError> {
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
@@ -1048,17 +1085,34 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// Words told to a window, kept for their task's resume as their paste failed
-    /// `because`: the human hears it once, as main told it of words that did not
-    /// reach the window, which these do at the resume. A task the human gave was
-    /// told of it already: that note was theirs.
-    fn tell_kept(&self, message: &MessageView, because: &str) -> Result<(), EngineError> {
+    /// Whether `message` is about a task the human gave, whose notes are theirs already.
+    fn given_by_the_human(
+        &self,
+        project: &ProjectView,
+        message: &MessageView,
+    ) -> Result<bool, EngineError> {
+        let Some(number) = message.task_number else {
+            return Ok(false);
+        };
+        let task = self.seams.ledger.borrow().task(project.id, number)?;
+        Ok(task.is_some_and(|thread| thread.task.requester == "human"))
+    }
+
+    /// Words told to a window, kept for their task's resume as their paste failed or
+    /// as its window went (`because`): the human hears it once, as main told it of
+    /// words that did not reach the window, which these do at the resume; words held
+    /// for the human wait for their word first. A task the human gave was told of it
+    /// already: that note was theirs.
+    pub(crate) fn tell_kept(
+        &self,
+        message: &MessageView,
+        because: &str,
+    ) -> Result<(), EngineError> {
         let Some(number) = message.task_number else {
             return Ok(());
         };
         let project = self.known_project(message.project_id)?;
-        let task = self.seams.ledger.borrow().task(project.id, number)?;
-        if task.is_some_and(|thread| thread.task.requester == "human") {
+        if self.given_by_the_human(&project, message)? {
             return Ok(());
         }
         self.seams.ledger.borrow_mut().note(
@@ -1067,12 +1121,21 @@ impl Dispatcher {
                 from: None,
                 to: "human".to_owned(),
                 task: Some(number),
-                body: format!(
-                    "m-{}, {}, waits for T-{number}'s resume to reach @{}: {because}.",
-                    message.id,
-                    described(message),
-                    message.recipient
-                ),
+                body: if message.state == "gated" {
+                    format!(
+                        "m-{}, {}, waits for your approval, then T-{number}'s resume, to reach @{}: {because}.",
+                        message.id,
+                        described(message),
+                        message.recipient
+                    )
+                } else {
+                    format!(
+                        "m-{}, {}, waits for T-{number}'s resume to reach @{}: {because}.",
+                        message.id,
+                        described(message),
+                        message.recipient
+                    )
+                },
             },
         )?;
         Ok(())
@@ -1092,23 +1155,20 @@ impl Dispatcher {
         Ok(())
     }
 
-    fn tell_requester(
-        &self,
-        project: &ProjectView,
-        task: &TaskView,
-        because: &str,
-    ) -> Result<(), EngineError> {
-        self.tell_failed(project, task, &task.requester, because)
-    }
-
-    /// `to` hears that `task` failed, `because`, and how to reopen it.
+    /// `to` hears that `task` failed, `because`, which of the words `told` its window
+    /// wait for the reopen, `to`'s own where `of` names it (`waiting_for_the_reopen`,
+    /// the words the ledger's give-up says them in: one fate, Calliope's P3-4 of T-414
+    /// and of T-446), and how to reopen it.
     fn tell_failed(
         &self,
         project: &ProjectView,
         task: &TaskView,
         to: &str,
         because: &str,
+        told: &[MessageView],
+        of: Option<&str>,
     ) -> Result<(), EngineError> {
+        let waiting = waiting_for_the_reopen(told, of);
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
@@ -1116,7 +1176,7 @@ impl Dispatcher {
                 to: to.to_owned(),
                 task: Some(task.number),
                 body: format!(
-                    "T-{0} failed: {because}. Reopen it with: cf task reopen T-{0} \"…\"",
+                    "T-{0} failed: {because}{waiting}. Reopen it with: cf task reopen T-{0} \"…\"",
                     task.number
                 ),
             },

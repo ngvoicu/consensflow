@@ -13,7 +13,7 @@
 //! which has none.
 
 use cf_base::time;
-use cf_proto::ledger::{HeldTask, Stop, TaskMoved, TaskThread, TaskView};
+use cf_proto::ledger::{HeldTask, MessageView, Stop, TaskMoved, TaskThread, TaskView};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Map, Value};
 
@@ -409,6 +409,64 @@ pub(crate) fn paused_task(
         Some((project_id, number)) => task(store, project_id, number),
         None => Ok(None),
     }
+}
+
+/// The words that resume a paused task (`message`: the resume queued them as it moved
+/// the task from paused to queued), given up before its window had them (`reason`): the
+/// task is paused again, never failed, as a task whose window closes is (field 3.0.6),
+/// and not failed as a first brief that never reached its window fails its task. The
+/// words fail, for they never went in, and its requester is told so, and why, in the
+/// note of the pause (the engine's, [`resumed_in_vain`]); what they carried waits for
+/// the next resume, which carries it
+/// (`fold`). Whether they were such words (T-77: a resume whose window never came up
+/// failed its task, and left the words kept for it queued under a failed task).
+pub(crate) fn pause_again(
+    store: &mut Store,
+    message: &MessageView,
+    task: &TaskRow,
+    reason: &str,
+) -> Result<bool, LedgerError> {
+    if message.kind != "task" || task.state != "queued" {
+        return Ok(false);
+    }
+    let resumed = store
+        .db
+        .prepare(
+            "SELECT 1 FROM event
+       WHERE project_id = ? AND kind = 'task.state' AND json_extract(data, '$.task') = ?
+         AND json_extract(data, '$.from') = 'paused' AND json_extract(data, '$.to') = 'queued'
+         AND json_extract(data, '$.message') = ?",
+        )?
+        .exists(params![task.project_id, task.number, message.id])?;
+    if !resumed {
+        return Ok(false);
+    }
+    store.db.execute(
+        "UPDATE message SET state = 'failed', reason = ? WHERE id = ?",
+        params![reason, message.id],
+    )?;
+    store.log(
+        message.project_id,
+        "delivery.failed",
+        json!({ "message": message.id, "reason": reason }),
+    )?;
+    release_carried(store, task.id)?;
+    let mut detail = Map::new();
+    detail.insert("by".into(), Value::Null);
+    detail.insert("because".into(), json!(resumed_in_vain(message, reason)));
+    pause(store, task, detail, false)?;
+    Ok(true)
+}
+
+/// Why a task is paused again whose resume's words, `message`, never reached its
+/// window (`reason`, on one line): what its pause says ([`pause_again`]), and its
+/// note, which the engine writes with the stalls it tells of together.
+pub fn resumed_in_vain(message: &MessageView, reason: &str) -> String {
+    let reason = reason.lines().collect::<Vec<_>>().join(" ");
+    format!(
+        "the words that resumed it, m-{}, did not reach @{}'s window: {reason}",
+        message.id, message.recipient
+    )
 }
 
 /// Whether a tell for this task has reached the participant's window since

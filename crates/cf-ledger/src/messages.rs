@@ -64,7 +64,7 @@ pub(crate) use paused_answers::{
 };
 pub use pauses::MAY_STILL_RUN;
 pub(crate) use pauses::{
-    join_pause_note, leave_pause_notes, note_pause, say_again, warnings_on_their_way,
+    join_pause_note, leave_pause_notes, note_pause, note_stall, say_again, warnings_on_their_way,
     warnings_queued, Afterwards,
 };
 pub use receipt::Read;
@@ -74,11 +74,11 @@ pub(crate) use receipt::{
 };
 pub(crate) use roles::{note_role, role_notes_to};
 pub(crate) use taken_back::take_back;
-pub use told::is_told;
 pub(crate) use told::{
     drop_queued_but_told, kept_through_leaving, launch_called_off, tell_queued, told_unreceived,
     told_waiting, Dropped,
 };
+pub use told::{is_told, waiting_for_the_reopen};
 
 /// A note: from a participant (ConsensFlow itself when none) to another,
 /// about one of the project's tasks or none.

@@ -15,8 +15,9 @@ use cf_ledger::{
     Begun, ConversationView, HandOver, MessageView, NewNote, ParticipantView, ProjectView, Stop,
 };
 use cf_proto::agents::Harness;
-use cf_proto::panes::Servers;
+use cf_proto::panes::{Servers, CLOSE_GRACE};
 use cf_proto::trace::WindowEvent;
+use futures_util::future::{select, Either};
 use serde_json::{json, Value};
 
 use crate::deliveries::{Admitting, Delivering};
@@ -25,7 +26,7 @@ use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
 use crate::role_change::{Compared, Prelude};
-use crate::runtime::{caught, returning};
+use crate::runtime::{begin, caught, returning};
 use crate::seams::{EngineError, SavedAgent};
 use crate::shown::Shown;
 use crate::specs::{ChiefSpecs, RoleText};
@@ -45,6 +46,33 @@ const DRAWN_QUIET_MS: f64 = 1_500.0;
 /// with each failure, up to the most.
 const RELAUNCH_MS: i64 = 5_000;
 const RELAUNCH_MAX_MS: i64 = 5 * 60_000;
+
+/// How long a member's launch given up waits for its window's kill to be answered
+/// before it settles without the exit ([`Dispatcher::close_own_within`]). The pane host
+/// answers once the window's programs are gone: on the Mac in about 7 ms, and in the
+/// whole close grace ([`CLOSE_GRACE`], 10 s; 10.02 s measured) where the window leaves
+/// a job that ignores the request to end; on Windows (zeewin) in 2 to 10 ms, its tree
+/// ended at once (T-77, `kill_answer_times_with_the_real_grace` in `cf-panes`). Three
+/// times the longest, derived from the grace so that the two move together (T-414 P3-6).
+const KILL_ANSWER_WAIT: Duration = Duration::from_secs(3 * CLOSE_GRACE.as_secs());
+
+/// A close of the engine's own under way ([`Dispatcher::close_own`]): the window it
+/// closes, and, where a member's give-up closes it, why the window was given up, which
+/// the words told to the window are said to wait for the resume for, and the message
+/// the give-up settles itself (`settling`), which they are not named with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OwnExit {
+    pub(crate) pane: Pane,
+    pub(crate) why: Option<String>,
+    pub(crate) settling: Option<i64>,
+}
+
+impl WindowPart {
+    /// The engine's own close of `pane`, where it is one.
+    pub(crate) fn own_exit_of(&self, pane: &Pane) -> Option<&OwnExit> {
+        self.own_exit.as_ref().filter(|own| own.pane == *pane)
+    }
+}
 
 /// What a window is doing, as the board and the trace say it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,9 +137,13 @@ pub(crate) struct Opening {
 /// number) whose pause an exit that came before the kill's answer marked as the
 /// suspension's (the host's close waits for the program to end, and tells the
 /// exit as it ends): the mark stands if the kill was taken, and goes if it was
-/// refused, for that exit was the window's own (`kill_and_settle`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// refused, for that exit was the window's own (`kill_and_settle`). Only that
+/// window's: a give-up goes on while its kill waits, and the record's later window
+/// may be killed meanwhile, whose answer is its own (T-509: the earlier kill, refused
+/// at last, took back the later one's mark).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Killing {
+    pub(crate) pane: Pane,
     pub(crate) paused: Option<(i64, i64)>,
 }
 
@@ -152,10 +184,12 @@ pub(crate) struct WindowPart {
     pub(crate) token: Option<String>,
     /// A kill is on its way.
     pub(crate) retiring: bool,
-    /// Its exit is the engine's own (`close_own`): a chief's closes no project.
-    pub(crate) own_exit: bool,
-    /// The engine's own kill of it waits for the host's answer.
-    pub(crate) killing: Option<Killing>,
+    /// The window whose exit is the engine's own (`close_own`): a chief's closes no
+    /// project. Only that window's: a close whose kill was never answered leaves it
+    /// set, and a later window of the record is no close of the engine's (T-414 P3-8).
+    pub(crate) own_exit: Option<OwnExit>,
+    /// The engine's own kills of its windows that wait for the host's answer.
+    pub(crate) killing: Vec<Killing>,
     /// Why the engine closes it, where the pause note of the task it was working
     /// on is to say more than that it closed: with its project, when the chief's
     /// window closed by itself.
@@ -236,8 +270,8 @@ impl Default for WindowPart {
             launch_id: None,
             token: None,
             retiring: false,
-            own_exit: false,
-            killing: None,
+            own_exit: None,
+            killing: Vec::new(),
             closed_with: None,
             pinned: false,
             hidden: false,
@@ -1404,10 +1438,78 @@ impl Dispatcher {
         record: &Rc<Record>,
         pane: &Pane,
     ) -> Result<bool, EngineError> {
-        record.window.borrow_mut().own_exit = true;
+        self.close_own_for(record, pane, None, None).await
+    }
+
+    /// [`Dispatcher::close_own`], `why` the window is closed and the message it settles
+    /// itself where a give-up closes it.
+    async fn close_own_for(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        pane: &Pane,
+        why: Option<String>,
+        settling: Option<i64>,
+    ) -> Result<bool, EngineError> {
+        record.window.borrow_mut().own_exit = Some(OwnExit {
+            pane: pane.clone(),
+            why,
+            settling,
+        });
         let went = self.kill_and_settle(record, pane).await;
-        record.window.borrow_mut().own_exit = false;
+        let mut window = record.window.borrow_mut();
+        if window.own_exit_of(pane).is_some() {
+            window.own_exit = None;
+        }
         went
+    }
+
+    /// [`Dispatcher::close_own`], its kill's answer waited for no longer than
+    /// [`KILL_ANSWER_WAIT`]: none where the host gave none by then, and the close goes
+    /// on apart, its exit settled whenever it comes and what it fails with told to the
+    /// log, as the host's own exit's is. The pane host's kill is a request with no
+    /// deadline (the chief's restart, 8bb0a465, left the kill unawaited for it).
+    ///
+    /// The one rule of every member's give-up of a window: one unfit for work
+    /// ([`Dispatcher::give_up_unfit`]), one that never came up
+    /// ([`Dispatcher::give_up_unstarted`]) and one that could not be told its role
+    /// ([`Dispatcher::abandon_launch`]). Each closes the window with this before the
+    /// message the launch was for goes, so that the exit pauses the task and words told
+    /// to the window wait for its resume, said to its requester and the human; a kill
+    /// refused, or not answered in its time, leaves no exit, and the message fails as
+    /// before. None is held for a kill that never answers. A chief's give-up waits for
+    /// its kill ([`Dispatcher::close_own`]). `why` the window is given up is what the
+    /// words told to it are said to wait for the resume for, in the note of the pause
+    /// its exit makes; `settling` the message the give-up settles itself, which they are
+    /// not named with there.
+    pub(crate) async fn close_own_within(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        pane: &Pane,
+        why: &str,
+        settling: Option<i64>,
+    ) -> Result<Option<bool>, EngineError> {
+        let (this, held, gone, why) = (
+            Rc::clone(self),
+            Rc::clone(record),
+            pane.clone(),
+            why.to_owned(),
+        );
+        let closing = begin(&*self.seams.spawn, async move {
+            this.close_own_for(&held, &gone, Some(why), settling).await
+        })
+        .await;
+        match select(closing, self.seams.time.sleep(KILL_ANSWER_WAIT)).await {
+            Either::Left((went, _)) => went.map(Some),
+            Either::Right(((), closing)) => {
+                let this = Rc::clone(self);
+                self.seams.spawn.spawn(Box::pin(async move {
+                    if let Err(cause) = closing.await {
+                        this.write_down(&cause);
+                    }
+                }));
+                Ok(None)
+            }
+        }
     }
 
     async fn kill_and_settle(
@@ -1421,17 +1523,22 @@ impl Dispatcher {
             // that comes while its kill is answered is, and a kill that then fails takes
             // the mark off the task that exit paused (resume.rs, both reviews of 2026-10-16
             // and the re-check of 2026-10-25).
-            record.window.borrow_mut().killing = Some(Killing::default());
+            record.window.borrow_mut().killing.push(Killing {
+                pane: pane.clone(),
+                paused: None,
+            });
             // The exit is settled here, and says nothing of the screen the window ends
             // with: where it was asking, the human's yes in it is read off the screen now.
             self.bank_yes_before_close(record, pane).await;
             let killed = self.kill(record, pane).await;
-            let paused = record
-                .window
-                .borrow_mut()
-                .killing
-                .take()
-                .and_then(|killing| killing.paused);
+            let paused = {
+                let mut window = record.window.borrow_mut();
+                let at = window
+                    .killing
+                    .iter()
+                    .position(|killing| killing.pane == *pane);
+                at.and_then(|at| window.killing.remove(at).paused)
+            };
             if !matches!(killed, Ok(true)) {
                 // Refused: an exit that came meanwhile was the window's own.
                 if let Some((project, number)) = paused {
@@ -1451,5 +1558,16 @@ impl Dispatcher {
             Box::pin(self.exited(pane, Shown::default())).await?;
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_kills_answer_is_waited_for_three_times_the_grace_the_host_gives_a_close() {
+        assert_eq!(KILL_ANSWER_WAIT, CLOSE_GRACE * 3);
+        assert!(KILL_ANSWER_WAIT > CLOSE_GRACE + Duration::from_secs(5));
     }
 }

@@ -413,6 +413,31 @@ impl Ledger {
         messages::give_up_delivery(&mut self.store, message_id, reason)
     }
 
+    /// ConsensFlow paused T-`number` as its window went away (`because`): its
+    /// requester is told in a note of the pause, `join`'s where that can take it, and
+    /// the words told to the window that still wait for it are named in it as waiting
+    /// for the resume, `why` said once, but `except`, which the caller names itself. The
+    /// note, and the words named.
+    pub fn note_stall(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        because: &str,
+        why: &str,
+        join: Option<i64>,
+        except: Option<i64>,
+    ) -> Result<(MessageView, Vec<MessageView>), LedgerError> {
+        messages::note_stall(
+            &mut self.store,
+            project_id,
+            number,
+            because,
+            why,
+            join,
+            except,
+        )
+    }
+
     /// Every message on its way to a window, oldest first.
     pub fn in_flight(&self) -> Result<Vec<MessageView>, LedgerError> {
         messages::in_flight(&self.store)

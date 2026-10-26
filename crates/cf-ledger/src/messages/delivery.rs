@@ -19,7 +19,7 @@ use super::{known_message, message_task, messages, require_message};
 use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
-use crate::tasks::{release_ready, withdrawn_late};
+use crate::tasks::{pause_again, release_ready, withdrawn_late};
 use crate::views::MESSAGE_SELECT;
 
 /// The participants something waits on: a message on its way to them, or a
@@ -741,8 +741,9 @@ pub(crate) fn retry_delivery(
 /// A delivery given up: a task it carried, still queued, fails with it, and
 /// what it carried is its own again, for the reopening to take. Words told to
 /// the window fail their task too (`told`), but while it is paused, when they
-/// are kept for its resume; and a brief of the chief's own step done while it
-/// was on its way is withdrawn (`withdrawn_late`). Neither is failed. A pause
+/// are kept for its resume; a brief of the chief's own step done while it
+/// was on its way is withdrawn (`withdrawn_late`); and the words that resume a
+/// paused task pause it again (`pause_again`). None of these is failed. A pause
 /// note whose task was cancelled while it was on its way is withdrawn instead,
 /// and says its warning again in a note of its own, which has its own attempts
 /// (`withdrawn_on_its_way`). A continuation whose task is no longer at work in
@@ -771,6 +772,10 @@ pub enum GivenUp {
     /// (`withdrawn_on_its_way`), or a continuation whose task is no longer at
     /// work in its window (`continuations`).
     Withdrawn,
+    /// The words that resume a paused task, which never reached its window
+    /// (`pause_again`): they failed, and the task is paused again, its requester
+    /// told why in the note of the pause.
+    Paused,
 }
 
 /// [`fail_delivery`], saying what it did ([`GivenUp`]).
@@ -788,6 +793,9 @@ pub(crate) fn give_up_delivery(
             }
             if kept_for_resume(store, &message, &task, reason)? {
                 return Ok((known_message(store, message_id)?, GivenUp::Kept));
+            }
+            if pause_again(store, &message, &task, reason)? {
+                return Ok((known_message(store, message_id)?, GivenUp::Paused));
             }
         }
         if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {

@@ -669,12 +669,23 @@ fn resumed_and_paused_again(w: &mut World, number: i64) {
 }
 
 /// The chief resumes T-`number`, and the words that resume it are given up, their
-/// attempts spent: the task fails with them (Astra's review of 2026-10-17).
+/// attempts spent (Astra's review of 2026-10-17): they fail, and the task is paused
+/// again, by a pause of its own (wt/give-up-paths: it failed with them before).
 fn resumed_and_its_words_given_up(w: &mut World, number: i64) {
     let words = w.resume(number, "Go on").message.expect("its words").id;
     w.begin(words);
     w.ledger
         .fail_delivery(words, "the window never showed it")
+        .expect("given up");
+    assert_eq!(w.message(words).state, "failed");
+    assert_eq!(w.state(number), "paused");
+}
+
+/// The chief resumes T-`number`, and the daemon gives up on it: it fails.
+fn resumed_and_given_up(w: &mut World, number: i64) {
+    w.resume(number, "Go on");
+    w.ledger
+        .give_up_task(w.project, number, "the harness reported a failure")
         .expect("given up");
     assert_eq!(w.state(number), "failed");
 }
@@ -694,11 +705,12 @@ fn taken_back(w: &mut World, number: i64) {
 #[test]
 fn a_pause_note_on_its_way_whose_task_moved_on_says_its_warning_again_if_it_goes_back_or_is_given_up(
 ) {
-    let cases: [(&str, MoveOn); 4] = [
+    let cases: [(&str, MoveOn); 5] = [
         ("resumed", resumed),
         ("was taken back", taken_back),
         ("was paused again", resumed_and_paused_again),
-        ("failed", resumed_and_its_words_given_up),
+        ("was paused again", resumed_and_its_words_given_up),
+        ("failed", resumed_and_given_up),
     ];
     for (why, moved) in cases {
         for given_up in [false, true] {
@@ -1275,4 +1287,30 @@ fn the_answer_note_of_a_task_that_stays_paused_through_the_resume_stays_in_the_w
         ("queued", note.body.as_str()),
         "the same words: the task is paused still"
     );
+}
+
+/// Calliope's landing rule 2 of T-414: the words that resume a paused task, given up
+/// while its project is suspended (on their way at a quit, settled at the start), pause
+/// it again as a pause of ConsensFlow's own, never the suspension's: the Resume of the
+/// project leaves it paused, for its requester to resume.
+#[test]
+fn a_resume_whose_words_are_given_up_in_a_suspended_project_is_paused_again_for_its_requester() {
+    let mut w = world();
+    let number = at_work(&mut w, "zeus");
+    w.pause(number);
+    let words = w.resume(number, "Go on").message.expect("its words").id;
+    w.begin(words);
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("suspended");
+    w.ledger
+        .fail_delivery(words, "the window never showed it")
+        .expect("given up");
+    assert_eq!(w.state(number), "paused");
+    assert_eq!(mark_of(&mut w, number), 0, "no pause of the suspension's");
+
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+    assert_eq!(w.state(number), "paused", "its requester's to resume");
 }
