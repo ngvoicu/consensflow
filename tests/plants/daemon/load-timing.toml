@@ -31,6 +31,8 @@ lt-closed = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "execute
 lt-held = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "stalls::held::tests::a_job_is_stopped_under_its_program"]
 lt-output-end = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "output_end::tests::what_a_program_says_after_an_end_of_its_output"]
 lt-errors-end = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell::the_error_output_of_a_program_that_has_ended"]
+lt-live-member = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_member::a_devin_members_window_is_opened_whole"]
+lt-daemon-copy = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "daemon", "a_daemon_runs_a_copy_of_the_cf_in_its_home"]
 lt-gone = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "testing::a_process_that_has_ended"]
 lt-liveness = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "contract::liveness::wakes_streamed"]
 lt-pty = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::tests::input_remains_responsive_while_output_waits_for_ack"]
@@ -80,17 +82,6 @@ find = '''        if !sent || std::time::Instant::now() >= until {
         }'''
 replace = '''        let _ = (sent, until);
         break;'''
-
-[[plant]]
-name = "load timing: the sweep of what a held program left goes on while it is not empty, not only while it signals"
-meant = "a_sweep_goes_on_for_what_is_started_in_the_session_while_it_goes_round"
-runs = ["lt-sweep"]
-platforms = ["macos", "linux"]
-
-[[plant.edit]]
-file = "crates/cf-process/src/group.rs"
-find = '''                table::Signalled::Sent => sent = true,'''
-replace = '''                table::Signalled::Sent => {}'''
 
 [[plant]]
 name = "load timing: a process that has ended and waits to be reaped is not gone"
@@ -280,7 +271,7 @@ runs = ["lt-cf-gone"]
 platforms = ["macos", "linux"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/rig/bundle.rs"
+file = "crates/cf-e2e/src/bundle.rs"
 find = '''    files::make_dir(folder)?;
     let name = program'''
 replace = '''    if program.exists() {
@@ -339,3 +330,38 @@ platforms = ["macos", "linux"]
 file = "crates/cf-e2e/src/process/spawned.rs"
 find = "        while !self.errors_ended.load(Ordering::SeqCst) {"
 replace = "        while false && !self.errors_ended.load(Ordering::SeqCst) {"
+
+# --- T-673: Calliope's review of T-581 ---
+#
+# The copy of `cf` goes where a build can break the program a window or a long-lived daemon finds by
+# its path: the hooks of a live Devin member's window (`live/window/open.rs`) and a daemon of a
+# scratch home (`Daemon::start_from`). The sources that run `cf` once, to its end, by the test's own
+# process (`ScratchHome::cf`, the cli cases, `codex-session`, `daemon_stop`) stay on the build: a build
+# can fail only the exec itself, loudly, and none resolves it again.
+
+[[plant]]
+name = "load timing: a Devin member's window has hooks that name the build's cf, which a build takes away"
+meant = "a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversation_with_the_note_in_its_launch"
+runs = ["lt-live-member"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/window/open.rs"
+find = "                cf: self.rig.cf(),"
+replace = "                cf: crate::cf::binary()?,"
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/window/open.rs"
+find = "                keep_only_consensflows_hooks(&start.args, self.rig.cf())?;"
+replace = "                keep_only_consensflows_hooks(&start.args, crate::cf::binary()?)?;"
+
+[[plant]]
+name = "load timing: a daemon of a scratch home runs the build's cf and not a copy of it"
+meant = "a_daemon_runs_a_copy_of_the_cf_in_its_home_and_not_the_build_a_cargo_build_takes_away"
+runs = ["lt-daemon-copy"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/daemon.rs"
+find = "        let own = bundle::copy_of(program, &bundle::folder(root))?;"
+replace = "        let _ = (root, bundle::folder);\n        let own = program.to_path_buf();"

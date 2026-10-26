@@ -135,6 +135,16 @@ pub(crate) fn process(pid: i32) -> Option<Process> {
     })
 }
 
+/// How long a look at a group or a session waits before it looks again. macOS reads a group with
+/// one call; Linux reads the `stat` of every process in `/proc` for one, a pass that costs a good
+/// deal on a machine with many, so the next is not begun at once there.
+#[cfg(unix)]
+pub(crate) const BETWEEN_PASSES: std::time::Duration = if cfg!(target_os = "linux") {
+    std::time::Duration::from_millis(10)
+} else {
+    std::time::Duration::from_millis(1)
+};
+
 /// The processes of the group `group` there are now that are not zombies (a zombie is in its
 /// group until it is reaped, and is nothing to end): none where the system will not say.
 #[cfg(target_os = "macos")]

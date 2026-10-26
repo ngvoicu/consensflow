@@ -14,10 +14,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cf_e2e::devin_store::{self, Message};
+use cf_e2e::files;
 use cf_e2e::live::window::{Member, Open};
 use cf_e2e::live::{ask, calls, until, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
-use cf_e2e::{cf, files};
 use serde_json::{json, Value};
 
 use crate::{config, secs, Outcome};
@@ -108,7 +108,7 @@ fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversati
     assert_eq!(launch.parent(), Some(launches.as_path()));
     assert_eq!(files::read_string(&file_of(&argv, "--prompt-file")?)?, task);
     let configured: Value = serde_json::from_str(&files::read_string(&config_file)?)?;
-    let real_cf = cf::binary()?.to_string_lossy().replace('\\', "/");
+    let real_cf = rig.cf().to_string_lossy().replace('\\', "/");
     assert_eq!(
         configured["hooks"]["SessionStart"][0]["hooks"][0]["command"],
         json!(format!("'{real_cf}' hook devin-session"))

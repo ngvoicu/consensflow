@@ -19,7 +19,7 @@ use serde_json::Value;
 
 use crate::process::{Run, Signal, Sink, Spawned};
 use crate::wire::{self, First};
-use crate::{cf, checkout, files, serial, Error, Result, ScratchHome};
+use crate::{bundle, cf, checkout, files, serial, Error, Result, ScratchHome};
 
 /// How long a daemon has to say it is ready.
 pub const READY: Duration = Duration::from_secs(10);
@@ -67,7 +67,18 @@ impl Home {
 
     /// The daemon on this home.
     pub fn daemon(&self) -> Result<Daemon> {
-        Daemon::start(self.vars())
+        Daemon::start_in(self.scratch.root(), self.vars())
+    }
+
+    /// The daemon on this home, with `vars` for its environment: the home's, and what a
+    /// case adds to them.
+    pub fn daemon_with<I, K, V>(&self, vars: I) -> Result<Daemon>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        Daemon::start_in(self.scratch.root(), vars)
     }
 }
 
@@ -89,14 +100,32 @@ pub struct Daemon {
 impl Daemon {
     /// Starts `cf ui --json --no-open` with the variables `vars` and no others
     /// (on Windows the few the system needs to start a program, and to find
-    /// one), in the checkout. Its handle line is not read yet.
-    pub fn start<I, K, V>(vars: I) -> Result<Self>
+    /// one), in the checkout, from a copy of the `cf` under test in the home
+    /// `root`. Its handle line is not read yet.
+    pub fn start_in<I, K, V>(root: &std::path::Path, vars: I) -> Result<Self>
     where
         I: IntoIterator<Item = (K, V)>,
         K: AsRef<OsStr>,
         V: AsRef<OsStr>,
     {
-        Self::run(cf::binary()?, ["ui", "--json", "--no-open"], vars)
+        Self::start_from(cf::binary()?, root, vars)
+    }
+
+    /// [`Daemon::start_in`], the copy made of `program`. The daemon runs from a copy that
+    /// no build touches (`crate::bundle`): its windows find the `cf` in the folder it runs
+    /// from, a program a `cargo build` takes away and puts back for a moment.
+    pub fn start_from<I, K, V>(
+        program: &std::path::Path,
+        root: &std::path::Path,
+        vars: I,
+    ) -> Result<Self>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        let own = bundle::copy_of(program, &bundle::folder(root))?;
+        Self::run(own, ["ui", "--json", "--no-open"], vars)
     }
 
     /// Starts `program` with `args` where the daemon is, in the same way: for

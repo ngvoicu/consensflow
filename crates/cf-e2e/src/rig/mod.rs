@@ -25,7 +25,6 @@
 //! that finds it ended by something else when it ends fails: the pane host ends a
 //! window's own and nothing of the machine's.
 
-mod bundle;
 mod forget;
 mod install;
 mod jobs;
@@ -394,7 +393,7 @@ pub struct Rig {
     daemon: Daemon,
     host: Spawned,
     /// The `cf` the daemon runs, which its windows find first on their `PATH`: the rig's own
-    /// copy ([`bundle`]).
+    /// copy (`crate::bundle`).
     cf: PathBuf,
     /// A process none of the windows' is, which nothing may have ended when they are.
     stranger: Stranger,

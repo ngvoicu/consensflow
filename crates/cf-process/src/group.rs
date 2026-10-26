@@ -177,7 +177,7 @@ impl Group {
         let Ok(leader) = i32::try_from(pid) else {
             return;
         };
-        let unpinned = sweep(leader, &self.asked.borrow(), &table::process);
+        let unpinned = sweep(leader, &self.asked.borrow(), &table::process, SWEEP_WITHIN);
         let mut kept = self.unpinned.borrow_mut();
         for (identity, why) in unpinned {
             if !kept.iter().any(|(kept, _)| *kept == identity) {
@@ -268,15 +268,18 @@ const SWEEP_WITHIN: Duration = Duration::from_millis(500);
 /// `Group::sweep`'s, of the program `leader`, given the processes `noted` as it was
 /// asked, and how a process is read again before it is signalled (`read`, the system's
 /// but for a test): one found by the session must be in it still, and every one born
-/// when it was. Those that could not be held to be signalled, and why.
+/// when it was. It goes on for `within` at most (the product's is [`SWEEP_WITHIN`]; a test
+/// that spends time of its own in a pass gives it a budget of its own). Those that could
+/// not be held to be signalled, and why.
 #[cfg(unix)]
 fn sweep(
     leader: i32,
     noted: &[Identity],
     read: &dyn Fn(i32) -> Option<table::Process>,
+    within: Duration,
 ) -> Vec<(Identity, String)> {
     let mut unpinned = Vec::new();
-    let until = std::time::Instant::now() + SWEEP_WITHIN;
+    let until = std::time::Instant::now() + within;
     loop {
         let now = table::processes();
         let mut doomed: Vec<(Identity, Option<i32>)> = now
@@ -315,7 +318,7 @@ fn sweep(
         if !sent || std::time::Instant::now() >= until {
             break;
         }
-        std::thread::sleep(Duration::from_millis(1));
+        std::thread::sleep(table::BETWEEN_PASSES);
     }
     unpinned
 }
@@ -430,7 +433,7 @@ mod tests {
         };
         // A leader no process is in the session of, nor descended from: only what was
         // noted is looked at.
-        sweep(i32::MAX, &[read.identity], &reborn);
+        sweep(i32::MAX, &[read.identity], &reborn, SWEEP_WITHIN);
         assert!(
             table::signal_if_same(
                 read.identity,
@@ -446,7 +449,7 @@ mod tests {
             "it was sent nothing: it is not the process noted"
         );
         // Read again as the process it was, it is forced.
-        sweep(i32::MAX, &[read.identity], &table::process);
+        sweep(i32::MAX, &[read.identity], &table::process, SWEEP_WITHIN);
         assert_eq!(noted.wait().unwrap().signal(), Some(libc::SIGKILL));
     }
 
@@ -506,10 +509,13 @@ mod tests {
             if reads.get() < 5 {
                 reads.set(reads.get() + 1);
                 started_in_the_session(&fifo, &pids, 1 + reads.get());
+                // The passes spend more than the product's 500 ms between them, as a loaded
+                // machine's do: the sweep has the budget of the test, not the product's.
+                std::thread::sleep(Duration::from_millis(150));
             }
             table::process(pid)
         };
-        sweep(session, &[], &read);
+        sweep(session, &[], &read, Duration::from_secs(60));
         let started = crate::testing::pids_so_far(&pids);
         assert!(
             started.len() > 3,
@@ -564,13 +570,13 @@ mod tests {
                 ..now
             })
         };
-        sweep(session, &[], &elsewhere);
+        sweep(session, &[], &elsewhere, SWEEP_WITHIN);
         std::thread::sleep(Duration::from_millis(300));
         assert!(
             crate::alive(member),
             "read in another session, it was sent nothing"
         );
-        sweep(session, &[], &table::process);
+        sweep(session, &[], &table::process, SWEEP_WITHIN);
         assert!(
             crate::testing::gone_within(member, Duration::from_secs(5)),
             "in it still, it is forced"

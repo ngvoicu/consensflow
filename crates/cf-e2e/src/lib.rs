@@ -92,6 +92,7 @@
 #![deny(unsafe_code)]
 
 pub mod agents_proof;
+mod bundle;
 pub mod cf;
 pub mod checkout;
 pub mod daemon;

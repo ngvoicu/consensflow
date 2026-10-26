@@ -82,6 +82,9 @@ pub(crate) fn end(pid: u32, how: Ending, reach: Reach, wait: bool, job: &Job) {
         if job.terminate() {
             return;
         }
+        // Started outside the lock every other start of this crate is under
+        // (`spawning`): Windows has no pipe made in two steps for a start to inherit, and
+        // `taskkill` has no stream of this process's, all three being null.
         #[allow(clippy::disallowed_methods)] // The one place a process starts.
         let mut command = std::process::Command::new("taskkill");
         command
@@ -115,7 +118,7 @@ const STRAGGLERS_WITHIN: std::time::Duration = std::time::Duration::from_millis(
 fn force_stragglers(target: i32) {
     let until = std::time::Instant::now() + STRAGGLERS_WITHIN;
     while !crate::table::in_group(-target).is_empty() && std::time::Instant::now() < until {
-        std::thread::sleep(std::time::Duration::from_millis(1));
+        std::thread::sleep(crate::table::BETWEEN_PASSES);
         #[allow(unsafe_code)]
         // SAFETY: as above: two integers, and the group is still held by its unreaped leader.
         unsafe {
