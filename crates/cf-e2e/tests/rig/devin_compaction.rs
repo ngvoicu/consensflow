@@ -165,3 +165,50 @@ fn answered_once(compact: &str) -> Outcome {
     rig.close()?;
     Ok(())
 }
+
+#[test]
+fn a_devin_workers_result_is_taken_after_devin_compacted_the_turn_that_gives_it() -> Outcome {
+    done_after("SLEEP 5 COMPACT Reply with exactly: T1_DONE")
+}
+
+/// The compaction comes before the daemon has looked at the window since it gave the
+/// brief: the brief is proved arrived by the user's message the compaction cut out.
+#[test]
+fn a_devin_workers_brief_is_proved_arrived_though_devin_compacted_its_turn_before_the_daemon_looked(
+) -> Outcome {
+    done_after("COMPACT Reply with exactly: T1_DONE")
+}
+
+/// A Devin worker given the task `task`, a turn Devin compacts before it answers: the
+/// brief is proved arrived, and its answer is the task's result.
+fn done_after(task: &str) -> Outcome {
+    let rig = Rig::start(devin_rig())?;
+    write_roster(&rig)?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    project.add_member("devin-worker")?;
+    rig.tell(project.id(), &format!("DISPATCH --tier standard {task}"))?;
+    let done = rig.wait_for("T-1 to be done", secs(60), || {
+        Ok(project.task(1)?["state"] == "done")
+    });
+    if let Err(failed) = done {
+        return Err(format!(
+            "{failed}\nT-1: {}\nthe worker's lane: {}",
+            project.task(1)?,
+            project.lane("devin-worker")?["activity"]
+        )
+        .into());
+    }
+    let task = project.task(1)?;
+    let brief = &task["messages"][0];
+    assert_eq!(brief["state"], "delivered", "{brief}");
+    assert_eq!(brief["attempts"], 1, "given once: {brief}");
+    let result = of_kind(&project, "chief", "result")?;
+    assert!(
+        result.iter().any(|result| result["body"]
+            .as_str()
+            .is_some_and(|body| body.contains("T1_DONE"))),
+        "its answer is the result: {result:?}"
+    );
+    rig.close()?;
+    Ok(())
+}

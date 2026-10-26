@@ -5,9 +5,13 @@
 //! stored as Devin 3000.11 stores one, with no `finish_reason`, in a model request of
 //! its own (`metadata.request_id`); the wire names that request as the turn ends, in the
 //! record that names the turn's message (`turnRequestId`) and in the end's statistics
-//! (`stats.requestId`). Only that request ties the answer to its end, and only where all
-//! three name it; a look that read the turn before the compaction reads the same as a
-//! fresh one.
+//! (`stats.requestId`).
+//!
+//! The user's message is read back where it was, found by the copies' originals, so the
+//! reply answers it as before the compaction. Where no copy leads back to it (copies of
+//! ids of their own, here), only the model request ties the answer to its end, and only
+//! where all three name it. A look that read the turn before the compaction reads the
+//! same as a fresh one.
 
 use super::*;
 
@@ -49,17 +53,38 @@ fn answer(id: &str, text: &str, request: &str) -> Value {
     })
 }
 
-/// The compaction, and the answer below the copied steps, the main chain's head.
-fn compacted(staged: &Staged, answered: &Value) {
-    let summary = json!({
-        "message_id": "s-1",
+/// The summary Devin's compactor begins a chain with.
+fn summary(id: &str) -> Value {
+    json!({
+        "message_id": id,
         "role": "system",
         "content": "The conversation so far.",
         "metadata": { "extensions": { "devin-rs/summary": { "source": "async_file_compactor", "kept_turns": 2 } } },
-    });
-    staged.node(Some("c-1"), None, &summary);
+    })
+}
+
+/// `message` with the id `id`.
+fn with_id(mut message: Value, id: &str) -> Value {
+    message["message_id"] = json!(id);
+    message
+}
+
+/// The compaction as Devin makes it, the steps copied with their ids, and the answer
+/// below the copies, the main chain's head.
+fn compacted(staged: &Staged, answered: &Value) {
+    staged.node(Some("c-1"), None, &summary("s-1"));
     staged.node(Some("c-2"), Some("c-1"), &step());
     staged.node(Some("c-3"), Some("c-2"), &tool());
+    staged.node(Some("c-4"), Some("c-3"), answered);
+    staged.head("c-4");
+}
+
+/// The compaction with copies of ids of their own: nothing leads back to the user's
+/// message, and only the model request can tie the answer to its end.
+fn compacted_anew(staged: &Staged, answered: &Value) {
+    staged.node(Some("c-1"), None, &summary("s-1"));
+    staged.node(Some("c-2"), Some("c-1"), &with_id(step(), "a-copy"));
+    staged.node(Some("c-3"), Some("c-2"), &with_id(tool(), "t-copy"));
     staged.node(Some("c-4"), Some("c-3"), answered);
     staged.head("c-4");
 }
@@ -104,8 +129,8 @@ fn said(reading: &str) -> (String, bool, bool) {
 }
 
 /// What a look that read the turn before the compaction reads once `after` wrote the
-/// rest, and what a fresh look reads: each as [`said`] says it, the same.
-fn read_after(after: impl Fn(&Staged)) -> (String, bool, bool) {
+/// rest, and what a fresh look reads: the same.
+fn reading_after(after: impl Fn(&Staged)) -> String {
     let staged = Staged::new();
     before(&staged);
     let mut reader = staged.reader();
@@ -115,13 +140,32 @@ fn read_after(after: impl Fn(&Staged)) -> (String, bool, bool) {
         "the turn at work before the compaction"
     );
     after(&staged);
-    let incremental = said(&show(&look(&mut reader)));
-    let fresh = said(&read_once(&staged));
+    let incremental = show(&look(&mut reader));
+    let fresh = read_once(&staged);
     assert_eq!(
         incremental, fresh,
         "a look that read the turn before the compaction"
     );
     fresh
+}
+
+/// [`reading_after`] as [`said`] says it.
+fn read_after(after: impl Fn(&Staged)) -> (String, bool, bool) {
+    said(&reading_after(after))
+}
+
+/// The ids of a reading's items, in order.
+fn ids(reading: &str) -> Vec<String> {
+    let reading: Value = serde_json::from_str(reading).unwrap_or_else(|_| panic!("{reading}"));
+    reading["items"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| item[0].as_str().unwrap_or_default().to_owned())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn settled() -> (String, bool, bool) {
@@ -133,11 +177,11 @@ fn unknown() -> (String, bool, bool) {
 }
 
 #[test]
-fn an_answer_a_compaction_cut_from_its_users_message_is_complete_by_the_model_request_the_wire_ended(
+fn an_answer_no_copy_leads_back_from_to_its_users_message_is_complete_by_the_model_request_the_wire_ended(
 ) {
     assert_eq!(
         read_after(|staged| {
-            compacted(staged, &answer("a-final", "Done.", ANSWERED));
+            compacted_anew(staged, &answer("a-final", "Done.", ANSWERED));
             wired(staged, &ended("complete", Some(ANSWERED), Some(ANSWERED)));
         }),
         settled()
@@ -156,7 +200,7 @@ fn the_end_of_a_compacted_turn_that_names_no_model_request_or_two_proves_nothing
     ] {
         assert_eq!(
             read_after(|staged| {
-                compacted(staged, &answer("a-final", "Done.", ANSWERED));
+                compacted_anew(staged, &answer("a-final", "Done.", ANSWERED));
                 wired(staged, &ended("complete", turn, stats));
             }),
             unknown(),
@@ -170,7 +214,7 @@ fn a_compacted_answer_of_another_model_request_is_not_completed_by_the_same_text
     // The wire ended `model-9` with the same words: the stored answer is of `model-2`.
     assert_eq!(
         read_after(|staged| {
-            compacted(staged, &answer("a-final", "Done.", ANSWERED));
+            compacted_anew(staged, &answer("a-final", "Done.", ANSWERED));
             wired(staged, &ended("complete", Some("model-9"), Some("model-9")));
         }),
         unknown()
@@ -178,7 +222,7 @@ fn a_compacted_answer_of_another_model_request_is_not_completed_by_the_same_text
     // Nor is an answer with no request of its own.
     assert_eq!(
         read_after(|staged| {
-            compacted(staged, &reply("a-final", json!("Done.")));
+            compacted_anew(staged, &reply("a-final", json!("Done.")));
             wired(staged, &ended("complete", Some(ANSWERED), Some(ANSWERED)));
         }),
         unknown()
@@ -186,7 +230,7 @@ fn a_compacted_answer_of_another_model_request_is_not_completed_by_the_same_text
     // Nor one whose words are not the ones the wire streamed.
     assert_eq!(
         read_after(|staged| {
-            compacted(staged, &answer("a-final", "Done, and more.", ANSWERED));
+            compacted_anew(staged, &answer("a-final", "Done, and more.", ANSWERED));
             wired(staged, &ended("complete", Some(ANSWERED), Some(ANSWERED)));
         }),
         unknown()
@@ -204,7 +248,7 @@ fn work_after_a_compacted_turn_ended_keeps_it_in_flight() {
     then.push(thought);
     assert_eq!(
         read_after(|staged| {
-            compacted(staged, &answer("a-final", "Done.", ANSWERED));
+            compacted_anew(staged, &answer("a-final", "Done.", ANSWERED));
             wired(staged, &then);
         }),
         ("in-flight".to_owned(), true, true)
@@ -212,7 +256,7 @@ fn work_after_a_compacted_turn_ended_keeps_it_in_flight() {
     // The store goes on below the answer, in a model request the wire never ended.
     assert_eq!(
         read_after(|staged| {
-            compacted(staged, &answer("a-final", "Done.", ANSWERED));
+            compacted_anew(staged, &answer("a-final", "Done.", ANSWERED));
             staged.node(
                 Some("c-5"),
                 Some("c-4"),
@@ -230,9 +274,93 @@ fn a_compacted_turn_an_escape_cancelled_is_over_by_the_model_request_the_wire_en
     // What a stop's look reads: the turn is over, its answer not whole.
     assert_eq!(
         read_after(|staged| {
-            compacted(staged, &answer("a-final", "Do", ANSWERED));
+            compacted_anew(staged, &answer("a-final", "Do", ANSWERED));
             wired(staged, &ended("cancelled", Some(ANSWERED), Some(ANSWERED)));
         }),
         ("settled".to_owned(), false, false)
     );
+}
+
+#[test]
+fn a_users_message_a_compaction_cut_out_is_read_back_before_the_first_copy_of_a_step_that_answers_it(
+) {
+    // The turn ends as Devin's wire said it before 3000.11 as well: by its message alone.
+    for end in [
+        ended("complete", Some(ANSWERED), Some(ANSWERED)),
+        vec![
+            json!({ "sessionId": SESSION, "turnClientMessageId": "request-1", "cause": "complete" }),
+        ],
+    ] {
+        let reading = reading_after(|staged| {
+            compacted(staged, &answer("a-final", "Done.", ANSWERED));
+            wired(staged, &end);
+        });
+        assert_eq!(ids(&reading), ["s-1", "u-1", "a-step", "t-step", "a-final"]);
+        assert_eq!(said(&reading), settled());
+    }
+    // Before the turn ends, the message is back as well: what a stop's look and a receipt
+    // are found by.
+    let reading = reading_after(|staged| compacted(staged, &answer("a-final", "Do", ANSWERED)));
+    assert_eq!(ids(&reading), ["s-1", "u-1", "a-step", "t-step", "a-final"]);
+    assert_eq!(said(&reading), ("in-flight".to_owned(), true, false));
+}
+
+#[test]
+fn a_second_compaction_reads_back_the_users_message_of_the_steps_first_original() {
+    let reading = reading_after(|staged| {
+        compacted(staged, &answer("a-final", "Done.", ANSWERED));
+        // The compactor runs again: it copies the copies.
+        staged.node(Some("d-1"), None, &summary("s-2"));
+        staged.node(Some("d-2"), Some("d-1"), &step());
+        staged.node(Some("d-3"), Some("d-2"), &tool());
+        staged.node(
+            Some("d-4"),
+            Some("d-3"),
+            &answer("a-final", "Done.", ANSWERED),
+        );
+        staged.head("d-4");
+        wired(staged, &ended("complete", Some(ANSWERED), Some(ANSWERED)));
+    });
+    assert_eq!(ids(&reading), ["s-2", "u-1", "a-step", "t-step", "a-final"]);
+    assert_eq!(said(&reading), settled());
+}
+
+#[test]
+fn nothing_is_read_back_where_no_original_has_a_users_message_above_it_or_the_chain_holds_it() {
+    // The original of the copy has no user's message above it.
+    let staged = Staged::new();
+    staged.node(Some("n-1"), None, &summary("s-0"));
+    staged.node(Some("n-2"), Some("n-1"), &step());
+    staged.node(Some("c-1"), None, &summary("s-1"));
+    staged.node(Some("c-2"), Some("c-1"), &step());
+    staged.head("c-2");
+    assert_eq!(ids(&read_once(&staged)), ["s-1", "a-step"]);
+    // A user's message on the chain after the summary is the chain's own: the copies
+    // before it have theirs back, and nothing after it.
+    let reading = reading_after(|staged| {
+        compacted(staged, &answer("a-final", "Done.", ANSWERED));
+        staged.node(
+            Some("c-5"),
+            Some("c-4"),
+            &user("u-2", Some(json!("request-2"))),
+        );
+        staged.node(Some("c-6"), Some("c-5"), &with_id(step(), "a-later"));
+        staged.head("c-6");
+    });
+    assert_eq!(
+        ids(&reading),
+        ["s-1", "u-1", "a-step", "t-step", "a-final", "u-2", "a-later"]
+    );
+    // The user's message copied onto the chain as well is there once.
+    let staged = Staged::new();
+    before(&staged);
+    staged.node(Some("c-1"), None, &summary("s-1"));
+    staged.node(Some("c-2"), Some("c-1"), &step());
+    staged.node(
+        Some("c-3"),
+        Some("c-2"),
+        &user("u-1", Some(json!("request-1"))),
+    );
+    staged.head("c-3");
+    assert_eq!(ids(&read_once(&staged)), ["s-1", "a-step", "u-1"]);
 }

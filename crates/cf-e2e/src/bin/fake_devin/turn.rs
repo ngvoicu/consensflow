@@ -26,7 +26,8 @@
 //! whose shell tool runs `cf` with those words and the text as one last word, as an
 //! agent runs it (`CF ask :: Which colour?` puts its question to the chief), and
 //! answers with what it printed; and a line `COMPACT <words>` is a turn that Devin's
-//! async compactor compacts before its answer (`Store::compact`), whose answer is
+//! async compactor compacts before its answer (`Store::compact`), once it has run a
+//! step (its `CF`, else a `pwd`), whose answer is
 //! stored and ended as Devin 3000.11 does it: in a request of its own, with no
 //! `finish_reason`, the wire naming that request as the turn ends (T-652). Every call of a tool is asked of the
 //! window's permission mode first (`permission`, `calls`): a message that is
@@ -442,7 +443,15 @@ impl<W: Write> Window<W> {
         }
         self.wire.said(&answer, &stream, &client).map_err(said)?;
         if plan.compact {
-            // The compactor ran while the turn worked: the answer goes on from its chain.
+            // The compactor ran while the turn worked, as the turn's steps filled the
+            // context: a turn compacted has run a step, which it keeps (T-602's had run 81),
+            // and the answer goes on from its chain.
+            if plan.cf.is_none() {
+                self.wire.called("pwd", &client).map_err(said)?;
+                let step = format!("{client}-step");
+                self.store
+                    .ran(&step, "pwd", &format!("{step}-request"), "/")?;
+            }
             self.store.compact()?;
             let request = format!("{client}-request-final");
             self.store.answered(&answer, &request)?;

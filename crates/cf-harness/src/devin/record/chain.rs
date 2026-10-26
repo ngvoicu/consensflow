@@ -1,11 +1,22 @@
 //! What Devin's main chain says: the messages from the chain's head up to its
 //! first, oldest first, and whether Devin's question tool waits for an answer.
 //!
+//! Devin's async compactor, in the middle of a turn, begins a chain of its own:
+//! a system message that sums the conversation up (`devin-rs/summary`), below it
+//! copies of the steps it keeps, each a new node with the id Devin gave its
+//! message, and the turn goes on below the copies. The user's message the steps
+//! answer is in none of it: it stays in the store, outside the main chain (T-652,
+//! the live board's T-602 of 2026-10-26: 190 messages on the chain, none a
+//! user's). It is read back where it was: before the first copy of a step that
+//! answers it, found by the step's original, the oldest row with the step's id
+//! off the chain. So the window's record still holds the message a task was given
+//! by, which its result, a stop's look and its turn's end are found from.
+//!
 //! A message's fields are read as Node read them: what V8 threw on (a
 //! message that is null, tool calls that are no list) fails the look here
 //! too, in words of this module's own.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cf_base::js;
@@ -48,7 +59,9 @@ impl Chain {
         let mut entries = Vec::new();
         let mut ids = HashSet::new();
         let mut request = Key::Null;
-        for row in ancestors(store)?.into_iter().rev() {
+        let mut chain = ancestors(store)?;
+        chain.reverse();
+        for row in with_cut_users(store, chain)? {
             let message = row.message()?;
             follow(&mut asking, message, row, &mut keys)?;
             let id = match message.get("message_id") {
@@ -117,6 +130,86 @@ impl Chain {
             entries,
             asking: asking != Key::Null,
         })
+    }
+}
+
+/// The rows of the main chain, oldest first, with the user's messages a compaction cut
+/// out of it put back, each once, before the first copy of a step that answers it.
+fn with_cut_users<'a>(store: &'a Store, chain: Vec<&'a Row>) -> Result<Vec<&'a Row>, String> {
+    let mut originals: Option<HashMap<&str, &Row>> = None;
+    let on_chain: HashSet<&Key> = chain.iter().map(|row| &row.node).collect();
+    let mut ids: HashSet<&str> = HashSet::new();
+    let mut rows = Vec::with_capacity(chain.len());
+    // After a compaction's summary, until a user's message on the chain: the user's
+    // message put back last.
+    let mut cut: Option<Option<&Key>> = None;
+    for row in &chain {
+        let message = row.message()?;
+        match message.get("role").and_then(Value::as_str) {
+            Some("user") => cut = None,
+            Some("system") if summary(message) => cut = Some(None),
+            Some("assistant" | "tool") => {
+                if let Some(last) = &mut cut {
+                    let originals = originals.get_or_insert_with(|| off_chain(store, &on_chain));
+                    let user = row
+                        .message_id()
+                        .and_then(|id| originals.get(id))
+                        .and_then(|original| user_of(store, original));
+                    if let Some(user) = user.filter(|user| *last != Some(&user.node)) {
+                        *last = Some(&user.node);
+                        rows.push(user);
+                    }
+                }
+            }
+            _ => {}
+        }
+        rows.push(row);
+    }
+    if rows.len() > chain.len() {
+        // A message put back that the chain holds as well is not put back: its id would
+        // be the chain's twice.
+        ids.extend(chain.iter().filter_map(|row| row.message_id()));
+        rows.retain(|row| {
+            on_chain.contains(&row.node) || !ids.contains(row.message_id().unwrap_or(""))
+        });
+    }
+    Ok(rows)
+}
+
+/// Whether `message` is the summary Devin's compactor begins a chain with.
+fn summary(message: &Value) -> bool {
+    message
+        .get("metadata")
+        .and_then(|metadata| metadata.get("extensions"))
+        .and_then(|extensions| extensions.get("devin-rs/summary"))
+        .is_some_and(|summary| !summary.is_null())
+}
+
+/// The rows off the main chain by the ids of their messages, the oldest of each id: the
+/// original of a message a compaction copied.
+fn off_chain<'a>(store: &'a Store, on_chain: &HashSet<&Key>) -> HashMap<&'a str, &'a Row> {
+    let mut originals = HashMap::new();
+    for row in store.rows() {
+        if let (false, Some(id)) = (on_chain.contains(&row.node), row.message_id()) {
+            originals.entry(id).or_insert(row);
+        }
+    }
+    originals
+}
+
+/// The user's message `row` answers: the nearest user's above it, if any. A row that
+/// cannot be read, or rows that lead back to themselves, answer none.
+fn user_of<'a>(store: &'a Store, row: &'a Row) -> Option<&'a Row> {
+    let mut visited = HashSet::new();
+    let mut at = row;
+    loop {
+        if at.message().ok()?.get("role").and_then(Value::as_str) == Some("user") {
+            return Some(at);
+        }
+        if !visited.insert(&at.node) {
+            return None;
+        }
+        at = store.row(&at.parent)?;
     }
 }
 
