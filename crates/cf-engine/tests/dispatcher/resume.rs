@@ -682,6 +682,66 @@ fn a_window_that_asks_and_ends_by_itself_while_the_close_looks_at_its_screen_and
     );
 }
 
+/// Calliope's re-check of T-504 (T-505, P3-1): the same, with the Close's look at the
+/// screen held for many times the bound a pass waits for its steps (`STEP_WAIT`), and
+/// passes made meanwhile. The Close holds the window's record all that while: no pass
+/// looks at the window, and the exit that comes during the look is still the window's
+/// own once the kill fails.
+#[test]
+fn a_window_that_asks_and_ends_by_itself_while_the_close_looks_past_a_passs_bound_and_whose_kill_fails_leaves_its_task_paused(
+) {
+    let context = Context::new();
+    context.adapter.asks_to_trust("/work/repository", false);
+    context
+        .host
+        .set_snapshot(json!({ "tail": [TRUST_QUESTION] }));
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = context.host.last("zeus").expect("its window").pane;
+    let id = zeus.id.clone();
+    let looking = context
+        .host
+        .request_holds
+        .hold(move |args| args[0] == "pane.snapshot" && args[1]["id"] == id.as_str());
+    let looks = |handle: &str| {
+        let launch = context.adapter.agent(handle).launch;
+        context
+            .recorder
+            .calls("adapter:claude-code", &["observe"])
+            .iter()
+            .filter(|(_, args)| args[0]["launch"]["launchId"] == launch.as_str())
+            .count()
+    };
+    let closing = context.begin_close_project(project);
+    context.settle();
+    let before = looks("zeus");
+    let bound = i64::try_from(cf_engine::steps::STEP_WAIT.as_millis()).unwrap();
+    for _ in 0..4 {
+        context.advance(2 * bound);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        looks("zeus"),
+        before,
+        "no pass looks at the window the Close holds"
+    );
+    // Zeus's harness crashes while the Close still looks at its screen; then its kill fails.
+    context.exit("zeus");
+    context.host.refuse_kills.set(true);
+    looking.open();
+    let refused = context.finish(closing).unwrap_err();
+    assert_match(&refused.to_string(), "would not close");
+    context.host.refuse_kills.set(false);
+
+    context.resume_project(project).unwrap();
+
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["paused", "working"],
+        "a window that closed by itself is the chief's to resume"
+    );
+}
+
 /// Sol's review of 2026-10-16: a Close that could not close the chief's window
 /// leaves it open while the project is closed, and a pass that stepped it gave it
 /// the note that the work is paused, which then reached it after the Resume had the
