@@ -50,8 +50,8 @@ const OPEN_DEADLINE_MS: &str = "3000";
 /// is three.
 const ENDED_WITHIN: Duration = Duration::from_secs(30);
 
-/// How long a window the host was let open late is given to start, where it would.
-const STARTS_WITHIN: Duration = Duration::from_secs(8);
+/// How long the host has to answer an open the rig let go late.
+const ANSWERED_WITHIN: Duration = Duration::from_secs(60);
 
 /// The first brief, whose window is given up on.
 const FIRST: &str = "FIRST_BRIEF_OK";
@@ -236,17 +236,27 @@ fn an_open_given_up_on_before_the_host_started_it_never_starts_and_the_task_sent
     assert_ne!(again["generation"], given_up["generation"], "{again}");
 
     // The open the loaded host took so long over reaches it at last, after the window
-    // that took the task sent again.
+    // that took the task sent again: the host refuses it, as one closed before it
+    // opened, and starts nothing.
     assert!(rig.let_open_go());
-    let late = rig.wait_for("the late open to start a window", STARTS_WITHIN, || {
-        Ok(started(&rig, &given_up)
-            || !rig
-                .transcript(&session_of(&given_up_frame(&rig, &given_up)))
-                .is_empty())
-    });
+    rig.wait_for(
+        "the host's answer to the late open",
+        ANSWERED_WITHIN,
+        || Ok(rig.open_answer().is_some()),
+    )?;
+    let late = rig.open_answer().unwrap_or_default();
+    assert_eq!(late["ok"], false, "the window given up on started: {late}");
     assert!(
-        late.is_err(),
-        "the window the daemon gave up on started once the host had its open, and ran its brief: {given_up}"
+        late["error"]
+            .as_str()
+            .is_some_and(|error| error.ends_with("was closed before it opened")),
+        "{late}"
+    );
+    assert!(!started(&rig, &given_up));
+    assert_eq!(
+        rig.transcript(&session_of(&given_up_frame(&rig, &given_up))),
+        "",
+        "it ran no brief"
     );
     // The task sent again was taken once, in the window that opened for it.
     assert_eq!(board.results()?, 1);

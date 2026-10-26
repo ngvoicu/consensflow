@@ -66,6 +66,12 @@ impl Rig {
         self.shared.open_held()
     }
 
+    /// The pane host's answer to the open held, once it came: its body (`ok`, the `pid`
+    /// it started, or the `error` it refused it with).
+    pub fn open_answer(&self) -> Option<Value> {
+        self.shared.open_answer()
+    }
+
     /// Lets the open held go on: the request to the pane host, or its answer to the
     /// daemon. Whether one was held.
     pub fn let_open_go(&self) -> bool {
