@@ -64,6 +64,11 @@
 //! folder's grants with `CF_TEST_QUOTES_THE_GRANTS`), and its input box above that line. With `CF_TEST_TRUST_IDLE_WHILE_ASKING` a window says it is idle while it
 //! asks, as a Claude Code that writes its status before its question would.
 //!
+//! The window of a participant `CF_TEST_INPUT_BOX` names draws Claude Code's input
+//! box, and opens its model picker for `/model` (`input_box`); one `CF_TEST_SUGGESTION`
+//! names shows a suggestion in its empty box, and one `CF_TEST_SLOW_DRAW` names draws
+//! its box seconds late.
+//!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
 //! `cf_e2e::process`, the one place a program starts and the environment is read.
@@ -78,6 +83,8 @@ mod args;
 mod background;
 #[path = "fake_agent/build.rs"]
 mod build;
+#[path = "fake_agent/input_box.rs"]
+mod input_box;
 #[path = "fake_agent/records.rs"]
 mod records;
 #[path = "fake_agent/reply.rs"]
@@ -239,6 +246,9 @@ fn run(
 
     // Claude Code's question about a folder it was never told to trust comes first.
     let asking = named("CF_TEST_TRUST");
+    let draws_box = named("CF_TEST_INPUT_BOX");
+    let suggests = named("CF_TEST_SUGGESTION");
+    let draws_slowly = named("CF_TEST_SLOW_DRAW");
     if asking {
         trust::bring_the_record_back(records.transcript());
         // A Claude Code that writes its status before its question reads at rest.
@@ -360,6 +370,9 @@ fn run(
         let _ = turns.send(seed.clone());
     }
 
+    // Claude Code's input box and its model picker, drawn as it draws them.
+    let mut input_box = draws_box.then(|| input_box::InputBox::new(suggests, draws_slowly));
+
     // Raw input, like a real TUI: a bracketed paste is text, Enter outside one
     // submits, and an Escape that nothing follows is the key.
     loop {
@@ -370,15 +383,28 @@ fn run(
         for event in events {
             match event {
                 Event::Submit(text) => {
-                    let _ = turns.send(text);
+                    if !input_box.as_mut().is_some_and(|shown| shown.takes(&text)) {
+                        let _ = turns.send(text);
+                    }
                 }
                 // A real TUI draws what was pasted, and a paste's Enter waits for that.
                 Event::Pasted(characters) => {
-                    let _ = say(&format!("[pasted, {characters} characters]\n"));
+                    let below = input_box.as_mut().map_or("", input_box::InputBox::below);
+                    let _ = say(&format!("{below}[pasted, {characters} characters]\n"));
                 }
-                Event::Escape => stop.press(),
+                Event::Escape => {
+                    if !input_box
+                        .as_mut()
+                        .is_some_and(|shown| shown.escape(&mut keys))
+                    {
+                        stop.press();
+                    }
+                }
                 Event::Interrupt => leave(&status_file, 0),
             }
+        }
+        if let Some(shown) = input_box.as_mut() {
+            let _ = shown.draw(keys.typed(), say);
         }
     }
 }

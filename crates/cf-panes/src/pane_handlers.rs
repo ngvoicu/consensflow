@@ -23,7 +23,7 @@ use crate::validation::{pane_key, validate_input, validate_seq, validate_size, I
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::panes::{
     BackgroundProcess, CommandsRequest, MarkRequest, PaneExit, PossiblyLeft, Rest, RestRequest,
-    SnapshotRequest, TAIL_LINES,
+    SnapshotRequest, BOTTOM_LINES, TAIL_LINES,
 };
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
@@ -86,6 +86,10 @@ struct PasteRequest {
     id: String,
     generation: u64,
     body: String,
+    /// The count of the human's keys (`pane.snapshot`'s `typed`) at which the
+    /// window's adapter read its input box empty on the screen.
+    #[serde(default, rename = "readEmpty")]
+    read_empty: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -187,8 +191,8 @@ pub fn register_pane_handlers(
     // reached the window, a request it could not read included.
     let paste_queue = Arc::clone(&inputs);
     builder.on("pane.write_paste", move |_bridge, body| {
-        let pasted = paste_request(body).and_then(|(key, body)| {
-            wait_for_input_blocking(paste_queue.paste(key, body.into_bytes())?)
+        let pasted = paste_request(body).and_then(|(key, body, read_empty)| {
+            wait_for_input_blocking(paste_queue.paste(key, body.into_bytes(), read_empty)?)
         });
         Ok(match pasted {
             Ok(()) => json!({"ok":true}),
@@ -316,6 +320,8 @@ pub fn register_pane_handlers(
             "pasteInFlight":snapshot.paste_in_flight,
             "inputFailed":snapshot.input_failed,
             "unsent":snapshot.unsent,
+            "typed":snapshot.typed,
+            "typedQuietMs":snapshot.typed_quiet_ms,
             "outputQuietMs":snapshot.output_quiet_ms,
             "pasteQuietMs":snapshot.paste_quiet_ms,
         });
@@ -326,7 +332,39 @@ pub fn register_pane_handlers(
                 answer["tail"] = json!(tail);
             }
         }
+        // The screen's last lines as drawn, for an adapter that reads its
+        // harness's input box.
+        if let Some(lines) = request.bottom {
+            if let Ok(drawn) = snapshot_panes.bottom(&key, lines.min(BOTTOM_LINES)) {
+                answer["bottom"] = json!(drawn.lines);
+                answer["cursor"] = drawn.cursor.map_or(Value::Null, |cursor| {
+                    json!({
+                        "line": cursor.line, "col": cursor.col, "shown": cursor.shown,
+                        "plainAfter": cursor.plain_after,
+                    })
+                });
+            }
+        }
         Ok(answer)
+    });
+}
+
+/// The human's own keys over the bridge (`pane.typed`), for the headless host,
+/// which has no page: its peer types as the window's page does
+/// (`pane_input_enqueue`), and the keys are counted for what they leave unsent.
+/// The window never takes it: there, the bridge's peer is the daemon, whose
+/// keys are never the human's; nor does the headless host, but where the rig
+/// asks for it (`headless::HUMAN_KEYS`).
+pub(crate) fn register_typed(builder: &mut BridgeBuilder, inputs: Arc<InputQueue>) {
+    builder.on("pane.typed", move |_bridge, body| {
+        let request: BytesRequest = parse_body(body)?;
+        validate_input(&request.bytes)?;
+        let key = pane_key(&request.id, request.generation)?;
+        inputs
+            .typed(key, request.bytes)
+            .and_then(wait_for_input_blocking)
+            .map_err(|error| error.to_string())?;
+        Ok(json!({"ok":true}))
     });
 }
 
@@ -463,11 +501,11 @@ fn parse_body<T: DeserializeOwned>(body: Value) -> Result<T, String> {
 
 /// A paste's pane and body. A request that does not name them was refused
 /// before anything was written.
-fn paste_request(body: Value) -> Result<(PaneKey, String), InputError> {
+fn paste_request(body: Value) -> Result<(PaneKey, String, Option<u64>), InputError> {
     let refused = |cause| InputError::refused(INVALID_BODY, cause);
     let request: PasteRequest = parse_body(body).map_err(refused)?;
     let key = pane_key(&request.id, request.generation).map_err(refused)?;
-    Ok((key, request.body))
+    Ok((key, request.body, request.read_empty))
 }
 
 /// Everything a `pane.open` asks for, checked before anything is spawned; the

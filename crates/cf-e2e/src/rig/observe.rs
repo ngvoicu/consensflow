@@ -165,6 +165,23 @@ impl Rig {
         &self.env
     }
 
+    /// The human types `bytes` into the window `pane` (`{ id, generation }`, as
+    /// the board names it) as the app's page types them: the pane host takes
+    /// them as the human's (`pane.typed`), and counts what they leave unsent in
+    /// its input box. [`Rig::tell`] and [`Rig::host`]'s `pane.input` are keys the
+    /// host takes as the daemon's.
+    pub fn types(&self, pane: &Value, bytes: &[u8]) -> Result<()> {
+        let answer = self.host(
+            "pane.typed",
+            json!({ "id": pane["id"], "generation": pane["generation"], "bytes": bytes }),
+        )?;
+        if answer["ok"] == true {
+            Ok(())
+        } else {
+            Err(Error::Daemon(format!("pane.typed was refused: {answer}")))
+        }
+    }
+
     /// The human types into the chief's terminal, the one way work reaches the
     /// chief: a bracketed paste of `text`, then Enter, once the chief is idle (it
     /// is waited for a minute).

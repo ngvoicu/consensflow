@@ -638,3 +638,21 @@ fn the_specmint_variant_a_harness_has_installed_is_asked_of_its_adapter_in_the_h
         .unwrap_err()
         .contains("no harness runs as kimi"));
 }
+
+#[test]
+fn the_input_box_is_read_as_the_adapter_reads_it_and_a_harness_with_no_reader_reads_none() {
+    let read = |kind: &str, screen: &[&str]| {
+        answer(&ask("input_box", json!({ "kind": kind, "screen": screen }))).unwrap()
+    };
+    const RULE: &str = "────────────────────────────────────────";
+    assert_eq!(read("claude-code", &[RULE, "❯", RULE]), json!("empty"));
+    assert_eq!(
+        read("claude-code", &[RULE, "❯ probe words", RULE]),
+        json!("holds")
+    );
+    assert_eq!(read("claude-code", &["no box"]), Value::Null);
+    assert_eq!(read("devin", &[RULE, "❭", RULE]), json!("empty"));
+    for kind in ["codex", "pi", "opencode"] {
+        assert_eq!(read(kind, &[RULE, "❯", RULE]), Value::Null, "{kind}");
+    }
+}

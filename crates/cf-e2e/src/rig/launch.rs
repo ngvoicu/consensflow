@@ -172,11 +172,17 @@ fn start_daemon(config: &Config, env: &[(String, String)]) -> Result<(Daemon, St
     Ok((daemon, start_line))
 }
 
+/// The variable that has the pane host take the human's keys (`pane.typed`), as
+/// the app's page types them: the rig's ([`Rig::types`]), never the bundled host's
+/// (`cf_panes::headless::HUMAN_KEYS`).
+const HUMAN_KEYS: &str = "CONSENSFLOW_TEST_HUMAN_KEYS";
+
 /// The pane host, started: its handle line read, and what it goes on to say
 /// kept for the routers.
 fn start_host(env: &[(String, String)]) -> Result<(Spawned, BufReader<ChildStdout>)> {
     let mut host = Run::new(cf::pane_host()?)
         .vars(env.iter().map(|(name, value)| (name, value)))
+        .var(HUMAN_KEYS, "1")
         .finding_programs()
         .cwd(checkout::root())
         .spawn()?;

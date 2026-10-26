@@ -49,6 +49,7 @@ fn devin_window(
         at_enter,
         history: History::default(),
         looked: Cell::default(),
+        read_empty: Cell::default(),
     })
 }
 

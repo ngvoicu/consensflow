@@ -8663,6 +8663,21 @@ test('says on a card and a row when a message waits for what the human typed the
   await expect(page.locator('tr[data-handle="zeus"] .row-status')).toHaveText(words)
 })
 
+test('says a message waits for what the human typed in a window out of quota too', async ({
+  page,
+}) => {
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  chief.holding = true
+  chief.participant.outUntil = new Date(Date.now() + 90 * 60_000).toISOString()
+  await open(page, data)
+  const status = page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status')
+  await expect(status).toHaveAttribute('data-state', 'out')
+  await expect(status).toHaveText(
+    /^Out of quota until (\S+ )?\d\d:\d\d\. A message waits until you send or erase what you typed here$/,
+  )
+})
+
 test("offers a chief still on its harness's own default every saved agent, and moves it to one", async ({
   page,
 }) => {

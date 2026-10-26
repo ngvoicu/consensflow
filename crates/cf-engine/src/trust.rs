@@ -636,6 +636,7 @@ impl Dispatcher {
             id: pane.id.clone(),
             generation: pane.generation,
             tail: Some(TAIL_LINES),
+            bottom: None,
         };
         let Ok(body) = serde_json::to_value(&request) else {
             return Seen::Unread;

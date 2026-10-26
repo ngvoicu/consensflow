@@ -26,6 +26,7 @@
 //! | `devin_readiness` | `wire`, `session`, `pane` (`id`, `generation`), `withinMs`, `everyMs`: a Devin window that is open, asked whether it is ready as the engine asks it, until it is ready or unfit or the time is up; the pane host it asks is the asker's, a request a line of the output and its answer a line of the input (`readiness`) | `{answers, ready}`: what the looks answered, in order (`ready`, `held: …`, `unfit: …`, one that came again in a row said once), and whether the last was ready |
 //! | `devin_hooks` | `cf`, `member`: the hooks ConsensFlow adds to the owner's in a Devin launch (a member's, or the chief's), its session hook run by `cf` | `{event: [entry]}`: each event with the entries added, as the launch's config has them written |
 //! | `trust` | `kind`, `screen` (a window's last lines), and `directory` where asked: what the engine reads there of the harness's question about trusting the window's folder | `{key, prompt, grants, servers}`: the key it presses next toward a yes (`down`, `up`, `enter`), or null where the lines show no such question or the harness never asks one, whether they are the harness's prompt, and whether the question is the one of a trusted folder's grants or Claude's dialog of new servers of `.mcp.json`; with `directory`, `trusts` too: `{folder, inside, servers_above}`, what a yes trusts for a window opened in that project's folder, and the nearest folder above it whose `.mcp.json` Claude reads too |
+//! | `input_box` | `kind`, `screen` (a window's last lines as drawn, the pane host's `bottom`): what the adapter reads of the window's input box there | `"empty"`, `"holds"`, or null where it reads no box |
 //!
 //! The last nine are the evals' and the live tests' own: the program a window
 //! opens on, which the daemon asks `cf_process::pane_argv` for, the
@@ -56,6 +57,7 @@ use crate::claude::install;
 use crate::contract::{Agent, Input, Interrupt, LaunchId, Question, Skill};
 use crate::launch::adapter;
 use crate::records::{self, Options};
+use crate::shared::input_box::{self, InputBox};
 use crate::shared::record_state::record_state;
 use crate::shared::{trust, window_args};
 use crate::testing::Fakes;
@@ -80,8 +82,9 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "devin_readiness" => readiness::devin_readiness(question),
         "devin_hooks" => launch::devin_hooks(question),
         "trust" => trust(question),
+        "input_box" => input_box(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks and trust"
+            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, trust and input_box"
         )),
     }
 }
@@ -165,6 +168,29 @@ fn trust(question: &Value) -> Result<Value, String> {
             json!({ "folder": folder, "inside": inside, "servers_above": servers_above });
     }
     Ok(answer)
+}
+
+/// What the adapter reads of a window's input box in `screen` (its last lines as
+/// drawn): `empty`, `holds`, or null where it reads none.
+fn input_box(question: &Value) -> Result<Value, String> {
+    let screen: Vec<String> = question
+        .get("screen")
+        .and_then(Value::as_array)
+        .ok_or("the question names no screen")?
+        .iter()
+        .filter_map(|line| line.as_str().map(str::to_owned))
+        .collect();
+    Ok(
+        match input_box::read(
+            harness(text(question, "kind")?)?,
+            &screen,
+            input_box::Cursor::of(question.get("cursor")),
+        ) {
+            Some(InputBox::Empty) => json!("empty"),
+            Some(InputBox::Holds) => json!("holds"),
+            None => Value::Null,
+        },
+    )
 }
 
 /// What the harness's own record of a conversation says, read whole once.

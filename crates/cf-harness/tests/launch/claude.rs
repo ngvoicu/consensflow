@@ -750,6 +750,117 @@ fn pastes_a_message_into_the_window_waiting_for_a_paste_on_its_way_and_for_what_
     );
 }
 
+/// Keys the human typed into a dialog or picker and left with Escape count as unsent
+/// (the pane host's guess from keys), though the input box is empty (T-288): the box
+/// on the screen says. Read empty, with the human's last key a second past, the window
+/// is ready, and its paste says at which count of the keys the box read empty, so the
+/// host takes it over the count unless a key came since. A box with words in it, one
+/// it cannot read, or a key a moment ago still holds the paste.
+#[test]
+fn a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dialog() {
+    const RULE: &str = "────────────────────────────────────────";
+    let home = Home::new();
+    let typed_in_box = RefCell::new("❯ ".to_owned());
+    // The human's last key 2 s ago, and the window has printed since.
+    let quiet = Cell::new(2_000_u64);
+    let printed = Cell::new(1_000_u64);
+    let cursor = RefCell::new(Value::Null);
+    let host = AnsweringHost::new(|op| {
+        Ok(match op {
+            "pane.snapshot" => json!({
+                "ok": true, "pasteInFlight": false, "unsent": true,
+                "typed": 4, "typedQuietMs": quiet.get(), "outputQuietMs": printed.get(),
+                "bottom": ["⏺ 4", "", RULE, typed_in_box.borrow().clone(), RULE,
+                    "  ⏵⏵ bypass permissions on (shift+tab to cycle)"],
+                "cursor": cursor.borrow().clone(),
+            }),
+            "pane.write_paste" => json!({ "ok": true }),
+            _ => json!({ "ok": false, "error": "unexpected" }),
+        })
+    });
+    let pane = Pane {
+        id: "s1-zeus".to_owned(),
+        generation: 7,
+    };
+    let window = window(
+        &home.adapter(),
+        &Request::resumed("e2c56db5-dffb-48d2-b060-d0f5a71096e0"),
+    );
+    let ready = || finished(window.ready(&host, &pane));
+    assert_eq!(ready(), Ok(Readiness::Ready));
+    assert_eq!(
+        host.asked.borrow().last().unwrap(),
+        &(
+            "pane.snapshot".to_owned(),
+            json!({ "id": "s1-zeus", "generation": 7, "bottom": 40 })
+        ),
+        "the screen as drawn is asked for once the count holds"
+    );
+    assert_eq!(
+        finished(window.deliver(&host, &pane, "hello")),
+        Ok(Admission::Admitted { queued: false })
+    );
+    assert_eq!(
+        host.asked.borrow().last().unwrap(),
+        &(
+            "pane.write_paste".to_owned(),
+            json!({ "id": "s1-zeus", "generation": 7, "body": "hello", "readEmpty": 4 })
+        )
+    );
+    // A key a moment ago may not be drawn yet; nor one the window has printed nothing
+    // since (T-330), unless it is 5 s past: a key that changes nothing draws nothing.
+    quiet.set(200);
+    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
+    // Drawn since, but a moment ago: the window may draw more of it.
+    printed.set(100);
+    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
+    quiet.set(2_000);
+    printed.set(2_500);
+    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
+    quiet.set(4_999);
+    printed.set(9_000);
+    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
+    quiet.set(5_000);
+    assert_eq!(ready(), Ok(Readiness::Ready));
+    printed.set(1_000);
+    // The suggestion in a conversation with nothing said yet, the cursor at the box's
+    // start and nothing after it drawn plain: an empty box (T-330).
+    *typed_in_box.borrow_mut() = "❯ Try \"how do I log an error?\"".to_owned();
+    *cursor.borrow_mut() = json!({ "line": 3, "col": 2, "shown": true, "plainAfter": 0 });
+    assert_eq!(ready(), Ok(Readiness::Ready));
+    *cursor.borrow_mut() = Value::Null;
+    for held in [
+        "❯ half a thought",
+        "❯ Try \"how do I log an error?\"",
+        " ❯ 1. Default",
+    ] {
+        *typed_in_box.borrow_mut() = held.to_owned();
+        assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)), "{held}");
+    }
+    // A host that says no `typed` takes no `readEmpty`: the count holds, and the
+    // screen is not asked for.
+    let older = AnsweringHost::new(|op| {
+        Ok(match op {
+            "pane.snapshot" => json!({ "ok": true, "pasteInFlight": false, "unsent": true }),
+            _ => json!({ "ok": true }),
+        })
+    });
+    assert_eq!(
+        finished(window.ready(&older, &pane)),
+        Ok(Readiness::Held(Held::Unsent))
+    );
+    assert_eq!(older.asked.borrow().len(), 1);
+    // A paste after a look that held says nothing of a read.
+    assert_eq!(
+        finished(window.deliver(&host, &pane, "hello")),
+        Ok(Admission::Admitted { queued: false })
+    );
+    assert_eq!(
+        host.asked.borrow().last().unwrap().1,
+        json!({ "id": "s1-zeus", "generation": 7, "body": "hello" })
+    );
+}
+
 #[test]
 fn reports_a_refused_request_as_exhausted_quota_with_the_reset_its_text_names() {
     let home = Home::new();

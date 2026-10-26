@@ -5,6 +5,7 @@
 
 mod adapter;
 pub mod computer_use;
+pub(crate) mod input_box;
 pub(crate) mod install;
 pub(crate) mod paths;
 mod question_hook;

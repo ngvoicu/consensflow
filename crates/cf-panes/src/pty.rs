@@ -12,7 +12,7 @@ use portable_pty::{Child, CommandBuilder, MasterPty, PtySize};
 
 use crate::background::Baseline;
 use crate::ended::{Ended, EndedSlot};
-use crate::screen::PaneScreen;
+use crate::screen::{Drawn, PaneScreen};
 
 mod close;
 #[cfg(windows)]
@@ -800,6 +800,18 @@ impl PaneTable {
                 .screen,
         );
         Ok(screen.tail(max))
+    }
+
+    /// The last `max` lines of a pane's screen as it is drawn ([`PaneScreen::bottom`]).
+    pub fn bottom(&self, key: &PaneKey, max: usize) -> Result<Drawn, PaneError> {
+        let screen = Arc::clone(
+            &self
+                .lock_panes()?
+                .get(key)
+                .ok_or_else(|| PaneError::NotFound(key.clone()))?
+                .screen,
+        );
+        Ok(screen.bottom(max))
     }
 
     /// How a pane's program ended, waiting up to `wait` for its status to be

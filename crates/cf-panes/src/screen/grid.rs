@@ -2,7 +2,10 @@
 //! sequences do to them: text goes where the cursor is, lines scroll, erasures
 //! blank cells, and the alternate screen (which full-screen programs draw on)
 //! parks the main one and gives it back. Colours, styles and the strings a
-//! terminal answers with change no text, so they are not here.
+//! terminal answers with change no text, so they are not here, but for one mark
+//! a cell keeps: whether it was drawn styled (in a colour other than the
+//! terminal's own, or faint), as a harness draws the hint in an empty input box
+//! and not the words typed there.
 
 mod edit;
 
@@ -22,6 +25,8 @@ const SECOND_HALF: char = '\0';
 #[derive(Debug, Clone)]
 struct Row {
     cells: Vec<char>,
+    /// Whether each cell was drawn styled.
+    styled: Vec<bool>,
     /// The text went on in the row below, because it filled this one: both
     /// are one line.
     wrapped: bool,
@@ -31,6 +36,7 @@ impl Row {
     fn blank(cols: usize) -> Self {
         Self {
             cells: vec![' '; cols],
+            styled: vec![false; cols],
             wrapped: false,
         }
     }
@@ -39,6 +45,7 @@ impl Row {
         let to = to.min(self.cells.len());
         if from < to {
             self.cells[from..to].fill(' ');
+            self.styled[from..to].fill(false);
         }
     }
 }
@@ -68,6 +75,12 @@ pub(super) struct Grid {
     top: usize,
     bottom: usize,
     autowrap: bool,
+    /// Whether the cursor is shown (`CSI ? 25 h`, `l`).
+    cursor_shown: bool,
+    /// The pen: whether text is drawn in a colour other than the terminal's own,
+    /// and whether faint (`CSI m`).
+    coloured: bool,
+    faint: bool,
     /// The last character printed, which `CSI b` repeats.
     last: Option<char>,
 }
@@ -88,6 +101,9 @@ impl Grid {
             top: 0,
             bottom: rows - 1,
             autowrap: true,
+            cursor_shown: true,
+            coloured: false,
+            faint: false,
             last: None,
         }
     }
@@ -138,6 +154,56 @@ impl Grid {
         lines
     }
 
+    /// Where the cursor is in [`Grid::lines`]: the line it is on, how many
+    /// characters of that line are before it (a wide character is one), whether it
+    /// is shown, and how many characters of the line from the cursor on are drawn
+    /// plain (not styled), blanks left out.
+    pub(super) fn cursor(&self) -> (usize, usize, bool, usize) {
+        let (mut line, mut before) = (0, 0);
+        for (at, row) in self.cells.iter().enumerate() {
+            let cells = |to: usize| {
+                row.cells[..to.min(row.cells.len())]
+                    .iter()
+                    .filter(|cell| **cell != SECOND_HALF)
+                    .count()
+            };
+            if at == self.row {
+                return (
+                    line,
+                    before + cells(self.col),
+                    self.cursor_shown,
+                    self.plain_from(at, self.col),
+                );
+            }
+            if row.wrapped {
+                before += cells(row.cells.len());
+            } else {
+                line += 1;
+                before = 0;
+            }
+        }
+        (line, before, self.cursor_shown, 0)
+    }
+
+    /// How many characters from column `col` of row `at` to the end of its line
+    /// (the rows it wraps into too) are drawn plain, blanks left out.
+    fn plain_from(&self, at: usize, col: usize) -> usize {
+        let mut plain = 0;
+        let mut from = col;
+        for row in &self.cells[at..] {
+            plain += row.cells[from.min(row.cells.len())..]
+                .iter()
+                .zip(&row.styled[from.min(row.styled.len())..])
+                .filter(|(cell, styled)| !**styled && **cell != ' ' && **cell != SECOND_HALF)
+                .count();
+            if !row.wrapped {
+                break;
+            }
+            from = 0;
+        }
+        plain
+    }
+
     /// The pty took another size. Text keeps its place from the top left, and
     /// the cursor stays on the screen; nothing is reflowed.
     pub(super) fn resize(&mut self, rows: usize, cols: usize) {
@@ -150,6 +216,7 @@ impl Grid {
             screen.resize(rows, Row::blank(cols));
             for row in screen.iter_mut() {
                 row.cells.resize(cols, ' ');
+                row.styled.resize(cols, false);
             }
         }
         self.rows = rows;
@@ -235,8 +302,40 @@ impl Grid {
             b'r' => self.set_region(params),
             b's' if params.is_empty() => self.save_cursor(),
             b'u' => self.restore_cursor(),
+            b'm' => self.pen(params),
             // Colours and styles, status reports, window operations.
             _ => {}
+        }
+    }
+
+    /// `CSI m`: what the pen draws in, as far as styled or not goes.
+    fn pen(&mut self, params: &[usize]) {
+        if params.is_empty() {
+            (self.coloured, self.faint) = (false, false);
+        }
+        let mut at = 0;
+        while let Some(&param) = params.get(at) {
+            match param {
+                0 => (self.coloured, self.faint) = (false, false),
+                2 => self.faint = true,
+                22 => self.faint = false,
+                30..=37 | 90..=97 => self.coloured = true,
+                39 => self.coloured = false,
+                // A colour by number (`5;n`) or by its parts (`2;r;g;b`): the
+                // foreground's makes the pen coloured, the background's nothing.
+                38 | 48 => {
+                    if param == 38 {
+                        self.coloured = true;
+                    }
+                    at += match params.get(at + 1) {
+                        Some(5) => 2,
+                        Some(2) => 4,
+                        _ => 0,
+                    };
+                }
+                _ => {}
+            }
+            at += 1;
         }
     }
 
@@ -244,6 +343,7 @@ impl Grid {
         for &mode in params {
             match mode {
                 7 => self.autowrap = on,
+                25 => self.cursor_shown = on,
                 47 | 1047 => self.alternate(on),
                 1049 => {
                     if on {
@@ -291,10 +391,13 @@ impl Grid {
                 width = 1;
             }
         }
+        let styled = self.coloured || self.faint;
         let row = &mut self.cells[self.row];
         row.cells[self.col] = character;
+        row.styled[self.col] = styled;
         if width == 2 {
             row.cells[self.col + 1] = SECOND_HALF;
+            row.styled[self.col + 1] = styled;
         }
         self.last = Some(character);
         if self.col + width >= self.cols {

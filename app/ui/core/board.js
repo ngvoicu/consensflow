@@ -365,12 +365,14 @@ export function laneStatus(lane, board, now) {
   if (lane.unstopped) {
     return ['unstopped', `Did not stop for T-${lane.unstopped.task}: still on its earlier turn`]
   }
+  // What the human typed and did not send holds a message whether or not the window
+  // is out of quota: the lane says both, or the hold hides behind the wait (T-288).
+  const holding = 'A message waits until you send or erase what you typed here'
   if (outOfQuota(participant, now)) {
-    return ['out', `Out of quota until ${backAt(participant.outUntil, now)}`]
+    const out = `Out of quota until ${backAt(participant.outUntil, now)}`
+    return ['out', lane.holding ? `${out}. ${holding}` : out]
   }
-  if (lane.holding) {
-    return ['holding', 'A message waits until you send or erase what you typed here']
-  }
+  if (lane.holding) return ['holding', holding]
   const state = activity?.state ?? 'closed'
   if (state === 'waiting' && activity.reason) return [state, `Waiting: ${activity.reason}`]
   // Its task goes on in the background: the window rests, and that is not idleness.

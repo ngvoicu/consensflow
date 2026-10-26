@@ -27,11 +27,15 @@ const INPUT_SEQUENCE_REGRESSION: &str = "pane-input-sequence-regression";
 
 /// What a pane's worker does, in order: the human's own keys (counted for
 /// what they leave unsent), the emulator's replies and the daemon's keys, a
-/// delivery's paste, a native send's claim.
+/// delivery's paste (and the count of the human's keys at which its adapter
+/// read the input box empty, if it did), a native send's claim.
 pub enum InputWork {
     Typed(Vec<u8>),
     Write(Vec<u8>),
-    Paste(Vec<u8>),
+    Paste {
+        body: Vec<u8>,
+        read_empty: Option<u64>,
+    },
     Claim,
 }
 
@@ -39,7 +43,7 @@ impl InputWork {
     fn byte_count(&self) -> usize {
         match self {
             Self::Typed(bytes) | Self::Write(bytes) => bytes.len(),
-            Self::Paste(body) => body.len().saturating_add(13),
+            Self::Paste { body, .. } => body.len().saturating_add(13),
             Self::Claim => 0,
         }
     }
@@ -190,9 +194,9 @@ impl InputQueue {
 
         page.last_sequences.insert(key.clone(), sequence);
         match &work {
-            InputWork::Typed(bytes) | InputWork::Write(bytes) | InputWork::Paste(bytes) => {
-                validate_input(bytes)?
-            }
+            InputWork::Typed(bytes)
+            | InputWork::Write(bytes)
+            | InputWork::Paste { body: bytes, .. } => validate_input(bytes)?,
             InputWork::Claim => {}
         }
         if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
@@ -236,12 +240,23 @@ impl InputQueue {
         self.submit(key, InputWork::Write(bytes))
     }
 
+    /// The human's own keys, from a peer that types as the page does (the
+    /// headless host's: `pane.typed`).
+    pub(crate) fn typed(
+        &self,
+        key: PaneKey,
+        bytes: Vec<u8>,
+    ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
+        self.submit(key, InputWork::Typed(bytes))
+    }
+
     pub(crate) fn paste(
         &self,
         key: PaneKey,
         body: Vec<u8>,
+        read_empty: Option<u64>,
     ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
-        self.submit(key, InputWork::Paste(body))
+        self.submit(key, InputWork::Paste { body, read_empty })
     }
 
     /// Admit a native-channel send: the pane is current and its input works,
@@ -390,7 +405,9 @@ fn input_worker(
         let result = match job.work {
             InputWork::Typed(bytes) => arbiter.write_typed(&panes, &key, &bytes),
             InputWork::Write(bytes) => arbiter.write(&panes, &key, &bytes),
-            InputWork::Paste(body) => arbiter.write_paste(&panes, &key, &body),
+            InputWork::Paste { body, read_empty } => {
+                arbiter.write_paste(&panes, &key, &body, read_empty)
+            }
             InputWork::Claim => arbiter.claim(&key),
         }
         .map_err(InputError::from);

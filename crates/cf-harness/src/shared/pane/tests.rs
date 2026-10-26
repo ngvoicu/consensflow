@@ -80,6 +80,7 @@ fn a_paste_into_a_window_is_read_as_the_delivery_contract_has_it_whatever_the_ho
             &host,
             &pane(),
             "the cache key is per conversation",
+            None,
         )));
         assert_eq!(admission(&sent, "refused", false), read, "{way}");
         assert_eq!(
@@ -99,19 +100,26 @@ fn a_paste_into_a_window_is_read_as_the_delivery_contract_has_it_whatever_the_ho
 
 /// Both reviews of 2026-10-16, round 4: the engine's last look at a closed
 /// project came before an adapter's own waits (Claude's keys that clear its input
-/// box). A paste asks the host whether it admits it as it is asked for.
+/// box). A paste asks the host whether it admits it as it is asked for, one that
+/// goes in over the human's keys because the box read empty (T-288) as any other.
 #[test]
 fn a_paste_the_host_no_longer_admits_is_refused_unwritten_and_never_asked_of_the_pane() {
-    let host = ScriptedHost::default();
-    host.refuse_hand_overs();
-    let sent = finished(Box::pin(write_paste(&host, &pane(), "hello")));
-    assert_eq!(
-        admission(&sent, "refused", false),
-        Admission::Refused {
-            reason: NOT_ADMITTED.to_owned()
-        }
-    );
-    assert!(host.take_asked().is_empty(), "the pane was asked nothing");
+    for read_empty in [None, Some(9)] {
+        let host = ScriptedHost::default();
+        host.refuse_hand_overs();
+        let sent = finished(Box::pin(write_paste(&host, &pane(), "hello", read_empty)));
+        assert_eq!(
+            admission(&sent, "refused", false),
+            Admission::Refused {
+                reason: NOT_ADMITTED.to_owned()
+            },
+            "{read_empty:?}"
+        );
+        assert!(
+            host.take_asked().is_empty(),
+            "{read_empty:?}: the pane was asked nothing"
+        );
+    }
 }
 
 /// A claim is no hand-over, and is not the last wait of every native send (one

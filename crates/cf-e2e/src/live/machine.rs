@@ -312,6 +312,18 @@ pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
     rig_keeping_claude_in(installs, stand_in, super::option("claude-config"))
 }
 
+/// [`rig`], whose Claude windows keep their config in the folder `claude_config`
+/// (`CLAUDE_CONFIG_DIR`), a throwaway one that holds a copy of the login: none of
+/// the owner's Claude files is read or written.
+pub fn rig_with_claude_config(
+    installs: &[Installed],
+    stand_in: impl Into<PathBuf>,
+    claude_config: &Path,
+) -> Config {
+    let folder = claude_config.to_string_lossy().into_owned();
+    rig_keeping_claude_in(installs, stand_in, Some(folder))
+}
+
 /// [`rig`], whose Claude windows keep their config in `claude_config` where it names a
 /// folder.
 fn rig_keeping_claude_in(

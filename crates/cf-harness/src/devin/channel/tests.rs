@@ -32,7 +32,7 @@ fn taking() -> AnsweringHost<impl Fn(&str) -> Result<Value, HostError>> {
 }
 
 fn send_into(host: &dyn PaneHost, wire: &Path, session: Option<&str>, text: &str) -> Sent {
-    finished(Box::pin(send(host, &pane(), wire, session, text)))
+    finished(Box::pin(send(host, &pane(), wire, session, text, None)))
 }
 
 #[test]

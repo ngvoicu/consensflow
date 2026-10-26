@@ -31,20 +31,24 @@ impl Grid {
     /// `CSI @`: blanks at the cursor, the rest of the row moving right.
     pub(super) fn insert_chars(&mut self, count: usize) {
         let (col, cols) = (self.col, self.cols);
-        let cells = &mut self.cells[self.row].cells;
+        let row = &mut self.cells[self.row];
         for _ in 0..count.min(cols - col) {
-            cells.insert(col, ' ');
-            cells.pop();
+            row.cells.insert(col, ' ');
+            row.cells.pop();
+            row.styled.insert(col, false);
+            row.styled.pop();
         }
     }
 
     /// `CSI P`: characters at the cursor gone, the rest of the row moving left.
     pub(super) fn delete_chars(&mut self, count: usize) {
         let (col, cols) = (self.col, self.cols);
-        let cells = &mut self.cells[self.row].cells;
+        let row = &mut self.cells[self.row];
         let count = count.min(cols - col);
-        cells.drain(col..col + count);
-        cells.extend(std::iter::repeat_n(' ', count));
+        row.cells.drain(col..col + count);
+        row.cells.extend(std::iter::repeat_n(' ', count));
+        row.styled.drain(col..col + count);
+        row.styled.extend(std::iter::repeat_n(false, count));
     }
 
     /// `CSI X`: characters at the cursor blanked where they are.
