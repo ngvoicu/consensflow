@@ -27,6 +27,7 @@ fm-rig-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regress
 fm-rig-trust = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked"]
 fm-rig-late-trust = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_whose_question_comes_after_half_a_minute"]
 fm-rig-never-prompt = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_that_never_draws_its_prompt"]
+fm-kit-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::"]
 
 [[plant]]
 name = "first message: Claude Code's adapter puts it on the command line again"
@@ -312,3 +313,26 @@ runs = ["fm-engine-delivered"]
 file = "crates/cf-engine/src/trust.rs"
 find = "                            told_no_prompt = true;\n"
 replace = ""
+
+# The live kit's own Claude config holds the trust a person's would (T-629): `live
+# folder-trust`'s fresh and follow-up cases went red under a config made fresh.
+
+[[plant]]
+name = "first message: a run's own Claude config is not seeded with the live folders trusted"
+meant = "a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_keeps_what_it_held"
+runs = ["fm-kit-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = "    held[\"projects\"][&root][\"hasTrustDialogAccepted\"] = serde_json::Value::Bool(true);\n"
+replace = "    let _ = &root;\n"
+
+[[plant]]
+name = "first message: the owner's own Claude config is seeded too"
+meant = "the_owners_own_claude_config_is_never_seeded"
+runs = ["fm-kit-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = "    if config == real(home) || config.starts_with(&owners) {"
+replace = "    if config == real(home) && config.starts_with(&owners) {"
