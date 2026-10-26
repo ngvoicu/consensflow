@@ -33,6 +33,7 @@ lt-output-end = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "outpu
 lt-errors-end = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell::the_error_output_of_a_program_that_has_ended"]
 lt-live-member = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_member::a_devin_members_window_is_opened_whole"]
 lt-daemon-copy = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "daemon", "a_daemon_runs_a_copy_of_the_cf_in_its_home"]
+lt-deaf = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "execute::tests::a_program_that_ignores_the_ask_to_end_goes_when"]
 lt-gone = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "testing::a_process_that_has_ended"]
 lt-liveness = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "contract::liveness::wakes_streamed"]
 lt-pty = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::tests::input_remains_responsive_while_output_waits_for_ack"]
@@ -365,3 +366,20 @@ platforms = ["macos", "linux"]
 file = "crates/cf-e2e/src/daemon.rs"
 find = "        let own = bundle::copy_of(program, &bundle::folder(root))?;"
 replace = "        let _ = (root, bundle::folder);\n        let own = program.to_path_buf();"
+
+# --- T-686: a program that ignores the ask to end ends with the test that started it ---
+#
+# A harness whose output is closed exits at once with its tests in flight, and the program a test started
+# in a group of its own, that ignores the ask to end, went on for ever: two of them for eight hours. The
+# script the case of the forced program runs ends when the process that started it is gone.
+
+[[plant]]
+name = "load timing: a program that ignores the ask to end goes on when the process that started it is gone"
+meant = "a_program_that_ignores_the_ask_to_end_goes_when_the_process_that_started_it_is_gone"
+runs = ["lt-deaf"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/execute.rs"
+find = '''while kill -0 $PPID 2>/dev/null; do sleep 0.05; done";'''
+replace = '''while true; do sleep 0.05; done";'''
