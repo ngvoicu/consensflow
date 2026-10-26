@@ -901,21 +901,23 @@ impl Dispatcher {
                     Some(own) => (own.why.unwrap_or_else(|| because.clone()), own.settling),
                     None => (because.clone(), None),
                 };
-                self.stall(&project, &thread.task, &because, &why, except, is_own)?;
+                let stop = self.stall(&project, &thread.task, &because, &why, except, is_own)?;
                 // Told while the engine's kill of this window waits for its answer, which
                 // decides whether this exit was the kill's (`close_own`), where the pause
                 // is the suspension's: an own exit in a suspended project. An earlier
                 // window's kill, answered late, is no answer of this one's, and a pause
                 // it made in an open project was no suspension's to take back (T-509).
                 let marked = is_own && project.state == "suspended";
+                // The mark is of this pause alone, its stop (Calliope's P3-2 of T-510).
+                let marked = stop.filter(|_| marked);
                 if let Some(killing) = record
                     .window
                     .borrow_mut()
                     .killing
                     .iter_mut()
-                    .find(|killing| marked && killing.pane == *pane)
+                    .find(|killing| marked.is_some() && killing.pane == *pane)
                 {
-                    killing.paused = Some((project.id, thread.task.number));
+                    killing.paused = marked.map(|stop| (project.id, thread.task.number, stop));
                 }
             } else {
                 let given = match owner {

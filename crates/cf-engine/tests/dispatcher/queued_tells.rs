@@ -701,3 +701,51 @@ fn the_teller_of_words_that_never_reach_the_window_hears_which_of_its_own_wait_f
         notes(&context, human)
     );
 }
+
+/// The chief's task, its words never reaching the window, and the human's told after
+/// them, which stay queued: the human, who is not its requester, hears in its one note
+/// of what did not reach the window which of its own words wait for the reopen, in the
+/// ledger's words (Calliope's P3-1 of T-510: the note named only what failed, where the
+/// ledger's give-up tells each teller of its own).
+#[test]
+fn the_human_who_told_words_that_wait_hears_so_in_its_note_of_what_did_not_reach_the_window() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open_body("Parser");
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let told = tell(&context, tiers.project.id, 1, "Use the v2 grammar");
+    let human_told = context
+        .ledger
+        .borrow_mut()
+        .tell_queued(tiers.project.id, 1, "human", "Name it parse_v2")
+        .unwrap()
+        .id;
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    context.adapter.answer("zeus", "Parser done");
+    context.adapter.with("zeus", |agent| agent.admit = false);
+    for _ in 0..5 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(told).state, "failed");
+    assert_eq!(tiers.task(1).task.state, "failed");
+    assert_eq!(
+        context.message(human_told).state,
+        "queued",
+        "kept for the reopen"
+    );
+    let human = context.id(tiers.project.id, "human");
+    let said: Vec<String> = notes(&context, human)
+        .into_iter()
+        .filter(|note| note.starts_with(&format!("m-{told}, ")))
+        .collect();
+    assert_eq!(
+        said,
+        [format!(
+            "m-{told}, a note from @chief on T-1, did not reach @{session}: refused by the test; the words told its window wait for the reopen: m-{human_told}."
+        )],
+        "one note, naming both"
+    );
+}

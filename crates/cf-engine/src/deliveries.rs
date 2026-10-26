@@ -733,7 +733,7 @@ impl Dispatcher {
             GivenUp::Paused => {
                 let project = self.known_project(message.project_id)?;
                 if !self.given_by_the_human(&project, message)? {
-                    self.tell_not_reached(&project, message, because)?;
+                    self.tell_not_reached(&project, message, because, "")?;
                 }
                 let paused = match message.task_number {
                     Some(number) => self.seams.ledger.borrow().task(project.id, number)?,
@@ -747,6 +747,11 @@ impl Dispatcher {
             }
         }
         let project = self.known_project(message.project_id)?;
+        // The human's own words that wait for the reopen of the task this failed, where
+        // the human is not its requester, said in the note of what did not reach the
+        // window, in the ledger's words (Calliope's P3-1 of T-510: the ledger's give-up
+        // told the human of them, and this note did not).
+        let mut waiting = String::new();
         if let Some(number) = message.task_number {
             let task = self.seams.ledger.borrow().task(project.id, number)?;
             let failed = task.filter(|thread| {
@@ -784,17 +789,21 @@ impl Dispatcher {
                 if thread.task.requester == "human" {
                     return Ok(());
                 }
+                waiting = waiting_for_the_reopen(&told, Some("human"));
             }
         }
-        self.tell_not_reached(&project, message, because)
+        self.tell_not_reached(&project, message, because, &waiting)
     }
 
-    /// The human hears, once, that `message` did not reach its window, and why.
+    /// The human hears, once, that `message` did not reach its window, and why, and
+    /// which of its own words told the window wait for the reopen (`waiting`, the clause
+    /// of [`waiting_for_the_reopen`], or nothing).
     fn tell_not_reached(
         &self,
         project: &ProjectView,
         message: &MessageView,
         because: &str,
+        waiting: &str,
     ) -> Result<(), EngineError> {
         self.seams.ledger.borrow_mut().note(
             project.id,
@@ -803,7 +812,7 @@ impl Dispatcher {
                 to: "human".to_owned(),
                 task: message.task_number,
                 body: format!(
-                    "m-{}, {}, did not reach @{}: {because}.",
+                    "m-{}, {}, did not reach @{}: {because}{waiting}.",
                     message.id,
                     described(message),
                     message.recipient

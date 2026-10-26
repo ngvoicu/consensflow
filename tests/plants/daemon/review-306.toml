@@ -742,8 +742,8 @@ runs = ["engine-dispatcher-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''                    .find(|killing| marked && killing.pane == *pane)'''
-replace = '''                    .find(|killing| killing.pane == *pane)'''
+find = '''                let marked = stop.filter(|_| marked);'''
+replace = '''                let marked = stop;'''
 
 [[plant]]
 name = "review 306: a give-up's exit after a Close is the window's own, not the Close's"
@@ -774,3 +774,39 @@ runs = ["engine-queued-tells"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''                    self.tell_failed(&project, task, teller, &because, &told, Some(teller))?;'''
 replace = '''                    self.tell_failed(&project, task, teller, &because, &[], Some(teller))?;'''
+
+# Calliope's re-check T-510, its P3s (T-658).
+
+[[plant]]
+name = "review 306: the human who told words that wait for the reopen is not told so"
+meant = "the_human_who_told_words_that_wait_hears_so_in_its_note_of_what_did_not_reach_the_window"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                waiting = waiting_for_the_reopen(&told, Some("human"));'''
+replace = '''                waiting = waiting_for_the_reopen(&told, Some("nobody"));'''
+
+[[plant]]
+name = "review 306: a mark is taken back whatever pause the task holds now"
+meant = "a_mark_taken_back_is_of_its_own_pause_alone"
+runs = ["ledger-receipt-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''             WHERE id = ? AND state = 'paused' AND stop_seq = ?",
+            params![task.id, stop],'''
+replace = '''             WHERE id = ? AND state = 'paused' AND ?2 = ?2",
+            params![task.id, stop],'''
+
+[[plant]]
+name = "review 306: a kill of a window that is taken leaves the other kills of it under way"
+meant = "a_give_up_whose_kill_is_refused_after_the_closes_kill_of_its_window_was_taken_leaves_the_pause_the_closes"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                    window.killing.retain(|killing| killing.pane != *pane);'''
+replace = '''                    if let Some(at) = window.killing.iter().position(|killing| killing.pane == *pane) {
+                        window.killing.remove(at);
+                    }'''

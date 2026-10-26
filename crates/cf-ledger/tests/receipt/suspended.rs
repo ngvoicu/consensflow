@@ -1281,3 +1281,54 @@ fn a_resume_whose_words_are_given_up_in_a_suspended_project_is_paused_again_for_
         .expect("resumed");
     assert_eq!(w.state(number), "paused", "its requester's to resume");
 }
+
+/// The engine takes back the mark of a pause its Close made only where it is that
+/// pause, by its stop: T-1 paused with the project, resumed with it, and paused with it
+/// again by a second Close keeps the second mark when the first is taken back, and the
+/// next Resume resumes it (Calliope's P3-2 of T-510: the mark was taken back whatever
+/// pause the task held).
+#[test]
+fn a_mark_taken_back_is_of_its_own_pause_alone() {
+    let mut w = world();
+    let number = at_work(&mut w, "zeus");
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("closed");
+    let first = w
+        .ledger
+        .pause_with_project(w.project, number, CLOSED)
+        .expect("paused with the project");
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+    assert_eq!(w.state(number), "working");
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("closed again");
+    let second = w
+        .ledger
+        .pause_with_project(w.project, number, CLOSED)
+        .expect("paused with the project again");
+    assert_eq!(second.seq, first.seq + 1, "two pauses, two stops");
+
+    w.ledger
+        .unmark_pause(w.project, number, first.seq)
+        .expect("the first taken back");
+    assert_eq!(mark_of(&mut w, number), 1, "the second's mark stands");
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+    assert_eq!(w.state(number), "working");
+
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("closed a third time");
+    let third = w
+        .ledger
+        .pause_with_project(w.project, number, CLOSED)
+        .expect("paused with the project a third time");
+    w.ledger
+        .unmark_pause(w.project, number, third.seq)
+        .expect("its own taken back");
+    assert_eq!(mark_of(&mut w, number), 0);
+}
