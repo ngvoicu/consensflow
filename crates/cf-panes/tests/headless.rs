@@ -420,7 +420,7 @@ fn stdio_protocol_opens_pastes_lists_and_kills_a_raw_recorder() {
             "/bin/stty raw -echo; tree=/tmp/cf-tree-$$; \
              /bin/sh -c '/bin/sleep 1000 & grandchild=$!; \
              printf \"%s\n\" \"$grandchild\" >\"$1\"; wait' sh \"$tree\" & child=$!; \
-             while [ ! -s \"$tree\" ]; do :; done; grandchild=$(/bin/cat \"$tree\"); \
+             while [ ! -s \"$tree\" ] && kill -0 $PPID 2>/dev/null; do :; done; grandchild=$(/bin/cat \"$tree\"); \
              /bin/rm -f \"$tree\"; printf 'PIDS:%s,%s,%s\nready' \"$$\" \"$child\" \"$grandchild\"; \
              /usr/bin/od -An -tx1 -N 17; printf '\nRECORDER-DONE\n'; wait \"$child\"",
             4096,
@@ -706,7 +706,7 @@ fn stdin_eof_reaps_every_spawned_process() {
                 "tree=/tmp/cf-eof-tree-$$; \
                  /bin/sh -c '/bin/sleep 1000 & grandchild=$!; \
                  printf \"%s\\n\" \"$grandchild\" >\"$1\"; wait' sh \"$tree\" & child=$!; \
-                 while [ ! -s \"$tree\" ]; do :; done; grandchild=$(/bin/cat \"$tree\"); \
+                 while [ ! -s \"$tree\" ] && kill -0 $PPID 2>/dev/null; do :; done; grandchild=$(/bin/cat \"$tree\"); \
                  /bin/rm -f \"$tree\"; printf '%s,%s,%s\\n' \"$$\" \"$child\" \"$grandchild\"; wait \"$child\"",
                 1024,
             ),
@@ -1210,7 +1210,7 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
     let opened = helper.request(
         "pane.open",
         open_body(
-            "trap '' HUP; /bin/sleep 1000 & printf 'CHILD %s END' \"$!\"; read _; exit 0",
+            "trap '' HUP; (while kill -0 $PPID 2>/dev/null; do sleep 0.2; done) & printf 'CHILD %s END' \"$!\"; read _; exit 0",
             1024,
         ),
         &mut events,
@@ -1264,6 +1264,7 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
 const OPENS_ITS_TERMINAL_AGAIN: &str = "exec /usr/bin/python3 -c '
 import ctypes, os, signal, time
 signal.signal(signal.SIGHUP, signal.SIG_IGN)
+parent = os.getppid()
 name = os.ttyname(0)
 print(\"PROGRAM %d END\" % os.getpid(), flush=True)
 libc = ctypes.CDLL(None, use_errno=True)
@@ -1271,7 +1272,7 @@ if libc.revoke(name.encode()) != 0:
     raise OSError(ctypes.get_errno(), \"revoke\")
 time.sleep(2)
 again = os.open(name, os.O_RDWR | os.O_NOCTTY)
-while True:
+while os.getppid() == parent:
     os.write(again, b\"BACK\\r\\n\")
     time.sleep(1)
 '";
@@ -1490,6 +1491,7 @@ fn a_program_that_exits_while_an_orphan_writes_on_to_its_terminal_is_told_closed
 #[cfg(target_os = "macos")]
 const CLEANS_UP_FOR_SIX_SECONDS: &str = "exec /usr/bin/python3 -c '
 import ctypes, os, signal, time
+parent = os.getppid()
 name = os.ttyname(0)
 def clean_up(number, frame):
     ctypes.CDLL(None).revoke(name.encode())
@@ -1498,7 +1500,8 @@ def clean_up(number, frame):
 signal.signal(signal.SIGHUP, signal.SIG_IGN)
 signal.signal(signal.SIGTERM, clean_up)
 print(\"PROGRAM %d END\" % os.getpid(), flush=True)
-time.sleep(1000)
+while os.getppid() == parent:
+    time.sleep(0.2)
 '";
 
 /// The daemon is told a window closed only on proof that its program has gone: a close
@@ -2460,7 +2463,7 @@ fn a_mark_that_names_the_harness_leaves_its_programs_and_what_they_run_out_of_wh
             // The helper, which began before the turn, waits for the window to say it
             // has begun and runs a shell, which says so once it runs a job; the window
             // says it started once it has.
-            r#""$BINS/codex" & "$BINS/codex-code-mode-host" 'while [ ! -e "$GO" ]; do sleep 0.05; done; /bin/sh -c "sleep 31 & echo inner-started; wait"' > "$SAID" & printf ready; read go; : > "$GO"; until [ -s "$SAID" ]; do sleep 0.05; done; printf started; wait"#,
+            r#""$BINS/codex" & "$BINS/codex-code-mode-host" 'while [ ! -e "$GO" ] && kill -0 $PPID 2>/dev/null; do sleep 0.05; done; /bin/sh -c "sleep 31 & echo inner-started; wait"' > "$SAID" & printf ready; read go; : > "$GO"; until [ -s "$SAID" ] || ! kill -0 $PPID 2>/dev/null; do sleep 0.05; done; printf started; wait"#,
             4096,
         );
         body["env"] = json!({"BINS": bins, "SAID": said, "GO": go});

@@ -185,16 +185,17 @@ fn silent(status: i32) -> String {
     format!(r#"printf 'ssh\t%s\t%s\n' "$1" "$2" >> "$CF_LOG"; echo "out"; exit {status}"#)
 }
 
-/// An ssh that goes on until it is ended (the first time), and that answers
-/// the second time it is asked (the run's end there) with `status`. It writes
-/// down its own process's id as well, which is what is to be gone.
+/// An ssh that goes on until it is ended (the first time), or until the test is gone, and that
+/// answers the second time it is asked (the run's end there) with `status`. It writes down its
+/// own process's id as well, which is what is to be gone.
 fn holds(status: u8) -> String {
     format!(
         r#"printf 'ssh\t%s\t%s\t%s\n' "$1" "$2" "$$" >> "$CF_LOG"
 if [ -e "$CF_FIRST" ]; then exit {status}; fi
 : > "$CF_FIRST"
 echo started
-exec sleep 120"#
+while {owner}; do sleep 0.2; done"#,
+        owner = cf_base::fixture::owner_there(std::process::id())
     )
 }
 
@@ -506,15 +507,16 @@ fn a_run_holds_the_machine_to_the_tree_it_sent_and_what_the_machine_says_of_it_i
 }
 
 /// An ssh that says the tree it unpacked is not the one this run sent, and goes on until
-/// it is ended (the first time), then answers the second time it is asked (the run's end
-/// there) with `status`: the pid of the first is written down.
+/// it is ended (the first time) or the test is gone, then answers the second time it is
+/// asked (the run's end there) with `status`: the pid of the first is written down.
 fn another_tree(status: u8) -> String {
     format!(
         r#"printf 'ssh\t%s\t%s\t%s\n' "$1" "$2" "$$" >> "$CF_LOG"
 if [ -e "$CF_FIRST" ]; then exit {status}; fi
 : > "$CF_FIRST"
 echo "== tree 0123456789abcdef0123456789abcdef01234567 fedcba9876543210"
-exec sleep 120"#
+while {owner}; do sleep 0.2; done"#,
+        owner = cf_base::fixture::owner_there(std::process::id())
     )
 }
 

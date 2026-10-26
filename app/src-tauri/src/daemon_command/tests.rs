@@ -306,7 +306,7 @@ fn a_lookup_given_up_on_has_ended_its_shell_before_a_quit_can_miss_it() {
         .args([
             "-c",
             &format!(
-                "i=0; while :; do i=$((i+1)); echo $i > '{}'; /bin/sleep 0.05; done",
+                "i=0; while kill -0 $PPID 2>/dev/null; do i=$((i+1)); echo $i > '{}'; /bin/sleep 0.05; done",
                 beat.display()
             ),
         ])
@@ -530,8 +530,10 @@ fn a_shell_that_ends_without_its_path_while_what_it_started_writes_on_is_given_u
     let shell = login_shell(
         home.path(),
         &format!(
-            "/bin/sh -c 'echo $$ > {}; while :; do echo noise; /bin/sleep 0.2; done' & exit 0",
-            writer.display()
+            "/bin/sh -c 'echo $$ > {}; while {}; do echo noise; /bin/sleep 0.2; done' & exit 0",
+            writer.display(),
+            // Its parent is the shell that exits at once: its owner is the test.
+            cf_base::fixture::owner_there(std::process::id())
         ),
     );
     let (sent, ended) = mpsc::channel();

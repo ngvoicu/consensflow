@@ -270,7 +270,9 @@ mod tests {
         // program can be taken for it; one that does not says nothing. So the case is given
         // tries, and needs one program that died. A capture that closes its streams after the
         // ask is never one that does (a plant).
-        let run = shell("trap 'echo bye; exit 0' TERM; echo hi; while true; do sleep 0.05; done");
+        let run = shell(
+            "trap 'echo bye; exit 0' TERM; echo hi; while kill -0 $PPID 2>/dev/null; do sleep 0.05; done",
+        );
         let limits = Limits {
             timeout: Duration::from_millis(300),
             max_buffer: 1024,
@@ -334,12 +336,14 @@ mod tests {
     /// ended on its way: a harness whose output is closed exits at once, with its tests in flight
     /// (T-686: two of them, for eight hours).
     #[cfg(unix)]
-    const DEAF: &str = "trap '' TERM; while kill -0 $PPID 2>/dev/null; do sleep 0.05; done";
+    fn deaf() -> String {
+        cf_base::fixture::deaf("TERM", "")
+    }
 
     #[cfg(unix)]
     #[test]
     fn a_program_that_will_not_end_when_asked_is_forced_a_moment_later() {
-        let run = shell(DEAF);
+        let run = shell(&deaf());
         let limits = Limits {
             timeout: Duration::from_millis(200),
             max_buffer: 1024,
@@ -362,7 +366,7 @@ mod tests {
         // the harness around it exits.
         let mut owner = Command::new("/bin/sh")
             .args(["-c", "/bin/sh -c \"$DEAF\" & echo $!; wait"])
-            .env("DEAF", DEAF)
+            .env("DEAF", deaf())
             .stdout(Stdio::piped())
             .spawn()
             .unwrap();

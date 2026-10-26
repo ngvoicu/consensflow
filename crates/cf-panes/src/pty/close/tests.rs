@@ -156,10 +156,7 @@ mod unix {
         let _serial = serial_pty_test();
         let mut outsider = Sentinel::start();
         let table = PaneTable::closing_within(GRACE);
-        let OpenedPane { key, mut reader } = open(
-            &table,
-            "trap '' TERM HUP; printf ready; while :; do sleep 1; done",
-        );
+        let OpenedPane { key, mut reader } = open(&table, &deaf());
         until_shown(&mut reader, "ready");
         let group = table.process_group_id(&key).expect("the pane's group");
 
@@ -197,8 +194,11 @@ mod unix {
         assert!(outsider.runs(), "a process outside the window");
     }
 
-    /// A program that ignores the request to end and runs on.
-    const DEAF: &str = "trap '' TERM HUP; printf ready; while :; do sleep 1; done";
+    /// A program that ignores the request to end and runs on, as long as the test that opened
+    /// its window is there.
+    fn deaf() -> String {
+        cf_base::fixture::deaf("TERM HUP", "printf ready")
+    }
 
     #[test]
     fn a_table_that_goes_asks_every_window_to_end_before_it_waits_on_any() {
@@ -207,7 +207,7 @@ mod unix {
         let table = PaneTable::closing_within(GRACE);
         let mut readers = Vec::new();
         for _ in 0..2 {
-            let OpenedPane { mut reader, .. } = open(&table, DEAF);
+            let OpenedPane { mut reader, .. } = open(&table, &deaf());
             until_shown(&mut reader, "ready");
             readers.push(reader);
         }
@@ -230,7 +230,7 @@ mod unix {
         let table = PaneTable::closing_within(GRACE);
         let mut readers = Vec::new();
         for _ in 0..2 {
-            let OpenedPane { mut reader, .. } = open(&table, DEAF);
+            let OpenedPane { mut reader, .. } = open(&table, &deaf());
             until_shown(&mut reader, "ready");
             readers.push(reader);
         }

@@ -279,7 +279,7 @@ mod shell {
         let folder = tempfile::tempdir().unwrap();
         let go = folder.path().join("go");
         let mut program = sh(&format!(
-            "(while [ ! -e '{}' ]; do sleep 0.01; done; printf late >&2) & printf early >&2",
+            "(while [ ! -e '{}' ] && kill -0 $PPID 2>/dev/null; do sleep 0.01; done; printf late >&2) & printf early >&2",
             go.display()
         ))
         .spawn()

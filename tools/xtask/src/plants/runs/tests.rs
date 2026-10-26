@@ -3086,8 +3086,9 @@ mod stops {
 
     /// A crate whose one test starts a writer that takes no notice of being asked to end
     /// and has none of the test's streams, marks that it did (`started`), and waits a
-    /// minute; the writer waits for the file `go`, then writes `late`. nextest runs the
-    /// test, and so the writer, in a group of its own.
+    /// minute; the writer waits for the file `go`, then writes `late`, and gives up after two
+    /// minutes (it is no child of the test that is to end it: its parent is the crate's test).
+    /// nextest runs the test, and so the writer, in a group of its own.
     const WRITER_LIB: &str = r#"#[cfg(test)]
 mod tests {
     #[test]
@@ -3096,7 +3097,7 @@ mod tests {
         std::process::Command::new("/bin/sh")
             .arg("-c")
             .arg(format!(
-                "trap '' TERM; while [ ! -e '{folder}/go' ]; do sleep 0.1; done; echo late > '{folder}/late'"
+                "trap '' TERM; n=0; while [ ! -e '{folder}/go' ] && [ $n -lt 1200 ]; do sleep 0.1; n=$((n+1)); done; echo late > '{folder}/late'"
             ))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())

@@ -286,7 +286,10 @@ fn the_daemon_is_told_at_once_of_a_program_that_has_gone() {
 fn a_reader_of_a_terminal_that_never_goes_quiet_ends_once_the_program_has_gone() {
     let _pty_guard = serial_pty_test();
     let table = PaneTable::closing_within(Duration::from_millis(500));
-    let (key, reader) = open(&table, "while :; do printf .; sleep 0.02; done");
+    let (key, reader) = open(
+        &table,
+        "while kill -0 $PPID 2>/dev/null; do printf .; sleep 0.02; done",
+    );
     let gone = Arc::new(AtomicBool::new(false));
     let said = Arc::clone(&gone);
     let pieces = read_all(output(
@@ -384,7 +387,7 @@ fn a_program_not_proven_gone_in_the_bound_is_named_and_a_window_of_its_name_open
 fn a_program_the_close_has_not_ended_by_the_bound_is_named_then_and_its_close_goes_on() {
     let _pty_guard = serial_pty_test();
     let table = Arc::new(PaneTable::closing_within(Duration::from_secs(60)));
-    let (key, _reader) = open(&table, "trap '' TERM HUP; exec /bin/sleep 1000");
+    let (key, _reader) = open(&table, &cf_base::fixture::deaf("TERM HUP", ""));
     let program = table.process_group_id(&key).expect("the pane's program");
     let slot = slot_of(&table, &key);
     let pid = u32::try_from(program).ok();

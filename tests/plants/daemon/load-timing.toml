@@ -371,7 +371,8 @@ replace = "        let _ = (root, bundle::folder);\n        let own = program.to
 #
 # A harness whose output is closed exits at once with its tests in flight, and the program a test started
 # in a group of its own, that ignores the ask to end, went on for ever: two of them for eight hours. The
-# script the case of the forced program runs ends when the process that started it is gone.
+# script the case of the forced program runs (`cf_base::fixture::deaf`, since T-693) ends when the process
+# that started it is gone.
 
 [[plant]]
 name = "load timing: a program that ignores the ask to end goes on when the process that started it is gone"
@@ -380,6 +381,6 @@ runs = ["lt-deaf"]
 platforms = ["macos", "linux"]
 
 [[plant.edit]]
-file = "crates/cf-process/src/execute.rs"
-find = '''while kill -0 $PPID 2>/dev/null; do sleep 0.05; done";'''
-replace = '''while true; do sleep 0.05; done";'''
+file = "crates/cf-base/src/fixture.rs"
+find = '''{first}while {OWNER_THERE}; do sleep 0.2; done")'''
+replace = '''{first}while :; do sleep 0.2; done")'''

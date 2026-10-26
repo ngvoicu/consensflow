@@ -22,6 +22,9 @@ test-support = []
 cf-panes = { path = ".", features = ["test-support"] }
 
 [dependencies]
+# The programs the tests start that end with the test (src/pty/sentinel.rs and the tests of
+# the crate) and, on Windows, `ps -W`'s parent (src/cygwin.rs).
+cf-base.workspace = true
 cf-bridge.workspace = true
 cf-proto.workspace = true
 futures-channel.workspace = true
@@ -46,7 +49,6 @@ portable-pty = { workspace = true, features = ["serde_support"] }
 # `ps -W` of Git Bash says the parent of a program of its own kind whose parent has gone
 # (src/cygwin.rs): started through cf-process, the one place a process starts, on a runtime
 # of its own for the moment it takes.
-cf-base.workspace = true
 cf-process.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "time"] }
 windows-sys = { workspace = true, features = [
