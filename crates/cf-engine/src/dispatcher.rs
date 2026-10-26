@@ -1369,7 +1369,7 @@ impl Dispatcher {
             require_open(&now)?;
             let open = held.window.borrow().pane.is_some();
             if open && !this.is_out(&chief) && (when == SwitchWhen::Turn || note) {
-                return this.after_turn(project, &held, to, note);
+                return this.after_turn(&held, to, note);
             }
             // On the heap, as the dispatcher's other big steps are: inline it took the
             // switch's future past its budget (3.0.6-alpha.3's integration B, T-664).

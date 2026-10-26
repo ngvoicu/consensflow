@@ -1,6 +1,6 @@
 //! `GET /api/inbox`: the messages waiting in the caller's inbox, newest first,
 //! at most a hundred: what the ledger holds for it, less what still waits for
-//! the human. It lists first lines, cut, and changes nothing: an answer is
+//! the human. It lists first lines, cut, and changes nothing: a message is
 //! received when `cf` says it wrote it whole (`POST /api/answers/read`), which
 //! a list of previews never does. While the project is closed, a message no
 //! window was handed yet is listed with none of its text: that it waits

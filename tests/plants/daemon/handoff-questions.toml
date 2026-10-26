@@ -104,8 +104,8 @@ runs = ["handoff-open-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages.rs"
-find = "AND a.state NOT IN ('cancelled', 'failed'))"
-replace = "AND a.state NOT IN ('failed'))"
+find = "AND a.state NOT IN ('cancelled', 'failed')\""
+replace = "AND a.state NOT IN ('failed')\""
 
 # --- round 2: the answer, and the eval's counts ---
 
@@ -188,8 +188,8 @@ runs = ["handoff-receipt-open"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages.rs"
-find = "AND a.state NOT IN ('cancelled', 'failed'))"
-replace = "AND a.state NOT IN ('cancelled'))"
+find = "AND a.state NOT IN ('cancelled', 'failed')\""
+replace = "AND a.state NOT IN ('cancelled')\""
 
 [[plant]]
 name = "handoff questions: an answer held at the gate is none, so the list sends the chief to a question the ledger will not take a second answer to"
@@ -198,8 +198,8 @@ runs = ["handoff-receipt-open"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages.rs"
-find = "AND a.state NOT IN ('cancelled', 'failed'))"
-replace = "AND a.state NOT IN ('gated', 'cancelled', 'failed'))"
+find = "AND a.state NOT IN ('cancelled', 'failed')\""
+replace = "AND a.state NOT IN ('gated', 'cancelled', 'failed')\""
 
 [[plant]]
 name = "handoff questions: the list reads a rule of its own again (the old one: gated or cancelled is none)"

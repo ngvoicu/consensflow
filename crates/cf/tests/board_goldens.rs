@@ -126,16 +126,23 @@ fn node_ran(golden: &Golden) -> Ran {
     }
 }
 
-/// The cases the receipt and stop redesign moved on purpose: each is named
+/// The cases the receipt and stop redesign, and T-260, moved on purpose: each is named
 /// with the requests the binary makes now, and why they are not Node's. What
 /// it prints and its exit code stay as Node's recording has them. Found by
 /// running every case against the binary, never by guessing; a case that is
 /// answered as Node answered it now is a line to take out.
-const DEPARTED: &[(&str, &[&str], &str)] = &[(
-    "a transcript of no items is asked for after the task",
-    &[],
-    "a command written wrong is said before the board is asked anything: Node asked for the task first, and the board took the answers in its thread as read, though nothing of them was printed",
-)];
+const DEPARTED: &[(&str, &[&str], &str)] = &[
+    (
+        "a transcript of no items is asked for after the task",
+        &[],
+        "a command written wrong is said before the board is asked anything: Node asked for the task first, and the board took the answers in its thread as read, though nothing of them was printed",
+    ),
+    (
+        "a message in full",
+        &["GET /api/inbox/12", "POST /api/answers/read"],
+        "`cf inbox read` of a question still queued says it printed it whole, and the board takes it as read, so it is never typed in after (T-260): Node said so of nothing",
+    ),
+];
 
 // The recordings that cannot be read are the test's failure, as in the tests that read them.
 #[allow(clippy::expect_used)]

@@ -287,31 +287,36 @@ fn message(kind: &str, state: &str) -> Value {
     } })
 }
 
+/// A message `cf inbox read` printed whole while it still waited to be pasted
+/// is acknowledged, whatever its kind: the board decides what a read in the
+/// inbox receives, and a question, a result or a note read there is not typed
+/// in after it (T-260). One that is not queued is not.
 #[test]
-fn an_answer_cf_inbox_read_printed_whole_is_acknowledged_and_nothing_else_is() {
-    for json in [false, true] {
-        let ran = cf_with(
-            &["inbox", "read", "m-12"],
-            json,
-            vec![
-                reply(200, message("answer", "queued")),
-                reply(200, json!({})),
-            ],
-            None,
-        );
-        assert_eq!(ran.code.unwrap(), 0);
-        assert!(ran.out.contains("and then YAML"));
-        assert_eq!(
-            asked(&ran),
-            [("GET", "/api/inbox/12"), ("POST", "/api/answers/read")]
-        );
-        assert_eq!(ran.asked[1].2, acknowledged(&[12], "inbox"));
-        assert_eq!(ran.flushed_at, Some(1));
+fn a_message_cf_inbox_read_printed_whole_while_it_waited_is_acknowledged_and_nothing_else_is() {
+    for kind in ["answer", "question", "result", "note"] {
+        for json in [false, true] {
+            let ran = cf_with(
+                &["inbox", "read", "m-12"],
+                json,
+                vec![reply(200, message(kind, "queued")), reply(200, json!({}))],
+                None,
+            );
+            assert_eq!(ran.code.unwrap(), 0);
+            assert!(ran.out.contains("and then YAML"));
+            assert_eq!(
+                asked(&ran),
+                [("GET", "/api/inbox/12"), ("POST", "/api/answers/read")],
+                "{kind}"
+            );
+            assert_eq!(ran.asked[1].2, acknowledged(&[12], "inbox"));
+            assert_eq!(ran.flushed_at, Some(1));
+        }
     }
     for (kind, state) in [
-        ("note", "queued"),
+        ("note", "delivered"),
         ("answer", "read"),
-        ("question", "queued"),
+        ("question", "delivering"),
+        ("result", "cancelled"),
     ] {
         let ran = cf(
             &["inbox", "read", "m-12"],
@@ -324,6 +329,39 @@ fn an_answer_cf_inbox_read_printed_whole_is_acknowledged_and_nothing_else_is() {
     let ran = cf(&["inbox", "read", "T-3"], vec![reply(200, json!({}))]);
     assert_eq!(ran.code.unwrap(), 2);
     assert!(ran.asked.is_empty());
+}
+
+/// Where the read in the inbox (T-260) meets the Resume after the Close: a
+/// message whose text waits for the Resume is refused to `cf inbox read` (409
+/// `waits`), whatever its kind, so `cf` prints none of it and says it received
+/// nothing. Only the board's refusal is said.
+#[test]
+fn a_message_that_waits_for_the_resume_is_not_printed_and_nothing_is_acknowledged() {
+    let waits = json!({
+        "error": "waits",
+        "message": "m-12 waits until the human resumes the project: it comes to you then. Do not ask for it again now.",
+    });
+    for json in [false, true] {
+        let ran = cf_with(
+            &["inbox", "read", "m-12"],
+            json,
+            vec![reply(409, waits.clone()), reply(200, json!({}))],
+            None,
+        );
+        assert_ne!(ran.code.unwrap(), 0, "json: {json}");
+        assert!(!ran.out.contains("and then YAML"), "json: {json}");
+        assert!(
+            ran.err
+                .contains("waits until the human resumes the project")
+                || ran
+                    .out
+                    .contains("waits until the human resumes the project"),
+            "json: {json}: {} {}",
+            ran.out,
+            ran.err
+        );
+        assert_eq!(asked(&ran), [("GET", "/api/inbox/12")], "json: {json}");
+    }
 }
 
 /// The thread of task 3 with the note in it (the fourth message) as long as `body`.

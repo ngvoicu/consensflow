@@ -216,7 +216,8 @@ pub(crate) fn ask(
 /// answer is read at once and never delivered, because the harness door
 /// that asked collects it and the tool call completes with it; the asker's
 /// task resumes here. A question on a task that is over (accepted, cancelled
-/// or failed) takes no answer, from either side: nobody waits for it. `from` is the answerer's participant
+/// or failed) takes no answer, from either side: nobody waits for it. A
+/// question answered is never typed in after (`settle_answered`). `from` is the answerer's participant
 /// id: handles repeat across projects (every chief is `chief`), ids never do.
 pub(crate) fn answer(
     store: &mut Store,
@@ -303,10 +304,13 @@ pub(crate) fn answer(
             "message.sent",
             json!({ "message": id, "kind": "answer", "from": answerer.handle, "to": question.sender }),
         )?;
-        // A question still gated is answered before the one asked saw it: it goes no further.
-        if question.state == "gated" {
+        // A question still gated is answered before the one asked saw it: it goes
+        // no further. So is one still queued that the asker's own window answered.
+        // One still queued that the one asked answered is theirs: they answered it.
+        if question.state == "gated" || (question.state == "queued" && from_window) {
             withdraw(store, question_id, &format!("answered by @{}", answerer.handle))?;
         }
+        settle_answered(store, question_id)?;
         let answer = known_message(store, id)?;
         // The asker's own window gave this one: it has it, and its task goes on.
         if answer.state == "read" {
@@ -348,12 +352,19 @@ fn finished_task_takes_no_answer(task: &TaskRow) -> LedgerError {
 /// that stands: one on its way, being delivered, delivered, read, or still held
 /// at the gate. One that was cancelled (declined, withdrawn, taken back with its
 /// task) or that failed to arrive is none: the question takes another. The one
-/// rule by which a second answer is refused (`answered`) and by which the
-/// chief's handoff lists what it has yet to answer (`chief_open_work`).
+/// rule by which a second answer is refused (`answered`), by which the
+/// chief's handoff lists what it has yet to answer (`chief_open_work`), and by
+/// which a question is never typed in once answered (`settle_answered`).
 pub(crate) fn has_standing_answer(question: &str) -> String {
+    format!("EXISTS ({})", standing_answers(question))
+}
+
+/// SQL that finds the ids of the answers that stand ([`has_standing_answer`])
+/// to the question called `question`.
+fn standing_answers(question: &str) -> String {
     format!(
-        "EXISTS (SELECT 1 FROM message a WHERE a.reply_to = {question}.id AND a.kind = 'answer'
-                   AND a.state NOT IN ('cancelled', 'failed'))"
+        "SELECT a.id FROM message a WHERE a.reply_to = {question}.id AND a.kind = 'answer'
+                   AND a.state NOT IN ('cancelled', 'failed')"
     )
 }
 
@@ -366,6 +377,49 @@ fn answered(store: &Store, question_id: i64) -> Result<bool, LedgerError> {
             has_standing_answer("q")
         ))?
         .exists([question_id])?)
+}
+
+/// A question that has an answer standing ([`has_standing_answer`]) is never
+/// typed into its recipient's window, however it was read (T-260): the one
+/// asked answered it, so it has it. Still `queued`, it is `read`, its receipt
+/// naming the answer, read when the answer was written, which is when the one
+/// asked had it: answered as it waited, or put back in the queue by a paste that
+/// was not proved after it was answered. Any other question, or one in any other
+/// state, is left as it is.
+///
+/// - No event is logged of it: the row says it, its receipt `{"answered": id}`
+///   and its `delivered_at`, the answer's `created_at`; the answer's own
+///   `message.sent` is the event, as it is of a question withdrawn at the gate
+///   by its answer, and the clock is not read again (which kept Node's
+///   recordings of the answer in place).
+/// - A question answered while its paste is in flight (`delivering`) is the
+///   paste's: confirmed, it is `delivered`, typed in with its "Run in your
+///   shell: cf answer m-…" line, and `cf answer` then refuses it
+///   (`already-answered`). Retried, it is settled here.
+pub(super) fn settle_answered(store: &mut Store, question_id: i64) -> Result<(), LedgerError> {
+    let question = known_message(store, question_id)?;
+    if question.kind != "question" || question.state != "queued" {
+        return Ok(());
+    }
+    let answer: Option<(i64, String)> = store
+        .db
+        .query_row(
+            &format!(
+                "SELECT id, created_at FROM message WHERE id = (
+                   SELECT ({} ORDER BY a.id LIMIT 1) FROM message q WHERE q.id = ?)",
+                standing_answers("q")
+            ),
+            [question_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if let Some((answer, at)) = answer {
+        store.db.execute(
+            "UPDATE message SET state = 'read', delivered_at = ?, receipt = ? WHERE id = ?",
+            params![at, json!({ "answered": answer }).to_string(), question_id],
+        )?;
+    }
+    Ok(())
 }
 
 /// What is on its way to a participant (queued, or being delivered), oldest first.

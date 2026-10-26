@@ -10,13 +10,15 @@
 //! read; a door that was shut meanwhile is refused (409 `door-closed`), and
 //! the answer comes as a message.
 //!
-//! `POST /api/answers/read`: `cf` says which answers it wrote whole to its
+//! `POST /api/answers/read`: `cf` says which messages it wrote whole to its
 //! output (`{"answers": [ids], "via": "inbox" | "task"}`), once that output is
-//! complete. The ones among them that are for the caller and still queued are
-//! received. A read never receives anything by itself: a response that did
-//! not reach its reader, or an output that was cut off, says nothing. Only an
-//! answer is received so: a result is put to its reader for a decision, which
-//! ends it (the ledger withdraws it then), and a read is no decision.
+//! complete: the answers of a thread `cf task get` printed, or the message
+//! `cf inbox read` printed, whatever its kind. The ones among them that are
+//! for the caller, still queued, and received by the way they were read (the
+//! ledger's `Read`) are received: a message read in the inbox is never typed
+//! in after it, nor is a result, which the board then shows read. A read
+//! never receives anything by itself: a response that did not reach its
+//! reader, or an output that was cut off, says nothing.
 
 use cf_base::js;
 use cf_ledger::Read;
@@ -58,11 +60,11 @@ pub(super) async fn handle(
     ))
 }
 
-/// `cf` wrote answers whole to its output and says so: those among them that
-/// are for the caller and still wait in the queue are `read`, each once, and
-/// the dispatcher is woken, for the task they were what waited for may go on.
-/// An answer for anyone else, or one that is not queued, is left as it is,
-/// and saying so again wakes nothing.
+/// `cf` wrote messages whole to its output and says so: those among them that
+/// are for the caller and still wait in the queue are `read`, each once, as
+/// the ledger receives them, and the dispatcher is woken, for the task they
+/// were what waited for may go on. A message for anyone else, or one that is
+/// not queued, is left as it is, and saying so again wakes nothing.
 pub(super) async fn read(
     context: &Context,
     caller: &Caller,
@@ -86,22 +88,11 @@ pub(super) async fn read(
         .and_then(Value::as_array)
         .and_then(|list| list.iter().map(Value::as_i64).collect::<Option<Vec<_>>>())
         .ok_or_else(invalid)?;
-    let mut waiting = Vec::new();
-    for id in named {
-        let found = context.ledger.borrow().message(id)?;
-        if found.is_some_and(|message| {
-            message.kind == "answer"
-                && message.state == "queued"
-                && message.recipient_id == caller.participant.id
-        }) {
-            waiting.push(id);
-        }
-    }
-    if !waiting.is_empty() {
-        context
-            .ledger
-            .borrow_mut()
-            .receive_read(caller.participant.id, &waiting, via)?;
+    let received = context
+        .ledger
+        .borrow_mut()
+        .receive_read(caller.participant.id, &named, via)?;
+    if received > 0 {
         (context.kick)();
     }
     Ok(Answer::ok(json!({})))

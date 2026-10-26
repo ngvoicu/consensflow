@@ -173,13 +173,14 @@ impl Ledger {
         messages::settle_claim(&mut self.store, answer_id, recipient, received)
     }
 
-    /// Answers of `recipient` among `ids` that `cf` served whole are received.
+    /// Messages of `recipient` among `ids` that `cf` served whole are received,
+    /// as the way they were served receives them (`Read`): how many were.
     pub fn receive_read(
         &mut self,
         recipient: i64,
         ids: &[i64],
         via: Read,
-    ) -> Result<(), LedgerError> {
+    ) -> Result<usize, LedgerError> {
         messages::receive_read(&mut self.store, recipient, ids, via)
     }
 

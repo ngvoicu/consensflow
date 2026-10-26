@@ -56,6 +56,8 @@ mod a_message_the_chief_took_was_typed_in_again_under_load;
 mod a_paste_devin_held_pasted_again_after_a_switch_and_a_restart;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
 mod a_pause_a_hung_worker_ignored_stranded_its_task;
+#[path = "regressions/a_question_the_chief_answered_was_typed_in_later.rs"]
+mod a_question_the_chief_answered_was_typed_in_later;
 #[path = "regressions/a_quota_wait_ended_failed.rs"]
 mod a_quota_wait_ended_failed;
 #[path = "regressions/a_result_delivered_twice_to_a_devin_chief.rs"]

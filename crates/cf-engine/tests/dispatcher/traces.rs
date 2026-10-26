@@ -408,6 +408,18 @@ const DEPARTED: &[(&str, &str)] = &[
     ("pastes again, once its arrival window passes, when one more Enter did not bring it", READ_ONCE_MORE),
     ("tries an uncertain handover again once its arrival window passes with no sign of it", READ_ONCE_MORE),
     ("waits on a message a harness queued itself, and re-sends only a paste the record never showed", READ_ONCE_MORE),
+    (
+        "first asks the chief where things stand, when the human wants that, and switches once it has answered",
+        "the note that asks the chief where things stand is written only when the engine pastes it, with the chief at rest, so no `cf inbox read` in the chief's turn can receive it and let the switch go without its answer (T-351): its `message.sent` comes in the pass after the switch was asked, where Node wrote the note when the switch was asked",
+    ),
+    (
+        "never gives the new chief the note that asked the old one where things stand",
+        "the note that asks the chief where things stand is written only when the engine pastes it, with the chief at rest, so no `cf inbox read` in the chief's turn can receive it and let the switch go without its answer (T-351): its `message.sent` comes in the pass after the switch was asked, where Node wrote the note when the switch was asked",
+    ),
+    (
+        "hands nothing to an old chief whose switch waited for its turn's end once its project is deleted, nor switches a project created meanwhile",
+        "the note that asks the chief where things stand is written only when the engine pastes it, with the chief at rest, so no `cf inbox read` in the chief's turn can receive it and let the switch go without its answer (T-351): its `message.sent` comes in the pass after the switch was asked, where Node wrote the note when the switch was asked",
+    ),
 ];
 
 /// The variable that asks for the departures to be recorded again, which `npm

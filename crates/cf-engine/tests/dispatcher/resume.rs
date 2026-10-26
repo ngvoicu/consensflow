@@ -922,7 +922,10 @@ fn a_delivery_that_waits_for_its_window_while_the_project_closes_is_not_pasted_a
 
 /// Both reviews of 2026-10-16, round 3: a Switch chief that waits for the chief's
 /// turn to end, in a project closed meanwhile whose Close could not close the chief's
-/// window, waits for the Resume: the note asking for the handoff is not pasted.
+/// window, waits for the Resume: the note asking for the handoff is not pasted. It is
+/// written only as it is pasted, with the chief at rest (T-351), so a closed project
+/// has none on the board at all; the Resume writes and pastes it, and the switch then
+/// waits for its answer.
 #[test]
 fn a_switch_waiting_for_the_chief_s_turn_in_a_closed_project_waits_for_the_resume() {
     let context = with_codex();
@@ -943,12 +946,37 @@ fn a_switch_waiting_for_the_chief_s_turn_in_a_closed_project_waits_for_the_resum
         context.pass().unwrap();
     }
 
-    let asked = context
-        .inbox(context.id(project.id, "chief"))
-        .into_iter()
-        .find(|message| message.body.contains("Write down where things stand"))
-        .expect("the note asking for the handoff");
-    assert_eq!(asked.state, "queued", "it waits for the Resume");
+    let chief = context.id(project.id, "chief");
+    let asking = || {
+        context
+            .inbox(chief)
+            .into_iter()
+            .filter(|message| message.body.contains("Write down where things stand"))
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        asking().is_empty(),
+        "it waits for the Resume: {:?}",
+        asking()
+    );
+    assert!(
+        given(&context, "chief")
+            .iter()
+            .all(|text| !text.contains("Write down where things stand")),
+        "nothing pasted"
+    );
+    assert!(context.dispatcher.pending_switch(chief).is_some());
+
+    context.resume_project(project.id).unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let written = asking();
+    assert_eq!(written.len(), 1, "{written:?}");
+    assert_eq!(written[0].state, "delivered", "the Resume pastes it");
+    assert!(
+        context.dispatcher.pending_switch(chief).is_some(),
+        "the switch waits for its answer"
+    );
 }
 
 /// The same, of a switch asked with no note: once the chief's turn is over it would
