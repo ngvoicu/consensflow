@@ -332,13 +332,15 @@ fn the_stand_in_codexs_server_takes_a_turn_and_writes_its_rollout_where_the_daem
 
 /// A thread has a rollout only once it has had a turn, as Codex's does: a window
 /// resumed on one that has had none finds nothing, and the server of another
-/// window resumes one that has, and goes on in its rollout.
+/// window resumes one that has, and goes on in its rollout. While the server that
+/// holds it runs, another has it read-only, as Codex gave the window that opened on
+/// a thread another window held (kluris, 2026-10-26).
 #[test]
 fn the_stand_in_codexs_thread_has_no_rollout_before_its_first_turn_and_another_server_resumes_it_once_it_has_one(
 ) -> Outcome {
     let _turn = cf_e2e::serial::turn();
     let root = tempfile::tempdir()?;
-    let first = server_in(root.path())?;
+    let mut first = server_in(root.path())?;
     let mut client = Client::connect(listening_on(&first))?;
     let thread = client.start_thread()?;
     // Started, and nothing said in it: no record of it, and a resume of it finds none.
@@ -361,11 +363,16 @@ fn the_stand_in_codexs_thread_has_no_rollout_before_its_first_turn_and_another_s
         loop_until(|| rollout_of(root.path(), &thread)).ok_or("no rollout was written")?;
     loop_until(|| (completed(&rollout) == 1).then_some(())).ok_or("the turn never completed")?;
 
-    // Another window's server is resumed on it, and its next turn is in the same record.
+    // Another window's server is resumed on it: read-only while the first runs, and
+    // its own once that has gone; its next turn is in the same record.
     let second = server_in(root.path())?;
     let mut again = Client::connect(listening_on(&second))?;
+    let held = again.call("thread/resume", json!({ "threadId": thread }))?;
+    assert_eq!(held["result"]["readOnly"], true, "{held}");
+    first.kill();
     let resumed = again.call("thread/resume", json!({ "threadId": thread }))?;
     assert_eq!(resumed["result"]["thread"]["id"], thread.as_str());
+    assert_eq!(resumed["result"]["readOnly"], false, "{resumed}");
     again.call(
         "turn/start",
         json!({ "threadId": thread, "input": turn_input(DONE_IN_A_SECOND) }),

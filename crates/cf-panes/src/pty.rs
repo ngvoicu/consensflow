@@ -1866,7 +1866,7 @@ mod tests {
     #[test]
     fn the_windows_killed_before_they_opened_are_the_latest_few() {
         let table = PaneTable::new();
-        let key = |generation: u64| PaneKey::new("worker", generation);
+        let key = |generation: u64| super::PaneKey::new("worker", generation);
         for generation in 0..=u64::try_from(CANCELLED_KEPT).unwrap() {
             table.kill(&key(generation)).expect("kill");
         }

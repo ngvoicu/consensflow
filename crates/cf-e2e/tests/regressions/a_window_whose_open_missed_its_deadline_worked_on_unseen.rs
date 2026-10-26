@@ -30,13 +30,17 @@
 
 use std::time::Duration;
 
+#[cfg(unix)]
 use cf_e2e::files;
 use cf_e2e::live::members::{descending_from, Identity, Machine, ThisMachine};
 use cf_e2e::rig::{Config, Held, Project, Rig, OPEN};
+#[cfg(unix)]
 use cf_e2e::rollout;
 use serde_json::{json, Value};
 
-use crate::{config, config_with_codex, secs, Outcome};
+#[cfg(unix)]
+use crate::config_with_codex;
+use crate::{config, secs, Outcome};
 
 /// How long the daemon gives the pane host to answer an open, in milliseconds.
 const OPEN_DEADLINE_MS: &str = "3000";
@@ -314,6 +318,7 @@ fn session_of(frame: &Value) -> String {
 
 /// The roster of the Codex case: the chief on the stand-in Claude, the worker on the
 /// stand-in Codex.
+#[cfg(unix)]
 fn write_codex_roster(rig: &Rig) -> cf_e2e::Result {
     let roster = json!({
         "schemaVersion": 1,
@@ -326,6 +331,7 @@ fn write_codex_roster(rig: &Rig) -> cf_e2e::Result {
 }
 
 /// What the worker's thread was told by its user, in its one rollout.
+#[cfg(unix)]
 fn codex_told(rig: &Rig) -> cf_e2e::Result<Vec<String>> {
     let home = std::path::PathBuf::from(rig.var("CODEX_HOME").unwrap_or_default());
     let mut told = Vec::new();
