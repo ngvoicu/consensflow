@@ -872,6 +872,23 @@ mod tests {
     }
 
     #[test]
+    fn a_first_message_given_as_an_argument_is_no_paste_and_keeps_the_path_of_an_image_in_it() {
+        // Claude Code 2.1.308 makes no attachment of the first message of a launch given as an
+        // argument of the program (the probe of 2026-10-22, T-265): a window the kit seeds so
+        // (`Open::seed`) keeps it as it was. ConsensFlow's windows are handed their brief once up,
+        // as a paste (T-432), whose pictures are attached (T-681).
+        let folder = tempfile::tempdir().unwrap();
+        let picture = folder.path().join("reference.png");
+        std::fs::write(&picture, cf_e2e::png::SMALL).unwrap();
+        let brief = format!("Reply with exactly: DONE\n{}", picture.display());
+        let seeded = recorded(&brief, true);
+        assert_eq!(seeded.len(), 1, "{seeded:?}");
+        assert_eq!(seeded[0]["message"]["content"], brief.as_str());
+        let pasted = recorded(&brief, false);
+        assert!(pasted[0].to_string().contains("[Image #1]"), "{pasted:?}");
+    }
+
+    #[test]
     fn a_notification_that_names_a_picture_is_written_as_a_notification_and_no_paste_attaches_it() {
         // Alpha.3 merged the notification's records (turn-end) with the images a paste is
         // made into (T-215): a notification is a turn Claude Code begins by itself, so

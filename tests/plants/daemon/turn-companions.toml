@@ -35,6 +35,7 @@ engine-text-viewer = ["cargo", "test", "--offline", "-p", "cf-engine", "--test",
 harness-ancestry = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::ancestry::"]
 ledger-healing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "whole_history", "healing::"]
 standin-notification = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "a_notification_that_names_a_picture"]
+standin-first-message = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "a_first_message_given_as_an_argument"]
 rig-companions = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed::"]
 
 [[plant]]
@@ -194,14 +195,13 @@ replace = '''    if !before.is_empty() {
 
 [[plant]]
 name = "turn companion: the stand-in Claude makes attachments of the paths in the first message of a launch"
-meant = "the_brief_a_window_is_launched_with_is_no_paste_and_keeps_the_path_of_an_image_in_it"
-runs = ["rig-companions"]
-builds = true
+meant = "a_first_message_given_as_an_argument_is_no_paste_and_keeps_the_path_of_an_image_in_it"
+runs = ["standin-first-message"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent.rs"
-find = '''    record_message(records, pid, first && window.seeded, text).map_err(failed)?;'''
-replace = '''    record_message(records, pid, first && window.seeded && false, text).map_err(failed)?;'''
+find = '''    let written = if launched {'''
+replace = '''    let written = if launched && false {'''
 
 # Round 3 (T-296, Calliope's review of both rounds, T-289): the history viewer's page drew what
 # Claude put ahead of a delivery as the human's typing (P3-1); a copy of an item made before the

@@ -210,8 +210,7 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
-            if trust == Trusting::Asked || (trust == Trusting::Looking && delivering.owed.is_none())
-            {'''
+            if trust.asks() || (trust == Trusting::Looking && delivering.owed.is_none()) {'''
 replace = '''
             if trust == Trusting::Looking && delivering.owed.is_none() {'''
 
@@ -824,13 +823,13 @@ find = '''
                             )?;
                             self.changed();
                         }
-                    } else if self.now() - began > ASKS_WITHIN_MS {'''
+                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {'''
 replace = '''
                             )?;
                             self.changed();
                             break (false, false);
                         }
-                    } else if self.now() - began > ASKS_WITHIN_MS {'''
+                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {'''
 
 [[plant]]
 name = "folder trust: a prompt below a conversation that quoted the dialog banks a yes (round 6, T-299)"

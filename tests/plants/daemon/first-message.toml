@@ -95,8 +95,8 @@ runs = ["fm-launch-pi-roles"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/adapter.rs"
-find = "argv.extend([\"--append-system-prompt\".to_owned(), role.file]);"
-replace = "argv.extend([\"--append-system-prompt\".to_owned(), launch.instructions.to_owned()]);"
+find = "                    .chain([role.file])"
+replace = "                    .chain([launch.instructions.to_owned()])"
 
 [[plant]]
 name = "first message: the engine gives a window it delivers the message to on its launch as well"
