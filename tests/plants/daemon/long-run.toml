@@ -2362,6 +2362,71 @@ file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
 find = "                if failure.code == rusqlite::ErrorCode::DatabaseBusy"
 replace = "                if failure.code == rusqlite::ErrorCode::DatabaseBusy && false"
 
+# T-580: the same test died once more, on a CI runner's Windows, in round 43 of 200 and in a run
+# that was slow all through (CI run 40195925291): a window gave up on a lock another window held
+# for longer than SQLite's five seconds. Its writes no longer wait for the disk, and every change
+# that finds the store held is tried again for thirty.
+
+[[plant]]
+name = "long run: a stand-in Devin's store is written with a wait for the disk, and a slow disk keeps its lock from the other windows"
+meant = "a_store_is_written_with_no_wait_for_the_disk"
+runs = ["fake-devin-store"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
+find = '            "PRAGMA synchronous = OFF;'
+replace = '            "PRAGMA synchronous = FULL;'
+
+[[plant]]
+name = "long run: a stand-in Devin's store gives up on a lock another window holds as soon as SQLite does"
+meant = "a_store_another_window_holds_for_longer_than_sqlite_waits_is_waited_out"
+runs = ["fake-devin-store"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
+find = "                    && begun.elapsed() < PATIENCE =>"
+replace = "                    && begun.elapsed() < Duration::ZERO =>"
+
+[[plant]]
+name = "long run: a stand-in Devin's store writes a message once, and dies on a lock another window holds for seconds"
+meant = "a_store_another_window_holds_for_longer_than_sqlite_waits_is_waited_out"
+runs = ["fake-devin-store"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
+find = '''        patiently(|| {
+            let transaction'''
+replace = '''        (|| {
+            let transaction'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
+find = '''            transaction.commit()
+        })
+        .map_err(said)?;'''
+replace = '''            transaction.commit()
+        })()
+        .map_err(said)?;'''
+
+[[plant]]
+name = "long run: a stand-in Devin opens its session once, and dies on a lock another window holds for seconds"
+meant = "a_store_another_window_holds_for_longer_than_sqlite_waits_is_waited_out"
+runs = ["fake-devin-store"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
+find = "        let (head, messages) = patiently(|| {"
+replace = "        let (head, messages) = (|| -> rusqlite::Result<_> {"
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
+find = '''            Ok((head, messages_of(&db, session)?))
+        })
+        .map_err(said)?;'''
+replace = '''            Ok((head, messages_of(&db, session)?))
+        })()
+        .map_err(said)?;'''
+
 [[plant]]
 name = "long run: the rig says what it says of itself as it is, whatever masker its owner gave it"
 meant = "what_a_rig_says_of_itself_goes_through_its_owners_masker_and_as_it_is_without_one"
