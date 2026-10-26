@@ -68,6 +68,7 @@
     "live:monitor-wait": "cargo xtask live monitor-wait",
     "live:folder-trust": "cargo xtask live folder-trust",
     "live:harnesses": "cargo xtask live harnesses",
+    "live:pi-parity": "cargo xtask live pi-parity",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },

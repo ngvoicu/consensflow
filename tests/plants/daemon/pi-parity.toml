@@ -1,0 +1,54 @@
+# A Pi member has what Pi has started in the user's own terminal (the owner's decision of
+# 2026-10-25, T-549). Two things it lacked were ConsensFlow's: given an `--append-system-prompt`
+# (its role), Pi reads no `APPEND_SYSTEM.md` of its own, so the adapter gives the one Pi would find
+# first (the project's `.pi/` one, else the agent folder's) before the role; and a `sessionDir` in
+# the user's settings has Pi keep the member's session where the board never looked. One plant
+# takes one rule out; a test of it fails. They run the launch suite's Pi tests and the unit tests
+# of `pi::paths`; the live proof is `cargo xtask live pi-parity`. Every name holds `pi parity`, so
+# `npm run plants:daemon -- "pi parity"` runs them all.
+
+[run]
+# A Pi window as the adapter prepares it.
+harness-launch-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "pi::"]
+# Where Pi keeps its things, as the adapter and the record look find them.
+harness-pi-paths = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::paths"]
+
+[[plant]]
+name = "pi parity: a member is given no APPEND_SYSTEM.md of the user's"
+meant = "a_window_keeps_the_append_system_file_pi_finds_by_itself_before_its_role"
+runs = ["harness-launch-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = '''            let appended = paths::append_system_prompt(&self.env, launch.directory);'''
+replace = '''            let appended = paths::append_system_prompt(&self.env, launch.directory).filter(|_| false);'''
+
+[[plant]]
+name = "pi parity: the user's APPEND_SYSTEM.md is given where the project has its own"
+meant = "the_file_pi_appends_by_itself_is_the_project_s_then_the_user_s_and_none_without_either"
+runs = ["harness-pi-paths", "harness-launch-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/paths.rs"
+find = '''    [Some(project), user()]'''
+replace = '''    [user(), Some(project)]'''
+
+[[plant]]
+name = "pi parity: the sessionDir of the user's settings is not followed"
+meant = "the_sessions_are_where_the_user_s_own_settings_put_them_unless_the_variable_says_otherwise"
+runs = ["harness-pi-paths"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/paths.rs"
+find = '''    if let Some(configured) = settings_session_dir(&agent, env)? {'''
+replace = '''    if let Some(configured) = settings_session_dir(&agent, env)?.filter(|_| false) {'''
+
+[[plant]]
+name = "pi parity: a relative sessionDir is taken as the board's own folder's"
+meant = "the_sessions_are_where_the_user_s_own_settings_put_them_unless_the_variable_says_otherwise"
+runs = ["harness-pi-paths"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/paths.rs"
+find = '''    Ok(Path::new(&expanded).is_absolute().then_some(expanded))'''
+replace = '''    Ok(Some(expanded))'''

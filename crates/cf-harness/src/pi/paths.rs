@@ -5,6 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
+use cf_base::file::read_file;
+use cf_base::json::from_slice_lossy;
 use cf_base::path;
 use cf_proto::specs::Variant;
 
@@ -24,13 +26,54 @@ pub(crate) fn transcript(session: &str, env: &Env) -> Result<Option<PathBuf>, St
 }
 
 /// Where Pi keeps its sessions (`piSessionDir`): `PI_CODING_AGENT_SESSION_DIR`,
-/// else `sessions` in the agent folder. An empty variable is none.
+/// else the `sessionDir` of the user's settings, else `sessions` in the agent
+/// folder. An empty variable is none.
+///
+/// Pi also reads `sessionDir` from the project's `.pi/settings.json`, and takes
+/// a relative one from its working folder: a look from here knows neither
+/// folder, so those are not followed (T-549).
 fn session_dir(env: &Env) -> Result<String, String> {
-    let configured = match set(env, "PI_CODING_AGENT_SESSION_DIR") {
-        Some(configured) => configured,
-        None => path::join(&[&agent_dir(env)?, "sessions"]),
+    if let Some(configured) = set(env, "PI_CODING_AGENT_SESSION_DIR") {
+        return expand(&configured, env);
+    }
+    let agent = agent_dir(env)?;
+    if let Some(configured) = settings_session_dir(&agent, env)? {
+        return Ok(configured);
+    }
+    expand(&path::join(&[&agent, "sessions"]), env)
+}
+
+/// The `sessionDir` of the user's own settings (`settings.json` in the agent
+/// folder), `~` expanded: none where the file, the key or a whole path is
+/// missing.
+fn settings_session_dir(agent: &str, env: &Env) -> Result<Option<String>, String> {
+    let file = path::join(&[agent, "settings.json"]);
+    let Ok(bytes) = read_file(Path::new(&file)) else {
+        return Ok(None);
     };
-    expand(&configured, env)
+    let Some(configured) = from_slice_lossy(&bytes).ok().and_then(|settings| {
+        let written = settings.get("sessionDir")?.as_str()?;
+        (!written.is_empty()).then(|| written.to_owned())
+    }) else {
+        return Ok(None);
+    };
+    let expanded = expand(&configured, env)?;
+    Ok(Path::new(&expanded).is_absolute().then_some(expanded))
+}
+
+/// The file Pi appends to its system prompt by itself
+/// (`discoverAppendSystemPromptFile`), which it reads only where it is given no
+/// `--append-system-prompt`: `.pi/APPEND_SYSTEM.md` in the working folder of a
+/// trusted project (every window is opened `--approve`), else
+/// `APPEND_SYSTEM.md` in the agent folder. None where neither is there. `.pi`
+/// is Pi's `piConfig.configDir`.
+pub(crate) fn append_system_prompt(env: &Env, directory: &str) -> Option<String> {
+    let project = path::join(&[directory, ".pi", "APPEND_SYSTEM.md"]);
+    let user = || Some(path::join(&[&agent_dir(env).ok()?, "APPEND_SYSTEM.md"]));
+    [Some(project), user()]
+        .into_iter()
+        .flatten()
+        .find(|file| Path::new(file).exists())
 }
 
 /// Pi's folder (`piAgentDir`): `PI_CODING_AGENT_DIR`, else `.pi/agent` in the

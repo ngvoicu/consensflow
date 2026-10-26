@@ -75,9 +75,11 @@
 //! long command running that its answer ends, `live_specs` a real chief of each
 //! harness told of specs where its project has them on, planning one and
 //! carrying it to the board, and `live_notes` a real chief, Devin's or Claude's,
-//! in a turn when two notes come for it, handed each once, and `live_tell` a real worker
+//! in a turn when two notes come for it, handed each once, `live_tell` a real worker
 //! of any harness told by the chief while inside a command, whose turn then ends with
-//! words the chief gets before any resume, and finishes the paused task with). Run them with
+//! words the chief gets before any resume, and finishes the paused task with, and
+//! `live_pi_parity` a Pi member's window holding all that bare Pi holds in the same
+//! folder). Run them with
 //! `cargo xtask test clis`, `daemons`, `integration`,
 //! `regressions`, `agents` and `load`, and `cargo xtask smoke` (the `npm run`
 //! names are the same), a live one with `cargo xtask live <name>`, or one with

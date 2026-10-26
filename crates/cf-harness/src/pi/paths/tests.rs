@@ -226,3 +226,107 @@ fn the_specmint_variant_the_human_installed_is_found_in_pis_own_skills_then_the_
     ]);
     assert_eq!(global_specmint(&env, Variant::Core), Some(found));
 }
+
+/// A home whose Pi settings are `settings`, and what the sessions folder is
+/// then, with `vars` beside the home.
+fn sessions_set(
+    settings: &str,
+    vars: &[(&str, &str)],
+) -> (tempfile::TempDir, Result<String, String>) {
+    let home = tempfile::tempdir().unwrap();
+    let agent = home.path().join(".pi").join("agent");
+    std::fs::create_dir_all(&agent).unwrap();
+    std::fs::write(agent.join("settings.json"), settings).unwrap();
+    let mut all = vec![("HOME", home.path().to_str().unwrap())];
+    all.extend_from_slice(vars);
+    let found = sessions(&all);
+    (home, found)
+}
+
+#[test]
+fn the_sessions_are_where_the_user_s_own_settings_put_them_unless_the_variable_says_otherwise() {
+    // T-549: Pi writes a member's session where `sessionDir` says, and the
+    // board read it nowhere.
+    // A whole path, on every system (`/elsewhere` has no drive on Windows).
+    let elsewhere = tempfile::tempdir().unwrap();
+    let whole = elsewhere.path().to_str().unwrap();
+    let settings = serde_json::json!({ "sessionDir": whole }).to_string();
+    let (_home, found) = sessions_set(&settings, &[]);
+    assert_eq!(found.unwrap(), whole);
+    let (home, found) = sessions_set(r#"{"sessionDir": "~/kept"}"#, &[]);
+    assert_eq!(
+        found.unwrap(),
+        path::join(&[home.path().to_str().unwrap(), "kept"])
+    );
+    let (_home, found) = sessions_set(&settings, &[("PI_CODING_AGENT_SESSION_DIR", "/variable")]);
+    assert_eq!(found.unwrap(), "/variable");
+    // A relative folder is Pi's working folder's, which a look does not know;
+    // no key, an empty one, and a file that is no JSON say nothing.
+    for settings in [
+        r#"{"sessionDir": "relative/s"}"#,
+        r#"{"sessionDir": ""}"#,
+        r#"{"theme": "dark"}"#,
+        "not json",
+    ] {
+        let (home, found) = sessions_set(settings, &[]);
+        let default = path::join(&[home.path().to_str().unwrap(), ".pi", "agent", "sessions"]);
+        assert_eq!(found.unwrap(), default, "{settings}");
+    }
+}
+
+#[test]
+fn a_session_is_found_in_the_folder_the_user_s_settings_name() {
+    let home = tempfile::tempdir().unwrap();
+    let agent = home.path().join(".pi").join("agent");
+    let elsewhere = home.path().join("elsewhere");
+    std::fs::create_dir_all(&agent).unwrap();
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let settings = serde_json::json!({ "sessionDir": elsewhere.to_str().unwrap() });
+    std::fs::write(agent.join("settings.json"), settings.to_string()).unwrap();
+    let file = elsewhere.join("2026-10-25T09-00-00-000Z_cf-1-zeus-0a1b2c3d.jsonl");
+    std::fs::write(&file, "").unwrap();
+    let env = Env::from_vars([("HOME", home.path().to_str().unwrap())]);
+    assert_eq!(transcript("cf-1-zeus-0a1b2c3d", &env), Ok(Some(file)));
+}
+
+#[test]
+fn the_file_pi_appends_by_itself_is_the_project_s_then_the_user_s_and_none_without_either() {
+    let home = tempfile::tempdir().unwrap();
+    let project = home.path().join("project");
+    let agent = home.path().join(".pi").join("agent");
+    std::fs::create_dir_all(project.join(".pi")).unwrap();
+    std::fs::create_dir_all(&agent).unwrap();
+    let env = Env::from_vars([("HOME", home.path().to_str().unwrap())]);
+    let directory = project.to_str().unwrap();
+    assert_eq!(append_system_prompt(&env, directory), None);
+    let user = agent.join("APPEND_SYSTEM.md");
+    std::fs::write(&user, "mine").unwrap();
+    assert_eq!(
+        append_system_prompt(&env, directory),
+        Some(user.to_string_lossy().into_owned())
+    );
+    let own = project.join(".pi").join("APPEND_SYSTEM.md");
+    std::fs::write(&own, "the project's").unwrap();
+    assert_eq!(
+        append_system_prompt(&env, directory),
+        Some(own.to_string_lossy().into_owned())
+    );
+    // `PI_CODING_AGENT_DIR` moves the user's.
+    std::fs::remove_file(&own).unwrap();
+    let moved = home.path().join("moved");
+    std::fs::create_dir_all(&moved).unwrap();
+    std::fs::write(moved.join("APPEND_SYSTEM.md"), "moved").unwrap();
+    let env = Env::from_vars([
+        ("HOME", home.path().to_str().unwrap()),
+        ("PI_CODING_AGENT_DIR", moved.to_str().unwrap()),
+    ]);
+    assert_eq!(
+        append_system_prompt(&env, directory),
+        Some(
+            moved
+                .join("APPEND_SYSTEM.md")
+                .to_string_lossy()
+                .into_owned()
+        )
+    );
+}

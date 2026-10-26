@@ -20,6 +20,7 @@
 //! | `newest_session` | `kind`, `workspace`, `since`, `env`: the newest top-level conversation a harness of that kind (OpenCode, Devin or Codex) opened in `workspace` at or after `since` (milliseconds), from its own store | the session's id, or null while there is none |
 //! | `specmint` | `kind`, `variant`, `env`: where the harness has the Specmint variant installed for its user (the adapter's own look, in the places the harness reads), with a home that is the one `env` names | `{installed, skill}`: whether the harness has it, and the file of its `SKILL.md` (where ConsensFlow's own copy would be written, for a launch of a made-up id, where it has none) |
 //! | `devin_launch` | `launch` (a lowercase uuid), `role`, `directory`, `resume`, `message`, `agent` (`model`, `effort`), `instructions` (the role's text), `cf` (the `cf` its session hook runs), `env`: a Devin window as the adapter prepares it for that role | `{command, args, env, dropEnv, session}` as `start` answers, the command being the program the adapter found: its `--config` (the owner's, with ConsensFlow's hooks) and the launch's files are written under the ConsensFlow home `env` names, and Devin is asked its version, as it is at every launch |
+//! | `pi_launch` | `launch`, `role`, `directory`, `resume`, `message`, `agent` (`model`, `thinking`), `instructions`, `env`: a Pi window as the adapter prepares it for that role | `{command, args, env, dropEnv, session}` as `devin_launch` answers: its extension and role skill are written under the ConsensFlow home `env` names, and the `APPEND_SYSTEM.md` Pi would find by itself in `directory` or the agent folder is given before the role's text |
 //! | `devin_ready` | `wire`: the wire log of a Devin window's launch | `{shown, mode, command}`: what the daemon's readiness reads of it (the conversation the window shows, the permission mode it is in) and the command the window is given before it is ready for work (`/bypass` where the wire says the normal mode), or null |
 //! | `devin_took` | `env`, `session`, `pasted`, `atMs`: Devin's store, a window's conversation, the text the window was given as it was pasted and when | `{took, prompts}`: whether the TUI took that text, as the engine asks the window after a paste (a history row of the session, written since, that begins with it whole), and how many history rows the session has |
 //! | `devin_readiness` | `wire`, `session`, `pane` (`id`, `generation`), `withinMs`, `everyMs`: a Devin window that is open, asked whether it is ready as the engine asks it, until it is ready or unfit or the time is up; the pane host it asks is the asker's, a request a line of the output and its answer a line of the input (`readiness`) | `{answers, ready}`: what the looks answered, in order (`ready`, `held: …`, `unfit: …`, one that came again in a row said once), and whether the last was ready |
@@ -73,13 +74,14 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "newest_session" => newest_session(question),
         "specmint" => specmint(question),
         "devin_launch" => launch::devin_launch(question),
+        "pi_launch" => launch::pi_launch(question),
         "devin_ready" => launch::devin_ready(question),
         "devin_took" => launch::devin_took(question),
         "devin_readiness" => readiness::devin_readiness(question),
         "devin_hooks" => launch::devin_hooks(question),
         "trust" => trust(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, devin_ready, devin_took, devin_readiness, devin_hooks and trust"
+            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks and trust"
         )),
     }
 }
