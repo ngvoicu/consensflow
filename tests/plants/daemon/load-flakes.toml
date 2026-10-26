@@ -186,8 +186,14 @@ runs = ["process-execute"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture.rs"
-find = "            drop((stdout, stderr));"
-replace = "            let _held = (&stdout, &stderr);"
+find = '''
+    // answer back, then the program asked to end, and the group it leads with it.
+    drop((stdout, stderr));
+'''
+replace = '''
+    // answer back, then the program asked to end, and the group it leads with it.
+    let _held = (&stdout, &stderr);
+'''
 
 [[plant]]
 name = "load flakes: the closed-pipe test runs beside the other tests"
