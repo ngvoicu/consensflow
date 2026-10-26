@@ -348,7 +348,7 @@ runs = ["engine-resume-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "                    killing.paused = marked.map(|stop| (project.id, thread.task.number, stop));"
+find = "                    killing.paused = Some((project.id, thread.task.number, stop));"
 replace = "                    let _ = killing;"
 
 [[plant]]

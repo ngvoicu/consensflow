@@ -736,16 +736,6 @@ find = '''                    .position(|killing| killing.pane == *pane);'''
 replace = '''                    .rposition(|_| true);'''
 
 [[plant]]
-name = "review 306: a give-up's pause in an open project is taken back as a suspension's"
-meant = "a_kill_of_an_earlier_window_refused_at_last_leaves_a_later_windows_close_its_own"
-runs = ["engine-dispatcher-resume"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '''                let marked = stop.filter(|_| marked);'''
-replace = '''                let marked = stop;'''
-
-[[plant]]
 name = "review 306: a give-up's exit after a Close is the window's own, not the Close's"
 meant = "a_give_up_whose_kill_is_taken_after_a_close_pauses_its_task_once_for_the_resume"
 runs = ["engine-dispatcher-resume"]
