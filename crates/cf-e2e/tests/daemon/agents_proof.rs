@@ -22,7 +22,7 @@ const TOKEN: &str = "proof-ui-token";
 /// where `fault` says so (nothing, for a right one). The server stands in for
 /// the daemon, and writes the roster file in `home` as the daemon does.
 fn agents_api(home: &Path, fault: &'static str) -> std::io::Result<Server> {
-    let size = if fault == "catalog" { 120 } else { 121 };
+    let size = if fault == "catalog" { 250 } else { 251 };
     let catalog: Vec<Value> = (0..size)
         .map(|at| {
             json!({

@@ -76,9 +76,9 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
   page.on('request', (request) => requests.push(new URL(request.url()).pathname))
   try {
     await page.goto(`${server.url}/?token=${server.token}`)
-    await expect(page.locator('#agents-count')).toHaveText('121 of 121 shown')
+    await expect(page.locator('#agents-count')).toHaveText('251 of 251 shown')
     await expect(page.locator('#lede')).toHaveText(
-      '121 agents, the catalog’s and your own; a project’s staff is picked from them.',
+      '251 agents, the catalog’s and your own; a project’s staff is picked from them.',
     )
     await expect(page.locator('#agents .offer')).toHaveCount(0)
     await expect(page.locator('#agents').getByRole('button', { name: /^Add/ })).toHaveCount(0)
@@ -113,7 +113,7 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
     expect(listAgents(t.env).find((a) => a.name === 'custom').workTier).toBe('complex')
     await expect(form.getByLabel('Work tier')).toHaveValue('auto')
     await expect(page.locator('#lede')).toContainText('1 is yours')
-    await expect(page.locator('#agents-count')).toHaveText('122 of 122 shown')
+    await expect(page.locator('#agents-count')).toHaveText('252 of 252 shown')
     // A catalog name is not yours to define again.
     await form.locator('[name="name"]').fill('gefjon')
     await form.locator('[name="harness"]').selectOption('claude')
@@ -144,14 +144,20 @@ test('a checkbox keeps Claude and OpenAI models to their own harnesses, for ever
       screen.getByLabel(/Claude and OpenAI models only on their own harnesses/)
     await expect(box(page)).not.toBeChecked()
     await expect(member(page, 'kronos')).toBeVisible()
+    await expect(member(page, 'osiris')).toBeVisible()
     await box(page).check()
     await expect(member(page, 'kronos')).toHaveCount(0)
+    // Devin reaches Claude and OpenAI models too: its Opus and its GPT go, its own SWE stays.
+    await expect(member(page, 'osiris')).toHaveCount(0)
+    await expect(member(page, 'amun')).toHaveCount(0)
+    await expect(member(page, 'sobek')).toBeVisible()
     await expect(member(page, 'apollo')).toBeVisible()
     await expect(member(page, 'ares')).toBeVisible()
     await expect(page.locator('#lede')).toContainText(
-      'hidden on Pi and OpenCode: Claude and OpenAI models run on their own harnesses.',
+      'hidden on Pi, OpenCode and Devin: Claude and OpenAI models run on their own harnesses.',
     )
     expect(listAgents(fixture.t.env).find((p) => p.name === 'kronos').hidden).toBe(true)
+    expect(listAgents(fixture.t.env).find((p) => p.name === 'osiris').hidden).toBe(true)
     // The other tab, and the next launch, read the same preference.
     await refreshAgents(second)
     await expect(box(second)).toBeChecked()
@@ -460,6 +466,65 @@ test('all browsing modes keep descending effort order, saved agents among the ca
   }
 })
 
+test('grouped by work tier, a tier lists its agents as the pickers offer them: by harness, then effort from max down, then name', async ({
+  page,
+}) => {
+  // Agents of your own on a model the catalog does not know: light work, every one of them.
+  const agents = [
+    ['amber', 'devin', 'medium'],
+    ['birch', 'claude', 'low'],
+    ['cedar', 'claude', 'max'],
+    ['dune', 'claude', undefined],
+    ['echo', 'codex', 'minimal'],
+    ['flint', 'codex', 'ultra'],
+    ['gale', 'opencode', 'high'],
+    ['heath', 'pi', 'off'],
+    ['iris', 'pi', 'xhigh'],
+  ]
+  const fixture = await catalogPage(
+    page,
+    agents.map(([name, harness, effort]) => ({
+      name,
+      harness,
+      model: 'own-model',
+      ...(effort ? { effort } : {}),
+    })),
+    'tier',
+  )
+  try {
+    for (const screen of [page, fixture.second]) {
+      await fixture.saved(screen)
+      await expect(screen.locator('.agent-group > h3')).toHaveText(['Light work · 9'])
+      await expect(screen.locator('.callsign')).toHaveText([
+        'cedar',
+        'birch',
+        'dune',
+        'flint',
+        'echo',
+        'gale',
+        'iris',
+        'heath',
+        'amber',
+      ])
+    }
+    // The other groupings keep their own order: a model's agents by effort, then by name.
+    await page.getByLabel('Group by').selectOption('none')
+    await expect(page.locator('.callsign')).toHaveText([
+      'flint',
+      'cedar',
+      'iris',
+      'gale',
+      'amber',
+      'birch',
+      'echo',
+      'heath',
+      'dune',
+    ])
+  } finally {
+    await fixture.close()
+  }
+})
+
 test('model capability order takes precedence over agent names and reasoning effort', async ({
   page,
 }) => {
@@ -516,12 +581,21 @@ test('model capability order takes precedence over agent names and reasoning eff
             group === 'model-reasoning' ? '.agent-group h3' : '.member__head > .tag:not(.tag--own)',
           )
           .allTextContents()
-        // In capability order, whichever of them a group holds (Devin's: Astra and Sol).
+        // In capability order, whichever of them a group holds (Devin's: every GPT it lists).
         const shown = [...new Set(labels.map((label) => label.split(' · ')[0]))]
         expect(shown).toEqual(
-          ['GPT-6 Astra', 'GPT-6.1 Sol', 'GPT-5.6 Terra', 'GPT-5.6 Luna'].filter((name) =>
-            shown.includes(name),
-          ),
+          [
+            'GPT-6 Astra',
+            'GPT-6.1 Sol',
+            'GPT-6 Sol',
+            'GPT-5.6 Sol',
+            'GPT-5.6 Terra',
+            'GPT-6 Luna',
+            'GPT-5.6 Luna',
+            'GPT-5.5',
+            'GPT-5.4 Mini',
+            'GPT-5.4',
+          ].filter((name) => shown.includes(name)),
         )
       }
     }
@@ -637,13 +711,13 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
         'Work tier',
       ])
       await expect(screen.getByRole('heading', { level: 3 })).toHaveCount(0)
-      await expect(screen.locator('#agents-count')).toHaveText('129 of 129 shown')
+      await expect(screen.locator('#agents-count')).toHaveText('259 of 259 shown')
     }
     await fixture.saved(own)
     await expect(own.locator('#agents-count')).toHaveText('8 of 8 shown')
     await search.fill('Astra')
     await expect(own.locator('#agents-count')).toHaveText('5 of 8 shown')
-    await expect(page.locator('#agents-count')).toHaveText('129 of 129 shown')
+    await expect(page.locator('#agents-count')).toHaveText('259 of 259 shown')
     await expect(own.locator('.callsign')).toHaveCount(5)
     await group.selectOption('model-reasoning')
     await expect(own.getByRole('heading', { level: 3 })).toHaveCount(4)
@@ -652,7 +726,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     ).toBeVisible()
     await page.getByRole('searchbox').fill('Astra')
     await page.getByLabel('Group by').selectOption('model-reasoning')
-    await expect(page.locator('#agents-count')).toHaveText('25 of 129 shown')
+    await expect(page.locator('#agents-count')).toHaveText('25 of 259 shown')
     await expect(page.getByRole('heading', { level: 3 })).toHaveText([
       'GPT-6 Astra · Max · 4',
       'GPT-6 Astra · Xhigh · 6',
@@ -682,7 +756,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     await expect(own.locator('.callsign')).toHaveCount(5)
     await search.fill('OpenRouter')
     await expect(own.locator('#agents')).toContainText('No agents match')
-    await expect(page.locator('#agents-count')).toHaveText('25 of 129 shown')
+    await expect(page.locator('#agents-count')).toHaveText('25 of 259 shown')
     await own.getByRole('button', { name: 'Clear filters' }).click()
     await expect(search).toHaveValue('')
     await expect(group).toHaveValue('model-reasoning')
@@ -707,7 +781,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     await page.getByRole('button', { name: 'Clear filters' }).click()
     await expect(page.getByRole('searchbox')).toHaveValue('')
     await expect(page.getByLabel('Group by')).toHaveValue('model-reasoning')
-    await expect(page.getByRole('heading', { level: 3 })).toHaveCount(53)
+    await expect(page.getByRole('heading', { level: 3 })).toHaveCount(170)
     await expect(group).toHaveValue('harness')
     await group.selectOption('model-reasoning')
     for (const name of [
@@ -721,7 +795,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     ]) {
       await expect(own.getByRole('heading', { name, exact: true })).toBeVisible()
     }
-    await expect(page.locator('#agents-count')).toHaveText('129 of 129 shown')
+    await expect(page.locator('#agents-count')).toHaveText('259 of 259 shown')
     await expect(member(page, 'astraeus')).toBeVisible()
     // No description of a model anywhere: its tier and scores say it all.
     await expect(page.locator('#agents')).not.toContainText('Good for')
@@ -766,7 +840,10 @@ test('shared model cards default to every model and reasoning across all harness
       if (!expected.has(key)) expected.set(key, [])
       expected.get(key).push(p.name)
     }
-    expect([...expected.values()].filter((names) => names.length > 1)).toHaveLength(37)
+    // Since 2026-10-25 Devin's rows of a model another harness carries share its card
+    // (Haiku 5.5, Gemini 3.8 Flash, GLM 5.3, Grok 4.7, Kimi K3, GPT-5.6 Terra and Luna),
+    // and Gemini 4 Argon is on Devin and Pi at each of its three levels.
+    expect([...expected.values()].filter((names) => names.length > 1)).toHaveLength(44)
     for (const screen of [page, fixture.second]) {
       await expect(screen.getByLabel('Group by')).toHaveValue('model-reasoning')
       const cards = screen.locator('.model-group')
@@ -783,17 +860,21 @@ test('shared model cards default to every model and reasoning across all harness
       // Every agent under a model card is a row with its route.
       for (const card of summaries) expect(card.routes).toBe(card.names.length)
       const luna = cards.filter({
-        has: screen.getByRole('heading', { name: 'GPT-5.6 Luna · Xhigh · 3', exact: true }),
+        has: screen.getByRole('heading', { name: 'GPT-5.6 Luna · Xhigh · 4', exact: true }),
       })
-      await expect(luna.locator('.callsign')).toHaveText(['bil', 'diana', 'phoebe'])
+      await expect(luna.locator('.callsign')).toHaveText(['bil', 'diana', 'phoebe', 'sahure'])
       await expect(luna.locator('.agent-route')).toHaveText([
         'OpenRouter · API',
         'Codex login',
         'Codex subscription',
+        'Devin account',
       ])
       await screen.getByRole('searchbox').fill('DeepSeek V4 Pro')
+      // Devin's own V4 Pro is another snapshot than OpenRouter's 0813: a card of its own.
       await expect(screen.locator('.model-summary h3')).toHaveText([
         'DeepSeek V4 Pro (0813) · Max · 2',
+        'DeepSeek V4 Pro · Max · 1',
+        'DeepSeek V4 Pro · High · 1',
       ])
     }
   } finally {

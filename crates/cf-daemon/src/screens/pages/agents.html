@@ -152,7 +152,7 @@ if (window.parent !== window) {
     <button type="button">Clear filters</button>
   </div>
   <p class="tier-guide">The work tier is what a task finds an agent by.</p>
-  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and OpenCode</label>
+  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi, OpenCode and Devin</label>
   <div id="agents"></div>
   </section>
 
@@ -209,6 +209,9 @@ const compareModels = (a, b) => modelRank(a.modelKey) - modelRank(b.modelKey) ||
 const compareEffort = (a, b) => rank(EFFORT_ORDER, a) - rank(EFFORT_ORDER, b) || compareText(a, b);
 const compareAgents = (a, b) => compareModels(a.profile, b.profile) ||
   compareEffort(effortValue(a), effortValue(b)) || compareText(a.name, b.name);
+// Inside a work tier, the order the pickers offer an agent in: harness by harness, the hardest thinking first.
+const compareInTier = (a, b) => rank(Object.keys(HARNESS_LABELS), a.harness) - rank(Object.keys(HARNESS_LABELS), b.harness) ||
+  compareEffort(effortValue(a), effortValue(b)) || compareText(a.name, b.name);
 
 function browsingGroups(entries, sectionId) {
   const section = document.querySelector(sectionId);
@@ -229,7 +232,7 @@ function browsingGroups(entries, sectionId) {
     groups.get(key).rows.push(p);
   }
   for (const group of groups.values()) {
-    group.rows.sort(compareAgents);
+    group.rows.sort(by === 'tier' ? compareInTier : compareAgents);
     group.shared = group.modelGroup ? ['workTier'].filter(field =>
       group.rows.every(p => JSON.stringify(p.profile[field]) === JSON.stringify(group.rows[0].profile[field]))) : [];
     // The tier's note goes with the tier pill: said once on the card when the tier is.
@@ -308,7 +311,7 @@ function renderAgents(data) {
   const mine = offered.filter(p => p.custom).length;
   document.querySelector('#lede').textContent = offered.length + ' agents, the catalog’s and your own; a project’s staff is picked from them.' +
     (mine === 0 ? '' : ' ' + mine + ' ' + (mine === 1 ? 'is' : 'are') + ' yours, defined here.') +
-    (hidden === 0 ? '' : ' ' + hidden + ' hidden on Pi and OpenCode: Claude and OpenAI models run on their own harnesses.') +
+    (hidden === 0 ? '' : ' ' + hidden + ' hidden on Pi, OpenCode and Devin: Claude and OpenAI models run on their own harnesses.') +
     (missing === 0 ? '' : ' ' + missing + ' on a harness not installed here: see Harnesses.');
   const groups = browsingGroups(entries, '#agents-section');
   if (groups.length === 0) { host.append(el('p', 'empty', 'No agents match these filters.')); return; }

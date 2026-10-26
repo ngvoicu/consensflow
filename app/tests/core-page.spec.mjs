@@ -663,7 +663,7 @@ const calls = (page, operation) =>
     operation,
   )
 
-/** What a chief pick list offers: each harness group's agents, and whether each is disabled. */
+/** What a chief pick list offers: each tier group's agents, and whether each is disabled. */
 const chiefGroups = (select) =>
   select
     .locator('optgroup')
@@ -2458,6 +2458,78 @@ test('a member whose agent is gone says so on the board and in the staff, with R
   await expect(member.getByRole('button', { name: 'Remove Worker @diana' })).toBeVisible()
 })
 
+test('a project staffed with Khnum after the release that dropped it says it left the catalog, and offers other agents', async ({
+  page,
+}) => {
+  // Khnum, Devin's SWE-1.6 Slow, left the catalog on 2026-10-25: Devin no longer offers it.
+  // The staff saved before still names it, and so does the chief.
+  const why = 'Devin no longer offers SWE-1.6 Slow'
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  Object.assign(chief.participant, { agent: 'khnum', harness: 'devin' })
+  Object.assign(chief, {
+    agentMissing: true,
+    agentRetired: why,
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  data.boards[1].lanes.push({
+    participant: participant(9, 'khnum', 'worker', { harness: 'devin', tier: 'light' }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+    agentMissing: true,
+    agentRetired: why,
+  })
+  await open(page, data)
+  const row = page.locator('tr[data-handle="khnum"]')
+  await expect(row.locator('.row-status')).toHaveText(
+    'khnum left the catalog: Devin no longer offers SWE-1.6 Slow. Remove @khnum from the staff and add another agent',
+  )
+  await expect(row.locator('.row-status')).toHaveAttribute('data-state', 'missing')
+  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+  await expect(card.locator('.terminal-status')).toHaveText(
+    'khnum left the catalog: Devin no longer offers SWE-1.6 Slow. Switch the chief to another agent',
+  )
+  // The staff row says so, with Remove at hand, and the pick list beside it offers the others.
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const member = settings.locator('tr[data-handle="khnum"]')
+  await expect(member.locator('.member-meta')).toHaveText(
+    'khnum left the catalog: Devin no longer offers SWE-1.6 Slow. Remove it and add another agent',
+  )
+  await expect(member.getByRole('button', { name: 'Remove Worker @khnum' })).toBeVisible()
+  await expect(settings.getByLabel('Agent').locator('option', { hasText: /^khnum / })).toHaveCount(
+    0,
+  )
+  await expect(settings.getByLabel('Agent').locator('option')).not.toHaveCount(0)
+  await settings.getByRole('button', { name: 'Close' }).click()
+  // Switch chief says it too, above the agents the chief may go on with.
+  await card.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  const switching = page.getByRole('dialog', { name: 'Switch the chief' })
+  await expect(switching.getByRole('status')).toHaveText(
+    'The chief runs on khnum, which left the catalog: Devin no longer offers SWE-1.6 Slow. Pick another agent.',
+  )
+  await expect(
+    switching.getByLabel('The chief runs on').locator('option', { hasText: /^khnum / }),
+  ).toHaveCount(0)
+  await switching.getByLabel('The chief runs on').selectOption('hera')
+  await switching.getByRole('button', { name: 'Switch', exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'chief.switch'))
+    .toEqual([{ project: 1, agent: 'hera', when: 'turn', note: false }])
+})
+
+test('Switch chief says nothing of a gone agent while the chief runs on one it has', async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('.chief-gone')).toBeHidden()
+})
+
 test("says on the chief's card in the dock what the chief is doing and runs on, and switches it from there", async ({
   page,
 }) => {
@@ -2488,11 +2560,8 @@ test("says on the chief's card in the dock what the chief is doing and runs on, 
   await expect(dialog).toBeVisible()
   // What the chief runs on now is no switch.
   expect(await chiefGroups(dialog.getByLabel('The chief runs on'))).toContainEqual([
-    'Codex',
-    [
-      ['diana', false],
-      ['hera', true],
-    ],
+    'T1 · Critical work',
+    [['hera', true]],
   ])
 })
 
@@ -2513,7 +2582,11 @@ test("keeps the chief's card in the dock while its window is down: its agent gon
   await expect(status).toHaveAttribute('data-state', 'missing')
   await expect(card.locator('.terminal-host')).toHaveCount(0)
   await card.getByRole('button', { name: 'Switch the chief to another agent' }).click()
-  await expect(page.getByRole('dialog', { name: 'Switch the chief' })).toBeVisible()
+  const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('status')).toHaveText(
+    'The chief runs on astraeus, which is no longer among your agents: pick another agent.',
+  )
 })
 
 test('a terminal and a board too narrow for its columns keep a visible scrollbar', async ({
@@ -2916,6 +2989,109 @@ test.describe('on Windows', () => {
     await expect.poll(sent).toEqual([[3]])
     expect(await copied()).toEqual(['copy'])
   })
+})
+
+/**
+ * Complex agents on four harnesses at every effort, listed out of order, and
+ * the order a pick list offers them in: harness by harness, the hardest
+ * thinking first (Codex's ultra above max, an agent naming no effort last),
+ * then by name.
+ */
+function ladder() {
+  const agent = (name, harness, effort) => ({
+    name,
+    harness,
+    model: `${harness}-model`,
+    ...(effort ? { effort } : {}),
+    profile: { workTier: 'complex' },
+  })
+  return {
+    agents: [
+      agent('larch', 'devin', 'low'),
+      agent('ash', 'claude'),
+      agent('birch', 'claude', 'low'),
+      agent('kapok', 'devin', 'max'),
+      agent('cedar', 'claude', 'max'),
+      agent('ivy', 'pi', 'minimal'),
+      agent('dogwood', 'claude', 'xhigh'),
+      agent('elm', 'claude', 'medium'),
+      agent('gum', 'codex', 'medium'),
+      agent('fir', 'claude', 'high'),
+      agent('hazel', 'codex', 'ultra'),
+      agent('juniper', 'pi', 'high'),
+      agent('alder', 'claude', 'high'),
+    ],
+    order: [
+      'cedar',
+      'dogwood',
+      'alder',
+      'fir',
+      'elm',
+      'birch',
+      'ash',
+      'hazel',
+      'gum',
+      'juniper',
+      'ivy',
+      'kapok',
+      'larch',
+    ],
+  }
+}
+
+/** A pick list's groups as the human reads them: each label, and the names of its agents. */
+const pickGroups = (select) =>
+  select
+    .locator('optgroup')
+    .evaluateAll((all) =>
+      all.map((group) => [
+        group.label,
+        [...group.querySelectorAll('option')].map((option) => option.textContent.split(' · ')[0]),
+      ]),
+    )
+
+test("the staff's pick list orders a tier's agents by harness, then by effort from max down to none, then by name", async ({
+  page,
+}) => {
+  const data = model()
+  const { agents, order } = ladder()
+  data.agents.push(...agents)
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  // zeus and diana are workers already: the rest of the roster is on offer.
+  expect(await pickGroups(dialog.getByLabel('Agent'))).toEqual([
+    ['T1 · Critical work', ['hera']],
+    ['T2 · Complex work', order],
+    ['T4 · Light work', ['athena']],
+  ])
+  await expect(dialog.getByLabel('Agent').locator('option', { hasText: /^cedar · / })).toHaveText(
+    'cedar · claude-model · claude · max',
+  )
+})
+
+test("the chief's pick list groups as the staff's does, by tier, then harness and effort, in New project and Switch chief", async ({
+  page,
+}) => {
+  const data = model()
+  const { agents, order } = ladder()
+  data.agents.push(...agents)
+  await open(page, data)
+  // Every harness is installed here; Pi's kronos is hidden and pygmalion draws, so neither is on offer.
+  const expected = [
+    ['T1 · Critical work', ['hera']],
+    ['T2 · Complex work', order],
+    ['T3 · Standard work', ['zeus']],
+    ['T4 · Light work', ['diana', 'athena']],
+  ]
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  expect(await pickGroups(fresh.getByLabel('The chief runs on'))).toEqual(expected)
+  await fresh.getByRole('button', { name: 'Cancel' }).click()
+  await expect(fresh).toBeHidden()
+  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  const switching = page.getByRole('dialog', { name: 'Switch the chief' })
+  expect(await pickGroups(switching.getByLabel('The chief runs on'))).toEqual(expected)
 })
 
 test('shows the staff as one row per member and role, and adds a saved agent in a role it fits', async ({
@@ -3601,7 +3777,7 @@ test('New project opens on the defaults every time: what was set in it before is
   await expect(made.specs.folder).toBeEnabled()
 })
 
-test("offers a new project's chief only the agents on a harness installed here, harness by harness", async ({
+test("offers a new project's chief only the agents on a harness installed here, by tier", async ({
   page,
 }) => {
   const data = model()
@@ -3621,14 +3797,14 @@ test("offers a new project's chief only the agents on a harness installed here, 
   // Claude Code and Devin are not installed here, and Pi's one agent is hidden; pygmalion
   // is a Codex agent, but an image agent is never the chief.
   expect(await chiefGroups(dialog.getByLabel('The chief runs on'))).toEqual([
+    ['T1 · Critical work', [['hera', false]]],
     [
-      'Codex',
+      'T4 · Light work',
       [
         ['diana', false],
-        ['hera', false],
+        ['athena', false],
       ],
     ],
-    ['OpenCode', [['athena', false]]],
   ])
   await expect(dialog.locator('tr[data-agent="ares"]')).toHaveCount(0)
   await expect(dialog.locator('option', { hasText: 'ares' })).toHaveCount(0)
@@ -8660,15 +8836,15 @@ test('switches the chief from its card to a saved agent on a harness installed h
   await expect(select.locator('option').first()).toHaveText('Pick an agent')
   // Devin is not installed here, and a hidden agent (Pi's one) is never on offer.
   expect(await chiefGroups(select)).toEqual([
-    ['Claude Code', [['zeus', true]]],
+    ['T1 · Critical work', [['hera', false]]],
+    ['T3 · Standard work', [['zeus', true]]],
     [
-      'Codex',
+      'T4 · Light work',
       [
         ['diana', false],
-        ['hera', false],
+        ['athena', false],
       ],
     ],
-    ['OpenCode', [['athena', false]]],
   ])
   await select.selectOption('hera')
   await dialog.getByLabel('Switch now, cutting its turn off').check()
