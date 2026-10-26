@@ -1356,8 +1356,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/machine.rs"
-find = "                Lock::NotRunning(why)"
-replace = "                Lock::Held"
+find = "                Lock::NotRunning(why)\n            } else {"
+replace = "                Lock::Held\n            } else {"
 
 [[plant]]
 name = "windows runner: zeelin is asked of the lock's folder, not its owner file"
@@ -1616,12 +1616,12 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/machine.rs"
-find = '''                    self.name, shared.linux
-                );
-                return Ok((Ready::Refused(why), Busy::No));'''
-replace = '''                    self.name, shared.linux
-                );
-                said.push(why);'''
+find = '''                        self.name, shared.linux
+                    );
+                    return Ok((Ready::Refused(why), Busy::No));'''
+replace = '''                        self.name, shared.linux
+                    );
+                    said.push(why);'''
 
 [[plant]]
 name = "windows runner: a stop heard while the laptop is asked is read as what the probes came to"
@@ -1803,7 +1803,7 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/queue.rs"
-find = "        if minutes == 0 {\n            return Ok(Waited::Refused(blocked));\n        }\n"
+find = "        if minutes == 0 {\n            return Ok(Waited::Refused(shown));\n        }\n"
 replace = ""
 
 [[plant]]
@@ -1845,4 +1845,116 @@ runs = ["xtask-lib-windows"]
 file = "tools/xtask/src/windows/queue.rs"
 find = "waiting for the machine alone\"\n                ))\n                .map_err(Error::Output)?;\n                None"
 replace = "waiting for the machine alone\"\n                ))\n                .map_err(Error::Output)?;\n                return Err(Error::Output(cause));"
+
+# T-778: Calliope's review of T-701 (T-777).
+
+[[plant]]
+name = "windows runner: a machine the runner does not share is not asked what holds its copy"
+meant = "a_machine_the_runner_does_not_share_is_asked_what_holds_its_copy_and_nothing_of_poker_lab_nor_its_disk"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "        let state = self.state(context, dir)?;\n        if let Some(shared)"
+replace = "        if self.shared.is_none() {\n            return Ok((Ready::Go(said), Busy::No));\n        }\n        let state = self.state(context, dir)?;\n        if let Some(shared)"
+
+[[plant]]
+name = "windows runner: the head of zeewin's queue sends its tree into a holder outside the queue"
+meant = "a_run_for_zeewin_waits_while_a_program_outside_the_queue_holds_it_and_sends_nothing"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "        let state = self.state(context, dir)?;\n        if let Some(shared)"
+replace = "        if self.shared.is_none() {\n            return Ok((Ready::Go(said), Busy::No));\n        }\n        let state = self.state(context, dir)?;\n        if let Some(shared)"
+
+[[plant]]
+name = "windows runner: a run told not to wait goes behind the runs queued for the machine"
+meant = "a_run_told_not_to_wait_is_refused_while_runs_are_queued_for_the_machine_and_never_asks_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "        if queued > 0 {\n            return Ok(Waited::Refused("
+replace = "        if queued > 1_000_000 {\n            return Ok(Waited::Refused("
+
+[[plant]]
+name = "windows runner: a run told not to wait is sent ahead of the runs queued for the machine"
+meant = "a_run_told_not_to_wait_is_refused_while_a_run_is_queued_for_the_machine_and_sends_nothing"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "        if queued > 0 {\n            return Ok(Waited::Refused("
+replace = "        if queued > 1_000_000 {\n            return Ok(Waited::Refused("
+
+[[plant]]
+name = "windows runner: the seconds the run ahead has been there are news at every look"
+meant = "a_run_behind_another_says_where_it_stands_once_in_the_first_minute_whatever_the_seconds_the_other_has_been_there"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "|(was, _)| *was != blocked"
+replace = "|(was, _)| *was != shown"
+
+[[plant]]
+name = "windows runner: a ticket is named by a clock that was set back"
+meant = "a_run_that_comes_after_the_clock_was_set_back_is_still_behind_the_runs_that_were_there"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "        let mut at = newest.map_or(now_ms, |newest| now_ms.max(newest + 1));"
+replace = "        let _ = newest;\n        let mut at = now_ms;"
+
+[[plant]]
+name = "windows runner: a ticket touched in the future is a run's"
+meant = "a_ticket_touched_in_the_future_is_a_run_killed_before_the_clock_was_set_back"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "touched - now_ms <= AHEAD_MS && "
+replace = ""
+
+[[plant]]
+name = "windows runner: a machine that cannot be read ends a wait that is on"
+meant = "a_machine_that_cannot_be_read_once_the_wait_is_on_does_not_end_it_and_is_said"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "Err(why) if !looked || minutes == 0 => return Err(Error::Unready(why)),"
+replace = "Err(why) => return Err(Error::Unready(why)),"
+
+[[plant]]
+name = "windows runner: a machine that cannot be read at the first look is waited for"
+meant = "a_machine_that_cannot_be_asked_is_the_error_it_was"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "Err(why) if !looked || minutes == 0 => return Err(Error::Unready(why)),"
+replace = "Err(why) if looked && minutes == 0 => return Err(Error::Unready(why)),"
+
+[[plant]]
+name = "windows runner: a wait that ended on a machine it could not read says it was busy"
+meant = "a_machine_that_cannot_be_read_all_the_wait_ends_it_with_the_error_when_the_time_is_up"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "            if let Some(why) = unread {"
+replace = "            if let Some(why) = unread.filter(|_| false) {"
+
+[[plant]]
+name = "windows runner: the head looks at a busy machine as often as at the queue"
+meant = "a_run_ahead_of_the_queue_looks_at_a_busy_machine_every_half_minute_then_every_minute"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "            Some(before) => MACHINE_LOOK_MS[before.min(1)],"
+replace = "            Some(_) => LOOK_MS,"
 

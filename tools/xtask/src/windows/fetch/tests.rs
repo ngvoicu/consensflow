@@ -60,6 +60,11 @@ impl Rig {
             .chain([
                 ("PATH".into(), path),
                 ("CF_LOG".into(), bin.path().join("log").into_os_string()),
+                // A queue of its own: the real one is in the home folder (T-778).
+                (
+                    "CF_WINDOWS_QUEUES".into(),
+                    bin.path().join("queues").into_os_string(),
+                ),
                 ("CF_COUNT".into(), bin.path().join("count").into_os_string()),
                 (
                     "CF_TARBALL".into(),
@@ -154,6 +159,11 @@ impl Rig {
 
     fn program(&self, name: &str, body: &str) {
         let path = self.bin.path().join(name);
+        let body = if name == "ssh" {
+            crate::windows::testing::ssh_stand_in(body)
+        } else {
+            body.to_owned()
+        };
         fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -638,4 +648,13 @@ fn the_reports_come_into_the_main_checkouts_folder_when_the_run_goes_from_a_tree
     let (ended, said) = rig.bring();
     ended.unwrap();
     assert_eq!(said, "");
+}
+
+/// The cases keep a queue of their own (the real one is in the home folder, and a run told not to
+/// wait reads it): see `windows::run`'s case of the same words.
+#[test]
+fn a_case_names_a_queue_folder_of_its_own() {
+    let rig = Rig::new();
+    let queues = rig.context.env.path("CF_WINDOWS_QUEUES").unwrap();
+    assert!(queues.starts_with(rig.bin.path()), "{queues:?}");
 }

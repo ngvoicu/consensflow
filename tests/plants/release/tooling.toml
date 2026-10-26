@@ -3335,3 +3335,24 @@ runs = ["xtask-lib-plants"]
 file = "tools/xtask/src/plants/runs.rs"
 find = "        Some(if why.ends_with(NONE_RAN) {"
 replace = "        Some(if false {"
+
+[[plant]]
+name = "tooling: a machine's limit on the tests it runs does not reach nextest"
+meant = "the_threads_libtest_is_told_by_the_environment_are_the_threads_nextest_is_given_unless_the_command_names_its_own"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = "                let words = with_the_threads_of_the_environment(words, context);\n"
+replace = ""
+
+[[plant]]
+name = "tooling: the environment's threads win over the command's own"
+meant = "the_threads_libtest_is_told_by_the_environment_are_the_threads_nextest_is_given_unless_the_command_names_its_own"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = "    if words[..before].iter().any(|word| word == \"--test-threads\") {\n        return words;\n    }\n"
+replace = "    words.retain(|word| word != \"--test-threads\");\n"
+

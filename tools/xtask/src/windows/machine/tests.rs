@@ -387,15 +387,42 @@ esac
         }
     }
 
+    /// zeewin is no one's but the runner's, and its queue is the runner's too: a run is asked
+    /// what is on its copy (a run, a program holding its lock) as the laptop's are, so that the
+    /// head of its queue waits for an holder outside the queue instead of uploading its tree
+    /// into a 75 (T-777, P2-1: that drained the queue, one upload for each run behind). It has
+    /// no poker-lab to ask of, and no disk floor.
     #[test]
-    fn a_machine_the_runner_does_not_share_is_asked_nothing() {
-        let laptop = Laptop::new("held", "free 1");
+    fn a_machine_the_runner_does_not_share_is_asked_what_holds_its_copy_and_nothing_of_poker_lab_nor_its_disk(
+    ) {
         let zeewin = Machine::named("zeewin").unwrap();
+        // The stand-in answers every machine but zeelin with the one answer: a nearly full disk
+        // is no reason, a run on the copy is.
+        let laptop = Laptop::new("held", "free 1");
         assert_eq!(
             zeewin.ready(&laptop.context, "consensflow-build"),
             Ok(Ready::Go(Vec::new()))
         );
-        assert!(laptop.asked().is_empty());
+        assert_eq!(laptop.asked(), ["zeewin"]);
+        let laptop = Laptop::new("held", "free 614\nrun");
+        assert_eq!(
+            zeewin.ready(&laptop.context, "consensflow-build"),
+            Ok(Ready::Refused(
+                "zeewin is busy: a run goes on there, and no run goes while it does.".into()
+            ))
+        );
+        let laptop = Laptop::new("held", "free 614\nheld");
+        let refused = zeewin.ready(&laptop.context, "consensflow-build").unwrap();
+        assert!(
+            matches!(&refused, Ready::Refused(why) if why.starts_with("zeewin is busy: its run lock is held")),
+            "{refused:?}"
+        );
+        // A machine that cannot say what it has is the error, as the laptop is.
+        let laptop = Laptop::new("held", "none");
+        assert!(zeewin
+            .ready(&laptop.context, "consensflow-build")
+            .unwrap_err()
+            .starts_with("zeewin did not say what it has free"));
     }
 
     #[test]

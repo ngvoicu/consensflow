@@ -32,6 +32,11 @@
 //! A run neither takes the lock nor waits on it, and a poker-lab job that starts while a run
 //! goes on is not seen.
 //!
+//! **Every machine is asked what is on its copy** (the runner's own zeewin too, T-777 P2-1): a
+//! run in the copy, or a program that holds its run lock, makes it busy, and the head of a queue
+//! waits for it instead of uploading its tree into a 75 (and each run behind it after it). Only a
+//! machine the runner shares has poker-lab to ask of and a disk floor.
+//!
 //! The laptop's C: holds Gabriel's own files and WSL's disk: a run there is sent only while its
 //! profile's disk has [`FLOOR_GIB`] free, as the laptop's PowerShell says it, and is refused with
 //! 75 below it.
@@ -41,7 +46,7 @@
 //! copy), and else zeewin.
 
 use super::interrupt::Interrupt;
-use super::queue::Queues;
+use super::queue::{queued_words, Queues};
 use super::script::{encode_script, LOCK, OWNER};
 use cf_base::time::{Clock, SystemClock};
 
@@ -144,9 +149,9 @@ impl Machine {
         }
     }
 
-    /// Whether a run may be sent now, for the copy `dir`: on a machine the runner shares, why
-    /// not if it may not ([`Ready::Refused`], which the run ends with 75), and what was found
-    /// that the person is told of if it may. A machine that could not be asked is the error.
+    /// Whether a run may be sent now, for the copy `dir`: why not if it may not
+    /// ([`Ready::Refused`], which the run ends with 75), and what was found that the person is told
+    /// of if it may. A machine that could not be asked is the error.
     pub fn ready(&self, context: &Context, dir: &str) -> Result<Ready, String> {
         Ok(match self.look(context, dir)? {
             (Ready::Go(_), Busy::Run) => Ready::Refused(format!(
@@ -162,41 +167,45 @@ impl Machine {
     }
 
     /// [`Machine::ready`], and what holds the copy besides: a run of this runner, or a program
-    /// that took its lock (none is known of a machine the runner does not share, or that is
-    /// refused).
+    /// that took its lock. Every machine is asked what is on its copy, the runner's own as well
+    /// as the laptop: the head of a queue that does not ask uploads its tree into the 75 of a holder
+    /// outside the queue (a tree whose runner predates the queue, another project's copy), and
+    /// each run behind it does the same in its turn (T-777, P2-1). Only a machine the runner
+    /// shares has poker-lab to ask of and a disk floor.
     fn look(&self, context: &Context, dir: &str) -> Result<(Ready, Busy), String> {
-        let Some(shared) = &self.shared else {
-            return Ok((Ready::Go(Vec::new()), Busy::No));
-        };
         let mut said = Vec::new();
-        match lock_of(context, shared) {
-            Lock::Held => {
-                let why = format!(
-                    "{} is busy: poker-lab's job holds it (~/{} on {}), and no run goes while it does.",
-                    self.name, shared.lock, shared.linux
-                );
-                return Ok((Ready::Refused(why), Busy::No));
-            }
-            Lock::Free => {}
-            Lock::NotRunning(why) => said.push(format!(
-                "{} did not answer ({why}), so Ubuntu is not running there and no poker-lab job can hold its lock: going on",
-                shared.linux
-            )),
-            Lock::Unknown(why) => {
-                let why = format!(
-                    "{} may be busy: {} answered, but not with whether poker-lab's job holds it ({why}), and no run goes while that is not known.",
-                    self.name, shared.linux
-                );
-                return Ok((Ready::Refused(why), Busy::No));
+        if let Some(shared) = &self.shared {
+            match lock_of(context, shared) {
+                Lock::Held => {
+                    let why = format!(
+                        "{} is busy: poker-lab's job holds it (~/{} on {}), and no run goes while it does.",
+                        self.name, shared.lock, shared.linux
+                    );
+                    return Ok((Ready::Refused(why), Busy::No));
+                }
+                Lock::Free => {}
+                Lock::NotRunning(why) => said.push(format!(
+                    "{} did not answer ({why}), so Ubuntu is not running there and no poker-lab job can hold its lock: going on",
+                    shared.linux
+                )),
+                Lock::Unknown(why) => {
+                    let why = format!(
+                        "{} may be busy: {} answered, but not with whether poker-lab's job holds it ({why}), and no run goes while that is not known.",
+                        self.name, shared.linux
+                    );
+                    return Ok((Ready::Refused(why), Busy::No));
+                }
             }
         }
         let state = self.state(context, dir)?;
-        if state.free_gib < shared.floor_gib {
-            let why = format!(
-                "{} is short of disk: a run needs {} GiB free there, and it has {}.",
-                self.name, shared.floor_gib, state.free_gib
-            );
-            return Ok((Ready::Refused(why), Busy::No));
+        if let Some(shared) = &self.shared {
+            if state.free_gib < shared.floor_gib {
+                let why = format!(
+                    "{} is short of disk: a run needs {} GiB free there, and it has {}.",
+                    self.name, shared.floor_gib, state.free_gib
+                );
+                return Ok((Ready::Refused(why), Busy::No));
+            }
         }
         let busy = if state.running {
             Busy::Run
@@ -240,12 +249,7 @@ impl Machine {
         let queued = Queues::of(&context.env)
             .map_or(0, |queues| queues.depth(&self.name, SystemClock.now_ms()));
         if queued > 0 {
-            let (runs, are) = if queued == 1 {
-                ("run", "is")
-            } else {
-                ("runs", "are")
-            };
-            return Free::No(format!("{queued} {runs} {are} queued for it"));
+            return Free::No(queued_words(queued));
         }
         match self.look(context, dir) {
             Ok((Ready::Go(_), Busy::No)) => Free::Yes,

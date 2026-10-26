@@ -76,6 +76,12 @@ impl Rig {
             .chain([
                 ("PATH".into(), path),
                 ("CF_LOG".into(), bin.path().join("log").into_os_string()),
+                // A queue of its own: the real one is in the home folder, and a run told not to
+                // wait reads it (T-778).
+                (
+                    "CF_WINDOWS_QUEUES".into(),
+                    bin.path().join("queues").into_os_string(),
+                ),
                 (
                     "CF_TARBALL".into(),
                     bin.path().join("tree.tgz").into_os_string(),
@@ -115,6 +121,11 @@ impl Rig {
     /// A program of the machine this runs on, which is this script.
     fn program(&self, name: &str, body: &str) {
         let path = self.bin.path().join(name);
+        let body = if name == "ssh" {
+            crate::windows::testing::ssh_stand_in(body)
+        } else {
+            body.to_owned()
+        };
         fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -511,9 +522,10 @@ fn a_probe_ended_by_something_else_is_no_stop() {
 }
 
 #[test]
-fn a_run_on_zeewin_asks_nothing_first() {
+fn a_run_on_zeewin_asks_what_holds_its_copy_first_and_nothing_of_poker_lab_nor_its_disk() {
     let rig = Rig::new();
     rig.program("scp", SENDS);
+    // A laptop's stand-in, whose zeelin holds a job and whose disk has 1 GiB: neither is zeewin's.
     rig.program("ssh", &laptop("held", 1));
     let (ended, _, _) = run_on(
         &rig,
@@ -522,8 +534,11 @@ fn a_run_on_zeewin_asks_nothing_first() {
     );
     assert_eq!(ended.unwrap(), Outcome::Exited(0));
     let log = rig.log();
-    assert!(log[0].starts_with("scp\t"), "{log:?}");
-    assert_eq!(log.len(), 2, "{log:?}");
+    // Its state, then the tree, then the run: no ssh to zeelin.
+    assert_eq!(log.len(), 3, "{log:?}");
+    assert!(log[0].starts_with("ssh\tzeewin\t"), "{log:?}");
+    assert!(log[1].starts_with("scp\t"), "{log:?}");
+    assert!(asked(&log, "zeelin").is_empty(), "{log:?}");
 }
 
 #[test]
@@ -1089,6 +1104,11 @@ set -- "$host" "$last"
 impl Rig {
     /// The run waits for its turn in the queue folder `queues`, looking every 50 ms.
     fn waits_in(&mut self, queues: &std::path::Path) {
+        self.waits_in_looking_every(queues, 50);
+    }
+
+    /// The run waits for its turn in the queue folder `queues`, looking every `ms`.
+    fn waits_in_looking_every(&mut self, queues: &std::path::Path, ms: u64) {
         let vars: Vec<(OsString, OsString)> = self
             .context
             .env
@@ -1096,7 +1116,7 @@ impl Rig {
             .map(|(name, value)| (name.to_owned(), value.to_owned()))
             .chain([
                 ("CF_WINDOWS_QUEUES".into(), queues.as_os_str().to_owned()),
-                ("CF_WINDOWS_LOOK_MS".into(), "50".into()),
+                ("CF_WINDOWS_LOOK_MS".into(), ms.to_string().into()),
             ])
             .collect();
         self.context.env = Env::from_vars(vars);
@@ -1161,15 +1181,58 @@ fn a_run_for_a_busy_zeewin2_waits_for_its_turn_and_goes_when_it_is_free_saying_w
 /// An scp that keeps what it is sent and notes whose run sent it, in the order they come.
 const NOTES_ITS_SENDER: &str = r#"printf 'scp\t%s\t%s\n' "$1" "$3" >> "$CF_LOG"; echo "$CF_LOG" >> "$CF_HOME/order"; cp "$2" "$CF_TARBALL""#;
 
+/// The laptop with a poker-lab job while `poker` is in the machine's profile folder, and then a
+/// machine that gives itself to the first run that asks and to no other until that run is
+/// over (`done`, which its run leaves): so that of two runs that look at it the first to look
+/// has it, and who looks first is the only thing the queue is for.
+fn laptop_that_is_the_first_askers_until_its_run_is_over() -> String {
+    let run = machine(0);
+    format!(
+        r#"for word; do host=$last; last=$word; done
+case "$host" in
+  zeelin) if [ -e "$CF_HOME/poker" ]; then echo held; else echo free; fi; exit 0 ;;
+esac
+script=$(printf '%s' "${{last##* }}" | base64 -d 2>/dev/null | iconv -f UTF-16LE -t UTF-8 2>/dev/null)
+case "$script" in *PSDrive*)
+  printf 'state\n' >> "$CF_LOG"
+  echo "free 614"
+  if [ -e "$CF_HOME/done" ] || mkdir "$CF_HOME/taken" 2>/dev/null; then :; else echo run; fi
+  exit 0 ;;
+esac
+touch "$CF_HOME/done"
+set -- "$host" "$last"
+{run}"#
+    )
+}
+
+/// Waits until `holds`, at most half a minute, saying `what` it waited for if it never does.
+fn until(what: &str, holds: impl Fn() -> bool) {
+    let by = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !holds() {
+        assert!(std::time::Instant::now() < by, "never: {what}");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+/// Two runs for one busy machine go in the order they came, however the machine is looked at
+/// (T-777, P3-9: the test was red on the words, and on the order by a coin's flip). The elder looks
+/// at the machine once a second and the younger every 5 ms, and the machine is the first asker's
+/// until its run is over: with no queue the younger has it every time the job is gone, and
+/// the elder never. Nothing is waited for by a time: each run is started when the one before has
+/// its place, and the job goes when both have.
 #[test]
 fn runs_for_one_busy_machine_from_two_trees_go_in_the_order_they_came() {
     let home = tempfile::tempdir().unwrap();
     let queues = tempfile::tempdir().unwrap();
     let (mut a, mut b) = (Rig::on(Some(home.path())), Rig::on(Some(home.path())));
-    for rig in [&mut a, &mut b] {
-        rig.waits_in(queues.path());
+    a.waits_in_looking_every(queues.path(), 1000);
+    b.waits_in_looking_every(queues.path(), 5);
+    for rig in [&a, &b] {
         rig.program("scp", NOTES_ITS_SENDER);
-        rig.program("ssh", &laptop_with_a_job_while_poker_is_there());
+        rig.program(
+            "ssh",
+            &laptop_that_is_the_first_askers_until_its_run_is_over(),
+        );
     }
     let poker = home.path().join("poker");
     fs::write(&poker, "").unwrap();
@@ -1190,17 +1253,18 @@ fn runs_for_one_busy_machine_from_two_trees_go_in_the_order_they_came() {
         );
         (ended, String::from_utf8(err).unwrap())
     };
+    let placed = |n: usize| {
+        let folder = queues.path().join("zeewin2");
+        move || fs::read_dir(&folder).map_or(0, Iterator::count) == n
+    };
     let (from_a, from_b) = std::thread::scope(|scope| {
         let first = scope.spawn(|| go(&a));
-        // The second comes when the first is waiting, and looks at the machine ten times as often.
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        until("the elder's place in the queue", placed(1));
         let second = scope.spawn(|| go(&b));
-        std::thread::sleep(std::time::Duration::from_millis(400));
+        until("the younger's place in the queue", placed(2));
         fs::remove_file(&poker).unwrap();
         (first.join().unwrap(), second.join().unwrap())
     });
-    assert_eq!(from_a.0.unwrap(), Outcome::Exited(0), "{}", from_a.1);
-    assert_eq!(from_b.0.unwrap(), Outcome::Exited(0), "{}", from_b.1);
     let order: Vec<String> = fs::read_to_string(home.path().join("order"))
         .unwrap()
         .lines()
@@ -1208,6 +1272,8 @@ fn runs_for_one_busy_machine_from_two_trees_go_in_the_order_they_came() {
         .collect();
     let mine = |rig: &Rig| rig.bin.path().join("log").display().to_string();
     assert_eq!(order, [mine(&a), mine(&b)], "the older run went first");
+    assert_eq!(from_a.0.unwrap(), Outcome::Exited(0), "{}", from_a.1);
+    assert_eq!(from_b.0.unwrap(), Outcome::Exited(0), "{}", from_b.1);
     assert!(
         from_b
             .1
@@ -1215,4 +1281,145 @@ fn runs_for_one_busy_machine_from_two_trees_go_in_the_order_they_came() {
         "the younger said whom it waited for: {}",
         from_b.1
     );
+}
+
+/// A run for zeewin waits while a program outside the queue holds it, and sends nothing: zeewin
+/// is asked what is on its copy as the laptop is (T-777, P2-1). Before, the head of its queue
+/// uploaded its tree into the holder's 75, and each run behind did the same in its turn.
+#[test]
+fn a_run_for_zeewin_waits_while_a_program_outside_the_queue_holds_it_and_sends_nothing() {
+    let queues = tempfile::tempdir().unwrap();
+    let mut rig = Rig::new();
+    rig.waits_in(queues.path());
+    rig.program("scp", SENDS);
+    rig.program("ssh", &zeewin_held_while_a_holder_is_there());
+    let holder = rig.bin.path().join("home").join("holder");
+    fs::write(&holder, "").unwrap();
+    let zeewin = Machine::named("zeewin").unwrap();
+    let mut options = rig.options();
+    options.wait = 1;
+    let states = || rig.log().iter().filter(|line| *line == "state").count();
+    let (ended, out, err) = std::thread::scope(|scope| {
+        let run = scope.spawn(|| {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let ended = run(
+                &rig.context,
+                &zeewin,
+                &options,
+                &mut Console {
+                    out: &mut out,
+                    err: &mut err,
+                },
+                &Interrupt::default(),
+            );
+            (
+                ended,
+                String::from_utf8(out).unwrap(),
+                String::from_utf8(err).unwrap(),
+            )
+        });
+        until("two looks at the machine, with its holder there", || {
+            states() >= 2 || run.is_finished()
+        });
+        let log = rig.log();
+        assert!(
+            !run.is_finished() && !log.iter().any(|line| line.starts_with("scp")),
+            "the run went on while a program held the machine: {log:?}"
+        );
+        fs::remove_file(&holder).unwrap();
+        run.join().unwrap()
+    });
+    assert_eq!(ended.unwrap(), Outcome::Exited(0), "{err}");
+    assert!(!out.contains("busy"), "nothing was refused: {out}");
+    assert!(
+        err.contains(
+            "windows: waiting for zeewin, 0 s of up to 1 min: zeewin is busy: a run goes on there"
+        ),
+        "{err}"
+    );
+    let log = rig.log();
+    assert_eq!(log.iter().filter(|line| line.starts_with("scp")).count(), 1);
+}
+
+/// The stand-in of zeewin: it says a run holds its copy while `holder` is in its profile folder.
+fn zeewin_held_while_a_holder_is_there() -> String {
+    let run = machine(0);
+    format!(
+        r#"for word; do last=$word; done
+script=$(printf '%s' "${{last##* }}" | base64 -d 2>/dev/null | iconv -f UTF-16LE -t UTF-8 2>/dev/null)
+case "$script" in *PSDrive*)
+  printf 'state\n' >> "$CF_LOG"
+  echo "free 614"
+  if [ -e "$CF_HOME/holder" ]; then echo run; fi
+  exit 0 ;;
+esac
+{run}"#
+    )
+}
+
+/// A run told not to wait goes behind no one: it is refused while a live run is queued for the
+/// machine, before the machine is asked and before a byte is sent (T-777, P2-2).
+#[test]
+fn a_run_told_not_to_wait_is_refused_while_a_run_is_queued_for_the_machine_and_sends_nothing() {
+    use crate::windows::queue::{Queues, Who};
+
+    let queues = tempfile::tempdir().unwrap();
+    let mut rig = Rig::new();
+    rig.waits_in(queues.path());
+    rig.program("scp", SENDS);
+    rig.program("ssh", &machine(0));
+    let _elder = Queues::at(queues.path(), std::time::Duration::from_secs(3600))
+        .join(
+            "zeewin",
+            &Who {
+                tree: "another-project".into(),
+                command: "cargo test".into(),
+            },
+            cf_base::time::Clock::now_ms(&mut cf_base::time::SystemClock),
+        )
+        .unwrap();
+    let (ended, out, _) = run_it(&rig, &Interrupt::default());
+    let why = "zeewin is busy: 1 run is queued for it";
+    assert_eq!(ended.unwrap(), Outcome::Refused(why.into()));
+    assert_eq!(out, format!("{why}\n"));
+    assert!(rig.log().is_empty(), "{:?}", rig.log());
+}
+
+/// The cases of the run keep a queue of their own, whatever the home folder holds: the real one is
+/// `~/.cf-windows-queues`, and a case that read it was refused for the real runs queued while it
+/// ran (T-778: the plants' baseline failed 10 cases while the author's own runs were on zeewin,
+/// once a run told not to wait read the queue).
+#[test]
+fn a_case_joins_and_reads_no_queue_but_its_own_whatever_the_home_folder_holds() {
+    use crate::windows::queue::{Queues, Who};
+
+    let home = tempfile::tempdir().unwrap();
+    let real = Queues::at(
+        &home.path().join(".cf-windows-queues"),
+        std::time::Duration::from_secs(3600),
+    );
+    let _busy = real
+        .join(
+            "zeewin",
+            &Who {
+                tree: "a real run".into(),
+                command: "cargo test".into(),
+            },
+            cf_base::time::Clock::now_ms(&mut cf_base::time::SystemClock),
+        )
+        .unwrap();
+    let mut rig = Rig::new();
+    let vars: Vec<(OsString, OsString)> = rig
+        .context
+        .env
+        .iter()
+        .filter(|(name, _)| *name != "HOME")
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .chain([("HOME".into(), home.path().as_os_str().to_owned())])
+        .collect();
+    rig.context.env = Env::from_vars(vars);
+    rig.program("scp", SENDS);
+    rig.program("ssh", &machine(0));
+    let (ended, _, err) = run_it(&rig, &Interrupt::default());
+    assert_eq!(ended.unwrap(), Outcome::Exited(0), "{err}");
 }

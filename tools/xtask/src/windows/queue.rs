@@ -7,9 +7,24 @@
 //! `CF_WINDOWS_QUEUES`), a folder for each machine, a file for each run in it. A run goes when
 //! no ticket older than its own is alive and the machine says it is ready ([`super::machine::Machine::ready`]: no
 //! poker-lab job, disk enough, no run on the copy, no one holding its lock), and says every minute
-//! where it stands. It waits [`DEFAULT_WAIT_MINUTES`] at most (`--wait MINUTES`; 0 asks once and
-//! refuses at once, as the runner did), and then ends with 75 saying how long it waited and what it
-//! was waiting for.
+//! where it stands. It waits [`DEFAULT_WAIT_MINUTES`] at most (`--wait MINUTES`), and then ends
+//! with 75 saying how long it waited and what it was waiting for.
+//!
+//! - **`--wait 0`** asks once and goes behind no one: while a live run is queued for the machine it
+//!   is refused, in the words the default choice uses (`1 run is queued for it`), before the
+//!   machine is asked (T-777, P2-2).
+//! - **The looks:** behind a run, the queue (a folder on this Mac) is looked at every ten seconds
+//!   and the machine not at all; at the head, a busy machine is asked after half a minute and then
+//!   every minute (two ssh sessions to the laptop each time, T-777 P3-7), and only what stops the
+//!   run changing is said, or every minute (not the seconds the run ahead has been there, P3-4).
+//! - **A machine that cannot be read:** the first look is the run's own answer and ends it (a host
+//!   that is not there is not waited on for an hour); once the wait is on it is said and the
+//!   wait goes on, and a wait that ends with the machine unread at its last look ends with that
+//!   error and not as a busy machine (P3-6).
+//! - **The clock:** a ticket is named for the moment it came or after the newest ticket that
+//!   is beating, whichever is later, so that a clock set back puts no run ahead of those that were
+//!   there; a ticket touched more than [`AHEAD_MS`] ahead of the clock is a run killed before it
+//!   was set back, and holds no one back (P3-5).
 //!
 //! A ticket is a file named by the time the run came and its process (so that the names sort in
 //! the order of coming), holding the tree and the command it is for. It is alive while its run
@@ -47,11 +62,34 @@ const BEAT: Duration = Duration::from_secs(5);
 /// How long a ticket may go untouched and be a run's: six beats.
 const DEAD_AFTER_MS: i64 = 30_000;
 
-/// How often a waiting run looks at the queue and asks the machine, in milliseconds.
+/// How a ticket's touch may be ahead of the clock and be a run's: two processes' clocks on one
+/// machine are a few milliseconds apart at most. A touch further ahead is the clock having been
+/// set back since: a beating run has touched its ticket again within a beat, so what stays ahead is
+/// a run killed before the step, and holds no one back until the clock has passed it.
+const AHEAD_MS: i64 = 10_000;
+
+/// How often a waiting run looks at the queue, in milliseconds: a folder on this Mac, and a run
+/// that leaves it is to be gone past at once.
 const LOOK_MS: u64 = 10_000;
+
+/// How often a run at the head of the queue looks at a machine that is busy, in milliseconds: the
+/// first time, and from then on. The machine is two sessions to the laptop (zeelin, then its
+/// state), and a holder outside the queue can be there for an hour (T-777, P3-7: 720 pairs).
+const MACHINE_LOOK_MS: [u64; 2] = [30_000, 60_000];
 
 /// How often a waiting run says where it stands, in milliseconds.
 const SAY_EVERY_MS: i64 = 60_000;
+
+/// How many runs are queued for a machine, as the default choice and a run told not to wait
+/// say it.
+pub fn queued_words(queued: usize) -> String {
+    let (runs, are) = if queued == 1 {
+        ("run", "is")
+    } else {
+        ("runs", "are")
+    };
+    format!("{queued} {runs} {are} queued for it")
+}
 
 /// What a ticket says of its run, for the runs behind it to say.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,7 +171,14 @@ impl Queues {
     pub fn join(&self, machine: &str, who: &Who, now_ms: i64) -> io::Result<Ticket> {
         let folder = self.folder(machine);
         fs::create_dir_all(&folder)?;
-        let mut at = now_ms;
+        // Named for the moment it came, and after the newest run that is beating: a clock set back
+        // since must not put a run that comes now ahead of the runs that were there (T-777, P3-5).
+        let newest = tickets(&folder)
+            .iter()
+            .filter(|ticket| ticket.alive(now_ms))
+            .map(|ticket| ticket.came_ms)
+            .max();
+        let mut at = newest.map_or(now_ms, |newest| now_ms.max(newest + 1));
         let (path, text) = loop {
             let path = folder.join(format!("{at:015}-{:010}.ticket", std::process::id()));
             let text = format!("{}\n{}\n", who.tree, who.command);
@@ -193,8 +238,9 @@ struct Entry {
 
 impl Entry {
     fn alive(&self, now_ms: i64) -> bool {
-        self.touched_ms
-            .is_some_and(|touched| now_ms - touched <= DEAD_AFTER_MS)
+        self.touched_ms.is_some_and(|touched| {
+            touched - now_ms <= AHEAD_MS && now_ms - touched <= DEAD_AFTER_MS
+        })
     }
 
     fn who(&self) -> Who {
@@ -297,9 +343,13 @@ impl Drop for Ticket {
 /// What a wait is paced by: the time, and a pause that ends early on a stop.
 pub trait Pace {
     fn now_ms(&mut self) -> i64;
-    /// How long a waiting run pauses between two looks, in milliseconds.
-    fn look_ms(&self) -> u64 {
-        LOOK_MS
+    /// How long a waiting run pauses between two looks, in milliseconds: at the queue (`None`), or
+    /// at a machine that was busy (`Some(n)`, the looks of this kind before this one).
+    fn look_ms(&self, machine_looks: Option<usize>) -> u64 {
+        match machine_looks {
+            None => LOOK_MS,
+            Some(before) => MACHINE_LOOK_MS[before.min(1)],
+        }
     }
     /// Waits `ms`; false if a stop was heard.
     fn pause(&mut self, ms: u64) -> bool;
@@ -330,7 +380,7 @@ impl Pace for Real<'_> {
         SystemClock.now_ms()
     }
 
-    fn look_ms(&self) -> u64 {
+    fn look_ms(&self, _: Option<usize>) -> u64 {
         self.look_ms
     }
 
@@ -362,7 +412,20 @@ pub enum Waited {
 }
 
 /// Waits for this run's turn at `machine`, and for the machine to be ready (`ready`), up to
-/// `minutes` (0: asks once). `say` is told where the run stands, every minute and when it changes.
+/// `minutes`. `say` is told where the run stands, when it changes and every minute.
+///
+/// - **`minutes` is 0:** the machine is asked once, and the run goes behind no one: while a live
+///   run is queued for the machine it is refused, in the words the default choice uses, before the
+///   machine is asked (T-777, P2-2).
+/// - **Behind a run:** the queue, a folder on this Mac, is looked at every ten seconds and the
+///   machine is not asked.
+/// - **At the head:** the machine is asked, and if it is busy again after half a minute, then
+///   every minute ([`MACHINE_LOOK_MS`]).
+/// - **A machine that cannot be read:** the first look is the run's own answer, and ends it (a
+///   host that is not there is not waited for an hour). Once the wait is on, it is said and the
+///   wait goes on: a run fifty minutes in keeps its place for one probe that did not answer
+///   (T-777, P3-6). If the machine could not be read at the last look when the time is up, the
+///   run ends with that error and not as a busy machine.
 pub fn wait(
     queues: Option<&Queues>,
     machine: &str,
@@ -374,6 +437,15 @@ pub fn wait(
 ) -> Result<Waited, Error> {
     let began = pace.now_ms();
     let limit_ms = i64::from(minutes) * 60_000;
+    if minutes == 0 {
+        let queued = queues.map_or(0, |queues| queues.depth(machine, began));
+        if queued > 0 {
+            return Ok(Waited::Refused(format!(
+                "{machine} is busy: {}",
+                queued_words(queued)
+            )));
+        }
+    }
     // A queue that cannot be kept (a folder that cannot be made, a disk that is full) does not stop
     // the run: it is said, and the run waits for the machine alone.
     let ticket = match queues.filter(|_| minutes > 0) {
@@ -390,51 +462,81 @@ pub fn wait(
         None => None,
     };
     let mut said: Option<(String, i64)> = None;
+    let mut machine_looks = 0;
+    let mut looked = false;
     loop {
         let now = pace.now_ms();
         let ahead = ticket
             .as_ref()
             .map(|ticket| ticket.ahead(now))
             .unwrap_or_default();
-        let blocked = if let Some(first) = ahead.first() {
+        // What stops the run (the same words while it is the same), how long the run ahead has
+        // been there, if one is, and the machine's error, if it could not be read.
+        let (blocked, elder_for, unread, pause) = if let Some(first) = ahead.first() {
+            machine_looks = 0;
             let place = ordinal(ahead.len() + 1);
-            format!(
-                "{place} in the queue for {machine}; the run ahead is {} ({}), here for {}",
-                first.who.tree,
-                first.who.command,
-                minutes_of(first.since_ms)
+            (
+                format!(
+                    "{place} in the queue for {machine}; the run ahead is {} ({})",
+                    first.who.tree, first.who.command
+                ),
+                Some(first.since_ms),
+                None,
+                pace.look_ms(None),
             )
         } else {
             let asked = ready();
             if !matches!(asked, Ok(Ready::Go(_))) && pace.stopped_after_failure() {
                 return Ok(Waited::Stopped);
             }
-            match asked.map_err(Error::Unready)? {
-                Ready::Go(lines) => return Ok(Waited::Go(lines, ticket)),
-                Ready::Refused(why) => why,
+            let pause = pace.look_ms(Some(machine_looks));
+            machine_looks += 1;
+            match asked {
+                Ok(Ready::Go(lines)) => return Ok(Waited::Go(lines, ticket)),
+                Ok(Ready::Refused(why)) => (why, None, None, pause),
+                Err(why) if !looked || minutes == 0 => return Err(Error::Unready(why)),
+                Err(why) => (
+                    format!("{machine} could not be asked: {why}"),
+                    None,
+                    Some(why),
+                    pause,
+                ),
             }
         };
+        looked = true;
+        let shown = match elder_for {
+            Some(elder) => format!("{blocked}, here for {}", minutes_of(elder)),
+            None => blocked.clone(),
+        };
         if minutes == 0 {
-            return Ok(Waited::Refused(blocked));
+            return Ok(Waited::Refused(shown));
         }
         let waited = now - began;
         if waited >= limit_ms {
+            if let Some(why) = unread {
+                return Err(Error::Unready(format!(
+                    "{machine} could not be asked in {} of waiting (--wait {minutes}): {why}",
+                    minutes_of(waited)
+                )));
+            }
             return Ok(Waited::Refused(format!(
-                "{machine} is still busy after waiting {} (as far as --wait {minutes} goes): {blocked}",
+                "{machine} is still busy after waiting {} (as far as --wait {minutes} goes): {shown}",
                 minutes_of(waited)
             )));
         }
+        // Said when what stops the run changes, and every minute: the seconds the run ahead has
+        // been there are no change, or every look would be a line (T-777, P3-4).
         let changed = said.as_ref().is_none_or(|(was, _)| *was != blocked);
         let due = said.as_ref().is_none_or(|(_, at)| now - at >= SAY_EVERY_MS);
         if changed || due {
             say(&format!(
-                "waiting for {machine}, {} of up to {minutes} min: {blocked}",
+                "waiting for {machine}, {} of up to {minutes} min: {shown}",
                 minutes_of(waited)
             ))
             .map_err(Error::Output)?;
             said = Some((blocked, now));
         }
-        if !pace.pause(pace.look_ms()) {
+        if !pace.pause(pause) {
             return Ok(Waited::Stopped);
         }
     }

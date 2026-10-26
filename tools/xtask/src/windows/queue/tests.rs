@@ -299,8 +299,9 @@ fn a_run_whose_machine_stays_busy_ends_when_its_time_is_up_saying_how_long_it_wa
         ended,
         "Refused(zeewin2 is still busy after waiting 3 min (as far as --wait 3 goes): zeewin2 is busy: poker-lab's job holds it)"
     );
-    // It looked every 10 s for the three minutes, and said so at the start and each minute.
-    assert_eq!(pace.pauses.len(), 18);
+    // It looked at the busy machine after 30 s, then every minute, until the three were up, and
+    // said so at the start and then each minute.
+    assert_eq!(pace.pauses, [30_000, 60_000, 60_000, 60_000]);
     assert_eq!(said.len(), 3, "{said:?}");
     assert!(
         said[1].starts_with("waiting for zeewin2, 1 min of up to 3 min: "),
@@ -339,7 +340,8 @@ fn a_run_with_no_queue_to_keep_waits_for_the_machine_alone_as_long_as_it_is_told
         ended.starts_with("Refused(zeewin2 is still busy after waiting 60 min"),
         "{ended}"
     );
-    assert_eq!(pace.pauses.len(), 360);
+    // 30 s, then a minute each: the look at 30 min 30 s... the sixty-first pause ends the hour.
+    assert_eq!(pace.pauses.len(), 61);
 }
 
 #[test]
@@ -412,4 +414,180 @@ fn a_queue_that_cannot_be_kept_is_said_and_the_run_waits_for_the_machine_alone()
         said[0].ends_with("): waiting for the machine alone"),
         "{said:?}"
     );
+}
+
+/// A wait behind an elder that came `before_ms` ago, beaten at every look and gone after
+/// `leaves_after` pauses: how it ended, what it said, and the pauses it made.
+fn wait_behind_an_elder(before_ms: i64, leaves_after: usize) -> (bool, Vec<String>, Vec<u64>) {
+    let (_dir, queues) = queues();
+    let elder = queues
+        .join("zeewin2", &who("elder"), DAY - before_ms)
+        .unwrap();
+    touch(&elder.path, &elder.text, DAY).unwrap();
+    let (path, text) = (elder.path.clone(), elder.text.clone());
+    let mut elder = Some(elder);
+    let mut pace = Slow::at(DAY);
+    let mut said = Vec::new();
+    let mut answers = std::iter::from_fn(|| Some(go()));
+    let came = {
+        let mut pace = Exiting {
+            slow: &mut pace,
+            on_pause: &mut |n| {
+                if n == leaves_after {
+                    drop(elder.take());
+                } else {
+                    touch(&path, &text, DAY + 10_000 * i64::try_from(n).unwrap()).unwrap();
+                }
+            },
+        };
+        wait(
+            Some(&queues),
+            "zeewin2",
+            &who("mine"),
+            60,
+            &mut || answers.next().unwrap(),
+            &mut pace,
+            &mut |line| {
+                said.push(line.to_owned());
+                Ok(())
+            },
+        )
+    };
+    (matches!(came, Ok(Waited::Go(..))), said, pace.pauses)
+}
+
+/// A run behind a run that came seconds ago said where it stood at every look: the seconds the
+/// elder had been there were in the words, and each look made them new (T-777, P3-4).
+#[test]
+fn a_run_behind_another_says_where_it_stands_once_in_the_first_minute_whatever_the_seconds_the_other_has_been_there(
+) {
+    let (went, said, pauses) = wait_behind_an_elder(5_000, 5);
+    assert!(went);
+    assert_eq!(
+        pauses, [10_000; 5],
+        "the queue is looked at every ten seconds"
+    );
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].ends_with("here for 5 s"), "{said:?}");
+}
+
+/// A run told not to wait goes behind no one: while a live run is queued for the machine it is
+/// refused, in the words the default choice uses, before the machine is asked (T-777, P2-2).
+#[test]
+fn a_run_told_not_to_wait_is_refused_while_runs_are_queued_for_the_machine_and_never_asks_it() {
+    let (_dir, queues) = queues();
+    let _elder = queues.join("zeewin2", &who("elder"), DAY).unwrap();
+    let mut pace = Slow::at(DAY + 1_000);
+    let (ended, said) = waited(Some(&queues), 0, &mut std::iter::empty(), &mut pace);
+    assert_eq!(ended, "Refused(zeewin2 is busy: 1 run is queued for it)");
+    assert!(said.is_empty() && pace.pauses.is_empty());
+    let _second = queues.join("zeewin2", &who("second"), DAY + 500).unwrap();
+    let (ended, _) = waited(Some(&queues), 0, &mut std::iter::empty(), &mut pace);
+    assert_eq!(ended, "Refused(zeewin2 is busy: 2 runs are queued for it)");
+    // A run that was killed is none: its ticket is thirty-one seconds old.
+    let mut later = Slow::at(DAY + 31_000 + 500);
+    let (ended, _) = waited(Some(&queues), 0, &mut [go()].into_iter(), &mut later);
+    assert_eq!(ended, r#"Go(["on it"], ticket false)"#);
+}
+
+/// A clock set back (a person, a machine woken from a snapshot) must not put a run that comes
+/// after it ahead of the runs that were there: it is named after the newest of them (T-777, P3-5).
+#[test]
+fn a_run_that_comes_after_the_clock_was_set_back_is_still_behind_the_runs_that_were_there() {
+    let (_dir, queues) = queues();
+    let first = queues.join("zeewin2", &who("a"), DAY).unwrap();
+    // The clock is a minute back, and the first run has beaten its ticket since (its thread
+    // touches it at every beat, with the clock as it is now).
+    let back = DAY - 60_000;
+    touch(&first.path, &first.text, back + 3_000).unwrap();
+    let second = queues.join("zeewin2", &who("b"), back + 4_000).unwrap();
+    let ahead: Vec<String> = second
+        .ahead(back + 4_000)
+        .into_iter()
+        .map(|run| run.who.tree)
+        .collect();
+    assert_eq!(ahead, ["a"]);
+    assert!(first.ahead(back + 4_000).is_empty());
+    // Two runs of one process in one millisecond are told apart as before.
+    let third = queues.join("zeewin2", &who("c"), back + 4_000).unwrap();
+    assert_eq!(third.ahead(back + 4_000).len(), 2);
+}
+
+/// What a run killed before the clock was set back leaves is a ticket touched in the future: no
+/// run that is beating has one a few seconds ahead, so it is a dead run's, and it holds no one
+/// back until the clock has passed it. A touch a moment ahead is a run's (T-777, P3-5).
+#[test]
+fn a_ticket_touched_in_the_future_is_a_run_killed_before_the_clock_was_set_back() {
+    let (_dir, queues) = queues();
+    let _killed = queues.join("zeewin2", &who("killed"), DAY).unwrap();
+    let back = DAY - 300_000;
+    assert_eq!(queues.depth("zeewin2", back), 0);
+    let waiting = queues.join("zeewin2", &who("waiting"), back).unwrap();
+    assert!(waiting.ahead(back + 1_000).is_empty());
+    assert_eq!(queues.depth("zeewin2", back + 1_000), 1);
+    // Two processes' clocks a few milliseconds apart: not a step.
+    let (_other, queues) = self::queues();
+    let _beating = queues
+        .join("zeewin2", &who("beating"), DAY + 3_000)
+        .unwrap();
+    assert_eq!(queues.depth("zeewin2", DAY), 1);
+}
+
+/// A machine that cannot be read once the wait is on does not end it: one probe of the laptop
+/// that did not answer must not cost a run its place after fifty minutes (T-777, P3-6). The
+/// first look is the run's own answer, and ends it as before.
+#[test]
+fn a_machine_that_cannot_be_read_once_the_wait_is_on_does_not_end_it_and_is_said() {
+    let (_dir, queues) = queues();
+    let mut pace = Slow::at(DAY);
+    let (ended, said) = waited(
+        Some(&queues),
+        60,
+        &mut [
+            busy("zeewin2 is busy"),
+            Err("zeelin could not be read".to_owned()),
+            go(),
+        ]
+        .into_iter(),
+        &mut pace,
+    );
+    assert_eq!(ended, r#"Go(["on it"], ticket true)"#);
+    assert!(
+        said.iter()
+            .any(|line| line.ends_with("zeewin2 could not be asked: zeelin could not be read")),
+        "{said:?}"
+    );
+}
+
+#[test]
+fn a_machine_that_cannot_be_read_all_the_wait_ends_it_with_the_error_when_the_time_is_up() {
+    let (_dir, queues) = queues();
+    let mut pace = Slow::at(DAY);
+    let answers = std::iter::once(busy("zeewin2 is busy"))
+        .chain(std::iter::from_fn(|| {
+            Some(Err("zeelin could not be read".to_owned()))
+        }))
+        .take(400);
+    let (ended, _) = waited(Some(&queues), 3, &mut answers.into_iter(), &mut pace);
+    assert_eq!(
+        ended,
+        "Error(zeewin2 could not be asked in 3 min of waiting (--wait 3): zeelin could not be read)"
+    );
+}
+
+/// The queue is a folder on this Mac and is looked at every ten seconds; the laptop is two ssh
+/// sessions, and a run ahead of the queue whose machine is busy looks at it every half minute,
+/// then every minute (T-777, P3-7: 720 pairs of sessions in an hour against one holder).
+#[test]
+fn a_run_ahead_of_the_queue_looks_at_a_busy_machine_every_half_minute_then_every_minute() {
+    let (_dir, queues) = queues();
+    let mut pace = Slow::at(DAY);
+    let (ended, _) = waited(
+        Some(&queues),
+        60,
+        &mut [busy("b"), busy("b"), busy("b"), busy("b"), go()].into_iter(),
+        &mut pace,
+    );
+    assert_eq!(ended, r#"Go(["on it"], ticket true)"#);
+    assert_eq!(pace.pauses, [30_000, 60_000, 60_000, 60_000]);
 }

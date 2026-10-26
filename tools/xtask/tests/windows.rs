@@ -128,7 +128,11 @@ fn id_in_script(script: &str) -> String {
 fn on(tree: &tempfile::TempDir, fakes: &Path, vars: &[(&str, &str)], args: &[&str]) -> Output {
     let manifest = tree.path().join("tools").join("xtask");
     let manifest = manifest.to_str().unwrap();
-    let mut all = vec![("CARGO_MANIFEST_DIR", manifest)];
+    // The machine's state, which a run asks before it sends (a free disk, nothing on the copy).
+    let mut all = vec![
+        ("CARGO_MANIFEST_DIR", manifest),
+        ("FAKE_CHILD_PROBE", "free 614"),
+    ];
     all.extend_from_slice(vars);
     xtask(tree.path(), &path_with(fakes), &all, args)
 }
@@ -531,6 +535,15 @@ fn script(folder: &Path, name: &str, body: &str) {
     use std::os::unix::fs::PermissionsExt;
 
     let path = folder.join(name);
+    // An ssh answers the machine's state first (the runner asks it of every machine before it
+    // sends a run, T-777), unless the case does: the laptop's zeelin is another question.
+    let body = if name == "ssh" && !body.contains("BatchMode") {
+        format!(
+            "case \"$*\" in *zeelin*) ;; *BatchMode=yes*) echo \"free 614\"; exit 0 ;; esac\n{body}"
+        )
+    } else {
+        body.to_owned()
+    };
     fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
 }
@@ -644,7 +657,7 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
     script(
         fakes.path(),
         "ssh",
-        r#"printf '%s\t%s\n' "$$" "$2" >> "$CF_LOG"; if [ -e "$CF_FIRST" ]; then exit 0; fi; : > "$CF_FIRST"; exec sleep 120"#,
+        r#"case "$*" in *BatchMode=yes*) echo "free 614"; exit 0 ;; esac; printf '%s\t%s\n' "$$" "$2" >> "$CF_LOG"; if [ -e "$CF_FIRST" ]; then exit 0; fi; : > "$CF_FIRST"; exec sleep 120"#,
     );
     let tree = tree(&[("keep.txt", "kept")]);
     let manifest = tree.path().join("tools").join("xtask");
