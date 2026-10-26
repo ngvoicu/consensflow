@@ -1020,7 +1020,7 @@ fn where_no_paste_proves_where_the_latest_message_arrived_there_is_no_result_and
 
 /// A monitor called `name` of `source` (its task's id is its name), whose notice of its
 /// end said `end` at 23:03:10.
-fn monitor(name: &str, source: Source, end: Option<End>) -> Monitor {
+pub(crate) fn monitor(name: &str, source: Source, end: Option<End>) -> Monitor {
     Monitor {
         id: name.into(),
         description: name.into(),
@@ -1034,7 +1034,7 @@ fn monitor(name: &str, source: Source, end: Option<End>) -> Monitor {
 }
 
 /// `jobs` pending, `noticed` of them monitors that said they ended.
-fn pending(jobs: usize, noticed: usize) -> Pending {
+pub(crate) fn pending(jobs: usize, noticed: usize) -> Pending {
     Pending {
         jobs,
         noticed,

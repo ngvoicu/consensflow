@@ -1,8 +1,14 @@
 //! Finish: the chief (`cf task finish T-n`, the API's `POST /api/tasks/<n>/finish`) or the
 //! human (Finish in the task's drawer) takes what the worker of a working task said last
 //! as its result (the owner's decision of 2026-10-18: the chief can finish any working task).
-//! A paused task is finished the same way, when the chief is told its worker's turn ended
-//! with an answer after its tell (`paused`): it is how that answer becomes the result.
+//! A paused task is finished the same way, whichever pause it is in (the chief's explicit
+//! call): the window's last complete answer since the latest message pasted into it. After a
+//! tell that is the answer its turn on the tell ended with, which the chief is told (`paused`);
+//! a pause that is none of a tell's (`cf task pause`, a Close, a stall) has whatever complete
+//! answer the window wrote since its last message, if it wrote one, and a harness that marks the
+//! text of a turn it was stopped in complete would give the chief those cut words (Claude Code
+//! marks it incomplete). While a tell to the window is queued or being pasted Finish is refused:
+//! the record holds the turn from before the tell, which is not its answer.
 //!
 //! It is the way out of a wait that has no end, and of a reader that reads a turn at work
 //! that is not (T-442, dip-agentos's T-20): a job that runs for ever (a dev server, a
@@ -134,7 +140,24 @@ impl Dispatcher {
         by: &str,
         record: &Rc<Record>,
     ) -> Result<Finished, EngineError> {
-        let (_, participant, _) = self.finishable(project, number)?;
+        let (thread, participant, _) = self.finishable(project, number)?;
+        // The record holds the turn from before a tell until the tell is pasted into the
+        // window: what it says last then is not the answer to the tell (Calliope's P3 on
+        // round 2).
+        if self
+            .seams
+            .ledger
+            .borrow()
+            .tell_on_its_way(participant.id, thread.task.id)?
+        {
+            return Err(refused(
+                "tell-on-its-way",
+                format!(
+                    "cannot finish T-{number}: the words you told @{} are on their way to its window, and its answer to them comes first; finish it once it has answered them, or cancel it",
+                    participant.handle
+                ),
+            ));
+        }
         let observed = returning(self.observe(&participant, record))
             .await
             .map_err(|why| {

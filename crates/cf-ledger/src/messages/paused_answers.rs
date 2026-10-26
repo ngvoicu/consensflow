@@ -20,6 +20,11 @@
 //!   The same words are written at once where the task moved on before the window's turn
 //!   ended (the chief resumed while the window was still at work on its answer): its
 //!   resume is queued behind the turn, and the turn's end is told all the same.
+//! - **staying paused** (a Resume of a project that leaves one of a window's several tasks
+//!   paused): the task has not moved on, and its note stays as it was.
+//! - **failed** (the task fails with the note unread, an early resume's turn that failed): the
+//!   queued messages dropped with it are not this one ([`queued`], [`put_back`]); it waits
+//!   for the reopen with the task, in the words of a task that has moved on.
 //! - **finished** (`cf task finish`, the drawer's Finish): the note's words are the result,
 //!   and the note is moot: it is withdrawn if not yet pasted ([`withdraw`]).
 //! - **cancelled**: the task's messages on their way are withdrawn with it, as always.
@@ -71,7 +76,7 @@ fn tail(number: i64, next: Next) -> String {
         Next::Chief => format!(
             "\n\nIf that is the result, take it: cf task finish T-{number}. To send it on: cf task resume T-{number} \"…\"."
         ),
-        Next::Human => "\n\nTo send it on, Resume it in the task's drawer.".to_owned(),
+        Next::Human => "\n\nTo take it as the result, Finish it in the task's drawer; to send it on, Resume it there.".to_owned(),
     }
 }
 
@@ -127,10 +132,13 @@ fn read(body: &str) -> Option<Answered> {
     (render(&answered) == body).then_some(answered)
 }
 
-/// The words every note of T-`number` that has moved on begins with: what a withdrawal of the
-/// pause notes leaves (`leave_pause_notes`).
-pub(super) fn moved_prefix(number: i64) -> String {
-    format!("T-{number}{WAS_PAUSED}")
+/// The words every note of T-`number` begins with, paused or moved on: what a withdrawal of
+/// the pause notes leaves (`leave_pause_notes`).
+pub(super) fn prefixes(number: i64) -> [String; 2] {
+    [
+        format!("T-{number}{IS_PAUSED}"),
+        format!("T-{number}{WAS_PAUSED}"),
+    ]
 }
 
 /// Tells T-`number`'s requester what the window of `handle` ended its turn on tell `tell`
@@ -210,6 +218,25 @@ fn notes_of(
         .collect())
 }
 
+/// Whether the chief's tell to `participant`'s window about `task` is still on its way to it:
+/// queued behind the turn the pause stopped, held for the human, or being pasted. Until it is
+/// in, the window's record holds the turn from before the tell, and what it says last is not
+/// the answer to it.
+pub(crate) fn tell_on_its_way(
+    store: &Store,
+    participant_id: i64,
+    task_id: i64,
+) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM message
+             WHERE task_id = ? AND recipient_id = ? AND kind = 'question' AND urgent = 1
+               AND state IN ('queued', 'gated', 'delivering')",
+        )?
+        .exists(params![task_id, participant_id])?)
+}
+
 /// The task is paused no more, and goes on (a resume) or goes back to the board: the notes
 /// not yet pasted into their reader's window say so, and that what they hold is not the
 /// task's result.
@@ -225,6 +252,28 @@ pub(crate) fn keep_moved(store: &Store, task: &TaskRow) -> Result<(), LedgerErro
                 params![body, id],
             )?;
         }
+    }
+    Ok(())
+}
+
+/// The notes not yet pasted that give T-`task`'s requester an answer of its window: their
+/// ids. A task that fails drops what is queued for it, and these wait for its reopen
+/// ([`put_back`]).
+pub(crate) fn queued(store: &Store, task: &TaskRow) -> Result<Vec<i64>, LedgerError> {
+    Ok(notes_of(store, task, Some("queued"))?
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect())
+}
+
+/// The notes `ids` queued again, as they were before the task's queued messages were dropped
+/// ([`queued`]): the answer of the window's turn on a tell is not lost with a task that failed
+/// before its requester was given it.
+pub(crate) fn put_back(store: &Store, ids: &[i64]) -> Result<(), LedgerError> {
+    for id in ids {
+        store
+            .db
+            .execute("UPDATE message SET state = 'queued' WHERE id = ?", [id])?;
     }
     Ok(())
 }
@@ -270,8 +319,10 @@ mod tests {
             render(&said(Then::Moved)),
             "T-7, paused when @zeus-amber-pine's turn on the words put to its window (m-12) began, has moved on since (resumed, or back on the board): its result will be its next complete answer, not this. What that turn ended with:\n\nDone.\n\nThe parser is on grammar v2."
         );
-        assert!(render(&said(Then::Moved)).starts_with(&moved_prefix(7)));
-        assert!(!render(&said(Then::Paused(Next::Chief))).starts_with(&moved_prefix(7)));
+        let [paused, moved] = prefixes(7);
+        assert!(render(&said(Then::Moved)).starts_with(&moved));
+        assert!(render(&said(Then::Paused(Next::Chief))).starts_with(&paused));
+        assert!(render(&said(Then::Paused(Next::Human))).starts_with(&paused));
     }
 
     #[test]

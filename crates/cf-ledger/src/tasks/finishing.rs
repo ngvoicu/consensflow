@@ -23,8 +23,9 @@ use super::{
     carrier_body, delivery_body, own_steps, require_on_board, require_task_state, task_by_id,
 };
 use crate::messages::{
-    drop_queued_but_told, fold, leave_pause_notes, say_again, tell_sent_back, told_waiting,
-    warnings_on_their_way, warnings_queued, withdraw_paused_answers, Dropped,
+    drop_queued_but_told, fold, leave_pause_notes, put_back_paused_answers, queued_paused_answers,
+    say_again, tell_sent_back, told_waiting, warnings_on_their_way, warnings_queued,
+    withdraw_paused_answers, Afterwards, Dropped,
 };
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
@@ -96,7 +97,7 @@ fn record(
         // task's window ended its turn with are the result: the note that gave them is moot.
         if task.state == "paused" {
             withdraw_paused_answers(store, &task, "finished")?;
-            leave_pause_notes(store, &task, "finished")?;
+            leave_pause_notes(store, &task, "finished", Afterwards::MovesOn)?;
         }
         let message_id = queue(
             store,
@@ -480,7 +481,7 @@ pub(crate) fn call_off(
         ],
     )?;
     // A note of several that names it, still queued, names it no more.
-    leave_pause_notes(store, &task, "cancelled")?;
+    leave_pause_notes(store, &task, "cancelled", Afterwards::MovesOn)?;
     say_again(store, &task, "cancelled", warnings)?;
     store.move_task(&task, "cancelled", json!({ "by": by }))?;
     release_ready(store, project_id)?;
@@ -685,11 +686,16 @@ fn fail(
         let failable = [&["open", "queued"], &ACTIVE_TASK_STATES[..]].concat();
         require_task_state(&task, &failable, "fail")?;
         let told = Dropped::of(store, &task)?;
+        // The answer of a window's turn on a tell, noted for the requester and not yet given
+        // (an early resume, then a resumed turn that failed), waits for the reopen with the
+        // task: what the window said then is the chief's still (T-442).
+        let answers = queued_paused_answers(store, &task)?;
         if given_up {
             drop_queued_but_told(store, task.id)?;
         } else {
             drop_queued(store, task.id)?;
         }
+        put_back_paused_answers(store, &answers)?;
         store.move_task(&task, "failed", json!({ "reason": reason }))?;
         release_ready(store, project_id)?;
         let requester = store.participant_row(task.requester_id)?;

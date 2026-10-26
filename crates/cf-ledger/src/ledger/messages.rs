@@ -114,6 +114,12 @@ impl Ledger {
         messages::note_paused_answer(&mut self.store, project_id, number, handle, tell, words)
     }
 
+    /// Whether the chief's tell to a participant's window about a task is still on its way to
+    /// it: what the window said last is not the answer to it until it is in.
+    pub fn tell_on_its_way(&self, participant_id: i64, task_id: i64) -> Result<bool, LedgerError> {
+        messages::tell_on_its_way(&self.store, participant_id, task_id)
+    }
+
     /// Whether words told to a participant's window about a task are still on
     /// their way to it: its answer is not the task's result until they are in.
     pub fn told_waiting(&self, participant_id: i64, task_id: i64) -> Result<bool, LedgerError> {

@@ -163,7 +163,7 @@ runs = ["ledger-suspended"]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
         let task = store.task_row(project_id, number)?;
-        leave_pause_notes(store, &task, "resumed")?;
+        leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)?;
         store.move_task('''
 replace = '''
         let task = store.task_row(project_id, number)?;
@@ -957,7 +957,7 @@ runs = ["ledger-suspended"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = '''                        leave_pause_notes(store, &task, "stays paused")?;'''
+find = '''                        leave_pause_notes(store, &task, "stays paused", Afterwards::StaysPaused)?;'''
 replace = '''                        let _ = leave_pause_notes;'''
 
 [[plant]]
@@ -967,7 +967,7 @@ runs = ["ledger-suspended"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = '''                        leave_pause_notes(store, &task, "stays paused")?;'''
+find = '''                        leave_pause_notes(store, &task, "stays paused", Afterwards::StaysPaused)?;'''
 replace = '''                        withdraw_pause_notes_silently(store, &task)?;'''
 
 [[plant.edit]]

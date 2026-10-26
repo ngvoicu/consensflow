@@ -129,6 +129,16 @@ pub(crate) struct Rests {
 }
 
 impl HeldPart {
+    /// What a window keeps once its task is no longer one it works on (paused, queued for a
+    /// resume): not the hold, nor what the requester was told of it. The look at its monitors
+    /// is kept: `watch_monitors` keeps it itself (it clears it at a pass that has no monitor
+    /// to decide), and a paused task's turn that ended with a monitor that said it ended is
+    /// told only once a look found its command over (T-442, Calliope's P2 on round 2).
+    pub(crate) fn drop_hold(&mut self) {
+        self.holding = None;
+        self.told = None;
+    }
+
     /// What a window keeps of its task's hold once no task of its is working: nothing of
     /// the hold, and its rests, which a window idle between its result and its close does
     /// not take again at every pass (Calliope on 136a7158).
@@ -210,8 +220,8 @@ impl Dispatcher {
             .borrow()
             .active_task(participant.id, false)?;
         let Some(thread) = task.filter(|thread| thread.task.state == "working") else {
-            record.held.borrow_mut().reset();
-            self.tell_paused_answer(project, participant, observed)?;
+            record.held.borrow_mut().drop_hold();
+            self.tell_paused_answer(project, participant, observed, watching)?;
             return Ok(Turn::Open);
         };
         let items = observed.items();
@@ -244,12 +254,7 @@ impl Dispatcher {
         else {
             return Ok(Turn::Open);
         };
-        let mut pending = observed.pending();
-        // The monitors that said they ended are over where a look found no command.
-        if watching == Watching::Seen(CommandsSeen::Running(0)) {
-            pending.jobs = pending.jobs.saturating_sub(pending.noticed);
-            pending.noticed = 0;
-        }
+        let pending = pending_after_look(observed, watching);
         let words = words_of(&answers.final_run);
         if pending.total() > 0 {
             let hold = Hold {
@@ -795,6 +800,18 @@ pub(crate) fn words_of(final_run: &[&Item]) -> String {
     } else {
         words.join("\n\n")
     }
+}
+
+/// What a worker's turn left pending, as a pass takes it: the monitors that said they ended
+/// are over where a look found no command in their window ([`Watching`]). A working task's
+/// turn ([`Dispatcher::collect`]) and a paused task's ([`paused`]) are held by the same count.
+pub(crate) fn pending_after_look(observed: &Observed, watching: Watching) -> Pending {
+    let mut pending = observed.pending();
+    if watching == Watching::Seen(CommandsSeen::Running(0)) {
+        pending.jobs = pending.jobs.saturating_sub(pending.noticed);
+        pending.noticed = 0;
+    }
+    pending
 }
 
 mod finish;

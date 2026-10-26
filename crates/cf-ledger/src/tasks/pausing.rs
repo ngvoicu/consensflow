@@ -22,7 +22,7 @@ use super::{
 };
 use crate::messages::{
     fold, join_pause_note, leave_pause_notes, note_pause, reconcile, release_carried, tell_goes_on,
-    transfer, withdraw_stale,
+    transfer, withdraw_stale, Afterwards,
 };
 use crate::model::{self, sql_list, LedgerError, ACTIVE_TASK_STATES, HELD_TASK_STATES, MAX_BODY};
 use crate::queue::{queue, send, Queued, Sent};
@@ -462,7 +462,7 @@ pub(crate) fn resume_task(
         let task = store.task_row(project_id, number)?;
         require_task_state(&task, &["paused"], "resume")?;
         // A refusal below writes nothing, this withdrawal with it.
-        leave_pause_notes(store, &task, "resumed")?;
+        leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)?;
         let assignee = task
             .assignee_id
             .map(|id| store.participant_row(id))
@@ -600,7 +600,7 @@ pub(crate) fn resume_with_project(store: &mut Store, project_id: i64) -> Result<
         .collect::<rusqlite::Result<_>>()?;
     for number in numbers {
         let task = store.task_row(project_id, number)?;
-        leave_pause_notes(store, &task, "resumed")?;
+        leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)?;
         store.move_task(
             &task,
             "working",
@@ -666,7 +666,7 @@ fn leave_several_paused(store: &mut Store, project_id: i64) -> Result<(), Ledger
                         [task.id],
                     )? > 0;
                     if suspension {
-                        leave_pause_notes(store, &task, "stays paused")?;
+                        leave_pause_notes(store, &task, "stays paused", Afterwards::StaysPaused)?;
                     }
                     suspension
                 }

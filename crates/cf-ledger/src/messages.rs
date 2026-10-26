@@ -56,11 +56,14 @@ pub(crate) use delivery::{
 pub use delivery::{HandOver, WITHDRAWN_AFTER_HANDED};
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub(crate) use holds::{note_hold, tell_goes_on};
-pub(crate) use paused_answers::{note as note_paused_answer, withdraw as withdraw_paused_answers};
+pub(crate) use paused_answers::{
+    note as note_paused_answer, put_back as put_back_paused_answers,
+    queued as queued_paused_answers, tell_on_its_way, withdraw as withdraw_paused_answers,
+};
 pub use pauses::MAY_STILL_RUN;
 pub(crate) use pauses::{
     join_pause_note, leave_pause_notes, note_pause, say_again, warnings_on_their_way,
-    warnings_queued,
+    warnings_queued, Afterwards,
 };
 pub use receipt::Read;
 pub(crate) use receipt::{

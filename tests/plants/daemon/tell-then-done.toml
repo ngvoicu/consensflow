@@ -16,6 +16,8 @@
 
 [run]
 engine-paused-answers = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_answers::"]
+ledger-receipt-suspended = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "suspended::"]
+page-finish = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "paused, though its lane"]
 ledger-pause-notes = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "pause_notes"]
 rig-regression-tell-then-done = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_final_answer_written_in_a_tells_turn"]
 
@@ -26,7 +28,7 @@ runs = ["engine-paused-answers"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "            self.tell_paused_answer(project, participant, observed)?;\n"
+find = "            self.tell_paused_answer(project, participant, observed, watching)?;\n"
 replace = ""
 
 [[plant]]
@@ -37,7 +39,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "            self.tell_paused_answer(project, participant, observed)?;\n"
+find = "            self.tell_paused_answer(project, participant, observed, watching)?;\n"
 replace = ""
 
 [[plant]]
@@ -77,7 +79,7 @@ runs = ["engine-paused-answers"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/paused.rs"
-find = " || observed.pending().total() > 0"
+find = "            || pending_after_look(observed, watching).total() > 0\n"
 replace = ""
 
 [[plant]]
@@ -147,7 +149,7 @@ runs = ["ledger-pause-notes"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "            leave_pause_notes(store, &task, \"finished\")?;\n"
+find = "            leave_pause_notes(store, &task, \"finished\", Afterwards::MovesOn)?;\n"
 replace = ""
 
 [[plant]]
@@ -187,8 +189,8 @@ runs = ["engine-paused-answers", "ledger-pause-notes"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "    let moved = moved_prefix(task.number);\n"
-replace = "    let moved = String::from(\"\\u{1}\");\n"
+find = "    let [paused, moved] = answer_prefixes(task.number);\n"
+replace = "    let [paused, _] = answer_prefixes(task.number);\n    let moved = String::from(\"\\u{1}\");\n"
 
 [[plant]]
 name = "tell then done: a resume writes the note again whether the chief has read it or not"
@@ -239,3 +241,103 @@ runs = ["engine-paused-answers"]
 file = "crates/cf-engine/src/turn_end/paused.rs"
 find = '"paused" | "queued"'
 replace = '"paused"'
+
+[[plant]]
+name = "tell then done: the monitors that said they ended hold a paused task's turn after a look found no command"
+meant = "a_tells_turn_that_ended_with_a_monitor_that_said_it_ended_is_told_once_a_look_finds_no_command"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = "pending_after_look(observed, watching).total() > 0"
+replace = "observed.pending().total() > 0"
+
+[[plant]]
+name = "tell then done: a pass over a task that is not working clears the look at its monitors"
+meant = "a_tells_turn_that_ended_with_a_monitor_that_said_it_ended_is_told_once_a_look_finds_no_command"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            record.held.borrow_mut().drop_hold();\n"
+replace = "            record.held.borrow_mut().reset();\n"
+
+[[plant]]
+name = "tell then done: a monitor whose command still runs is taken for over"
+meant = "a_tells_turn_whose_monitor_command_still_runs_is_told_when_it_has_ended"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "    if watching == Watching::Seen(CommandsSeen::Running(0)) {"
+replace = "    if matches!(watching, Watching::Seen(CommandsSeen::Running(_))) {"
+
+[[plant]]
+name = "tell then done: Finish takes the answer from before a tell that is on its way"
+meant = "finish_waits_for_the_answer_to_a_tell_that_is_not_in_the_window_yet_and_takes_no_answer_from_before_it"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "               AND state IN ('queued', 'gated', 'delivering')\",\n"
+replace = "               AND state IN ('gated')\",\n"
+
+[[plant]]
+name = "tell then done: Finish refuses a task whose tell is delivered"
+meant = "finish_takes_the_final_answer_of_a_paused_task_as_its_result"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "               AND state IN ('queued', 'gated', 'delivering')\",\n"
+replace = "               AND state IN ('queued', 'gated', 'delivering', 'delivered')\",\n"
+
+[[plant]]
+name = "tell then done: the human is told only to Resume a paused task, though its drawer can Finish it"
+meant = "a_task_the_human_gave_is_put_to_the_human_in_the_words_of_the_drawer"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "To take it as the result, Finish it in the task's drawer; to send it on, Resume it there."
+replace = "To send it on, Resume it in the task's drawer."
+
+[[plant]]
+name = "tell then done: a task that stays paused has its answer note written in the words of one that moved on"
+meant = "the_answer_note_of_a_task_that_stays_paused_through_the_resume_stays_in_the_words_of_a_paused_task"
+runs = ["ledger-receipt-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "    if afterwards == Afterwards::MovesOn {"
+replace = "    if true {"
+
+[[plant]]
+name = "tell then done: a task that stays paused has its answer note withdrawn with the pause notes"
+meant = "the_answer_note_of_a_task_that_stays_paused_through_the_resume_stays_in_the_words_of_a_paused_task"
+runs = ["ledger-receipt-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "    let [paused, moved] = answer_prefixes(task.number);\n"
+replace = "    let [_, moved] = answer_prefixes(task.number);\n    let paused = String::from(\"\\u{1}\");\n"
+
+[[plant]]
+name = "tell then done: a task that fails drops the answer note with its queued messages"
+meant = "a_resumed_turn_that_fails_fails_the_task_and_leaves_the_note_of_the_tells_answer"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        put_back_paused_answers(store, &answers)?;\n"
+replace = ""
+
+[[plant]]
+name = "tell then done: the drawer offers Finish for a working task alone"
+meant = "says nothing of waiting on a task that is paused, though its lane is held for it, and offers Finish, which takes what its worker said last"
+runs = ["page-finish"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "const FINISHABLE = ['working', 'paused']"
+replace = "const FINISHABLE = ['working']"

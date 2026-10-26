@@ -23,11 +23,20 @@
 //! will be the next complete answer; Finish withdraws it. What the window wrote before its
 //! last tool call, or in an earlier turn, stays in the transcript, as everywhere else.
 //!
+//! A harness that marks the text of a turn it was stopped in complete would have a note with
+//! those cut words, after a tell as after any pause; Claude Code marks it incomplete, and
+//! [`answers_to_the_task`] takes only a complete answer.
+//!
 //! **The chief may resume at once**, on the answer it was given, while the window is still
 //! at work on the rest of its turn: the resume waits behind the turn, the task is queued
 //! when the turn ends, and its answer is the follow-up to the resume's words, not the turn
 //! on the tell. That turn's end is told all the same, in the words of a task that has
 //! moved on.
+//!
+//! **A turn that left a Monitor** that said it ended is told as a working task's result is:
+//! once a look at the window's commands found none of the monitor's running
+//! ([`pending_after_look`]); until then it is pending, and the look state is kept across the
+//! passes of a task that is not working (`HeldPart::drop_hold`).
 //!
 //! Told once for each tell: the ledger writes none where the task's thread has a note of
 //! this tell, whatever became of it, so a daemon that restarts says nothing again.
@@ -35,7 +44,7 @@
 use cf_harness::contract::Observed;
 use cf_ledger::{ParticipantView, ProjectView};
 
-use super::{words_of, WITHOUT_ANSWER};
+use super::{pending_after_look, words_of, Watching, WITHOUT_ANSWER};
 use crate::delivery_text::header_id;
 use crate::dispatcher::Dispatcher;
 use crate::role_change::answers_to_the_task;
@@ -45,15 +54,20 @@ impl Dispatcher {
     /// The turn of the window of a paused task (or of one resumed, whose resume waits behind
     /// the turn), looked at: if it ended with a complete answer after the chief's tell,
     /// whoever gave the task is told it (see above). Nothing where the task is neither, no
-    /// tell is the latest message the window was pasted, the turn goes on, left work pending,
-    /// or was told already.
+    /// tell is the latest message the window was pasted, the turn goes on, left work pending
+    /// (the monitors that said they ended are over once a look found no command, as for a
+    /// working task's result), or was told already.
     pub(super) fn tell_paused_answer(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
         observed: &Observed,
+        watching: Watching,
     ) -> Result<(), EngineError> {
-        if !observed.settled || observed.failed || observed.pending().total() > 0 {
+        if !observed.settled
+            || observed.failed
+            || pending_after_look(observed, watching).total() > 0
+        {
             return Ok(());
         }
         // Paused, or resumed already with the resume queued behind the turn that just ended.

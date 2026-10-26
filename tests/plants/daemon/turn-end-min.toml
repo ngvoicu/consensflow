@@ -661,8 +661,8 @@ runs = ["tem-page-finish"]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = '''    if (task.state === 'working' && task.assignee !== null && task.assignee !== 'chief') {'''
-replace = '''    if (this.#held !== null && task.state === 'working' && task.assignee !== null && task.assignee !== 'chief') {'''
+find = '''    if (FINISHABLE.includes(task.state) && task.assignee !== null && task.assignee !== 'chief') {'''
+replace = '''    if (this.#held !== null && FINISHABLE.includes(task.state) && task.assignee !== null && task.assignee !== 'chief') {'''
 
 [[plant]]
 name = "turn-end-min cf: `cf task finish` is no command"
@@ -1015,8 +1015,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '        if watching == Watching::Seen(CommandsSeen::Running(0)) {'
-replace = '        if matches!(watching, Watching::Seen(CommandsSeen::Running(0) | CommandsSeen::Untold)) {'
+find = '    if watching == Watching::Seen(CommandsSeen::Running(0)) {'
+replace = '    if matches!(watching, Watching::Seen(CommandsSeen::Running(0) | CommandsSeen::Untold)) {'
 
 [[plant]]
 name = "turn-end-min engine: a held task is not told again when its monitor's notice comes"
@@ -1297,11 +1297,8 @@ runs = ["tem-engine-turn-end"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-        let rests = std::mem::take(&mut self.rests);
-        *self = HeldPart {
-            rests,
-            ..HeldPart::default()
-        };'''
+        self.holding = None;
+        self.told = None;'''
 replace = '''
         *self = HeldPart::default();'''
 

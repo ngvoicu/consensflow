@@ -23,9 +23,18 @@
 //! words the result. What the window did is said besides: the lane's state, the thread and
 //! the chief's inbox.
 //!
+//! Two cases (`--case`): `plain`, the shape above, on every harness named; and `monitor`
+//! (Claude Code's alone, which has the Monitor tool; Calliope's P2 on round 2 of T-442), where
+//! the turn on the tell arms a Monitor on a command, ends at once, and the monitor's expiry
+//! wakes the turn that ends with the final words: a turn that ended with a monitor that said it
+//! ended, which is told once a look at the window's commands finds none. The case checks the
+//! record shows the Monitor armed, so a window that skipped it passes nothing. Claude runs
+//! both by default.
+//!
 //! ```text
-//! cargo xtask live tell                    Claude, the default
+//! cargo xtask live tell                    Claude, the default: both cases
 //! cargo xtask live tell codex opencode     the ones named, one after the other
+//! cargo xtask live tell --case monitor     Claude's turn with a Monitor
 //! cargo xtask live tell -- --list          the check, listed
 //! ```
 //!
@@ -62,16 +71,73 @@ const DONE: Duration = Duration::from_secs(300);
 /// How often the board is looked at.
 const LOOK: Duration = Duration::from_millis(500);
 
-/// What the chief tells the window.
-fn told_words() -> String {
-    format!(
-        "Stop waiting for that command; do not run it again. First write the line {ANSWER} as text. Then, in this same turn, run `sleep 15` with your shell tool and wait for it. Then end your reply with exactly the line {REPORT}."
-    )
+/// What a run of the check asks of the window in the turn on the tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Turn {
+    /// A short command, then the final words.
+    Plain,
+    /// A Monitor armed on a command, and the final words when its expiry wakes the turn.
+    Monitor,
 }
 
-/// The project of the run: a stand-in chief, and `worker` on its cheap model.
-fn plan(worker: Harness) -> Plan {
-    Plan::new("tell", stand_in_chief()).with(member(worker))
+impl Turn {
+    /// The name `--case` gives it.
+    const fn name(self) -> &'static str {
+        match self {
+            Turn::Plain => "plain",
+            Turn::Monitor => "monitor",
+        }
+    }
+
+    /// What the chief tells the window.
+    fn told(self) -> String {
+        match self {
+            Turn::Plain => format!(
+                "Stop waiting for that command; do not run it again. First write the line {ANSWER} as text. Then, in this same turn, run `sleep 15` with your shell tool and wait for it. Then end your reply with exactly the line {REPORT}."
+            ),
+            Turn::Monitor => format!(
+                "Stop waiting for that command; do not run it again. First answer this question with cf answer, the answer being the line {ANSWER}. Then use ToolSearch to load the Monitor tool (select:Monitor), and use Monitor to watch the command: exec sleep 611 , with timeout_ms 20000 and description 'tell-watch'. Then end your turn at once, saying only WATCHING. When a notification says the monitor expired, end your reply with exactly the line {REPORT}."
+            ),
+        }
+    }
+
+    /// The cases a harness runs when none is asked for: Claude both, the others the plain one.
+    fn default_for(harness: Harness) -> Vec<Turn> {
+        if harness == Harness::Claude {
+            vec![Turn::Plain, Turn::Monitor]
+        } else {
+            vec![Turn::Plain]
+        }
+    }
+
+    /// The cases asked for with `--case`, for `harness`: those named, or its defaults.
+    fn asked(names: &[String], harness: Harness) -> Result<Vec<Turn>> {
+        if names.is_empty() {
+            return Ok(Self::default_for(harness));
+        }
+        let mut turns = Vec::new();
+        for name in names {
+            let turn = [Turn::Plain, Turn::Monitor]
+                .into_iter()
+                .find(|turn| turn.name() == name)
+                .ok_or_else(|| cf_e2e::Error::Daemon(format!("no such case: {name}")))?;
+            if turn == Turn::Monitor && harness != Harness::Claude {
+                continue;
+            }
+            turns.push(turn);
+        }
+        Ok(turns)
+    }
+}
+
+/// The project of the run: a stand-in chief, and `worker` on its cheap model, in a folder of
+/// the case's own.
+fn plan(worker: Harness, turn: Turn) -> Plan {
+    let folder = match turn {
+        Turn::Plain => "tell".to_owned(),
+        Turn::Monitor => format!("tell-{}", turn.name()),
+    };
+    Plan::new(&folder, stand_in_chief()).with(member(worker))
 }
 
 /// The id of the plan's worker.
@@ -204,7 +270,7 @@ fn number_in(out: &str) -> Option<i64> {
 
 /// The case: the chief tells the worker inside its command, the worker's turn ends with the
 /// words it was asked for, and the chief finishes the task.
-fn drive(mut members: Members, agent: &str, log: &Log) -> Result<Account> {
+fn drive(mut members: Members, agent: &str, turn: Turn, log: &Log) -> Result<Account> {
     let mut case = Account::new();
     members.add(agent, &[])?;
     let tier = members.tier_of(agent).unwrap_or("standard").to_owned();
@@ -238,7 +304,7 @@ fn drive(mut members: Members, agent: &str, log: &Log) -> Result<Account> {
     sleep(Duration::from_secs(3));
 
     let target = format!("T-{number}");
-    chief(&members, &mut case, &["tell", &target, &told_words()])?;
+    chief(&members, &mut case, &["tell", &target, &turn.told()])?;
     case.check(
         "the tell paused the task",
         state(&members, number) == "paused",
@@ -292,6 +358,26 @@ fn drive(mut members: Members, agent: &str, log: &Log) -> Result<Account> {
         ),
     );
 
+    if turn == Turn::Monitor {
+        // The record shows the turn armed a Monitor: a window that skipped it proves nothing.
+        let seen = chief(
+            &members,
+            &mut case,
+            &[
+                "task",
+                "get",
+                &target,
+                "--transcript",
+                "--find",
+                "tell-watch",
+            ],
+        )?;
+        case.check(
+            "the turn on the tell armed the Monitor",
+            seen.stdout.contains("tell-watch"),
+            cut(&seen.stdout, 300),
+        );
+    }
     let finished = chief(&members, &mut case, &["task", "finish", &target])?;
     case.check(
         "cf task finish answers",
@@ -334,29 +420,35 @@ fn a_workers_final_answer_after_the_chiefs_tell_reaches_the_chief_and_finish_mak
         "harness",
         &[Harness::Claude],
     )?;
+    let asked = live::list("case");
     let mut checks = Vec::new();
     for worker in workers {
-        let plan = plan(worker);
-        let agent = agent_of(&plan);
-        let scoped = log.scoped(format!("{} worker", worker.name()));
         let version = live::version_of(worker);
-        let case = Members::open(&plan, Path::new(FAKE_AGENT), &scoped)
-            .and_then(|members| drive(members, &agent, &scoped))
-            .unwrap_or_else(|failed| {
-                let mut case = Account::new();
-                case.fail(failed);
-                case
-            });
-        log.block(
-            &format!("== {} worker: {version}", worker.name()),
-            &case.text(),
-        );
-        checks.push(Check::new(
-            &format!("{} worker", worker.name()),
-            "the final answer after a tell reaches the chief, and Finish makes it the result",
-            case.held(),
-            version,
-        ));
+        for turn in Turn::asked(&asked, worker)? {
+            let plan = plan(worker, turn);
+            let agent = agent_of(&plan);
+            let scoped = log.scoped(format!("{} worker {}", worker.name(), turn.name()));
+            let case = Members::open(&plan, Path::new(FAKE_AGENT), &scoped)
+                .and_then(|members| drive(members, &agent, turn, &scoped))
+                .unwrap_or_else(|failed| {
+                    let mut case = Account::new();
+                    case.fail(failed);
+                    case
+                });
+            log.block(
+                &format!("== {} worker, {}: {version}", worker.name(), turn.name()),
+                &case.text(),
+            );
+            checks.push(Check::new(
+                &format!("{} worker", worker.name()),
+                &format!(
+                    "the final answer after a tell reaches the chief ({}), and Finish makes it the result",
+                    turn.name()
+                ),
+                case.held(),
+                version.clone(),
+            ));
+        }
     }
     report::conclude(&log, "what each worker came to", &checks)
 }
@@ -367,25 +459,60 @@ mod tests {
 
     #[test]
     fn the_chief_tells_the_worker_to_answer_with_one_word_and_to_end_with_another() {
-        let words = told_words();
-        assert!(words.contains(ANSWER) && words.contains(REPORT));
-        assert!(
-            words.find(ANSWER) < words.find(REPORT),
-            "the answer comes first"
-        );
+        for turn in [Turn::Plain, Turn::Monitor] {
+            let words = turn.told();
+            assert!(words.contains(ANSWER) && words.contains(REPORT));
+            assert!(
+                words.find(ANSWER) < words.find(REPORT),
+                "the answer comes first"
+            );
+        }
         assert_ne!(ANSWER, REPORT);
+    }
+
+    #[test]
+    fn the_monitor_turn_arms_a_monitor_that_expires_and_ends_with_the_words_its_expiry_wakes() {
+        let words = Turn::Monitor.told();
+        assert!(words.contains("select:Monitor") && words.contains("timeout_ms 20000"));
+        assert!(words.contains("'tell-watch'"));
+        assert!(words.ends_with(&format!("exactly the line {REPORT}.")));
+        assert!(!Turn::Plain.told().contains("Monitor"));
+    }
+
+    #[test]
+    fn claude_runs_both_cases_by_default_and_the_others_the_plain_one_and_a_monitor_asked_of_them_is_none(
+    ) {
+        assert_eq!(
+            Turn::asked(&[], Harness::Claude).unwrap(),
+            [Turn::Plain, Turn::Monitor]
+        );
+        assert_eq!(Turn::asked(&[], Harness::Codex).unwrap(), [Turn::Plain]);
+        let monitor = ["monitor".to_owned()];
+        assert_eq!(
+            Turn::asked(&monitor, Harness::Claude).unwrap(),
+            [Turn::Monitor]
+        );
+        assert_eq!(Turn::asked(&monitor, Harness::Codex).unwrap(), []);
+        let nonsense = ["fast".to_owned()];
+        assert_eq!(
+            Turn::asked(&nonsense, Harness::Claude)
+                .unwrap_err()
+                .to_string(),
+            "no such case: fast"
+        );
     }
 
     #[test]
     fn the_project_is_a_stand_in_chief_and_one_worker_of_the_harness_on_its_cheap_model() {
         for harness in Harness::ALL {
-            let plan = plan(harness);
+            let plan = plan(harness, Turn::Plain);
             assert_eq!(plan.folder, "tell");
             assert_eq!(plan.roster.len(), 2, "{harness:?}");
             assert_eq!(plan.roster[1]["kind"], harness.kind());
             assert_eq!(plan.roster[1]["model"], live::agents::model(harness).name);
             assert_eq!(agent_of(&plan), plan.roster[1]["id"].as_str().unwrap());
         }
+        assert_eq!(plan(Harness::Claude, Turn::Monitor).folder, "tell-monitor");
     }
 
     #[test]

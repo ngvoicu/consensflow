@@ -10,12 +10,13 @@
 //! Node had none of it, so none of these is held to a Node trace.
 
 use cf_engine::testing::Context;
-use cf_harness::records::Role;
+use cf_harness::records::{End, Role, Source};
 use cf_ledger::NewTask;
 use cf_proto::ledger::MessageView;
 use serde_json::json;
 
 use crate::fixtures::{given, notes, Tiers};
+use crate::turn_end::{monitor, pending};
 
 /// What the window ends its turn with, after the answer to the tell.
 const FINAL: &str = "FINAL-RESULT: the parser is done on grammar v2";
@@ -50,9 +51,9 @@ fn tell_working(context: &Context, project: i64, window: &str) -> MessageView {
     told
 }
 
-/// The window answers the tell with `cf answer`, works on, and ends its turn with `FINAL`:
-/// the record shows its words, a tool, the answer's tool, and the final words.
-fn answers_then_goes_on_to_the_end(context: &Context, told: &MessageView) {
+/// The window answers the tell with `cf answer` and works on: the record shows its words,
+/// a tool, the answer's tool, and another tool, and its turn goes on.
+fn answers_and_goes_on(context: &Context, told: &MessageView) {
     let item = |role, text: &str, complete| {
         let mut item = context.adapter.item(role, text);
         item.complete = complete;
@@ -72,6 +73,11 @@ fn answers_then_goes_on_to_the_end(context: &Context, told: &MessageView) {
             .push(item(Role::Tool, "m-3 answered @chief.", true));
         agent.items.push(item(Role::Tool, "(Bash completed)", true));
     });
+}
+
+/// The window answers the tell with `cf answer`, works on, and ends its turn with `FINAL`.
+fn answers_then_goes_on_to_the_end(context: &Context, told: &MessageView) {
+    answers_and_goes_on(context, told);
     context.adapter.answer("zeus", FINAL);
 }
 
@@ -488,7 +494,7 @@ fn a_task_the_human_gave_is_put_to_the_human_in_the_words_of_the_drawer() {
     assert_eq!(
         notes(&context, context.id(project.id, "human")),
         [format!(
-            "T-1 is paused, and @zeus's turn on the words put to its window (m-{}) is over. What it said last:\n\n{FINAL}\n\nTo send it on, Resume it in the task's drawer.",
+            "T-1 is paused, and @zeus's turn on the words put to its window (m-{}) is over. What it said last:\n\n{FINAL}\n\nTo take it as the result, Finish it in the task's drawer; to send it on, Resume it there.",
             told.id
         )]
     );
@@ -526,4 +532,185 @@ fn a_complete_answer_of_no_words_says_nothing_either() {
         context.pass().unwrap();
     }
     assert_eq!(kept_notes(&context, project), Vec::<String>::new());
+}
+
+#[test]
+fn a_tells_turn_that_ended_with_a_monitor_that_said_it_ended_is_told_once_a_look_finds_no_command()
+{
+    // Calliope's P2 on round 2: a worker's tell answered, its turn on with a Monitor armed
+    // that ran out of time (Claude Code kills its command as it writes the notice). The
+    // pass that sees the notice looks at nothing, the next looks and finds no command, and
+    // the turn's end is told, as a working task's would be a result.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context.background.commands_run(Some(0));
+    answers_and_goes_on(&context, &told);
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        FINAL,
+        pending(1, 1),
+        vec![monitor("ticks", Source::Command, Some(End::Expired))],
+    );
+    context.pass().unwrap();
+    assert_eq!(
+        context.background.looks(),
+        0,
+        "no look on the pass that saw it"
+    );
+    assert_eq!(
+        kept_notes(&context, project),
+        Vec::<String>::new(),
+        "none before the look"
+    );
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.background.looks(), 1, "one look found it over");
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    assert_eq!(
+        kept_notes(&context, project),
+        [paused_words("zeus", &told)],
+        "told once"
+    );
+}
+
+#[test]
+fn a_tells_turn_whose_monitor_command_still_runs_is_told_when_it_has_ended() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context.background.commands_run(Some(1));
+    answers_and_goes_on(&context, &told);
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        FINAL,
+        pending(1, 1),
+        vec![monitor("ticks", Source::Command, Some(End::Expired))],
+    );
+    // Two looks that find a command running, the second after the wait between looks: it is
+    // told of a working task at the second (`running_looks`), and a paused task's turn is not
+    // over before then either.
+    for _ in 0..3 {
+        context.advance(4_000);
+        context.pass().unwrap();
+    }
+    assert!(context.background.looks() >= 2);
+    assert_eq!(
+        kept_notes(&context, project),
+        Vec::<String>::new(),
+        "a command of the monitor runs still"
+    );
+    // The command ends: the next look, once the wait between looks is over, finds none.
+    context.background.commands_run(Some(0));
+    for _ in 0..4 {
+        context.advance(4_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(kept_notes(&context, project), [paused_words("zeus", &told)]);
+}
+
+/// The note T-1's window left for its requester while the task was paused, in its words.
+fn paused_words(handle: &str, told: &MessageView) -> String {
+    format!(
+        "T-1 is paused, and @{handle}'s turn on the words put to its window (m-{}) is over. What it said last:\n\n{FINAL}\n\nIf that is the result, take it: cf task finish T-1. To send it on: cf task resume T-1 \"…\".",
+        told.id
+    )
+}
+
+#[test]
+fn finish_waits_for_the_answer_to_a_tell_that_is_not_in_the_window_yet_and_takes_no_answer_from_before_it(
+) {
+    // Between `cf tell` and its paste the record holds the turn from before the tell: the
+    // window wrote a complete answer, and a job it left running keeps the task working.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context
+        .adapter
+        .answer_leaving_a_job("zeus", "Stage one is done; the build runs");
+    context.pass().unwrap();
+    assert_eq!(
+        context.task(project.id, 1).task.state,
+        "working",
+        "held for its job"
+    );
+    context.tell(project.id, "zeus", 1, "Stop and tell me where you are");
+    assert_eq!(context.task(project.id, 1).task.state, "paused");
+
+    let refused = context.finish_task(project.id, 1, "chief").unwrap_err();
+    assert!(
+        refused.to_string().starts_with(
+            "cannot finish T-1: the words you told @zeus are on their way to its window"
+        ),
+        "{refused}"
+    );
+    assert_eq!(results(&context, project.id), Vec::<String>::new());
+    assert_eq!(context.task(project.id, 1).task.state, "paused");
+}
+
+#[test]
+fn finish_takes_the_last_complete_answer_of_a_task_paused_without_a_tell() {
+    // The chief's explicit call, for any paused task: what its window wrote last since the
+    // latest message it was pasted.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    context.pause_task(project.id, 1);
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "Half a parser");
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "paused");
+
+    let finished = context
+        .finish_task(project.id, 1, "chief")
+        .expect("finished");
+    assert_eq!(finished.task.state, "done");
+    assert!(results(&context, project.id)[0].starts_with("Half a parser"));
+}
+
+#[test]
+fn a_resumed_turn_that_fails_fails_the_task_and_leaves_the_note_of_the_tells_answer() {
+    // Calliope's P3: the early resume's "moved on" note is queued (the chief is at work) when
+    // the resumed window's turn fails and the task fails with it; dropping the task's queued
+    // messages took the note, and the answer with it, since the tell has its note already.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context.adapter.busy("chief");
+    context
+        .ledger
+        .borrow_mut()
+        .answer(told.id, told.recipient_id, Some(&json!(ANSWER)), None)
+        .unwrap();
+    context.resume_task(project, 1, "Go on, or say you finished");
+    context.adapter.answer("zeus", FINAL);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.task(project, 1).task.state,
+        "working",
+        "the resume went in"
+    );
+    let note = kept_note(&context, project);
+    assert_eq!(note.state, "queued");
+
+    // The harness reports the resumed turn failed.
+    context.adapter.with("zeus", |agent| {
+        agent.failed = true;
+        agent.settled = true;
+    });
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 1).task.state, "failed");
+    let kept = context.message(note.id);
+    assert_eq!(
+        kept.state, "queued",
+        "the answer to the tell is not dropped with the task"
+    );
+    assert_eq!(kept.body, moved_on_words("zeus", &told));
 }

@@ -22,6 +22,8 @@ const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'open']
 const PAUSABLE = ['open', 'queued', 'working', 'waiting']
 /** What the human may give back to the board for another member of its tier. */
 const REASSIGNABLE = ['queued', 'working', 'waiting', 'paused']
+/** The states in which the human may take what a worker said last as the task's result. */
+const FINISHABLE = ['working', 'paused']
 /** What is over, accepted or not: the human may delete it from the board. */
 const FINISHED = ['accepted', 'failed', 'cancelled']
 /** The columns, in reading order; whatever is over, accepted or not, shares the last one. */
@@ -1167,12 +1169,13 @@ export class TaskDrawer {
         ),
       )
     }
-    // Any working task of a member's: what its worker said last becomes the result, at the
-    // human's word (the chief has the same in `cf task finish`), whatever the window's
-    // reader says of its turn. It ends nothing the turn left running, which ends with
+    // Any working or paused task of a member's: what its worker said last becomes the result,
+    // at the human's word (the chief has the same in `cf task finish`), whatever the window's
+    // reader says of its turn. A paused task's is the answer its turn on a tell ended with,
+    // which the human is told (T-442). It ends nothing the turn left running, which ends with
     // its window, or outlives it where the host cannot tell what is the window's: the
     // button promises no end of it.
-    if (task.state === 'working' && task.assignee !== null && task.assignee !== 'chief') {
+    if (FINISHABLE.includes(task.state) && task.assignee !== null && task.assignee !== 'chief') {
       actions.push(
         button(
           'Finish',
