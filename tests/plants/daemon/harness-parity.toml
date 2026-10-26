@@ -245,13 +245,13 @@ replace = '''    this.#grantsOf.hidden = true'''
 
 [[plant]]
 name = "parity live kit: the stand-in writes in the machine's Claude folder whatever the run was given"
-meant = "a_stand_in_keeps_the_claude_folder_a_run_was_given_and_else_the_machines"
+meant = "a_stand_in_keeps_the_claude_folder_a_run_was_given"
 runs = ["live-kit-shim"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine/wrapper.rs"
-find = '''CLAUDE_CONFIG_DIR=\"${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}\" exec {}'''
-replace = '''CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec {}'''
+find = '''fake | fake-chief) exec {} \"$@\" ;;'''
+replace = '''fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec {} \"$@\" ;;'''
 
 [[plant]]
 name = "parity env: a Claude window keeps the billing key an rc exports"

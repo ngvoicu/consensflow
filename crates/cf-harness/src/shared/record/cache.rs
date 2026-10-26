@@ -147,6 +147,9 @@ mod tests {
 
     /// A cache over counting readers, which reads no conversation without
     /// a session.
+    // Its error is only ever `Reading::Unknown` or `Reading::Missing`, a reason string, never a
+    // record (3.0.6-alpha.3's integration B, T-664).
+    #[allow(clippy::result_large_err)]
     fn cache(idle_ms: i64) -> Cache {
         let opened = AtomicUsize::new(0);
         Cache::new(
@@ -226,6 +229,9 @@ mod tests {
     }
 
     #[test]
+    // Its error is only ever `Reading::Unknown` or `Reading::Missing`, a reason string, never a
+    // record (3.0.6-alpha.3's integration B, T-664).
+    #[allow(clippy::result_large_err)]
     fn each_look_hands_its_own_options_and_its_time_to_the_reader() {
         let env = Env::default();
         let mut cache = Cache::new(Box::new(|_, _, _| Ok(Box::new(Telling))), IDLE_MS, 0);
