@@ -677,7 +677,8 @@ fn last_activity(context: &Context, handle: &str) -> Option<String> {
         .lines
         .borrow()
         .iter()
-        .filter_map(|line| match &line.what {
+        .rev()
+        .find_map(|line| match &line.what {
             Traced::Window {
                 participant: Some(participant),
                 event: WindowEvent::Activity { reason, .. },
@@ -685,7 +686,6 @@ fn last_activity(context: &Context, handle: &str) -> Option<String> {
             } if participant == handle => Some(reason.clone()),
             _ => None,
         })
-        .last()
         .flatten()
 }
 
