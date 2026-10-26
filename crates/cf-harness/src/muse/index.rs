@@ -4,9 +4,10 @@
 //! its one query in a transaction that ends with it: `shared::record::sqlite`).
 //!
 //! The index is Muse's cache of its logs, not their record, and it lags them (Muse
-//! 1.4.13 on echo, T-703, `tests/fixtures/muse/index-states.json`): a session has no
-//! row while it runs, nor after it quit cleanly, until a later Muse process starts; the
-//! row of a session resumed and quit is gone until the next one starts; and a session
+//! 1.4.13 on echo, T-703, `tests/fixtures/muse/index-states.json`): a session may have
+//! no row while it runs (one probe saw a running session indexed partway through, the
+//! recording saw none), nor after it quit cleanly, until a later Muse process starts;
+//! the row of a session resumed and quit is gone until the next one starts; and a session
 //! killed at rest, its turn answered, reads as a segment that did not end
 //! (`latest_segment_terminated = 0`), as one killed at work does. So the index says
 //! yes, never no, and never whether a turn was cut: the log says those ([`resumable`];
