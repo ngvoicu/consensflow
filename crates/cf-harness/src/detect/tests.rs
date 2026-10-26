@@ -4,6 +4,7 @@ use std::path::Path;
 use super::*;
 
 mod managed_pi;
+mod muse;
 mod npm_global;
 mod tool_folders;
 
@@ -66,14 +67,15 @@ fn every_harness_is_known_in_the_order_harnesses_js_lists_them_not_the_rosters()
             Harness::Claude,
             Harness::Codex,
             Harness::Opencode,
-            Harness::Pi
+            Harness::Pi,
+            Harness::Muse
         ]
     );
     let mut sorted = known_harnesses().map(Harness::as_str);
     sorted.sort_unstable();
     let mut all = Harness::ALL.map(Harness::as_str);
     all.sort_unstable();
-    assert_eq!(sorted, all, "the same five harnesses, in another order");
+    assert_eq!(sorted, all, "the same six harnesses, in another order");
 }
 
 #[test]
@@ -99,7 +101,7 @@ fn the_installed_and_the_missing_are_told_apart_each_in_the_order_of_the_list() 
     startable(&bin.join(name("devin")));
     assert_eq!(
         missing_harnesses(&env),
-        [Harness::Claude, Harness::Opencode]
+        [Harness::Claude, Harness::Opencode, Harness::Muse]
     );
     let detected = detect_harnesses(&env);
     assert_eq!(

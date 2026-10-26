@@ -357,6 +357,7 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         asking: false,
         failed: false,
         failure: None,
+        took_back: false,
         quota,
         settlement,
         pending: Default::default(),

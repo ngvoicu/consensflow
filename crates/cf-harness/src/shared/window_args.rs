@@ -109,6 +109,8 @@ fn window(
                 drop_env: &["ANTHROPIC_API_KEY"],
             }
         }
+        // No Muse window is opened yet (MUS-08): its adapter refuses the launch.
+        Harness::Muse => return None,
         // `--session-id` creates the session the first time and resumes it after.
         Harness::Pi => {
             let session = session?;
@@ -227,6 +229,8 @@ fn model_and_effort(harness: Harness, agent: Agent) -> Vec<String> {
                 flag("--model", model.to_owned());
             }
         }
+        // No Muse window is opened yet (MUS-08).
+        Harness::Muse => {}
     }
     flags
 }

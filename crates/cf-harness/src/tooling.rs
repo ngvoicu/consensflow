@@ -140,7 +140,9 @@ fn trust(question: &Value) -> Result<Value, String> {
             crate::claude::trust::shows_prompt(&screen),
             crate::claude::trust::names_choices(&screen),
         ),
-        Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin => (None, false, false),
+        Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin | Harness::Muse => {
+            (None, false, false)
+        }
     };
     let pressed = match key {
         Some(

@@ -218,13 +218,14 @@ impl Records for Thread {
     }
 }
 
-/// The caches of the five harnesses, each with its own sweep.
+/// The caches of the six harnesses, each with its own sweep.
 struct Caches {
     claude: Cache,
     codex: Cache,
     pi: Cache,
     opencode: Cache,
     devin: Cache,
+    muse: Cache,
 }
 
 impl Caches {
@@ -249,6 +250,7 @@ impl Caches {
             pi: cache(),
             opencode: cache(),
             devin: cache(),
+            muse: cache(),
         }
     }
 
@@ -259,6 +261,7 @@ impl Caches {
             Harness::Pi => &mut self.pi,
             Harness::Opencode => &mut self.opencode,
             Harness::Devin => &mut self.devin,
+            Harness::Muse => &mut self.muse,
         }
     }
 }

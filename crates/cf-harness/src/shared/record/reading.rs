@@ -82,6 +82,14 @@ pub struct Record {
     /// reading Node wrote has it.
     #[serde(skip)]
     pub failure: Option<String>,
+    /// The turn was stopped before a word of it, and its harness put its message back in
+    /// the input box, out of the conversation it answers from, though the items still
+    /// hold it, as the record says (Muse's `run_retracted`). A reader whose record
+    /// cannot say it leaves it false, and the window's look infers it where it can
+    /// (`Observed::took_back`, Claude's from the interrupt it pressed). Never said: no
+    /// reading Node wrote has it.
+    #[serde(skip)]
+    pub took_back: bool,
     pub quota: Option<Arc<Quota>>,
     pub settlement: Settlement,
     /// What the settled turn left running that its harness wakes its agent for as
@@ -233,6 +241,7 @@ impl Record {
             asking: false,
             failed: false,
             failure: None,
+            took_back: false,
             quota: None,
             settlement: Settlement::Unknown,
             pending: Pending::default(),

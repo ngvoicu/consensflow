@@ -19,6 +19,7 @@ pub mod contract;
 pub mod detect;
 pub mod devin;
 pub mod launch;
+pub mod muse;
 pub mod opencode;
 pub mod pi;
 pub mod prepare;

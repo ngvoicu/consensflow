@@ -79,6 +79,7 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
             asking: false,
             failed: false,
             failure: None,
+            took_back: false,
             quota: None,
             settlement: if settled {
                 Settlement::Settled

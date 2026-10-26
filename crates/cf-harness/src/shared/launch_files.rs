@@ -32,14 +32,15 @@ pub(crate) const CODEX_FOLDER: &str = "codex";
 const FOLDERS: [&str; 5] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER];
 
 /// The folder under `integrations` a harness keeps its launches' files in:
-/// Codex is given what it runs with, and keeps no role there ([`CODEX_FOLDER`]).
+/// Codex is given what it runs with, and keeps no role there ([`CODEX_FOLDER`]),
+/// and no Muse window is launched yet.
 pub(crate) fn harness_folder(harness: Harness) -> Option<&'static str> {
     match harness {
         Harness::Claude => Some("claude"),
         Harness::Pi => Some("pi"),
         Harness::Devin => Some("devin"),
         Harness::Opencode => Some("opencode"),
-        Harness::Codex => None,
+        Harness::Codex | Harness::Muse => None,
     }
 }
 

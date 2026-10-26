@@ -1,8 +1,11 @@
 //! The Claude transcripts the tests of this crate read (`tests/fixtures/claude`)
-//! are of live runs, made fixtures by `cargo xtask scrub-transcript`: no folder of
-//! a user, no address and no id of an account may be left in one, whatever else a
-//! person adds to the folder by hand. How the tool scrubs is held by its own tests
-//! (`tools/xtask/src/scrub_transcript`); this holds what it was made for.
+//! are of live runs, made fixtures by `cargo xtask scrub-transcript`, and the Muse
+//! session logs (`tests/fixtures/muse`) are of runs on Muse's fake model, made
+//! fixtures by `cargo xtask scrub-muse-session`: no folder of a user or of the
+//! machine's temporary folder, no address and no id of an account may be left in
+//! one, whatever else a person adds to a folder by hand. How the tools scrub is held
+//! by their own tests (`tools/xtask/src/scrub_transcript`,
+//! `tools/xtask/src/scrub_muse_session`); this holds what they were made for.
 
 use std::fs;
 use std::path::PathBuf;
@@ -11,11 +14,16 @@ use regex::Regex;
 use serde_json::Value;
 
 /// What a transcript of a live run has in it that is personal, each with a sample:
-/// a folder of a user's, on a Mac and on Linux, an address, and the ids of an
-/// account's bridge sessions. (A word is what JavaScript's `\w` made it: ASCII.)
-const PERSONAL: [(&str, &str); 5] = [
+/// a folder of a user's, on a Mac and on Linux, a Mac's temporary folder (a user's
+/// own, with `/private` before it or not), an address, and the ids of an account's
+/// bridge sessions. (A word is what JavaScript's `\w` made it: ASCII.)
+const PERSONAL: [(&str, &str); 6] = [
     (r"/Users/", "/Users/jane/Projects/app"),
     (r"/home/", "/home/jane/app"),
+    (
+        r"/var/folders/",
+        "/private/var/folders/5f/cy8ywl/T/muse-rec-1/work",
+    ),
     (
         r"[A-Za-z0-9_.+-]+@[A-Za-z0-9_-]+\.[A-Za-z0-9_]+",
         "jane@example.com",
@@ -24,16 +32,17 @@ const PERSONAL: [(&str, &str); 5] = [
     (r"session_0[A-Za-z0-9_]{6,}", "session_01Abcdefg"),
 ];
 
-fn folder() -> PathBuf {
+fn folder(harness: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
-        .join("claude")
+        .join(harness)
 }
 
 #[test]
 fn the_claude_fixtures_hold_no_folder_no_address_and_no_id_of_an_account() {
-    let mut names: Vec<String> = fs::read_dir(folder())
+    let folder = folder("claude");
+    let mut names: Vec<String> = fs::read_dir(&folder)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .filter(|name| name.ends_with(".jsonl"))
@@ -41,7 +50,7 @@ fn the_claude_fixtures_hold_no_folder_no_address_and_no_id_of_an_account() {
     names.sort();
     assert!(names.len() >= 2, "the fixtures are there: {names:?}");
     for name in names {
-        let text = fs::read_to_string(folder().join(&name)).unwrap();
+        let text = fs::read_to_string(folder.join(&name)).unwrap();
         for (pattern, _) in PERSONAL {
             let found = Regex::new(pattern).unwrap();
             assert!(!found.is_match(&text), "{name} matches {pattern}");
@@ -51,6 +60,27 @@ fn the_claude_fixtures_hold_no_folder_no_address_and_no_id_of_an_account() {
             if let Some(session) = record.get("sessionId") {
                 assert_eq!(session, "$SESSION", "{name}");
             }
+        }
+    }
+}
+
+#[test]
+fn the_muse_fixtures_hold_no_folder_no_address_and_no_id_of_an_account() {
+    let folder = folder("muse");
+    let mut names: Vec<String> = fs::read_dir(&folder)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| {
+            name.ends_with(".jsonl") || name.ends_with(".json") || name.ends_with(".sql")
+        })
+        .collect();
+    names.sort();
+    assert!(names.len() >= 10, "the fixtures are there: {names:?}");
+    for name in names {
+        let text = fs::read_to_string(folder.join(&name)).unwrap();
+        for (pattern, _) in PERSONAL {
+            let found = Regex::new(pattern).unwrap();
+            assert!(!found.is_match(&text), "{name} matches {pattern}");
         }
     }
 }

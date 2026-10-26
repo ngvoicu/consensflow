@@ -63,7 +63,8 @@ pub fn read(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Opti
     match harness {
         Harness::Claude => crate::claude::input_box::read(screen, cursor),
         Harness::Devin => crate::devin::input_box::read(screen, cursor),
-        Harness::Codex | Harness::Pi | Harness::Opencode => None,
+        // Muse's box is read once its window is (MUS-10).
+        Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Muse => None,
     }
 }
 

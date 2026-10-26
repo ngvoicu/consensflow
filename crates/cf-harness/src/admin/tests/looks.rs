@@ -300,12 +300,22 @@ fn every_harness_is_looked_at_at_once_each_asked_its_own_version_and_release() {
             .latest
             .says(Harness::from_name(command).unwrap(), release);
     }
+    // Muse says its version in the file beside its launcher, and runs nothing; no
+    // window is opened on it, so no update is offered it.
+    let muse = fixture.install("bin", "muse");
+    std::fs::write(muse.with_file_name(".muse-version"), "1.4.13-R1\n").unwrap();
+    fixture.latest.says(Harness::Muse, "1.4.14-R1");
     let rows = fixture.check(None, false);
     let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
-    assert_eq!(ids, ["devin", "claude", "codex", "opencode", "pi"]);
-    assert!(rows
+    assert_eq!(ids, ["devin", "claude", "codex", "opencode", "pi", "muse"]);
+    assert!(rows[..5]
         .iter()
         .all(|row| matches!(row.update, Update::Available(_))));
+    assert!(
+        matches!(rows[5].update, Update::Unknown(_)),
+        "{:?}",
+        rows[5].update
+    );
     let mut ran: Vec<String> = fixture
         .capture
         .take_ran()
@@ -330,6 +340,81 @@ fn every_harness_is_looked_at_at_once_each_asked_its_own_version_and_release() {
         .map(|(id, _)| id.as_str())
         .collect();
     asked.sort_unstable();
-    assert_eq!(asked, ["claude", "codex", "devin", "opencode", "pi"]);
+    assert_eq!(
+        asked,
+        ["claude", "codex", "devin", "muse", "opencode", "pi"]
+    );
     assert!(fixture.capture.unused().is_empty() && fixture.latest.unused().is_empty());
+}
+
+#[test]
+fn muses_version_is_the_line_beside_its_launcher_with_nothing_run_else_a_quiet_version() {
+    let not_yet = Setup::NotSupportedYet {
+        reason: "ConsensFlow cannot open a Muse Code window yet.".to_owned(),
+    };
+    // Its installer's launcher, which names the binary it runs beside it.
+    let fixture = Fixture::new();
+    let launcher = fixture.install("home/.local/bin", "muse");
+    let line = launcher.parent().unwrap().join(".muse-version");
+    std::fs::write(&line, "1.4.13-R6996.1\n").unwrap();
+    fixture.latest.says(Harness::Muse, "1.4.13-R6996.2");
+    let row = fixture.row("muse", false);
+    assert_eq!(
+        row.version,
+        Version::Checked {
+            value: "1.4.13-R6996.1".to_owned()
+        }
+    );
+    assert!(
+        fixture.capture.take_ran().is_empty(),
+        "the launcher's own --version checks for an update"
+    );
+    assert_eq!(row.setup, Some(not_yet.clone()));
+    assert_eq!(
+        row.distribution,
+        Distribution::Named("Muse Code's installer".to_owned())
+    );
+    // No window is opened on it, so no update is offered it, and none runs one.
+    let Update::Unknown(release) = &row.update else {
+        panic!("{:?}", row.update);
+    };
+    assert_eq!(release.value, "1.4.13-R6996.2");
+    assert_eq!(release.command, None);
+    // An older one is to be updated, and the release is one.
+    std::fs::write(&line, "1.4.12-R6000\n").unwrap();
+    fixture.latest.says(Harness::Muse, "1.4.13-R6996.1");
+    let row = fixture.row("muse", true);
+    assert_eq!(
+        row.setup,
+        Some(Setup::UpdateRequired {
+            reason:
+                "Muse Code 1.4.13 or newer is required. Update Muse Code before opening a pane."
+                    .to_owned()
+        })
+    );
+    assert!(
+        matches!(row.update, Update::Available(_)),
+        "{:?}",
+        row.update
+    );
+    // With no line beside it, it is asked, with its update and its login off.
+    std::fs::remove_file(&line).unwrap();
+    fixture.capture.answer(
+        "muse --version",
+        [says("Muse Code 1.4.13 (1.4.13-R6996.1)")],
+    );
+    fixture.latest.says(Harness::Muse, "1.4.13-R6996.1");
+    let row = fixture.row("muse", true);
+    assert_eq!(
+        row.version,
+        Version::Checked {
+            value: "1.4.13".to_owned()
+        }
+    );
+    assert_eq!(row.setup, Some(not_yet));
+    let ran = fixture.capture.take_ran();
+    assert_eq!(ran.len(), 1);
+    assert_eq!(ran[0].0.env.text("MUSE_NO_AUTO_UPDATE"), Some("1"));
+    assert_eq!(ran[0].0.env.text("MUSE_LOGIN"), Some("0"));
+    assert_eq!(ran[0].0.env.text("HOME"), fixture.env.text("HOME"));
 }

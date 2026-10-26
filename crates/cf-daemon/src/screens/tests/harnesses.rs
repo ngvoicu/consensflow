@@ -53,7 +53,7 @@ async fn every_harness_is_checked_in_the_order_the_page_lists_them() {
     assert_eq!(status, 200);
     let rows: Vec<&Value> = body["harnesses"].as_array().unwrap().iter().collect();
     let ids: Vec<&str> = rows.iter().map(|row| row["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["devin", "claude", "codex", "opencode", "pi"]);
+    assert_eq!(ids, ["devin", "claude", "codex", "opencode", "pi", "muse"]);
     assert_eq!(
         rows[1].to_string(),
         format!(
