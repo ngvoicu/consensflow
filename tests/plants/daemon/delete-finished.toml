@@ -17,6 +17,7 @@ ledger-delete-needed = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test
 daemon-page-deleting = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::deleting"]
 page-delete-finished = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Delete finished when every finished|nothing can be deleted when every|deletes every finished task that may go"]
 rig-delete-finished = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "the_finished_column_could_not_be_cleared_while_its_tasks_were_needed"]
+rig-delete-finished-needs = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "work_added_to_wait_for_an_accepted_task_the_human_cleared"]
 
 # --- the page: the control and the dialog ---
 
@@ -152,3 +153,92 @@ runs = ["ledger-delete-needed"]
 file = "crates/cf-ledger/src/views.rs"
 find = "WHERE n.task_id = t.id ORDER BY d.number) d) AS needs"
 replace = "WHERE n.task_id = t.id AND d.deleted_at IS NULL ORDER BY d.number) d) AS needs"
+
+# --- a task that waits for a task the human cleared (T-780) ---
+# `--needs T-n` on a task the human deleted: an accepted one releases the new task as before (the
+# delete only takes it off the board), a cancelled one is never accepted, and a failed one cannot be
+# reopened any more, so the last two stay refused (the failed one as recorded in `ledger-tasks-028`).
+
+
+[[plant]]
+name = "delete finished: a task may not wait for an accepted task the human cleared"
+meant = "a_task_may_wait_for_an_accepted_task_the_human_cleared_from_the_board_and_is_released_by_it"
+runs = ["ledger-delete-needed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '            if need.state != "accepted" {'
+replace = '            if need.state != "nothing" {'
+
+[[plant]]
+name = "delete finished: a task waiting for a cleared accepted task and another is not released with it"
+meant = "a_task_waiting_for_a_cleared_accepted_task_and_another_goes_on_when_the_other_is_accepted"
+runs = ["ledger-delete-needed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '            if need.state != "accepted" {'
+replace = '            if need.state != "nothing" {'
+
+[[plant]]
+name = "delete finished: a task given by name waits for an accepted task the human cleared"
+meant = "a_task_may_wait_for_an_accepted_task_the_human_cleared_from_the_board_and_is_released_by_it"
+runs = ["ledger-delete-needed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '                if store.task_row(project_id, *number)?.state != "accepted" {'
+replace = '''                let need = store.task_row(project_id, *number)?;
+                if need.state != "accepted" || need.deleted_at.is_some() {'''
+
+[[plant]]
+name = "delete finished: the chief's task for a cleared accepted task is refused, in the field's shape"
+meant = "work_added_to_wait_for_an_accepted_task_the_human_cleared_is_released_by_it_and_one_for_a_cleared_cancelled_task_is_refused"
+runs = ["rig-delete-finished-needs"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '            if need.state != "accepted" {'
+replace = '            if need.state != "nothing" {'
+
+[[plant]]
+name = "delete finished: a task may wait for a cancelled task the human cleared"
+meant = "a_task_cannot_wait_for_a_cancelled_task_the_human_cleared_from_the_board"
+runs = ["ledger-delete-needed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '            if need.state == "cancelled" {'
+replace = '            if need.state == "cancelled" && need.deleted_at.is_none() {'
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '            if need.state != "accepted" {'
+replace = '            if need.state != "accepted" && need.state != "cancelled" {'
+
+[[plant]]
+name = "delete finished: the chief's task for a cleared cancelled task is added, in the field's shape"
+meant = "work_added_to_wait_for_an_accepted_task_the_human_cleared_is_released_by_it_and_one_for_a_cleared_cancelled_task_is_refused"
+runs = ["rig-delete-finished-needs"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '            if need.state == "cancelled" {'
+replace = '            if need.state == "cancelled" && need.deleted_at.is_none() {'
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '            if need.state != "accepted" {'
+replace = '            if need.state != "accepted" && need.state != "cancelled" {'
+
+[[plant]]
+name = "delete finished: a task may wait for a failed task the human cleared, which can no longer be reopened"
+meant = "a_task_cannot_wait_for_a_failed_task_the_human_cleared_but_may_for_one_still_on_the_board"
+runs = ["ledger-delete-needed", "ledger-replay"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '            if need.state != "accepted" {'
+replace = '            if need.state == "nothing" {'

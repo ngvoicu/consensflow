@@ -8,7 +8,9 @@
 //! while an unfinished task needs it *and it can still change*: a failed task,
 //! which the chief can reopen and then accept (a deleted task is not reopened).
 //! An accepted task is accepted for good, and a cancelled one will never be
-//! accepted, so each goes though a task needs it.
+//! accepted, so each goes though a task needs it. And a task may be added that waits for an
+//! accepted task the human cleared (T-780): it is released by it at once, where `--needs` on any
+//! cleared task was refused.
 
 #![allow(clippy::expect_used)]
 
@@ -310,4 +312,156 @@ fn a_task_not_yet_finished_is_still_not_deleted_whatever_waits_for_it() {
                 .to_owned()
         ))
     );
+}
+
+/// What asking for a task that waits for `needs` came to, for a tier or, with `to`, by
+/// name: the refusal's code and words, or none.
+fn waiting_refused(
+    ledger: &mut Ledger,
+    to: Option<&str>,
+    needs: &[u64],
+) -> Option<(&'static str, String)> {
+    ledger
+        .create_task(
+            1,
+            &NewTask {
+                from: "chief".into(),
+                pool: to.is_none().then(|| "worker".into()),
+                tier: to.is_none().then(|| "standard".into()),
+                to: to.map(Into::into),
+                body: "Next".into(),
+                needs: needs.to_vec(),
+                ..NewTask::default()
+            },
+        )
+        .err()
+        .map(|error| (error.code().expect("a refusal"), error.to_string()))
+}
+
+// What waits for a task the human cleared from the board (T-780, 3.0.6, after T-721): the delete
+// only takes it off the board, so an accepted one still releases a task that waits for it, new or
+// old. `--needs` on it was refused ("cannot wait for T-n: it was deleted from the board"), which
+// stopped the chief chaining work onto a step it had held and the human had cleared.
+
+#[test]
+fn a_task_may_wait_for_an_accepted_task_the_human_cleared_from_the_board_and_is_released_by_it() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = open_ledger(&dir.path().join("consensflow.db"), options()).expect("ledger");
+    let view = project(&mut ledger);
+    let member = zeus(&view);
+    open(&mut ledger, "Stage one", &[]);
+    done(&mut ledger, 1, member, "One");
+    ledger.accept_task(1, 1, "chief").expect("T-1 accepted");
+    ledger.delete_tasks(1, &[1]).expect("T-1 cleared");
+    assert_eq!(
+        on_board(&ledger.board(1).expect("a board")),
+        Vec::<i64>::new()
+    );
+
+    // For a tier it opens with nothing to wait for, and reads T-1 as accepted.
+    open(&mut ledger, "For a tier", &[1]);
+    let tier = ledger.task(1, 2).expect("a thread").expect("T-2").task;
+    assert_eq!(tier.state, "open");
+    assert_eq!(
+        tier.needs,
+        [Need {
+            number: 1,
+            state: "accepted".into()
+        }]
+    );
+    assert_eq!(tier.blocked_by, Vec::<i64>::new(), "T-1 holds nothing back");
+
+    // By name it goes to its window at once: queued, its brief waiting for it.
+    by_name(&mut ledger, "By name", &[1]);
+    let named = ledger.task(1, 3).expect("a thread").expect("T-3");
+    assert_eq!(named.task.state, "queued", "released at once");
+    assert_eq!(
+        named
+            .messages
+            .iter()
+            .map(|message| (message.kind.as_str(), message.state.as_str()))
+            .collect::<Vec<_>>(),
+        [("task", "queued")]
+    );
+}
+
+#[test]
+fn a_task_waiting_for_a_cleared_accepted_task_and_another_goes_on_when_the_other_is_accepted() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = open_ledger(&dir.path().join("consensflow.db"), options()).expect("ledger");
+    let view = project(&mut ledger);
+    let member = zeus(&view);
+    open(&mut ledger, "Stage one", &[]);
+    open(&mut ledger, "Stage two", &[]);
+    done(&mut ledger, 1, member, "One");
+    done(&mut ledger, 2, member, "Two");
+    ledger.accept_task(1, 1, "chief").expect("T-1 accepted");
+    ledger.delete_tasks(1, &[1]).expect("T-1 cleared");
+
+    // T-3 is given to zeus by name, waiting for the cleared T-1 and for T-2, which is done.
+    by_name(&mut ledger, "Ship", &[1, 2]);
+    let held = ledger.task(1, 3).expect("a thread").expect("T-3").task;
+    assert_eq!(held.state, "open", "it waits on the board for T-2 alone");
+    assert_eq!(held.blocked_by, [2]);
+
+    ledger.accept_task(1, 2, "chief").expect("T-2 accepted");
+    assert_eq!(
+        state(&ledger, 3),
+        "queued",
+        "the cleared T-1 counts as accepted"
+    );
+}
+
+#[test]
+fn a_task_cannot_wait_for_a_cancelled_task_the_human_cleared_from_the_board() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = open_ledger(&dir.path().join("consensflow.db"), options()).expect("ledger");
+    project(&mut ledger);
+    open(&mut ledger, "Parser", &[]);
+    ledger.cancel_task(1, 1, "chief").expect("T-1 cancelled");
+    ledger.delete_tasks(1, &[1]).expect("T-1 cleared");
+
+    // It is never accepted, so it never releases anything: refused as for any cancelled task, for
+    // a tier and by name, and nothing is added.
+    for to in [None, Some("zeus")] {
+        assert_eq!(
+            waiting_refused(&mut ledger, to, &[1]),
+            Some((
+                "need-cancelled",
+                "T-1 is cancelled: nothing waits for it".to_owned()
+            )),
+            "{to:?}"
+        );
+    }
+    assert!(ledger.task(1, 2).expect("a thread").is_none(), "no T-2");
+}
+
+#[test]
+fn a_task_cannot_wait_for_a_failed_task_the_human_cleared_but_may_for_one_still_on_the_board() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = open_ledger(&dir.path().join("consensflow.db"), options()).expect("ledger");
+    project(&mut ledger);
+    open(&mut ledger, "Parser", &[]);
+    open(&mut ledger, "Lexer", &[]);
+    ledger
+        .fail_task(1, 1, "its launch never came up")
+        .expect("T-1 fails");
+    ledger
+        .fail_task(1, 2, "its launch never came up")
+        .expect("T-2 fails");
+    // Nothing needed T-1, so it could be cleared; the chief can reopen no cleared task, so a task
+    // waiting for it would wait for good (recorded: `ledger-tasks-028`).
+    ledger.delete_tasks(1, &[1]).expect("T-1 cleared");
+
+    assert_eq!(
+        waiting_refused(&mut ledger, None, &[1]),
+        Some((
+            "task-deleted",
+            "cannot wait for T-1: it was deleted from the board".to_owned()
+        ))
+    );
+    // T-2 failed and is still on the board: the chief can reopen it, so a task may wait for it.
+    assert_eq!(waiting_refused(&mut ledger, None, &[2]), None);
+    let waiter = ledger.task(1, 3).expect("a thread").expect("T-3").task;
+    assert_eq!(waiter.blocked_by, [2]);
 }
