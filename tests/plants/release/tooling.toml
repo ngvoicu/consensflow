@@ -578,6 +578,16 @@ find = "            Self::Smoke(app) => crate::smoke::captured(context, app.as_d
 replace = "            Self::Smoke(app) => crate::smoke::invocation(context, app.as_deref()),"
 
 [[plant]]
+name = "tooling: libtest's threads are left after the dashes, where nextest takes none"
+meant = "each_option_of_cargo_test_is_given_to_nextest_as_it_names_what_cargo_means_or_refused"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = '            Some(threads) => words.extend([OsString::from("--test-threads"), threads]),'
+replace = '            Some(threads) => libtest.extend([OsString::from("--test-threads"), threads]),'
+
+[[plant]]
 name = "tooling: the plants' reporter of Node's tests says no file Node failed whole"
 meant = "node_s_report_names_each_test_as_written_and_a_file_that_ran_none_of_its_own"
 runs = ["xtask-lib-plants"]

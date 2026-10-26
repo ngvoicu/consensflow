@@ -14,7 +14,8 @@
 //! `CONSENSFLOW_SMOKE_TIMEOUT_MS` and `CONSENSFLOW_SMOKE_KEEP=1` are the test's,
 //! and reach it as they were set. The smoke's case is the one `cargo test`
 //! ignores, so the command asks for the ignored cases (of the smoke test alone),
-//! and for the test's own output, which says what the daemon that ran was. The
+//! and for the test's own output, which says what the daemon that ran was; its
+//! cases run one at a time (`tests` says why). The
 //! packaged app is a macOS bundle: elsewhere the command refuses, in words, and so
 //! it does on a Mac whose screen is locked (`screen`): no window can be shown.
 
@@ -105,10 +106,10 @@ pub(crate) fn app_of(args: &[OsString]) -> Result<Option<PathBuf>, String> {
 
 /// The packaged smoke on `app` (a relative path is from the checkout's root),
 /// or on the app the test finds without being told: `cargo test -p cf-e2e
-/// --test smoke -- --ignored --nocapture`, from the checkout's root. `candidate`
-/// runs it on the app it built.
+/// --test smoke -- --ignored --test-threads=1 --nocapture`, from the checkout's
+/// root. `candidate` runs it on the app it built.
 pub(crate) fn invocation(context: &Context, app: Option<&Path>) -> Invocation {
-    tests(context, app, &["--".into(), "--nocapture".into()])
+    tests(context, app, &["--nocapture".into()])
 }
 
 /// The same `cargo test` without `--nocapture`, for a runner that reports each test
@@ -118,8 +119,16 @@ pub(crate) fn captured(context: &Context, app: Option<&Path>) -> Invocation {
     tests(context, app, &[])
 }
 
+/// The smoke's cases run one at a time: each starts an app of its own and floods its
+/// window, and the hidden app's case holds its flood to a bound (smoke/hidden.rs,
+/// `DRAIN`) that a flood of the other case's beside it, on a release's runner of three
+/// cores, would take away (T-479).
 fn tests(context: &Context, app: Option<&Path>, args: &[OsString]) -> Invocation {
-    let invocation = cargo_test(context, SMOKE, args);
+    let args: Vec<OsString> = ["--".into(), "--test-threads=1".into()]
+        .into_iter()
+        .chain(args.iter().cloned())
+        .collect();
+    let invocation = cargo_test(context, SMOKE, &args);
     match app {
         Some(app) => invocation.var(APP_VARIABLE, context.root.join(app)),
         None => invocation,
@@ -148,7 +157,7 @@ mod tests {
         let smoke = invocation(&context(), None);
         assert_eq!(
             smoke.display(),
-            "cargo test -p cf-e2e --test smoke -- --ignored --nocapture"
+            "cargo test -p cf-e2e --test smoke -- --ignored --test-threads=1 --nocapture"
         );
         assert_eq!(smoke.cwd, PathBuf::from("checkout"));
         // Nothing of the environment is set that the caller's own has: the app is the test's to find.
@@ -195,7 +204,7 @@ mod tests {
         let captured = captured(&context(), None);
         assert_eq!(
             captured.display(),
-            "cargo test -p cf-e2e --test smoke -- --ignored"
+            "cargo test -p cf-e2e --test smoke -- --ignored --test-threads=1"
         );
         assert_eq!(captured.cwd, PathBuf::from("checkout"));
         // The app it is given is the same variable, from the same root.

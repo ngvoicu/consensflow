@@ -618,9 +618,16 @@ async function open(page, data = model()) {
               const emulator = {
                 host,
                 written: [],
+                // How many writes it was given, each counted as it comes, before it is done.
+                writes: 0,
                 // Retired by the page: its window is over for good.
                 disposed: false,
-                write: async (bytes) => emulator.written.push(...bytes),
+                // A write is done once `__writeGate` lets it go, where a test holds it.
+                write: async (bytes) => {
+                  emulator.writes += 1
+                  await window.__writeGate
+                  emulator.written.push(...bytes)
+                },
                 onData: (callback) => {
                   emulator.type = callback
                   return { dispose() {} }
@@ -7061,6 +7068,65 @@ test("docks the chief's terminal and a member's own, offers no Open terminal for
     () => window.__calls.filter(([c]) => c === 'subscribe_output').length,
   )
   expect(subscriptions).toBe(1)
+})
+
+/** The stand-in emulator of the card of `handle` in the dock, by its index in `__emulators`. */
+const emulatorOf = (page, handle) =>
+  page.evaluate((handle) => {
+    const card = document.querySelector(`#stage .terminal-card[data-handle="${handle}"]`)
+    return window.__emulators.findIndex((e) => card?.contains(e.host) && !e.disposed)
+  }, handle)
+
+test('writes each message to its terminal as it comes and acknowledges up to the last one drawn', async ({
+  page,
+}) => {
+  await open(page)
+  const zeus = await emulatorOf(page, 'zeus')
+  expect(zeus).toBeGreaterThanOrEqual(0)
+  // The terminal is slow to draw (a page throttled behind a hidden window or a locked
+  // screen draws once a tick): what comes meanwhile goes to it at once, not one message
+  // a tick behind an acknowledgement each.
+  await page.evaluate(() => {
+    window.__writeGate = new Promise((open) => {
+      window.__openWrites = open
+    })
+    for (const seq of [1, 2, 3]) {
+      window.__output.onmessage({ id: 'p1-zeus', generation: 7, seq, bytes: [96 + seq] })
+    }
+  })
+  await expect.poll(() => page.evaluate((i) => window.__emulators[i].writes, zeus)).toBe(3)
+  expect(await acked(page, 'p1-zeus'), 'nothing acknowledged before it is drawn').toEqual([])
+  await page.evaluate(() => window.__openWrites())
+  // One acknowledgement frees everything up to its number: the last drawn is acknowledged,
+  // with no acknowledgement a message.
+  await expect.poll(async () => (await acked(page, 'p1-zeus')).at(-1)).toBe(3)
+  const acks = await acked(page, 'p1-zeus')
+  expect(acks.length, `${acks}`).toBeLessThan(3)
+  expect(acks, 'in order').toEqual([...acks].sort((a, b) => a - b))
+  expect(await page.evaluate((i) => window.__emulators[i].written, zeus)).toEqual([97, 98, 99])
+})
+
+test('acknowledges what comes for a window the page let go of while it still runs, and draws none of it', async ({
+  page,
+}) => {
+  await open(page)
+  // The board says zeus's window is gone; its program, still running, prints on. Unread
+  // and unacknowledged, its output would hold the window to a stop once 1 MiB of it is owed.
+  await page.evaluate(() => {
+    const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+    lane.pane = null
+    lane.activity = { state: 'closed' }
+    window.__listeners.get('state-changed')()
+  })
+  await expect.poll(() => disposed(page)).toBe(1)
+  await page.evaluate(() =>
+    window.__output.onmessage({ id: 'p1-zeus', generation: 7, seq: 4, bytes: [104, 105] }),
+  )
+  await expect.poll(() => acked(page, 'p1-zeus')).toEqual([4])
+  const drawn = await page.evaluate(() =>
+    window.__emulators.filter((e) => e.disposed).map((e) => e.written.length),
+  )
+  expect(drawn).toEqual([0])
 })
 
 /** Both projects open, each with its chief's window live; harbour as `data` has it. */
