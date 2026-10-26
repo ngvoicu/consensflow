@@ -78,6 +78,19 @@ pub fn programs(names: &[&str]) -> tempfile::TempDir {
     folder
 }
 
+/// A stand-in for `ioreg` in `folder`, a program that prints `printed` and nothing else
+/// (a script: the tests that ask for it are a Mac's).
+pub fn ioreg_printing(folder: &Path, printed: &str) {
+    let script = folder.join("ioreg");
+    fs::write(&script, format!("#!/bin/sh\nprintf '%s' '{printed}'\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
 /// The line a fake child writes for the word `word` it was given.
 pub fn arg_line(word: impl Into<OsString>) -> String {
     format!("arg: {:?}", word.into())

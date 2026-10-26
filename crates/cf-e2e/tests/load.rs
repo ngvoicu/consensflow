@@ -20,7 +20,7 @@ use cf_e2e::{files, Error};
 use regex::Regex;
 use serde_json::{json, Value};
 
-type Outcome = Result<(), Box<dyn std::error::Error>>;
+type Outcome = cf_e2e::Outcome;
 
 /// The stand-in for a window's harness program, built for these tests.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
@@ -52,7 +52,7 @@ fn the_daemon_stays_up_delivers_every_task_and_logs_nothing_wrong_while_several_
     let projects = size("CONSENSFLOW_LOAD_PROJECTS", 3);
     let waves = size("CONSENSFLOW_LOAD_WAVES", 3);
     let tasks = size("CONSENSFLOW_LOAD_TASKS", 3);
-    let mut rig = Rig::start(Config::new(FAKE_AGENT))?;
+    let mut rig = Rig::start(Config::new(FAKE_AGENT).judged_by_outcome())?;
     let workers: Vec<String> = (1..=WORKERS).map(|at| format!("worker{at}")).collect();
     let agents: Vec<Value> = std::iter::once("chief".to_owned())
         .chain(workers.iter().cloned())

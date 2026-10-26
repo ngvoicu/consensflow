@@ -1,5 +1,7 @@
 //! Ending a process this program started.
 
+use crate::job::Job;
+
 /// How a process is asked to end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ending {
@@ -16,28 +18,36 @@ pub(crate) enum Reach {
     Process,
     /// The process and what it started: on Unix the process group the process
     /// leads (a program `capture` runs does), so that an installer's children
-    /// end with it; Windows ends the whole tree whichever is asked.
+    /// end with it; Windows ends the whole job the program runs in whichever is
+    /// asked.
     Group,
 }
 
 /// Ends the process `pid`, one this program started and has not yet reaped:
 /// on Unix with the signal `how` names; on Windows, which has no signals,
 /// with its whole tree killed (`taskkill /T /F`) whatever `how` asks. On
-/// Windows the call returns once `taskkill` has.
+/// Windows the call returns once `taskkill` has. A process started through
+/// this crate is ended by its owner (`Child::terminate`, `Ender::force`,
+/// `Owned::end`), which holds the job it runs in: `taskkill` ends what it has
+/// read of a tree, and leaves what the tree starts meanwhile (zeewin, T-322)
+/// and what has lost its parent.
 pub fn terminate(pid: u32, how: Ending) {
-    end(pid, how, Reach::Process, true);
+    end(pid, how, Reach::Process, true, &Job::unheld());
 }
 
 /// Ends what `pid` is the leader of, as `reach` says, one this program
 /// started and has not yet reaped: while it is not reaped its id, and its
-/// group's, are held, and name no other. On Windows `taskkill` is waited for
-/// if `wait`, and else started and let go: a program on its way out must not
-/// spend its last moments on a child's end, one `taskkill` after another.
-pub(crate) fn end(pid: u32, how: Ending, reach: Reach, wait: bool) {
+/// group's, are held, and name no other. On Windows the program's `job` is
+/// ended, whole and at once: everything in it, whatever is started as it ends,
+/// and nothing is waited for. A program with no job (none could be made for it,
+/// or only its pid is known) is ended by `taskkill /T /F`, waited for if `wait`,
+/// and else started and let go: a program on its way out must not spend its
+/// last moments on a child's end, one `taskkill` after another.
+pub(crate) fn end(pid: u32, how: Ending, reach: Reach, wait: bool, job: &Job) {
     #[cfg(unix)]
     {
-        // Signalling waits for nothing.
-        let _ = wait;
+        // Signalling waits for nothing, and a group holds what a job would.
+        let _ = (wait, job);
         let Some(target) = i32::try_from(pid).ok().and_then(|pid| target(pid, reach)) else {
             return;
         };
@@ -59,6 +69,9 @@ pub(crate) fn end(pid: u32, how: Ending, reach: Reach, wait: bool) {
         use std::process::Stdio;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let _ = (how, reach);
+        if job.terminate() {
+            return;
+        }
         #[allow(clippy::disallowed_methods)] // The one place a process starts.
         let mut command = std::process::Command::new("taskkill");
         command
@@ -121,7 +134,7 @@ mod tests {
             let sleep = pids_written_to(&file, 1)[0];
             // What the process alone leaves is ended as the test ends.
             let _left = Survivors(vec![sleep]);
-            end(shell.id(), Ending::Forced, reach, false);
+            end(shell.id(), Ending::Forced, reach, false, &Job::unheld());
             assert_eq!(shell.wait().unwrap().signal(), Some(libc::SIGKILL));
             let within = Duration::from_millis(if left_behind { 300 } else { 20_000 });
             assert_eq!(gone_within(sleep, within), !left_behind, "{reach:?}");
@@ -147,7 +160,7 @@ mod tests {
             (Ending::Forced, libc::SIGKILL),
         ] {
             let mut child = crate::testing::command("sleep").arg("30").spawn().unwrap();
-            end(child.id(), how, Reach::Process, false);
+            end(child.id(), how, Reach::Process, false, &Job::unheld());
             assert_eq!(child.wait().unwrap().signal(), Some(signal), "{how:?}");
         }
     }
@@ -168,7 +181,13 @@ mod tests {
             .spawn()
             .unwrap();
         let started = Instant::now();
-        end(child.id(), Ending::Forced, Reach::Process, false);
+        end(
+            child.id(),
+            Ending::Forced,
+            Reach::Process,
+            false,
+            &Job::unheld(),
+        );
         assert!(started.elapsed() < Duration::from_secs(5));
         // `taskkill` goes on without anyone waiting for it: the child ends.
         assert!(child.wait().is_ok());

@@ -43,8 +43,14 @@
 //! - `--bridge <dir>`: a checkout of the bridge to build from (else its tag is exported)
 //! - `--flip <dir>`: a checkout of the flip release to build from (else its tag is exported)
 //! - `--flip-ref <ref>`: the tag or commit of the flip release to export (else the newest after the bridge)
-//! - `--cache <dir>`: where the builds are kept (`app/src-tauri/target/updater-smoke`)
-//! - `--reuse`: take the apps a run kept in the cache, and build only what is not there
+//! - `--cache <dir>`: where the builds are kept (`~/Library/Caches/ConsensFlow/updater-smoke/<this checkout>`,
+//!   which the run says; not in the checkout, whose Cargo configuration a build there would also read).
+//!   One run holds a cache at a time: a second run of it is refused, saying so
+//! - `--reuse`: take the apps a run kept in the cache, and build only what is not there. A kept update
+//!   that was built from another commit or other changes than this checkout has is said so. A kept
+//!   installed app was built with another run's updater key and takes this run's all the same: the
+//!   self-test hands it the public key to verify the update by (`CONSENSFLOW_SELFTEST_UPDATER_KEY`,
+//!   read by the bridge and the flip release alike), whatever key it carries
 //! - `--build-only`: build, say where, and run nothing
 //! - `--export-bridge`: export the bridge's source from its tag into the cache, say where, and stop
 //! - `--only <words>`: run the cases whose names hold a word (comma apart)
@@ -60,7 +66,9 @@
 //! FIFO), `processes` (what the process table says, and the waits), `evidence`
 //! (what proves an app and its daemon are up and hold the ledger), `ledger`
 //! (the ledger read from outside), `launchers` (the terminal's command), `case`
-//! (what every case shares), `cases` (the cases) and `versions`.
+//! (what every case shares), `cases` (the cases), `cache` (where the builds are
+//! kept, who holds the folder, and what the kept update was built from) and
+//! `versions`.
 
 /// Says a check of the smoke holds, or returns the words that say what was seen
 /// instead: `ensure!(condition, "what was seen: {value}")`. The checks are the
@@ -85,6 +93,7 @@ mod app;
 mod build;
 // What a bundle holds and the process table say are read by the candidate too.
 pub(crate) mod bundle;
+mod cache;
 mod case;
 mod cases;
 #[cfg(unix)]
@@ -116,6 +125,7 @@ use cf_release::version::source_version;
 use crate::context::Context;
 use crate::dispatch::{Console, Failure};
 use crate::process;
+use crate::screen;
 use build::{build_app, export_release, flip_release, Build, Release, BRIDGE_TAG};
 use bundle::{copy_bundle, plist_value, remove_all};
 use case::{Given, Inputs};
@@ -185,6 +195,13 @@ pub fn run(
         )?;
         return Ok(1);
     }
+    // The runs that start an app: building the apps, or exporting the bridge's source, shows no window.
+    if !options.export_bridge
+        && !options.build_only
+        && screen::locked("smoke:updater", context, console.err)?
+    {
+        return Ok(1);
+    }
     let releases = options.releases().map_err(Failure::Usage)?;
     let (say, lines) = Say::channel();
     // The run speaks from more than one thread; this one holds the streams, and
@@ -242,11 +259,17 @@ fn talk(say: &Say, text: impl AsRef<str>) {
 fn smoke(context: &Context, options: &Options, releases: &[Release], say: &Say) -> Result<i32> {
     let root = &context.root;
     let in_the_checkout = |path: &Path| root.join(path);
-    let cache = options.cache.as_deref().map_or_else(
-        || context.path("app/src-tauri/target/updater-smoke"),
-        in_the_checkout,
-    );
+    let cache = match options.cache.as_deref() {
+        Some(named) => in_the_checkout(named),
+        None => cache::default_cache(context)?,
+    };
     fs::create_dir_all(&cache).map_err(files("make", &cache))?;
+    // Held to the end of the run: one run to a cache.
+    let _hold = cache::hold(&cache)?;
+    if options.cache.is_none() {
+        cache::mark_checkout(&cache, root)?;
+        talk(say, format!("the builds are kept in {}", cache.display()));
+    }
     if options.export_bridge {
         let source = export_release(root, &cache.join("bridge-source"), BRIDGE_TAG, &context.env)?;
         talk(
@@ -355,7 +378,12 @@ fn smoke_in(
 
     let update = match (&options.to_app, take_kept("update")) {
         (Some(named), _) => in_the_checkout(named),
-        (None, Some(found)) => found,
+        (None, Some(found)) => {
+            if let Some(older) = cache::older_update(&found, root, env) {
+                talk(say, older);
+            }
+            found
+        }
         (None, None) => {
             let versions = installed
                 .iter()
@@ -368,16 +396,17 @@ fn smoke_in(
                 say,
                 format!("building the update from {} as {version}", root.display()),
             );
-            let built = build_app(
-                &Build {
-                    checkout: root,
-                    work: folder,
-                    public_key: &key.public_key,
-                    version: Some(&version),
-                },
-                env,
-            )?;
-            copy_bundle(&built, &kept("update"), env)?
+            cache::keep_update(root, &kept("update"), env, || {
+                build_app(
+                    &Build {
+                        checkout: root,
+                        work: folder,
+                        public_key: &key.public_key,
+                        version: Some(&version),
+                    },
+                    env,
+                )
+            })?
         }
     };
     talk(say, format!("update: {}", update.display()));

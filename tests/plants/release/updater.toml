@@ -20,7 +20,7 @@ replace = "let mine: Vec<_> = rows.iter().collect();"
 
 [[plant]]
 name = "updater evidence: a home with a second daemon running is taken for one with a holder"
-meant = "refuses_a_home_with_a_second_daemon_running"
+meant = "refuses_a_home_with_a_second_daemon_running_one_daemon_holds_the_ledger"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -72,7 +72,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a daemon that failed to start (exit 1) is not looked for"
-meant = "refuses_an_earlier_daemon_of_the_app_that_was_refused_its_start"
+meant = "refuses_an_earlier_daemon_of_the_app_that_was_refused_its_start_and_not_a_probes_refusal"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -82,7 +82,7 @@ replace = '!written.iter().any(|line| line.ends_with(" info never")),'
 
 [[plant]]
 name = "updater evidence: a daemon of the app that was refused the ledger is let through at the end"
-meant = "say_so_when_a_daemon_the_app_started_was_refused_the_ledger"
+meant = "say_so_when_a_daemon_the_app_started_was_refused_the_ledger_or_a_probe_was_not"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -96,7 +96,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a probe’s refusal counts against the app’s daemons"
-meant = "refuses_an_earlier_daemon_of_the_app_that_was_refused_its_start"
+meant = "refuses_an_earlier_daemon_of_the_app_that_was_refused_its_start_and_not_a_probes_refusal"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -111,7 +111,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a process that is not the app’s executable is taken for the app"
-meant = "takes_the_app_for_the_process_that_is_the_bundles_executable"
+meant = "takes_the_app_for_the_process_that_is_the_bundles_executable_and_no_other"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -125,7 +125,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a zombie is taken for the running app"
-meant = "takes_the_app_for_the_process_that_is_the_bundles_executable"
+meant = "takes_the_app_for_the_process_that_is_the_bundles_executable_and_no_other"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -145,7 +145,7 @@ replace = '''app_log_text.split('\n').any(|line| line.contains("native")),'''
 
 [[plant]]
 name = "updater evidence: a second ConsensFlow that ran is taken for one that was refused"
-meant = "is_no_proof_when_the_second_one_ran"
+meant = "is_no_proof_when_the_second_one_ran_or_was_refused_for_something_else"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -159,7 +159,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: the ledger’s words are not looked for in the refusal"
-meant = "is_no_proof_when_the_second_one_ran"
+meant = "is_no_proof_when_the_second_one_ran_or_was_refused_for_something_else"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -169,7 +169,7 @@ replace = '            .contains(""),'
 
 [[plant]]
 name = "updater evidence: a probe that never ended is taken for a refused one"
-meant = "is_no_proof_when_the_second_one_ran"
+meant = "is_no_proof_when_the_second_one_ran_or_was_refused_for_something_else"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -183,7 +183,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a handle line from the second ConsensFlow is let through"
-meant = "is_no_proof_when_the_second_one_ran"
+meant = "is_no_proof_when_the_second_one_ran_or_was_refused_for_something_else"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -197,7 +197,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a column that changed is let through"
-meant = "is_no_longer_whole_when_a_row_is_gone"
+meant = "is_no_longer_whole_when_a_row_is_gone_a_stable_column_changed_a_table_lost_or_the_schema_went_back"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -207,7 +207,7 @@ replace = "if true {"
 
 [[plant]]
 name = "updater evidence: a row that is gone is let through"
-meant = "is_no_longer_whole_when_a_row_is_gone"
+meant = "is_no_longer_whole_when_a_row_is_gone_a_stable_column_changed_a_table_lost_or_the_schema_went_back"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -227,7 +227,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a table that is gone is let through"
-meant = "is_no_longer_whole_when_a_row_is_gone"
+meant = "is_no_longer_whole_when_a_row_is_gone_a_stable_column_changed_a_table_lost_or_the_schema_went_back"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -243,7 +243,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a schema that went back is let through"
-meant = "is_not_sound_when_its_schema_is_below"
+meant = "is_not_sound_when_its_schema_is_below_the_older_daemons_a_reference_is_broken_or_it_holds_no_table"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -257,7 +257,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: SQLite’s own check of the file is not asked"
-meant = "is_not_sound_when_its_schema_is_below"
+meant = "is_not_sound_when_its_schema_is_below_the_older_daemons_a_reference_is_broken_or_it_holds_no_table"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -271,7 +271,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a reference that does not hold is let through"
-meant = "is_not_sound_when_its_schema_is_below"
+meant = "is_not_sound_when_its_schema_is_below_the_older_daemons_a_reference_is_broken_or_it_holds_no_table"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -285,7 +285,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a project that is not in the ledger is let through"
-meant = "has_a_project_for_each_directory_asked_for"
+meant = "has_a_project_for_each_directory_asked_for_and_says_which_has_none"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -299,7 +299,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: an event the daemon traced and the ledger lost is let through"
-meant = "reads_the_events_a_daemon_traced"
+meant = "reads_the_events_a_daemon_traced_from_its_trace_file_and_only_the_ledgers"
 runs = ["smoke-evidence"]
 
 [[plant.edit]]
@@ -313,7 +313,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: no command is looked at: all are taken for repaired"
-meant = "is_not_repaired_while_it_still_names_nodes"
+meant = "is_not_repaired_while_it_still_names_nodes_loses_its_pin_or_its_mark_or_is_not_a_program"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -327,7 +327,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: only the first name is looked at: the second is taken for repaired"
-meant = "is_not_repaired_when_the_second_name_was_left_as_it_was"
+meant = "is_not_repaired_when_the_second_name_was_left_as_it_was_though_it_serves_the_home"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -341,7 +341,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a command that does not run the update’s cf is taken for repaired"
-meant = "is_not_repaired_while_it_still_names_nodes"
+meant = "is_not_repaired_while_it_still_names_nodes_loses_its_pin_or_its_mark_or_is_not_a_program"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -355,7 +355,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a repaired command that lost its pin is taken for repaired"
-meant = "is_not_repaired_while_it_still_names_nodes"
+meant = "is_not_repaired_while_it_still_names_nodes_loses_its_pin_or_its_mark_or_is_not_a_program"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -372,7 +372,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a repaired command that lost its mark is taken for repaired"
-meant = "is_not_repaired_while_it_still_names_nodes"
+meant = "is_not_repaired_while_it_still_names_nodes_loses_its_pin_or_its_mark_or_is_not_a_program"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -382,7 +382,7 @@ replace = '        ensure!(true, "{shown} lost its mark");'
 
 [[plant]]
 name = "updater evidence: a repaired command that still names Node’s is taken for repaired"
-meant = "is_not_repaired_while_it_still_names_nodes"
+meant = "is_not_repaired_while_it_still_names_nodes_loses_its_pin_or_its_mark_or_is_not_a_program"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -396,7 +396,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a repaired command that cannot be run is taken for repaired"
-meant = "is_not_repaired_while_it_still_names_nodes"
+meant = "is_not_repaired_while_it_still_names_nodes_loses_its_pin_or_its_mark_or_is_not_a_program"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -406,7 +406,7 @@ replace = '        ensure!(true, "{shown} is not executable");'
 
 [[plant]]
 name = "updater evidence: a command that runs another cf than the daemon is taken for repaired"
-meant = "is_no_repair_when_it_runs_another_cf"
+meant = "is_no_repair_when_it_runs_another_cf_than_the_daemons"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -420,7 +420,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: an app log that does not say the repair is taken for one that does"
-meant = "is_not_own_home_only"
+meant = "is_not_own_home_only_when_a_command_of_another_home_was_rewritten_or_the_log_speaks_of_one"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -434,7 +434,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a command that serves another home, changed in this home’s bin, is let through"
-meant = "is_not_own_home_only"
+meant = "is_not_own_home_only_when_a_command_of_another_home_was_rewritten_or_the_log_speaks_of_one"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -448,7 +448,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: an app log that speaks of the command pinned to another home is let through"
-meant = "is_not_own_home_only"
+meant = "is_not_own_home_only_when_a_command_of_another_home_was_rewritten_or_the_log_speaks_of_one"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -462,7 +462,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: the commands of another home, changed, are let through"
-meant = "is_not_own_home_only"
+meant = "is_not_own_home_only_when_a_command_of_another_home_was_rewritten_or_the_log_speaks_of_one"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -476,7 +476,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: an app log that speaks of another home’s command is let through"
-meant = "is_not_own_home_only"
+meant = "is_not_own_home_only_when_a_command_of_another_home_was_rewritten_or_the_log_speaks_of_one"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -490,7 +490,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a process that is under the app but not its child is not looked for"
-meant = "finds_everything_under_a_process"
+meant = "finds_everything_under_a_process_its_children_theirs_a_chain_of_them"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -500,7 +500,7 @@ replace = "if row.ppid == root && !found.contains(&row.pid) {"
 
 [[plant]]
 name = "updater evidence: a tree is not ended, whatever the app made of it"
-meant = "ends_a_process_and_all_that_is_under_it"
+meant = "ends_a_process_and_all_that_is_under_it_which_a_group_does_not_hold"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -515,8 +515,74 @@ replace = '''
 '''
 
 [[plant]]
+name = "updater app: the app is left to quit by the end of its input before the kill reaches it"
+meant = "every_process_the_app_has_been_is_ended_with_what_is_under_it"
+runs = ["smoke-app"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/app.rs"
+find = '''
+        for pid in pids {
+            kill_group(pid);
+'''
+replace = '''
+        self.close_input();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        for pid in pids {
+            kill_group(pid);
+'''
+
+[[plant]]
+name = "updater feed: a feed goes on taking clients after it was closed"
+meant = "serves_the_feed_and_the_archive_when_offered_and_not_found_when_not"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/feed.rs"
+find = '''
+        thread::spawn(move || accept(&listener, &config, &offer, &over, &say))
+'''
+replace = '''
+        let (again, config_again, offer_again) = (
+            listener.try_clone().unwrap(),
+            Arc::clone(&config),
+            Arc::clone(&offer),
+        );
+        thread::spawn(move || {
+            accept(
+                &again,
+                &config_again,
+                &offer_again,
+                &AtomicBool::new(false),
+                &Say::channel().0,
+            )
+        });
+        thread::spawn(move || accept(&listener, &config, &offer, &over, &say))
+'''
+
+[[plant]]
+name = "updater feed: the test takes any silence at a feed's address for a feed that answers no one"
+meant = "a_feed_that_is_up_answers_and_a_port_nothing_holds_does_not"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/testing.rs"
+find = "map_or(true, |answer| answer.is_empty())"
+replace = "map_or(true, |_| true)"
+
+[[plant]]
+name = "updater case: the panes are taken for closed while their chiefs run"
+meant = "two_windows_open_and_the_install_refused_for_them_is_what_the_ready_snapshot_shows"
+runs = ["smoke-case"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/case.rs"
+find = "Ok(chiefs.iter().all(|pid| gone(*pid)).then_some(()))"
+replace = "Ok(Some(()))"
+
+[[plant]]
 name = "updater evidence: a bundle of another app is taken"
-meant = "refuses_another_app_two_versions_in_one_plist"
+meant = "refuses_another_app_two_versions_in_one_plist_a_bundle_with_no_cf_and_half_of_node"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -530,7 +596,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a plist with two versions is taken"
-meant = "refuses_another_app_two_versions_in_one_plist"
+meant = "refuses_another_app_two_versions_in_one_plist_a_bundle_with_no_cf_and_half_of_node"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -544,7 +610,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a bundle with no cf is taken"
-meant = "refuses_another_app_two_versions_in_one_plist"
+meant = "refuses_another_app_two_versions_in_one_plist_a_bundle_with_no_cf_and_half_of_node"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -554,7 +620,7 @@ replace = 'for (what, path) in [("native executable", &binary)] {'
 
 [[plant]]
 name = "updater evidence: a bundle with half of Node’s files is taken"
-meant = "refuses_another_app_two_versions_in_one_plist"
+meant = "refuses_another_app_two_versions_in_one_plist_a_bundle_with_no_cf_and_half_of_node"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -568,7 +634,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a bundle signed again is not verified: any seal passes"
-meant = "makes_the_refused_bundles_the_way_the_smoke_needs_them"
+meant = "makes_the_refused_bundles_the_way_the_smoke_needs_them_one_the_seal_passes_and_one_it_does_not"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -586,7 +652,7 @@ pub fn verify_seal(app: &Path, env: &Env) -> Result {
 
 [[plant]]
 name = "updater evidence: the bundle with no cf is not signed again, so the seal refuses it before the rule does"
-meant = "makes_the_refused_bundles_the_way_the_smoke_needs_them"
+meant = "makes_the_refused_bundles_the_way_the_smoke_needs_them_one_the_seal_passes_and_one_it_does_not"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -606,7 +672,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: the tampered bundle is not tampered with"
-meant = "makes_the_refused_bundles_the_way_the_smoke_needs_them"
+meant = "makes_the_refused_bundles_the_way_the_smoke_needs_them_one_the_seal_passes_and_one_it_does_not"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -622,7 +688,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a replacement leaves the old files where they were"
-meant = "copies_a_bundle_whole_replacing_what_was_there"
+meant = "copies_a_bundle_whole_replacing_what_was_there_or_over_it_with_the_old_files_left"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -637,7 +703,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a build that does not carry the run’s key is taken"
-meant = "a_build_is_held_to_its_key"
+meant = "a_build_is_held_to_its_key_the_executable_has_the_runs_and_not_the_products"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -651,7 +717,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a build that carries the product’s key is taken"
-meant = "a_build_is_held_to_its_key"
+meant = "a_build_is_held_to_its_key_the_executable_has_the_runs_and_not_the_products"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -665,7 +731,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: the update is not given its version"
-meant = "a_build_is_given_the_override_of_the_runs_public_key"
+meant = "a_build_is_given_the_override_of_the_runs_public_key_and_of_the_version_where_it_is_the_update"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -679,7 +745,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: a build inherits the signing variables of the shell it runs in"
-meant = "a_build_inherits_no_updater_key_apple_certificate_or_identity"
+meant = "a_build_inherits_no_updater_key_apple_certificate_or_identity_and_is_offline"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -689,7 +755,7 @@ replace = 'const SIGNING_VARIABLES: [&str; 3] = ["NOTHING_", "NOTHING_", "NOTHIN
 
 [[plant]]
 name = "updater evidence: a build may use the network"
-meant = "a_build_inherits_no_updater_key_apple_certificate_or_identity"
+meant = "a_build_inherits_no_updater_key_apple_certificate_or_identity_and_is_offline"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -699,7 +765,7 @@ replace = '("CARGO_NET_OFFLINE".into(), "false".into())'
 
 [[plant]]
 name = "updater evidence: the update is given the checkout’s version, which is the installed app’s"
-meant = "is_the_next_one_after_the_newest_installed_apps"
+meant = "is_the_next_one_after_the_newest_installed_apps_unless_a_release_has_moved_past_it"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -713,7 +779,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: the update is given a version newer than the first installed app’s alone"
-meant = "is_the_next_one_after_the_newest_installed_apps"
+meant = "is_the_next_one_after_the_newest_installed_apps_unless_a_release_has_moved_past_it"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -727,7 +793,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: the flip is the oldest release after the bridge"
-meant = "has_the_flip_release_the_newest_tag_after_the_bridges"
+meant = "has_the_flip_release_the_newest_tag_after_the_bridges_and_none_where_there_is_none"
 runs = ["smoke-kit"]
 
 [[plant.edit]]
@@ -755,7 +821,7 @@ replace = '''
 
 [[plant]]
 name = "updater evidence: the flip’s terminal command is repaired though it was current"
-meant = "is_current_it_names_the_cf_of_the_bundle_which_the_updates_is_at"
+meant = "is_current_it_names_the_cf_of_the_bundle_which_the_updates_is_at_and_is_as_it_was"
 runs = ["smoke-launchers"]
 
 [[plant.edit]]
@@ -781,7 +847,7 @@ replace = 'line.contains("starting the daemon: ")'
 
 [[plant]]
 name = "updater evidence: a program asked for a process group of its own is left in the smoke’s"
-meant = "leads_a_process_group_of_its_own"
+meant = "a_spawned_program_leads_a_process_group_of_its_own_only_when_it_is_asked_to"
 runs = ["xtask-process"]
 
 [[plant.edit]]
@@ -791,7 +857,7 @@ replace = "if false {"
 
 [[plant]]
 name = "updater evidence: a program not asked for a process group of its own is given one"
-meant = "leads_a_process_group_of_its_own"
+meant = "a_spawned_program_leads_a_process_group_of_its_own_only_when_it_is_asked_to"
 runs = ["xtask-process"]
 
 [[plant.edit]]
@@ -801,7 +867,7 @@ replace = "if true {"
 
 [[plant]]
 name = "updater evidence: a program is not given the input it is told"
-meant = "has_its_folder_its_environment_and_its_input"
+meant = "a_spawned_program_has_its_folder_its_environment_and_its_input_and_answers_on_pipes"
 runs = ["xtask-process"]
 
 [[plant.edit]]
@@ -811,7 +877,7 @@ replace = ".stdin(Stdio::null())"
 
 [[plant]]
 name = "updater evidence: a program’s output is not given in a pipe"
-meant = "has_its_folder_its_environment_and_its_input"
+meant = "a_spawned_program_has_its_folder_its_environment_and_its_input_and_answers_on_pipes"
 runs = ["xtask-process"]
 
 [[plant.edit]]
@@ -821,7 +887,7 @@ replace = ".stdout(Stdio::null())"
 
 [[plant]]
 name = "updater evidence: a program’s error output is not given in a pipe"
-meant = "has_its_folder_its_environment_and_its_input"
+meant = "a_spawned_program_has_its_folder_its_environment_and_its_input_and_answers_on_pipes"
 runs = ["xtask-process"]
 
 [[plant.edit]]
@@ -831,7 +897,7 @@ replace = ".stderr(Stdio::null());"
 
 [[plant]]
 name = "updater evidence: a program is not run in the folder it is told"
-meant = "has_its_folder_its_environment_and_its_input"
+meant = "a_spawned_program_has_its_folder_its_environment_and_its_input_and_answers_on_pipes"
 runs = ["xtask-process"]
 
 [[plant.edit]]
@@ -843,7 +909,7 @@ replace = ""
 
 [[plant]]
 name = "updater evidence: a variable a program is told to go without is left in its environment"
-meant = "has_its_folder_its_environment_and_its_input"
+meant = "a_spawned_program_has_its_folder_its_environment_and_its_input_and_answers_on_pipes"
 runs = ["xtask-process"]
 
 [[plant.edit]]
@@ -853,7 +919,7 @@ replace = "None => &mut command,"
 
 [[plant]]
 name = "updater evidence: a program that is not there is not said to be missing"
-meant = "that_is_not_there_or_has_no_folder"
+meant = "a_spawned_program_that_is_not_there_or_has_no_folder_to_run_in_is_said_so"
 runs = ["xtask-process"]
 
 [[plant.edit]]
@@ -936,3 +1002,233 @@ find = """
     cf_process::hold_only_the_streams(&mut command);
 """
 replace = ""
+
+# Where the smoke keeps its builds: the release it installs is built in the cache, and a cache in
+# the checkout has Cargo read the checkout's configuration too (the `xtask` alias, doubled).
+[[plant]]
+name = "updater driver: the builds are kept inside the checkout"
+meant = "keeps_the_builds_by_default_outside_every_checkout"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = '''
+    Ok(home
+        .join("Library")
+'''
+replace = '''
+    let _ = home;
+    Ok(context
+        .root
+        .join("Library")
+'''
+
+[[plant]]
+name = "updater driver: every checkout keeps its builds in one folder"
+meant = "keeps_each_checkouts_builds_in_a_folder_of_its_own_that_is_the_same_every_run"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = ".join(format!(\"{name}-{place}\"))"
+replace = ".join(\"checkout\")"
+
+[[plant]]
+name = "updater driver: the run does not say where it keeps its builds"
+meant = "says_where_the_builds_are_kept_when_no_cache_is_named"
+runs = ["smoke-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = '''
+        talk(say, format!("the builds are kept in {}", cache.display()));
+'''
+replace = ""
+
+# The file that names the checkout a cache is for, which a cleanup reads to find the caches of
+# checkouts that are gone.
+[[plant]]
+name = "updater driver: the run does not name its checkout in the cache"
+meant = "says_where_the_builds_are_kept_when_no_cache_is_named"
+runs = ["smoke-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = '''
+        cache::mark_checkout(&cache, root)?;
+'''
+replace = ""
+
+[[plant]]
+name = "updater cache: the file that names the checkout names nothing"
+meant = "names_the_checkout_a_cache_is_for_in_a_file_of_its_own_that_a_cleanup_reads"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = '''fs::write(&mark, format!("{}\n", root.display())).map_err(files("write", &mark))'''
+replace = '''fs::write(&mark, format!("{}\n", cache.display())).map_err(files("write", &mark))'''
+
+# One run to a cache: a second would wipe the first's exports and kept apps.
+[[plant]]
+name = "updater driver: a run takes no hold on its cache"
+meant = "refuses_a_cache_another_run_holds_and_says_so_before_it_makes_anything"
+runs = ["smoke-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = '''
+    let _hold = cache::hold(&cache)?;
+'''
+replace = ""
+
+[[plant]]
+name = "updater cache: a cache that is held is taken"
+meant = "a_cache_is_held_by_one_run_at_a_time_and_the_second_is_told_so"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = "    match file.try_lock() {"
+replace = '''
+    match file.try_lock().or_else(|held| match held {
+        TryLockError::WouldBlock => Ok(()),
+        other => Err(other),
+    }) {
+'''
+
+# What the kept update was built from, and the word that a `--reuse` run says of an old one.
+[[plant]]
+name = "updater driver: a kept update is reused without a word of its age"
+meant = "says_a_kept_update_that_is_not_the_checkouts_when_told_to_reuse_it"
+runs = ["smoke-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = "                talk(say, older);"
+replace = "                let _ = older;"
+
+[[plant]]
+name = "updater cache: a kept update is not older for the changes made in the checkout"
+meant = "says_when_the_kept_update_is_not_of_the_checkout_as_it_is"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = "(then != now).then(|| {"
+replace = "(then.commit != now.commit).then(|| {"
+
+[[plant]]
+name = "updater cache: the checkout is read after the build, not as the build started"
+meant = "keeps_the_update_with_what_the_checkout_was_when_the_build_started_to_read_it"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = '''
+    let state = State::of(root, cache_of(update), env);
+    let built = build()?;
+'''
+replace = '''
+    let built = build()?;
+    let state = State::of(root, cache_of(update), env);
+'''
+
+[[plant]]
+name = "updater cache: the update is kept with no record of what it was built from"
+meant = "keeps_the_update_with_what_the_checkout_was_when_the_build_started_to_read_it"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = '''
+        fs::write(&mark, state.text()).map_err(files("write", &mark))?;
+'''
+replace = '''
+        let _ = state;
+'''
+
+[[plant]]
+name = "updater cache: an update built where the checkout cannot be read keeps the record of the one before"
+meant = "an_update_built_where_the_checkout_cannot_be_read_has_no_record_and_one_that_failed_keeps_its_own"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = '''
+    remove_all(&mark)?;
+'''
+replace = ""
+
+[[plant]]
+name = "updater cache: a file in no commit is no change in the checkout"
+meant = "the_state_of_a_checkout_is_its_commit_and_what_is_changed_in_it_staged_or_not"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = '''.filter(|path| !path.is_empty())'''
+replace = '''.filter(|path| path.is_empty())'''
+
+[[plant]]
+name = "updater cache: a change that is staged is no change in the checkout"
+meant = "the_state_of_a_checkout_is_its_commit_and_what_is_changed_in_it_staged_or_not"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = '''&["diff", "HEAD", "--binary"]'''
+replace = '''&["diff", "--binary"]'''
+
+# A hold that is dropped at once holds nothing: `Hold` is `#[must_use]`, so that a bare
+# `cache::hold(&cache)?;` is a warning, and the gate's clippy denies warnings.
+[[plant]]
+name = "updater driver: the hold on the cache is a bare statement"
+meant = "unused_must_use"
+runs = ["smoke-lint"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = "    let _hold = cache::hold(&cache)?;"
+replace = "    cache::hold(&cache)?;"
+
+# A cache in the checkout that git does not ignore is not a change in the checkout.
+[[plant]]
+name = "updater cache: a cache in the checkout is a change in it"
+meant = "a_cache_in_the_checkout_that_git_does_not_ignore_is_no_change_in_the_checkout"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = ".is_some_and(|cache| physical.join(path).starts_with(cache))"
+replace = ".is_some_and(|cache| physical.join(path).starts_with(cache) && false)"
+
+[[plant]]
+name = "updater cache: the record of the update counts the cache in the checkout"
+meant = "a_cache_in_the_checkout_that_git_does_not_ignore_is_no_change_in_the_checkout"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = "    let state = State::of(root, cache_of(update), env);"
+replace = "    let state = State::of(root, None, env);"
+
+[[plant]]
+name = "updater cache: a reuse counts the cache in the checkout"
+meant = "a_cache_in_the_checkout_that_git_does_not_ignore_is_no_change_in_the_checkout"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = "    let now = match State::of(root, cache_of(update), env) {"
+replace = "    let now = match State::of(root, None, env) {"
+
+[[plant]]
+name = "updater cache: a file in no commit is told by its name and not by what it holds"
+meant = "the_state_of_a_checkout_is_its_commit_and_what_is_changed_in_it_staged_or_not"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = "                    let _ = io::copy(&mut file, &mut digest);"
+replace = "                    let _ = &mut file;"

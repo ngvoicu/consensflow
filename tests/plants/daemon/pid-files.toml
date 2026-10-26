@@ -1,0 +1,96 @@
+# The stand-ins' process files, read as soon as they are there. A stand-in writes its process whole:
+# under another name, renamed to the file once written (`cf_e2e::files::say_its_process`, which the
+# Codex stand-in's `fake_codex/servers.rs` and the fake agent's jobs and builds all use), so that a
+# case that waits for the file reads a number, and `Rig::jobs` never meets an empty file. Before,
+# `fs::write` made the file and then wrote into it, and a case that read the file at once read "": a
+# flake of `ParseIntError`, or a job the rig did not list. The Codex stand-in was made whole in T-72,
+# and the cases read the process through `stand_ins::pid_in`, which waits for a number.
+#
+# Each plant puts the in-place write back with a pause of 300 ms between the making of the file and
+# its writing, so the gap that was rare is in every run. The first is caught by the case that reads
+# the job's file as it appears. The other two put back the old read in their own case as well, and
+# each is caught by that case. The cases are run by name, so `cargo xtask plants daemon pid-files`
+# runs them all.
+
+[run]
+pid-files-whole = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stand_ins::the_stand_in_agents_job_writes_its_process_whole_or_not_at_all"]
+pid-files-job = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stand_ins::the_stand_in_agents_job_writes_its_process_runs_its_seconds_and_says_it_finished"]
+pid-files-browser = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stand_ins::the_stand_in_agents_server_launches_a_browser_that_is_its_child_in_a_group_of_its_own"]
+
+[[plant]]
+name = "pid-files: the job's file is there before its process is written, and the case reads it as it appears"
+meant = "the_stand_in_agents_job_writes_its_process_whole_or_not_at_all"
+runs = ["pid-files-whole"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/files.rs"
+find = '''
+    let mut writing = file.as_os_str().to_owned();
+    writing.push(".writing");
+    fs::write(&writing, text)?;
+    fs::rename(writing, file)'''
+replace = '''
+    let mut made = fs::File::create(file)?;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    io::Write::write_all(&mut made, text.as_bytes())'''
+
+[[plant]]
+name = "pid-files: the job's case reads its file as soon as it is there, and the job writes its process slowly"
+meant = "the_stand_in_agents_job_writes_its_process_runs_its_seconds_and_says_it_finished"
+runs = ["pid-files-job"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/rig/stand_ins.rs"
+find = '''
+    assert_eq!(
+        pid_in(&beside(&file, "pid"))?,
+        job.id(),
+        "the job says it runs"
+    );'''
+replace = '''
+    assert!(until_there(&beside(&file, "pid")), "the job says it runs");
+    assert_eq!(
+        files::read_string(&beside(&file, "pid"))?,
+        job.id().to_string()
+    );'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/files.rs"
+find = '''
+    let mut writing = file.as_os_str().to_owned();
+    writing.push(".writing");
+    fs::write(&writing, text)?;
+    fs::rename(writing, file)'''
+replace = '''
+    let mut made = fs::File::create(file)?;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    io::Write::write_all(&mut made, text.as_bytes())'''
+
+[[plant]]
+name = "pid-files: the browser's case reads its file as soon as it is there, and the browser writes its process slowly"
+meant = "the_stand_in_agents_server_launches_a_browser_that_is_its_child_in_a_group_of_its_own"
+runs = ["pid-files-browser"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/rig/stand_ins.rs"
+find = '''
+    let browser = pid_in(&beside(&browser_file, "pid"))?;'''
+replace = '''
+    assert!(until_there(&beside(&browser_file, "pid")), "so does its browser");
+    let browser: u32 = files::read_string(&beside(&browser_file, "pid"))?
+        .trim()
+        .parse()?;'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/files.rs"
+find = '''
+    let mut writing = file.as_os_str().to_owned();
+    writing.push(".writing");
+    fs::write(&writing, text)?;
+    fs::rename(writing, file)'''
+replace = '''
+    let mut made = fs::File::create(file)?;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    io::Write::write_all(&mut made, text.as_bytes())'''

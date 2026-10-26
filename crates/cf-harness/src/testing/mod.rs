@@ -414,12 +414,17 @@ pub enum Answer {
 
 /// A pane host that answers each request with the next answer scripted for
 /// its operation, at once or when released, and keeps what it was asked.
-/// A request with no answer left fails, as Node's scripted host threw.
+/// A request with no answer left fails, as Node's scripted host threw. It
+/// admits every hand-over until the test says it admits none
+/// ([`ScriptedHost::refuse_hand_overs`]), as the engine's host does once a
+/// project closes, and counts how often it was asked.
 #[derive(Default)]
 pub struct ScriptedHost {
     answers: RefCell<HashMap<String, VecDeque<Answer>>>,
     asked: RefCell<Vec<(String, Value)>>,
     held: RefCell<VecDeque<HeldRequest>>,
+    refusing: Cell<bool>,
+    admissions: Cell<usize>,
 }
 
 /// A request held: its operation, the work it belongs to, and where its
@@ -431,6 +436,16 @@ struct HeldRequest {
 }
 
 impl ScriptedHost {
+    /// From now on the host admits no hand-over ([`PaneHost::admits`]).
+    pub fn refuse_hand_overs(&self) {
+        self.refusing.set(true);
+    }
+
+    /// How often the host was asked whether it admits a hand-over.
+    pub fn admissions(&self) -> usize {
+        self.admissions.get()
+    }
+
     /// Scripts the next answers to `op`, after those scripted already.
     pub fn answer(&self, op: &str, answers: impl IntoIterator<Item = Answer>) {
         self.answers
@@ -523,6 +538,11 @@ impl PaneHost for ScriptedHost {
                 })
             }
         }
+    }
+
+    fn admits(&self) -> bool {
+        self.admissions.set(self.admissions.get() + 1);
+        !self.refusing.get()
     }
 }
 

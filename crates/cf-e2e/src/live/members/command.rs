@@ -217,6 +217,7 @@ mod tests {
             identity: Identity { pid, started },
             ppid,
             command: command.to_owned(),
+            exe: None,
         }
     }
 

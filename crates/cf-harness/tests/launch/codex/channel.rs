@@ -7,8 +7,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use cf_harness::contract::{Admission, HostError, PaneHost, Readiness, Work};
-use cf_harness::testing::{finished, AnsweringHost, Driver};
+use cf_harness::contract::{Admission, HostError, PaneHost, Readiness, Work, NOT_ADMITTED};
+use cf_harness::testing::{finished, Answer, AnsweringHost, Driver, ScriptedHost};
 
 use super::*;
 
@@ -96,6 +96,80 @@ fn claims_the_pane_then_hands_the_exact_text_to_the_broker_for_the_thread_it_nam
             Some(THREAD),
             Some("a message with spaces\nand newlines")
         )
+    );
+}
+
+/// Sol's review of 2026-10-16, round 4: the project closed while the delivery
+/// waited for the pane's claim, and the text went to the broker once the claim
+/// was answered. Once it is, the host is asked whether it still admits the send.
+#[test]
+fn a_send_the_host_stops_admitting_while_its_claim_waits_never_reaches_the_broker() {
+    let home = Home::new();
+    let (adapter, fakes) = adapter(&home);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    let host = Rc::new(ScriptedHost::default());
+    host.answer("pane.claim", [Answer::Held]);
+    let mut driver = Driver::default();
+    let (deliver, claims) = (Rc::clone(&window), Rc::clone(&host));
+    driver.begin(0, async move {
+        deliver.deliver(&*claims, &pane(), "late").await
+    });
+    assert!(driver.run().is_empty(), "the claim waits for the host");
+    host.refuse_hand_overs();
+    assert!(host.release("pane.claim", Ok(json!({ "ok": true }))));
+    assert_eq!(
+        driver.run(),
+        [(
+            0,
+            Ok(Admission::Refused {
+                reason: NOT_ADMITTED.to_owned()
+            })
+        )]
+    );
+    assert!(
+        fakes.loopback.take_asked().is_empty(),
+        "the broker was asked nothing"
+    );
+}
+
+/// Astra's review of 2026-10-16, round 5: the claim was answered and admitted,
+/// and the project closed while the request to the broker waited for its
+/// connection. The host is asked once the connection is up, before a byte goes.
+#[test]
+fn a_send_the_host_stops_admitting_while_its_connection_is_made_never_reaches_the_broker() {
+    let home = Home::new();
+    let (adapter, fakes) = adapter(&home);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    let host = Rc::new(ScriptedHost::default());
+    host.answer("pane.claim", [Answer::Now(Ok(json!({ "ok": true })))]);
+    fakes.loopback.hold_connection("POST /deliver");
+    fakes
+        .loopback
+        .serve("POST /deliver", [replies(r#"{"ok":true,"admitted":true}"#)]);
+    let mut driver = Driver::default();
+    let (deliver, claims) = (Rc::clone(&window), Rc::clone(&host));
+    driver.begin(0, async move {
+        deliver.deliver(&*claims, &pane(), "late").await
+    });
+    assert!(driver.run().is_empty(), "the connection is being made");
+    host.refuse_hand_overs();
+    assert!(fakes.loopback.connect("POST /deliver"));
+    assert_eq!(
+        driver.run(),
+        [(
+            0,
+            Ok(Admission::Refused {
+                reason: NOT_ADMITTED.to_owned()
+            })
+        )]
+    );
+    assert!(
+        fakes.loopback.take_asked().is_empty(),
+        "the broker was asked nothing"
     );
 }
 

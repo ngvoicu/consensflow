@@ -22,6 +22,8 @@ detect-goldens = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "a
 base-env = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "env::"]
 # Where a program is looked for on a PATH.
 process-search = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "search::"]
+# What an installed harness's folder says about how to update it.
+admin-source = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin::source"]
 # The daemon started as the Finder starts it: a task to a Codex worker whose Codex is
 # only in the system's folder, or the human's own in the home with an older one there,
 # and a window that runs a program of the system's folder.
@@ -146,8 +148,8 @@ runs = ["process-search"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/search.rs"
-find = '    on(command, env.os("PATH"), env)'
-replace = "    on(command, env.search_path(), env)"
+find = '    on(command, env.os("PATH"), env, &STARTABLE)'
+replace = "    on(command, env.search_path(), env, &STARTABLE)"
 
 [[plant]]
 name = "detect: the Node an npm shim runs on is looked for on the PATH a harness is first looked for on"
@@ -156,8 +158,8 @@ runs = ["detect-unit"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/runnable.rs"
-find = '    on_path("node", env)'
-replace = '    crate::on_search_path("node", env)'
+find = '    own().or_else(|| on_path_as_program("node", env))'
+replace = '    own().or_else(|| crate::on_search_path("node", env))'
 
 [[plant]]
 name = "detect: putting the system's folders on the PATH puts them on the one a harness is looked for on"
@@ -330,7 +332,129 @@ runs = ["detect-unit"]
 file = "crates/cf-harness/src/detect.rs"
 find = '''
     if harness != Harness::Pi {
-        return None;
+        return Vec::new();
     }
 '''
+replace = ""
+
+# A program is a `.exe` or a `.com` (T-34, P3-4): a `node.cmd` before it on the PATH is no Node
+# a window can start.
+[[plant]]
+name = "detect: a script is a program"
+meant = "a_program_is_found_as_an_exe_or_a_com_and_never_as_a_script_pathext_lists_first"
+runs = ["process-search"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/search.rs"
+find = '    on(command, env.os("PATH"), env, &PROGRAMS)'
+replace = '    on(command, env.os("PATH"), env, &STARTABLE)'
+
+# The agent folder both of Pi's installers read from `PI_CODING_AGENT_DIR` (T-33).
+[[plant]]
+name = "detect: the agent folder the human named for Pi is not looked in"
+meant = "a_managed_pi_in_the_agent_folder_the_human_named_is_found_and_the_default_is_still_looked_in"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = '    let named = agent_dir(env).ok().and_then(|agent| {'
+replace = '''
+    let named: Option<PathBuf> = None;
+    let _ = agent_dir(env).ok().and_then(|agent| {'''
+
+[[plant]]
+name = "detect: the default agent folder is looked in before the one the human named"
+meant = "a_managed_pi_in_the_agent_folder_the_human_named_is_found_and_the_default_is_still_looked_in"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = "    named.into_iter().chain(default).collect()"
+replace = "    default.into_iter().chain(named).collect()"
+
+# Pi's managed install is updated by `pi update`, as its installer says (T-33).
+[[plant]]
+name = "detect: Pi's managed install is told from one nobody installed"
+meant = "each_harness_s_own_installer_is_told_by_its_folder_in_either_spelling"
+runs = ["admin-source"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '''
+            ("/.pi/agent/bin/", &["update"]),
+'''
+replace = ""
+
+[[plant]]
+name = "detect: Pi's managed install is updated as its earlier installer's is"
+meant = "each_harness_s_own_installer_is_told_by_its_folder_in_either_spelling"
+runs = ["admin-source"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '            ("/.pi/agent/bin/", &["update"]),'
+replace = '            ("/.pi/agent/bin/", &["update", "--self"]),'
+
+# The agent folder as Pi reads it, a relative one the home's (T-141, P3-4); a custom agent folder is
+# told by the file its installer wrote (P3-5).
+[[plant]]
+name = "detect: the agent folder is read as the variable has it, with no tilde expanded"
+meant = "the_agent_folder_the_human_named_is_read_as_pi_reads_it_a_tilde_and_a_relative_one_included"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = '    let named = agent_dir(env).ok().and_then(|agent| {'
+replace = '    let named = set(env, "PI_CODING_AGENT_DIR").and_then(|agent| {'
+
+[[plant]]
+name = "detect: a relative agent folder is the daemon's own working folder's"
+meant = "the_agent_folder_the_human_named_is_read_as_pi_reads_it_a_tilde_and_a_relative_one_included"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = "            Some(home) if agent.is_relative() => Some(home.join(agent)),"
+replace = "            Some(home) if agent.is_relative() && false => Some(home.join(agent)),"
+
+[[plant]]
+name = "detect: Pi's managed install in a folder of any name is told by nothing"
+meant = "pis_managed_install_in_an_agent_folder_the_human_named_is_updated_as_its_installer_says"
+runs = ["admin-source"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = "    if harness == Harness::Pi && is_pi_managed_install(&real) {"
+replace = "    if harness == Harness::Pi && false && is_pi_managed_install(&real) {"
+
+[[plant]]
+name = "detect: a folder called install is the file Pi's installer writes"
+meant = "pis_managed_install_in_an_agent_folder_the_human_named_is_updated_as_its_installer_says"
+runs = ["admin-source"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '    agent.is_some_and(|agent| agent.join("install").join("managed-install.json").is_file())'
+replace = '    agent.is_some_and(|agent| agent.join("install").is_dir())'
+
+# A program is found on the PATH it runs on, as the Node of an npm shim is (T-141, P3-8).
+[[plant]]
+name = "detect: a program is looked for on the PATH a harness is first looked for on, as a program"
+meant = "a_program_is_found_on_the_path_it_runs_on_and_a_harness_on_the_one_given"
+runs = ["process-search"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/search.rs"
+find = '    on(command, env.os("PATH"), env, &PROGRAMS)'
+replace = "    on(command, env.search_path(), env, &PROGRAMS)"
+
+# T-194's P3-7: a relative agent folder with no home to read it against is no place.
+[[plant]]
+name = "detect: a relative agent folder with no home is read against the daemon's working folder"
+meant = "a_relative_agent_folder_with_no_home_to_read_it_against_is_no_place_and_an_absolute_one_needs_none"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = "            None if agent.is_relative() => None,\n"
 replace = ""

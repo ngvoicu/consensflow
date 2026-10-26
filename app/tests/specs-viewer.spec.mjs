@@ -626,31 +626,34 @@ test.describe('the registry', () => {
     page,
   }) => {
     await open(page)
-    const took = await page.evaluate(async () => {
-      const { readRegistry } = await import(new URL('core/specs-folder.js', location.href).href)
-      const { render } = await import(new URL('core/markdown.js', location.href).href)
-      const head = '| ID | Title | Status | Priority | Progress | Updated |'
-      // A cell of escaped pipes, within the 512 KB the daemon shows: once read again for each.
-      const pipes = '\\|'.repeat(250_000)
-      const texts = [
-        `${head}\n|---|---|---|---|---|---|\n| a | ${pipes} | active | high | 1/2 | 2026 |`,
-        `| A | B |\n|---|---|\n| ${pipes} | x |`,
-        `${head}\n${' '.repeat(131_072)}X`,
-        `${head}\n|${' -'.repeat(65_536)} X`,
-        // Lists and quotes nested past what a page's stack holds, read as words past a depth.
-        `${'- '.repeat(65_536)}X`,
-        `${'> '.repeat(65_536)}X`,
-        `${'*'.repeat(131_072)}X`,
-        `${'['.repeat(65_536)}](${'('.repeat(65_536)}`,
-      ]
-      const started = performance.now()
-      for (const text of texts) {
-        readRegistry(text)
-        render(text)
-      }
-      return performance.now() - started
-    })
-    expect(took).toBeLessThan(2_000)
+    // Read in a moment, and read at all: a reader that throws (its stack past what a page
+    // holds) fails the assertion, as one that takes too long does.
+    await expect(
+      page.evaluate(async () => {
+        const { readRegistry } = await import(new URL('core/specs-folder.js', location.href).href)
+        const { render } = await import(new URL('core/markdown.js', location.href).href)
+        const head = '| ID | Title | Status | Priority | Progress | Updated |'
+        // A cell of escaped pipes, within the 512 KB the daemon shows: once read again for each.
+        const pipes = '\\|'.repeat(250_000)
+        const texts = [
+          `${head}\n|---|---|---|---|---|---|\n| a | ${pipes} | active | high | 1/2 | 2026 |`,
+          `| A | B |\n|---|---|\n| ${pipes} | x |`,
+          `${head}\n${' '.repeat(131_072)}X`,
+          `${head}\n|${' -'.repeat(65_536)} X`,
+          // Lists and quotes nested past what a page's stack holds, read as words past a depth.
+          `${'- '.repeat(65_536)}X`,
+          `${'> '.repeat(65_536)}X`,
+          `${'*'.repeat(131_072)}X`,
+          `${'['.repeat(65_536)}](${'('.repeat(65_536)}`,
+        ]
+        const started = performance.now()
+        for (const text of texts) {
+          readRegistry(text)
+          render(text)
+        }
+        return performance.now() - started
+      }),
+    ).resolves.toBeLessThan(2_000)
   })
 
   test('keeps what its cells say as text, and a row with no folder opens nothing', async ({

@@ -44,8 +44,10 @@ use std::time::{Duration, Instant};
 use crate::{Error, Result};
 
 #[cfg(unix)]
+pub use pid::stall;
+#[cfg(unix)]
 pub use pid::{age, described, group_of};
-pub use pid::{is_alive, signal, started, Signal};
+pub use pid::{alive_among, end_all, is_alive, signal, started, Signal};
 pub use spawned::{Sink, Spawned};
 
 /// How long a program may run before it is ended. A verb of `cf` answers at
@@ -82,7 +84,8 @@ const PROGRAM_LOOKUP_ON_WINDOWS: [&str; 2] = ["COMSPEC", "PATHEXT"];
 
 /// The environment variable `name` of this process, or none when it is not set
 /// (or is not text). A stand-in program reads what the window it stands in for
-/// gave it, and a suite its size, here and nowhere else.
+/// gave it, a suite its size, and a run the programs built for it before it
+/// (`cf::BUILT`), here and nowhere else.
 pub fn own_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }

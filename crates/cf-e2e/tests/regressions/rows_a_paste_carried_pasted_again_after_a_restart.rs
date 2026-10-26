@@ -34,8 +34,6 @@
 //! A row let go of so, and then folded into the words of a later resume or reopening, does
 //! come again glued in front of them.
 
-use std::time::{Duration, Instant};
-
 use cf_e2e::devin_store;
 use cf_e2e::files;
 use cf_e2e::rig::{Config, Pasted, Project, Rig};
@@ -50,10 +48,6 @@ const ANSWERS: [&str; 2] = ["ANSWER_ONE", "ANSWER_TWO"];
 
 /// What the words that resume T-1 begin with, by which their paste is caught.
 const RESUMED: &str = "Resumed: Go on";
-
-/// How long the worker's record is to hold still before what it was given is taken
-/// for all: a window resumed, its note and what waits after it.
-const STILL: Duration = Duration::from_secs(15);
 
 /// The harness of the worker's window, and where its record is read.
 #[derive(Clone, Copy)]
@@ -287,11 +281,16 @@ fn the_app_starts_again(mut rig: Rig, harness: Harness, project: i64) -> cf_e2e:
     Ok(rig)
 }
 
-/// Waits until the carrier and the answers are delivered, the worker's window is open
+/// Waits until the carrier and the answers are delivered and the worker's window is open
 /// again and its record holds more than the `before` messages it held before the restart
-/// (the note that its turn was cut, or the words that resume T-1), and the record has held
-/// still for [`STILL`] since: what it was given by then is all it is given. The ledger
-/// may say all is delivered as the daemon starts, before the window is back.
+/// (the note that its turn was cut, or the words that resume T-1): what it was given, and
+/// the daemon's word that no answer was pasted on its own. The ledger may say all is
+/// delivered as the daemon starts, before the window is back.
+///
+/// The record's silence is no proof that nothing more comes: an answer pasted again goes
+/// in as a message of its own, and the daemon says so (`delivery.begun` of its row) when it
+/// pastes it, before the window can show it. An answer the ledger holds delivered, with no
+/// paste of its own begun, has nothing left to be pasted: it rode in its carrier's.
 fn until_all_is_given(
     rig: &Rig,
     harness: Harness,
@@ -323,22 +322,19 @@ fn until_all_is_given(
             Ok(delivered(RESUMED) && ANSWERS.iter().all(|answer| delivered(answer)))
         },
     )?;
-    let (mut held, mut since, begun) = (0, Instant::now(), Instant::now());
-    loop {
-        let given = harness.given(rig, &kept.session)?;
-        if given.len() != held {
-            (held, since) = (given.len(), Instant::now());
-        }
-        if since.elapsed() >= STILL {
-            return Ok(given);
-        }
-        if begun.elapsed() >= secs(180) {
-            return Err(Error::Timeout(format!(
-                "the worker's record went on for three minutes: {given:?}"
-            )));
-        }
-        std::thread::sleep(Duration::from_millis(500));
+    let events = rig.events();
+    for answer in ANSWERS {
+        let id = answer_to(&project, &kept.worker, answer)?["id"].clone();
+        let begun = events
+            .iter()
+            .filter(|event| event["kind"] == "delivery.begun" && event["data"]["message"] == id)
+            .count();
+        assert_eq!(
+            begun, 0,
+            "{answer} (m-{id}) was pasted on its own {begun} times, though it rode in its carrier's paste"
+        );
     }
+    harness.given(rig, &kept.session)
 }
 
 /// What the owner should have seen: each answer reached the worker's window once, in

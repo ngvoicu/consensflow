@@ -10,11 +10,13 @@
 #   (`cf_e2e::files::write_whole`);
 # - the rig names what it found left behind, and takes a program that began after the last window
 #   was noted for none of the windows (`crates/cf-e2e/src/rig/left.rs`);
-# - the lane over a stop is told by its order and not by the second the watch first looked at
-#   (`tests/live_stops/midturn/stand_in.rs`);
-# - a chief's answer is the assistant's record that ends the turn, not the word its prompt held
-#   (`tests/regressions/idle_compaction_read_as_a_cut_turn.rs`), and the line a `node` writes is
-#   waited for whole (`codex_in_homebrew_taken_for_not_installed.rs`);
+# - the rig's stranger, dropped with its handle, is ended and waited for, not left to the system
+#   (`crates/cf-e2e/src/process/spawned.rs`; the plant of `long run:` that edits the same drop names
+#   a test of `process::` (T-407), and this one names the stranger's own);
+# - a chief's turn has ended when its record says so, not when the word its prompt held is there
+#   (`tests/regressions/idle_compaction_read_as_a_cut_turn.rs`, whose chief answers three seconds
+#   late), and the line a `node` writes is waited for whole
+#   (`codex_in_homebrew_taken_for_not_installed.rs`);
 # - the windows of the headless host are given a minute to print (`cf-panes/tests/headless.rs`);
 # - a program asked to end with its streams closed meets a closed pipe: the test runs in a process
 #   of its own, where no program of another test can hold a copy of the pipe that would let the
@@ -29,8 +31,8 @@ process-closed-stream-stress = ["cargo", "test", "--offline", "-p", "cf-process"
 rig-lib-spawned = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::spawned"]
 rig-lib-files = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "files::"]
 rig-lib-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::left"]
+rig-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger"]
 rig-stand-ins = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stand_ins::the_stand_in_agents_job_writes"]
-live-stops-lane = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "--", "a_lane_that_worked"]
 regressions-idle = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "--", "idle_compaction_read_as_a_cut_turn"]
 regressions-finder = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "--", "a_window_of_a_daemon_on_the_finders_path"]
 panes-headless-eof = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "stdin_eof_reaps_every_spawned_process"]
@@ -142,26 +144,20 @@ find = "if wait::until(within, || !process::is_alive(pid)) {"
 replace = "if wait::until(within, || true) {"
 
 [[plant]]
-name = "load flakes: a lane is taken for worked and closed in any order"
-meant = "a_lane_that_worked_when_the_watch_began_and_was_closed_after_is_told_from_one_that_was_not"
-runs = ["live-stops-lane"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_stops/midturn/stand_in.rs"
-find = "at(1) <= at(2)"
-replace = "true"
-
-[[plant]]
-name = "load flakes: any assistant's record with the word is the chief's answer"
-meant = "only_the_assistants_ended_turn_with_the_word_is_the_chiefs_answer"
+name = "load flakes: the idle-compaction case waits for the word its prompt held, and its chief answers late"
+meant = "a_claude_chief_whose_conversation_was_compacted_while_idle_is_given_no_note_at_a_resume"
 runs = ["regressions-idle"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/regressions/idle_compaction_read_as_a_cut_turn.rs"
 find = '''
-                && entry["message"]["stop_reason"] == "end_turn"
+    wait_for_the_turn_to_end(&rig, &session, "Reply with exactly: HELLO")?;
 '''
-replace = ""
+replace = '''
+    rig.wait_for("the word", secs(60), || {
+        Ok(rig.transcript(&session).contains("HELLO"))
+    })?;
+'''
 
 [[plant]]
 name = "load flakes: the file a node writes is read as soon as it is there"
@@ -219,3 +215,17 @@ find = '''
 replace = '''
         // Probed on Node v26.8.1: the streams are closed before the program is
 '''
+
+[[plant]]
+name = "load flakes: the rig's stranger, dropped with its handle, is left running and never waited for"
+meant = "a_stranger_dropped_is_ended_through_its_handle"
+runs = ["rig-lib-stranger"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/spawned.rs"
+find = """
+    fn drop(&mut self) {
+        self.kill();
+    }"""
+replace = """
+    fn drop(&mut self) {}"""

@@ -77,16 +77,30 @@
 //! parent each process names, which is the process that started it only while that
 //! one is there); the rest is here.
 
+#[cfg(any(target_os = "macos", test))]
+mod clock;
 mod harness;
 mod work;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use cf_proto::panes::{Background, BackgroundProcess, Ending, BACKGROUND_PROCESSES, COMMAND_CHARS};
+use cf_proto::panes::{
+    Background, BackgroundProcess, Ending, Servers, BACKGROUND_PROCESSES, COMMAND_CHARS,
+};
 
+#[cfg(test)]
+pub(crate) use clock::Reading;
+#[cfg(any(target_os = "macos", test))]
+pub(crate) use clock::{began_before, PaneClock};
+#[cfg(target_os = "macos")]
+pub(crate) use clock::{Read, Watch};
 pub(crate) use harness::Kept;
+
+/// How many of a window's rests are kept ([`Baseline::rest`]): a rest asked of in a look is
+/// the latest a few turns before it, and one no longer kept leaves nothing out.
+const RESTS: usize = 16;
 
 /// How long the host waits before it looks again at what it found the turn's work, where
 /// it names what a window left running (see above): longer than a run of a harness's
@@ -140,6 +154,11 @@ pub(crate) struct Baseline {
     /// Which harness it is, as the daemon said at the latest mark: the name its own
     /// programs are told by.
     harness: Option<String>,
+    /// The window's processes at the latest of its rests the daemon asked to be kept
+    /// ([`Baseline::rest`]), each by the number the host gave it, oldest first: a few.
+    rests: VecDeque<(u64, HashSet<ProcessKey>)>,
+    /// The number the next rest is given.
+    next_rest: u64,
     /// What was seen to descend from a process of the harness's own at the latest
     /// look, and runs still: kept for the day the process that started it has gone. It
     /// is shared by the copies a look is made with: whatever one sees, the next knows.
@@ -160,6 +179,56 @@ impl Baseline {
         self.harness = harness;
         // What the harness has now is its own, whatever becomes of what started it.
         self.protected(tree);
+    }
+
+    /// Whether the host can tell the commands of the window's harness: a window whose
+    /// harness keeps its servers in the window's group, as the daemon said at a mark, on a
+    /// platform with groups. Asked before the tree is walked (Calliope on 472b1d96).
+    pub fn tells_commands(&self) -> bool {
+        self.commands_kept().is_some()
+    }
+
+    fn commands_kept(&self) -> Option<Kept> {
+        self.kept.filter(|kept| kept.servers == Servers::InGroup)
+    }
+
+    /// The window is at rest, its tree `tree`: kept, under the number answered, for a
+    /// look at its commands to leave out ([`Baseline::commands`]). The last [`RESTS`] are
+    /// kept, and those `keep` names however many came after them: the daemon names those a
+    /// monitor that runs is left (Astraeus on 136a7158). None where the host cannot tell
+    /// the commands.
+    pub fn rest(&mut self, tree: &[Member], keep: &[u64]) -> Option<u64> {
+        self.commands_kept()?;
+        let number = self.next_rest;
+        self.next_rest += 1;
+        self.rests
+            .push_back((number, tree.iter().map(|member| member.key).collect()));
+        let latest = self.rests.len().saturating_sub(RESTS);
+        let mut at = 0;
+        self.rests.retain(|(number, _)| {
+            at += 1;
+            at > latest || keep.contains(number)
+        });
+        Some(number)
+    }
+
+    /// The commands of the window's harness that run in `tree` now ([`harness::commands`]),
+    /// less what ran at the rest `since` where it is one kept, and what `before` proves began
+    /// before the monitors were called (the pane's clock: [`clock`]): none where the host
+    /// cannot tell them (`cf_proto::panes::Commands`). A rest no longer kept, or never kept,
+    /// leaves nothing out.
+    pub fn commands(
+        &self,
+        tree: &[Member],
+        since: Option<u64>,
+        before: &dyn Fn(&Member) -> bool,
+    ) -> Option<Background> {
+        let kept = self.commands_kept()?;
+        let empty = HashSet::new();
+        let rest = since
+            .and_then(|since| self.rests.iter().find(|(number, _)| *number == since))
+            .map_or(&empty, |(_, rest)| rest);
+        Some(listed(harness::commands(kept, tree, rest, before)))
     }
 
     /// Whether a turn was ever said to begin: where it was not, the tree is

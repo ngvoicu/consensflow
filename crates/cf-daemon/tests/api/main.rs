@@ -32,6 +32,7 @@
 mod checks;
 mod frames;
 mod names;
+mod nested_cargo;
 mod player;
 mod relay;
 mod rig;
@@ -67,13 +68,17 @@ const RESULT_ACCEPTED: &str = "the chief accepts the task while its result is st
 /// The same when the chief sent the task back.
 const RESULT_SENT_BACK: &str = "the chief sends the task back while its result is still queued for it: the result is withdrawn (`cancelled`, with the reason `T-n was sent back`), where Node leaves it `queued` to be pasted after the decision";
 
+/// What `cf` says that names `cf task finish`, a verb Node's `cf` had none of: the
+/// chief's way out of a working task, with the last complete answer of its worker.
+const FINISH_IN_THE_USAGE: &str = "the usage `cf help` prints inside a window lists `cf task finish`, a verb Node's `cf` had none of: the chief's way out of a working task, with the last complete answer of its worker";
+
 /// The traces the receipt and stop redesign moved on purpose: a choice answer
 /// is received, not read at its creation, a resume takes in what its window
-/// kept, a command written wrong asks the board nothing, a brief that waits at
-/// the gate is not given to an agent, and `cf task get` prints the brief of a
-/// task no window holds under its header; and those the decision on a result
-/// moved: the result is withdrawn, not pasted after it. Found by playing them
-/// against the daemon.
+/// kept, a command written wrong asks the board nothing, and `cf task get`
+/// prints the brief of a task no window holds under its header; those the
+/// decision on a result moved: the result is withdrawn, not pasted after it;
+/// and those that print the verbs of `cf task`, which have `finish` now. Found
+/// by playing them against the daemon.
 const DEPARTED: &[Departed] = &[
     ("core-api-003", RESULT_ACCEPTED),
     (
@@ -91,12 +96,12 @@ const DEPARTED: &[Departed] = &[
         "a resume carries the brief that never arrived and logs `message.carried`: one more clock reading, so the task's `updatedAt` is a second later",
     ),
     (
-        "cf-board-010",
-        "the task an agent reads while its brief waits at the gate has no `body`: the brief is for its window once the human passes it on",
-    ),
-    (
         "cf-board-015",
         "`cf task get` prints the brief of a task no window ever held (here one cancelled, then deleted, while it was open) under its header, so the whole brief can be read before it goes out: Node printed the header alone",
+    ),
+    (
+        "cf-board-022",
+        "the sentence of an unknown task command names `finish` among the verbs `cf task` has, which Node's `cf` had none of: the chief's way out of a working task",
     ),
     (
         "cf-board-023",
@@ -107,6 +112,8 @@ const DEPARTED: &[Departed] = &[
         "the answer to a question with options lands `queued`: it is read when received, not when written",
     ),
     ("cf-board-027", RESULT_ACCEPTED),
+    ("cf-board-028", FINISH_IN_THE_USAGE),
+    ("cf-board-029", FINISH_IN_THE_USAGE),
 ];
 
 /// Plays every trace of `suites` but the departed, each against an API of its

@@ -5,9 +5,10 @@
 
 use std::fs;
 use std::io::{self, Read, Write};
-use std::net::{IpAddr, Ipv4Addr, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use cf_base::env::Env;
 use rustls::pki_types::pem::PemObject;
@@ -75,6 +76,37 @@ pub fn stand_in_for_the_app(binary: &Path, script: &str) {
 /// What a client that trusts the authority at `ca` is answered to `method path`
 /// by the feed whose address is `url`: the status and the body.
 pub fn https_get(url: &str, ca: &Path, method: &str, path: &str) -> io::Result<(u16, Vec<u8>)> {
+    let all = exchange(url, ca, method, path, None)?;
+    let split = all
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("a response has a head");
+    let head = String::from_utf8_lossy(&all[..split]).into_owned();
+    let status = head.split(' ').nth(1).unwrap().parse().unwrap();
+    Ok((status, all[split + 4..].to_vec()))
+}
+
+/// Whether nothing at `url` answers a client that trusts the authority at `ca`, as
+/// the feed of the run would: a port that nothing listens at refuses it, and one
+/// that something else holds takes the connection and says nothing a client takes
+/// for the feed's, which `patience` ends the wait for. A port is no proof that a
+/// server is gone: a process the test's own program started while the server's
+/// socket was being made can be left that socket (macOS makes it close-on-exec
+/// in a second step), and keeps the port open after the server closed it.
+pub fn unanswered(url: &str, ca: &Path, patience: Duration) -> bool {
+    exchange(url, ca, "GET", "/feed", Some(patience)).map_or(true, |answer| answer.is_empty())
+}
+
+/// Everything the feed whose address is `url` sends back to a client that trusts
+/// the authority at `ca`, for `method path`: the whole of it, or, where `patience`
+/// is given, as much as it says within that time of each step.
+fn exchange(
+    url: &str,
+    ca: &Path,
+    method: &str,
+    path: &str,
+    patience: Option<Duration>,
+) -> io::Result<Vec<u8>> {
     let port: u16 = url
         .trim_start_matches("https://127.0.0.1:")
         .trim_end_matches("/feed")
@@ -93,7 +125,17 @@ pub fn https_get(url: &str, ca: &Path, method: &str, path: &str) -> io::Result<(
     // The address the app is told, and which the certificate holds.
     let name = ServerName::from(IpAddr::V4(Ipv4Addr::LOCALHOST));
     let connection = ClientConnection::new(Arc::new(config), name).unwrap();
-    let mut stream = StreamOwned::new(connection, TcpStream::connect((Ipv4Addr::LOCALHOST, port))?);
+    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    let socket = match patience {
+        None => TcpStream::connect(address)?,
+        Some(patience) => {
+            let socket = TcpStream::connect_timeout(&address, patience)?;
+            socket.set_read_timeout(Some(patience))?;
+            socket.set_write_timeout(Some(patience))?;
+            socket
+        }
+    };
+    let mut stream = StreamOwned::new(connection, socket);
     write!(
         stream,
         "{method} {path} HTTP/1.1\r\nhost: 127.0.0.1\r\nconnection: close\r\n\r\n"
@@ -104,13 +146,7 @@ pub fn https_get(url: &str, ca: &Path, method: &str, path: &str) -> io::Result<(
         Err(cause) if cause.kind() == io::ErrorKind::UnexpectedEof => {}
         Err(cause) => return Err(cause),
     }
-    let split = all
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .expect("a response has a head");
-    let head = String::from_utf8_lossy(&all[..split]).into_owned();
-    let status = head.split(' ').nth(1).unwrap().parse().unwrap();
-    Ok((status, all[split + 4..].to_vec()))
+    Ok(all)
 }
 
 /// A signed `ConsensFlow.app` in `parent`, made as `fake` says. macOS programs
@@ -220,6 +256,23 @@ impl Drop for Ran {
     fn drop(&mut self) {
         if !std::thread::panicking() {
             println!("{RAN}");
+        }
+    }
+}
+
+/// The hold on `cache` once it is let go of. A test that takes it back at once can
+/// meet a program another test is starting (a `fork` copies the descriptors of the
+/// process until the program is `exec`ed, and the lock goes with the last of them),
+/// so it is tried for a moment before it is said to be held.
+pub fn hold_when_free(cache: &Path) -> super::cache::Hold {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match super::cache::hold(cache) {
+            Ok(hold) => return hold,
+            Err(held) if std::time::Instant::now() > until => {
+                panic!("the cache is still held: {held}")
+            }
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
         }
     }
 }

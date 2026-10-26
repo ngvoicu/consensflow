@@ -149,22 +149,103 @@ fn closed_at_rest_with_a_notification_queued(config: &str, session: &str) -> std
     )
 }
 
+/// What a process that closed with a job and a monitor of its turn still running left (T-442
+/// with its Monitor, turn-end of 2026-10-21): the turn started a command in the background
+/// and armed a monitor on it, as Claude Code 2.1.305 writes them, and ended; the window
+/// closed with both, and no word of their end was written. Their notifications went with
+/// the process, and the window that comes back waits on neither.
+fn closed_with_a_job_and_a_monitor_pending(config: &str, session: &str) -> std::io::Result<()> {
+    let at = "2026-10-17T18:29:00.000Z";
+    let record = |fields: Value| {
+        let mut record = json!({ "sessionId": session, "isSidechain": false, "timestamp": at });
+        if let (Some(record), Some(fields)) = (record.as_object_mut(), fields.as_object()) {
+            record.extend(fields.clone());
+        }
+        record
+    };
+    let call =
+        |id: &str, name: &str| json!({ "type": "tool_use", "id": id, "name": name, "input": {} });
+    let result = |uuid: &str, call: &str, said: &str, how: Value| {
+        record(json!({
+            "type": "user", "uuid": uuid, "parentUuid": null,
+            "message": { "role": "user", "content": [
+                { "type": "tool_result", "tool_use_id": call, "content": said },
+            ] },
+            "toolUseResult": how,
+        }))
+    };
+    left(
+        config,
+        session,
+        &[
+            record(json!({
+                "type": "user", "uuid": "run-it", "parentUuid": null,
+                "message": { "role": "user", "content": "Run the suite and watch it" },
+            })),
+            record(json!({
+                "type": "assistant", "uuid": "starting", "parentUuid": "run-it",
+                "message": {
+                    "id": "msg-run", "role": "assistant", "stop_reason": "tool_use",
+                    "content": [call("toolu-run", "Bash"), call("toolu-watch", "Monitor")],
+                },
+            })),
+            result(
+                "started",
+                "toolu-run",
+                "Command running in background with ID: bsuite001.",
+                json!({ "backgroundTaskId": "bsuite001" }),
+            ),
+            result(
+                "armed",
+                "toolu-watch",
+                "Monitor started (task bwatch001, expires in 30m).",
+                json!({ "taskId": "bwatch001", "timeoutMs": 1_800_000, "persistent": false }),
+            ),
+            record(json!({
+                "type": "assistant", "uuid": "waiting", "parentUuid": "armed",
+                "message": {
+                    "id": "msg-wait", "role": "assistant", "stop_reason": "end_turn",
+                    "content": [{ "type": "text", "text": "WAITING" }],
+                },
+            })),
+            record(json!({
+                "type": "system", "subtype": "turn_duration", "uuid": "waited",
+                "parentUuid": "waiting", "durationMs": 1000, "messageCount": 9,
+            })),
+        ],
+    )
+}
+
+#[test]
+fn a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_with_its_job_and_monitor_running(
+) -> Outcome {
+    let results = reopened_after(closed_with_a_job_and_a_monitor_pending)?;
+    assert!(results[1].starts_with("AGAIN_OK\n\n(ConsensFlow: no word came that the 2 background jobs an earlier window of @"), "the result says what it no longer waits on, and that it may run: {results:?}");
+    Ok(())
+}
+
 #[test]
 fn a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_with_a_notification_queued(
 ) -> Outcome {
-    reopened_after(closed_in_a_turn_with_a_notification_queued)
+    let results = reopened_after(closed_in_a_turn_with_a_notification_queued)?;
+    assert_eq!(results, ["FIRST_OK", "AGAIN_OK"]);
+    Ok(())
 }
 
 #[test]
 fn a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_at_rest_with_a_notification_queued(
 ) -> Outcome {
-    reopened_after(closed_at_rest_with_a_notification_queued)
+    let results = reopened_after(closed_at_rest_with_a_notification_queued)?;
+    assert_eq!(results, ["FIRST_OK", "AGAIN_OK"]);
+    Ok(())
 }
 
 /// The worker answers T-1, its window closes, and its record then ends as `left`
 /// writes it, before the chief reopens T-1: the answer to the reopen is T-1's
-/// result.
-fn reopened_after(left: fn(&str, &str) -> std::io::Result<()>) -> Outcome {
+/// result. The results the chief was given.
+fn reopened_after(
+    left: fn(&str, &str) -> std::io::Result<()>,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let rig = Rig::start(config())?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
@@ -223,7 +304,9 @@ fn reopened_after(left: fn(&str, &str) -> std::io::Result<()>) -> Outcome {
     rig.wait_for("the result to reach the chief", secs(30), || {
         Ok(results(&project)?.len() == 2)
     })?;
-    assert_eq!(results(&project)?, ["FIRST_OK", "AGAIN_OK"]);
+    let given = results(&project)?;
+    assert_eq!(given[0], "FIRST_OK");
+    assert!(given[1].starts_with("AGAIN_OK"), "{given:?}");
     rig.close()?;
-    Ok(())
+    Ok(given)
 }

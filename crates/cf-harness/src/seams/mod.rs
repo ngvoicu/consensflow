@@ -9,6 +9,8 @@
 use std::cell::{Cell, RefCell};
 use std::future::{poll_fn, Future};
 use std::net::TcpListener;
+#[cfg(target_os = "macos")]
+use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::pin::pin;
 use std::rc::Rc;
@@ -176,21 +178,73 @@ impl Entropy for SystemEntropy {
     }
 }
 
-/// A port the system hands out on loopback, let go at once.
+/// A port the system hands out on loopback, let go at once, that no program
+/// listens on once it has been.
+///
+/// macOS cannot open a socket close-on-exec: std opens it and makes it so in a
+/// second call. A program another thread starts between the two is left the
+/// listener that learned the port, and holds it for as long as it runs, or,
+/// where a program is started holding only its streams, for the milliseconds
+/// it takes to let go of what it was left. Letting go of ours does not free
+/// the port then, and whatever binds it next is refused. So a port is looked
+/// at once it is let go, when a program that holds it has been left it already,
+/// and another is drawn where one listens on it.
 pub struct LoopbackPorts;
 
 impl Ports for LoopbackPorts {
     fn free_loopback(&self) -> Result<u16, String> {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|failed| failed.to_string())?;
-        let port = listener
-            .local_addr()
-            .map_err(|failed| failed.to_string())?
-            .port();
-        if port == 0 {
-            return Err("could not choose a loopback port".to_owned());
-        }
-        Ok(port)
+        free_loopback_from(drawn, listened_on)
     }
+}
+
+/// How many ports are drawn at most before one that no program holds is found.
+const DRAWS: usize = 8;
+
+/// How long a look at a port waits for its answer, which loopback gives at once.
+#[cfg(target_os = "macos")]
+const LOOK: Duration = Duration::from_millis(250);
+
+/// The first port `draw` names that `held` does not say a program holds.
+fn free_loopback_from(
+    mut draw: impl FnMut() -> Result<u16, String>,
+    held: impl Fn(u16) -> bool,
+) -> Result<u16, String> {
+    for _ in 0..DRAWS {
+        let port = draw()?;
+        if !held(port) {
+            return Ok(port);
+        }
+    }
+    Err("could not choose a loopback port that no program holds".to_owned())
+}
+
+/// Whether a program listens on `port` of loopback: a connection to it is
+/// taken (into the backlog of a listener nothing serves), where one to a
+/// port no one listens on is refused. It makes no listener, which is what
+/// the look is for.
+#[cfg(target_os = "macos")]
+fn listened_on(port: u16) -> bool {
+    TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)), LOOK).is_ok()
+}
+
+/// Only macOS leaves a program the listener of another thread's: Linux opens
+/// a socket close-on-exec as it makes it, and Windows hands nothing over.
+#[cfg(not(target_os = "macos"))]
+fn listened_on(_port: u16) -> bool {
+    false
+}
+
+/// A port the system names on loopback, its listener let go.
+fn drawn() -> Result<u16, String> {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|failed| failed.to_string())?;
+    let port = listener
+        .local_addr()
+        .map_err(|failed| failed.to_string())?
+        .port();
+    if port == 0 {
+        return Err("could not choose a loopback port".to_owned());
+    }
+    Ok(port)
 }
 
 #[cfg(test)]
@@ -198,6 +252,7 @@ mod tests {
     use super::*;
     use crate::testing::{Driver, ManualTime};
     use std::cell::Cell;
+    use std::net::TcpStream;
     use std::time::Instant;
 
     /// Marks when it is dropped.
@@ -351,5 +406,72 @@ mod tests {
         bound_once_free(port);
         assert!(waited.elapsed() >= Duration::from_millis(100));
         holder.join().unwrap();
+    }
+
+    /// Whether a program listens on `port`, as a connection to it says.
+    fn listens(port: u16) -> bool {
+        TcpStream::connect(("127.0.0.1", port)).is_ok()
+    }
+
+    /// A port the system names that is not `taken`.
+    fn another(taken: u16) -> u16 {
+        loop {
+            let port = drawn().unwrap();
+            if port != taken {
+                return port;
+            }
+        }
+    }
+
+    #[test]
+    fn a_port_a_program_was_left_a_listener_of_is_not_the_one_named() {
+        // What the program another thread started was left of the listener the
+        // seam opened: the port stays listened on after the seam let go of it.
+        let kept = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let taken = kept.local_addr().unwrap().port();
+        let free = another(taken);
+        let mut draws = [taken, free].into_iter();
+        let named = free_loopback_from(|| Ok(draws.next().unwrap()), listens).unwrap();
+        assert_eq!(named, free, "the port {taken} is listened on");
+        TcpListener::bind(("127.0.0.1", named)).unwrap();
+    }
+
+    #[test]
+    fn no_port_is_named_when_every_one_drawn_is_held() {
+        let mut drawn = 0;
+        let named = free_loopback_from(
+            || {
+                drawn += 1;
+                Ok(40_000)
+            },
+            |_| true,
+        );
+        assert_eq!(
+            named,
+            Err("could not choose a loopback port that no program holds".to_owned())
+        );
+        assert_eq!(drawn, DRAWS, "it gives up after the draws it has");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_port_is_looked_at_by_a_connection_to_it() {
+        let kept = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = kept.local_addr().unwrap().port();
+        assert!(listened_on(port));
+        drop(kept);
+        // A program started while the listener was open may hold its copy for a
+        // moment more: the port is clear once that program has let go.
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        while listened_on(port) {
+            assert!(std::time::Instant::now() < until, "{port} is listened on");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn a_draw_the_system_refuses_is_the_failure() {
+        let named = free_loopback_from(|| Err("no more".to_owned()), |_| false);
+        assert_eq!(named, Err("no more".to_owned()));
     }
 }

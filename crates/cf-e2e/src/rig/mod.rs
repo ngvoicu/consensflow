@@ -35,9 +35,11 @@ mod project;
 mod report;
 mod route;
 mod stranger;
+mod sweep;
 mod wait;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, MutexGuard};
 use std::time::Duration;
 
@@ -46,7 +48,8 @@ use serde_json::Value;
 use crate::daemon::Daemon;
 use crate::daemon_log::StartLine;
 use crate::live::members::Identity;
-use crate::process::{Ran, Run, Sink, Spawned};
+use crate::outcome::{self, Verdict};
+use crate::process::{self, Ran, Run, Sink, Spawned};
 use crate::{cf, checkout, files, wire, Error, Result};
 
 pub use forget::project_name;
@@ -96,6 +99,10 @@ pub struct Config {
     opencode: Option<PathBuf>,
     finder: bool,
     masker: Option<Masker>,
+    reports: Option<PathBuf>,
+    homes: Option<PathBuf>,
+    case: Option<String>,
+    judged: bool,
 }
 
 /// What a rig passes what it says of itself through, where its owner gives it one
@@ -159,6 +166,10 @@ impl Config {
             opencode: None,
             finder: false,
             masker: None,
+            reports: None,
+            homes: None,
+            case: None,
+            judged: false,
         }
     }
 
@@ -173,6 +184,48 @@ impl Config {
     #[must_use]
     pub fn as_the_finder_starts_it(mut self) -> Self {
         self.finder = true;
+        self
+    }
+
+    /// With the report of a rig a case leaves unclosed kept in `folder`, not beside
+    /// the rig's home in the machine's temp folder: for a rig whose windows are a
+    /// real harness's, whose screens the person's login drew and no masker is sure
+    /// to hide (the lead's decision of 2026-10-16), and which the machine's temp
+    /// folder would keep for good.
+    #[must_use]
+    pub fn reports_in(mut self, folder: impl Into<PathBuf>) -> Self {
+        self.reports = Some(folder.into());
+        self
+    }
+
+    /// With the rig's report, and the line that says where it is, naming `case` as the case
+    /// that left it, where the rig is not started on a thread named for its case: a run
+    /// that is no test. A rig started on the thread of a test is that test's, by the
+    /// thread's name.
+    #[must_use]
+    pub fn case(mut self, case: impl Into<String>) -> Self {
+        self.case = Some(case.into());
+        self
+    }
+
+    /// With the rig's case judged by what it returns ([`Outcome`](crate::Outcome)): a rig
+    /// dropped unclosed in a case that has not failed was dropped by a case that passed,
+    /// and has no report to keep. A rig not judged, which is every rig whose case does not
+    /// return one (a live suite's, a run's), cannot tell and keeps its report for every
+    /// drop unclosed.
+    #[must_use]
+    pub fn judged_by_outcome(mut self) -> Self {
+        self.judged = true;
+        self
+    }
+
+    /// With the rig's home made in `folder`, and not in the machine's temp folder: for a case
+    /// that wants its rig's home, and the homes a rig that starts sweeps, in a folder of its
+    /// own. A rig that starts takes away the homes in that folder that a killed run left:
+    /// those older than a day that no process works in.
+    #[must_use]
+    pub fn homes_in(mut self, folder: impl Into<PathBuf>) -> Self {
+        self.homes = Some(folder.into());
         self
     }
 
@@ -336,10 +389,22 @@ pub struct Rig {
     forget: Option<Forget>,
     /// What it passes what it says of itself through ([`Config::masked_by`]).
     masker: Option<Masker>,
+    /// Where its report is kept, where it is not beside its home ([`Config::reports_in`]).
+    reports: Option<PathBuf>,
+    /// The case that started it, as its report names it ([`Config::case`]).
+    case: String,
+    /// Whether its case is judged by what it returns, and whether it has failed
+    /// ([`Config::judged_by_outcome`]); the failures of the thread it started on then.
+    judged: Option<Verdict>,
     /// Whether the home is left when the rig ends: it is not, unless a rig is
     /// to resume on it or a case asked to keep it ([`Rig::keep_home`]).
     keep_root: bool,
+    /// Whether the rig ended: set when a close succeeded, never by one that failed.
     closed: bool,
+    /// Whether a close was tried and failed.
+    close_failed: bool,
+    /// Whether the case holds its close to fail ([`Rig::expect_the_close_to_fail`]).
+    close_expected_to_fail: AtomicBool,
     _turn: MutexGuard<'static, ()>,
 }
 
@@ -357,6 +422,12 @@ impl Rig {
     /// The daemon's process id.
     pub fn daemon_pid(&self) -> u32 {
         self.daemon.id()
+    }
+
+    /// The pane host's process id: the process that holds the windows' terminals and
+    /// reads their output.
+    pub fn host_pid(&self) -> u32 {
+        self.host.id()
     }
 
     /// The value of the variable `name` in the environment of the daemon and
@@ -567,7 +638,8 @@ impl Rig {
 
     /// Leaves the home where it is when the rig ends, however it ends (closed,
     /// or dropped by a case that failed), for a person to look at what the case
-    /// did: where it is.
+    /// did: where it is. A rig that starts a day later takes it away unless a process
+    /// works in it.
     pub fn keep_home(&mut self) -> PathBuf {
         self.keep_root = true;
         self.root.clone()
@@ -590,6 +662,14 @@ impl Rig {
     /// it.
     pub fn close(mut self) -> Result<()> {
         self.shutdown(EXIT)
+    }
+
+    /// Begins the close without waiting for it: the daemon's input and the pane host's
+    /// end, as the app's quit ends them. [`Rig::shut_down_within`] then waits for them, its
+    /// time counted from there, so a case can wait for an event of the close first.
+    pub fn begin_close(&self) {
+        self.daemon.end_input();
+        self.host.end_input();
     }
 
     /// [`Rig::close`], but the daemon and the pane host each have `within` to end,
@@ -635,11 +715,51 @@ impl Rig {
         last_word(&self.shared, self.root.clone(), LAST_FRAMES)
     }
 
+    /// For a case that holds the close to fail (the rig's checks of what the pane host
+    /// ended, of what a window left running): a close that fails keeps no report of
+    /// the rig, since the failure is what the case is about and it says it. That is
+    /// the rig's whole report, so an error the case returns after the expected failure
+    /// (not a panic, which keeps one) keeps none either: the case says what it needs to
+    /// in the error. A close that fails in any other case does keep one, and so does a
+    /// case that never tries it.
+    pub fn expect_the_close_to_fail(&self) {
+        self.close_expected_to_fail.store(true, Ordering::Relaxed);
+    }
+
+    /// What the drop of the rig says of itself. A panic in flight is a failed case's. A rig
+    /// closed, or whose close the case holds to fail, has nothing to say. Any other is
+    /// dropped unclosed: a case that is not judged by what it returns cannot say that it
+    /// passed, and the rig says it; one that is says it once the case is known to have
+    /// failed, whether that is already or comes later (`outcome::leave`).
+    fn drop_says(&self) -> DropSays {
+        if std::thread::panicking() {
+            return DropSays::Now;
+        }
+        let failure_expected =
+            self.close_failed && self.close_expected_to_fail.load(Ordering::Relaxed);
+        if self.closed || failure_expected {
+            return DropSays::Nothing;
+        }
+        self.judged
+            .map_or(DropSays::Now, DropSays::OnceItsCaseFails)
+    }
+
+    /// Ends the rig, as [`Rig::close`] says. It is closed once that succeeded: a close
+    /// that failed leaves the rig to be dropped unclosed, which keeps its report.
     fn shutdown(&mut self, exit: Duration) -> Result<()> {
         if self.closed {
             return Ok(());
         }
-        self.closed = true;
+        let ended = self.end(exit);
+        if ended.is_ok() {
+            self.closed = true;
+        } else {
+            self.close_failed = true;
+        }
+        ended
+    }
+
+    fn end(&mut self, exit: Duration) -> Result<()> {
         self.daemon.end_input();
         self.host.end_input();
         let (daemon, host) = (self.daemon.wait(exit)?, self.host.wait(exit)?);
@@ -670,14 +790,41 @@ impl Rig {
     }
 }
 
+impl Rig {
+    /// What a failed case of the rig leaves of it, as the report the rig keeps says it: the
+    /// windows' screens, the daemon's failure events and log, and what the stand-in agents
+    /// wrote, all told through the masker the rig was given.
+    pub fn failure_report(&self) -> String {
+        report::report_of(self)
+    }
+}
+
+/// What the drop of a rig does with the report of what it showed.
+enum DropSays {
+    /// Nothing: the case closed it, or holds its close to fail.
+    Nothing,
+    /// It says it now: a panic is in flight, or the rig's case cannot say that it passed.
+    Now,
+    /// It says it once the case has failed, as the verdict reads.
+    OnceItsCaseFails(Verdict),
+}
+
 impl Drop for Rig {
-    /// A rig not closed (a case that failed on the way, by a check or by an
-    /// error it returned: every case that passes ends by closing it) is ended
-    /// all the same, saying what the windows showed first; and the home goes
-    /// unless it is to be kept.
+    /// A rig not closed (a case that failed on the way, by a check, by an error it
+    /// returned, or by a close that failed) is ended all the same, saying what the
+    /// windows showed first; and the home goes unless it is to be kept. A rig whose case
+    /// passed says nothing: one dropped unclosed by a case that is judged by what it
+    /// returns ([`Config::judged_by_outcome`]) writes what it shows while it is up, and
+    /// that is said only if the case fails; the scan of the suites
+    /// (`tests/rig/reports.rs`) is what holds the cases to the close.
     fn drop(&mut self) {
-        if std::thread::panicking() || !self.closed {
-            report::say(self);
+        match self.drop_says() {
+            DropSays::Nothing => {}
+            DropSays::Now => report::left_by(self).say(),
+            DropSays::OnceItsCaseFails(verdict) => {
+                let left = report::left_by(self);
+                outcome::leave(verdict, move || left.say());
+            }
         }
         let _ = self.shutdown(EXIT);
         self.daemon.kill();

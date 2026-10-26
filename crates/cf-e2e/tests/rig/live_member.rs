@@ -76,7 +76,7 @@ fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversati
     let note = &ask::cut_note(2, &[1])?;
     assert_eq!(
         note,
-        "[ConsensFlow m-2 · T-1 · note from ConsensFlow]\nConsensFlow quit while you were working on T-1. Go on where you stopped."
+        "[ConsensFlow m-2 · T-1 · note from ConsensFlow]\nConsensFlow stopped while you were working on T-1. Go on where you stopped."
     );
 
     // The window, as the daemon opens a member's.

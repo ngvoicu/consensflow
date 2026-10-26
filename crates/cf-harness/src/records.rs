@@ -28,7 +28,9 @@ mod thread;
 
 pub use crate::shared::quota::{Level, Quota};
 pub use crate::shared::record::cache::{Cache, Look, Open, Options, PiSettlement, IDLE_MS};
-pub use crate::shared::record::reading::{Item, Reading, Record, Role, Settlement};
+pub use crate::shared::record::reading::{
+    End, Item, Monitor, Notice, Pending, Reading, Record, Role, Settlement, Source,
+};
 pub use thread::Thread;
 
 /// The reader of the conversation `session` in `harness`'s record, in the

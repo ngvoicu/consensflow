@@ -29,7 +29,47 @@ recordings in four ways, none of them by recording again.
   and `-021`: changed by hand, in those words alone.
 - The refusal that lists the roles a member may hold lists the tester, in
   `corners-page-005`: changed by hand in the same way.
+- `cf tell`'s usage has a third line, for a task still queued (the field report of
+  2026-10-15: a tell to a queued task waits for its window), in `cf-board-028` and
+  `-029`: changed by hand, that line alone.
+- The owner's decisions of 2026-10-16 on the same report: the usage has a line for the
+  transcript's `--page` and `--find`, and its tail the lines of `--file`, in `cf-board-028`
+  and `-029`; and every run of `cf task add`, `reopen`, `resume` and `tell` that printed a
+  reply has a last line saying how many characters it sent and how they end, in
+  `cf-board-004`, `-008`, `-009`, `-011`, `-014` to `-017`, `-020`, `-021` and `-022`:
+  changed by hand, those lines alone, each written as `cf` writes it of the run's words.
+- The second review of that work (2026-10-16): a task whose brief reached no window has
+  no transcript of its own, and the board and `cf task get --transcript` say so, in
+  `cf-board-015` (a task cancelled before any window had it): changed by hand, that
+  answer's `"reached": false` and the line `cf` prints of it alone. The page
+  traces whose drawer showed such a task the whole copy of the window its brief waited
+  for (`core-page-024`, `-025` and `corners-page-008`) depart instead, as `../page/`
+  names them.
 - Every trace that holds a database says `userVersion: 11` and a role check and a pool
   check without the tester, as Node's ledger had them (migration 0012 added the
   tester). They are not rewritten: the player holds the database this ledger left to
   them as Node's schema had it (`cf_ledger::testing::hold_apart_what_node_never_had_in_its_schema`).
+
+`cf task edit` (board task T-110, 3.0.6) moved the usage `cf` prints once more, and the
+sentence it says of a task verb it does not know: the usage has the entry `cf task edit
+T-3 "…"` and one more line under `--after`, in `cf-board-028` and `-029`, and the sentence
+names `edit`, in `cf-board-022`. Changed by hand, in those words alone. The recordings of
+the crates' own goldens (`crates/cf/tests/goldens/board.json`) were changed with them.
+Round 2 of the same task (T-158) changed one phrase of that entry, by hand, in `cf-board-028`
+and `-029`: `(open, blocked or queued)` became `(open, queued, or paused)`.
+
+The merge of main with 3.0.6's field work (board task T-340) changed three traces by hand.
+`cf-board-010`'s run of `cf task add`, which main's reading of a gated brief no longer
+leaves departed, has the reply's last line of the field work (`Sent: 16 characters,
+ending "Write the parser".`), as the other runs of that command were given it. And
+`cf task edit` takes its brief as the others do, from a file too: the usage's line of
+the commands that take one says `(task add, reopen, resume, edit and tell)`, and the next
+`Those five say how many characters went`, in `cf-board-028`: those words alone. Where
+both sides had changed `cf-board-022`, `-028` and `-029`, each side's hand changes were
+put together, word for word, and nothing else moved.
+
+`cf task list` with idle sessions (board task T-261, 3.0.6) moved the usage `cf` prints once
+more: its line reads `cf task list [--all]` and says what the flag adds, in every print of it
+in `cf-board-028` and `-029`. Changed by hand, in those words alone. The recordings of the
+crates' own goldens (`crates/cf/tests/goldens/board.json`) were changed with them, and one
+more there: the case `cf task list --json` carries an `idle` key (see that folder's README).

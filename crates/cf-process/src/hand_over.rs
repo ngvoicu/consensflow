@@ -3,8 +3,8 @@
 //! stay as long as the app it started runs (an `xdg-open` that starts a browser
 //! in its own place). It is waited for a moment, for what it says when it fails
 //! at once; then it is let go, never ended: it leads a process group of its own
-//! on Unix, so nothing sent to this one's reaches it, and on Windows it stays
-//! out of the job that ends every child of this process with it.
+//! on Unix, so nothing sent to this one's reaches it, and on Windows it is put in
+//! no job (`job`), which would end it with this process.
 
 use std::process::Stdio;
 use std::time::Duration;
@@ -68,7 +68,8 @@ pub async fn hand_over(run: &Run, env: &Env, within: Duration) -> Result<Handed,
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use std::time::Instant;
 
     use super::*;
 
@@ -123,15 +124,42 @@ mod tests {
         assert_eq!(handed("exit 3"), Ok(Handed::Ended(Some(3))));
     }
 
+    /// What `mark` holds once it says `words`, read again for up to `within`: a
+    /// program that writes it with a shell's `>` makes the file before it writes
+    /// into it, and a file that is there is not one that is written. Where the
+    /// words do not come: what it held last, or why it could not be read.
+    fn mark_saying(mark: &Path, words: &str, within: Duration) -> String {
+        let until = Instant::now() + within;
+        loop {
+            let held = std::fs::read_to_string(mark)
+                .map(|held| held.trim().to_owned())
+                .unwrap_or_else(|failed| failed.to_string());
+            if held == words || Instant::now() >= until {
+                return held;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
     /// The opener that stays while the browser it started runs is let go at
-    /// the end of its moment, and goes on to its end: nothing ends it.
-    #[cfg(unix)]
+    /// the end of its moment, and goes on to its end: nothing ends it, on Windows
+    /// no job either, which would end it with the handing over. The program makes
+    /// its mark at once and writes into it at its end, a second on, as a shell's
+    /// `>` does a moment apart where the machine is busy: a mark read for being
+    /// there is read empty.
     #[test]
     fn a_program_still_running_is_let_go_and_runs_on_to_its_end() {
         let folder = tempfile::tempdir().unwrap();
         let mark = folder.path().join("ended");
-        let script = format!("sleep 1; echo done > '{}'", mark.display());
-        let started = std::time::Instant::now();
+        let script = if cfg!(windows) {
+            format!(
+                "type NUL > {m} & ping -n 3 127.0.0.1 >NUL & echo done> {m}",
+                m = mark.display()
+            )
+        } else {
+            format!(": > '{m}'; sleep 1; echo done > '{m}'", m = mark.display())
+        };
+        let started = Instant::now();
         let runtime = runtime();
         let handed = runtime.block_on(hand_over(
             &shell(&script),
@@ -141,11 +169,7 @@ mod tests {
         assert_eq!(handed, Ok(Handed::Running));
         assert!(started.elapsed() < Duration::from_millis(900));
         drop(runtime);
-        let until = std::time::Instant::now() + Duration::from_secs(10);
-        while !mark.exists() && std::time::Instant::now() < until {
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        assert_eq!(std::fs::read_to_string(&mark).unwrap(), "done\n");
+        assert_eq!(mark_saying(&mark, "done", Duration::from_secs(10)), "done");
     }
 
     #[test]
