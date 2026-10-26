@@ -168,6 +168,7 @@ fn a_task_cancelled_while_its_window_works_on_a_brief_whose_picture_was_attached
 }
 
 /// The bodies of T-1's results, oldest first.
+#[cfg(unix)]
 fn results(project: &Project) -> cf_e2e::Result<Vec<String>> {
     Ok(project.task(1)?["messages"]
         .as_array()
@@ -181,6 +182,7 @@ fn results(project: &Project) -> cf_e2e::Result<Vec<String>> {
 /// A worker given T-1, whose brief is `words` and then, on a line of its own, the path of a
 /// picture, written where `exists`; once its brief is in its record, `then` is given the rig,
 /// the project, the worker's conversation and the path, and the rig is closed after.
+#[cfg(unix)]
 fn briefed_with(
     exists: bool,
     words: &str,
