@@ -137,16 +137,12 @@ replace = '''
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
 find = '''
-            if let Some(shell) = asking.shell.as_mut() {
-                let _ = shell.kill();
-            }
-            asking.shell.take()'''
+            at.map(|at| asking.shells.remove(at).1).map(|mut shell| {
+                let _ = shell.kill();'''
 replace = '''
-            if let Some(shell) = asking.shell.as_mut() {
+            at.map(|at| asking.shells.remove(at).1).map(|mut shell| {
                 unsafe { libc::killpg(shell.id() as i32, libc::SIGKILL) };
-                let _ = shell.kill();
-            }
-            asking.shell.take()'''
+                let _ = shell.kill();'''
 
 [[plant]]
 name = "login path: the app's quit ends what the login file started too"
@@ -163,11 +159,11 @@ replace = '''
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
 find = '''
-        if let Some(shell) = asking.shell.as_mut() {
+        for (_, shell) in &mut asking.shells {
             let _ = shell.kill();
 '''
 replace = '''
-        if let Some(shell) = asking.shell.as_mut() {
+        for (_, shell) in &mut asking.shells {
             unsafe { libc::killpg(shell.id() as i32, libc::SIGKILL) };
             let _ = shell.kill();
 '''
@@ -181,18 +177,16 @@ runs = ["app-daemon-path"]
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
 find = '''
-            let mut asking = self.lock();
-            if let Some(shell) = asking.shell.as_mut() {
+            at.map(|at| asking.shells.remove(at).1).map(|mut shell| {
                 let _ = shell.kill();
-            }
-            asking.shell.take()
+                shell
+            })
         };
         between();
         if let Some(mut shell) = shell {
             let _ = shell.wait();'''
 replace = '''
-            let mut asking = self.lock();
-            asking.shell.take()
+            at.map(|at| asking.shells.remove(at).1)
         };
         between();
         if let Some(mut shell) = shell {
@@ -235,7 +229,7 @@ runs = ["app-daemon-path"]
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
 find = '''
-        if let Some(shell) = asking.shell.as_mut() {
+        for (_, shell) in &mut asking.shells {
             let _ = shell.kill();
         }
 '''
@@ -364,8 +358,8 @@ runs = ["app-daemon-path"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
-find = '''        Some(shell) if !left().is_zero() => login_environment_in(shell, left(), lookup),'''
-replace = '''        Some(shell) if !left().is_zero() => login_environment_in(shell, left(), lookup).filter(|_| false),'''
+find = '''            Some(shell) => login_environment_in(shell, timeout, lookup),'''
+replace = '''            Some(shell) => login_environment_in(shell, timeout, lookup).filter(|_| false),'''
 
 [[plant]]
 name = "login path: the shell's place, depth and terminal are taken too"
@@ -472,11 +466,56 @@ replace = '''    if names.is_empty() {
         command.env('''
 
 [[plant]]
-name = "login path: each question to the shell has the whole limit"
+name = "login path: the two questions are asked one after the other, each with the whole limit"
 meant = "a_shell_that_hangs_on_every_question_costs_the_start_one_limit"
 runs = ["app-daemon-path"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
-find = '''        Some(shell) if !left().is_zero() => login_environment_in(shell, left(), lookup),'''
-replace = '''        Some(shell) => login_environment_in(shell, timeout, lookup),'''
+find = '''        let path = both.spawn(|| shell.and_then(|shell| login_path_in(shell, timeout, lookup)));'''
+replace = '''        let path = shell.and_then(|shell| login_path_in(shell, timeout, lookup));
+        let _ = &both;'''
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        (path.join().unwrap_or_default(), taken)'''
+replace = '''        (path, taken)'''
+
+# T-657 (Calliope's re-check T-613, P3-6): the two questions are asked at once, so slow
+# login files, which both run, leave the interactive one its whole limit; the lookup
+# holds both shells, and the app's quit ends each.
+[[plant]]
+name = "login path: the interactive question waits for the login one and has what is left"
+meant = "slow_login_files_leave_the_interactive_question_its_whole_limit"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        let path = both.spawn(|| shell.and_then(|shell| login_path_in(shell, timeout, lookup)));
+        let taken = match shell {
+            Some(shell) => login_environment_in(shell, timeout, lookup),'''
+replace = '''        let deadline = Instant::now() + timeout;
+        let path = shell.and_then(|shell| login_path_in(shell, timeout, lookup));
+        let _ = &both;
+        let left = deadline.saturating_duration_since(Instant::now());
+        let taken = match shell {
+            Some(shell) if !left.is_zero() => login_environment_in(shell, left, lookup),'''
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''            None => None,
+        };
+        (path.join().unwrap_or_default(), taken)'''
+replace = '''            _ => None,
+        };
+        (path, taken)'''
+
+[[plant]]
+name = "login path: the app's quit ends only the first of the shells asked"
+meant = "ending_a_lookup_ends_both_shells_it_asks_at_once"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        for (_, shell) in &mut asking.shells {'''
+replace = '''        for (_, shell) in asking.shells.iter_mut().take(1) {'''

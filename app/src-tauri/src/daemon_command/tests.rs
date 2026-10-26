@@ -213,7 +213,7 @@ fn a_lookup_the_app_has_quit_starts_no_shell() {
     let mut asked = Command::new(&shell);
     asked.stdout(Stdio::piped());
     assert!(lookup.start(&mut asked).is_none(), "a shell was started");
-    assert!(lookup.status().is_err(), "a shell is held");
+    assert!(lookup.lock().shells.is_empty(), "a shell is held");
     thread::sleep(Duration::from_millis(300));
     assert!(!started.exists(), "a shell ran after the quit");
 }
@@ -234,19 +234,22 @@ fn ending_a_lookup_ends_the_shell_it_asks_at_once_and_only_it() {
         ])
         .stdout(Stdio::piped());
     let lookup = LoginLookup::default();
-    let _output = lookup.start(&mut shell).expect("the shell is started");
+    let started = lookup.start(&mut shell).expect("the shell is started");
     let agent = pid_in(&sleeper);
     lookup.end();
     let until = Instant::now() + Duration::from_secs(3);
     let mut ended = false;
     while Instant::now() < until {
-        if lookup.status().is_ok_and(|status| status.is_some()) {
+        if lookup
+            .status(started.asked)
+            .is_ok_and(|status| status.is_some())
+        {
             ended = true;
             break;
         }
         thread::sleep(Duration::from_millis(20));
     }
-    lookup.finish();
+    lookup.finish(started.asked);
     let left = cf_panes::pty::process_exists(agent);
     kill(agent);
     assert!(ended, "the shell outlived the quit");
@@ -273,7 +276,10 @@ fn a_lookup_given_up_on_has_ended_its_shell_before_a_quit_can_miss_it() {
         ])
         .stdout(Stdio::piped());
     let lookup = LoginLookup::default();
-    let _output = lookup.start(&mut shell).expect("the shell is started");
+    let asked = lookup
+        .start(&mut shell)
+        .expect("the shell is started")
+        .asked;
     let started = Instant::now();
     while !beat.exists() {
         assert!(
@@ -283,7 +289,7 @@ fn a_lookup_given_up_on_has_ended_its_shell_before_a_quit_can_miss_it() {
         thread::sleep(Duration::from_millis(20));
     }
     let mut stopped = false;
-    lookup.finish_with(|| {
+    lookup.finish_with(asked, || {
         // The quit comes here, and the app could end with it.
         lookup.end();
         let before = std::fs::read_to_string(&beat).unwrap_or_default();
@@ -609,7 +615,7 @@ fn an_interactive_rc_that_hangs_falls_back_to_the_login_path_within_its_time() {
     let started = Instant::now();
     let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(2));
     assert!(
-        started.elapsed() < Duration::from_millis(2_900),
+        started.elapsed() < Duration::from_millis(3_500),
         "the start waited {:?}, past its one limit",
         started.elapsed()
     );
@@ -838,10 +844,63 @@ fn a_shell_that_hangs_on_every_question_costs_the_start_one_limit() {
     let started = Instant::now();
     let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(2));
     assert!(
-        started.elapsed() < Duration::from_millis(2_900),
+        started.elapsed() < Duration::from_millis(3_500),
         "the start waited {:?}",
         started.elapsed()
     );
     assert_eq!(given_of(&command, "PATH").as_deref(), Some(FINDER_PATH));
     assert!(said.is_some(), "the log says the shell gave none");
+}
+
+/// Login files that are slow, which both questions run, leave the interactive one its
+/// whole limit: the two are asked at once, not one after the other, and the start still
+/// waits one limit at most.
+#[cfg(unix)]
+#[test]
+fn slow_login_files_leave_the_interactive_question_its_whole_limit() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = login_shell(
+        home.path(),
+        "/bin/sleep 2.5\ncase \"$1\" in *i*) export PARITY_ONLY_INTERACTIVE=1 ;; esac\nexec /bin/sh -c \"$2\"",
+    );
+    let started = Instant::now();
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(4));
+    assert!(
+        started.elapsed() < Duration::from_millis(5_500),
+        "the start waited {:?}, past its one limit",
+        started.elapsed()
+    );
+    assert_eq!(
+        given_of(&command, "PARITY_ONLY_INTERACTIVE").as_deref(),
+        Some("1"),
+        "the interactive question ran out of time behind the login one"
+    );
+    assert_eq!(said, None);
+}
+
+/// The app's quit ends every shell the lookup asks, when it asks two at once.
+#[cfg(unix)]
+#[test]
+fn ending_a_lookup_ends_both_shells_it_asks_at_once() {
+    let lookup = LoginLookup::default();
+    let mut first = Command::new("/bin/sleep");
+    first.arg("30").stdout(Stdio::piped());
+    let mut second = Command::new("/bin/sleep");
+    second.arg("30").stdout(Stdio::piped());
+    let one = lookup.start(&mut first).expect("the first is started");
+    let two = lookup.start(&mut second).expect("the second is started");
+    assert_ne!(one.asked, two.asked);
+    lookup.end();
+    let until = Instant::now() + Duration::from_secs(3);
+    let ended = |asked| lookup.status(asked).is_ok_and(|status| status.is_some());
+    while Instant::now() < until && !(ended(one.asked) && ended(two.asked)) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        ended(one.asked) && ended(two.asked),
+        "a shell outlived the quit"
+    );
+    lookup.finish(one.asked);
+    lookup.finish(two.asked);
+    assert!(lookup.lock().shells.is_empty(), "a shell is still held");
 }

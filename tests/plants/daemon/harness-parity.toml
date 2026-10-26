@@ -263,3 +263,14 @@ builds = true
 file = "crates/cf-harness/src/shared/window_args.rs"
 find = '''                drop_env: &["ANTHROPIC_API_KEY"],'''
 replace = '''                drop_env: &[],'''
+
+# T-657 (Calliope's re-check T-613, P3-4): an rc's `export NAME=` reaches the window too.
+[[plant]]
+name = "parity env: a variable the rc set empty is not given to a window"
+meant = "every_window_is_given_what_the_app_took_of_a_terminals_environment_before_its_own"
+runs = ["daemon-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''        .filter_map(|name| Some((name.clone(), env.os(&name)?.to_str()?.to_owned())))'''
+replace = '''        .filter_map(|name| Some((name.clone(), env.text(&name)?.to_owned())))'''

@@ -167,17 +167,19 @@ fn on_login_environment(
     lookup: &LoginLookup,
 ) -> Option<String> {
     let shell = env.path("SHELL").filter(|_| !env.on_windows());
-    // One limit for both questions, as `LOGIN_PATH_TIMEOUT` says: the login files' PATH
-    // first, which they rarely hang on and which is the fallback, then the interactive
-    // shell's whole environment in what is left of it.
-    let deadline = Instant::now() + timeout;
-    let left = || deadline.saturating_duration_since(Instant::now());
-    let login_path = shell.and_then(|shell| login_path_in(shell, timeout, lookup));
-    let taken = match shell {
-        Some(shell) if !left().is_zero() => login_environment_in(shell, left(), lookup),
-        None if cfg!(windows) => profile_environment_in(&powershell_of(env), timeout, lookup),
-        _ => None,
-    };
+    // One limit for both questions, as `LOGIN_PATH_TIMEOUT` says, asked at once: the login
+    // files' PATH, which is the fallback, and the interactive shell's whole environment,
+    // each given the whole limit, so that slow login files, which both run, do not leave
+    // the second question less of it.
+    let (login_path, taken) = thread::scope(|both| {
+        let path = both.spawn(|| shell.and_then(|shell| login_path_in(shell, timeout, lookup)));
+        let taken = match shell {
+            Some(shell) => login_environment_in(shell, timeout, lookup),
+            None if cfg!(windows) => profile_environment_in(&powershell_of(env), timeout, lookup),
+            None => None,
+        };
+        (path.join().unwrap_or_default(), taken)
+    });
     let login = taken
         .iter()
         .flatten()
@@ -367,11 +369,19 @@ pub(crate) struct LoginLookup {
     asking: Mutex<Asking>,
 }
 
-/// The shell asked, and whether the app is quitting.
+/// The shells asked, each by the number its start was given, and whether the app is
+/// quitting.
 #[derive(Default)]
 struct Asking {
-    shell: Option<Child>,
+    shells: Vec<(u64, Child)>,
+    next: u64,
     ended: bool,
+}
+
+/// A shell a lookup started: the number it is held by, and its output, to read.
+pub(crate) struct Started {
+    pub(crate) asked: u64,
+    pub(crate) output: ChildStdout,
 }
 
 impl LoginLookup {
@@ -381,10 +391,10 @@ impl LoginLookup {
             .unwrap_or_else(|error| error.into_inner())
     }
 
-    /// Starts `shell` and holds it, in one step against the app's quit: its
-    /// output, to read; none once the app is quitting, when no shell is
-    /// started, or where it cannot be.
-    fn start(&self, shell: &mut Command) -> Option<ChildStdout> {
+    /// Starts `shell` and holds it beside any other asked, in one step against the
+    /// app's quit; none once the app is quitting, when no shell is started, or where it
+    /// cannot be.
+    fn start(&self, shell: &mut Command) -> Option<Started> {
         let mut asking = self.lock();
         if asking.ended {
             return None;
@@ -395,14 +405,21 @@ impl LoginLookup {
             let _ = started.wait();
             return None;
         };
-        asking.shell = Some(started);
-        Some(output)
+        let asked = asking.next;
+        asking.next += 1;
+        asking.shells.push((asked, started));
+        Some(Started { asked, output })
     }
 
-    /// How the shell held ended: none while it runs.
-    fn status(&self) -> std::io::Result<Option<ExitStatus>> {
-        match self.lock().shell.as_mut() {
-            Some(shell) => shell.try_wait(),
+    /// How the shell held as `asked` ended: none while it runs.
+    fn status(&self, asked: u64) -> std::io::Result<Option<ExitStatus>> {
+        match self
+            .lock()
+            .shells
+            .iter_mut()
+            .find(|(held, _)| *held == asked)
+        {
+            Some((_, shell)) => shell.try_wait(),
             None => Err(std::io::ErrorKind::NotFound.into()),
         }
     }
@@ -411,20 +428,21 @@ impl LoginLookup {
     /// and only then let go and waited for. A shell let go first was one a quit
     /// could find nowhere, and the app could end before anything ended it (the
     /// third review of 2026-10-16).
-    fn finish(&self) {
-        self.finish_with(|| {});
+    fn finish(&self, asked: u64) {
+        self.finish_with(asked, || {});
     }
 
     /// [`LoginLookup::finish`], with `between` run once the lock is let go and
     /// before the shell is waited for: where the app's quit may come, and the
     /// app end.
-    fn finish_with(&self, between: impl FnOnce()) {
+    fn finish_with(&self, asked: u64, between: impl FnOnce()) {
         let shell = {
             let mut asking = self.lock();
-            if let Some(shell) = asking.shell.as_mut() {
+            let at = asking.shells.iter().position(|(held, _)| *held == asked);
+            at.map(|at| asking.shells.remove(at).1).map(|mut shell| {
                 let _ = shell.kill();
-            }
-            asking.shell.take()
+                shell
+            })
         };
         between();
         if let Some(mut shell) = shell {
@@ -432,11 +450,11 @@ impl LoginLookup {
         }
     }
 
-    /// The app is quitting: the shell asked ends now, and no other is started.
+    /// The app is quitting: every shell asked ends now, and no other is started.
     pub(crate) fn end(&self) {
         let mut asking = self.lock();
         asking.ended = true;
-        if let Some(shell) = asking.shell.as_mut() {
+        for (_, shell) in &mut asking.shells {
             let _ = shell.kill();
         }
     }
@@ -502,7 +520,7 @@ fn asked(
         use std::os::windows::process::CommandExt;
         asked.creation_flags(CREATE_NO_WINDOW);
     }
-    let mut output = lookup.start(&mut asked)?;
+    let Started { asked, mut output } = lookup.start(&mut asked)?;
     let (chunks, printed) = mpsc::channel();
     // Not joined: a process a login file started may hold the output open
     // long after the shell has gone.
@@ -516,7 +534,7 @@ fn asked(
     });
     let deadline = Instant::now() + timeout;
     let status = loop {
-        match lookup.status() {
+        match lookup.status(asked) {
             Ok(Some(status)) => break Some(status),
             // The app's quit ends the shell, which then has ended.
             Ok(None) if Instant::now() < deadline => {
@@ -528,7 +546,7 @@ fn asked(
     let said = status
         .filter(ExitStatus::success)
         .and_then(|_| between(marker.as_bytes(), &printed, deadline));
-    lookup.finish();
+    lookup.finish(asked);
     said
 }
 

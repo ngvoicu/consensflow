@@ -34,8 +34,10 @@ const VALUE: &str = "set-by-the-rc";
 const KEY: &str = "ANTHROPIC_API_KEY";
 const KEY_VALUE: &str = "parity-not-a-key";
 
-/// The files under `folder` that hold `text`, by their names.
-fn holding(folder: &std::path::Path, text: &str) -> Vec<String> {
+/// The files under `folder`, and those of them that hold one of `values`, by their
+/// names.
+fn scanned(folder: &std::path::Path, values: &[&str]) -> (Vec<std::path::PathBuf>, Vec<String>) {
+    let mut read = Vec::new();
     let mut found = Vec::new();
     let mut folders = vec![folder.to_path_buf()];
     while let Some(folder) = folders.pop() {
@@ -46,16 +48,39 @@ fn holding(folder: &std::path::Path, text: &str) -> Vec<String> {
             let path = entry.path();
             if path.is_dir() {
                 folders.push(path);
-            } else if std::fs::read(&path).is_ok_and(|bytes| {
+                continue;
+            }
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            if values.iter().any(|value| {
                 bytes
-                    .windows(text.len())
-                    .any(|window| window == text.as_bytes())
+                    .windows(value.len())
+                    .any(|window| window == value.as_bytes())
             }) {
                 found.push(path.display().to_string());
             }
+            read.push(path);
         }
     }
-    found
+    (read, found)
+}
+
+/// Holds the daemon's `home` to holding none of `values`: its ledger and its log among
+/// the files read, so that a home that is empty, or could not be read, is no pass.
+fn holds_none(home: &std::path::Path, values: &[&str], when: &str) {
+    let (read, found) = scanned(home, values);
+    for kept in ["consensflow.db", "daemon.log"] {
+        assert!(
+            read.contains(&home.join(kept)),
+            "{when}: the scan read no {kept} in {}",
+            home.display()
+        );
+    }
+    assert!(
+        found.is_empty(),
+        "{when}: a value given the daemon is written in {found:?}"
+    );
 }
 
 /// The names a `pane.open` gives its window, never their values.
@@ -169,14 +194,16 @@ fn a_member_window_is_given_what_the_app_took_of_the_humans_terminal() -> Outcom
         "the chief's pane.open has no {NAME}: it names {:?}",
         names(&chief)
     );
-    // The daemon's home holds no value it was given: its ledger, its trace, its log.
-    for value in [VALUE, KEY_VALUE] {
-        let found = holding(&rig.home(), value);
-        assert!(
-            found.is_empty(),
-            "a value given the daemon is written in {found:?}"
-        );
-    }
-    rig.close()?;
+    // The daemon's home holds no value it was given, while it runs and once it has
+    // ended (what it writes as it ends): its ledger, its trace, its log.
+    let home = rig.home();
+    holds_none(&home, &[VALUE, KEY_VALUE], "while the daemon runs");
+    let root = rig.close_keeping_the_root()?;
+    holds_none(&home, &[VALUE, KEY_VALUE], "once the daemon ended");
+    std::fs::remove_dir_all(&root).map_err(|source| Error::File {
+        action: "remove",
+        path: root.clone(),
+        source,
+    })?;
     Ok(())
 }
