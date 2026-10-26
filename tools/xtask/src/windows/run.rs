@@ -32,6 +32,9 @@ use crate::process::{self, Invocation};
 pub enum Outcome {
     /// The command ended there with this status, which is the run's own.
     Exited(i32),
+    /// The machine may not take a run now, and why (the person is told): nothing was sent,
+    /// and the run answers [`REFUSED`], as the machine's own lock refuses one.
+    Refused(String),
     /// This program was stopped, and the run was ended there as well.
     Stopped,
 }
@@ -83,7 +86,7 @@ pub(super) fn powershell(script: &str) -> Result<String, Refusal> {
 }
 
 /// The status of a run the machine could not take now, as its own lock refuses one.
-const REFUSED: i32 = 75;
+pub const REFUSED: i32 = 75;
 
 /// Whether the script a run makes can be sent: the refusal that says why not, before a run
 /// starts and before a machine is chosen. What goes on the line, the bootstrap and the stop, is
@@ -108,14 +111,18 @@ pub fn run(
 ) -> Result<Outcome, Error> {
     let id = run_id();
     let plan = Plan::new(machine, options, &id)?;
-    // A machine the runner shares is asked first, and a run it may not take now is not sent.
-    match machine
-        .ready(context, &options.dir)
-        .map_err(Error::Unready)?
-    {
+    // A machine the runner shares is asked first, and a run it may not take now is not sent. A
+    // Ctrl-C ends the probes with this program (they are in the terminal's group), so a stop is
+    // looked for before what they came to is read: a probe it ended is no zeelin that did not
+    // answer, no disk not said, and no refusal.
+    let ready = machine.ready(context, &options.dir);
+    if stopped(interrupt, !matches!(ready, Ok(Ready::Go(_)))) {
+        return Ok(Outcome::Stopped);
+    }
+    match ready.map_err(Error::Unready)? {
         Ready::Refused(why) => {
             writeln!(console.out, "{why}").map_err(Error::Output)?;
-            return Ok(Outcome::Exited(REFUSED));
+            return Ok(Outcome::Refused(why));
         }
         Ready::Go(said) => {
             for line in said {

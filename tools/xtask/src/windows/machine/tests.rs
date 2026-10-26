@@ -60,10 +60,39 @@ fn the_disk_is_asked_of_the_profiles_drive_and_the_run_of_the_copys_owner_file()
     );
     assert!(
         script.contains(&format!(
-            "(Join-Path (Join-Path $env:USERPROFILE 'consensflow-build') '{OWNER}')"
+            "Join-Path (Join-Path $env:USERPROFILE 'consensflow-build') '{OWNER}'"
         )),
         "{script}"
     );
+}
+
+#[test]
+fn a_run_goes_on_there_only_if_the_process_the_owner_file_names_is_a_powershell_older_than_it() {
+    // A file left by a reboot, a battery or a BSOD names no run (T-610), and a process id that
+    // a later program has taken is none either: as the run's own lock reads its process file.
+    let script = state_script("consensflow-build");
+    for part in [
+        "Get-Process -Id ([int]$of[1]) -ErrorAction Stop",
+        "($_.Name -in @('powershell', 'pwsh'))",
+        "$_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime",
+    ] {
+        assert!(script.contains(part), "{part}: {script}");
+    }
+    // With no owner file `Get-Content` fails and leaves `$?` false: the script says it ended well.
+    assert!(script.ends_with("\nexit 0\n"), "{script}");
+}
+
+/// A program started beside the test, as a run's PowerShell is: ended by the test.
+#[cfg(windows)]
+fn spawned(cwd: &std::path::Path, program: &str, args: &[&str]) -> std::process::Child {
+    let started = Invocation::new(program, cwd).args(args.iter().copied());
+    process::spawn(
+        &started,
+        &cf_base::env::Env::from_process(),
+        std::process::Stdio::null(),
+        false,
+    )
+    .unwrap()
 }
 
 #[cfg(windows)]
@@ -89,8 +118,39 @@ fn the_disk_script_says_the_free_disk_and_a_run_in_the_machines_own_powershell()
     assert!(state.free_gib > 0, "{state:?}");
     assert!(!state.running);
     std::fs::create_dir(profile.path().join("copy")).unwrap();
-    std::fs::write(profile.path().join("copy").join(OWNER), "id\n1\n").unwrap();
-    assert!(ask().running);
+    let owner = profile.path().join("copy").join(OWNER);
+
+    // A file naming a PowerShell that is alive, started before the file was written: a run.
+    let mut run = spawned(
+        profile.path(),
+        "powershell",
+        &[
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Start-Sleep 60",
+        ],
+    );
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    std::fs::write(&owner, format!("id\r\n{}\r\n", run.id())).unwrap();
+    assert!(ask().running, "a live PowerShell is a run");
+
+    // The same file after that process is gone, as after a reboot or a BSOD: no run.
+    run.kill().unwrap();
+    run.wait().unwrap();
+    assert!(!ask().running, "a file naming a dead process is no run");
+
+    // A file that names a process that is no PowerShell (a program that took the id later), a
+    // file with no process in it, and one with words in place of an id: no run either.
+    let mut other = spawned(profile.path(), "cmd", &["/c", "ping -n 60 127.0.0.1 >nul"]);
+    std::fs::write(&owner, format!("id\r\n{}\r\n", other.id())).unwrap();
+    assert!(!ask().running, "a process that is no PowerShell is no run");
+    other.kill().unwrap();
+    other.wait().unwrap();
+    for text in ["id\r\n", "", "id\r\nsoon\r\n"] {
+        std::fs::write(&owner, text).unwrap();
+        assert!(!ask().running, "{text:?}");
+    }
 }
 
 #[cfg(unix)]
@@ -104,8 +164,12 @@ mod asked {
     use super::*;
 
     /// The laptop's two sides, as the stand-in ssh answers for them: zeelin says `zeelin` (`held`,
-    /// `free`) of poker-lab's lock or does not answer (`none`), and zeewin2 answers the disk
-    /// script with `zeewin2` (`free N`, then `run` if `running`), or does not answer (`none`).
+    /// `free`) of poker-lab's lock, or is not asked at all (`down`: the connection times out, as
+    /// the laptop's firewall makes of a port nothing listens on, measured 2026-10-26; `refused`),
+    /// or connects and cannot say (`stalled`: no banner; `key`: a host key that changed; `denied`;
+    /// `nonsense`: a login banner in place of the answer; `killed`: ssh ended by a signal, which
+    /// leaves status 1 and no words). zeewin2 answers the disk script with `zeewin2` (`free N`,
+    /// then `run` if `running`), or does not answer (`none`).
     struct Laptop {
         bin: tempfile::TempDir,
         context: Context,
@@ -121,12 +185,19 @@ mod asked {
                     r#"#!/bin/sh
 for word; do host=$last; last=$word; done
 printf '%s\t%s\n' "$host" "$last" >> "{log}"
+printf '%s\n' "$*" >> "{log}.words"
 case "$host" in
   zeelin) answer='{zeelin}' ;;
   *) answer='{zeewin2}' ;;
 esac
 case "$answer" in
-  none) echo "ssh: connect to host 10.6.0.6: Operation timed out" >&2; exit 255 ;;
+  none|down) echo "ssh: connect to host 10.6.0.6 port 22: Operation timed out" >&2; exit 255 ;;
+  refused) echo "ssh: connect to host 10.6.0.6 port 22: Connection refused" >&2; exit 255 ;;
+  stalled) printf 'Connection timed out during banner exchange\nConnection to 10.6.0.6 port 22 timed out\n' >&2; exit 255 ;;
+  key) echo "Host key verification failed." >&2; exit 255 ;;
+  denied) echo "zee@10.6.0.6: Permission denied (publickey)." >&2; exit 255 ;;
+  nonsense) echo "Welcome to Ubuntu 26.04" ;;
+  killed) kill -INT $$ ;;
   *) printf '%b\n' "$answer" ;;
 esac
 "#,
@@ -156,6 +227,19 @@ esac
                 .collect()
         }
 
+        /// The words ssh was given before the host, for each call to `host`.
+        fn options(&self, host: &str) -> Vec<String> {
+            fs::read_to_string(self.bin.path().join("log.words"))
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|line| {
+                    format!(" {line}")
+                        .split_once(&format!(" {host} "))
+                        .map(|(options, _)| options.trim().to_owned())
+                })
+                .collect()
+        }
+
         fn ready(&self) -> Result<Ready, String> {
             Machine::named("zeewin2")
                 .unwrap()
@@ -163,6 +247,12 @@ esac
         }
 
         fn choose(&self) -> (String, String) {
+            let (chosen, said) = self.choose_with(&Interrupt::default());
+            (chosen.expect("a machine was chosen").name, said)
+        }
+
+        /// The machine chosen, or none if the stop was heard, and what was said.
+        fn choose_with(&self, interrupt: &Interrupt) -> (Option<Machine>, String) {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let chosen = choose(
                 &self.context,
@@ -171,10 +261,11 @@ esac
                     out: &mut out,
                     err: &mut err,
                 },
+                interrupt,
             )
             .unwrap();
             assert!(out.is_empty());
-            (chosen.name, String::from_utf8(err).unwrap())
+            (chosen, String::from_utf8(err).unwrap())
         }
     }
 
@@ -209,14 +300,83 @@ esac
     }
 
     #[test]
-    fn a_zeelin_that_does_not_answer_holds_no_lock_and_is_said() {
-        let laptop = Laptop::new("none", "free 614");
-        assert_eq!(
-            laptop.ready(),
-            Ok(Ready::Go(vec![
-                "zeelin did not answer (ssh ended with status 255: ssh: connect to host 10.6.0.6: Operation timed out), so Ubuntu is not running there and no poker-lab job can hold its lock: going on".into()
-            ]))
-        );
+    fn a_zeelin_nobody_connects_to_holds_no_lock_and_is_said() {
+        // WSL stopped: the laptop's firewall drops port 22 (its sshd rule is off, nothing listens),
+        // so the connection times out (measured 2026-10-26); a refused one is the same Ubuntu.
+        for (zeelin, ssh) in [
+            ("down", "Operation timed out"),
+            ("refused", "Connection refused"),
+        ] {
+            let laptop = Laptop::new(zeelin, "free 614");
+            assert_eq!(
+                laptop.ready(),
+                Ok(Ready::Go(vec![format!(
+                    "zeelin did not answer (ssh ended with status 255: ssh: connect to host 10.6.0.6 port 22: {ssh}), so Ubuntu is not running there and no poker-lab job can hold its lock: going on"
+                )])),
+                "{zeelin}"
+            );
+            assert_eq!(laptop.asked(), ["zeelin", "zeewin2"], "{zeelin}");
+        }
+    }
+
+    #[test]
+    fn a_zeelin_that_connected_and_cannot_say_leaves_the_laptop_unsent_a_run() {
+        // sshd is there (Ubuntu runs, perhaps under poker-lab's load) but cannot be asked: not
+        // knowing whether the lock is held, no run goes, and the disk is not asked.
+        for (zeelin, why) in [
+            (
+                "stalled",
+                "ssh ended with status 255: Connection timed out during banner exchange; Connection to 10.6.0.6 port 22 timed out",
+            ),
+            (
+                "key",
+                "ssh ended with status 255: Host key verification failed.",
+            ),
+            (
+                "denied",
+                "ssh ended with status 255: zee@10.6.0.6: Permission denied (publickey).",
+            ),
+            ("nonsense", "it said \"Welcome to Ubuntu 26.04\""),
+            ("killed", "ssh ended with status 1"),
+        ] {
+            let laptop = Laptop::new(zeelin, "free 614");
+            assert_eq!(
+                laptop.ready(),
+                Ok(Ready::Refused(format!(
+                    "zeewin2 may be busy: zeelin answered, but not with whether poker-lab's job holds it ({why}), and no run goes while that is not known."
+                ))),
+                "{zeelin}"
+            );
+            assert_eq!(laptop.asked(), ["zeelin"], "{zeelin}: the disk is not asked");
+        }
+    }
+
+    #[test]
+    fn a_laptop_whose_ssh_cannot_be_started_cannot_be_sent_a_run() {
+        // No ssh to ask with: nothing is known of the lock, and the run is not sent.
+        let mut laptop = Laptop::new("free", "free 614");
+        let empty = tempfile::tempdir().unwrap();
+        let vars: Vec<(OsString, OsString)> =
+            vec![("PATH".into(), empty.path().as_os_str().to_owned())];
+        laptop.context.env = Env::from_vars(vars);
+        match laptop.ready() {
+            Ok(Ready::Refused(why)) => assert!(
+                why.starts_with("zeewin2 may be busy: zeelin answered, but not with whether poker-lab's job holds it (`ssh` was not found"),
+                "{why}"
+            ),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn both_probes_of_the_laptop_are_bounded_alike() {
+        // The disk probe once had none of these: a connection that hung held the run, and
+        // through the lead tool the queue, for ever.
+        let laptop = Laptop::new("free", "free 614");
+        laptop.ready().unwrap();
+        let bounds = "-o ConnectTimeout=5 -o BatchMode=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=1";
+        assert_eq!(laptop.options("zeelin"), [bounds]);
+        assert_eq!(laptop.options("zeewin2"), [bounds]);
     }
 
     #[test]
@@ -287,6 +447,13 @@ esac
                 "{zeelin} {zeewin2}"
             );
         }
+        let laptop = Laptop::new("stalled", "free 614");
+        let (chosen, said) = laptop.choose();
+        assert_eq!(chosen, "zeewin");
+        assert!(
+            said.starts_with("windows: on zeewin, as zeewin2 is not free: zeewin2 may be busy: zeelin answered, but not with whether poker-lab's job holds it (ssh ended with status 255: Connection timed out during banner exchange"),
+            "{said}"
+        );
         let laptop = Laptop::new("free", "none");
         let (chosen, said) = laptop.choose();
         assert_eq!(chosen, "zeewin");
@@ -294,6 +461,25 @@ esac
             said.starts_with("windows: on zeewin, as zeewin2 is not free: zeewin2 did not say what it has free (ssh ended with status 255"),
             "{said}"
         );
+    }
+
+    #[test]
+    fn a_stop_heard_while_the_default_is_chosen_chooses_nothing_and_says_nothing() {
+        // The Ctrl-C ended the probes with this program: zeewin2 is not "not free" for it (T-610).
+        for zeelin in ["killed", "down"] {
+            let laptop = Laptop::new(zeelin, "free 614");
+            let interrupt = Interrupt::default();
+            interrupt.raise();
+            let (chosen, said) = laptop.choose_with(&interrupt);
+            // A zeelin that is not running still leaves zeewin2 free, and the run goes on to
+            // look for the stop itself; one ended by the signal leaves it not free, and that
+            // is the stop.
+            if zeelin == "killed" {
+                assert_eq!((chosen, said.as_str()), (None, ""), "{zeelin}");
+            } else {
+                assert_eq!(chosen.map(|machine| machine.name), Some("zeewin2".into()));
+            }
+        }
     }
 
     #[test]

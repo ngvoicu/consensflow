@@ -5,7 +5,7 @@
 //! Node traces' shape.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use cf_base::refusal::Refusal;
@@ -169,6 +169,9 @@ pub struct FakeRoster {
     pub(crate) recorder: Recorder,
     /// Agents the human deleted.
     pub gone: RefCell<HashSet<String>>,
+    /// Ready-made agents a release took out of the catalog, and why: a call of
+    /// it is no call Node's roster had, so none is written down.
+    pub retired: RefCell<HashMap<String, String>>,
     /// Agents that are image agents.
     pub designers: RefCell<HashSet<String>>,
     /// The agents file cannot be read.
@@ -217,6 +220,10 @@ impl Roster for FakeRoster {
             thinking: None,
             designer,
         }))
+    }
+
+    fn retired(&self, name: &str) -> Option<String> {
+        self.retired.borrow().get(name).cloned()
     }
 
     fn app_specs(&self) -> AppSpecs {

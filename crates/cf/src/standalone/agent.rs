@@ -7,7 +7,7 @@ use std::io::Write;
 use cf_base::args::{self, Opt, Parsed, Positionals};
 use cf_base::env::Env;
 use cf_base::js;
-use cf_base::text::pad_end;
+use cf_base::text::{pad_end, utf16_len};
 use cf_base::time::SystemClock;
 use cf_catalog::{validate_work_tier, AgentView, Catalog, Roster};
 use serde_json::{json, Map, Value};
@@ -133,8 +133,11 @@ fn add(
     Ok(())
 }
 
-/// Every agent, the catalog's first, as a table (its columns as wide as
-/// `padEnd` makes them, in UTF-16 units) or as JSON.
+/// Every agent, the catalog's first, as a table or as JSON. A column is as
+/// wide as its widest value leaves it, in UTF-16 units, with two units
+/// between it and the next and never narrower than the recording's fixed
+/// width: a longer value — an OpenRouter model id runs to 49 — would else run
+/// into the column after it, as `…claude-fable-5.1low` did.
 fn list(env: &Env, catalog: &Catalog, parsed: &Parsed, out: &mut dyn Write) -> Done {
     let agents = roster(env, catalog)?.list()?;
     if parsed.flag("json") {
@@ -149,9 +152,21 @@ fn list(env: &Env, catalog: &Catalog, parsed: &Parsed, out: &mut dyn Write) -> D
         )?;
         return Ok(());
     }
+    // A row of the file with no id, kind or model has no text to pad, and
+    // stops the table after the rows before it; a field it lacks is no width.
+    let (names, harnesses, models) = agents.iter().fold((14, 10, 36), |each, agent| {
+        let field = |value: &Option<String>, at: usize| {
+            value
+                .as_deref()
+                .map_or(at, |text| at.max(utf16_len(text) + 2))
+        };
+        (
+            field(&agent.name, each.0),
+            field(&agent.harness, each.1),
+            field(&agent.model, each.2),
+        )
+    });
     for agent in &agents {
-        // A row of the file with no id, kind or model has no text to pad,
-        // and stops the table after the rows before it.
         let (Some(name), Some(harness), Some(model)) = (
             agent.name.as_deref(),
             agent.harness.as_deref(),
@@ -162,9 +177,9 @@ fn list(env: &Env, catalog: &Catalog, parsed: &Parsed, out: &mut dyn Write) -> D
         writeln!(
             out,
             "{}{}{}{}",
-            pad_end(name, 14),
-            pad_end(harness, 10),
-            pad_end(model, 36),
+            pad_end(name, names),
+            pad_end(harness, harnesses),
+            pad_end(model, models),
             agent.effort.as_deref().unwrap_or("-")
         )?;
     }

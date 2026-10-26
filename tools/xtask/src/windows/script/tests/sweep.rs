@@ -374,17 +374,7 @@ fn powershell_makes_the_copy_a_checkout_whose_one_commit_is_what_went_over() {
         // unpacked to it before it makes them a checkout.
         let names: Vec<&str> = listed.lines().collect();
         say_the_tree(dir, &names);
-        let script = format!(
-            "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
-            dir.display()
-        );
-        process::capture(
-            &Invocation::new("powershell", ".")
-                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
-                .arg(encode_script(&script).unwrap()),
-            &Env::from_process(),
-        )
-        .unwrap()
+        run_sweep(dir)
     };
     let git = |words: &[&str]| {
         let ran = process::capture(
@@ -399,7 +389,7 @@ fn powershell_makes_the_copy_a_checkout_whose_one_commit_is_what_went_over() {
     let committed = || git(&["ls-tree", "-r", "--name-only", "HEAD"]);
 
     let ran = sweep(".gitignore\nkeep.log\nnotes.txt\nsrc/lib.rs\n");
-    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    assert_eq!(ran.code, 0, "{}", said(&ran));
     assert_eq!(
         status(),
         "",
@@ -411,7 +401,7 @@ fn powershell_makes_the_copy_a_checkout_whose_one_commit_is_what_went_over() {
     assert_eq!(status(), "?? src/new.rs\n");
     // The tree changed: a file left it, the new one is in it.
     let ran = sweep(".gitignore\nkeep.log\nsrc/lib.rs\nsrc/new.rs\n");
-    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    assert_eq!(ran.code, 0, "{}", said(&ran));
     assert!(!dir.join("notes.txt").exists());
     assert_eq!(status(), "");
     assert_eq!(
@@ -509,11 +499,13 @@ fn powershell(script: &str) -> crate::process::Captured {
     .unwrap()
 }
 
-/// The sweep run on the copy `dir`, which holds the list and the sweep it reads.
+/// The sweep run on the copy `dir`, which holds the list and the sweep it reads, as the
+/// bootstrap runs it: with the progress records it would otherwise write on its error
+/// stream (`Preparing modules for first use`) turned off, so that what is there is an error.
 #[cfg(windows)]
 fn run_sweep(dir: &std::path::Path) -> crate::process::Captured {
     powershell(&format!(
-        "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
+        "$ProgressPreference = 'SilentlyContinue'\n$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
         dir.display()
     ))
 }
@@ -577,7 +569,7 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
         .open(&stale_held)
         .unwrap();
     let ran = run_sweep(dir);
-    assert_eq!(ran.code, 1, "{}{}", ran.stdout, ran.stderr);
+    assert_eq!(ran.code, 1, "{}", said(&ran));
     assert!(
         ran.stdout.contains("What left the tree could not be removed from the copy: crates/cf-e2e/tests/stale_probe.rs: "),
         "{}",
@@ -586,7 +578,7 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
     drop(held);
 
     let ran = run_sweep(dir);
-    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    assert_eq!(ran.code, 0, "{}", said(&ran));
     for gone in [
         "crates/cf-e2e/tests/stale_probe.rs",
         "crates/stale/src/lib.rs",
@@ -621,7 +613,7 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
     assert!(elsewhere.path().join("outside.txt").exists());
     // And a second sweep finds nothing to remove.
     let again = run_sweep(dir);
-    assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    assert_eq!(again.code, 0, "{}", said(&again));
     assert!(!again.stdout.contains("== removed"), "{}", again.stdout);
 }
 
@@ -703,10 +695,10 @@ fn powershell_removes_reports_past_their_age_and_nothing_newer_or_outside_them()
         ])
     );
     let set = powershell(&times);
-    assert_eq!(set.code, 0, "{}{}", set.stdout, set.stderr);
+    assert_eq!(set.code, 0, "{}", said(&set));
 
     let ran = run_sweep(dir);
-    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    assert_eq!(ran.code, 0, "{}", said(&ran));
     for gone in [
         "evals/reports/2026-09-25T20-09-20-351Z-six-decisions.json",
         "evals/reports/long/2026-09-26T04-46-26-635Z-long.md",
@@ -756,7 +748,7 @@ fn powershell_removes_reports_past_their_age_and_nothing_newer_or_outside_them()
     );
     // And a second sweep finds nothing more to remove.
     let again = run_sweep(dir);
-    assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    assert_eq!(again.code, 0, "{}", said(&again));
     assert!(!again.stdout.contains("== removed"), "{}", again.stdout);
 }
 
@@ -795,10 +787,10 @@ fn powershell_does_not_prune_what_a_reports_folder_that_is_a_link_goes_to() {
         "$ErrorActionPreference = 'Stop'\nforeach ($path in @('{0}\\old.json', '{0}\\folder\\old.json', '{0}\\folder')) {{ (Get-Item -LiteralPath $path).LastWriteTime = (Get-Date).AddDays(-40) }}\n",
         elsewhere.path().display()
     ));
-    assert_eq!(aged.code, 0, "{}{}", aged.stdout, aged.stderr);
+    assert_eq!(aged.code, 0, "{}", said(&aged));
 
     let ran = run_sweep(dir);
-    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    assert_eq!(ran.code, 0, "{}", said(&ran));
     assert!(!ran.stdout.contains("== removed"), "{}", ran.stdout);
     for kept in ["old.json", "folder/old.json", "folder"] {
         assert!(elsewhere.path().join(kept).exists(), "{kept}");
@@ -815,10 +807,6 @@ fn powershell_takes_away_the_tarballs_runs_left_an_hour_ago_or_of_a_folder_gone_
 ) {
     use std::fs;
     use std::time::{Duration, SystemTime};
-
-    use cf_base::env::Env;
-
-    use crate::process::{self, Invocation};
 
     let profile = tempfile::tempdir().unwrap();
     let dir = profile.path().join("consensflow-build");
@@ -876,18 +864,8 @@ fn powershell_takes_away_the_tarballs_runs_left_an_hour_ago_or_of_a_folder_gone_
         make(name, written);
     }
     fs::write(dir.join(SWEEP), sweep_script()).unwrap();
-    let script = format!(
-        "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
-        dir.display()
-    );
-    let ran = process::capture(
-        &Invocation::new("powershell", ".")
-            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
-            .arg(encode_script(&script).unwrap()),
-        &Env::from_process(),
-    )
-    .unwrap();
-    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    let ran = run_sweep(&dir);
+    assert_eq!(ran.code, 0, "{}", said(&ran));
     for name in removed {
         assert!(!profile.path().join(name).exists(), "{name} stayed");
     }
@@ -907,10 +885,6 @@ fn powershell_makes_the_hash_the_mac_makes_of_names_and_bytes_and_refuses_files_
     use std::fs;
     use std::path::Path;
 
-    use cf_base::env::Env;
-
-    use crate::process::{self, Invocation};
-
     let copy = tempfile::tempdir().unwrap();
     let dir = copy.path();
     let files: [(&str, &[u8]); 5] = [
@@ -929,21 +903,9 @@ fn powershell_makes_the_hash_the_mac_makes_of_names_and_bytes_and_refuses_files_
     fs::write(dir.join(SYNCED), format!("{}\n", names.join("\n"))).unwrap();
     fs::write(dir.join(SWEEP), sweep_script()).unwrap();
     say_the_tree(dir, &names);
-    let run = |dir: &Path| {
-        let script = format!(
-            "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
-            dir.display()
-        );
-        process::capture(
-            &Invocation::new("powershell", ".")
-                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
-                .arg(encode_script(&script).unwrap()),
-            &Env::from_process(),
-        )
-        .unwrap()
-    };
+    let run = |dir: &Path| run_sweep(dir);
     let ran = run(dir);
-    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    assert_eq!(ran.code, 0, "{}", said(&ran));
     assert!(
         !ran.stdout.contains("not the tree that was sent"),
         "{}",
@@ -954,7 +916,7 @@ fn powershell_makes_the_hash_the_mac_makes_of_names_and_bytes_and_refuses_files_
     let sent = identity.trim().split(' ').nth(1).unwrap().to_owned();
     fs::write(dir.join("keep.txt"), b"kept!").unwrap();
     let changed = run(dir);
-    assert_eq!(changed.code, 1, "{}{}", changed.stdout, changed.stderr);
+    assert_eq!(changed.code, 1, "{}", said(&changed));
     assert!(
         changed
             .stdout
@@ -969,7 +931,7 @@ fn powershell_makes_the_hash_the_mac_makes_of_names_and_bytes_and_refuses_files_
     fs::remove_file(dir.join("empty")).unwrap();
     // The sweep removes what the list does not name, so the list's file that is gone is the difference.
     let gone = run(dir);
-    assert_eq!(gone.code, 1, "{}{}", gone.stdout, gone.stderr);
+    assert_eq!(gone.code, 1, "{}", said(&gone));
     assert!(
         gone.stdout.contains("not the tree that was sent"),
         "{}",

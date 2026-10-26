@@ -21,20 +21,26 @@
 //!    ([`version_only`]). The change is committed there, its parent the alpha's
 //!    commit.
 //! 5. The branch `release/X.Y.Z` at the version commit, in the checkout and
-//!    pushed to origin and upstream; the tag `vX.Y.Z` on it, with the notes,
-//!    pushed the same way. The tag's own Release run is the gate: it runs
-//!    `ci.yml`'s whole gate and both platforms' builds and smoke before it
-//!    publishes, so no CI is started by hand, and there is no dry run (the
-//!    `release` environment admits `main` and `v*` tags alone). A run that fails
-//!    on a flake is finished with `gh run rerun`.
-//! 6. The Release run watched to its end; both feeds read until they serve `X.Y.Z`.
+//!    pushed to origin and upstream. Its push runs CI (`ci.yml` runs on
+//!    `release/*`), which is the gate of the version commit: the release
+//!    publishes only a commit CI passed on both platforms, and the command waits
+//!    until it did, by the tag's gate's own rule (a run by the push or by hand),
+//!    before any tag. A CI run that fails leaves the branch and no tag,
+//!    and says how to rerun it and finish by hand, or start over. There is no
+//!    Release dry run (the `release` environment admits `main` and `v*` tags
+//!    alone): the tag's own Release run builds, signs and smoke-tests both
+//!    platforms' packages before it publishes.
+//! 6. The tag `vX.Y.Z` on the version commit, with the notes, pushed to origin
+//!    and upstream; its Release run checks CI's green gate of that commit (its
+//!    `gate` job), and is watched to its end; both feeds read until they serve
+//!    `X.Y.Z`. A Release run that fails on a flake is finished with `gh run rerun`.
 //!
 //! Nothing goes back to `main`: the branch's one commit is the version, and
 //! `main`'s next alpha needs a version after `X.Y.Z` (`X.Y.(Z+1)-alpha.1` or
 //! later), which `release alpha` enforces, as `feed-alpha` then serves `X.Y.Z`.
 //!
 //! `--dry-run` does 1 to 4, the commit made and left in no branch, asks `gh`
-//! for the Release runs as 5 does before its first push, and says what it would
+//! for the Release runs as 6 does before its first push, and says what it would
 //! push.
 
 use std::fs;
@@ -43,7 +49,7 @@ use std::path::{Path, PathBuf};
 use cf_publish::version::Version;
 use cf_release::version::source_version;
 
-use super::github::Watched;
+use super::github::{finish_by_hand, Left, Watched};
 use super::{notes_at, plain_of, refused, short, Error, Options, Release, ALPHA_FEED, STABLE_FEED};
 use crate::process::Invocation;
 
@@ -132,6 +138,15 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
              `git push origin --delete {branch} && git branch -D {branch}`, and run again"
         )
     })?;
+    // The branch's push started CI on the version commit: the gate, before the tag.
+    release.ci_passed(
+        &promoted,
+        Left::Branch {
+            branch: &branch,
+            tag: &tag,
+            commit: &promoted,
+        },
+    )?;
     release.tag_and_push(&tag, &notes, &promoted)?;
     let run = release.watch(&Watched {
         label: "release",
@@ -139,8 +154,7 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
         commit: &promoted,
         event: Some("push"),
         before,
-        both_platforms: false,
-        tag: Some(&tag),
+        left: Left::Tag(&tag),
     })?;
     release.wait_for_feed(ALPHA_FEED, &plain, run)?;
     release.wait_for_feed(STABLE_FEED, &plain, run)?;
@@ -186,12 +200,12 @@ fn branch_is_new(
     };
     Err(refused(format!(
         "{branch} is {}, at {}: a promotion stopped before its tag. Start over: `{}`, and run again; \
-         or, if its parent is {alpha_commit}, finish it by hand: \
-         `git tag -a {tag} -F <notes> {at} && git push origin {tag} && git push upstream {tag}`, \
+         or, if its parent is {alpha_commit} and CI is green on it, finish it by hand: `{}`, \
          then watch its Release run and read both feeds",
         places.join(" and "),
         short(&at),
-        undo.join(" && ")
+        undo.join(" && "),
+        finish_by_hand(tag, &at)
     )))
 }
 

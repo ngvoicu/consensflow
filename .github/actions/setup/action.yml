@@ -1,0 +1,26 @@
+# What every job of the gate (ci.yml) starts from, after the checkout: Node with
+# the npm cache, Rust from the runner's own rustup with clippy and rustfmt,
+# Swatinem/rust-cache (pinned to a commit; its key holds the job's id, so each
+# job keeps the build it makes, and the shards of one job share one), and the
+# packages of the root and of the app.
+name: Gate setup
+description: Node, Rust, the build cache and the npm packages, for a job of ci.yml
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 26
+        cache: npm
+        cache-dependency-path: |
+          package-lock.json
+          app/package-lock.json
+    - shell: bash
+      run: rustup update stable --no-self-update && rustup default stable && rustup component add clippy rustfmt
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        workspaces: ". -> app/src-tauri/target"
+    - shell: bash
+      run: npm ci
+    - shell: bash
+      run: npm ci --prefix app

@@ -1,0 +1,42 @@
+# The Close of a project whose Codex chief never had a turn went unanswered (T-534, bug 3, on
+# 3.0.6-alpha.2 with codex-cli 0.164.0; fixed in T-542). The pane host closes a window with SIGTERM
+# and then SIGHUP at once. The window's supervisor (`cf codex-session`) took SIGTERM, but SIGHUP was
+# left to its default, and ended it before it had ended Codex's server. Codex's server, closed soon
+# after it started, stalled in its own shutdown, and lived on until the pane host's grace (10 s) was
+# over and it was killed, and the Close waited for it. The supervisor takes SIGHUP as it takes
+# SIGTERM now: it asks both of Codex's processes to end, and kills the server once its grace (1.5 s)
+# is over. The cases are the rig's `codex_session` (the supervisor as a process, closed by SIGHUP
+# alone and as the pane host closes it, its server taking neither signal) and the regression
+# `a_close_waited_for_a_codex_chiefs_server_to_end` (the real daemon and pane host, on the stand-in
+# Codex whose server takes neither). One plant takes one rule out; a test of it fails.
+#
+# Every name holds `codex close`, so `npm run plants:daemon -- "codex close"` runs them all.
+
+[run]
+rig-codex-close = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "codex_session::ends_"], builds = true }
+rig-regression-codex-close = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_close_waited_for_a_codex_chiefs_server_to_end::"], builds = true }
+
+[[plant]]
+name = "codex close: the supervisor leaves SIGHUP to its default, and dies of it before it ends Codex's server"
+meant = "the_close_of_a_codex_chief_whose_server_does_not_end_when_asked_is_answered_at_once_and_the_chief_comes_back_afresh"
+runs = ["rig-regression-codex-close"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = "                hangup: signal(SignalKind::hangup())?,"
+replace = "                hangup: signal(SignalKind::user_defined1())?,"
+
+[[plant]]
+name = "codex close: the supervisor takes SIGHUP and ends nothing for it"
+meant = "ends_both_codex_processes_when_its_window_is_closed_sighup"
+runs = ["rig-codex-close"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''
+            _ = self.hangup.recv() => {}
+'''
+replace = '''
+'''

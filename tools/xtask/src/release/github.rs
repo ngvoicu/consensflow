@@ -6,11 +6,18 @@
 //! before it was asked for, then looked at until it has ended. `gh run watch`
 //! can return before a run ends, so only the run's own status is read.
 //!
+//! CI is not watched by its newest run: whether it passed a commit is asked as
+//! the release's own gate asks it (cf-release's `ci_passed::verdict`, through
+//! `gh api`), so that a commit the command tags is one the tag's run takes, and
+//! one it refuses is one the tag's run would refuse. It is asked again while a
+//! run of CI on the commit goes on, or none has appeared yet.
+//!
 //! A feed is read as installed apps read it, and read again on a 404 or a
 //! network error within the reads the pace allows: a feed just swapped can
 //! answer 404 for minutes while GitHub's download links catch up.
 
 use cf_publish::version::{named_release, Version};
+use cf_release::ci_passed::{self, GitHub, Refusal};
 use serde_json::Value;
 
 use super::{refused, short, Error, Release, ALPHA_FEED, DOWNLOADS, REPOSITORY, STABLE_FEED};
@@ -18,7 +25,7 @@ use crate::process::Invocation;
 
 /// The run to watch: which workflow, on which commit, started by which event.
 pub(super) struct Watched<'a> {
-    /// How the run is named in what is said: `ci`, `dry run`, `release`.
+    /// How the run is named in what is said: `ci`, `release`.
     pub label: &'a str,
     pub workflow: &'a str,
     pub commit: &'a str,
@@ -26,11 +33,68 @@ pub(super) struct Watched<'a> {
     pub event: Option<&'a str>,
     /// The newest such run before this one was asked for, which is not it.
     pub before: Option<u64>,
-    /// Whether the run must hold a green gate of each platform (`ci.yml`'s).
-    pub both_platforms: bool,
-    /// The tag whose push started the run, which stays on upstream whatever
+    /// What the run that started it left on the remotes, which stays whatever
     /// the run does: what is said when it does not end green.
-    pub tag: Option<&'a str>,
+    pub left: Left<'a>,
+}
+
+/// What a run that did not end green leaves behind it.
+#[derive(Clone, Copy)]
+pub(super) enum Left<'a> {
+    /// Nothing was pushed for it.
+    Nothing,
+    /// The tag whose push started it, on upstream.
+    Tag(&'a str),
+    /// A promotion's branch, on both remotes, at its version commit, which CI
+    /// runs on before the tag is pushed.
+    Branch {
+        branch: &'a str,
+        tag: &'a str,
+        commit: &'a str,
+    },
+}
+
+impl Left<'_> {
+    /// What to do about what was left, when run `run` (if there was one) did not end green.
+    fn then(&self, run: Option<u64>) -> String {
+        match *self {
+            Left::Nothing => "nothing after it was done".to_owned(),
+            Left::Tag(tag) => match run {
+                Some(_) => format!("{tag} stays on upstream; {}", rerun_advice(tag, run)),
+                None => format!("{tag} is on upstream; {}", rerun_advice(tag, None)),
+            },
+            Left::Branch {
+                branch,
+                tag,
+                commit,
+            } => {
+                let rerun = match run {
+                    Some(id) => format!(
+                        "a flake: rerun it, `gh run rerun {id} --failed --repo {REPOSITORY}`"
+                    ),
+                    None => format!(
+                        "start its CI by hand, `gh workflow run ci.yml --ref {branch} --repo {REPOSITORY}`"
+                    ),
+                };
+                format!(
+                    "{branch} is on origin and upstream at {}, and no tag was pushed. Its commit is the alpha's \
+                     with the version alone changed: {rerun}, and once CI is green on it finish by hand, \
+                     `{}`, then watch its Release run and read both feeds; or start over, \
+                     `git push origin --delete {branch} && git push upstream --delete {branch} && git branch -D {branch}`, \
+                     and run again",
+                    short(commit),
+                    finish_by_hand(tag, commit)
+                )
+            }
+        }
+    }
+}
+
+/// What tags a promotion's version commit by hand and pushes it, as the run would.
+pub(super) fn finish_by_hand(tag: &str, commit: &str) -> String {
+    format!(
+        "git tag -a {tag} -F <notes> {commit} && git push origin {tag} && git push upstream {tag}"
+    )
 }
 
 /// What a person does about a tag on upstream whose Release run `run` did not
@@ -112,14 +176,6 @@ impl Release<'_> {
             .and_then(Value::as_u64))
     }
 
-    /// Starts `workflow` by hand on `reference`, as a dry run or a dispatch.
-    pub(super) fn dispatch(&mut self, workflow: &str, reference: &str) -> Result<(), Error> {
-        self.gh(&[
-            "workflow", "run", workflow, "--repo", REPOSITORY, "--ref", reference,
-        ])?;
-        Ok(())
-    }
-
     fn status(&mut self, id: u64) -> Result<Status, Error> {
         let id_text = id.to_string();
         let said = self.gh(&[
@@ -173,13 +229,10 @@ impl Release<'_> {
             self.system.pause(self.pace.appear);
         }
         let id = found.ok_or_else(|| {
-            let then = watched.tag.map_or_else(
-                || "nothing after it was done".to_owned(),
-                |tag| format!("{tag} is on upstream; {}", rerun_advice(tag, None)),
-            );
             refused(format!(
-                "{label}: no new run of {workflow} appeared on {}: {then}",
-                short(watched.commit)
+                "{label}: no new run of {workflow} appeared on {}: {}",
+                short(watched.commit),
+                watched.left.then(None)
             ))
         })?;
         self.say(&format!("{label}: run {id} of {workflow}, until it ends"));
@@ -195,29 +248,64 @@ impl Release<'_> {
             self.say(&format!("  {job} {conclusion}"));
         }
         if ended.conclusion != "success" {
-            let then = watched.tag.map_or_else(
-                || "nothing after it was done".to_owned(),
-                |tag| format!("{tag} stays on upstream; {}", rerun_advice(tag, Some(id))),
-            );
             return Err(refused(format!(
-                "{label} run {id} ended {}: {then}",
-                ended.conclusion
+                "{label} run {id} ended {}: {}",
+                ended.conclusion,
+                watched.left.then(Some(id))
             )));
         }
-        if watched.both_platforms {
-            for platform in ["macos", "windows"] {
-                let green = ended
-                    .jobs
-                    .iter()
-                    .any(|(job, conclusion)| job.contains(platform) && conclusion == "success");
-                if !green {
-                    return Err(refused(format!(
-                        "{label} run {id} holds no green {platform} gate: both platforms must pass"
-                    )));
+        Ok(id)
+    }
+
+    /// Waits until CI's full gate passed `commit` on both platforms, by the
+    /// rule the tag's gate holds it to (a run of `ci.yml` by a push or by hand,
+    /// green with both summaries), and refuses it once CI ended without: what
+    /// was found, then what `left` says to do. A run still going, or none yet,
+    /// is waited for. The run that passed it.
+    pub(super) fn ci_passed(&mut self, commit: &str, left: Left) -> Result<u64, Error> {
+        let mut looks = 0;
+        let mut said_going = false;
+        loop {
+            match ci_passed::verdict(&mut Api { release: self }, REPOSITORY, commit) {
+                Ok(passed) => {
+                    self.say(&format!(
+                        "ci: run {} passed {} on both platforms",
+                        passed.run,
+                        short(commit)
+                    ));
+                    for red in &passed.red {
+                        self.say(&format!("ci: {red}, beside it"));
+                    }
+                    return Ok(passed.run);
+                }
+                Err(Refusal::Running(said)) => {
+                    if !said_going {
+                        self.say(&format!(
+                            "ci: waiting until CI's run of {} ends ({said})",
+                            short(commit)
+                        ));
+                        said_going = true;
+                    }
+                    self.system.pause(self.pace.poll);
+                }
+                Err(Refusal::NeverRan(_)) if looks < self.pace.appear_attempts => {
+                    looks += 1;
+                    self.system.pause(self.pace.appear);
+                }
+                Err(Refusal::NeverRan(said)) => {
+                    return Err(refused(format!("{said}; {}", left.then(None))));
+                }
+                Err(Refusal::Red { said, run }) => {
+                    return Err(refused(format!("{said}; {}", left.then(Some(run)))));
+                }
+                Err(Refusal::Unasked(said)) => {
+                    return Err(Error::Answer {
+                        what: format!("whether CI passed {}", short(commit)),
+                        said,
+                    });
                 }
             }
         }
-        Ok(id)
     }
 
     /// The address installed apps read the feed `name` at.
@@ -319,5 +407,18 @@ impl Release<'_> {
                 Self::feed_address(name)
             ))),
         }
+    }
+}
+
+/// GitHub's API as the release's gate asks it, through the machine's `gh`.
+struct Api<'r, 'a> {
+    release: &'r mut Release<'a>,
+}
+
+impl GitHub for Api<'_, '_> {
+    fn get(&mut self, path: &str) -> Result<String, String> {
+        self.release
+            .gh(&["api", path])
+            .map_err(|error| error.to_string())
     }
 }

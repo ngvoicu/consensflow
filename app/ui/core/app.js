@@ -795,6 +795,7 @@ $('#new-project').addEventListener('click', async () => {
 // chosen; once the switch is taken, the chief's window is the one in front.
 const switchChief = new SwitchChiefDialog($('#switch-chief-dialog'), {
   selected: () => state.selected,
+  board: () => state.board,
   daemon,
   act,
   onSwitch: () => {
