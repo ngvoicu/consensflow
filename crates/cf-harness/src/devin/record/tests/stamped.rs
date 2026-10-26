@@ -228,3 +228,20 @@ fn a_turn_an_escape_ended_is_over_though_the_command_it_left_goes_on_saying_it_r
     staged.wire("launch-1", &wire);
     assert_eq!(both(&staged, &mut reader, "the command runs on"), over);
 }
+
+#[test]
+fn a_turn_devin_says_waits_for_its_user_is_no_work_until_devin_says_it_works_again() {
+    let staged = Staged::new();
+    staged.chain(&[user("u-1", Some(json!("request-1")))]);
+    let mut reader = staged.reader();
+    let mut wire = vec![status("working"), stamped("tool_call", None, None)];
+    staged.wire("launch-1", &wire);
+    assert_eq!(both(&staged, &mut reader, "at work"), at_work());
+    // It waits for its user, with no end of the turn: the record says what the turn is.
+    wire.push(status("blocked"));
+    staged.wire("launch-1", &wire);
+    assert_eq!(both(&staged, &mut reader, "waiting"), settled());
+    wire.push(status("working"));
+    staged.wire("launch-1", &wire);
+    assert_eq!(both(&staged, &mut reader, "at work again"), at_work());
+}

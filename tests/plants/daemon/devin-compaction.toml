@@ -17,12 +17,22 @@
 # - no user's message is read back, a step's newest row off the chain is taken for its
 #   original, or a message the chain holds is read back as well.
 #
-# Every name holds `devin compaction`, so `npm run plants:daemon -- "devin compaction"` runs
-# them all.
+# And a turn Devin 3000.11 stamps (T-660, from T-656's reading of the live suites): every
+# record of its work stamped with its time, as a replay is, and Devin's own word on the turn
+# (`working`, `blocked`). Its cases are in `crates/cf-harness/src/devin/record/tests/stamped.rs`
+# and `crates/cf-e2e/tests/rig/devin_stamped.rs` (the stand-in where `FAKE_DEVIN_STAMPS` says):
+#
+# - Devin's word that it works is not read, or its word that it waits ends nothing;
+# - stamped words in a stream are taken for a replay, or stamped words in none for work.
+#
+# Every name of the first holds `devin compaction`, of the second `devin stamped`: `npm run
+# plants:daemon -- "devin compaction" "devin stamped"` runs them all.
 
 [run]
 harness-lib-devin-compaction = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record::tests::compaction::"]
 rig-devin-compaction = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "devin_compaction::"]
+harness-lib-devin-stamped = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record::tests::stamped::"]
+rig-devin-stamped = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "devin_stamped::"]
 
 [[plant]]
 name = "devin compaction: the wire's end is not kept by its model request"
@@ -137,3 +147,65 @@ find = '''        if entry.request == Key::Null {
             Request::Native(&entry.native)'''
 replace = '''        if entry.request == Key::Null && false {
             Request::Native(&entry.native)'''
+
+[[plant]]
+name = "devin stamped: Devin's word that a turn works is not read"
+meant = "a_turn_devin_stamps_is_at_work_from_its_word_that_it_works_through_its_call_to_its_end"
+runs = ["harness-lib-devin-stamped"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''                Some("working") => self.busy = true,'''
+replace = '''                Some("working") => {}'''
+
+[[plant]]
+name = "devin stamped: Devin's word that a turn waits for its user ends nothing"
+meant = "a_turn_devin_says_waits_for_its_user_is_no_work_until_devin_says_it_works_again"
+runs = ["harness-lib-devin-stamped"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''                Some("blocked") => self.busy = false,'''
+replace = '''                Some("blocked") => {}'''
+
+[[plant]]
+name = "devin stamped: stamped words in a stream are taken for a replay"
+meant = "a_streamed_word_of_a_turn_devin_stamps_is_work_with_no_word_of_its_own"
+runs = ["harness-lib-devin-stamped"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''            && !(kind.is_some_and(|kind| STREAMED.contains(&kind))'''
+replace = '''            && !(kind.is_some_and(|kind| STREAMED.contains(&kind) && false)'''
+
+[[plant]]
+name = "devin stamped: stamped words in no stream are taken for work"
+meant = "the_turn_a_reopened_window_replays_is_no_work_however_it_is_stamped"
+runs = ["harness-lib-devin-stamped"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''                && meta("cognition.ai/streamingMessageId").is_some());'''
+replace = '''                && meta("cognition.ai/streamingMessageId").is_some() || true);'''
+
+[[plant]]
+name = "devin stamped: the rig's stamped window reads at rest through its turn"
+meant = "a_devin_turn_stamped_as_devin_3000_11_stamps_it_is_at_work_through_a_silent_stretch_and_its_answer_is_the_result"
+runs = ["rig-devin-stamped"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''                Some("working") => self.busy = true,'''
+replace = '''                Some("working") => {}'''
+
+[[plant]]
+name = "devin stamped: the rig's pause presses nothing into a stamped turn"
+meant = "a_pause_stops_a_devin_turn_stamped_as_devin_3000_11_stamps_it_and_the_chiefs_question_goes_in_after"
+runs = ["rig-devin-stamped"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''                Some("working") => self.busy = true,'''
+replace = '''                Some("working") => {}'''
