@@ -400,6 +400,7 @@ impl Window for CodexWindow {
                 return Ok(Observed {
                     reading: None,
                     settled: false,
+                    over: false,
                     waiting: None,
                     failed: false,
                     quota: None,

@@ -295,6 +295,9 @@ impl Window for FakeWindow {
                 agent.settled = true;
                 agent.took_back = agent.takes_back;
             }
+            if agent.busy_when_interrupted {
+                agent.over = true;
+            }
         });
     }
 }
@@ -325,6 +328,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
         return Observed {
             reading: reading(agent.records.get(session).cloned().unwrap_or_default()),
             settled: false,
+            over: false,
             waiting: None,
             failed: agent.failed,
             quota: agent.quota.clone(),
@@ -343,6 +347,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
     Observed {
         reading: reading(agent.items.clone()),
         settled: agent.settled,
+        over: agent.over,
         waiting,
         failed: agent.failed,
         quota: agent.quota.clone(),

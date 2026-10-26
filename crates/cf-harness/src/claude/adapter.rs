@@ -443,9 +443,10 @@ impl Window for ClaudeWindow {
                 ),
                 Reading::Unknown(_) => (true, false, false, None, false),
             };
-            let observed = |settled, waiting, took_back, at_prompt| Observed {
+            let observed = |settled, over, waiting, took_back, at_prompt| Observed {
                 reading: Some(Arc::clone(&reading)),
                 settled,
+                over,
                 waiting,
                 failed,
                 quota: quota.clone(),
@@ -456,7 +457,7 @@ impl Window for ClaudeWindow {
             };
             Ok(match live {
                 Some(live) if self.elsewhere(&live) => {
-                    switched_to(observed(false, None, false, false), live.session)
+                    switched_to(observed(false, false, None, false, false), live.session)
                 }
                 live => {
                     // Claude's own status is the word on whether the window
@@ -499,12 +500,11 @@ impl Window for ClaudeWindow {
                         .borrow()
                         .as_ref()
                         .is_some_and(|open| open.still(&reading));
-                    observed(
-                        at_prompt && (settled || empty || left) || by_press,
-                        waiting,
-                        by_press,
-                        at_prompt,
-                    )
+                    // The record's word that the turn is over stands whatever the
+                    // status says: busy while a background agent runs, after a turn
+                    // an interrupt or a refusal ended with no count of them (T-604).
+                    let at_rest = at_prompt && (settled || empty || left) || by_press;
+                    observed(at_rest, settled && !at_rest, waiting, by_press, at_prompt)
                 }
             })
         })

@@ -341,7 +341,12 @@ pub fn run(ctx: &Ctx, case: &mut Account, variant: &Variant) -> Result<()> {
                 |closed| format!("its pane was gone at {}", plus(closed, made)),
             ),
         );
-        case.check("the human is told, once", human.len() == 1, &told);
+        // One note of one event, to whoever gave the task (T-551).
+        case.check(
+            "the human is given no note of its own",
+            human.is_empty(),
+            &told,
+        );
         case.check("the requester is told, once", requester.len() == 1, &told);
     }
     case.say(format!("     the stop, as it ran: {how}"));

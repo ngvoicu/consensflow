@@ -127,6 +127,13 @@ fn told(context: &Context, project: i64) -> [Vec<String>; 2] {
     ]
 }
 
+/// One note of a window that did not stop, to the chief who gave the task, in the
+/// chief's words of `said` ([human's, chief's]), and none to the human: two notes of
+/// one event said it twice (T-502's m-3943 and m-3944, 2026-10-25).
+fn to_the_chief(said: [&str; 2]) -> [Vec<String>; 2] {
+    [Vec::new(), vec![said[1].to_owned()]]
+}
+
 /// The window at work on T-1 ignores every key, as a harness hung in a model
 /// request does (Pi on zeewin's long run, 2026-10-19): T-1 is paused and its three
 /// rounds are pressed, three seconds apart. The pane it was pressed into.
@@ -171,10 +178,7 @@ fn three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_re
         "a closed window has nothing to show of the stop"
     );
     assert_eq!(context.task(project, 1).task.state, "paused");
-    assert_eq!(
-        told(&context, project),
-        CLOSED_PAUSED.map(|said| vec![said.to_owned()])
-    );
+    assert_eq!(told(&context, project), to_the_chief(CLOSED_PAUSED));
 
     // Nothing more while it is paused: no window opens for it, nothing is said again.
     context.advance(10 * 60_000);
@@ -182,7 +186,7 @@ fn three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_re
     context.pass().unwrap();
     assert_eq!(context.adapter.prepared().len(), launches);
     assert_eq!(context.host.inputs().len(), 3);
-    assert_eq!(told(&context, project).map(|notes| notes.len()), [1, 1]);
+    assert_eq!(told(&context, project).map(|notes| notes.len()), [0, 1]);
     assert_eq!(context.task(project, 1).task.state, "paused");
 
     // Resumed: the window reopens on its conversation, told its program before is
@@ -234,10 +238,7 @@ fn a_task_resumed_while_its_window_ignores_the_rounds_has_its_words_go_into_the_
         "closed after its third round"
     );
     assert_eq!(context.task(project, 1).task.state, "queued");
-    assert_eq!(
-        told(&context, project),
-        CLOSED_RESUMED.map(|said| vec![said.to_owned()])
-    );
+    assert_eq!(told(&context, project), to_the_chief(CLOSED_RESUMED));
 
     // The next pass opens it again, on its conversation, with the words.
     context.pass().unwrap();
@@ -284,10 +285,7 @@ fn a_window_held_for_quota_that_ignores_the_rounds_is_closed_and_the_reset_reope
         "closed while its member is out"
     );
     assert_eq!(context.task(project, 1).task.state, "paused");
-    assert_eq!(
-        told(&context, project),
-        CLOSED_PAUSED.map(|said| vec![said.to_owned()])
-    );
+    assert_eq!(told(&context, project), to_the_chief(CLOSED_PAUSED));
 
     // Held until the reset: no window opens, and nothing goes in.
     context.advance(60 * 60_000);
@@ -351,10 +349,10 @@ fn a_task_cancelled_while_its_window_is_closed_is_said_to_be_cancelled_and_no_wo
     assert_eq!(context.task(project, 1).task.state, "cancelled");
     assert_eq!(
         told(&context, project),
-        [
-            vec!["@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. T-1 was cancelled.".to_owned()],
-            vec!["T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. T-1 was cancelled.".to_owned()],
-        ]
+        to_the_chief([
+            "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. T-1 was cancelled.",
+            "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. T-1 was cancelled.",
+        ])
     );
 }
 
@@ -378,10 +376,10 @@ fn a_close_the_host_refuses_is_shown_said_once_and_tried_again_every_minute_with
     );
     assert_eq!(
         told(&context, project),
-        [
-            vec!["@zeus did not stop for T-1: it ignored the interrupt 3 times, and its window would not close. ConsensFlow tries to close it again every minute; until then what is for it waits, and what it writes is not T-1's result.".to_owned()],
-            vec!["T-1's window (@zeus) did not stop: it ignored the interrupt, and would not close. ConsensFlow tries again every minute; until then your words wait, and what it writes is not taken as T-1's result (cf task get T-1 --transcript shows it).".to_owned()],
-        ]
+        to_the_chief([
+            "@zeus did not stop for T-1: it ignored the interrupt 3 times, and its window would not close. ConsensFlow tries to close it again every minute; until then what is for it waits, and what it writes is not T-1's result.",
+            "T-1's window (@zeus) did not stop: it ignored the interrupt, and would not close. ConsensFlow tries again every minute; until then your words wait, and what it writes is not taken as T-1's result (cf task get T-1 --transcript shows it).",
+        ])
     );
 
     // Less than a minute: nothing; a minute: the close again, no key, nothing said.
@@ -398,7 +396,7 @@ fn a_close_the_host_refuses_is_shown_said_once_and_tried_again_every_minute_with
         3,
         "no key once every round was ignored"
     );
-    assert_eq!(told(&context, project).map(|notes| notes.len()), [1, 1]);
+    assert_eq!(told(&context, project).map(|notes| notes.len()), [0, 1]);
 
     // The host takes the next: closed, and said so; the task stays paused.
     context.host.refuse_kills.set(false);
@@ -410,10 +408,13 @@ fn a_close_the_host_refuses_is_shown_said_once_and_tried_again_every_minute_with
         ActivityState::Closed
     );
     assert_eq!(context.dispatcher.unstopped(zeus), None);
-    for (notes, closed) in told(&context, project).iter().zip(CLOSED_PAUSED) {
-        assert_eq!(notes.len(), 2, "{notes:?}");
-        assert!(notes.iter().any(|note| note == closed), "{notes:?}");
-    }
+    let [human, chief] = told(&context, project);
+    assert_eq!(human, Vec::<String>::new());
+    assert_eq!(chief.len(), 2, "{chief:?}");
+    assert!(
+        chief.iter().any(|note| note == CLOSED_PAUSED[1]),
+        "{chief:?}"
+    );
     assert_eq!(context.task(project, 1).task.state, "paused");
 }
 

@@ -93,6 +93,13 @@ pub struct FakeAgent {
     /// Its harness says its window waits at its prompt, whatever its record says of the
     /// turn ([`Observed::at_prompt`]): set by [`FakeAdapter::answer_never_over`].
     pub at_prompt: bool,
+    /// Its record says its turn is over though its status kept the look from
+    /// reading it settled (`Observed::over`): Claude's busy while a background
+    /// agent runs, after a turn an interrupt or a refusal ended.
+    pub over: bool,
+    /// Interrupted, its turn ends in its record and its status stays busy: the
+    /// look reads it over, not settled (a Claude whose background agents run).
+    pub busy_when_interrupted: bool,
     /// Its record, read with no window open, cannot tell whether its turn was
     /// cut: Devin's, which reads a turn as going on only while its window shows it.
     pub cannot_tell_a_cut: bool,
@@ -360,6 +367,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(item);
             agent.settled = true;
+            agent.over = false;
             agent.pending = Pending::default();
             agent.monitors.clear();
             agent.took_back = false;
@@ -375,6 +383,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(item);
             agent.settled = false;
+            agent.over = false;
             agent.at_prompt = true;
             agent.pending = Pending::default();
             agent.monitors.clear();
@@ -434,6 +443,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(item);
             agent.settled = false;
+            agent.over = false;
             agent.pending = Pending::default();
             agent.monitors.clear();
             agent.took_back = false;
@@ -445,6 +455,7 @@ impl FakeAdapter {
     pub fn busy(&self, handle: &str) {
         self.with(handle, |agent| {
             agent.settled = false;
+            agent.over = false;
             agent.pending = Pending::default();
             agent.monitors.clear();
             agent.took_back = false;
@@ -465,6 +476,24 @@ impl FakeAdapter {
             agent.settled = false;
             agent.stops_when_interrupted = true;
         });
+    }
+
+    /// The agent is at work on a turn that an interrupt ends in its record while
+    /// its status stays busy: Claude's, with background agents running, whose
+    /// interrupted turn writes no count of them (T-604). The look reads it over,
+    /// never settled.
+    pub fn busy_with_agents_until_interrupted(&self, handle: &str) {
+        self.busy(handle);
+        self.with(handle, |agent| agent.busy_when_interrupted = true);
+    }
+
+    /// The harness refuses the turn as `refuse` says, and the look still does not
+    /// read the window settled: its record reads the turn in flight past the
+    /// refusal, as Claude's reader read T-502's (a queued message of a process the
+    /// window's reopen was not told had gone), or its status says busy.
+    pub fn refuse_unsettled(&self, handle: &str, quota: Quota) {
+        self.refuse(handle, quota);
+        self.with(handle, |agent| agent.settled = false);
     }
 
     /// Its record cannot tell, with no window open, whether its turn was cut,
@@ -510,6 +539,8 @@ impl FakeAdapter {
             agent.quota = Some(Arc::new(quota));
             agent.failed = true;
             agent.settled = true;
+            agent.over = false;
+            agent.at_prompt = false;
             agent.pending = Pending::default();
             agent.monitors.clear();
         });
@@ -524,9 +555,11 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(said);
             agent.settled = false;
+            agent.over = false;
             agent.pending = Pending::default();
             agent.failed = false;
             agent.took_back = false;
+            agent.at_prompt = false;
         });
     }
 
@@ -749,6 +782,8 @@ impl Asked {
             takes_back: false,
             took_back: false,
             at_prompt: false,
+            over: false,
+            busy_when_interrupted: false,
             cannot_tell_a_cut: false,
             resumable: Some(true),
             unread: false,

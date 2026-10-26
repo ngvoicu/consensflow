@@ -358,12 +358,12 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
         told_the_human(&human_inbox),
         told_the_requester(&requester_inbox),
     );
-    // A window that ignored every round is closed, and the notes say so; one the
-    // host would not close shows `unstopped` on its lane.
-    let closed = human.iter().any(|note| {
+    // A window that ignored every round is closed, and the requester's note says so;
+    // one the host would not close shows `unstopped` on its lane.
+    let closed = requester.iter().any(|note| {
         note["body"]
             .as_str()
-            .is_some_and(|body| body.contains("so ConsensFlow closed its window"))
+            .is_some_and(|body| body.contains("so ConsensFlow closed it"))
     });
     let exhausted = closed || seen.iter().any(|word| word.contains("unstopped"));
     let gaps = crate::slow::gaps(&presses);
@@ -435,9 +435,9 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
         ));
     }
     say_events(case, members, number);
-    // Either end is an answer: a window that ignores (closed, and told to the human and the
-    // requester) or one that stops.
-    case.require(!exhausted || (human.len() == 1 && requester.len() == 1));
+    // Either end is an answer: a window that ignores (closed, and told once, to the
+    // requester: one note of one event, T-551) or one that stops.
+    case.require(!exhausted || (human.is_empty() && requester.len() == 1));
     Ok(())
 }
 

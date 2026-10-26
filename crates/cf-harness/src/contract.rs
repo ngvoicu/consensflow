@@ -490,6 +490,13 @@ pub struct Observed {
     /// None where the window has not named a conversation to read yet.
     pub reading: Option<Arc<Reading>>,
     pub settled: bool,
+    /// The turn the window was last in is over by its harness's own record,
+    /// though its live status kept the look from reading it `settled`: nothing
+    /// in it is left for an interrupt to stop. Claude says it is busy for as long
+    /// as a background agent runs, and a turn an interrupt or a refusal ended
+    /// writes no count of them (T-604, 2026-10-25). A harness whose `settled` is
+    /// its record's word says no.
+    pub over: bool,
     pub waiting: Option<Waiting>,
     pub failed: bool,
     pub quota: Option<Arc<Quota>>,

@@ -1,0 +1,101 @@
+# A window whose turn is over has nothing for a stop to interrupt, and is never closed
+# for keys nothing in it could heed (T-551, 2026-10-25, 3.0.6-alpha.2): a weekly limit's
+# hold pressed Escape into T-502's window, whose turn the refusal had ended, closed it
+# after three rounds and ended the plant run it left in the background; a `cf tell`
+# stopped T-604's turn with its first Escape, and the window, busy with three
+# background agents, was closed all the same. One close was told twice.
+#
+# - a turn the record says is over is read at work while Claude says busy (T-604);
+# - a turn a refusal for quota ended is read at work while the look is not at rest
+#   (T-502);
+# - Claude's look says nothing of its record's word that the turn is over;
+# - a close is told to the human and to the requester, two notes of one event;
+# - the stand-in's `AGENTS --then` starts no agents, so the rig's cases lose their shape.
+#
+# The engine's tests are in `crates/cf-engine/tests/dispatcher/nothing_to_stop.rs` and
+# `stops.rs`; Claude's look, in `crates/cf-harness/tests/launch/claude/agents.rs`; the
+# rig's cases, in `crates/cf-e2e/tests/regressions/
+# a_window_with_nothing_to_stop_was_closed_and_its_work_ended.rs`, which run the native
+# `cf` built from the planted sources (`builds`).
+#
+# Every name holds `nothing to stop`, so `cargo xtask plants daemon "nothing to stop"`
+# runs them all.
+
+[run]
+# Claude's look at a window busy with the agents its turn left, or whose turn ended.
+harness-launch-claude-agents = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::agents::"]
+# The rig's cases, against the native `cf`.
+rig-regression-nothing-to-stop = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_window_with_nothing_to_stop_was_closed_and_its_work_ended::"], builds = true }
+# The stand-in's own tests of what it answers.
+fake-agent-reply = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "reply::"]
+
+[[plant]]
+name = "nothing to stop: a turn its record ends is at work while Claude says busy"
+meant = "a_tell_whose_escape_stopped_a_turn_with_background_agents_keeps_the_window_and_goes_in_once_it_rests"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "} else if observed.settled || observed.over || self.cut_short(observed) {"
+replace = "} else if observed.settled || self.cut_short(observed) {"
+
+[[plant]]
+name = "nothing to stop: a turn its record ends is at work while Claude says busy, on the rig"
+meant = "a_tell_that_stopped_a_turn_whose_agents_run_keeps_the_window_and_its_work"
+runs = ["rig-regression-nothing-to-stop"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "} else if observed.settled || observed.over || self.cut_short(observed) {"
+replace = "} else if observed.settled || self.cut_short(observed) {"
+
+[[plant]]
+name = "nothing to stop: a turn a refusal for quota ended is at work"
+meant = "a_task_held_for_its_job_whose_next_turn_is_refused_presses_no_key_and_goes_on_there_at_the_reset"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "} else if observed.settled || observed.over || self.cut_short(observed) {"
+replace = "} else if observed.settled || observed.over {"
+
+[[plant]]
+name = "nothing to stop: Claude's look says nothing of its record's end of the turn"
+meant = "a_turn_interrupted_while_its_agents_run_is_over_though_claude_says_busy_and_is_not_at_rest"
+runs = ["harness-launch-claude-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "observed(at_rest, settled && !at_rest, waiting, by_press)"
+replace = "observed(at_rest, false, waiting, by_press)"
+
+[[plant]]
+name = "nothing to stop: a close is told to the human and to the requester"
+meant = "three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_reopens_it_on_its_conversation"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = """            Some(requester) => (requester, to_requester),"""
+replace = """            Some(requester) => {
+                self.seams.ledger.borrow_mut().note(
+                    project.id,
+                    &NewNote { from: None, to: "human".to_owned(), task: Some(number), body: human },
+                )?;
+                (requester, to_requester)
+            }"""
+
+[[plant]]
+name = "nothing to stop: the stand-in's agents then a turn start no agents"
+meant = "an_agents_then_line_starts_them_and_goes_on_with_the_rest_of_the_line"
+runs = ["fake-agent-reply"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = """        window.agents.start(count, seconds, move || {
+            let _ = wake.send(woken);
+        });
+        return reply_to(&agents[3], window);"""
+replace = """        let _ = (count, seconds, wake, woken);
+        return reply_to(&agents[3], window);"""

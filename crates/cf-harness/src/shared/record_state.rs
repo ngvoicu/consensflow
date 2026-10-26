@@ -30,6 +30,7 @@ pub(crate) fn record_state(reading: Arc<Reading>) -> Observed {
     Observed {
         reading: Some(reading),
         settled,
+        over: false,
         waiting: None,
         failed,
         quota,
@@ -58,6 +59,7 @@ pub(crate) fn dialog_waiting(reading: Option<&Reading>) -> Option<Waiting> {
 pub(crate) fn switched_to(observed: Observed, session: String) -> Observed {
     Observed {
         settled: false,
+        over: false,
         waiting: None,
         switched: Some(session),
         at_prompt: false,

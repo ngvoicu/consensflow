@@ -21,11 +21,12 @@ pub enum Case {
     Stuck,
     MidTurn,
     MidTool,
+    Tell,
 }
 
 impl Case {
     /// Every case, in the order they are run in.
-    pub const ALL: [Case; 8] = [
+    pub const ALL: [Case; 9] = [
         Case::Command,
         Case::Early,
         Case::Hook,
@@ -34,6 +35,7 @@ impl Case {
         Case::Stuck,
         Case::MidTurn,
         Case::MidTool,
+        Case::Tell,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -46,6 +48,7 @@ impl Case {
             Case::Stuck => "stuck",
             Case::MidTurn => "midturn",
             Case::MidTool => "midtool",
+            Case::Tell => "tell",
         }
     }
 
@@ -133,7 +136,10 @@ mod tests {
         let names: Vec<&str> = all.cases.iter().map(|case| case.name()).collect();
         assert_eq!(
             names,
-            ["command", "early", "hook", "escape", "slowhook", "stuck", "midturn", "midtool"]
+            [
+                "command", "early", "hook", "escape", "slowhook", "stuck", "midturn", "midtool",
+                "tell"
+            ]
         );
         assert_eq!(all.harnesses, [Harness::OpenCode]);
         assert_eq!(all.hook.name, "stop");
