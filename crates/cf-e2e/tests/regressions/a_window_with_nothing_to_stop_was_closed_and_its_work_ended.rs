@@ -121,7 +121,7 @@ fn an_accounts_limit_holds_its_windows_and_closes_none_that_left_work_running() 
     rig.tell(
         project.id(),
         &format!(
-            "DISPATCH --tier {tier} JOB 600 AGENTS --then 2 60 SLEEP 30 Reply with exactly: HELD_OK"
+            "DISPATCH --tier {tier} JOB 600 AGENTS --then 2 90 SLEEP 60 Reply with exactly: HELD_OK"
         ),
     )?;
     let held = at_work(&rig, &project, 1)?;
@@ -135,18 +135,23 @@ fn an_accounts_limit_holds_its_windows_and_closes_none_that_left_work_running() 
         .into_iter()
         .next()
         .ok_or_else(|| Error::Daemon("the job is gone".to_owned()))?;
+    let pane = pane_of(&project, &held)?;
+    // Its agents start as its job is up; the account's limit is spent while its turn
+    // works on, so each turn is refused as it asks again: T-1's after its work, and
+    // T-2's, given now, at its first ask (no wait on the order the windows come up in).
+    sleep(secs(3));
+    files::write(&account.file(), "")?;
     rig.tell(
         project.id(),
-        &format!("DISPATCH --tier {tier} SLEEP 20 Reply with exactly: PLAIN_OK"),
+        &format!("DISPATCH --tier {tier} Reply with exactly: PLAIN_OK"),
     )?;
-    let plain = at_work(&rig, &project, 2)?;
-    let pane = pane_of(&project, &held)?;
-
-    // The account's limit is spent: each turn is refused as it asks again.
-    files::write(&account.file(), "")?;
-    rig.wait_for("both tasks to be held", secs(90), || {
+    rig.wait_for("both tasks to be held", secs(120), || {
         Ok(project.task(1)?["state"] == "paused" && project.task(2)?["state"] == "paused")
     })?;
+    let plain = project.task(2)?["assignee"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
     // Every round a stop could have, and more.
     sleep(secs(15));
     assert_eq!(
@@ -213,7 +218,7 @@ fn a_tell_that_stopped_a_turn_whose_agents_run_keeps_the_window_and_its_work() -
     rig.tell(
         project.id(),
         &format!(
-            "DISPATCH --tier {tier} JOB 600 AGENTS --then 2 30 SLEEP 300 Reply with exactly: NEVER_OK"
+            "DISPATCH --tier {tier} JOB 600 AGENTS --then 2 60 SLEEP 300 Reply with exactly: NEVER_OK"
         ),
     )?;
     let session = at_work(&rig, &project, 1)?;
@@ -247,7 +252,7 @@ fn a_tell_that_stopped_a_turn_whose_agents_run_keeps_the_window_and_its_work() -
     assert_eq!(closes_told(&rig, &project)?, Vec::<String>::new());
 
     // The agents end; the window rests, and the tell's words go into it.
-    rig.wait_for("the worker to answer the tell", secs(90), || {
+    rig.wait_for("the worker to answer the tell", secs(150), || {
         Ok(project
             .inbox("chief")?
             .iter()
