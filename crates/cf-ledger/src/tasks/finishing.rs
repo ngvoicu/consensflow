@@ -687,8 +687,10 @@ fn fail(
         require_task_state(&task, &failable, "fail")?;
         let told = Dropped::of(store, &task)?;
         // The answer of a window's turn on a tell, noted for the requester and not yet given
-        // (an early resume, then a resumed turn that failed), waits for the reopen with the
-        // task: what the window said then is the chief's still (T-442).
+        // (an early resume, then a resumed turn that failed), is put back queued after the
+        // drop: the requester is given it at its next rest, in the words of a task that has
+        // moved on, then the note that the task failed (T-442). It does not wait for the
+        // reopen.
         let answers = queued_paused_answers(store, &task)?;
         if given_up {
             drop_queued_but_told(store, task.id)?;

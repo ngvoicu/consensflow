@@ -23,8 +23,11 @@
 //! - **staying paused** (a Resume of a project that leaves one of a window's several tasks
 //!   paused): the task has not moved on, and its note stays as it was.
 //! - **failed** (the task fails with the note unread, an early resume's turn that failed): the
-//!   queued messages dropped with it are not this one ([`queued`], [`put_back`]); it waits
-//!   for the reopen with the task, in the words of a task that has moved on.
+//!   queued messages dropped with it are not this one ([`queued`], [`put_back`]); it is put
+//!   back queued as it was, in the words of a task that has moved on, and is given to its
+//!   reader at its next rest like any note (the delivery of a note to a chief does not wait
+//!   for the task's state), before the note that the task failed. Nothing waits for the
+//!   reopen but the task.
 //! - **finished** (`cf task finish`, the drawer's Finish): the note's words are the result,
 //!   and the note is moot: it is withdrawn if not yet pasted ([`withdraw`]).
 //! - **cancelled**: the task's messages on their way are withdrawn with it, as always.

@@ -7,7 +7,8 @@
 #![allow(clippy::expect_used)]
 
 use cf_ledger::{
-    open_ledger, Ledger, MessageView, NewChief, NewMember, NewNote, NewProject, NewTask, Options,
+    open_ledger, Ledger, MessageView, NewChief, NewMember, NewNote, NewProject, NewQuestion,
+    NewTask, Options,
 };
 
 /// A project whose chief has given T-1, T-2 and T-3 to three workers, each
@@ -492,4 +493,100 @@ fn finishing_a_paused_task_withdraws_what_its_requester_was_told_of_the_pause_an
         "delivered",
         "what was read stays"
     );
+}
+
+impl World {
+    /// The chief tells the window of T-1 `Stop`: the message that puts it (the task is paused
+    /// for it), and the ids of T-1 and of its window, as `Ledger::tell_on_its_way` is asked.
+    fn tell(&mut self) -> (MessageView, i64, i64) {
+        let thread = self
+            .ledger
+            .task(self.project, 1)
+            .expect("a read")
+            .expect("T-1");
+        let window = thread.task.assignee.clone().expect("its window");
+        let told = self
+            .ledger
+            .ask(
+                self.project,
+                &NewQuestion {
+                    from: Some("chief".into()),
+                    to: window.clone(),
+                    body: Some("Stop".into()),
+                    task: Some(1),
+                    urgent: true,
+                    ..NewQuestion::default()
+                },
+            )
+            .expect("the tell");
+        let participant = self
+            .ledger
+            .project(self.project)
+            .expect("a read")
+            .expect("the project")
+            .participants
+            .into_iter()
+            .find(|participant| participant.handle == window)
+            .expect("its window's participant")
+            .id;
+        (told, thread.task.id, participant)
+    }
+}
+
+#[test]
+fn a_tell_is_on_its_way_while_it_is_queued_held_at_the_gate_or_being_pasted_and_not_after() {
+    // Finish refuses a paused task while a tell to its window is on its way (T-442, Calliope's
+    // P3 on round 2): the record holds the turn from before the tell until it is pasted.
+    for gated in [false, true] {
+        let mut world = world();
+        world
+            .ledger
+            .set_gate(world.project, gated)
+            .expect("the gate");
+        let (told, task, window) = world.tell();
+        let on_its_way = |world: &World| {
+            world
+                .ledger
+                .tell_on_its_way(window, task)
+                .expect("the ledger")
+        };
+        assert_eq!(told.state, if gated { "gated" } else { "queued" });
+        assert!(on_its_way(&world), "{} as it is made", told.state);
+        if gated {
+            world
+                .ledger
+                .approve_message(told.id, "human")
+                .expect("passed on");
+            assert!(on_its_way(&world), "queued once the human passed it on");
+        }
+        world.ledger.begin_delivery(told.id).expect("on its way");
+        assert!(on_its_way(&world), "being pasted");
+        world
+            .ledger
+            .confirm_delivery(told.id, None)
+            .expect("pasted");
+        assert!(!on_its_way(&world), "pasted: the window has it");
+    }
+}
+
+#[test]
+fn a_tell_withdrawn_with_its_cancelled_task_is_on_its_way_no_more() {
+    let mut world = world();
+    world
+        .ledger
+        .set_gate(world.project, true)
+        .expect("the gate");
+    let (_, task, window) = world.tell();
+    assert!(world
+        .ledger
+        .tell_on_its_way(window, task)
+        .expect("the ledger"));
+    world
+        .ledger
+        .cancel_task(world.project, 1, "chief")
+        .expect("called off");
+    assert!(!world
+        .ledger
+        .tell_on_its_way(window, task)
+        .expect("the ledger"));
 }
