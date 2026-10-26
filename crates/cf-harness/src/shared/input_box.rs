@@ -156,6 +156,36 @@ pub(crate) enum Unsent {
     ReadEmpty(u64),
 }
 
+/// What the input box of a `harness` window holds on its screen now, whatever the
+/// pane host counted of the human's keys: its last lines as drawn, read by the
+/// harness's reader ([`read`]). None where the host gives no lines or the reader
+/// reads no box in them.
+pub(crate) async fn on_screen(
+    host: &dyn PaneHost,
+    pane: &Pane,
+    harness: Harness,
+) -> Option<InputBox> {
+    let snapshot = super::pane::snapshot_drawn(host, pane).await.ok()?;
+    read(
+        harness,
+        &bottom(&snapshot)?,
+        Cursor::of(snapshot.get("cursor")),
+    )
+}
+
+/// The screen's last lines as drawn that a snapshot holds (`bottom`).
+fn bottom(snapshot: &Value) -> Option<Vec<String>> {
+    snapshot
+        .get("bottom")
+        .and_then(Value::as_array)
+        .map(|lines| {
+            lines
+                .iter()
+                .filter_map(|line| line.as_str().map(str::to_owned))
+                .collect()
+        })
+}
+
 /// What a `harness` window holds unsent, the count up in the snapshot `counted`:
 /// its screen's last lines as drawn, read by the harness's reader ([`read`]). A box
 /// it does not read, a key too recent, or a host that gives no lines is the count's
@@ -184,16 +214,7 @@ pub(crate) fn read_unsent(harness: Harness, snapshot: &Value) -> Unsent {
         typed >= SETTLED_MS && (drawn || typed >= UNDRAWN_MS)
     });
     let typed = snapshot.get("typed").and_then(Value::as_u64);
-    let lines: Option<Vec<String>> =
-        snapshot
-            .get("bottom")
-            .and_then(Value::as_array)
-            .map(|lines| {
-                lines
-                    .iter()
-                    .filter_map(|line| line.as_str().map(str::to_owned))
-                    .collect()
-            });
+    let lines = bottom(snapshot);
     let cursor = Cursor::of(snapshot.get("cursor"));
     match (settled, typed, lines) {
         (true, Some(typed), Some(lines))

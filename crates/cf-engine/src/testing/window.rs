@@ -370,6 +370,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             lines: Box::new(Lines {
                 lost: agent.lost.clone(),
                 places,
+                ..Lines::default()
             }),
         })))
     };

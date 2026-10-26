@@ -20,25 +20,26 @@
 //! Enter) at the window idle. Each must leave fresh evidence that it ran (below) before the
 //! window is read; then, once Claude's status has read idle for a few seconds, the window
 //! must read at rest as the daemon reads it: Claude's status idle, and its record settled.
-//! The owner's Claude settings file must be byte for byte what it was before each command:
-//! `--setting-sources local` limits what Claude reads, not what it writes, and `/model` and
-//! `/effort` save themselves there as the default for new sessions (the first run changed
-//! the owner's model so), which is why neither is typed here (the reader's tests hold their
-//! shape). Then a last message, answered, and at rest.
+//! The window's Claude settings file must be byte for byte, from before the window opens to
+//! after its last command, what it was: `--setting-sources local` limits what Claude reads,
+//! not what it writes, and `/model` and `/effort` save themselves there as the default for
+//! new sessions (the first run changed the owner's model so), which is why neither is typed
+//! here (the reader's tests hold their shape). Then a last message, answered, and at rest.
 //!
 //! - `compact`    `/compact`: the boundary, and the `PostCompact` hook's words in what it
-//!   printed
+//!   printed; the words before the command never written before the boundary, which would
+//!   let a compaction at work be read as cancelled
 //! - `clear`      `/clear`: the window shows a new conversation, which its status names
 //! - `refused`    `/clear`, then `/compact` with nothing to compact: what it printed, as the
 //!   system's record
-//! - `cancelled`  a message, answered, then `/compact` and Escape a second later: a record of
-//!   the command, or Claude's status busy after the keys. A finding, never a failure (left
-//!   for 3.0.6): its second run found Claude 2.1.304 writes of the cancel the bare `/compact`
-//!   and the words before a command alone, which ConsensFlow reads as a turn at work, and
-//!   puts the `/compact` back in its input box, where a message pasted next goes after it
-//!   and becomes the compaction's instructions. The case says what Claude wrote and how the
-//!   record reads, then sends what the box holds and says whether it was the `/compact`
-//!   alone, which leaves the box empty for what comes after
+//! - `cancelled`  a message, answered, then `/compact` and Escape a second later: the bare
+//!   `/compact` and the words before a command, and no boundary (a compaction that finished
+//!   before the Escape is no cancel). Its second run (Claude 2.1.304) found those records,
+//!   which ConsensFlow read as a turn at work until 3.0.6, and the `/compact` put back in the
+//!   input box, where a message pasted next goes after it and becomes the compaction's
+//!   instructions. The case then sends what the box holds and says whether it was the
+//!   `/compact` alone, which leaves the box empty for what comes after (what the product
+//!   does with that box, `cargo xtask live compact-cancelled` shows)
 //!
 //! ```text
 //! cargo xtask live commands-at-rest                           every command
@@ -115,47 +116,64 @@ impl Command {
             Command::Compact | Command::Refused | Command::Cancelled => "/compact",
         }
     }
-
-    /// Whether what comes of it is a finding, which fails nothing.
-    fn finding(self) -> bool {
-        self == Command::Cancelled
-    }
 }
 
 /// What the run saw of a command once its keys were typed: what was written in the
-/// conversation the window shows, whether that is a new one, and whether Claude's status
-/// read busy.
+/// conversation the window shows, and whether that is a new one.
 struct Seen {
     written: Vec<Entry>,
     new_conversation: bool,
-    busy: bool,
+}
+
+/// The user's record of `/compact` as it was typed, alone.
+fn bare_compact(entry: &Entry) -> bool {
+    entry.kind == "user" && entry.text == "/compact"
+}
+
+/// The words Claude Code writes before a command.
+fn caveat(entry: &Entry) -> bool {
+    entry.kind == "user" && entry.text.starts_with("<local-command-caveat>")
+}
+
+/// A compaction's boundary.
+fn boundary(entry: &Entry) -> bool {
+    entry.kind == "system/compact_boundary"
 }
 
 /// Whether what was seen is fresh evidence that `command` ran: a window whose status and
 /// record are as they were before the keys says nothing of a command, which may never
-/// have been taken.
+/// have been taken. A cancel is the bare command and the words before a command, with no
+/// boundary: a compaction that finished before the Escape is no cancel (round 2's reviews
+/// of compact-rest).
 fn ran(command: Command, seen: &Seen) -> bool {
-    let wrote = |kind: &str| seen.written.iter().any(|entry| entry.kind == kind);
-    let the_command = || {
-        seen.written.iter().any(|entry| {
-            entry.kind == "user"
-                && (entry.text == "/compact"
-                    || entry
-                        .text
-                        .starts_with("<command-name>/compact</command-name>"))
-        })
-    };
+    let any = |test: fn(&Entry) -> bool| seen.written.iter().any(test);
     match command {
         Command::Compact => {
-            wrote("system/compact_boundary")
+            any(boundary)
                 && seen
                     .written
                     .iter()
                     .any(|entry| entry.text.contains(POST_COMPACT))
         }
         Command::Clear => seen.new_conversation,
-        Command::Refused => wrote("system/local_command"),
-        Command::Cancelled => the_command() || seen.busy,
+        Command::Refused => seen
+            .written
+            .iter()
+            .any(|entry| entry.kind == "system/local_command"),
+        Command::Cancelled => any(bare_compact) && any(caveat) && !any(boundary),
+    }
+}
+
+/// Whether the words before a command were written before the compaction's boundary: what
+/// would let a compaction still at work be read as cancelled.
+fn caveat_before_boundary(written: &[Entry]) -> bool {
+    match (
+        written.iter().position(caveat),
+        written.iter().position(boundary),
+    ) {
+        (Some(words), Some(boundary)) => words < boundary,
+        (Some(_), None) => true,
+        (None, _) => false,
     }
 }
 
@@ -169,6 +187,17 @@ fn hooks() -> Value {
 /// where there is none.
 fn settings_of(config: &Path) -> Option<Vec<u8>> {
     fs::read(config.join("settings.json")).ok()
+}
+
+/// The Claude config folder the rig gives its windows: its `CLAUDE_CONFIG_DIR`, else
+/// `.claude` in its home, as a window's is ([`Window::claude_config`]).
+fn claude_config_of_rig(rig: &Rig) -> PathBuf {
+    let var = |name: &str| rig.var(name).filter(|value| !value.is_empty());
+    match (var("CLAUDE_CONFIG_DIR"), var("HOME")) {
+        (Some(config), _) => PathBuf::from(config),
+        (None, Some(home)) => Path::new(home).join(".claude"),
+        (None, None) => PathBuf::from(".claude"),
+    }
 }
 
 /// The status file of the running Claude whose status names `session`, under the
@@ -266,27 +295,21 @@ fn send_what_the_box_holds(
     Ok(idle)
 }
 
-/// What came of one command: the lines that say it, whether the window read at rest, and
-/// whether it read as the finding does: everything came (it ran, Claude held idle after it,
-/// the owner's settings were kept, and the daemon read the window) but the settling, the
-/// daemon reading the turn in flight and nothing else.
+/// What came of one command: the lines that say it, and whether the window read at rest.
 struct Came {
     at_rest: bool,
-    in_flight: bool,
     lines: Vec<String>,
 }
 
 /// What a command came to: whether it was `done` (it ran, and Claude held idle after it),
-/// whether the daemon `read` its window, and read it `settled` or `in_flight` alone
-/// ([`ask::Record::in_flight_alone`]: not failed, not out of quota, not `unknown`), whether
-/// the owner's settings were `kept`; and for the cancelled one, what came once what its box
-/// held was sent: whether Claude held idle after it, and whether the settings were still
-/// kept.
+/// whether the daemon `read` its window, and read it `settled`, whether the window's
+/// settings were `kept` as they were before it opened; and for the cancelled one, what came
+/// once what its box held was sent: whether Claude held idle after it, and whether the
+/// settings were still kept.
 struct Outcome {
     done: bool,
     read: bool,
     settled: bool,
-    in_flight: bool,
     kept: bool,
     after_the_box: Option<(bool, bool)>,
 }
@@ -304,7 +327,6 @@ impl Outcome {
             done,
             read: reading.is_some(),
             settled: reading.is_some_and(|record| record.settled),
-            in_flight: reading.is_some_and(ask::Record::in_flight_alone),
             kept,
             after_the_box,
         }
@@ -315,14 +337,33 @@ impl Came {
     /// What came of a command whose outcome is `outcome`, said by `lines`.
     fn of(outcome: &Outcome, lines: Vec<String>) -> Self {
         let (idle, still) = outcome.after_the_box.unwrap_or((true, true));
-        let done = outcome.done && idle;
-        let kept = outcome.kept && still;
         Self {
-            at_rest: done && outcome.read && outcome.settled && kept,
-            in_flight: done && outcome.read && outcome.in_flight && kept,
+            at_rest: outcome.done
+                && idle
+                && outcome.read
+                && outcome.settled
+                && outcome.kept
+                && still,
             lines,
         }
     }
+}
+
+/// The check of `command` from what came of it: it holds where the window read at rest
+/// after it. Since 3.0.6 that holds for `cancelled` too: Claude's reader ends the turn at
+/// the words before a command a cancel writes (it was a finding that failed nothing until
+/// then).
+fn check_of(command: Command, came: &Came) -> Check {
+    Check::new(
+        "claude",
+        command.name(),
+        came.at_rest,
+        if came.at_rest {
+            "it ran, and the window is at rest after it"
+        } else {
+            "not at rest after it, or it never ran as it was asked to, or the window's settings changed"
+        },
+    )
 }
 
 /// What a command needs before it is typed: a conversation just cleared for `refused`,
@@ -359,8 +400,14 @@ fn prepare(window: &Window, status: &Path, command: Command) -> Result<bool> {
 
 /// Types `command` into the idle `window` (whose status file is `status`), waits for fresh
 /// evidence that it ran and for Claude to be idle after it, and reads the window as the
-/// daemon reads it; the owner's settings must be as they were.
-fn type_command(window: &Window, status: &Path, command: Command) -> Result<Came> {
+/// daemon reads it; the window's settings must be what they were before it opened
+/// (`settings`).
+fn type_command(
+    window: &Window,
+    status: &Path,
+    command: Command,
+    settings: Option<&[u8]>,
+) -> Result<Came> {
     if !prepare(window, status, command)? {
         let outcome = Outcome::read_as(false, None, true, None);
         return Ok(Came::of(
@@ -373,7 +420,6 @@ fn type_command(window: &Window, status: &Path, command: Command) -> Result<Came
         ));
     }
     let config = window.claude_config();
-    let settings = settings_of(&config);
     let before = window.session().unwrap_or_default();
     let mark = claude::record(&config, &before).len();
     type_keys(window, command.typed())?;
@@ -381,7 +427,7 @@ fn type_command(window: &Window, status: &Path, command: Command) -> Result<Came
         sleep(CANCEL_AFTER);
         window.press(&[27])?;
     }
-    let mut busy = false;
+    let mut early = false;
     let look = || {
         // A /clear has the window show a conversation of its own, which its status names.
         let now = read(status);
@@ -392,32 +438,34 @@ fn type_command(window: &Window, status: &Path, command: Command) -> Result<Came
             .into_iter()
             .skip(if session == before { mark } else { 0 })
             .collect();
-        (session, written, now["status"] == "busy")
+        (session, written)
     };
     let seen = live::until(DONE, LOOK, || {
-        let (session, written, now_busy) = look();
-        busy |= now_busy;
+        let (session, written) = look();
+        early |= command == Command::Compact && caveat_before_boundary(&written);
         let seen = Seen {
             written,
             new_conversation: session != before,
-            busy,
         };
         ran(command, &seen).then_some((session, seen))
     });
-    let done = seen.is_some() && idle_and_held(status);
-    let (session, written, _) = look();
+    let done = seen.is_some() && idle_and_held(status) && !early;
+    let (session, written) = look();
     if session != before {
         window.follow(&session);
     }
     let reading = window.record();
-    let kept = settings_of(&config) == settings;
+    let kept = settings_of(&config).as_deref() == settings;
     let mut lines = vec![format!(
         "typed `{}`; {}; Claude's status {}; the record reads {}",
         command.typed(),
-        if seen.is_some() {
-            "it ran"
-        } else {
-            "no fresh evidence that it ran"
+        match (seen.is_some(), command) {
+            (true, Command::Cancelled) => "it was cancelled",
+            (true, _) => "it ran",
+            (false, Command::Cancelled) => {
+                "no fresh evidence that it was cancelled (a compaction that finished before the Escape is none)"
+            }
+            (false, _) => "no fresh evidence that it ran",
         },
         if done {
             "read idle after it"
@@ -432,9 +480,12 @@ fn type_command(window: &Window, status: &Path, command: Command) -> Result<Came
         lines.push(format!("the window shows a new conversation: {session}"));
     }
     lines.extend(written.iter().map(|entry| format!("  {}", shape(entry))));
+    if early {
+        lines.push("FAIL the words before the command came before the compaction's boundary: a compaction at work would read as cancelled".to_owned());
+    }
     if !kept {
         lines.push(format!(
-            "FAIL Claude changed the owner's settings, {}",
+            "FAIL Claude changed the window's settings, {}",
             config.join("settings.json").display()
         ));
     }
@@ -442,10 +493,10 @@ fn type_command(window: &Window, status: &Path, command: Command) -> Result<Came
     // owner's settings must still be as they were.
     let after_the_box = if command == Command::Cancelled {
         let idle = send_what_the_box_holds(window, status, &mut lines)?;
-        let still = settings_of(&config) == settings;
+        let still = settings_of(&config).as_deref() == settings;
         if kept && !still {
             lines.push(format!(
-                "FAIL Claude changed the owner's settings once what the box held was sent, {}",
+                "FAIL Claude changed the window's settings once what the box held was sent, {}",
                 config.join("settings.json").display()
             ));
         }
@@ -455,35 +506,6 @@ fn type_command(window: &Window, status: &Path, command: Command) -> Result<Came
     };
     let outcome = Outcome::read_as(done, reading.as_ref(), kept, after_the_box);
     Ok(Came::of(&outcome, lines))
-}
-
-/// The check of `command` from what came of it: it holds where the window read at rest
-/// after it. For the one whose outcome is a finding (`cancelled`), it holds too where only
-/// the daemon's settling of its reading is missing: the command ran, Claude held idle after
-/// it and after what its box held was sent, the owner's settings were kept throughout, and
-/// the daemon read the window as a turn in flight. A message before it that never answered,
-/// a command that never ran or never left Claude idle, settings Claude changed, a window the
-/// daemon could not read, and a record read `unknown`, failed or stopped by a quota fail it,
-/// finding or not (Calliope's reviews of compact-rest round 3, of round b7 and of round b9).
-fn check_of(command: Command, came: &Came) -> Check {
-    let finding = command.finding() && came.in_flight && !came.at_rest;
-    let said = if came.at_rest {
-        "it ran, and the window is at rest after it"
-    } else if finding {
-        "it ran, Claude held idle after it, the owner's settings were kept and the daemon read the window as a turn in flight, but the window does not read at rest"
-    } else {
-        "not at rest after it, or it never ran, or the owner's settings changed"
-    };
-    Check::new(
-        "claude",
-        command.name(),
-        came.at_rest || finding,
-        if command.finding() {
-            format!("{said} (a finding, left for 3.0.6: its lines above say what Claude wrote and what its box held)")
-        } else {
-            said.to_owned()
-        },
-    )
 }
 
 #[test]
@@ -501,6 +523,9 @@ fn each_command_typed_at_an_idle_claudes_prompt_leaves_the_window_at_rest() -> R
     )?;
     let claude = log.found(Harness::Claude)?;
     let rig = Rig::start(live::rig(std::slice::from_ref(&claude), FAKE_AGENT))?;
+    // The window's settings before anything of it ran: one baseline, to its end.
+    let config = claude_config_of_rig(&rig);
+    let settings = settings_of(&config);
     let window = Open::new(&rig, &claude, FOLDER, FOLDER)
         .claude_alone_with_hooks(hooks())
         .open_telling(&log, "claude")?;
@@ -532,7 +557,7 @@ fn each_command_typed_at_an_idle_claudes_prompt_leaves_the_window_at_rest() -> R
             ));
             continue;
         }
-        let came = type_command(&window, &status, command)?;
+        let came = type_command(&window, &status, command, settings.as_deref())?;
         log.block(&format!("== {}", command.name()), &came.lines.join("\n"));
         checks.push(check_of(command, &came));
     }
@@ -553,6 +578,18 @@ fn each_command_typed_at_an_idle_claudes_prompt_leaves_the_window_at_rest() -> R
         ),
     ));
     drop(window);
+    // From before the window opened to after it is gone.
+    let kept = settings_of(&config) == settings;
+    checks.push(Check::new(
+        "claude",
+        "settings",
+        kept,
+        if kept {
+            "the window's settings are byte for byte what they were before it opened"
+        } else {
+            "Claude changed the window's settings"
+        },
+    ));
     rig.close()?;
     report::conclude(&log, "what each command came to", &checks)
 }
@@ -595,11 +632,12 @@ mod tests {
     }
 
     #[test]
-    fn the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings() {
+    fn a_command_holds_only_where_it_was_done_read_settled_and_kept_the_settings_cancelled_too() {
         // Every outcome of a command: whether it was done (it ran, and Claude held idle after
-        // it), whether the daemon read its window, and read it settled or in flight alone,
-        // whether the owner's settings were kept; and for the cancelled one, whether Claude
-        // held idle once what its box held was sent, and the settings were still kept then.
+        // it), whether the daemon read its window, and read it settled, whether the window's
+        // settings were kept; and for the cancelled one, whether Claude held idle once what
+        // its box held was sent, and the settings were still kept then. Since 3.0.6 the
+        // cancelled one is no finding: a reading in flight fails it as it fails any.
         let flags = [false, true];
         let afters = [
             None,
@@ -610,116 +648,52 @@ mod tests {
         for done in flags {
             for read in flags {
                 for settled in flags {
-                    for in_flight in flags {
-                        for kept in flags {
-                            for after_the_box in afters {
-                                let outcome = Outcome {
-                                    done,
-                                    read,
-                                    settled,
-                                    in_flight,
-                                    kept,
-                                    after_the_box,
-                                };
-                                let came = Came::of(&outcome, Vec::new());
-                                let (idle, still) = after_the_box.unwrap_or((true, true));
-                                let all_came = done && read && kept && idle && still;
-                                for command in Command::ALL {
-                                    // At rest holds for any command; the finding (`cancelled`)
-                                    // holds too where all came but the settling and the
-                                    // daemon reads the turn in flight alone. A prep message
-                                    // that never answered, a command never done, the settings
-                                    // changed, Claude never idle after the box, a window the
-                                    // daemon never read, or one it reads otherwise than in
-                                    // flight fail it all the same.
-                                    let holds = (all_came && settled)
-                                        || (command == Command::Cancelled && all_came && in_flight);
-                                    let check = check_of(command, &came);
-                                    assert_eq!(
-                                        check.ok, holds,
-                                        "{command:?} {done} {read} {settled} {in_flight} {kept} {after_the_box:?}: {}",
-                                        check.detail
-                                    );
-                                }
+                    for kept in flags {
+                        for after_the_box in afters {
+                            let outcome = Outcome {
+                                done,
+                                read,
+                                settled,
+                                kept,
+                                after_the_box,
+                            };
+                            let (idle, still) = after_the_box.unwrap_or((true, true));
+                            let holds = done && read && settled && kept && idle && still;
+                            for command in Command::ALL {
+                                let check = check_of(command, &Came::of(&outcome, Vec::new()));
+                                assert_eq!(
+                                    check.ok, holds,
+                                    "{command:?} {done} {read} {settled} {kept} {after_the_box:?}"
+                                );
                             }
                         }
                     }
                 }
             }
         }
-        let outcome = |read: bool, kept: bool| Outcome {
-            done: true,
-            read,
-            settled: false,
-            in_flight: read,
-            kept,
-            after_the_box: Some((true, true)),
-        };
-        let finding = check_of(
-            Command::Cancelled,
-            &Came::of(&outcome(true, true), Vec::new()),
-        );
-        assert!(
-            finding.detail.starts_with("it ran, Claude held idle"),
-            "{}",
-            finding.detail
-        );
-        for (read, kept) in [(true, false), (false, true)] {
-            let failed = check_of(
-                Command::Cancelled,
-                &Came::of(&outcome(read, kept), Vec::new()),
-            );
-            assert!(
-                failed.detail.starts_with("not at rest"),
-                "{}",
-                failed.detail
-            );
-        }
-    }
-
-    #[test]
-    fn the_cancelled_finding_passes_only_a_record_read_in_flight_and_not_one_unknown_failed_or_out_of_quota(
-    ) {
-        // Calliope's review of round b9 (T-84, P3 2): the daemon's `settled` is false for a
-        // record read `unknown` (a transcript proving neither), and the check read nothing
-        // of `failed` or `quota`, so each passed as the known finding (the record reads in
-        // flight while Claude's status reads idle).
-        let record = |settled: bool, state: &str, failed: Value, quota: Value| ask::Record {
+        // A record read in flight, unknown, failed or out of quota is not settled.
+        let record = |settled: bool, state: &str| ask::Record {
             settled,
             settlement: state.to_owned(),
-            failed,
-            quota,
             ..ask::Record::default()
         };
-        let stopped = json!({ "resetsAt": "2026-10-24T20:00:00.000Z" });
-        let passes = |reading: &ask::Record| {
-            let outcome = Outcome::read_as(true, Some(reading), true, Some((true, true)));
-            check_of(Command::Cancelled, &Came::of(&outcome, Vec::new())).ok
-        };
-        assert!(passes(&record(
-            false,
-            "in-flight",
-            json!(false),
-            Value::Null
-        )));
-        assert!(passes(&record(true, "settled", json!(false), Value::Null)));
-        for (what, reading) in [
-            (
-                "unknown",
-                record(false, "unknown", json!(false), Value::Null),
-            ),
-            (
-                "failed",
-                record(false, "in-flight", json!(true), Value::Null),
-            ),
-            (
-                "out of quota",
-                record(false, "in-flight", json!(false), stopped),
-            ),
+        for (settled, state, holds) in [
+            (true, "settled", true),
+            (false, "in-flight", false),
+            (false, "unknown", false),
         ] {
-            assert!(!passes(&reading), "a record read {what} passed");
+            let outcome = Outcome::read_as(
+                true,
+                Some(&record(settled, state)),
+                true,
+                Some((true, true)),
+            );
+            assert_eq!(
+                check_of(Command::Cancelled, &Came::of(&outcome, Vec::new())).ok,
+                holds,
+                "{state}"
+            );
         }
-        // And a window the daemon could not read fails it as before.
         let unread = Outcome::read_as(true, None, true, Some((true, true)));
         assert!(!check_of(Command::Cancelled, &Came::of(&unread, Vec::new())).ok);
     }
@@ -728,17 +702,6 @@ mod tests {
     fn each_command_is_typed_as_a_person_types_it() {
         let typed: Vec<&str> = Command::ALL.iter().map(|command| command.typed()).collect();
         assert_eq!(typed, ["/compact", "/clear", "/compact", "/compact"]);
-    }
-
-    #[test]
-    fn only_the_cancelled_compaction_is_a_finding_which_fails_nothing() {
-        // Left for 3.0.6: ConsensFlow reads a compaction cancelled with Escape as a turn at
-        // work, and Claude puts the `/compact` back in its input box.
-        let findings: Vec<Command> = Command::ALL
-            .into_iter()
-            .filter(|command| command.finding())
-            .collect();
-        assert_eq!(findings, [Command::Cancelled]);
     }
 
     /// A record of the kind `kind`, saying `text`.
@@ -752,60 +715,77 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_command_ran_only_where_it_left_fresh_evidence_of_its_own() {
-        let seen = |written: Vec<Entry>, new_conversation: bool, busy: bool| Seen {
+    fn seen(written: Vec<Entry>, new_conversation: bool) -> Seen {
+        Seen {
             written,
             new_conversation,
-            busy,
-        };
-        let nothing = || seen(Vec::new(), false, false);
+        }
+    }
+
+    #[test]
+    fn a_command_ran_only_where_it_left_fresh_evidence_of_its_own() {
         // An unchanged window says nothing of any command.
         for command in Command::ALL {
-            assert!(!ran(command, &nothing()), "{command:?}");
+            assert!(!ran(command, &seen(Vec::new(), false)), "{command:?}");
         }
         let boundary = || entry("system/compact_boundary", "");
         let printed = |words: &str| entry("user", &format!("<local-command-stdout>{words}"));
         assert!(ran(
             Command::Compact,
-            &seen(vec![boundary(), printed(POST_COMPACT)], false, false)
+            &seen(vec![boundary(), printed(POST_COMPACT)], false)
         ));
+        assert!(!ran(Command::Compact, &seen(vec![boundary()], false)));
         assert!(!ran(
             Command::Compact,
-            &seen(vec![boundary()], false, false)
+            &seen(vec![printed(POST_COMPACT)], false)
         ));
-        assert!(!ran(
-            Command::Compact,
-            &seen(vec![printed(POST_COMPACT)], false, false)
-        ));
-        assert!(ran(Command::Clear, &seen(Vec::new(), true, false)));
-        assert!(!ran(Command::Clear, &seen(vec![boundary()], false, true)));
+        assert!(ran(Command::Clear, &seen(Vec::new(), true)));
+        assert!(!ran(Command::Clear, &seen(vec![boundary()], false)));
         assert!(ran(
             Command::Refused,
-            &seen(vec![entry("system/local_command", "")], false, false)
+            &seen(vec![entry("system/local_command", "")], false)
         ));
-        assert!(!ran(
-            Command::Refused,
-            &seen(vec![printed("x")], false, true)
-        ));
-        for written in [
-            vec![entry("user", "/compact")],
+        assert!(!ran(Command::Refused, &seen(vec![printed("x")], false)));
+        assert!(!ran(Command::Refused, &seen(vec![boundary()], false)));
+    }
+
+    #[test]
+    fn a_cancel_is_the_bare_command_and_the_words_before_a_command_and_no_boundary() {
+        // Round 2's reviews of compact-rest: a compaction that finished before the Escape is
+        // no cancel, and neither is the command's record alone or Claude's status busy.
+        let bare = || entry("user", "/compact");
+        let words = || entry("user", "<local-command-caveat>Run by the user.");
+        assert!(ran(Command::Cancelled, &seen(vec![bare(), words()], false)));
+        for not in [
+            vec![bare()],
+            vec![words()],
+            vec![bare(), entry("system/compact_boundary", ""), words()],
+            vec![entry("user", "/compact more"), words()],
             vec![entry(
                 "user",
                 "<command-name>/compact</command-name> ⏎ <command-args></command-args>",
             )],
         ] {
-            assert!(ran(Command::Cancelled, &seen(written, false, false)));
+            assert!(
+                !ran(Command::Cancelled, &seen(not.clone(), false)),
+                "{not:?}"
+            );
         }
-        assert!(ran(Command::Cancelled, &seen(Vec::new(), false, true)));
-        assert!(!ran(
-            Command::Cancelled,
-            &seen(
-                vec![entry("user", "<command-name>/clear</command-name>")],
-                false,
-                false
-            )
-        ));
+    }
+
+    #[test]
+    fn the_words_before_a_command_come_after_a_compactions_boundary_or_it_is_told() {
+        let bare = entry("user", "/compact");
+        let boundary = entry("system/compact_boundary", "");
+        let words = entry("user", "<local-command-caveat>Run by the user.");
+        assert!(!caveat_before_boundary(std::slice::from_ref(&bare)));
+        assert!(!caveat_before_boundary(&[
+            bare.clone(),
+            boundary.clone(),
+            words.clone()
+        ]));
+        assert!(caveat_before_boundary(&[bare.clone(), words.clone()]));
+        assert!(caveat_before_boundary(&[bare, words, boundary]));
     }
 
     #[test]

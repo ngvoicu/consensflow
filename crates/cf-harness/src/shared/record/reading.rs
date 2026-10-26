@@ -92,13 +92,14 @@ pub struct Record {
     /// Code's): said only where there are any, and no reading Node wrote has them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub monitors: Vec<Monitor>,
-    /// Where the record's lines stand: those torn and passed over, and the record each
-    /// item began in. Never said: no reading Node wrote has it.
+    /// Where the record's lines stand: those torn and passed over, the record each item
+    /// began in, and what the last of them leave in the harness's input box. Never said:
+    /// no reading Node wrote has it.
     #[serde(skip)]
     pub lines: Box<Lines>,
 }
 
-/// Where a record's lines stand, as its reader read them (T-223, T-290). Behind a box in
+/// Where a record's lines stand, as its reader read them (T-223, T-290, T-483). Behind a box in
 /// [`Record`], which a reader's `Err` holds too ([`crate::records::Open`]): a reading stays
 /// as small as one without them (the merge with turn-end, T-494).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -111,6 +112,10 @@ pub struct Lines {
     /// item, which [`Lines::lost`] is counted in: none where the harness's
     /// items are not its record's lines (Devin's, from its store).
     pub places: Option<Vec<usize>>,
+    /// The turn is over, and its harness put the command it began with back in its
+    /// input box, where what is pasted next goes in after it: Claude Code's compaction
+    /// cancelled with Escape (its reader, T-483).
+    pub put_back: bool,
 }
 
 /// A monitor a turn armed that its harness has said no end of: its task's id, what its

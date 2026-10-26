@@ -1,5 +1,5 @@
 //! The pattern of Node's Claude record reader that is kept (its `/clear`'s is
-//! one of the quiet commands' now), and the two of a command typed at Claude's
+//! one of the quiet commands' now), and those of a command typed at Claude's
 //! prompt, each compiled once, the first time it is used, as JavaScript reads it
 //! (`shared::pattern`).
 
@@ -31,6 +31,16 @@ pub(super) static QUIET_COMMAND: LazyLock<Regex> = LazyLock::new(|| {
 /// `<local-command-stdout>`, or `<local-command-stderr>`.
 pub(super) static OUTPUT: LazyLock<Regex> =
     LazyLock::new(|| compile(r"^<local-command-(?:stdout|stderr)>"));
+
+/// What Claude Code writes as the user's turn the moment `/compact` is typed,
+/// before it compacts (2.1.303 to 2.1.310): the command as typed, with its
+/// instructions where it was given some.
+pub(super) static BARE_COMPACT: LazyLock<Regex> =
+    LazyLock::new(|| compile(r"^/compact(?:\s[\s\S]*)?$"));
+
+/// What Claude Code writes, as a meta record of the user's, before a command
+/// typed at its prompt, and alone where a compaction was cancelled with Escape.
+pub(super) static CAVEAT: LazyLock<Regex> = LazyLock::new(|| compile(r"^<local-command-caveat>"));
 
 #[cfg(test)]
 mod tests {
@@ -82,6 +92,22 @@ mod tests {
             "<local-command-stdin>x</local-command-stdin>",
         ] {
             assert!(!OUTPUT.is_match(not), "{not:?}");
+        }
+        for typed in ["/compact", "/compact keep the plan", "/compact\nand this"] {
+            assert!(BARE_COMPACT.is_match(typed), "{typed:?}");
+        }
+        for not in [
+            "/compacted",
+            " /compact",
+            "/compactness",
+            "Please /compact",
+            "<command-name>/compact</command-name>",
+        ] {
+            assert!(!BARE_COMPACT.is_match(not), "{not:?}");
+        }
+        assert!(CAVEAT.is_match("<local-command-caveat>Run by the user.</local-command-caveat>"));
+        for not in [" <local-command-caveat>", "<local-command-stdout>x"] {
+            assert!(!CAVEAT.is_match(not), "{not:?}");
         }
     }
 }

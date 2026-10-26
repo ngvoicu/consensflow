@@ -72,7 +72,7 @@ use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
 use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
-use crate::shared::input_box::{self, Unsent};
+use crate::shared::input_box::{self, InputBox, Unsent};
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::switched_to;
 use crate::shared::resumable::transcript_kept;
@@ -186,6 +186,8 @@ impl Adapter for ClaudeAdapter {
                     asked: RefCell::new(None),
                     pressed: RefCell::new(None),
                     restored: Cell::new(false),
+                    put_back: Cell::new(false),
+                    clear_first: Cell::new(false),
                     read_empty: Cell::new(None),
                     left_open: RefCell::new(left_open),
                     relaunched,
@@ -262,6 +264,12 @@ struct ClaudeWindow {
     /// The latest look read the window at rest by that press: Claude has put
     /// the message back in its input box.
     restored: Cell<bool>,
+    /// The latest look read the window at rest after a command Claude put back in
+    /// its input box (a compaction cancelled with Escape, `Lines::put_back`).
+    put_back: Cell<bool>,
+    /// The latest readiness read that command still in the box on the screen, with
+    /// no key of the human's since: the delivery's paste clears it first.
+    clear_first: Cell<bool>,
     /// The human's keys left something unsent by the pane host's count, and the
     /// latest readiness read the input box empty on the screen, at this count of
     /// their keys: the delivery's paste says so ([`Unsent::ReadEmpty`]).
@@ -279,6 +287,10 @@ struct ClaudeWindow {
     /// project's servers.
     directory: String,
 }
+
+/// Why a paste waits for a box that may hold the `/compact` Claude put back.
+const PUT_BACK_UNREAD: &str =
+    "Claude's input box may still hold the /compact it put back when the compaction was cancelled, and the screen does not show the box";
 
 /// What a look at `session` is told: where the window's program began writing,
 /// when the window was opened again on that conversation.
@@ -332,6 +344,22 @@ impl ClaudeWindow {
             .as_ref()
             .is_some_and(|pressed| pressed.stopped(record, self.time.wall_ms()))
     }
+
+    /// Whether a paste may go in after a compaction the human cancelled, the
+    /// human's keys having left nothing unsent: the box on the screen empty, or
+    /// holding what Claude put back, which the paste clears first (one Ctrl+C,
+    /// only where the box shows text: at an empty box a second one in a row ends
+    /// Claude). A box the screen does not show holds the paste.
+    async fn put_back_cleared(&self, host: &dyn PaneHost, pane: &Pane) -> Readiness {
+        match input_box::on_screen(host, pane, Harness::Claude).await {
+            Some(InputBox::Empty) => Readiness::Ready,
+            Some(InputBox::Holds) => {
+                self.clear_first.set(true);
+                Readiness::Ready
+            }
+            None => Readiness::Held(Held::Because(PUT_BACK_UNREAD.to_owned())),
+        }
+    }
 }
 
 impl Window for ClaudeWindow {
@@ -348,6 +376,7 @@ impl Window for ClaudeWindow {
         *self.asked.borrow_mut() = None;
         *self.pressed.borrow_mut() = None;
         self.restored.set(false);
+        self.put_back.set(false);
         *self.left_open.borrow_mut() = None;
     }
 
@@ -382,6 +411,10 @@ impl Window for ClaudeWindow {
     /// A paste waits for the window to be readable, on its conversation,
     /// with no paste going in, and for what the human typed and did not send,
     /// unless the input box reads empty on the screen ([`input_box::unsent`]).
+    /// After a compaction the human cancelled, Claude has the `/compact` back in
+    /// its box, which the human's keys never typed: the box on the screen says
+    /// whether it is still there, to be cleared first, and a box that cannot be
+    /// read holds the paste, which would go in behind it (`put_back`).
     fn ready<'a>(
         &'a self,
         host: &'a dyn PaneHost,
@@ -408,8 +441,13 @@ impl Window for ClaudeWindow {
                 return Ok(Readiness::Held(Held::Because(reason)));
             }
             self.read_empty.set(None);
+            self.clear_first.set(false);
             if !js::truthy(snapshot.get("unsent")) {
-                return Ok(Readiness::Ready);
+                return Ok(if self.put_back.get() {
+                    self.put_back_cleared(host, pane).await
+                } else {
+                    Readiness::Ready
+                });
             }
             // The count is the human's keys, a guess: the box on the screen says.
             Ok(
@@ -432,10 +470,10 @@ impl Window for ClaudeWindow {
     ) -> Work<'a, Result<Admission, String>> {
         Box::pin(async move {
             // A window read at rest by an interrupt of ours has the message it
-            // was given in its input box again, and this one would be pasted
-            // after it, to go as one: the box is cleared first, unless the engine
-            // just cleared it.
-            if self.restored.get() && !host.cleared() {
+            // was given in its input box again, and one the human's cancel left
+            // has the `/compact`: this one would be pasted after it, to go as one.
+            // The box is cleared first, unless the engine just cleared it.
+            if (self.restored.get() || self.clear_first.take()) && !host.cleared() {
                 if let Err(cause) = pane::write_keys(host, pane, &stopped::CLEAR_INPUT).await {
                     let reason = format!("the window's input box could not be cleared: {cause}");
                     return Ok(Admission::Refused { reason });
@@ -525,6 +563,8 @@ impl Window for ClaudeWindow {
                     // out of the conversation it answers from: the look says so.
                     let by_press = idle && self.stopped(&reading);
                     self.restored.set(by_press);
+                    self.put_back
+                        .set(matches!(&*reading, Reading::Known(record) if record.lines.put_back));
                     *self.asked.borrow_mut() = stopped::last_user(&reading);
                     // A turn the quit cut is over, though its record never says
                     // so: Claude at its prompt has begun no other.

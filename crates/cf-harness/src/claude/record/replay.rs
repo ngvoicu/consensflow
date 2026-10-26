@@ -8,8 +8,10 @@ use cf_base::{js, time};
 use serde_json::Value;
 
 use super::patterns::QUIET_COMMAND;
-use super::project::{Assistant, Block, Boundary, Call, Hook, Projected, ToolResult, User};
-use super::{Candidate, Terminal, Transcript};
+use super::project::{
+    Assistant, Block, Boundary, Call, Compacting, Hook, Projected, ToolResult, User,
+};
+use super::{Candidate, Terminal, Transcript, TypedCompact};
 use crate::shared::quota::exhausted_quota;
 use crate::shared::record::reading::{native_id, Role};
 
@@ -65,6 +67,8 @@ impl Transcript {
         let number = Value::from(seq);
         let at = record.at.as_ref().unwrap_or(&number);
         self.queues.answered();
+        self.typed_compact = None;
+        self.put_back = false;
         let named = record.message_id.as_deref();
         if self
             .active_assistant
@@ -177,6 +181,15 @@ impl Transcript {
     /// a `/compact` read at work for 80 minutes). Departs from Node's reader,
     /// which read the output as a prompt too.
     ///
+    /// A compaction cancelled with Escape (Claude Code 2.1.304 and 2.1.310, the
+    /// live suite `commands-at-rest`) writes the bare `/compact` as it was typed,
+    /// and at the Escape the words before a command, a sibling of it, and
+    /// nothing more: a native end of the turn the bare command began
+    /// (`cancels`), and Claude Code puts the `/compact` back in its input box
+    /// (`Lines::put_back`). A compaction at work writes nothing after its bare
+    /// command but its boundary and summary, and those words after them, their
+    /// child.
+    ///
     /// A result that says its call started a job in the background (a command, a
     /// monitor) starts it, and a TaskStop call's result that says it stopped one ends
     /// it; a notification Claude Code takes as a turn of its own ends the jobs its head
@@ -189,6 +202,8 @@ impl Transcript {
     fn user(&mut self, record: &User, place: Option<usize>, seq: usize) -> Result<(), String> {
         let number = Value::from(seq);
         let at = record.at.as_ref().unwrap_or(&number);
+        let typed = self.typed_compact.take();
+        self.put_back = false;
         for result in &record.results {
             self.tool_result(result, at, seq)?;
         }
@@ -224,6 +239,7 @@ impl Transcript {
             .output_of
             .as_deref()
             .is_some_and(|parent| self.follows_its_command(parent));
+        let cancels = typed.is_some_and(|typed| Self::cancels(&typed, record));
         let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
         if record.summary {
             self.items.summary(id, &record.text, at, seq);
@@ -232,12 +248,18 @@ impl Transcript {
         } else {
             self.items.push(id, Role::User, &record.text, at, seq);
         }
-        if ends {
+        if ends || cancels {
             self.ended_natively();
+            self.put_back = cancels;
             return Ok(());
         }
         if (record.summary && !self.turn_open) || self.late_ancestor(place) {
             return Ok(());
+        }
+        if let Some((Compacting::Typed, parent)) = &record.compacting {
+            self.typed_compact = Some(TypedCompact {
+                parent: Arc::clone(parent),
+            });
         }
         self.queues.consumed(&record.text, record.queued);
         // Written to the transcript alone, it runs no turn: the turn is as it was (2.1.292
@@ -268,6 +290,15 @@ impl Transcript {
         }
         self.ancestry
             .is_late(user, uuid.as_deref(), &candidate.uuid)
+    }
+
+    /// Whether the user's record `record` is the cancel of the compaction the
+    /// bare `/compact` `typed` began: the words before a command, a sibling of
+    /// that bare command (the same parent). The bare command is forgotten at
+    /// the next record of the user's or the assistant's (`typed_compact`), so
+    /// nothing came between them but Claude Code's own bookkeeping.
+    fn cancels(typed: &TypedCompact, record: &User) -> bool {
+        matches!(&record.compacting, Some((Compacting::Caveat, parent)) if *parent == typed.parent)
     }
 
     /// What a command printed, written as the system's record, that follows

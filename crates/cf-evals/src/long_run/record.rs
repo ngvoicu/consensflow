@@ -85,9 +85,15 @@ pub enum Kind {
     /// Claude Code compacted the conversation: no turn.
     Compaction,
     /// What a command typed at Claude's prompt printed (`<local-command-stdout>`,
-    /// `<local-command-stderr>`), as the user's record or the system's: the end,
-    /// natively, of the turn its command began, where it follows the command.
+    /// `<local-command-stderr>`), as the user's record: the end, natively, of the
+    /// turn its command began, where it follows the command; a prompt's words where
+    /// it does not, as the product reads them.
     Output,
+    /// The same, as the system's record (`local_command`): the end of its command's
+    /// turn where it follows the command, and nothing where it does not, as the
+    /// product reads it. A command the system writes whole (`/mcp`, `/plugin`) has
+    /// its own record the system's too, which is nothing, and began no turn.
+    Printed,
     /// How many background agents and workflows a root `turn_duration` says its turn
     /// left running (`pendingBackgroundAgentCount`, `pendingWorkflowCount`; none when
     /// it says none): Claude Code wakes the agent as each ends, and says the count again
@@ -349,9 +355,12 @@ impl Record {
             .filter(|entry| entry.at.is_none_or(|said| said <= at))
         {
             match &entry.kind {
-                Kind::Output if last.is_some_and(|said| follows_its_command(said, entry)) => {
+                Kind::Output | Kind::Printed
+                    if last.is_some_and(|said| follows_its_command(said, entry)) =>
+                {
                     (open, candidate, ended, agents) = (false, None, None, 0);
                 }
+                Kind::Printed => continue,
                 Kind::Prompt | Kind::Output => {
                     let late = ended.is_some_and(|(parent, answer)| {
                         answer.is_some_and(|answer| {
@@ -450,8 +459,9 @@ impl Record {
     /// since Claude Code compacted the conversation (a job's start or end, or a count
     /// of agents, aside, and the records of each command after it that runs no model:
     /// what it printed, the command, and the words before it, which a `/compact` typed
-    /// at the prompt writes after its summary). A command that may go on to the model
-    /// is no such thing: a turn may be at work after it.
+    /// at the prompt writes after its summary, and what a command the system writes
+    /// whole printed, which began no turn). A command that may go on to the model is
+    /// no such thing: a turn may be at work after it.
     pub fn ends_in_compaction(&self) -> bool {
         let mut said = self
             .entries
@@ -464,11 +474,19 @@ impl Record {
                 )
             })
             .peekable();
-        while said.next_if(|entry| entry.kind == Kind::Output).is_some() {
-            if said.next_if(|entry| quiet(entry)).is_none() {
+        while let Some(output) =
+            said.next_if(|entry| matches!(entry.kind, Kind::Output | Kind::Printed))
+        {
+            let its_command = |entry: &&Entry| {
+                quiet(entry) && entry.uuid.is_some() && entry.uuid == output.parent
+            };
+            if said.next_if(its_command).is_some() {
+                said.next_if(|entry| {
+                    entry.kind == Kind::Prompt && entry.content.starts_with(CAVEAT)
+                });
+            } else if output.kind == Kind::Output {
                 return false;
             }
-            said.next_if(|entry| entry.kind == Kind::Prompt && entry.content.starts_with(CAVEAT));
         }
         said.next()
             .is_some_and(|entry| entry.kind == Kind::Compaction)
@@ -668,7 +686,7 @@ fn claude_entries(line: &Value, names: &Names) -> Vec<Entry> {
                     .is_some_and(|text| OUTPUTS.iter().any(|tag| text.starts_with(tag))) =>
         {
             vec![entry(
-                Kind::Output,
+                Kind::Printed,
                 line["content"].as_str().unwrap_or_default(),
             )]
         }

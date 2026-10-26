@@ -84,7 +84,7 @@
 
 use std::path::Path;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -135,6 +135,9 @@ pub struct Window {
     /// The window's first message came with its launch, as an argument of the program, and
     /// was no paste: Claude Code makes no attachment of the paths of images in it.
     pub seeded: bool,
+    /// What a command cancelled put back in the input box, until the terminal's reader
+    /// takes it there.
+    pub put_back: Arc<Mutex<Option<String>>>,
 }
 
 /// What a turn answers.
@@ -549,6 +552,7 @@ mod tests {
             wake: std::sync::mpsc::channel().0,
             stop: Arc::new(Stop::default()),
             seeded: false,
+            put_back: Arc::default(),
         }
     }
 

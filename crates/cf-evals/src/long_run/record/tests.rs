@@ -333,6 +333,59 @@ fn compact_typed(printed: String) -> Vec<String> {
     ]
 }
 
+/// A command the system writes whole, its own record and what it printed (2.1.282's
+/// `/plugin`, `/mcp` dismissed), `name` and `parent` the command's.
+fn written_whole(second: u32, name: &str, parent: &str) -> [String; 2] {
+    let system = |uuid: &str, parent: &str, content: &str| {
+        line(
+            second,
+            json!({ "type": "system", "subtype": "local_command", "uuid": uuid,
+                "parentUuid": parent, "isMeta": false, "level": "info", "isSidechain": false,
+                "content": content }),
+        )
+    };
+    [
+        system(
+            "w1",
+            parent,
+            &format!("<command-name>/{name}</command-name>"),
+        ),
+        system(
+            "w2",
+            "w1",
+            "<local-command-stdout>Dialog dismissed</local-command-stdout>",
+        ),
+    ]
+}
+
+#[test]
+fn a_command_the_system_writes_whole_after_a_compaction_opens_no_turn_and_the_record_ends_in_it() {
+    // Astra's look at compact-rest round 2: its output, unmatched, read as a prompt, a
+    // phantom turn.
+    let printed = said_by_claude(
+        150,
+        "o1",
+        "n1",
+        "<local-command-stdout>Compacted</local-command-stdout>",
+        json!({}),
+    );
+    let mut lines = compact_typed(printed);
+    lines.extend(written_whole(200, "mcp", "t1"));
+    let read = record(&lines);
+    assert_eq!(read.stood_at(at(300)).unwrap().0, Stood::AtRest);
+    assert!(read.ends_in_compaction());
+    // And with no compaction before it, a turn that ended stays at rest.
+    let mut answered = vec![
+        prompt(0, "Plan it."),
+        answer(10, "Planned.", "end_turn"),
+        duration(11),
+    ];
+    answered.extend(written_whole(20, "plugin", "d1"));
+    let read = record(&answered);
+    assert_eq!(read.stood_at(at(30)).unwrap().0, Stood::AtRest);
+    assert!(!read.ends_in_compaction());
+}
+
 #[test]
 fn a_compact_typed_at_the_prompt_ends_at_what_it_printed_and_the_record_ends_in_its_compaction() {
     let printed = |parent: &str, text: &str| said_by_claude(150, "o1", parent, text, json!({}));
@@ -432,7 +485,7 @@ fn a_compact_that_found_nothing_to_compact_ends_at_what_the_system_says_it_print
     assert_eq!(read.stood_at(at(35)).unwrap().0, Stood::InFlight, "it runs");
     let (stood, last) = read.stood_at(at(60)).unwrap();
     assert_eq!(stood, Stood::AtRest, "{last:?}");
-    assert_eq!(last.kind, Kind::Output);
+    assert_eq!(last.kind, Kind::Printed);
     assert!(!read.ends_in_compaction(), "nothing was compacted");
     // A system record of another kind, a meta one, or one that printed no output ends nothing.
     for (why, fields) in [

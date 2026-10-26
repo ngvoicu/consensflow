@@ -10,7 +10,7 @@
 //! A turn is settled once the transcript says it ended, with no tool call or
 //! queued message open: natively (an API error, an interrupt, the output of a
 //! command typed at Claude's prompt that runs no model, a `/clear`'s or a
-//! `/compact`'s), or
+//! `/compact`'s, a compaction cancelled with Escape), or
 //! by the boundary record a turn that answered writes after its stop hooks
 //! ran (a `turn_duration`, or a `stop_hook_summary` that did not prevent
 //! continuation). A turn that has begun and not ended is in flight.
@@ -176,6 +176,17 @@ struct Transcript {
     relaunch: Option<Relaunch>,
     /// The byte the line of the latest record visited begins at.
     last_at: Option<u64>,
+    /// The bare `/compact` that began the turn, while nothing has moved it since:
+    /// what a cancel of the compaction ends.
+    typed_compact: Option<TypedCompact>,
+    /// The turn ended at such a cancel, and Claude Code put the `/compact` back in
+    /// its input box (`Lines::put_back`), until a record moves the turn again.
+    put_back: bool,
+}
+
+/// A `/compact` as it was typed: the record it is a child of.
+struct TypedCompact {
+    parent: Arc<str>,
 }
 
 /// A process ConsensFlow started on the conversation: the byte the transcript
@@ -245,6 +256,8 @@ impl Transcript {
                 reached: false,
             }),
             last_at: None,
+            typed_compact: None,
+            put_back: false,
         }
     }
 
@@ -276,6 +289,9 @@ impl Transcript {
             self.queues.restart();
             self.jobs.retire();
             self.open_tools.clear();
+            // The process that cancelled a compaction, and its input box, are gone.
+            self.typed_compact = None;
+            self.put_back = false;
             if let Some(candidate) = self.candidate.take() {
                 self.hooks.remove(&candidate.item_id);
             }
@@ -392,6 +408,7 @@ impl Answer for Transcript {
             noticed: self.jobs.noticed_count(),
         };
         record.monitors = self.jobs.monitors();
+        record.lines.put_back = self.put_back && settlement == Settlement::Settled;
         Ok(record)
     }
 }

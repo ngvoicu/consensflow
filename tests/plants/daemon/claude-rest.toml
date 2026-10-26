@@ -115,9 +115,11 @@ find = '''
         *self.asked.borrow_mut() = None;
         *self.pressed.borrow_mut() = None;
         self.restored.set(false);
+        self.put_back.set(false);
         *self.left_open.borrow_mut() = None;
     }'''
 replace = '''
+        self.put_back.set(false);
         *self.left_open.borrow_mut() = None;
     }'''
 
@@ -140,8 +142,8 @@ runs = ["harness-launch-claude-stops"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            if self.restored.get() && !host.cleared() {"
-replace = "            if self.restored.get() && false && !host.cleared() {"
+find = "            if (self.restored.get() || self.clear_first.take()) && !host.cleared() {"
+replace = "            if (self.restored.get() && false || self.clear_first.take()) && !host.cleared() {"
 
 [[plant]]
 name = "rest: an input box that could not be cleared is pasted into all the same"

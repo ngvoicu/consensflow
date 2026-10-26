@@ -142,4 +142,18 @@ user's and the assistant's words stay as written:
   result names it (`task_id`, `task_type: local_bash`, `message: Successfully stopped
   task: …`), and no notification follows.
 
+Kept 2026-10-26 by `cargo xtask live compact-cancelled --case alone --keep` (Claude Code
+2.1.310, on Sonnet, the chief of a project on the native daemon), its chief's transcript
+scrubbed with `cargo xtask scrub-transcript`, which since T-483 keeps of each request Claude
+Code kept (`api-request`, `api-request-shape`, `api-request-blob`) only its type and session.
+The first 32 records, cut after the cancel (the rest is the worker's result, pasted after it,
+and the chief's answer):
+
+- `compact-cancelled.jsonl` — 3.0.6's item 6b. A message (`Reply with exactly one line:
+  READY`), answered; `/compact` typed as the human types it, and Escape a second later.
+  Claude writes the bare `/compact` and, at the Escape, the words before a command
+  (`<local-command-caveat>`, `isMeta`), a sibling of the bare command (the same
+  `parentUuid`), then a `file-history-snapshot` and nothing more: no boundary, no summary,
+  no command; its status reads idle, and the `/compact` is back in its input box.
+
 A new Claude version that writes these otherwise is a new fixture, not an edit.
