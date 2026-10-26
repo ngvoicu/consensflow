@@ -4,7 +4,9 @@
 //! never builds anything, and never goes through `cargo run`: that would build,
 //! and run, whatever the lockfile names with the key in its environment. The
 //! tool's own behaviour is its crate's tests'; this holds the workflow's text.
-//! The same is held of cf-publish itself in tests/release_publish.rs.
+//! The same is held of cf-publish itself in tests/release_publish.rs. The gate
+//! job builds the tool the same way and asks it whether CI passed the commit
+//! (`ci-passed`), in place of running CI's gate again.
 
 // A failure in a test is the test's answer, in its helpers too.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -111,6 +113,113 @@ mod the_release_tool_in_the_release_workflow {
         assert!(
             builder_of(&steps) < notes_at,
             "the tool is built before the step that runs it"
+        );
+    }
+}
+
+mod the_gate_of_the_release_workflow {
+    use cf_publish::testing::workflow::{files, live, step};
+
+    use super::*;
+
+    /// The gate job's step that asks whether CI passed the commit.
+    const CI_PASSED: &str = "CI passed this commit on both platforms";
+
+    fn gate() -> String {
+        job(&read("release.yml"), "gate")
+    }
+
+    #[test]
+    fn checks_that_ci_passed_the_commit_and_runs_no_gate_of_its_own() {
+        let gate = gate();
+        assert!(
+            !live(&gate).contains("uses: ./.github/workflows/ci.yml"),
+            "the release runs CI's gate again"
+        );
+        let asking = step(&gate, CI_PASSED);
+        let script = asking.script();
+        assert!(
+            script.starts_with(&format!("{TOOL} ci-passed --github \"$GITHUB_REPOSITORY\"")),
+            "{script}"
+        );
+        // The exact commit of the run, and its event, so that a hand run is told and not failed.
+        assert!(script.contains("--commit \"$GITHUB_SHA\""), "{script}");
+        assert!(
+            script.contains("--event \"$GITHUB_EVENT_NAME\""),
+            "{script}"
+        );
+        assert_eq!(
+            asking.env(),
+            [("GH_TOKEN".to_string(), "${{ github.token }}".to_string())]
+        );
+    }
+
+    #[test]
+    fn builds_the_tool_with_the_lockfile_where_no_secret_is_before_it_asks() {
+        let gate = gate();
+        assert!(!gate.contains("secrets."), "the gate holds a secret");
+        assert!(
+            !gate.contains("environment:"),
+            "the gate is in the release environment"
+        );
+        let steps = steps(&gate);
+        let built = builder_of(&steps);
+        let asked = steps
+            .iter()
+            .position(|step| step.name() == CI_PASSED)
+            .expect("the gate asks CI");
+        assert!(
+            built < asked,
+            "the tool is built after the step that runs it"
+        );
+        assert!(!goes_through_cargo(&steps[asked].text()));
+        // Its token reads the runs of CI, and writes nothing.
+        let permissions: Vec<&str> = gate
+            .split("\n    permissions:\n")
+            .nth(1)
+            .expect("the gate names its permissions")
+            .lines()
+            .take_while(|line| line.starts_with("      "))
+            .map(str::trim)
+            .collect();
+        assert_eq!(permissions, ["actions: read", "contents: read"]);
+        assert!(gate.contains("persist-credentials: false"), "{gate}");
+    }
+
+    #[test]
+    fn is_what_the_publish_job_waits_for() {
+        let publish = job(&read("release.yml"), "publish");
+        let needs = publish
+            .lines()
+            .find_map(|line| line.strip_prefix("    needs: "))
+            .unwrap();
+        assert!(needs.contains("gate"), "{needs}");
+    }
+
+    #[test]
+    fn leaves_ci_a_workflow_no_other_one_calls_and_runs_it_on_a_promotions_branch() {
+        for file in files() {
+            assert!(
+                !read(&file).contains("uses: ./.github/workflows/ci.yml"),
+                "{file} runs CI's gate"
+            );
+        }
+        let ci = read("ci.yml");
+        let on = ci
+            .split("\non:\n")
+            .nth(1)
+            .expect("ci.yml says when it runs");
+        let on: Vec<&str> = on
+            .lines()
+            .take_while(|line| line.is_empty() || line.starts_with("  "))
+            .collect();
+        assert!(
+            !on.iter().any(|line| line.trim() == "workflow_call:"),
+            "{on:?}"
+        );
+        assert!(
+            on.contains(&"    branches: [main, 'release/*']"),
+            "a promotion's branch runs no CI: {on:?}"
         );
     }
 }

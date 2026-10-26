@@ -8,7 +8,7 @@ use std::io::{self, ErrorKind, Write};
 
 use cf_base::env::Env;
 
-use crate::{sign_mac, update, version};
+use crate::{ci_passed, sign_mac, update, version};
 
 /// A step of the release.
 pub struct Command {
@@ -44,7 +44,12 @@ pub enum Failure {
 }
 
 /// Every step, in the order the release runs them.
-pub const COMMANDS: [&Command; 3] = [&version::COMMAND, &update::COMMAND, &sign_mac::COMMAND];
+pub const COMMANDS: [&Command; 4] = [
+    &ci_passed::COMMAND,
+    &version::COMMAND,
+    &update::COMMAND,
+    &sign_mac::COMMAND,
+];
 
 /// Runs the command line `args` (without the program's name) and answers the
 /// exit status: 0 when the step finished, 1 when it could not, 2 when the
@@ -144,7 +149,10 @@ mod tests {
     #[test]
     fn every_step_of_the_release_is_a_command_with_a_help_of_its_own() {
         let names: Vec<_> = COMMANDS.iter().map(|command| command.name).collect();
-        assert_eq!(names, ["version", "prepare-update", "sign-mac"]);
+        assert_eq!(
+            names,
+            ["ci-passed", "version", "prepare-update", "sign-mac"]
+        );
         let (status, out, err) = answer("--help");
         assert_eq!((status, err.as_str()), (0, ""));
         for command in COMMANDS {

@@ -1,8 +1,10 @@
 //! What the release's tests run on: a checkout in a temporary tree with two
 //! bare repositories for its remotes, `origin` and `upstream`, which `git`
 //! really pushes to; and a GitHub that is a script. `gh` lists, shows and
-//! starts runs the test sets up, a push of `main` to upstream starts CI, a push
-//! of a tag starts the Release run, which (when it ends green) puts the version
+//! starts runs the test sets up, and answers `gh api` for CI's runs of a commit
+//! and a run's jobs as the Actions API does; a push of `main` or of a `release/` branch to
+//! upstream starts CI, a push of a tag starts the Release run, which (when it
+//! ends green) puts the version
 //! on the feeds a release of its channel moves; `curl` reads those feeds; and
 //! `cargo update` writes the lockfile's version as cargo does. Nothing here
 //! reaches GitHub or moves a feed.
@@ -279,6 +281,10 @@ pub struct Fake {
     pub tag_fetch_fails: bool,
     /// Whether a tag pushed to upstream starts its Release run.
     pub tags_start_runs: bool,
+    /// Whether a `release/` branch pushed to upstream starts CI on it, and
+    /// whether someone runs CI on it by hand as well, beside the push's run.
+    pub branches_start_ci: bool,
+    pub branch_ci_by_hand: bool,
     /// Whether every `gh` fails, as it does when it is not logged in.
     pub gh_fails: bool,
     /// Every program run, in order.
@@ -317,6 +323,8 @@ impl Fake {
             failing_after_the_tag: Vec::new(),
             tag_fetch_fails: false,
             tags_start_runs: true,
+            branches_start_ci: true,
+            branch_ci_by_hand: false,
             gh_fails: false,
             ran: Vec::new(),
             pauses: 0,
@@ -425,6 +433,18 @@ impl Fake {
         } else if target == "main" || target == "refs/heads/main" {
             let commit = self.upstream_commit("main");
             self.start("ci.yml", &commit, "push");
+        } else if let Some(branch) = target
+            .strip_prefix("refs/heads/")
+            .or(Some(target))
+            .filter(|branch| branch.starts_with("release/"))
+        {
+            let commit = self.upstream_commit(&format!("refs/heads/{branch}"));
+            if self.branches_start_ci {
+                self.start("ci.yml", &commit, "push");
+            }
+            if self.branch_ci_by_hand {
+                self.start("ci.yml", &commit, "workflow_dispatch");
+            }
         }
     }
 
@@ -444,6 +464,7 @@ impl Fake {
         };
         let words: Vec<&str> = args.iter().map(String::as_str).collect();
         match words.as_slice() {
+            ["api", path] => said(&self.api(path)),
             ["run", "list", ..] => {
                 let workflow = flag("--workflow").unwrap();
                 let (commit, event) = (flag("--commit"), flag("--event"));
@@ -486,15 +507,68 @@ impl Fake {
                         .to_string(),
                 )
             }
-            ["workflow", "run", workflow, ..] => {
-                let reference = flag("--ref").unwrap();
-                let commit = self.upstream_commit(&reference);
-                let workflow = (*workflow).to_owned();
-                self.start(&workflow, &commit, "workflow_dispatch");
-                said("")
-            }
             _ => panic!("gh was asked what GitHub's script does not answer: {args:?}"),
         }
+    }
+
+    /// What the Actions API answers `path`: CI's runs of a commit, newest
+    /// first, each run looked at once more; or a run's jobs.
+    fn api(&mut self, path: &str) -> String {
+        let (route, query) = path.split_once('?').unwrap_or((path, ""));
+        let word = |name: &str| {
+            query
+                .split('&')
+                .find_map(|pair| pair.strip_prefix(&format!("{name}=")))
+                .map(str::to_owned)
+        };
+        let page: usize = word("page").and_then(|page| page.parse().ok()).unwrap_or(1);
+        let prefix = "repos/ngvoicu/consensflow/actions/";
+        let route = route
+            .strip_prefix(prefix)
+            .unwrap_or_else(|| panic!("the API is asked another repository: {path}"));
+        if let Some(workflow) = route
+            .strip_prefix("workflows/")
+            .and_then(|rest| rest.strip_suffix("/runs"))
+        {
+            let commit = word("head_sha").expect("CI's runs are asked by the commit");
+            let mut listed = Vec::new();
+            for run in self.runs.iter_mut().rev() {
+                if run.workflow != workflow || run.commit != commit || page > 1 {
+                    continue;
+                }
+                if run.unlisted_for > 0 {
+                    run.unlisted_for -= 1;
+                    continue;
+                }
+                let (status, conclusion) = if run.running_for > 0 {
+                    run.running_for -= 1;
+                    ("in_progress", serde_json::Value::Null)
+                } else {
+                    ("completed", json!(run.conclusion))
+                };
+                listed.push(json!({
+                    "id": run.id, "head_sha": run.commit, "event": run.event,
+                    "head_repository": { "full_name": "ngvoicu/consensflow" },
+                    "status": status, "conclusion": conclusion,
+                }));
+            }
+            return json!({ "total_count": listed.len(), "workflow_runs": listed }).to_string();
+        }
+        let id: u64 = route
+            .strip_prefix("runs/")
+            .and_then(|rest| rest.strip_suffix("/jobs"))
+            .and_then(|id| id.parse().ok())
+            .unwrap_or_else(|| {
+                panic!("the API is asked what GitHub's script does not answer: {path}")
+            });
+        let run = self.runs.iter().find(|run| run.id == id).unwrap();
+        let jobs: Vec<_> = run
+            .jobs
+            .iter()
+            .filter(|_| page == 1)
+            .map(|(name, ended)| json!({ "name": name, "conclusion": ended }))
+            .collect();
+        json!({ "total_count": jobs.len(), "jobs": jobs }).to_string()
     }
 
     fn curl(&mut self, address: &str) -> Captured {
