@@ -94,6 +94,12 @@ pub struct StreamedPane {
     /// The window's exit, owed to the daemon until whoever reads `output` is done: the table
     /// is asked whether every one has been told ([`PaneTable::exits_told_within`]).
     pub owed: ExitOwed,
+    /// The window's process tree, which its exit asks what may be the window's and was not
+    /// ended (`ProcessTree::possibly_left`): the pane may have left the table by then. On
+    /// macOS only: on Windows the tree is the pane's job, ended as its last handle closes,
+    /// and a handle the exit held would end it only after the exit (Calliope's review T-421).
+    #[cfg(target_os = "macos")]
+    pub(crate) tree: crate::process_tree::ProcessTree,
 }
 
 /// The child environment carried by `pane.open`: inherit the parent, apply
@@ -642,12 +648,18 @@ impl PaneTable {
             size,
         )?;
         let flow = Arc::new(OutputFlow::new(backlog_bytes));
+        #[cfg(target_os = "macos")]
+        let tree;
         let (pid, screen, ended, terminal) = {
             let mut panes = self.lock_panes()?;
             let pane = panes
                 .get_mut(&key)
                 .ok_or_else(|| PaneError::NotFound(key.clone()))?;
             pane.output_flow = Some(Arc::clone(&flow));
+            #[cfg(target_os = "macos")]
+            {
+                tree = pane.process_tree.clone();
+            }
             (
                 pane.child.process_id(),
                 Arc::clone(&pane.screen),
@@ -689,6 +701,8 @@ impl PaneTable {
             screen,
             ended,
             owed: self.exits.owe(),
+            #[cfg(target_os = "macos")]
+            tree,
         })
     }
 

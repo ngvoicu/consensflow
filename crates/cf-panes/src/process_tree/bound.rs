@@ -19,9 +19,24 @@
 //! pane's program leads its session (it is the pane's program, by its unique identifier
 //! and not its number, it runs, and it is its own session's leader) every process in that
 //! session is the window's, whoever started it and whether or not the process that
-//! started it is still there: a job an agent detached from its shell is one. A session
-//! whose leader has gone allows nothing, and nor does one whose number another process
-//! has now: a number is given again once its process is gone.
+//! started it is still there: a job an agent detached from its shell is one. So it is once
+//! the program has gone, for as long as nobody has its number: the session keeps the name
+//! of its leader while it has a member, and what the system says of who started a job
+//! cannot be relied on after that (below). A session whose number another process has
+//! now allows nothing, nor does one the program was not the leader of: a number is given
+//! again once its process and its session are gone.
+//!
+//! **What the system says of who started a process is no proof once that process has
+//! ended.** It records the identifier of a process's parent when the process is forked and
+//! again at each exec, from the parent of that moment (T-384), and keeps it when that parent
+//! ends: a job that has exec'd by then names its starter for good, and one that execs after
+//! the starter has gone names init's (1). Load does not change what is recorded; it makes the
+//! starter's exit beat the job's exec more often, a process just forked waiting for a
+//! processor. T-375: of 300 windows opened beside computing threads, 11 left a job that named
+//! init when the host looked, and ended nothing of it (`under_load_…` in `tests/headless.rs`;
+//! the kernel's rule is held there by `the_identifier_recorded_…`). A job the program left
+//! that no look saw (a window never marked, or a job begun after the last look) is then under
+//! no process that is known, and its session is all that says it is the window's.
 //!
 //! Each look at the tree ([`Bound::observe`]) records what the window's is by these
 //! rules, told by the identifier the system gives each process, which no later process
@@ -30,11 +45,10 @@
 //! gone is let go of.
 //!
 //! The bound only permits: it chooses nothing, and what it allows is not what is signalled.
-//! A close attempts what the selection names, and an ending what the turn's lineage names,
-//! so a job a look saw under the program that then left its session (`setsid`), whose shell
-//! has gone, is permitted here and is no candidate of a close unless the selection names it
-//! (by the process that started it, the session or the marker): it is left running, which
-//! ends less, and is the limit written down in [`super`].
+//! A close attempts what the selection names, so a job a look saw under the program that then
+//! left its session (`setsid`), whose shell has gone, is permitted here and is no candidate of
+//! a close unless the selection names it (by the process that started it, the session or the
+//! marker): it is left running, which ends less, and is the limit written down in [`super`].
 //!
 //! The pane's process group, which a close signals whole, is the pane's program's own
 //! while the program runs ([`Bound::signal_group`]); once it has gone its number may have
@@ -79,6 +93,16 @@ pub(super) trait System {
     /// Sends `signal` to every process of the group `group`: one that is gone is no
     /// error. Only [`Bound::signal_group`] calls it.
     fn send_group(&self, group: i32, signal: i32) -> io::Result<()>;
+
+    /// Whether the process `pid` carries `marker`, a pane's, in the environment it was
+    /// started with: what [`super::ProcessTree::possibly_left`] names by, which the bound
+    /// never asks.
+    fn carries(&self, pid: i32, marker: &str) -> bool;
+
+    /// Whether no process of any user has the number `pid` ([`native::nobody_holds`]): what
+    /// [`super::ProcessTree::possibly_left`] tells a session whose leader has gone by, which
+    /// the bound never asks.
+    fn nobody_holds(&self, pid: i32) -> bool;
 }
 
 /// The system itself.
@@ -111,6 +135,14 @@ impl System for Native {
     fn send_group(&self, group: i32, signal: i32) -> io::Result<()> {
         native::signal_group(group, signal)
     }
+
+    fn carries(&self, pid: i32, marker: &str) -> bool {
+        native::has_marker(pid, marker)
+    }
+
+    fn nobody_holds(&self, pid: i32) -> bool {
+        native::nobody_holds(pid)
+    }
 }
 
 /// The system's processes of one look, by the identifier the system gives each, held for
@@ -139,15 +171,19 @@ impl<'a> Table<'a> {
 pub(super) struct Bound {
     /// The pane's program, which the tree starts at: none where it could not be read.
     program: Option<Identity>,
+    /// The session the program was in when the tree attached to it: its own number if it led
+    /// one, as the pty makes a pane's program do.
+    session: Option<i32>,
     /// The identifiers of what the latest look saw to be the window's, and runs still.
     seen: Arc<Mutex<HashSet<u64>>>,
 }
 
 impl Bound {
-    /// The bound of a tree whose program is `program`.
-    pub fn new(program: Option<Identity>) -> Self {
+    /// The bound of a tree whose program is `program`, in the session `session`.
+    pub fn new(program: Option<Identity>, session: Option<i32>) -> Self {
         Self {
             program,
+            session,
             seen: Arc::default(),
         }
     }
@@ -239,14 +275,26 @@ impl Bound {
         failure.map_or(Ok(()), Err)
     }
 
-    /// The session the pane's program leads, while it does: the program runs, with the
-    /// identity it was attached with, and its session is its own number. None where it
-    /// has gone, where another process has its number now (another identifier), and where
-    /// it is no session's leader.
+    /// The session the pane's program leads, or led: its own number, while the program runs
+    /// with the identity it was attached with and leads it; and once the program has gone,
+    /// while none of ours has that number (the session is named for its leader and keeps the
+    /// name while it has a member; the table is of our processes, `native::processes` leaves
+    /// out those of other users, so a holder of another user's is not seen). None where
+    /// another process of ours has the number now (another identifier), and where the
+    /// program was no session's leader.
     fn led_session(&self, table: &Table<'_>) -> Option<i32> {
         let program = self.program?;
-        let process = table.by_identifier.get(&program.unique)?;
-        (process.identity == program && process.session == Some(program.pid)).then_some(program.pid)
+        let leads = match table.by_identifier.get(&program.unique) {
+            Some(process) => process.identity == program && process.session == Some(program.pid),
+            None => {
+                self.session == Some(program.pid)
+                    && !table
+                        .processes
+                        .iter()
+                        .any(|process| process.identity.pid == program.pid)
+            }
+        };
+        leads.then_some(program.pid)
     }
 
     /// Whether the pane's program runs, with the identity it was attached with, and leads

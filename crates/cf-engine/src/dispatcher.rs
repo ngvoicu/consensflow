@@ -37,7 +37,7 @@ use cf_ledger::{
 use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
-use crate::background::quote;
+use crate::background::leaving;
 use crate::chief_switch::SwitchTo;
 use crate::computer_use::ComputerUseState;
 use crate::record::Record;
@@ -843,6 +843,14 @@ impl Dispatcher {
             self.settle_exited_launch(&record, &project, &participant, &prelude, &because, own)?;
         }
         if participant.role == "chief" {
+            // What the chief's window left running is the human's to know: no task's giver
+            // is there to tell.
+            self.tell_human_left_running(
+                &project,
+                &participant,
+                shown.left_running(),
+                shown.possibly_left(),
+            )?;
             // The chief's own exit closes the project as Close does, but for the
             // window of a launch that was to say the role: it did not come up, and
             // is tried again (`settle_exited_launch`).
@@ -889,16 +897,12 @@ impl Dispatcher {
             let left = shown.left_running();
             if let Some(thread) = task {
                 // The pause note says how the window ended and what it showed last, as
-                // far as the host said, and what the close ended, where there was any:
-                // a harness that crashed under its task says why on its screen. A window
-                // the engine closed says why it did, where it was not the human's Close,
-                // and nothing of its end, which was the kill's (the host's exit can come
-                // while the kill is answered).
-                let besides = if left.is_empty() {
-                    String::new()
-                } else {
-                    format!(" with background work still running: {}", quote(left))
-                };
+                // far as the host said, and what the close ended, where there was any, in
+                // the words of every close note: a harness that crashed under its task says
+                // why on its screen. A window the engine closed says why it did, where it
+                // was not the human's Close, and nothing of its end, which was the kill's
+                // (the host's exit can come while the kill is answered).
+                let besides = leaving(left, shown.possibly_left());
                 // A window the engine closed itself: in a suspended project it closed
                 // with the project (the human's Close, or the chief's window ending),
                 // and the ledger marks the pause for the human's Resume to end. One
@@ -948,7 +952,7 @@ impl Dispatcher {
                     Some(number) => self.seams.ledger.borrow().task(project.id, number)?,
                     None => None,
                 };
-                self.tell_left_running(&project, given.as_ref(), left)?;
+                self.tell_left_running(&project, given.as_ref(), left, shown.possibly_left())?;
             }
         }
         self.changed();

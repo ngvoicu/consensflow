@@ -1,5 +1,5 @@
-//! A process that is none of any window's, for the tests of what an ending or a close of
-//! a window may signal: as the user's own programs are beside a window, it is none of the
+//! A process that is none of any window's, for the tests of what a close of a window may
+//! signal: as the user's own programs are beside a window, it is none of the
 //! test's either. A shell the test starts detached (a child of the system's init, in a
 //! session of its own: no process of the test started it), with a job of its own, both
 //! asleep. The pane host signals only the window's own, whatever its selection says, so an

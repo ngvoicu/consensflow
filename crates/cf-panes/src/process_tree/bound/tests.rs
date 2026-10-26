@@ -7,9 +7,14 @@ use crate::process_tree::testing::{
     BUILD, DEEP, DETACHED, JOB, LEFT, PROGRAM, SHELL, USERS_JOB, USERS_SHELL,
 };
 
-/// The bound of the tree that starts at the window's program in `processes`.
+/// The bound of the tree that starts at the window's program in `processes`, in the session
+/// the table puts it in, as a tree attaches.
 fn bound_of(processes: &[Process]) -> Bound {
-    Bound::new(Some(identity_of(processes, PROGRAM)))
+    let program = processes
+        .iter()
+        .find(|process| process.identity.pid == PROGRAM)
+        .expect("the window's program");
+    Bound::new(Some(program.identity), program.session)
 }
 
 fn allows(bound: &Bound, processes: &[Process], target: Identity) -> bool {
@@ -166,7 +171,7 @@ fn a_process_that_took_the_number_of_one_that_was_seen_is_not_the_windows() {
 fn the_program_is_the_windows_when_it_has_gone_and_what_it_started_still_is() {
     let (_, processes) = machine();
     let program = identity_of(&processes, PROGRAM);
-    let bound = Bound::new(Some(program));
+    let bound = bound_of(&processes);
 
     // The program is not in the table, which names it as the parent of what it started.
     let later = vec![processes[1].clone(), listed(the_tests_own_parent(), 800, 1)];
@@ -183,7 +188,7 @@ fn the_program_is_the_windows_when_it_has_gone_and_what_it_started_still_is() {
 #[test]
 fn with_no_program_nothing_is_the_windows_but_what_was_seen() {
     let (machine, processes) = machine();
-    let bound = Bound::new(None);
+    let bound = Bound::new(None, None);
     for pid in the_windows() {
         assert!(
             !allows(&bound, &processes, identity_of(&processes, pid)),
@@ -238,7 +243,7 @@ fn a_table_that_is_no_tree_ends_the_walk() {
     let a = listed(4_000_040, 3000, 3100);
     let b = listed(4_000_041, 3100, 3000);
     let processes = vec![a.clone(), b.clone()];
-    let bound = Bound::new(Some(listed(PROGRAM, 1000, 700).identity));
+    let bound = Bound::new(Some(listed(PROGRAM, 1000, 700).identity), Some(PROGRAM));
     assert!(!allows(&bound, &processes, a.identity));
     assert!(!allows(&bound, &processes, b.identity));
 }
@@ -288,27 +293,43 @@ fn what_is_in_the_session_the_program_leads_is_the_windows_whoever_started_it() 
 }
 
 #[test]
-fn a_session_whose_leader_has_gone_allows_nothing() {
-    let (_, processes) = machine();
+fn a_session_whose_leader_has_gone_is_the_windows_while_nobody_has_its_number() {
+    let (machine, processes) = machine();
     let bound = bound_of(&processes);
     let detached = identity_of(&processes, DETACHED);
 
-    // The program is not in the table: nothing says whose the session's number is.
+    // The program has gone and was reaped, and nothing holds its number. What it started
+    // and left in its session is named by the system as started by init (`1`: a job that
+    // execs after its starter has gone is given init's identifier, not the starter's, which
+    // load makes happen more often, T-375, T-384), and no look saw it. The session is the
+    // kernel's own: it is still the window's.
     let later: Vec<Process> = processes
         .iter()
         .filter(|process| process.identity.pid != PROGRAM)
         .cloned()
         .collect();
-    assert!(!allows(&bound, &later, detached));
-    // A look then sees nothing in it either, and a job that begins in it later is no one's.
+    assert_eq!(identity_of(&later, DETACHED), detached);
+    let job = later
+        .iter()
+        .find(|process| process.identity.pid == DETACHED)
+        .expect("the detached job");
+    assert_eq!(job.parent, 1, "the job's parent is init's identifier");
+    assert!(allows(&bound, &later, detached));
+    assert!(signal(&bound, &machine, &later, detached, libc::SIGTERM));
+    assert_eq!(machine.sent(libc::SIGTERM), [DETACHED]);
+
+    // What began in that session since, by the processes in it, is the session's too.
     observe(&bound, &later);
     let mut newer = later.clone();
     newer.push(Process {
         session: Some(PROGRAM),
         ..listed(4_000_051, 1600, 1)
     });
-    assert!(!allows(&bound, &newer, identity_of(&newer, 4_000_051)));
-    assert!(!allows(&bound, &newer, detached));
+    assert!(allows(&bound, &newer, identity_of(&newer, 4_000_051)));
+    assert!(allows(&bound, &newer, detached));
+    // But not what is in no session of the window's: a job that left it (`setsid`).
+    assert!(!allows(&bound, &later, identity_of(&later, LEFT)));
+    assert!(!allows(&bound, &later, identity_of(&later, BUILD)));
 }
 
 #[test]
@@ -324,13 +345,14 @@ fn what_a_look_saw_in_the_session_while_its_leader_ran_stays_the_windows_after()
         .cloned()
         .collect();
     assert!(allows(&bound, &later, detached), "seen: it is that process");
-    // Not what began in the session's number since: that was never seen.
+    // And it is the window's by the session too, once nobody has the number, which is no
+    // word about a number another process has (the next case).
     let mut newer = later.clone();
     newer.push(Process {
         session: Some(PROGRAM),
         ..listed(4_000_051, 1600, 1)
     });
-    assert!(!allows(&bound, &newer, identity_of(&newer, 4_000_051)));
+    assert!(allows(&bound, &newer, identity_of(&newer, 4_000_051)));
 }
 
 #[test]
@@ -357,6 +379,23 @@ fn a_session_whose_number_another_process_has_allows_nothing() {
     assert!(!allows(&bound, &later, detached));
     assert!(!allows(&bound, &later, identity_of(&later, PROGRAM)));
     assert!(!allows(&bound, &later, identity_of(&later, 4_000_052)));
+}
+
+#[test]
+fn a_program_that_led_no_session_leaves_the_window_none_of_its_number_once_it_has_gone() {
+    let (_, processes) = machine();
+    // The program was in a session some other process led, as a program started from a
+    // terminal is: the number of the program is no session's. It has gone, and a job
+    // holds a session of that number (another process led one by it once, and has gone).
+    let mut table = processes.clone();
+    table[0].session = Some(4_000_060);
+    let bound = bound_of(&table);
+    let later: Vec<Process> = table
+        .iter()
+        .filter(|process| process.identity.pid != PROGRAM)
+        .cloned()
+        .collect();
+    assert!(!allows(&bound, &later, identity_of(&later, DETACHED)));
 }
 
 #[test]
@@ -396,7 +435,7 @@ fn a_group_the_program_leads_is_signalled_whole_while_the_program_runs() {
         // One in the group whose parent has gone: the group is the program's, whole.
         of_group(PROGRAM, 4_000_012, 1200, 1),
     ];
-    let bound = Bound::new(Some(table[0].identity));
+    let bound = Bound::new(Some(table[0].identity), table[0].session);
 
     bound
         .signal_group(&machine, &Table::of(&table), PROGRAM, libc::SIGTERM)
@@ -422,7 +461,7 @@ fn a_group_whose_program_has_gone_is_signalled_member_by_member_through_the_boun
         // Not in the group at all.
         listed(4_000_072, 9500, 1000),
     ];
-    let bound = Bound::new(Some(program().identity));
+    let bound = Bound::new(Some(program().identity), program().session);
 
     bound
         .signal_group(&machine, &Table::of(&table), PROGRAM, libc::SIGKILL)
@@ -450,7 +489,7 @@ fn a_group_another_process_leads_now_is_not_signalled_whole() {
         },
         of_group(PROGRAM, 4_000_073, 9600, 9000),
     ];
-    let bound = Bound::new(Some(program().identity));
+    let bound = Bound::new(Some(program().identity), program().session);
 
     bound
         .signal_group(&machine, &Table::of(&table), PROGRAM, libc::SIGTERM)
@@ -468,7 +507,7 @@ fn a_group_the_program_does_not_lead_is_signalled_member_by_member() {
         of_group(group, 4_000_080, 9700, 1000),
         of_group(group, 4_000_081, 9800, 1),
     ];
-    let bound = Bound::new(Some(table[0].identity));
+    let bound = Bound::new(Some(table[0].identity), table[0].session);
 
     bound
         .signal_group(&machine, &Table::of(&table), group, libc::SIGTERM)
@@ -482,7 +521,7 @@ fn a_group_the_program_does_not_lead_is_signalled_member_by_member() {
 fn a_pane_with_no_program_signals_no_group() {
     let machine = Machine::new(Vec::new());
     let table = vec![of_group(PROGRAM, 4_000_011, 1100, 1000)];
-    let bound = Bound::new(None);
+    let bound = Bound::new(None, None);
 
     bound
         .signal_group(&machine, &Table::of(&table), PROGRAM, libc::SIGKILL)
@@ -494,7 +533,7 @@ fn a_pane_with_no_program_signals_no_group() {
 #[test]
 fn a_number_that_names_more_than_a_group_is_refused() {
     let machine = Machine::new(Vec::new());
-    let bound = Bound::new(Some(program().identity));
+    let bound = Bound::new(Some(program().identity), program().session);
     let table = vec![program()];
     for number in [0, 1, -1, -4_000_010] {
         let refused = bound.signal_group(&machine, &Table::of(&table), number, libc::SIGKILL);

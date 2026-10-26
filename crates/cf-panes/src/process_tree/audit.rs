@@ -55,6 +55,11 @@ const SENDERS: [(&str, &str, &str); 13] = [
     ),
     (
         "process_tree/native.rs",
+        "libc::kill(pid, 0)",
+        "signal 0 delivers nothing: whether any process holds a session's number",
+    ),
+    (
+        "process_tree/native.rs",
         "libc::kill(-group, signal)",
         "the same, to a group, which a test build asks the guard of as well",
     ),
@@ -87,11 +92,6 @@ const SENDERS: [(&str, &str, &str); 13] = [
         "job_object.rs",
         "TerminateJobObject(self.handle, 1)",
         "Windows: the pane's own job, in which nothing else is",
-    ),
-    (
-        "job_object.rs",
-        "TerminateProcess(self.0, 1)",
-        "Windows: a member of the pane's job, by the handle it was admitted by",
     ),
 ];
 
@@ -289,8 +289,8 @@ fn the_files_of_tests_are_told_from_the_rest() {
     for test_code in [
         "process_tree/tests.rs",
         "process_tree/bound/tests.rs",
-        "pty/turn/ending_tests.rs",
-        "pty/turn/ending_tests/programs.rs",
+        "pty/turn/leaving_tests.rs",
+        "pty/turn/leaving_tests/programs.rs",
         "pty/turn/support.rs",
         "process_tree/testing.rs",
         "pty/keys.rs",

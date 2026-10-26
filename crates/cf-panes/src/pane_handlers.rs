@@ -22,7 +22,7 @@ use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::panes::{
-    BackgroundProcess, CommandsRequest, EndRequest, MarkRequest, PaneExit, Rest, RestRequest,
+    BackgroundProcess, CommandsRequest, MarkRequest, PaneExit, PossiblyLeft, Rest, RestRequest,
     SnapshotRequest, TAIL_LINES,
 };
 
@@ -282,19 +282,6 @@ pub fn register_pane_handlers(
         Ok(json!({"ok":true,"rest":rest}))
     });
 
-    // What the window's turn left running ends, the window staying open: it is
-    // asked to end, and given the table's grace, as a close gives one. The host
-    // chooses what, from all it can prove the turn's.
-    let end_panes = Arc::clone(&panes);
-    builder.on("pane.end_background", move |_bridge, body| {
-        let request: EndRequest = parse_body(body)?;
-        let key = pane_key(&request.id, request.generation)?;
-        let ending = end_panes
-            .end_background(&key)
-            .map_err(|error| error.to_string())?;
-        Ok(json!({"ok":true,"ended":ending.ended,"left":ending.left}))
-    });
-
     let list_panes = Arc::clone(&panes);
     builder.on("pane.list", move |_bridge, body| {
         let _: EmptyBody = parse_body(body)?;
@@ -377,6 +364,8 @@ fn stream_to_page(
             ended,
             // Paid, with this thread's end, once the exit is told.
             owed: _owed,
+            #[cfg(target_os = "macos")]
+            tree,
         } = streamed;
         for message in stream {
             printed.note();
@@ -391,7 +380,17 @@ fn stream_to_page(
             // How it ended by itself, where that came after the output did; not the
             // host's own end of it.
             let status = status.or_else(|| (!handed.ended_by_host).then(|| ended.get()).flatten());
-            let exit = exit_body(&key, &screen, status, background, handed.survivor);
+            // What may be the window's and runs on, which no close or ending signals: named
+            // as the program is proven gone, which a close's ending of what is the window's
+            // does not change.
+            let left = Left {
+                background,
+                possibly: possibly_left(
+                    #[cfg(target_os = "macos")]
+                    &tree,
+                ),
+            };
+            let exit = exit_body(&key, &screen, status, left, handed.survivor);
             #[cfg(test)]
             if let Some(handed) = EXIT_HANDED
                 .lock()
@@ -408,6 +407,29 @@ fn stream_to_page(
     });
 }
 
+/// What may be the window's and runs on, not ended, for its exit to name: on macOS what its
+/// process tree names (`ProcessTree::possibly_left`); elsewhere none, and on Windows the
+/// pane's job ends its whole tree as its last handle closes, with the pane.
+fn possibly_left(
+    #[cfg(target_os = "macos")] tree: &crate::process_tree::ProcessTree,
+) -> Vec<PossiblyLeft> {
+    #[cfg(target_os = "macos")]
+    {
+        tree.possibly_left()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Vec::new()
+    }
+}
+
+/// What a window left running, for its exit: the turn's work, which its close ended, and
+/// what may be the window's and was not ended.
+struct Left {
+    background: Vec<BackgroundProcess>,
+    possibly: Vec<PossiblyLeft>,
+}
+
 /// `pane.exit`'s body: the pane, how its program ended where that was read,
 /// the last lines its screen showed, what it left running, and the program
 /// where it could not be proven gone.
@@ -415,7 +437,7 @@ fn exit_body(
     key: &PaneKey,
     screen: &PaneScreen,
     ended: Option<Ended>,
-    background: Vec<BackgroundProcess>,
+    left: Left,
     survivor: Option<u32>,
 ) -> Value {
     let exit = PaneExit {
@@ -424,7 +446,8 @@ fn exit_body(
         exit_code: ended.as_ref().map(|ended| ended.code),
         signal: ended.and_then(|ended| ended.signal),
         tail: Some(screen.tail(TAIL_LINES)),
-        background,
+        background: left.background,
+        possibly_left: left.possibly,
         survivor,
     };
     serde_json::to_value(&exit).unwrap_or_else(|_| json!({"id":key.id,"generation":key.generation}))

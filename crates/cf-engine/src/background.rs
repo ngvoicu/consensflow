@@ -56,8 +56,8 @@
 //! in the window's mark, and is not the turn's, and the host does not name it at a close.
 
 use cf_harness::contract::Pane;
-use cf_ledger::{NewNote, ProjectView, TaskThread};
-use cf_proto::panes::BackgroundProcess;
+use cf_ledger::{NewNote, ParticipantView, ProjectView, TaskThread};
+use cf_proto::panes::{BackgroundProcess, PossiblyLeft};
 
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -94,8 +94,9 @@ impl Dispatcher {
         project: &ProjectView,
         given: Option<&TaskThread>,
         left: &[BackgroundProcess],
+        possibly: &[PossiblyLeft],
     ) -> Result<(), EngineError> {
-        if left.is_empty() {
+        if left.is_empty() && possibly.is_empty() {
             return Ok(());
         }
         let Some(thread) = given else {
@@ -108,10 +109,33 @@ impl Dispatcher {
                 from: None,
                 to: thread.task.requester.clone(),
                 task: Some(number),
-                body: format!(
-                    "T-{number}'s window closed with background work running, which its close ended: {}",
-                    quote(left)
-                ),
+                body: closed_leaving(&format!("T-{number}'s window closed"), left, possibly),
+            },
+        )?;
+        Ok(())
+    }
+
+    /// What a chief's window that closed with work still running, or with processes the host
+    /// names as possibly its own, says to the human: no task's giver is there to tell, and the
+    /// words are a worker's close's. A window that closes with none says nothing.
+    pub(crate) fn tell_human_left_running(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        left: &[BackgroundProcess],
+        possibly: &[PossiblyLeft],
+    ) -> Result<(), EngineError> {
+        if left.is_empty() && possibly.is_empty() {
+            return Ok(());
+        }
+        let closed = format!("@{}'s window closed", participant.handle);
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: closed_leaving(&closed, left, possibly),
             },
         )?;
         Ok(())
@@ -139,8 +163,69 @@ fn line(process: &BackgroundProcess, masked: &mut usize) -> String {
 /// The commands of what a window left running, as a note quotes them: the first
 /// few, each held to one line and a few characters, what looks like a key or a
 /// token in them hidden, and how many were left out or hidden said after them.
-pub(crate) fn quote(left: &[BackgroundProcess]) -> String {
+fn quote(left: &[BackgroundProcess]) -> String {
     quote_of(left, left.len())
+}
+
+/// `closed` (a window closed), and what it left running and what may be its own, as a close
+/// note says them.
+fn closed_leaving(closed: &str, left: &[BackgroundProcess], possibly: &[PossiblyLeft]) -> String {
+    format!("{closed}{}", leaving(left, possibly))
+}
+
+/// What every note of a window's close says after the window closed (the note to whoever gave
+/// its task, the chief's to the human, the pause note): the work its close ended, which `pane.exit`
+/// lists (`background`), and what may be its own and was not ended (`possiblyLeft`). Nothing for
+/// none.
+pub(crate) fn leaving(left: &[BackgroundProcess], possibly: &[PossiblyLeft]) -> String {
+    let mut said = String::new();
+    if !left.is_empty() {
+        said.push_str(&format!(
+            " with background work running, which its close ended: {}",
+            quote(left)
+        ));
+    }
+    if let Some(words) = possibly_left_words(possibly) {
+        said.push_str(&format!("; {words}"));
+    }
+    said
+}
+
+/// What a note says of the processes the host named as possibly a window's and did not end
+/// (`PaneExit::possibly_left`): `pid 4242 (node) may be this window's and was not ended`,
+/// [`QUOTED`] of them at most and the rest counted. None for none.
+fn possibly_left_words(possibly: &[PossiblyLeft]) -> Option<String> {
+    if possibly.is_empty() {
+        return None;
+    }
+    let mut named: Vec<String> = possibly
+        .iter()
+        .take(QUOTED)
+        .map(|process| format!("pid {} ({})", process.pid, program_of(process)))
+        .collect();
+    if possibly.len() > QUOTED {
+        named.push(format!("{} more", possibly.len() - QUOTED));
+    }
+    let was = if possibly.len() == 1 { "was" } else { "were" };
+    Some(format!(
+        "{} may be this window's and {was} not ended",
+        named.join(", ")
+    ))
+}
+
+/// The name of the program of `process` as a note says it: on one line, held to
+/// [`COMMAND_CHARS`] characters, what looks like a key or a token in it hidden.
+fn program_of(process: &PossiblyLeft) -> String {
+    let words = mask(&process.program)
+        .text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if words.is_empty() {
+        "unnamed".to_owned()
+    } else {
+        words.chars().take(COMMAND_CHARS).collect()
+    }
 }
 
 /// [`quote`] of the first of `total` processes, which a host that lists no more than

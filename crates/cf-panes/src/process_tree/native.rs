@@ -8,8 +8,15 @@ use std::io;
 
 use super::{Identity, Looked, Process, OWNER_ENV};
 
-// XNU proc_info_private.h declares this 56-byte structure as an API. The
-// original parent's unique ID survives reparenting; a reused PID cannot match.
+// XNU proc_info_private.h declares this 56-byte structure as an API. A process's own unique
+// ID is its alone, and a reused PID cannot match it. The parent's is the identifier of the
+// process that was its parent when it was forked, and again at each exec (T-384), and the
+// system keeps it when that process ends: a job that has exec'd by then names its starter
+// for good, one that execs after the starter has gone names init's (1). Load does not change
+// it; it makes the starter's exit beat the job's exec more often (T-375). So it is no proof
+// of who started a process whose starter has gone (`super::bound`; held by
+// `the_identifier_recorded_for_the_process_that_started_a_job_is_its_parent_at_its_last_exec`
+// in tests/headless.rs).
 #[repr(C)]
 #[derive(Default)]
 struct NativeIdentity {
@@ -83,6 +90,23 @@ fn session_of(pid: i32) -> Option<i32> {
     // not there answers -1.
     let session = unsafe { libc::getsid(pid) };
     (session > 0).then_some(session)
+}
+
+/// Whether no process of any user has the number `pid`: the system answers a signal 0 to it
+/// (which delivers nothing) with `ESRCH`, and only that. A number that is not a process's
+/// (1 or less) is held, as is one the system answers otherwise: a zombie holds its number (the
+/// signal succeeds), and so does a process of another user (`EPERM`), such as the root `login`
+/// that leads a terminal's session.
+pub(super) fn nobody_holds(pid: i32) -> bool {
+    if pid <= 1 {
+        return false;
+    }
+    // SAFETY: kill takes two integers and touches no memory of ours; signal 0 delivers
+    // nothing, it asks whether there is a process to deliver to.
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return false;
+    }
+    io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
 }
 
 /// The path of the program a process runs, as the system keeps it, whole whatever
@@ -295,7 +319,7 @@ pub(super) fn children(pid: i32) -> io::Result<Vec<i32>> {
 pub(super) fn has_marker(pid: i32, marker: &str) -> bool {
     // No arguments or environment values are logged, retained, or returned to
     // the app: the environment is only read for the marker.
-    procargs(pid).is_some_and(|bytes| environment_has_marker(&bytes, marker))
+    read_procargs(pid, |bytes| environment_has_marker(bytes, marker)).unwrap_or(false)
 }
 
 /// What the system keeps of a process's arguments and environment
@@ -303,28 +327,49 @@ pub(super) fn has_marker(pid: i32, marker: &str) -> bool {
 /// arguments and the environment, each ended by a NUL. None for a process that
 /// cannot be read (it ended, or it is not ours to read).
 pub(super) fn procargs(pid: i32) -> Option<Vec<u8>> {
-    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
-    // macOS bounds argv + environment by ARG_MAX.
-    let mut bytes = vec![0u8; 1024 * 1024];
-    let mut size = bytes.len();
-    // SAFETY: `mib` holds the `mib.len()` name entries passed with it, and
-    // `bytes` is writable for the `size` bytes passed with it, which sysctl
-    // lowers to what it wrote. Nothing is set: the new value is null, of length 0.
-    let result = unsafe {
-        libc::sysctl(
-            mib.as_mut_ptr(),
-            mib.len() as u32,
-            bytes.as_mut_ptr().cast(),
-            &mut size,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    if result != 0 {
-        return None;
-    }
-    bytes.truncate(size);
-    Some(bytes)
+    read_procargs(pid, <[u8]>::to_vec)
+}
+
+thread_local! {
+    /// The buffer what the system keeps of a process's arguments and environment is read
+    /// into, made once for a thread (macOS bounds them by `ARG_MAX`, a megabyte) and used
+    /// for every read on it: a report reads the marker of each of its candidates.
+    static ARGUMENTS: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// `read` of what the system keeps of the process `pid`'s arguments and environment
+/// ([`procargs`]), in this thread's buffer: none where it cannot be read.
+fn read_procargs<T>(pid: i32, read: impl FnOnce(&[u8]) -> T) -> Option<T> {
+    ARGUMENTS.with(|buffer| {
+        let mut bytes = buffer.borrow_mut();
+        if bytes.is_empty() {
+            #[cfg(test)]
+            BUFFERS_MADE.with(|made| made.set(made.get() + 1));
+            bytes.resize(1024 * 1024, 0);
+        }
+        let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+        let mut size = bytes.len();
+        // SAFETY: `mib` holds the `mib.len()` name entries passed with it, and
+        // `bytes` is writable for the `size` bytes passed with it, which sysctl
+        // lowers to what it wrote. Nothing is set: the new value is null, of length 0.
+        let result = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                mib.len() as u32,
+                bytes.as_mut_ptr().cast(),
+                &mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        (result == 0).then(|| read(&bytes[..size.min(bytes.len())]))
+    })
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many buffers for a process's arguments and environment this thread has made.
+    static BUFFERS_MADE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The fields after the program's path and its padding: the arguments, as many

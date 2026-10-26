@@ -1,13 +1,13 @@
 //! Git Bash's own programs and the parents Git Bash says they have.
 //!
 //! A program of Git Bash's own kind (`sleep`, `grep`, `ls`: they run on Cygwin's layer) is
-//! started from a script by a forked copy of the shell, which starts it and has gone when
-//! anyone looks (zeewin, 2026-10-21: the sleep of `sh ./script` names a parent that no process
-//! has; `exec sleep` and a job in the background do the same). So the parent Windows names for
-//! it is no process of the window's tree, and the chain of processes that run, up from it to
-//! the shell the harness started, which is what the host takes for a turn's work
-//! ([`crate::background`]), is broken: a stop leaves it running, and nothing names it, until
-//! the window closes. `ps -W` of Git Bash's own folder says what its parent was (its Cygwin
+//! started from a script by a forked copy of the shell, which starts it and has gone a few
+//! milliseconds after, when anyone looks (zeewin, 2026-10-21: the sleep of `sh ./script` names
+//! a parent that no process has; `exec sleep` and a job in the background do the same). So the
+//! parent Windows names for it is no process of the window's tree, and the chain of processes
+//! that run, up from it to the shell the harness started, which is what the host takes for a
+//! turn's work ([`crate::background`]), is broken: a stop leaves it running, and nothing names
+//! it, until the window closes. `ps -W` of Git Bash's own folder says what its parent was (its Cygwin
 //! number, and so the shell that is its parent, with the number Windows has for it); where
 //! Windows lists that shell, the shell is the parent it has.
 //!

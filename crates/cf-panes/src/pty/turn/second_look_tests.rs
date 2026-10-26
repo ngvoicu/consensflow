@@ -1,10 +1,10 @@
-//! The second look ([`crate::background`]): what a close and an ending name of what a
-//! turn left running is what the host finds twice, [`SETTLE`](crate::background::SETTLE)
-//! apart. The harness runs short commands of its own beside the agent's (Claude Code's
-//! status line is a shell with a job, ended in a moment, in a group of its own, as its
-//! tools' commands are), and the host cannot tell one from the agent's by anything but
-//! that it ends: a look that finds a run names it as work the turn left, and an ending
-//! of that look would end it, and tell the chief it did.
+//! The second look ([`crate::background`]): what a close names of what a turn left running
+//! is what the host finds twice, [`SETTLE`](crate::background::SETTLE) apart. The harness
+//! runs short commands of its own beside the agent's (Claude Code's status line is a shell
+//! with a job, ended in a moment, in a group of its own, as its tools' commands are), and
+//! the host cannot tell one from the agent's by anything but that it ends: a look that finds
+//! a run names it as work the turn left, and a close that named it would tell the chief it
+//! ended it.
 
 #[cfg(target_os = "macos")]
 mod macos {
@@ -12,15 +12,15 @@ mod macos {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use cf_proto::panes::{Ending, Servers};
+    use cf_proto::panes::Servers;
 
     use crate::background::SETTLE;
     use crate::headless::reap_all;
-    use crate::pty::turn::support::{ended_pids, gone, listed, numbers, started};
-    use crate::pty::{process_exists, serial_pty_test, PaneTable, Sentinel};
+    use crate::pty::turn::support::{listed, numbers, started};
+    use crate::pty::{serial_pty_test, PaneTable, Sentinel};
 
-    /// What a test's table gives the programs it asks to end: long enough to tell from
-    /// none, and short enough to wait for.
+    /// What a test's table gives the programs its close asks to end: long enough to tell
+    /// from none, and short enough to wait for.
     const GRACE: Duration = Duration::from_millis(1500);
 
     /// The window of a harness once its turn is told to go: before the turn, a program
@@ -59,37 +59,6 @@ input()
 print("started " + json.dumps({"program": os.getpid()}), flush=True)
 time.sleep(60)
 "#;
-
-    #[test]
-    fn a_run_of_the_harnesss_status_line_is_named_by_one_look_and_none_of_an_ending() {
-        let _serial = serial_pty_test();
-        let mut outsider = Sentinel::start();
-        let table = Arc::new(PaneTable::closing_within(GRACE));
-        let (pane, pid) = started(&table, STATUS_LINE, Servers::InGroup, None, &HashMap::new());
-        // The run is in a group of its own, and its shell began after the mark: a look
-        // while it lives takes it, and its job, for the turn's work, beside the command.
-        assert_eq!(
-            listed(&table, &pane.key),
-            numbers(&pid, &["line", "line_job", "tool", "tool_job"])
-        );
-
-        let ending = table.end_background(&pane.key).expect("end it");
-
-        // By the second look the run has ended: the ending ends and names the command.
-        let lasting = numbers(&pid, &["tool", "tool_job"]);
-        assert_eq!(ended_pids(&ending), lasting, "{ending:?}");
-        assert_eq!(ending.left.total, 0, "{ending:?}");
-        for job in ["tool", "tool_job"] {
-            assert!(gone(pid[job]), "{job} was ended");
-        }
-        assert!(
-            process_exists(pid["program"]) && process_exists(pid["before"]),
-            "the window is as it was"
-        );
-        assert!(outsider.runs(), "a process outside the window");
-        table.kill(&pane.key).expect("close the pane");
-        assert!(outsider.runs(), "nor a close's");
-    }
 
     #[test]
     fn a_close_keeps_what_the_window_left_running_for_the_exit_and_not_a_run_of_the_harnesss_status_line(
@@ -173,30 +142,19 @@ time.sleep(60)
     }
 
     #[test]
-    fn a_window_that_left_nothing_is_looked_at_once_by_an_ending_and_by_a_close() {
+    fn a_window_that_left_nothing_is_looked_at_once_by_a_close() {
         let _serial = serial_pty_test();
         let mut outsider = Sentinel::start();
         let table = Arc::new(PaneTable::closing_within(GRACE));
         let (pane, _) = started(&table, NOTHING, Servers::InGroup, None, &HashMap::new());
         assert_eq!(listed(&table, &pane.key), Vec::<u32>::new());
 
-        let ending = Instant::now();
-        assert_eq!(
-            table.end_background(&pane.key).expect("end it"),
-            Ending::default()
-        );
-        assert!(
-            ending.elapsed() < SETTLE,
-            "a look that finds nothing is not made again: {:?}",
-            ending.elapsed()
-        );
-
         let closing = Instant::now();
         table.kill(&pane.key).expect("close the pane");
 
         assert!(
             closing.elapsed() < SETTLE,
-            "nor is a close's: {:?}",
+            "a look that finds nothing is not made again: {:?}",
             closing.elapsed()
         );
         assert_eq!(pane.ended.background(), Some(Vec::new()));
@@ -206,7 +164,8 @@ time.sleep(60)
 
 /// The same on Windows, where the tree is the pane's job: a command of the agent's that
 /// lasts, and a shell that runs a ping a second long and stays, as a harness's helper that
-/// starts a short run of its own beside the agent's does.
+/// starts a short run of its own beside the agent's does. What a close names is what the
+/// look it makes twice finds ([`super::super::steadily_looked_at`]).
 #[cfg(windows)]
 mod windows {
     use std::collections::HashMap;
@@ -245,7 +204,7 @@ mod windows {
     }
 
     #[test]
-    fn a_ping_that_ends_between_two_looks_is_none_of_what_an_ending_ends_or_names() {
+    fn a_ping_that_ends_between_two_looks_is_none_of_what_a_close_names() {
         let _pty_guard = serial_pty_test();
         let table = Arc::new(PaneTable::new());
         let shell = system(r"WindowsPowerShell\v1.0\powershell.exe");
@@ -279,17 +238,22 @@ mod windows {
         read_until(&table, &key, &output, "RUN#");
         until_listed(&table, &key, &["ping.exe", "-n 2 "]);
 
-        let ending = table.end_background(&key).expect("end it");
+        // What the close would name, by the two looks it makes.
+        let (tree, baseline) = {
+            let panes = table.lock_panes().expect("the panes");
+            let pane = panes.get(&key).expect("the pane");
+            (pane.tree(), pane.baseline.clone())
+        };
+        let named = super::super::steadily_looked_at(&baseline, &tree).expect("two looks");
 
         assert!(
-            says(&ending.ended, &["ping.exe", "-n 1006"]),
-            "what lasts is ended: {ending:?}"
+            says(&named, &["ping.exe", "-n 1006"]),
+            "what lasts is named: {named:?}"
         );
         assert!(
-            !says(&ending.ended, &["ping.exe", "-n 2 "]) && !says(&ending.left, &["-n 2 "]),
-            "the ping that had ended by the second look is none of it: {ending:?}"
+            !says(&named, &["ping.exe", "-n 2 "]),
+            "the ping that had ended by the second look is none of it: {named:?}"
         );
-        assert_eq!(ending.left.total, 0, "{ending:?}");
         table.kill(&key).expect("close the pane");
     }
 }

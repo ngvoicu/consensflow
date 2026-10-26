@@ -391,6 +391,7 @@ async fn an_exit_tells_how_the_window_ended_and_what_its_screen_showed_where_the
                 signal: None,
                 tail: None,
                 background: Vec::new(),
+                possibly_left: Vec::new(),
                 survivor: None,
             };
             assert_eq!(
