@@ -153,7 +153,7 @@ fn with_cut_users<'a>(store: &'a Store, chain: Vec<&'a Row>) -> Result<Vec<&'a R
                     let user = row
                         .message_id()
                         .and_then(|id| originals.get(id))
-                        .and_then(|original| user_of(store, original));
+                        .and_then(|original| user_of(store, originals, original));
                     if let Some(user) = user.filter(|user| *last != Some(&user.node)) {
                         *last = Some(&user.node);
                         rows.push(user);
@@ -196,12 +196,24 @@ fn off_chain<'a>(store: &'a Store, on_chain: &HashSet<&Key>) -> HashMap<&'a str,
     originals
 }
 
-/// The user's message `row` answers: the nearest user's above it, if any. A row that
-/// cannot be read, or rows that lead back to themselves, answer none.
-fn user_of<'a>(store: &'a Store, row: &'a Row) -> Option<&'a Row> {
+/// The user's message `row` answers: the nearest user's above it, if any, each row on
+/// the way read as its original (`originals`), the oldest off the chain with its id. A
+/// step written between two compactions has its oldest row below the earlier one's
+/// copies, which lead to that summary, and their originals to the message (Calliope's
+/// P2-1 on T-655: after the last of three summaries, 5 of 7 kept copies in each SWE-2
+/// session). A row that cannot be read, or rows that lead back to themselves, answer
+/// none.
+fn user_of<'a>(
+    store: &'a Store,
+    originals: &HashMap<&str, &'a Row>,
+    row: &'a Row,
+) -> Option<&'a Row> {
     let mut visited = HashSet::new();
     let mut at = row;
     loop {
+        if let Some(&original) = at.message_id().and_then(|id| originals.get(id)) {
+            at = original;
+        }
         if at.message().ok()?.get("role").and_then(Value::as_str) == Some("user") {
             return Some(at);
         }

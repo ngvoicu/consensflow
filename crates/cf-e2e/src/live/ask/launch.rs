@@ -42,6 +42,13 @@ pub fn devin_hooks(cf: &Path, member: bool) -> Result<Value> {
     question(&json!({ "op": "devin_hooks", "cf": cf, "member": member }))
 }
 
+/// The owner's own config of Devin, as the adapter reads it for a launch, in the config
+/// folder `env` names: its comments and trailing commas left out, and an empty one where
+/// there is none.
+pub fn devin_config(env: &[(String, String)]) -> Result<Value> {
+    question(&json!({ "op": "devin_config", "env": env_object(env) }))
+}
+
 /// What the adapter is asked to prepare a member's Devin window from.
 #[derive(Debug, Clone, Copy)]
 pub struct DevinLaunch<'a> {

@@ -80,6 +80,12 @@ pub(super) fn devin_hooks(question: &Value) -> Result<Value, String> {
     Ok(Value::Object(hooks))
 }
 
+/// The owner's own config of Devin, read as the adapter reads it for a launch, with the
+/// home `env` names: comments and trailing commas left out, and none as an empty one.
+pub(super) fn devin_config(question: &Value) -> Result<Value, String> {
+    crate::devin::native_config(&env(question)?).map(Value::Object)
+}
+
 /// The launch the question names, prepared by Devin's adapter over `services`.
 fn prepared(question: &Value, services: &Services) -> Result<Value, String> {
     let id = LaunchId::new(text(question, "launch")?)

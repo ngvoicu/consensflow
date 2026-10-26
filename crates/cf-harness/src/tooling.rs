@@ -23,16 +23,19 @@
 //! | `devin_ready` | `wire`: the wire log of a Devin window's launch | `{shown, mode, command}`: what the daemon's readiness reads of it (the conversation the window shows, the permission mode it is in) and the command the window is given before it is ready for work (`/bypass` where the wire says the normal mode), or null |
 //! | `devin_readiness` | `wire`, `session`, `pane` (`id`, `generation`), `withinMs`, `everyMs`: a Devin window that is open, asked whether it is ready as the engine asks it, until it is ready or unfit or the time is up; the pane host it asks is the asker's, a request a line of the output and its answer a line of the input (`readiness`) | `{answers, ready}`: what the looks answered, in order (`ready`, `held: …`, `unfit: …`, one that came again in a row said once), and whether the last was ready |
 //! | `devin_hooks` | `cf`, `member`: the hooks ConsensFlow adds to the owner's in a Devin launch (a member's, or the chief's), its session hook run by `cf` | `{event: [entry]}`: each event with the entries added, as the launch's config has them written |
+//! | `devin_config` | `env`: the owner's own config of Devin, read as the adapter reads it for a launch, in the config folder `env` names | the config, an object: its comments and trailing commas left out, and an empty one where there is none |
 //! | `trust` | `kind`, `screen` (a window's last lines), and `directory` where asked: what the engine reads there of the harness's question about trusting the window's folder | `{key, prompt}`: the key it presses next toward a yes (`down`, `enter`), or null where the lines show no such question or the harness never asks one, and whether they are the harness's prompt; with `directory`, `trusts` too: `{folder, inside}`, what a yes trusts for a window opened in that project's folder |
 //!
-//! The last eight are the evals' and the live tests' own: the program a window
+//! The last nine are the evals' and the live tests' own: the program a window
 //! opens on, which the daemon asks `cf_process::pane_argv` for, the
 //! conversation a window of a harness that names its own opened, which only
 //! its store says, the Specmint skill a chief's window is given, which the
 //! live test of specs names the copy it was given by, the Devin window a
 //! member is given, whole, which `start` leaves bare (no config, no hooks, no
 //! first message), and what the daemon's readiness makes of that window's
-//! permission mode, read and then done, and the key the engine presses into a
+//! permission mode, read and then done, the owner's Devin config as a launch reads
+//! it, which the live test of a compacted turn sets a threshold in, and the key the
+//! engine presses into a
 //! harness's question about trusting a window's folder, which the live test of
 //! folder trust holds against the real harnesses' screens.
 
@@ -74,9 +77,10 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "devin_ready" => launch::devin_ready(question),
         "devin_readiness" => readiness::devin_readiness(question),
         "devin_hooks" => launch::devin_hooks(question),
+        "devin_config" => launch::devin_config(question),
         "trust" => trust(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, devin_ready, devin_readiness, devin_hooks and trust"
+            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, devin_ready, devin_readiness, devin_hooks, devin_config and trust"
         )),
     }
 }

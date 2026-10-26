@@ -364,3 +364,106 @@ fn nothing_is_read_back_where_no_original_has_a_users_message_above_it_or_the_ch
     staged.head("c-3");
     assert_eq!(ids(&read_once(&staged)), ["s-1", "a-step", "u-1"]);
 }
+
+#[test]
+fn a_step_written_between_two_compactions_reads_back_the_users_message_through_the_first_ones_copies(
+) {
+    // Calliope's P2-1 on T-655 (T-679): the four SWE-2 sessions of T-655's live runs were
+    // each compacted three times, and after the last summary 5 of 7 kept copies were of
+    // steps written after an earlier one, whose rows lead up through that one's copies.
+    let staged = Staged::new();
+    before(&staged);
+    let mut reader = staged.reader();
+    look(&mut reader);
+    // The first compaction, and a step written below its copies.
+    staged.node(Some("c-1"), None, &summary("s-1"));
+    staged.node(Some("c-2"), Some("c-1"), &step());
+    staged.node(Some("c-3"), Some("c-2"), &tool());
+    staged.node(Some("c-4"), Some("c-3"), &with_id(step(), "b-step"));
+    staged.node(Some("c-5"), Some("c-4"), &with_id(tool(), "b-tool"));
+    staged.head("c-5");
+    assert_eq!(
+        ids(&show(&look(&mut reader))),
+        ["s-1", "u-1", "a-step", "t-step", "b-step", "b-tool"]
+    );
+    // The second keeps only the later step.
+    staged.node(Some("d-1"), None, &summary("s-2"));
+    staged.node(Some("d-2"), Some("d-1"), &with_id(step(), "b-step"));
+    staged.node(Some("d-3"), Some("d-2"), &with_id(tool(), "b-tool"));
+    staged.node(
+        Some("d-4"),
+        Some("d-3"),
+        &answer("a-final", "Done.", ANSWERED),
+    );
+    staged.head("d-4");
+    wired(&staged, &ended("complete", Some(ANSWERED), Some(ANSWERED)));
+    let incremental = show(&look(&mut reader));
+    assert_eq!(
+        incremental,
+        read_once(&staged),
+        "a fresh look reads the same"
+    );
+    assert_eq!(
+        ids(&incremental),
+        ["s-2", "u-1", "b-step", "b-tool", "a-final"]
+    );
+    assert_eq!(said(&incremental), settled());
+}
+
+#[test]
+fn a_summary_below_a_system_prefix_is_read_as_one_at_the_chains_root() {
+    // Real chains hold the summary after the system's own rows (index 23 of 190 in
+    // T-602's store, 6 of 15 in the SWE-2 sessions): Calliope's P3-2 on T-655.
+    let prefix = json!({ "message_id": "p-1", "role": "system", "content": "Rules." });
+    let reading = reading_after(|staged| {
+        staged.node(Some("c-0"), None, &prefix);
+        staged.node(Some("c-1"), Some("c-0"), &summary("s-1"));
+        staged.node(Some("c-2"), Some("c-1"), &step());
+        staged.node(Some("c-3"), Some("c-2"), &tool());
+        staged.node(
+            Some("c-4"),
+            Some("c-3"),
+            &answer("a-final", "Done.", ANSWERED),
+        );
+        staged.head("c-4");
+        wired(staged, &ended("complete", Some(ANSWERED), Some(ANSWERED)));
+    });
+    assert_eq!(
+        ids(&reading),
+        ["p-1", "s-1", "u-1", "a-step", "t-step", "a-final"]
+    );
+    assert_eq!(said(&reading), settled());
+}
+
+#[test]
+fn a_compacted_turn_devin_stamps_is_at_work_by_its_wire_alone_until_its_end_and_settles_by_its_request(
+) {
+    // Where T-655 and T-660 meet (Calliope on T-679): a turn Devin 3000.11 stamps, compacted
+    // with nothing that leads back to its user's message, is at work by the wire's word
+    // alone, whatever the chain holds, and ends at the end the wire says, by the model
+    // request it names.
+    let stamp = json!({ "cognition.ai/timestamp": "2026-10-26T08:18:30.000000+00:00" });
+    let status = |state: &str| {
+        json!({ "sessionId": SESSION, "update": { "sessionUpdate": "session_info_update",
+            "_meta": { "cognition.ai/timestamp": 1_792_976_967_738_i64,
+                "cognition.ai/statusEnum": state } } })
+    };
+    let work = vec![
+        status("working"),
+        json!({ "sessionId": SESSION, "update": { "sessionUpdate": "tool_call", "_meta": stamp } }),
+        json!({ "sessionId": SESSION, "update": { "sessionUpdate": "tool_call_update", "status": "in_progress" } }),
+    ];
+    let at_work = reading_after(|staged| {
+        compacted_anew(staged, &with_id(tool(), "t-later"));
+        wired(staged, &work);
+    });
+    assert_eq!(said(&at_work), ("in-flight".to_owned(), true, true));
+    let ended = reading_after(|staged| {
+        compacted_anew(staged, &answer("a-final", "Done.", ANSWERED));
+        let mut then = work.clone();
+        then.push(status("blocked"));
+        then.extend(ended("complete", Some(ANSWERED), Some(ANSWERED)));
+        wired(staged, &then);
+    });
+    assert_eq!(said(&ended), settled());
+}

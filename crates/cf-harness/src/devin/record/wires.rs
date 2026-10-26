@@ -235,7 +235,9 @@ struct Ended<'a> {
 }
 
 /// `outcome` as how the turn of `key` ended in `outcomes`: a log that says another of
-/// the same turn fails the look.
+/// the same turn fails the look, and every look after it while the log says both (the
+/// client id's rule, which the model request's ends keep too). A retried turn whose two
+/// ends disagree reads unknown for good, never settled early (Calliope's P3-3 on T-655).
 fn record(
     outcomes: &mut HashMap<String, Outcome>,
     key: &str,

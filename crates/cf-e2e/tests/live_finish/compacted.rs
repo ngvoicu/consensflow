@@ -5,16 +5,17 @@
 //! the store outside the main chain: a turn's end that looked for the brief on the chain
 //! found none, and the task stayed working for good with its window at rest.
 //!
-//! Devin compacts a session once its context passes `agent.compaction_threshold_tokens`
-//! of its config (an integer from 1 up, Devin 3000.11.205). The run gives the daemon and
-//! its windows a config folder of their own (`XDG_CONFIG_HOME`): the machine's Devin
-//! config with the threshold at [`THRESHOLD`] tokens, and nothing else of the machine's
-//! folder. Devin's login is not kept there, and stays where the machine keeps it. The
-//! task is several calls of the worker's shell, so that the compactor runs in the middle
-//! of the turn: two probes of 2026-10-26 on SWE-2 compacted three times in five calls, in
-//! about 30 s. The run checks what the first step checks (the task done, its result at
-//! the chief with the command's output), and that Devin did compact the turn: a session
-//! whose main chain holds no compaction's summary proves nothing, and fails the run.
+//! Devin compacts a session once its context passes `agent.compaction_threshold_tokens` of
+//! its config (an integer from 1 up, Devin 3000.11.205). The run gives the daemon and its
+//! windows a config folder of their own (`XDG_CONFIG_HOME`): the machine's Devin config,
+//! read as a launch reads it, with the threshold at [`THRESHOLD`] tokens, and nothing else
+//! of the machine's folder. Devin's login is not kept there, and stays where the machine
+//! keeps it. The task is several calls of the worker's shell, so that the compactor runs in
+//! the middle of the turn: two probes of 2026-10-26 on SWE-2 compacted three times in five
+//! calls, in about 30 s. The run checks what the first step checks (the task done, its
+//! result at the chief with the command's output), and that Devin did compact the turn: a
+//! session whose main chain holds no compaction's summary proves nothing, and fails the
+//! run.
 //!
 //! On Windows Devin keeps its config in its data folder, which `XDG_CONFIG_HOME` does not
 //! move, so the step is not run there.
@@ -24,6 +25,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cf_e2e::devin_store;
+use cf_e2e::live::ask;
 use cf_e2e::live::machine::{home, live_folder};
 use cf_e2e::live::members::{self, Plan};
 use cf_e2e::live::{Harness, Log, Who};
@@ -59,10 +61,21 @@ fn config() -> Result<TempDir> {
             || home().map(|home| home.join(".config")),
             |folder| Ok(PathBuf::from(folder)),
         )?;
-    let text = files::read_string(&machine.join("devin").join("config.json"))?;
-    let mut config: Value = serde_json::from_str(&text).map_err(|cause| {
-        Error::Daemon(format!("the machine's Devin config is no JSON: {cause}"))
-    })?;
+    config_in(&machine)
+}
+
+/// A config folder for Devin: the config in the config folder `machine`, read as a
+/// launch reads it (`ask::devin_config`: its comments and trailing commas left out, none
+/// as an empty one), its compaction threshold at [`THRESHOLD`].
+fn config_in(machine: &Path) -> Result<TempDir> {
+    let env = [
+        ("HOME".to_owned(), home()?.to_string_lossy().into_owned()),
+        (
+            "XDG_CONFIG_HOME".to_owned(),
+            machine.to_string_lossy().into_owned(),
+        ),
+    ];
+    let mut config = ask::devin_config(&env)?;
     let Some(fields) = config.as_object_mut() else {
         return Err(Error::Daemon(
             "the machine's Devin config is no object".to_owned(),
@@ -211,6 +224,36 @@ mod tests {
         assert_eq!(
             plan.vars,
             [("XDG_CONFIG_HOME".to_owned(), "/x/config".to_owned())]
+        );
+    }
+
+    /// The config a run gives Devin, made from the config folder `machine`.
+    fn given(machine: &Path) -> Value {
+        let folder = config_in(machine).unwrap();
+        let text = files::read_string(&folder.path().join("devin").join("config.json")).unwrap();
+        serde_json::from_str(&text).unwrap()
+    }
+
+    #[test]
+    fn the_owners_config_is_read_as_a_launch_reads_it_with_its_comments_and_none_as_empty() {
+        // Calliope's P3-1 on T-655: the adapter reads the owner's config as JSONC, and
+        // one that is not there as empty; the case read it as JSON, and required it.
+        let machine = tempfile::tempdir().unwrap();
+        assert_eq!(
+            given(machine.path()),
+            json!({ "agent": { "compaction_threshold_tokens": THRESHOLD } })
+        );
+        files::write(
+            &machine.path().join("devin").join("config.json"),
+            "// the owner's\n{ \"agent\": { \"model\": \"swe-2\", /* theirs */ }, \"theme_mode\": \"dark\", }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            given(machine.path()),
+            json!({
+                "agent": { "model": "swe-2", "compaction_threshold_tokens": THRESHOLD },
+                "theme_mode": "dark",
+            })
         );
     }
 

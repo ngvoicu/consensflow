@@ -15,7 +15,9 @@
 #   request is not read at all;
 # - a compacted reply is complete whatever words the wire streamed;
 # - no user's message is read back, a step's newest row off the chain is taken for its
-#   original, or a message the chain holds is read back as well.
+#   original, a row on the walk to the message is not read as its original (a step written
+#   between two compactions, Calliope's P2-1 on T-655), or a message the chain holds is
+#   read back as well.
 #
 # And a turn Devin 3000.11 stamps (T-660, from T-656's reading of the live suites): every
 # record of its work stamped with its time, as a replay is, and Devin's own word on the turn
@@ -209,3 +211,13 @@ builds = true
 file = "crates/cf-harness/src/devin/record/wires.rs"
 find = '''                Some("working") => self.busy = true,'''
 replace = '''                Some("working") => {}'''
+
+[[plant]]
+name = "devin compaction: the walk to a cut user's message reads no row as its original"
+meant = "a_step_written_between_two_compactions_reads_back_the_users_message_through_the_first_ones_copies"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = "            at = original;"
+replace = "            let _ = original;"
