@@ -379,9 +379,9 @@ fn stream_to_page(
             // How it ended by itself, where that came after the output did; not the
             // host's own end of it.
             let status = status.or_else(|| (!handed.ended_by_host).then(|| ended.get()).flatten());
-            // What may be the window's and runs on, which no close or ending signals: named
-            // as the program is proven gone, which a close's ending of what is the window's
-            // does not change.
+            // What may be the window's and runs on, which no close signals: named as the
+            // program is proven gone, which the close's ending of what is the window's does
+            // not change.
             let left = Left {
                 background,
                 possibly: possibly_left(

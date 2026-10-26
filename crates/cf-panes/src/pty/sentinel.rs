@@ -2,11 +2,11 @@
 //! signal: as the user's own programs are beside a window, it is none of the
 //! test's either. A shell the test starts detached (a child of the system's init, in a
 //! session of its own: no process of the test started it), with a job of its own, both
-//! asleep. The pane host signals only the window's own, whatever its selection says, so an
-//! ending or a close that is right never reaches them, and a test says so once it is over
+//! asleep. The pane host signals only the window's own, whatever its selection says, so a
+//! close that is right never reaches them, and a test says so once it is over
 //! ([`Sentinel::runs`]), and once more when the sentinel is dropped, which a test that
-//! failed before its own look at it reaches too. Every test that ends or closes a window of
-//! real processes has one: the bound of the tree is what keeps a wrong selection from them,
+//! failed before its own look at it reaches too. Every test that closes a window of real
+//! processes has one: the bound of the tree is what keeps a wrong selection from them,
 //! and this is what shows it did. The guard of a test build's real signals
 //! (`process_tree::guard`) refuses it as a stranger, which a child of the test would not be.
 
