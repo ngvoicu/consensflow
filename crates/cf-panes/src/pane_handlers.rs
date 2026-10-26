@@ -330,6 +330,7 @@ pub fn register_pane_handlers(
             "inputFailed":snapshot.input_failed,
             "unsent":snapshot.unsent,
             "outputQuietMs":snapshot.output_quiet_ms,
+            "pasteQuietMs":snapshot.paste_quiet_ms,
         });
         // The screen's last lines, for a request that asks for them. A pane
         // the table no longer holds has none to give.
@@ -625,6 +626,8 @@ mod tests {
         );
         let snapshot = ask("pane.snapshot", json!({"id":"typing-pane","generation":1}));
         assert_eq!(snapshot["pasteInFlight"], false, "{snapshot}");
+        // And says how long since it wrote that paste.
+        assert!(snapshot["pasteQuietMs"].is_u64(), "{snapshot}");
         // Keys over the bridge are the daemon's, never the human's unsent text.
         assert_eq!(snapshot["unsent"], false, "{snapshot}");
 

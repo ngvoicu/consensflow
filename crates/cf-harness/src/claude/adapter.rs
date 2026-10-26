@@ -65,8 +65,8 @@ use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
-    Adapter, Admission, Held, Input, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Skill, Trusts, Waiting, Window, Work,
+    Adapter, Admission, Held, Input, Launch, Observed, Pane, PaneHost, Prepared, Question,
+    Readiness, Records, ServersChosen, Skill, Trusts, Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
@@ -188,6 +188,7 @@ impl Adapter for ClaudeAdapter {
                     left_open: RefCell::new(left_open),
                     relaunched,
                     trusts: trust::trusts(launch.directory),
+                    directory: launch.directory.to_owned(),
                 }),
             })
         })
@@ -268,6 +269,9 @@ struct ClaudeWindow {
     relaunched: Option<(String, u64)>,
     /// What a yes to Claude Code's question about the window's folder trusts.
     trusts: Trusts,
+    /// The window's folder, whose local settings keep what Claude Code was told of the
+    /// project's servers.
+    directory: String,
 }
 
 /// What a look at `session` is told: where the window's program began writing,
@@ -349,12 +353,24 @@ impl Window for ClaudeWindow {
         Some(&self.trusts)
     }
 
-    fn toward_trust(&self, screen: &[String]) -> Option<&'static [u8]> {
+    fn toward_trust(&self, screen: &[String]) -> Option<Question> {
         super::trust::toward_trust(screen)
     }
 
     fn shows_prompt(&self, screen: &[String]) -> bool {
         super::trust::shows_prompt(screen)
+    }
+
+    fn names_trust_choices(&self, screen: &[String]) -> bool {
+        super::trust::names_choices(screen)
+    }
+
+    fn trust_servers(&self, screen: &[String]) -> Vec<String> {
+        super::trust::servers_named(screen)
+    }
+
+    fn servers_chosen(&self) -> ServersChosen {
+        trust::chosen(&self.directory)
     }
 
     /// A paste waits for the window to be readable, on its conversation,
@@ -441,7 +457,7 @@ impl Window for ClaudeWindow {
                     record.quota.clone(),
                     record.pending.agents > 0,
                 ),
-                Reading::Unknown(_) => (true, false, false, None, false),
+                Reading::Unknown(_) | Reading::Missing(_) => (true, false, false, None, false),
             };
             let observed = |settled, over, waiting, took_back, at_prompt| Observed {
                 reading: Some(Arc::clone(&reading)),

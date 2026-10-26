@@ -14,10 +14,14 @@
 //! And a case can catch one paste of the daemon's ([`Catch`]): passed to the pane
 //! host or kept from it, its answer never reaches the daemon, which goes on
 //! waiting for it, as a daemon stopped between a paste and its receipt left it.
+//! Or stall the pane host at one ([`Stall`]): the paste and every frame after it
+//! between the two wait here for a while, then go on in the order they came.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -98,6 +102,9 @@ pub(super) struct Seen {
     pub kills: Vec<Value>,
     /// Every key the daemon pressed into a window, in order.
     pub presses: Vec<Press>,
+    /// When the daemon told the page the board moved (`state.changed`, its reason
+    /// `core`), in milliseconds since the epoch, in order.
+    pub moves: Vec<i64>,
     /// Everything each pane printed, by the pane's id.
     pub printed: HashMap<String, Vec<u8>>,
     /// The body of each `pane.exit` the pane host told.
@@ -131,6 +138,39 @@ pub(super) struct Catch {
     caught: Option<String>,
 }
 
+/// A stall of the pane host a case set out ([`crate::rig::Rig::stall_host_at_paste`]):
+/// armed for the daemon's next paste that holds some words, it holds that paste and every
+/// frame between the daemon and the pane host after it, both ways, until it has lasted its
+/// time; they then go on in the order they came, as from a host that answered nothing
+/// meanwhile, and whose window was given nothing.
+#[derive(Debug, Default)]
+pub(super) struct Stall {
+    armed: Option<(String, Duration)>,
+    /// The words of the paste it holds the frames since, while it does.
+    holding_for: Option<String>,
+    /// Whether it holds the frames now.
+    holding: bool,
+    /// Whether it held a paste and let it go.
+    over: bool,
+    to_host: Vec<String>,
+    to_daemon: Vec<String>,
+}
+
+impl Stall {
+    /// Lets what it held go, in order, and holds nothing more.
+    fn release(&mut self, host: &Sink, daemon: &Sink) {
+        for line in self.to_host.drain(..) {
+            host.send(line);
+        }
+        for line in self.to_daemon.drain(..) {
+            daemon.send(line);
+        }
+        self.holding = false;
+        self.holding_for = None;
+        self.over = true;
+    }
+}
+
 /// What the routers share with the case.
 #[derive(Debug, Default)]
 pub(super) struct Shared {
@@ -140,6 +180,9 @@ pub(super) struct Shared {
     pages: AtomicU64,
     hosts: AtomicU64,
     catch: Mutex<Catch>,
+    stall: Arc<Mutex<Stall>>,
+    /// The daemon's looks at a window's screen are refused here while it is set.
+    refusing_snapshots: AtomicBool,
 }
 
 impl Shared {
@@ -163,6 +206,77 @@ impl Shared {
         let mut catch = self.catch.lock().unwrap_or_else(PoisonError::into_inner);
         catch.armed = Some((words.to_owned(), pasted));
         catch.caught = None;
+    }
+
+    /// The pane host stalls at the daemon's next paste that holds `words`, for
+    /// `lasting`, or until the daemon pastes those words again; one set before and not
+    /// yet begun is replaced.
+    pub fn stall_at_paste(&self, words: &str, lasting: Duration) {
+        let mut stall = self.stall();
+        stall.armed = Some((words.to_owned(), lasting));
+        stall.over = false;
+    }
+
+    /// Whether the stall set out held a paste and is over.
+    pub fn stall_over(&self) -> bool {
+        self.stall().over
+    }
+
+    fn stall(&self) -> MutexGuard<'_, Stall> {
+        self.stall.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Whether `line`, a frame of the daemon's, is held by the stall: the paste it is
+    /// armed for begins it, and what comes while it holds waits with it. The stall ends
+    /// on a thread of its own once it has lasted, whatever frames come.
+    fn stalls_daemon(&self, frame: &Value, line: &str, host: &Sink, daemon: &Sink) -> bool {
+        let mut stall = self.stall();
+        let paste = frame["kind"] == "req" && frame["op"] == "pane.write_paste";
+        let holds = |words: &str| {
+            paste
+                && frame["body"]["body"]
+                    .as_str()
+                    .is_some_and(|body| body.contains(words))
+        };
+        // A second paste of the same words while it holds is what a daemon that took
+        // the first for lost does: the stall has held what it was for, and ends.
+        if stall.holding && stall.holding_for.as_deref().is_some_and(holds) {
+            stall.to_host.push(line.to_owned());
+            stall.release(host, daemon);
+            return true;
+        }
+        if let Some((words, lasting)) = stall.armed.take_if(|(words, _)| holds(words)) {
+            stall.holding = true;
+            stall.holding_for = Some(words);
+            let (held, host, daemon) = (Arc::clone(&self.stall), host.clone(), daemon.clone());
+            let until = Instant::now() + lasting;
+            thread::spawn(move || {
+                thread::sleep(until.saturating_duration_since(Instant::now()));
+                let mut held = held.lock().unwrap_or_else(PoisonError::into_inner);
+                if held.holding {
+                    held.release(&host, &daemon);
+                }
+            });
+        }
+        if stall.holding {
+            stall.to_host.push(line.to_owned());
+        }
+        stall.holding
+    }
+
+    /// Whether `line`, a frame of the pane host's, is held by the stall.
+    fn stalls_host(&self, line: &str) -> bool {
+        let mut stall = self.stall();
+        if stall.holding {
+            stall.to_daemon.push(line.to_owned());
+        }
+        stall.holding
+    }
+
+    /// From now on, while `refused`, the daemon's every `pane.snapshot` is answered
+    /// here, not ok, as a host that could not read the screen answers it.
+    pub fn refuse_snapshots(&self, refused: bool) {
+        self.refusing_snapshots.store(refused, Ordering::Relaxed);
     }
 
     /// Whether the paste set out to be caught was.
@@ -202,8 +316,10 @@ impl Shared {
     }
 
     /// A line the daemon wrote: kept, and passed to the pane host unless it is
-    /// the answer to a request of the case's, or a paste caught to go nowhere.
-    pub fn route_daemon(&self, line: &str, host: &Sink) {
+    /// the answer to a request of the case's, a paste caught to go nowhere, a
+    /// look at a screen refused, which is answered to the `daemon` here, or held by
+    /// a stall of the host's until it is over.
+    pub fn route_daemon(&self, line: &str, host: &Sink, daemon: &Sink) {
         let Ok(frame) = serde_json::from_str::<Value>(line) else {
             self.seen().stray.push(line.to_owned());
             return;
@@ -221,6 +337,12 @@ impl Shared {
             }
             if frame["kind"] == "req" && frame["op"] == "pane.kill" {
                 seen.kills.push(frame["body"].clone());
+            }
+            if frame["kind"] == "evt"
+                && frame["op"] == "state.changed"
+                && frame["body"]["reason"] == "core"
+            {
+                seen.moves.push(jiff::Timestamp::now().as_millisecond());
             }
             if frame["kind"] == "req" && frame["op"] == "pane.input" {
                 if let Some(bytes) = bytes_of(&frame["body"]["bytes"]) {
@@ -240,12 +362,24 @@ impl Shared {
         if self.caught(&frame) == Some(Pasted::Nowhere) {
             return;
         }
-        host.send(format!("{line}\n"));
+        let line = format!("{line}\n");
+        if self.stalls_daemon(&frame, &line, host, daemon) {
+            return;
+        }
+        if frame["kind"] == "req"
+            && frame["op"] == "pane.snapshot"
+            && self.refusing_snapshots.load(Ordering::Relaxed)
+        {
+            let refused = json!({ "ok": false, "error": "the rig refused the snapshot" });
+            daemon.send(wire::response(id, "pane.snapshot", &refused));
+            return;
+        }
+        host.send(line);
     }
 
     /// A line the pane host wrote: kept, a pane's output gathered and the
     /// cursor query answered, and passed to the daemon unless it is the answer
-    /// to a request of the case's, or to the paste caught.
+    /// to a request of the case's, or to the paste caught, or held by a stall.
     pub fn route_host(&self, line: &str, host: &Sink, daemon: &Sink) {
         let Ok(frame) = serde_json::from_str::<Value>(line) else {
             self.seen().stray.push(line.to_owned());
@@ -303,7 +437,11 @@ impl Shared {
         if self.answers_the_caught(&frame) {
             return;
         }
-        daemon.send(format!("{line}\n"));
+        let line = format!("{line}\n");
+        if self.stalls_host(&line) {
+            return;
+        }
+        daemon.send(line);
     }
 }
 
@@ -351,11 +489,43 @@ mod tests {
     }
 
     #[test]
+    fn a_look_at_a_screen_is_refused_while_the_case_says_so_and_passed_on_after() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, daemon_lines) = sinks();
+        let look = r#"{"v":1,"id":"d-4","kind":"req","op":"pane.snapshot","body":{"id":"p1-worker","generation":1,"tail":12}}"#;
+        shared.refuse_snapshots(true);
+        shared.route_daemon(look, &host, &daemon);
+        let refused: Value =
+            serde_json::from_str(&daemon_lines.recv_timeout(Duration::from_secs(10)).unwrap())
+                .unwrap();
+        assert_eq!(
+            (&refused["id"], &refused["kind"], &refused["body"]["ok"]),
+            (&json!("d-4"), &json!("res"), &json!(false))
+        );
+        // Any other request goes on.
+        let key = r#"{"v":1,"id":"d-5","kind":"req","op":"pane.input","body":{"id":"p1-worker","generation":1,"bytes":[13]}}"#;
+        shared.route_daemon(key, &host, &daemon);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            key
+        );
+        shared.refuse_snapshots(false);
+        shared.route_daemon(look, &host, &daemon);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            look
+        );
+        assert!(daemon_lines
+            .recv_timeout(Duration::from_millis(100))
+            .is_err());
+    }
+
+    #[test]
     fn a_frame_the_daemon_wrote_is_kept_and_passed_to_the_pane_host() {
         let shared = Shared::default();
-        let (host, host_lines, _daemon, _) = sinks();
+        let (host, host_lines, daemon, _) = sinks();
         let open = r#"{"v":1,"id":"n-1","kind":"req","op":"pane.open","body":{"id":"p1-chief","argv":["x"]}}"#;
-        shared.route_daemon(open, &host);
+        shared.route_daemon(open, &host, &daemon);
         assert_eq!(
             host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
             open
@@ -363,6 +533,29 @@ mod tests {
         let seen = shared.seen();
         assert_eq!(seen.daemon, 1);
         assert_eq!(seen.opened, [json!({"id": "p1-chief", "argv": ["x"]})]);
+    }
+
+    #[test]
+    fn a_word_to_the_page_that_the_board_moved_is_kept_with_its_time_and_passed_on() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, _daemon_lines) = sinks();
+        let before = jiff::Timestamp::now().as_millisecond();
+        let moved =
+            r#"{"v":1,"id":"e-1","kind":"evt","op":"state.changed","body":{"reason":"core"}}"#;
+        shared.route_daemon(moved, &host, &daemon);
+        // A window's work written is no move of the board.
+        let written = r#"{"v":1,"id":"e-2","kind":"evt","op":"state.changed","body":{"reason":"transcript"}}"#;
+        shared.route_daemon(written, &host, &daemon);
+        let moves = shared.seen().moves.clone();
+        assert!(moves.len() == 1 && moves[0] >= before, "{moves:?}");
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            moved
+        );
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            written
+        );
     }
 
     #[test]
@@ -376,8 +569,8 @@ mod tests {
             })
             .to_string()
         };
-        shared.route_daemon(&open("d-7", "p1-worker-a"), &host);
-        shared.route_daemon(&open("d-8", "p1-worker-b"), &host);
+        shared.route_daemon(&open("d-7", "p1-worker-a"), &host, &daemon);
+        shared.route_daemon(&open("d-8", "p1-worker-b"), &host, &daemon);
         // The host answers the second first, and the first with no process (it failed).
         let answer = |frame: &str, body: Value| {
             json!({ "v": 1, "id": frame, "kind": "res", "op": "pane.open", "body": body })
@@ -400,7 +593,7 @@ mod tests {
             "v": 1, "id": "d-9", "kind": "req", "op": "pane.kill",
             "body": {"id": "p1-worker-b", "generation": 2},
         });
-        shared.route_daemon(&kill.to_string(), &host);
+        shared.route_daemon(&kill.to_string(), &host, &daemon);
         let seen = shared.seen();
         assert_eq!(
             seen.pids,
@@ -414,7 +607,7 @@ mod tests {
     #[test]
     fn a_key_the_daemon_pressed_is_kept_with_the_time_it_was_seen_sent() {
         let shared = Shared::default();
-        let (host, host_lines, _daemon, _) = sinks();
+        let (host, host_lines, daemon, _) = sinks();
         let before = jiff::Timestamp::now().as_millisecond();
         let key = |id: &str, bytes: &str| {
             format!(
@@ -426,7 +619,7 @@ mod tests {
             key("p1-worker", "[3]"),
             key("p1-chief", "[27]"),
         ] {
-            shared.route_daemon(&line, &host);
+            shared.route_daemon(&line, &host, &daemon);
             // Each is passed on, as every frame is.
             assert_eq!(
                 host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
@@ -436,7 +629,7 @@ mod tests {
         // Another request of the daemon's is no key, and nor is an answer.
         shared.route_daemon(
             r#"{"v":1,"id":"n-2","kind":"req","op":"pane.write_paste","body":{"id":"p1-chief","bytes":[27]}}"#,
-            &host,
+            &host, &daemon,
         );
         let after = jiff::Timestamp::now().as_millisecond();
         let seen = shared.seen();
@@ -463,13 +656,14 @@ mod tests {
     #[test]
     fn the_answer_to_a_request_of_the_cases_stops_where_it_is_read() {
         let shared = Shared::default();
-        let (host, host_lines, _daemon, _) = sinks();
+        let (host, host_lines, daemon, _) = sinks();
         let id = shared.next_page_id();
         assert_eq!(id, "r-test-1");
         let answer = shared.pending.expect(&id);
         shared.route_daemon(
             &format!(r#"{{"v":1,"id":"{id}","kind":"res","op":"ping","body":{{"ok":true}}}}"#),
             &host,
+            &daemon,
         );
         assert_eq!(
             answer.recv_timeout(Duration::from_secs(10)).unwrap(),
@@ -479,15 +673,105 @@ mod tests {
         shared.route_daemon(
             r#"{"v":1,"id":"r-test-9","kind":"res","op":"ping","body":{"ok":true}}"#,
             &host,
+            &daemon,
         );
         // An answer to the host's own request goes on.
         let theirs = r#"{"v":1,"id":"n-7","kind":"res","op":"pane.open","body":{"ok":true}}"#;
-        shared.route_daemon(theirs, &host);
+        shared.route_daemon(theirs, &host, &daemon);
         assert_eq!(
             host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
             theirs
         );
         assert!(host_lines.recv_timeout(Duration::from_millis(100)).is_err());
+    }
+
+    #[test]
+    fn a_stall_holds_its_paste_and_every_frame_after_it_both_ways_until_it_has_lasted() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, daemon_lines) = sinks();
+        let lasting = Duration::from_millis(600);
+        shared.stall_at_paste("m-9", lasting);
+        let frame = |id: &str, kind: &str, op: &str, body: Value| {
+            json!({ "v": 1, "id": id, "kind": kind, "op": op, "body": body }).to_string()
+        };
+        let pane = json!({ "id": "p1-chief", "generation": 5 });
+        // A paste of other words goes on.
+        let other = frame(
+            "d-1",
+            "req",
+            "pane.write_paste",
+            json!({ "id": "p1-chief", "generation": 5, "body": "m-8" }),
+        );
+        shared.route_daemon(&other, &host, &daemon);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            other
+        );
+        // The paste it is set for begins it: that paste, what the daemon asks after it,
+        // and what the host says, wait.
+        let begun = Instant::now();
+        let paste = frame(
+            "d-2",
+            "req",
+            "pane.write_paste",
+            json!({ "id": "p1-chief", "generation": 5, "body": "m-9" }),
+        );
+        let snapshot = frame("d-3", "req", "pane.snapshot", pane.clone());
+        let answer = frame("d-1", "res", "pane.write_paste", json!({ "ok": true }));
+        shared.route_daemon(&paste, &host, &daemon);
+        shared.route_daemon(&snapshot, &host, &daemon);
+        shared.route_host(&answer, &host, &daemon);
+        assert!(host_lines.recv_timeout(Duration::from_millis(200)).is_err());
+        assert!(daemon_lines
+            .recv_timeout(Duration::from_millis(10))
+            .is_err());
+        assert!(!shared.stall_over());
+        // Once it has lasted, they go on in the order they came.
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            paste
+        );
+        assert!(begun.elapsed() >= lasting);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            snapshot
+        );
+        assert_eq!(
+            daemon_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            answer
+        );
+        assert!(shared.stall_over());
+        // And what comes after goes on at once.
+        let after = frame("d-4", "req", "pane.snapshot", pane);
+        shared.route_daemon(&after, &host, &daemon);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            after
+        );
+    }
+
+    #[test]
+    fn a_stall_ends_at_a_second_paste_of_its_words_which_it_holds_with_the_rest() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, _daemon_lines) = sinks();
+        shared.stall_at_paste("m-9", Duration::from_secs(600));
+        let paste = |id: &str| {
+            json!({ "v": 1, "id": id, "kind": "req", "op": "pane.write_paste",
+                    "body": { "id": "p1-chief", "generation": 5, "body": "m-9" } })
+            .to_string()
+        };
+        shared.route_daemon(&paste("d-1"), &host, &daemon);
+        assert!(host_lines.recv_timeout(Duration::from_millis(200)).is_err());
+        shared.route_daemon(&paste("d-2"), &host, &daemon);
+        assert!(shared.stall_over());
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            paste("d-1")
+        );
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            paste("d-2")
+        );
     }
 
     #[test]
@@ -559,7 +843,7 @@ mod tests {
         shared.catch_paste("Resumed:", Pasted::IntoTheWindow);
         // A paste that does not hold the words goes, and its answer comes back.
         let (other, answered) = paste("n-1", "[ConsensFlow m-3]\nhello");
-        shared.route_daemon(&other, &host);
+        shared.route_daemon(&other, &host, &daemon);
         assert_eq!(
             host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
             other
@@ -572,7 +856,7 @@ mod tests {
         assert!(!shared.paste_caught());
 
         let (caught, answer) = paste("n-2", "[ConsensFlow m-4]\nResumed: Go on");
-        shared.route_daemon(&caught, &host);
+        shared.route_daemon(&caught, &host, &daemon);
         assert_eq!(
             host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
             caught
@@ -585,7 +869,7 @@ mod tests {
 
         // It is caught once: the next that holds the words goes, answer and all.
         let (again, answered) = paste("n-3", "[ConsensFlow m-5]\nResumed: Go on");
-        shared.route_daemon(&again, &host);
+        shared.route_daemon(&again, &host, &daemon);
         assert_eq!(
             host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
             again
@@ -600,10 +884,10 @@ mod tests {
     #[test]
     fn a_paste_caught_to_go_nowhere_never_reaches_the_host() {
         let shared = Shared::default();
-        let (host, host_lines, _daemon, _) = sinks();
+        let (host, host_lines, daemon, _) = sinks();
         shared.catch_paste("Resumed:", Pasted::Nowhere);
         let (caught, _) = paste("n-1", "[ConsensFlow m-4]\nResumed: Go on");
-        shared.route_daemon(&caught, &host);
+        shared.route_daemon(&caught, &host, &daemon);
         assert!(shared.paste_caught());
         assert!(host_lines.recv_timeout(Duration::from_millis(100)).is_err());
         assert_eq!(shared.seen().daemon, 1, "it is counted, as every frame is");

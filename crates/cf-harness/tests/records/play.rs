@@ -262,7 +262,7 @@ impl Stage<'_> {
         self.handed_out.push((Arc::clone(reading), index));
         let quota = match &**reading {
             Reading::Known(record) => record.quota.as_ref(),
-            Reading::Unknown(_) => None,
+            Reading::Unknown(_) | Reading::Missing(_) => None,
         };
         let Some(quota) = quota else {
             assert_eq!(look.quota_same_as, None, "{name}");

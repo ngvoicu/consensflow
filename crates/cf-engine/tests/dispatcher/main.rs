@@ -28,7 +28,8 @@
 //! window whoever else is free (`quota_waits`), and an account's quota as every
 //! window's on it, and what waits for a window out of quota said to the human
 //! (`quota_accounts`), and a window whose turn is over, which no stop interrupts
-//! or closes (`nothing_to_stop`).
+//! or closes (`nothing_to_stop`), and a read of a window that fails or comes too late, which is
+//! unknown, and a pass that leaves a window whose read hangs to it (`unknown_looks`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -110,6 +111,7 @@ mod turn_end;
 mod turns_at_seams;
 mod undeliverable;
 mod unfit;
+mod unknown_looks;
 mod unreadable_agents;
 mod unsent;
 mod unstarted;

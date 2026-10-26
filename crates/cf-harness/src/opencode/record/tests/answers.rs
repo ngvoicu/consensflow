@@ -415,7 +415,7 @@ fn a_failed_reply_keeps_the_words_of_its_error() {
         staged.conversation(reply);
         match &*look(&mut staged.reader()) {
             Reading::Known(record) => (record.failed, record.failure.clone()),
-            Reading::Unknown(reason) => panic!("unknown: {reason}"),
+            Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
         }
     };
     let said = failure_of(&json!({

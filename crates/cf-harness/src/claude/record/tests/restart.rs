@@ -68,7 +68,7 @@ fn record_of(records: &[Value]) -> Record {
 fn known(reading: &Reading) -> Record {
     match reading {
         Reading::Known(record) => record.clone(),
-        Reading::Unknown(reason) => panic!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
     }
 }
 

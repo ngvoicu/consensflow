@@ -182,7 +182,7 @@ fn the_time_of_a_refusal_is_what_number_makes_of_the_message_time() {
             Reading::Known(record) => {
                 Ok(serde_json::to_value(record.quota.as_deref()).unwrap()["at"].clone())
             }
-            Reading::Unknown(reason) => Err(reason.clone()),
+            Reading::Unknown(reason) | Reading::Missing(reason) => Err(reason.clone()),
         }
     };
     let ok = |at: &str| Ok(json!(at));

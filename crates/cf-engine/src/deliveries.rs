@@ -43,6 +43,9 @@ pub(crate) struct Delivering {
     /// harness did not hold it then, else the first look that found it held no longer
     /// after the last that did. None while the harness holds it (`arrival`).
     pub(crate) free_since: Option<i64>,
+    /// A look found the window in a turn since the hand-over, or its harness holding
+    /// it (`arrival`): the rest counted is since then.
+    pub(crate) turned: bool,
     /// It is a launch's first message.
     pub(crate) launch: bool,
     /// It is the chief's first message, a handoff most often, or what a launch put
@@ -63,10 +66,24 @@ pub(crate) struct Delivering {
     pub(crate) session: Option<String>,
 }
 
+/// The reads of a window that came to nothing while a message was on its way
+/// (`arrival`'s `unknown`), as its log line counts them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Unread {
+    pub(crate) message: i64,
+    /// When the first came to nothing.
+    pub(crate) first: i64,
+    pub(crate) reads: u32,
+    /// When the log last said so.
+    pub(crate) told: Option<i64>,
+}
+
 /// The record's delivery part.
 #[derive(Debug, Default)]
 pub(crate) struct DeliveryPart {
     pub(crate) delivering: Option<Delivering>,
+    /// The reads that came to nothing for the message on its way, or the last.
+    pub(crate) unread: Option<Unread>,
     /// A message waits for what the human typed and has not sent.
     pub(crate) unsent: bool,
     /// For the message on its way, pasted into a conversation the window left: how many
@@ -540,6 +557,7 @@ impl Dispatcher {
         let free = (!window.held()).then_some(since);
         delivering.rested_since = free;
         delivering.free_since = free;
+        delivering.turned = free.is_none();
         // The harness's own queue took it (a peer inbox, a broker, a plugin): it
         // shows when the harness gets to it, and sending it again would only make
         // a duplicate.
@@ -631,6 +649,7 @@ impl Dispatcher {
             since,
             rested_since: Some(since),
             free_since: Some(since),
+            turned: false,
             launch: false,
             // What a chief's launch put ahead of its queue is its first messages.
             chief: self.begins(record, message),

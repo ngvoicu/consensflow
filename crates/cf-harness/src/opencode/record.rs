@@ -95,8 +95,8 @@ impl Reader {
     /// What the session says now, or why it cannot be read.
     fn read_store(&mut self) -> Result<Arc<Reading>, String> {
         let Some((store, which)) = stores::open(&self.env, &self.session)? else {
-            return Ok(Arc::new(Reading::unreadable(&format!(
-                "no opencode store for {}",
+            return Ok(Arc::new(Reading::missing(&format!(
+                "opencode store for {}",
                 self.session
             ))));
         };
@@ -115,8 +115,8 @@ impl Reader {
             .is_none()
         {
             self.read = None;
-            return Ok(Arc::new(Reading::unreadable(&format!(
-                "no opencode session {session}"
+            return Ok(Arc::new(Reading::missing(&format!(
+                "opencode session {session}"
             ))));
         }
         // Taken while it is read on: a look that fails leaves none.

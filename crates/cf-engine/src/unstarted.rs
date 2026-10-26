@@ -167,6 +167,7 @@ impl Dispatcher {
             chief: participant.role == "chief",
             queued: false,
             free_since: None,
+            turned: false,
             entered_again: false,
             // A launch's first message is never pressed for.
             carried: Vec::new(),

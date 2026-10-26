@@ -224,6 +224,7 @@ fn machine(home: &Path, programs: &[(Harness, &Path)]) -> Machine {
             .map(|(harness, program)| Installed::at(*harness, *program, home))
             .collect(),
         node: None,
+        login: None,
     }
 }
 
@@ -307,6 +308,7 @@ fn a_harness_that_is_not_in_the_run_is_an_error_that_names_it() {
         home: home.path().to_path_buf(),
         installs: Vec::new(),
         node: None,
+        login: None,
     };
     let chief = chief_environment("claude", None).unwrap();
     let failed = write(&machine, &options("--chief claude"), &chief).unwrap_err();

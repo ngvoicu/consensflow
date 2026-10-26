@@ -23,7 +23,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, Input, Interrupt, Launch, Prepared, Readiness, Skill, Waiting, Window, Work,
+    Adapter, Admission, Input, Interrupt, Launch, Prepared, Readiness, Skill, Trusts, Waiting,
+    Window, Work,
 };
 use cf_harness::records::{Item, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
@@ -108,9 +109,9 @@ pub struct FakeAgent {
     /// asked), it holds nothing (`Some(false)`: Codex's thread before its first
     /// turn), or the record cannot tell (none).
     pub resumable: Option<bool>,
-    /// Its record cannot be read at a look (`Reading::Unknown`), as when the reader's
-    /// read of the transcript fails.
-    pub unread: bool,
+    /// Why its record cannot be read now: each look reads none (`Reading::Unknown`),
+    /// as when the reader's read of the transcript fails.
+    pub unreadable: Option<String>,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -247,9 +248,29 @@ pub struct FakeAdapter {
     /// last window on it left it, as a harness's `--resume` does: not, as the fake of
     /// Node's suite, whose every window began with an empty record.
     pub resumes_records: Cell<bool>,
+    /// What a yes to its windows' question about trusting their folder would trust,
+    /// where its harness may ask one ([`FakeAdapter::asks_to_trust`]): none, as an
+    /// adapter that never asks, which the fake of Node's suite was.
+    pub trusts: RefCell<Option<Trusts>>,
 }
 
 impl FakeAdapter {
+    /// From now on its windows' harness may ask whether to trust their folder
+    /// before it starts, as Claude Code does in a git repository: a yes would
+    /// trust `folder`, and `inside` says it is the project's folder or below it.
+    /// A window reads its screen as the question where a line holds
+    /// `TRUST_QUESTION` (or `TRUST_UNPLACED`: the question, its choice not placed), as
+    /// its prompt where a line holds `TRUST_PROMPT` and it shows no question, and as
+    /// naming the question's choices where a line holds one of the three or
+    /// `TRUST_QUOTED`: a conversation that quotes them.
+    pub fn asks_to_trust(&self, folder: &str, inside: bool) {
+        *self.trusts.borrow_mut() = Some(Trusts {
+            folder: folder.to_owned(),
+            inside,
+            servers_above: None,
+        });
+    }
+
     pub fn new(recorder: Recorder) -> Rc<Self> {
         Self::numbering(recorder, Rc::new(Cell::new(0)))
     }
@@ -298,6 +319,7 @@ impl FakeAdapter {
             wraps_pastes: Cell::new(false),
             forgets_first_messages: Cell::new(false),
             resumes_records: Cell::new(false),
+            trusts: RefCell::new(None),
         })
     }
 
@@ -463,10 +485,12 @@ impl FakeAdapter {
         });
     }
 
-    /// The agent's record cannot be read from now on (`unread`), or can again: its
+    /// The agent's record cannot be read from now on (`unreadable`), or can again: its
     /// window is as it was.
     pub fn unread(&self, handle: &str, unread: bool) {
-        self.with(handle, |agent| agent.unread = unread);
+        self.with(handle, |agent| {
+            agent.unreadable = unread.then(|| "the transcript could not be read".to_owned());
+        });
     }
 
     /// The agent is at work on a turn it stops, at once and writing nothing,
@@ -786,7 +810,7 @@ impl Asked {
             busy_when_interrupted: false,
             cannot_tell_a_cut: false,
             resumable: Some(true),
-            unread: false,
+            unreadable: None,
         };
         let seeded = launch
             .message

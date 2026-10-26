@@ -1,0 +1,306 @@
+# Two flakes seen once each in T-358's merge of turn-end with main (2026-10-23), T-373.
+#
+# The daemon's refused second start: `core_daemon::touches_no_window_of_the_running_daemon_when_a_second_start_is_refused_its_ledger`
+# failed in a gate run under heavy parallel load, the second daemon having ended with 1 and
+# its log's `exit 1` and no sentence. The sentence is on its error output, written before
+# the exit; the rig's `Spawned::wait` returned the moment the program was gone, and the
+# thread that keeps the error output had not run yet. A 400 ms stall of that thread (the
+# plant by hand) failed this test and `ends_cf_ui_with_1_when_a_second_start_is_refused…`
+# alike. An end seen by `wait` now waits for the thread to read to the end of the pipe,
+# for `HELD` at most (`crates/cf-e2e/src/process/spawned.rs`, `process.rs`). The tests are
+# the rig's own, `crates/cf-e2e/src/process/tests.rs`.
+#
+# Folder trust's late-keys case, `a_worker_that_reads_the_humans_keys_late…`, timed out after
+# 30 s on zeewin once in the same merge, and did not on main in 73 runs of it, 12 at a time,
+# nor in a whole crate's run. On T-358's tree (turn-end, whose workers' windows close once
+# their task is done) 8 of 48 copies did, each with the human's yes taken in one window, its
+# task done and its window closed, and the other window asking still, no key of ConsensFlow's
+# in it. The human's yes was banked for the project's other windows only by a look at the
+# screen that saw the window's prompt, a look every half second, and that window was gone
+# before the next. The exit's own screen is read now (`trust::yes_at_exit`, `dispatcher::exited`);
+# the stand-in's `CF_TEST_TRUST_LEAVES_MS` ends a window as it is past the question.
+
+[run]
+process-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell"]
+process-lib-settle = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output_wherever_it_runs"]
+reports-not-judged-drop = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_its_case_ends_as_a_drop_on_purpose_leaves_no_report"]
+trust-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::a_window_that_asks_and_ends_by_itself"]
+trust-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--features", "test-support", "--lib", "tooling::tests::the_key_toward"]
+trust-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "trust::"]
+trust-rig-gone = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_the_human_said_yes_in_that_is_gone"]
+trust-rig-no = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_humans_no"]
+
+[[plant]]
+name = "merge flakes: an end seen by wait does not wait for the program's error output to be all kept"
+meant = "a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output"
+runs = ["process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/spawned.rs"
+find = '''
+                Ok(Some(status)) => {
+                    self.settle_errors();
+'''
+replace = '''
+                Ok(Some(status)) => {
+'''
+
+[[plant]]
+name = "merge flakes: the wait for the error output's end gives up at once"
+meant = "a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output"
+runs = ["process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = "    while !thread.is_finished() && Instant::now() < by {"
+replace = "    while false && !thread.is_finished() && Instant::now() < by {"
+
+[[plant]]
+name = "merge flakes: an end seen waits for a pipe a process it left holds open for as long as that lives"
+meant = "a_spawned_program_that_left_a_process_holding_its_error_output_is_waited_for_a_while"
+runs = ["process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/spawned.rs"
+find = "            ended_by(reader, Instant::now() + HELD);"
+replace = "            ended_by(reader, Instant::now() + Duration::from_secs(60));"
+
+[[plant]]
+name = "merge flakes: the human's yes in a window that ended before the watch looked again is not banked from the screen it ended with"
+meant = "a_worker_the_human_said_yes_in_that_is_gone_before_the_next_look_still_has_its_yes_carried"
+runs = ["trust-rig-gone"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.trust.said_yes(project.id, &folder, sure);\n        }\n        // A launch the exit ended"
+replace = "            let _ = (folder, sure);\n        }\n        // A launch the exit ended"
+
+[[plant]]
+name = "merge flakes: a window that ended at the question banks a yes at its exit"
+meant = "a_humans_no_in_one_window_is_no_yes_for_the_others"
+runs = ["trust-rig-no"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "    (window.shows_prompt(lines) && !window.names_trust_choices(lines))\n        .then(|| (folder.clone(), part.trust_sure))"
+replace = "    let _ = lines;\n    Some((folder.clone(), part.trust_sure))"
+
+# Round 2 (T-443, Calliope's review of the above, T-438): the same cases at the engine's level,
+# which no rig is needed for (`crates/cf-engine/src/trust/tests.rs`); a window the engine closes
+# itself is looked at before the kill; `closed` resets the count of keys with the state it
+# counts for; the settle has a test that needs no shell, and a program's status is looked at
+# and not waited for.
+
+[[plant]]
+name = "merge flakes: a window that ends asking, with its prompt on its last screen, banks no yes"
+meant = "a_window_that_ends_asking_with_its_prompt_on_the_screen_it_ends_with_is_the_humans_yes"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.trust.said_yes(project.id, &folder, sure);\n        }\n        // A launch the exit ended"
+replace = "            let _ = (folder, sure);\n        }\n        // A launch the exit ended"
+
+[[plant]]
+name = "merge flakes: a window that ends at the question banks a yes at its exit, engine"
+meant = "a_window_that_ends_at_the_question_is_a_no_and_banks_nothing"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "    (window.shows_prompt(lines) && !window.names_trust_choices(lines))\n        .then(|| (folder.clone(), part.trust_sure))"
+replace = "    let _ = lines;\n    Some((folder.clone(), part.trust_sure))"
+
+[[plant]]
+name = "merge flakes: a window ConsensFlow pressed keys in banks the human's yes at its exit"
+meant = "a_window_consensflow_pressed_keys_in_is_not_the_humans_yes"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "    if !part.trust.asks() || part.trust_keys > 0 {"
+replace = "    if !part.trust.asks() {"
+
+[[plant]]
+name = "merge flakes: a window that never asked banks a yes at its exit"
+meant = "a_window_that_never_asked_banks_nothing_whatever_it_ends_with"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "    if !part.trust.asks() || part.trust_keys > 0 {"
+replace = "    if part.trust_keys > 0 {"
+
+[[plant]]
+name = "merge flakes: a window the engine closes is not looked at before the kill, and the human's yes in it is lost to the close"
+meant = "a_window_the_engine_closes_is_read_off_the_screen_it_shows_before_the_kill"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            self.bank_yes_before_close(record, pane).await;\n"
+replace = ""
+
+[[plant]]
+name = "merge flakes: a window ConsensFlow answered is looked at before the engine closes it"
+meant = "a_window_the_engine_closes_after_consensflow_pressed_keys_in_it_is_not_looked_at"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "            part.trust.asks() && part.trust_keys == 0"
+replace = "            part.trust.asks()"
+
+[[plant]]
+name = "merge flakes: a window that ended keeps its count of keys for the next one"
+meant = "a_window_that_ended_keeps_no_count_of_keys_for_the_next_one"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            window.trust_keys = 0;\n"
+replace = ""
+
+[[plant]]
+name = "merge flakes: an end seen by wait does not wait for the program's error output, where there is no shell"
+meant = "a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output_wherever_it_runs"
+runs = ["process-lib-settle"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/spawned.rs"
+find = '''
+                Ok(Some(status)) => {
+                    self.settle_errors();
+'''
+replace = '''
+                Ok(Some(status)) => {
+'''
+
+[[plant]]
+name = "merge flakes: a look at a program's status waits for the pipe a process it left holds"
+meant = "a_spawned_programs_status_is_looked_at_and_not_waited_for_though_a_process_it_left_holds_its_error_output"
+runs = ["process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/spawned.rs"
+find = "        self.child.try_wait().ok().flatten()\n    }\n\n    /// Whether it has ended ("
+replace = "        let status = self.child.try_wait().ok().flatten();\n        if status.is_some() {\n            self.settle_errors();\n        }\n        status\n    }\n\n    /// Whether it has ended ("
+
+# T-502: the merge with the folder-trust stack (wt/mcp-dialog), whose watch the exit path now
+# reads as: the question read with its choice placed (`trust_sure`), the prompt with the
+# question's choices gone from the screen (`cleared`), a window in the dialog of servers
+# (`asks`), and the keys ConsensFlow pressed counted on the window's record (`trust_keys`).
+
+[[plant]]
+name = "merge flakes: a prompt below a conversation that quoted the question is the human's yes at an exit"
+meant = "a_window_that_ends_with_its_prompt_below_a_conversation_that_quoted_the_question_banks_nothing"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "    (window.shows_prompt(lines) && !window.names_trust_choices(lines))\n"
+replace = "    (window.shows_prompt(lines))\n"
+
+[[plant]]
+name = "merge flakes: a window the engine closes below a quoted question banks the prompt as a yes"
+meant = "a_window_the_engine_closes_below_a_quoted_question_banks_nothing"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "    (window.shows_prompt(lines) && !window.names_trust_choices(lines))\n"
+replace = "    (window.shows_prompt(lines))\n"
+
+[[plant]]
+name = "merge flakes: a yes to a question never read with its choice placed is carried at an exit"
+meant = "a_yes_to_a_question_whose_choice_was_never_placed_is_not_carried_and_has_the_others_told_of_again"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "        .then(|| (folder.clone(), part.trust_sure))"
+replace = "        .then(|| (folder.clone(), true))"
+
+[[plant]]
+name = "merge flakes: a yes said and not carried does not have the others told of again"
+meant = "a_yes_to_a_question_whose_choice_was_never_placed_is_not_carried_and_has_the_others_told_of_again"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "        if sure {\n            self.accepted"
+replace = "        if true {\n            self.accepted"
+
+[[plant]]
+name = "merge flakes: a window in the dialog of servers that ends at its prompt banks no yes"
+meant = "a_window_in_the_dialog_of_servers_that_ends_at_its_prompt_is_the_humans_yes"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "    if !part.trust.asks() || part.trust_keys > 0 {"
+replace = "    if part.trust != Trusting::Asked || part.trust_keys > 0 {"
+
+[[plant]]
+name = "merge flakes: the keys ConsensFlow presses are not counted on the window's record"
+meant = "a_window_consensflow_answered_itself_is_not_the_humans_yes_at_its_exit"
+runs = ["trust-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                            record.window.borrow_mut().trust_keys += 1;"
+replace = "                            record.window.borrow_mut().trust_keys += 0;"
+
+# T-502, the rig's two rules about a rig dropped unclosed meet (T-428's, a judged rig says
+# nothing for a case that passed and holds its report for one that fails; T-501's, a rig
+# its case ends as a drop on purpose keeps none): a drop on purpose says nothing of a rig
+# whatever its case is judged by, and what the case finds after is its own to say.
+
+[[plant]]
+name = "merge flakes: a rig not judged by what its case returns keeps a report of a drop on purpose"
+meant = "a_rig_its_case_ends_as_a_drop_on_purpose_leaves_no_report"
+runs = ["reports-not-judged-drop"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = "        if self.closed || failure_expected || self.dropped_on_purpose {"
+replace = "        if self.closed || failure_expected {"
+
+# T-587, Calliope's re-check of the merge (T-503): the Close marks its kill (`Killing`) before it
+# looks at an asking window's screen, so a window that ends by itself during the look is the
+# Close's and a kill that then fails takes the mark off its task (the race of resume.rs, both
+# reviews of 2026-10-16, moved to the snapshot); and the live suite's windows that end read the
+# kept screen as naming the question's choices only where it does (`names_choices`), which the
+# tooling test of the reader stands in for.
+
+[[plant]]
+name = "merge flakes: the Close marks its kill after it looks at an asking window's screen"
+meant = "a_window_that_asks_and_ends_by_itself_while_the_close_looks_at_its_screen_and_whose_kill_fails_leaves_its_task_paused"
+runs = ["trust-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+            record.window.borrow_mut().killing = Some(Killing::default());
+            // The exit is settled here, and says nothing of the screen the window ends
+            // with: where it was asking, the human's yes in it is read off the screen now.
+            self.bank_yes_before_close(record, pane).await;
+'''
+replace = '''
+            // The exit is settled here, and says nothing of the screen the window ends
+            // with: where it was asking, the human's yes in it is read off the screen now.
+            self.bank_yes_before_close(record, pane).await;
+            record.window.borrow_mut().killing = Some(Killing::default());
+'''
+
+[[plant]]
+name = "merge flakes: every screen names the question's choices (the live suite's windows that end read the kept screen by it)"
+meant = "the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about_its_folder"
+runs = ["trust-tooling"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "    offers(screen, YES) && offers(screen, NO)\n}\n\n/// Whether `screen` is Claude's prompt"
+replace = "    true || (offers(screen, YES) && offers(screen, NO))\n}\n\n/// Whether `screen` is Claude's prompt"

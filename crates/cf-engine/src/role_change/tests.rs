@@ -546,6 +546,7 @@ fn a_displaced_message_that_rides_in_the_paste_of_another_is_not_begun_and_its_l
         chief: false,
         queued: false,
         free_since: None,
+        turned: false,
         entered_again: false,
         carried: Vec::new(),
         session: None,

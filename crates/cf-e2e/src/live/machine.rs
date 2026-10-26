@@ -2,16 +2,16 @@
 //! OpenCode, Pi, Devin and Codex), found as a shell finds them with the home
 //! each reads its login from, and the rig whose windows run them.
 //!
-//! Nothing is copied: a window reads its login where it is, as it does for the
-//! person it belongs to (and writes its own sessions there, as it does for
-//! them). What a window is given of the machine is what [`rig`] says: the
-//! variables the harness reads its login by, the folders it and Node are in, a
-//! locale that draws its screen, and the user's name, which a harness may ask
-//! the system's keychain by; and never the `CLAUDE_CONFIG_DIR` the rig sets for
-//! the stand-in, which makes a real Claude Code look for its login in a folder
-//! that holds none and open on its first-run dialog. A run given a Claude config
-//! folder of its own (`--claude-config`) has its windows keep their config there:
-//! its caller made it and copied the login into it.
+//! A window reads its login where it is, as it does for the person it belongs to
+//! (and writes its own sessions there, as it does for them), but for Claude Code's:
+//! a Claude Code window runs on a config folder of the run's own, which holds a copy
+//! of the machine's login and is removed with the run ([`login`]), so that nothing of
+//! the run is written in the person's `~/.claude`; a run given a Claude config folder
+//! of its own (`--claude-config`) has its windows keep their config there instead: its
+//! caller made it and copied the login into it. What a window is given of the
+//! machine is what [`rig`] says: the variables the harness reads its login by, the
+//! folders it and Node are in, a locale that draws its screen, and the user's name,
+//! which a harness may ask the system's keychain by.
 //!
 //! Claude Code has two programs of ours in front of it: [`isolated_claude`] adds
 //! the flags that shut the human's MCP servers and browser out, and
@@ -26,9 +26,11 @@ mod wrapper;
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use super::login::Login;
 use crate::process::{own_var, Run};
-use crate::rig::Config;
+use crate::rig::{ClaudeConfig, Config};
 use crate::{checkout, files, Error, Result};
 
 pub use path::{command, working_command};
@@ -127,6 +129,9 @@ pub struct Installed {
     command: PathBuf,
     home: PathBuf,
     node: Option<PathBuf>,
+    /// The config folder its windows run on, where they are not on the person's own
+    /// ([`Installed::claude_config`]).
+    claude_config: Option<Arc<dyn ClaudeConfig>>,
 }
 
 impl Installed {
@@ -137,6 +142,7 @@ impl Installed {
             command: command.into(),
             home: home.into(),
             node: None,
+            claude_config: None,
         }
     }
 
@@ -145,6 +151,19 @@ impl Installed {
     pub fn with_node(mut self, node: impl Into<PathBuf>) -> Self {
         self.node = Some(node.into());
         self
+    }
+
+    /// This harness, whose windows run on the config folder `claude_config` gives
+    /// them: Claude Code's, on a copy of the machine's login ([`login`]).
+    #[must_use]
+    pub fn with_claude_config(mut self, claude_config: Arc<dyn ClaudeConfig>) -> Self {
+        self.claude_config = Some(claude_config);
+        self
+    }
+
+    /// The config folder its windows run on, if it is not the person's own.
+    pub fn claude_config(&self) -> Option<&Arc<dyn ClaudeConfig>> {
+        self.claude_config.as_ref()
     }
 
     /// Which harness it is.
@@ -279,13 +298,16 @@ const REPORTS: &str = "app/src-tauri/target/live-reports";
 /// harness of `installs`, logged in as the machine is: each one's command's
 /// folder, and Node's where it is another, are on their `PATH` (in the order
 /// given, none twice), and the variables they read their logins by are the
-/// machine's. Claude Code reads its config where `CLAUDE_CONFIG_DIR` does not
-/// point, so a rig that has it has the variable unset, but where the run was given a
+/// machine's. The windows of the machine's Claude Code run on a config folder of
+/// the run's own, with a copy of its login ([`Installed::claude_config`]), which is
+/// the one the daemon reads Claude's records in as well; where the run was given a
 /// folder of its own for it (`--claude-config`: one its caller made and copied a login
-/// into, which keeps the owner's own config out of the run). The windows have a
-/// locale that draws their screens, and the user's name, which a harness may
-/// ask the system's keychain by; on Windows they also have the machine's own
-/// folders for settings and programs ([`WINDOWS`]).
+/// into), they keep their config there instead. A Claude that has neither (a stand-in,
+/// or the machine's on Windows) reads its config where `CLAUDE_CONFIG_DIR` does not
+/// point, so a rig that has it has the variable unset. The windows have a locale that
+/// draws their screens, and the user's name, which a harness may ask the system's
+/// keychain by; on Windows they also have the machine's own folders for settings and
+/// programs ([`WINDOWS`]).
 pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
     rig_keeping_claude_in(installs, stand_in, super::option("claude-config"))
 }
@@ -321,9 +343,12 @@ fn rig_keeping_claude_in(
             config = config.var(&name, value);
         }
         if install.harness == Harness::Claude {
-            config = match &claude_config {
-                Some(folder) => config.var("CLAUDE_CONFIG_DIR", folder.clone()),
-                None => config.unset("CLAUDE_CONFIG_DIR"),
+            // A folder the run was given wins: its caller made it and copied the login
+            // into it. Otherwise the kit's own copy of the login, where it has one.
+            config = match (&claude_config, install.claude_config()) {
+                (Some(folder), _) => config.var("CLAUDE_CONFIG_DIR", folder.clone()),
+                (None, Some(kept)) => config.claude_config(Arc::clone(kept)),
+                (None, None) => config.unset("CLAUDE_CONFIG_DIR"),
             };
         }
     }
@@ -333,10 +358,9 @@ fn rig_keeping_claude_in(
 /// A rig for `installs`, one of which is the machine's Claude Code, whose Claude
 /// windows are the stand-in agent's (`stand_in`) where the agent's model is
 /// `fake` or `fake-chief`, and the real Claude Code's otherwise, started through
-/// [`shimmed_claude`] (made in `folder`). The stand-ins write their records
-/// where the machine's Claude keeps its own, which is the person's: so the rig
-/// takes away those it wrote when it ends, and no others
-/// ([`Config::stand_ins_write_in`]).
+/// [`shimmed_claude`] (made in `folder`). The stand-ins write their records where
+/// the real Claude Code's windows write theirs, which is where the daemon reads
+/// Claude's: the config folder of the run's own ([`rig`]).
 pub fn rig_with_stand_ins(
     installs: &[Installed],
     folder: &Path,
@@ -354,12 +378,7 @@ pub fn rig_with_stand_ins(
             ),
         })?;
     let shim = shimmed_claude(folder, claude.command(), stand_in)?;
-    // The stand-ins write where the real Claude does: the run's own config folder where
-    // it was given one, else the machine's.
-    let records = super::option("claude-config")
-        .filter(|folder| !folder.is_empty())
-        .map_or_else(|| claude.home().join(".claude"), PathBuf::from);
-    Ok(rig(installs, shim).stand_ins_write_in(records))
+    Ok(rig(installs, shim))
 }
 
 /// The machine's `harness`, found as a person's shell finds it, with the home
@@ -385,7 +404,11 @@ pub fn installed(harness: Harness) -> Result<Installed> {
     if !has_login(&places) {
         return Err(no_login(harness, &places));
     }
-    let installed = Installed::at(harness, command, home);
+    let mut installed = Installed::at(harness, command, home);
+    // Claude Code's windows run on a login of the run's own, copied from the machine's.
+    if let Some(login) = Login::of_machine().filter(|_| harness == Harness::Claude) {
+        installed = installed.with_claude_config(Arc::new(login));
+    }
     // A machine with no Node has a harness that needs none (a native one).
     Ok(match command_folder("node") {
         Some(node) => installed.with_node(node),

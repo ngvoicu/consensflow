@@ -157,7 +157,7 @@ fn look(reader: &mut Box<dyn Look + Send>) -> Arc<Reading> {
 /// A reading as the Node probe printed it.
 fn show(reading: &Reading) -> String {
     let record = match reading {
-        Reading::Unknown(reason) => return format!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => return format!("unknown: {reason}"),
         Reading::Known(record) => record,
     };
     let items: Vec<Value> = record

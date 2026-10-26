@@ -86,6 +86,11 @@ file = "crates/cf-harness/src/devin/history.rs"
 find = "                let took = seen.took || (pasted.is_some() && self.seen.get().took);"
 replace = "                let took = false;"
 
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if !self.read_once_more(record, delivering.message).await? {"
+replace = "        if false && !self.read_once_more(record, delivering.message).await? {"
+
 [[plant]]
 name = "results twice: the chief at work when the second result comes, the arrival window counted from the hand-over, turns or none (3.0.3)"
 meant = "two_results_for_a_devin_chief_at_work_when_the_second_comes_go_in_once_each_whole_and_apart"
@@ -106,6 +111,11 @@ replace = '''
             turned: false,
             ..self.rested(record, observed, self.held(record))
         };'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if !self.read_once_more(record, delivering.message).await? {"
+replace = "        if false && !self.read_once_more(record, delivering.message).await? {"
 
 # Devin's store says it took a paste from its Enter on (3000.11.92, and the stand-in that
 # plays it), which keeps the note once whatever this rule does: it is taken out too (T-107).
@@ -155,8 +165,10 @@ runs = ["engine-slow-records"]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {'''
 replace = '''
+            delivering.turned = true;
             return Rest {'''
 
 [[plant]]
@@ -198,8 +210,10 @@ runs = ["engine-slow-records"]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.rested_since = None;
+            delivering.turned = true;
             Rest {'''
 replace = '''
+            delivering.turned = true;
             Rest {'''
 
 [[plant]]
@@ -315,9 +329,11 @@ replace = "        let free = Some(since);"
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {'''
 replace = '''
             delivering.free_since = Some(now);
+            delivering.turned = true;
             return Rest {'''
 
 [[plant]]
@@ -391,6 +407,7 @@ find = '''
         let Rest {
             rested,
             turned,
+            read_again,
             free,
         } = self.rested(record, observed, self.held(record));
         let at_rest = observed.settled && observed.waiting.is_none();
@@ -400,6 +417,7 @@ replace = '''
         let Rest {
             rested,
             turned,
+            read_again,
             free,
         } = self.rested(record, observed, held);
         let at_rest = observed.settled && observed.waiting.is_none();
@@ -411,9 +429,11 @@ find = '''
         if held {
             delivering.rested_since = None;
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {
                 rested: 0,
                 turned: true,
+                read_again: false,
                 free: None,
             };
         }
@@ -422,14 +442,17 @@ find = '''
             let since = *delivering.rested_since.get_or_insert(now);
             Rest {
                 rested: now - since,
-                turned: since != delivering.since,
+                turned: delivering.turned,
+                read_again: since != delivering.since,
                 free,
             }
         } else {
             delivering.rested_since = None;
+            delivering.turned = true;
             Rest {
                 rested: 0,
                 turned: true,
+                read_again: false,
                 free,
             }
         }'''
@@ -447,15 +470,18 @@ replace = '''
             let since = *delivering.rested_since.get_or_insert(now);
             Rest {
                 rested: now - since,
-                turned: since != delivering.since,
+                turned: delivering.turned,
+                read_again: since != delivering.since,
                 free: delivering.rest_after_hold,
             }
         } else {
             delivering.rested_since = None;
             delivering.rested_last = None;
+            delivering.turned = true;
             Rest {
                 rested: 0,
                 turned: true,
+                read_again: false,
                 free: delivering.rest_after_hold,
             }
         }'''
@@ -515,8 +541,10 @@ runs = ["engine-slow-records"]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {'''
 replace = '''
+            delivering.turned = true;
             return Rest {'''
 
 [[plant]]
@@ -528,8 +556,10 @@ runs = ["engine-slow-records"]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {'''
 replace = '''
+            delivering.turned = true;
             return Rest {'''
 
 [[plant]]

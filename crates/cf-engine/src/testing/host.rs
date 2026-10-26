@@ -161,6 +161,15 @@ impl FakeHost {
             .collect()
     }
 
+    /// How many `pane.snapshot` requests were made: the looks at a screen.
+    pub fn snapshots(&self) -> usize {
+        self.requests
+            .borrow()
+            .iter()
+            .filter(|(op, _)| op == "pane.snapshot")
+            .count()
+    }
+
     /// The last pane opened for `handle`'s window: its own, or one of its sessions'.
     pub fn last(&self, handle: &str) -> Option<OpenPane> {
         self.opened

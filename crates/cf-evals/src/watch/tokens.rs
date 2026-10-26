@@ -1,15 +1,14 @@
 //! What each Claude window of a project used, as its own record counts tokens: the
 //! turns it took, what its first turn held in context, what it read from the cache,
 //! wrote and output over them all. Claude Code keeps its conversations under
-//! `~/.claude/projects/<folder>/<session>.jsonl`; the ledger names the session of each
-//! window.
+//! `<config folder>/projects/<folder>/<session>.jsonl` (the user's `~/.claude`, or the throwaway
+//! folder of an eval); the ledger names the session of each window.
 
 use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use cf_e2e::live::machine;
 use rusqlite::Connection;
 use serde_json::Value;
 
@@ -68,15 +67,15 @@ fn column(count: u64) -> String {
     pad_start(&thousands(count), 10)
 }
 
-/// Says what each Claude window of the project `project` used.
-pub(super) fn say(db: &Connection, project: i64, out: &mut dyn Write) -> Result {
+/// Says what each Claude window of the project `project` used, as the records in `projects` (the
+/// `projects` folder of their Claude config folder) count it.
+pub(super) fn say(db: &Connection, project: i64, projects: &Path, out: &mut dyn Write) -> Result {
     writeln!(out, "\nClaude windows, as their records count tokens")?;
     writeln!(
         out,
         "  {} turns  first turn  cache read  written  output",
         pad_end("session", 26)
     )?;
-    let projects = machine::home()?.join(".claude").join("projects");
     let mut statement = db.prepare(
         "SELECT p.handle, c.native_session FROM conversation c
          JOIN participant p ON p.id = c.participant_id
@@ -88,7 +87,7 @@ pub(super) fn say(db: &Connection, project: i64, out: &mut dyn Write) -> Result 
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     for (handle, session) in windows {
-        let Some(file) = session.and_then(|session| record_of(&projects, &session)) else {
+        let Some(file) = session.and_then(|session| record_of(projects, &session)) else {
             continue;
         };
         let used = used(&fs::read_to_string(&file).map_err(crate::Error::file("read", &file))?);

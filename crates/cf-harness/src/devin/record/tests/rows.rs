@@ -19,7 +19,7 @@ fn the_last_eight_rows_are_read_again_and_no_more() {
             .map(|item| item.text.to_string())
             .collect::<Vec<_>>()
             .join(" "),
-        Reading::Unknown(reason) => reason.clone(),
+        Reading::Unknown(reason) | Reading::Missing(reason) => reason.clone(),
     };
     let first = look(&mut reader);
     // The ninth row from the last is past them: its rewrite is not seen.
@@ -43,7 +43,7 @@ fn a_failed_look_has_the_next_read_the_store_whole() {
     let mut reader = staged.reader();
     let first_text = |reading: &Reading| match reading {
         Reading::Known(record) => record.items[0].text.to_string(),
-        Reading::Unknown(reason) => reason.clone(),
+        Reading::Unknown(reason) | Reading::Missing(reason) => reason.clone(),
     };
     look(&mut reader);
     // Past the rows each look reads again: not seen.
@@ -64,4 +64,24 @@ fn a_failed_look_has_the_next_read_the_store_whole() {
     );
     staged.wire("launch-1", &[]);
     assert_eq!(first_text(&look(&mut reader)), "Rewritten 1.");
+}
+
+#[test]
+fn a_session_the_store_has_no_row_of_yet_is_missing_and_a_store_that_fails_is_unread() {
+    let staged = Staged::new();
+    staged
+        .store
+        .execute("DELETE FROM sessions WHERE id = ?", [SESSION])
+        .unwrap();
+    let mut reader = staged.reader();
+    let before = look(&mut reader);
+    assert!(
+        matches!(&*before, Reading::Missing(reason) if reason == "unreadable: missing Devin session"),
+        "{before:?}"
+    );
+    assert!(!before.read_failed());
+    // A store that cannot be read is a look that failed, whatever SQLite says.
+    staged.store.execute_batch("DROP TABLE sessions").unwrap();
+    let failed = look(&mut reader);
+    assert!(failed.read_failed(), "{failed:?}");
 }

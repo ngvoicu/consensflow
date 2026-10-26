@@ -47,6 +47,7 @@ use crate::scheduler::{News, SchedulerState};
 use crate::seams::{EngineError, Seams};
 use crate::shown::Shown;
 use crate::stalls::StallsState;
+use crate::steps::{Step, StepsState};
 use crate::trust::{self, TrustState, Trusting};
 use crate::windows::{Activity, ActivityState, WindowsState};
 
@@ -110,6 +111,8 @@ pub struct Dispatcher {
     pub(crate) trust: TrustState,
     /// The missing permissions each project's notes spoke of already (`computer_use`).
     pub(crate) computer_use: ComputerUseState,
+    /// What the passes keep of the steps they went on without (`steps`).
+    pub(crate) steps: StepsState,
 }
 
 impl Dispatcher {
@@ -128,6 +131,7 @@ impl Dispatcher {
             resumes: ResumeState::default(),
             trust: TrustState::default(),
             computer_use: ComputerUseState::default(),
+            steps: StepsState::default(),
         })
     }
 
@@ -623,6 +627,7 @@ impl Dispatcher {
     /// tasks it gives out is read again, so their sessions open this pass.
     /// It answers at the first step that fails, the others going on. The
     /// tasks whose windows are gone are told to their requesters together.
+    /// It waits for its steps [`STEP_WAIT`] at most (`steps`).
     pub async fn pass(self: &Rc<Self>) -> Result<(), EngineError> {
         let _burst = self.stalls.begin_burst();
         self.resume_held()?;
@@ -635,7 +640,7 @@ impl Dispatcher {
                 projects.push(project);
             }
         }
-        let mut steps: Vec<Begun<Result<(), EngineError>>> = Vec::new();
+        let mut steps = Vec::new();
         for project in projects {
             // One with no window and nothing on its way or in its hands is not stepped.
             let working = self.seams.ledger.borrow().with_work(project.id)?;
@@ -655,11 +660,16 @@ impl Dispatcher {
                 // Boxed where it is made: a step holds every wait below it, and
                 // moved by value through the hold it filled the stack.
                 let step = Box::pin(async move { this.step(&at, &who).await });
-                steps.extend(self.try_exclusive(&record, step).await);
+                if let Some(begun) = self.try_exclusive(&record, step).await {
+                    steps.push(Step {
+                        handle: participant.handle.clone(),
+                        record,
+                        begun,
+                    });
+                }
             }
         }
-        all(steps).await?;
-        Ok(())
+        self.wait_for_steps(steps).await
     }
 
     /// A window ended (`pane.exit` from the pane host), told where the
@@ -738,6 +748,7 @@ impl Dispatcher {
         record.delivery.borrow_mut().prelude = None;
         // The task the window was given, whose requester hears what its close ended.
         let owner = record.window.borrow().owner;
+        let said_yes = trust::yes_at_exit(&record, &shown);
         self.closed(&record);
         // No door survives its window: what one claimed and none acknowledged is the ledger's again.
         self.seams
@@ -769,6 +780,11 @@ impl Dispatcher {
         else {
             return Ok(());
         };
+        // The human's yes in a window that was gone before the watch looked again is still
+        // theirs for the project's other windows that ask (`trust::yes_at_exit`).
+        if let Some((folder, sure)) = said_yes {
+            self.trust.said_yes(project.id, &folder, sure);
+        }
         // A launch the exit ended says what its window showed.
         let at_launch = owed.is_some()
             || delivering
@@ -1070,6 +1086,8 @@ impl Dispatcher {
             Ok(observed) => observed,
             Err(reason) => {
                 if !self.forgotten(record) {
+                    // A look that failed says nothing of what is on its way in (`arrival`).
+                    self.unknown(record, "a look at it failed");
                     self.set_activity(record, Activity::because(ActivityState::Unknown, reason))?;
                 }
                 return Ok(());
@@ -1095,8 +1113,11 @@ impl Dispatcher {
         // An out member's window says so, and nothing else, until the reset.
         if !self.is_out(&owner) {
             // The reason is given once the question is on its screen.
-            let activity = if record.window.borrow().trust == Trusting::Asked {
+            let trusting = record.window.borrow().trust;
+            let activity = if trusting == Trusting::Asked {
                 Activity::because(ActivityState::Starting, trust::HELD)
+            } else if trusting == Trusting::AskedServers {
+                Activity::because(ActivityState::Starting, trust::HELD_SERVERS)
             } else if starting {
                 Activity::of(ActivityState::Starting)
             } else if let Some(waiting) = &observed.waiting {

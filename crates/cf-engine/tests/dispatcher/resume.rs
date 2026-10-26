@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use cf_engine::testing::{Context, FakeAdapter, Gate, Made, Restarted};
+use cf_engine::testing::{Context, FakeAdapter, Gate, Made, Restarted, TRUST_QUESTION};
 use cf_engine::{ActivityState, SwitchWhen};
 use cf_harness::contract::Readiness;
 use cf_ledger::{MessageView, RESUME_WORDS};
@@ -629,6 +629,46 @@ fn a_window_that_ends_by_itself_while_its_kill_is_answered_and_whose_kill_fails_
     context.exit("zeus");
     context.host.refuse_kills.set(true);
     answer.open();
+    let refused = context.finish(closing).unwrap_err();
+    assert_match(&refused.to_string(), "would not close");
+    context.host.refuse_kills.set(false);
+
+    context.resume_project(project).unwrap();
+
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["paused", "working"],
+        "a window that closed by itself is the chief's to resume"
+    );
+}
+
+/// Calliope's re-check of 2026-10-25 (T-503): the same race, moved to a window that asks
+/// whether to trust its folder. The Close looks at such a window's screen before it kills
+/// it, to read the human's yes (`bank_yes_before_close`), and a window that ends by itself
+/// during that look is taken for one the Close closed unless the Close's kill is marked
+/// before the look, so that a kill that then fails takes the Close's mark off its task.
+#[test]
+fn a_window_that_asks_and_ends_by_itself_while_the_close_looks_at_its_screen_and_whose_kill_fails_leaves_its_task_paused(
+) {
+    let context = Context::new();
+    context.adapter.asks_to_trust("/work/repository", false);
+    context
+        .host
+        .set_snapshot(json!({ "tail": [TRUST_QUESTION] }));
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = context.host.last("zeus").expect("its window").pane;
+    let id = zeus.id.clone();
+    let looking = context
+        .host
+        .request_holds
+        .hold(move |args| args[0] == "pane.snapshot" && args[1]["id"] == id.as_str());
+    let closing = context.begin_close_project(project);
+    context.settle();
+    // Zeus's harness crashes while the Close looks at its screen; then its kill fails.
+    context.exit("zeus");
+    context.host.refuse_kills.set(true);
+    looking.open();
     let refused = context.finish(closing).unwrap_err();
     assert_match(&refused.to_string(), "would not close");
     context.host.refuse_kills.set(false);

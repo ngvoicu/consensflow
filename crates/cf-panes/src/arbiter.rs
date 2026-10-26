@@ -85,6 +85,10 @@ pub struct ArbiterSnapshot {
     /// How long the pane has printed nothing, once it has printed anything:
     /// a harness still drawing its screen is not ready for input.
     pub output_quiet_ms: Option<u64>,
+    /// How long since a paste was last written into the pane, once one was: a
+    /// paste the host held while it was slow is written when it catches up, and
+    /// the window's record has had only this long to show it.
+    pub paste_quiet_ms: Option<u64>,
 }
 
 /// When one generation of a pane last printed. Its output thread notes every
@@ -175,6 +179,8 @@ struct PaneInputState {
     input_failed: bool,
     unsent: usize,
     output: Arc<OutputClock>,
+    /// When a paste was last written into this generation of the pane.
+    pasted: Option<Instant>,
 }
 
 type PaneState = Arc<Mutex<PaneInputState>>;
@@ -188,6 +194,7 @@ impl PaneInputState {
             input_failed: false,
             unsent: 0,
             output: Arc::new(OutputClock::new()),
+            pasted: None,
         }
     }
 
@@ -198,6 +205,9 @@ impl PaneInputState {
             input_failed: self.input_failed,
             unsent: self.unsent > 0,
             output_quiet_ms: self.output.quiet_ms(),
+            paste_quiet_ms: self
+                .pasted
+                .map(|pasted| u64::try_from(pasted.elapsed().as_millis()).unwrap_or(u64::MAX)),
         }
     }
 }
@@ -416,6 +426,9 @@ impl InputArbiter {
         // pane's next admission, never what this paste already wrote.
         if let Ok(mut state) = lock_state(&state) {
             state.paste_in_flight = false;
+            if pasted {
+                state.pasted = Some(Instant::now());
+            }
         }
         written.map_err(|error| fail_input(&state, pane, error, pasted))
     }
@@ -915,6 +928,31 @@ mod tests {
     }
 
     #[test]
+    fn a_snapshot_says_how_long_since_a_paste_was_written_into_the_pane() {
+        let key = PaneKey::new("pasted", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        arbiter.register(&key).expect("register pane");
+        let pasted = || arbiter.snapshot(&key).expect("snapshot").paste_quiet_ms;
+        assert_eq!(pasted(), None, "nothing pasted yet");
+        arbiter
+            .write_paste_via(writer.as_ref(), &key, b"body")
+            .expect("write paste");
+        thread::sleep(Duration::from_millis(20));
+        assert!(
+            pasted().is_some_and(|ms| (20..5_000).contains(&ms)),
+            "{:?}",
+            pasted()
+        );
+        // The daemon's own keys and the human's are no paste.
+        thread::sleep(Duration::from_millis(30));
+        arbiter
+            .write_via(writer.as_ref(), &key, b"\r")
+            .expect("a key");
+        assert!(pasted().is_some_and(|ms| ms >= 50), "{:?}", pasted());
+    }
+
+    #[test]
     fn paste_is_bracketed_then_enter_is_a_delayed_separate_write() {
         let key = PaneKey::new("recorded", 1);
         let (writer, _observed) = RecordingWriter::new(None);
@@ -1306,6 +1344,7 @@ mod tests {
                 input_failed: false,
                 unsent: false,
                 output_quiet_ms: None,
+                paste_quiet_ms: None,
             }
         );
     }

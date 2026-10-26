@@ -79,7 +79,7 @@ usage: cf-evals <command> [flags]
   summary  write the table of the reports kept in evals/reports (evals/RESULTS.md)
              [--reports DIR] [--results FILE]
   watch    look at a project that is running
-             --project NAME-OR-ID [--minutes N] [--tokens] [--home DIR]
+             --project NAME-OR-ID [--minutes N] [--tokens] [--home DIR] [--claude-config DIR]
 ";
 
 /// The flags of `summary`.

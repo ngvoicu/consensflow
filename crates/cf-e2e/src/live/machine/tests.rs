@@ -311,8 +311,60 @@ fn a_rig_for_several_harnesses_has_each_ones_folders_once_and_claude_without_its
         )
     );
     assert!(plain.contains("unset: []"), "{plain}");
-    // And a rig of the machine's own harnesses leaves no stand-in's records to take away.
-    assert!(plain.contains("stand_in_records: None"), "{plain}");
+    assert!(plain.contains("claude_config: None"), "{plain}");
+}
+
+/// A Claude config folder a case keeps for the real Claude Code's windows.
+#[derive(Debug)]
+struct Kept;
+
+impl ClaudeConfig for Kept {
+    fn folder(&self) -> Result<PathBuf> {
+        Ok(PathBuf::from("/kept/claude"))
+    }
+
+    fn described(&self) -> String {
+        "the machine".to_owned()
+    }
+
+    fn finish(&self) -> Result {
+        Ok(())
+    }
+}
+
+#[test]
+fn the_real_claudes_windows_run_on_the_config_folder_they_are_given_and_the_variable_is_not_cleared(
+) {
+    let claude = Installed::at(Harness::Claude, "/opt/bin/claude", "/machine")
+        .with_claude_config(Arc::new(Kept));
+    let debug = format!("{:?}", rig(&[claude], "/the/stand-in"));
+    // The rig starts the daemon and the windows on that folder, and not on the person's own: the
+    // variable is not unset (a rig that clears it leaves Claude on `~/.claude`).
+    assert!(debug.contains("claude_config: Some(Kept)"), "{debug}");
+    assert!(debug.contains("unset: []"), "{debug}");
+}
+
+#[test]
+fn a_claude_config_the_run_was_given_wins_over_the_kits_own_copy_of_the_login() {
+    // The merge of live-keychain with the long run's `--claude-config`: a folder the run's
+    // caller made, the login copied into it, is where the windows keep their config, and
+    // the kit makes no copy of its own beside it.
+    let claude = Installed::at(Harness::Claude, "/opt/bin/claude", "/machine")
+        .with_claude_config(Arc::new(Kept));
+    let debug = format!(
+        "{:?}",
+        rig_keeping_claude_in(
+            &[claude],
+            "/the/stand-in",
+            Some("/scratch/throwaway".to_owned())
+        )
+    );
+    assert!(
+        debug.contains("(\"CLAUDE_CONFIG_DIR\", \"/scratch/throwaway\")"),
+        "{debug}"
+    );
+    assert!(debug.contains("claude_config: None"), "{debug}");
+    assert!(!debug.contains("unset: [\"CLAUDE_CONFIG_DIR\"]"), "{debug}");
 }
 
 #[test]
@@ -378,10 +430,11 @@ fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_h
 }
 
 #[test]
-fn a_rig_of_stand_ins_and_the_real_claude_starts_claude_through_the_shim_and_says_where_they_write()
-{
+fn a_rig_of_stand_ins_and_the_real_claude_starts_claude_through_the_shim_and_has_them_write_where_the_real_one_does(
+) {
     let folder = tempfile::tempdir().unwrap();
-    let claude = Installed::at(Harness::Claude, "/opt/bin/claude", "/machine");
+    let claude = Installed::at(Harness::Claude, "/opt/bin/claude", "/machine")
+        .with_claude_config(Arc::new(Kept));
     let made = rig_with_stand_ins(
         std::slice::from_ref(&claude),
         folder.path(),
@@ -398,11 +451,10 @@ fn a_rig_of_stand_ins_and_the_real_claude_starts_claude_through_the_shim_and_say
         debug.contains(&format!("stand_in: {:?}", shim)),
         "the rig's `claude` is the shim: {debug}"
     );
-    // The stand-ins write where the machine's Claude keeps its own: the rig clears what they wrote.
-    assert!(
-        debug.contains("stand_in_records: Some(\"/machine/.claude\")"),
-        "{debug}"
-    );
+    // The stand-ins write where the real Claude's windows do, in the config folder the rig gave
+    // them all, and not in the machine's own.
+    assert!(debug.contains("claude_config: Some(Kept)"), "{debug}");
+    assert!(!debug.contains("/machine/.claude"), "{debug}");
     let script = fs::read_to_string(&shim).unwrap();
     assert!(script.contains("'/the/fake-agent'"), "{script}");
     assert!(script.contains("'/opt/bin/claude'"), "{script}");

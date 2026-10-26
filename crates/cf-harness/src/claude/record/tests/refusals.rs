@@ -272,7 +272,7 @@ fn failure_of(records: &[Value]) -> Option<String> {
     stage.write(records);
     match &*stage.reader.look(&Options::default(), 0) {
         Reading::Known(record) => record.failure.clone(),
-        Reading::Unknown(reason) => panic!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
     }
 }
 

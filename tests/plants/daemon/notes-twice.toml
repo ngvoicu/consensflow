@@ -61,6 +61,11 @@ file = "crates/cf-harness/src/devin/history.rs"
 find = "                let took = seen.took || (pasted.is_some() && self.seen.get().took);"
 replace = "                let took = false;"
 
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if !self.read_once_more(record, delivering.message).await? {"
+replace = "        if false && !self.read_once_more(record, delivering.message).await? {"
+
 [[plant]]
 name = "notes twice: the engine counts the arrival window from the hand-over, its turns or none"
 meant = "waits_for_the_record_of_a_message_while_its_window_is_in_a_turn_and_pastes_it_once"
@@ -75,6 +80,11 @@ replace = '''
             turned: false,
             ..self.rested(record, observed, self.held(record))
         };'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if !self.read_once_more(record, delivering.message).await? {"
+replace = "        if false && !self.read_once_more(record, delivering.message).await? {"
 
 [[plant]]
 name = "notes twice: a window that waits on a dialog of its own is at rest"
@@ -113,7 +123,7 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "                turned: since != delivering.since,"
+find = "                turned: delivering.turned,"
 replace = "                turned: false,"
 
 [[plant]]

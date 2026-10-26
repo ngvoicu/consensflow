@@ -15,7 +15,13 @@ use crate::shared::quota::Quota;
 /// the reason (`{unknown: true, reason}`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Reading {
+    /// The look could not read the record (it failed, or never answered): what
+    /// the record holds is not known.
     Unknown(String),
+    /// The record is not there: a conversation its harness has written nothing of
+    /// yet. It was read, and holds nothing. Said as an unknown one is, its reason
+    /// as written.
+    Missing(String),
     Known(Record),
 }
 
@@ -24,12 +30,31 @@ impl Reading {
     pub(crate) fn unreadable(reason: &str) -> Self {
         Reading::Unknown(format!("unreadable: {reason}"))
     }
+
+    /// The reading of a record that is not there, said `unreadable: no <what>`.
+    pub(crate) fn missing(what: &str) -> Self {
+        Reading::Missing(format!("unreadable: no {what}"))
+    }
+
+    /// Whether the look could not read the record at all, so what it holds is not
+    /// known. A record that is not there ([`Reading::Missing`]) was read.
+    pub fn read_failed(&self) -> bool {
+        matches!(self, Reading::Unknown(_))
+    }
+
+    /// Why the record was not read, where it was not.
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            Reading::Unknown(reason) | Reading::Missing(reason) => Some(reason),
+            Reading::Known(_) => None,
+        }
+    }
 }
 
 impl Serialize for Reading {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Reading::Unknown(reason) => {
+            Reading::Unknown(reason) | Reading::Missing(reason) => {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("unknown", &true)?;
                 map.serialize_entry("reason", reason)?;
@@ -389,6 +414,23 @@ mod tests {
             serde_json::to_string(&Reading::unreadable("no codex rollout for s")).unwrap(),
             r#"{"unknown":true,"reason":"unreadable: no codex rollout for s"}"#
         );
+    }
+
+    #[test]
+    fn a_record_that_is_not_there_was_read_and_one_that_could_not_be_read_failed() {
+        let missing = Reading::missing("claude transcript for s");
+        assert_eq!(
+            serde_json::to_string(&missing).unwrap(),
+            r#"{"unknown":true,"reason":"unreadable: no claude transcript for s"}"#,
+            "said as it was before it had a name of its own"
+        );
+        assert!(!missing.read_failed());
+        assert!(Reading::unreadable("the records thread ended").read_failed());
+        // A failure whose words begin as a missing record's do is a failure still:
+        // SQLite's own, in OpenCode's store.
+        assert!(Reading::unreadable("no such column: id").read_failed());
+        assert!(Reading::Unknown("missing session id".to_owned()).read_failed());
+        assert!(!Reading::Known(Record::new()).read_failed());
     }
 
     #[test]

@@ -339,7 +339,7 @@ fn a_turn_that_ended_in_an_error_keeps_the_words_its_end_said() {
         );
         match &*look(&mut staged.reader()) {
             Reading::Known(record) => (record.failed, record.failure.clone()),
-            Reading::Unknown(reason) => panic!("unknown: {reason}"),
+            Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
         }
     };
     let ended = |cause: &str, said: Option<&str>| {

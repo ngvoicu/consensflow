@@ -196,6 +196,7 @@ impl Dispatcher {
             chief: false,
             queued: false,
             free_since: None,
+            turned: false,
             entered_again: false,
             carried: Vec::new(),
             session: None,

@@ -25,7 +25,7 @@ pub(crate) fn record_state(reading: Arc<Reading>) -> Observed {
                 record.quota.clone(),
             )
         }
-        Reading::Unknown(_) => (true, false, None),
+        Reading::Unknown(_) | Reading::Missing(_) => (true, false, None),
     };
     Observed {
         reading: Some(reading),

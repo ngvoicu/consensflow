@@ -10,9 +10,10 @@
 //! The native daemon and the real pane host run in a home of the run's own (never
 //! `~/.consensflow`), one rig for each project, one project after another. The chief's
 //! window runs the machine's harness and reads its login where it is (the machine's
-//! home, and `CODEX_HOME`; Claude Code with no `CLAUDE_CONFIG_DIR`, started through
-//! a shim that adds `--strict-mcp-config --no-chrome`), and knows nothing of the shell
-//! that runs this: the rig gives it an environment of its own. The project's one
+//! home, and `CODEX_HOME`; Claude Code on a config folder of the run's own with a copy
+//! of the machine's login ([`cf_e2e::live::login`]), started through a shim that adds
+//! `--strict-mcp-config --no-chrome`), and knows nothing of the shell that runs this:
+//! the rig gives it an environment of its own. The project's one
 //! member is the stand-in worker, which does no work and answers what a brief tells it
 //! to ([`project::BRIEF`]): what the run judges is the chief's.
 //!

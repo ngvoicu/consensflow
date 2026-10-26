@@ -25,10 +25,10 @@
 //! that finds it ended by something else when it ends fails: the pane host ends a
 //! window's own and nothing of the machine's.
 
-mod forget;
 mod install;
 mod jobs;
 mod launch;
+mod names;
 mod observe;
 mod project;
 mod report;
@@ -51,14 +51,13 @@ use crate::outcome::{self, Verdict};
 use crate::process::{self, Ran, Run, Sink, Spawned};
 use crate::{cf, checkout, files, wire, Error, Result};
 
-pub use forget::project_name;
 pub use jobs::Job;
+pub use names::project_name;
 pub use project::{write_staff, Project};
 pub use route::Pasted;
 
 pub(crate) use observe::events_of;
 
-use forget::Forget;
 use route::Shared;
 use stranger::Stranger;
 
@@ -94,7 +93,7 @@ pub struct Config {
     path: Vec<PathBuf>,
     existing_root: Option<PathBuf>,
     daemon: Option<PathBuf>,
-    stand_in_records: Option<PathBuf>,
+    claude_config: Option<Arc<dyn ClaudeConfig>>,
     codex: Option<PathBuf>,
     devin: Option<PathBuf>,
     /// The stand-in `opencode`: of an OpenCode 1.x, or of one that is 2.
@@ -163,7 +162,7 @@ impl Config {
             path: Vec::new(),
             existing_root: None,
             daemon: None,
-            stand_in_records: None,
+            claude_config: None,
             codex: None,
             devin: None,
             opencode: None,
@@ -353,17 +352,45 @@ impl Config {
         self
     }
 
-    /// With the stand-in agents writing their records in the Claude config
-    /// folder `config`, the machine's own (`~/.claude`: a program that plays the
-    /// stand-in for some windows and starts the real Claude Code for the others
-    /// has them write where the daemon reads Claude's), and not in the rig's. The
-    /// folder is the person's: a rig that ends takes away the conversations and
-    /// the status files its stand-ins wrote, and nothing else of it.
+    /// With the Claude Code config folder of every window `claude_config`'s, in place
+    /// of the folder the rig makes in its home: for a case whose windows run the real
+    /// Claude Code on a login of the machine's, copied into a folder of its own, so
+    /// that nothing of the run is written in the person's `~/.claude`
+    /// ([`ClaudeConfig`]). The rig asks it for the folder when it starts, and for
+    /// what the run came to when it ends.
     #[must_use]
-    pub fn stand_ins_write_in(mut self, config: impl Into<PathBuf>) -> Self {
-        self.stand_in_records = Some(config.into());
+    pub fn claude_config(mut self, claude_config: Arc<dyn ClaudeConfig>) -> Self {
+        self.claude_config = Some(claude_config);
         self
     }
+}
+
+/// A Claude Code config folder that a rig's windows (and its daemon, which reads
+/// the records Claude keeps there) run on in place of the one the rig makes, kept
+/// by the owner of a live case ([`Config::claude_config`]).
+pub trait ClaudeConfig: std::fmt::Debug + Send + Sync {
+    /// The folder, made when it is first asked for and the same after: a rig that
+    /// starts again on the same home (the app's restart) finds its conversations
+    /// where they were. An error is why there is none, said before anything is spent.
+    fn folder(&self) -> Result<PathBuf>;
+
+    /// Where the login in the folder is copied from, as a run says it.
+    fn described(&self) -> String;
+
+    /// Copies what the run's Claude Code kept in the folder (its conversations and
+    /// its sessions, never the login) into `into`, the `.claude` of the home the rig made
+    /// (`<root>/home/.claude`, beside `CONSENSFLOW_HOME`), which is where a kept home has them: asked when a rig whose home is kept ends, the
+    /// windows gone, before [`ClaudeConfig::finish`]; the folder itself goes with the
+    /// run. Copying again over a copy made before is the same copy, grown. A folder
+    /// that holds no login of the person's has nothing to take out of it.
+    fn keep_records(&self, _into: &Path) -> Result {
+        Ok(())
+    }
+
+    /// What the run came to in the folder and in the person's own setup, asked
+    /// when a rig that used the folder ends, the windows gone: an error says what
+    /// the run did that it was not to, and fails the case that ends the rig.
+    fn finish(&self) -> Result;
 }
 
 /// What a rig that closed leaves: its root, kept, and the last word of the pane
@@ -397,9 +424,11 @@ pub struct Rig {
     host: Spawned,
     /// A process none of the windows' is, which nothing may have ended when they are.
     stranger: Stranger,
-    /// What the rig takes away of the machine's own Claude folder when it
-    /// ends, where its stand-ins write there ([`Config::stand_ins_write_in`]).
-    forget: Option<Forget>,
+    /// The Claude config folder the windows run on, where a case gave one
+    /// ([`Config::claude_config`]), and whether it has been asked what the run came
+    /// to ([`ClaudeConfig::finish`]).
+    claude_config: Option<Arc<dyn ClaudeConfig>>,
+    claude_config_finished: bool,
     /// What it passes what it says of itself through ([`Config::masked_by`]).
     masker: Option<Masker>,
     /// Where its report is kept, where it is not beside its home ([`Config::reports_in`]).
@@ -418,6 +447,8 @@ pub struct Rig {
     close_failed: bool,
     /// Whether the case holds its close to fail ([`Rig::expect_the_close_to_fail`]).
     close_expected_to_fail: AtomicBool,
+    /// Whether the case ends the rig as a drop does, on purpose ([`Rig::close_as_dropped`]).
+    dropped_on_purpose: bool,
     _turn: MutexGuard<'static, ()>,
 }
 
@@ -658,17 +689,6 @@ impl Rig {
         self.root.clone()
     }
 
-    /// The folder `folder` is one of the run's: what a real Claude Code kept of
-    /// it (its conversations there, and the `memory/` that every later session in
-    /// that folder reads) is taken away when the rig ends, unless the home is
-    /// kept. Only for a rig whose stand-ins write in the machine's own Claude
-    /// folder ([`Config::stand_ins_write_in`]), which it is the person's.
-    pub fn forget_claude_memory_of(&mut self, folder: &Path) {
-        if let Some(forget) = &mut self.forget {
-            forget.folder(folder);
-        }
-    }
-
     /// Ends the rig: both programs' input is ended, both are waited for, and
     /// every process a window started is checked to be gone (and, on Unix, the
     /// process that is none of any window's to run still). The home goes with
@@ -740,7 +760,8 @@ impl Rig {
     }
 
     /// What the drop of the rig says of itself. A panic in flight is a failed case's. A rig
-    /// closed, or whose close the case holds to fail, has nothing to say. Any other is
+    /// closed, whose close the case holds to fail, or that the case ended as a drop on
+    /// purpose ([`Rig::close_as_dropped`]), has nothing to say. Any other is
     /// dropped unclosed: a case that is not judged by what it returns cannot say that it
     /// passed, and the rig says it; one that is says it once the case is known to have
     /// failed, whether that is already or comes later (`outcome::leave`).
@@ -750,11 +771,19 @@ impl Rig {
         }
         let failure_expected =
             self.close_failed && self.close_expected_to_fail.load(Ordering::Relaxed);
-        if self.closed || failure_expected {
+        if self.closed || failure_expected || self.dropped_on_purpose {
             return DropSays::Nothing;
         }
         self.judged
             .map_or(DropSays::Now, DropSays::OnceItsCaseFails)
+    }
+
+    /// Ends the rig as a case that failed leaves it, dropped unclosed: the drop's own way
+    /// (its home kept or taken away, its Claude config asked what the run came to), for
+    /// a case about that way. It keeps no report of the rig: the case holds to the drop,
+    /// and passes or fails by what it finds after.
+    pub fn close_as_dropped(mut self) {
+        self.dropped_on_purpose = true;
     }
 
     /// Ends the rig, as [`Rig::close`] says. It is closed once that succeeded: a close
@@ -805,7 +834,27 @@ impl Rig {
                 )));
             }
         }
-        Ok(())
+        // Every window is gone: nothing writes in the Claude config folder any more.
+        self.finish_claude_config()
+    }
+
+    /// Asks the Claude config folder the windows ran on what the run came to
+    /// ([`ClaudeConfig::finish`]), once: the answer to the case that ends the rig.
+    fn finish_claude_config(&mut self) -> Result {
+        match &self.claude_config {
+            Some(claude_config) if !self.claude_config_finished => {
+                self.claude_config_finished = true;
+                // The home is kept: what Claude Code kept of the run goes in it, where it
+                // has always been (the folder holds a login, and goes with the run).
+                let kept = if self.keep_root {
+                    claude_config.keep_records(&self.root.join("home").join(".claude"))
+                } else {
+                    Ok(())
+                };
+                claude_config.finish().and(kept)
+            }
+            _ => Ok(()),
+        }
     }
 }
 
@@ -848,11 +897,9 @@ impl Drop for Rig {
         let _ = self.shutdown(EXIT);
         self.daemon.kill();
         self.host.kill();
-        // Once every window is gone, and before the home that says which
-        // conversations the stand-ins started is.
-        if let Some(forget) = &self.forget {
-            forget.clear(&self.started(), self.keep_root);
-        }
+        // A rig that did not end by being closed (a case that failed) is still asked
+        // what the run did in the person's setup, which the folder says loudly.
+        let _ = self.finish_claude_config();
         if !self.keep_root {
             let _ = std::fs::remove_dir_all(&self.root);
         }

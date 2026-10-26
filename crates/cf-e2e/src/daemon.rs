@@ -125,7 +125,8 @@ impl Daemon {
         self.process.id()
     }
 
-    /// Everything it has said on its error output so far.
+    /// Everything it has said on its error output so far: all of it once
+    /// [`Daemon::wait`] (or [`Daemon::exit_code`]) has seen it end.
     pub fn errors(&self) -> String {
         self.process.errors()
     }
@@ -204,6 +205,7 @@ impl Daemon {
     }
 
     /// Waits up to `within` for it to end: how it ended, or none if it did not.
+    /// What it said on its error output is all kept when it did.
     pub fn wait(&mut self, within: Duration) -> Result<Option<ExitStatus>> {
         self.process.wait(within)
     }

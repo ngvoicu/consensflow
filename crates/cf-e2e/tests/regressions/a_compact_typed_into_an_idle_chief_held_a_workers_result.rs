@@ -37,7 +37,7 @@ use crate::resume_of_a_chief_with_no_turn::{after, wait_for_the_chief, windows_o
 use crate::{config, secs, Outcome};
 
 /// The tier the worker was given, as a word the chief's brief names.
-fn tier(added: &Value) -> &str {
+pub(crate) fn tier(added: &Value) -> &str {
     added["member"]["tier"].as_str().unwrap_or_default()
 }
 

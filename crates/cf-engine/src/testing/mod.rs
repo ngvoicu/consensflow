@@ -40,6 +40,7 @@ pub use seams::{
     FakeRoster, FakeTrace, MODELS,
 };
 pub use time::TestTime;
+pub use window::{TRUST_PROMPT, TRUST_QUESTION, TRUST_QUOTED, TRUST_UNPLACED};
 
 /// What a note that replaces a role says before the role text, which a test
 /// that quotes it to the window of a worker needs word for word.

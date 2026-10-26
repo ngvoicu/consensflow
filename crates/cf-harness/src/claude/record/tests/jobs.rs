@@ -107,7 +107,7 @@ fn reporting(uuid: &str, parent: &str) -> Value {
 fn says(stage: &mut Stage) -> (Settlement, usize) {
     let record = match &*stage.reader.look(&Options::default(), 0) {
         Reading::Known(record) => record.clone(),
-        Reading::Unknown(reason) => panic!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
     };
     (record.settlement, record.pending.total())
 }

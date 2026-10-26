@@ -337,7 +337,46 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
     ];
     assert_eq!(
         read("claude-code", &claude),
-        json!({ "key": "down", "prompt": false })
+        json!({ "asks": true, "key": "down", "grants": false, "servers": false, "prompt": false, "names": true })
+    );
+    // Its cursor drawn otherwise: asked, and no key known.
+    assert_eq!(
+        read(
+            "claude-code",
+            &[
+                " Quick safety check",
+                " > No, exit",
+                "   Yes, I trust this folder"
+            ]
+        ),
+        json!({ "asks": true, "key": null, "grants": false, "servers": false, "prompt": false, "names": true })
+    );
+    // Asked of a trusted folder's grants (T-354): asked, and its key toward a yes.
+    assert_eq!(
+        read(
+            "claude-code",
+            &[
+                " These will apply without asking. Only proceed if you trust this configuration.",
+                " ❯ No, continue without these permissions",
+                "   Yes, I trust this folder",
+                " Enter to confirm · Esc to cancel"
+            ]
+        ),
+        json!({ "asks": true, "key": "down", "grants": true, "servers": false, "prompt": false, "names": false })
+    );
+    // The dialog of a new server of `.mcp.json` (T-383): asked, and Up toward using it.
+    assert_eq!(
+        read(
+            "claude-code",
+            &[
+                " New MCP server found in this project: probe",
+                "   Use this MCP server",
+                "   Use this and all future MCP servers in this project",
+                " ❯ Continue without using this MCP server",
+                " Enter to confirm · Esc to cancel"
+            ]
+        ),
+        json!({ "asks": true, "key": "up", "grants": false, "servers": true, "prompt": false, "names": false })
     );
     let codex = [
         "  Trust this folder? Codex can read, edit, and run files here.",
@@ -346,7 +385,7 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
     ];
     // A harness that never asks as ConsensFlow opens it reads none, whatever the
     // screen shows: Codex's own question is its window's opened alone.
-    let none = json!({ "key": null, "prompt": false });
+    let none = json!({ "asks": false, "key": null, "grants": false, "servers": false, "prompt": false, "names": false });
     assert_eq!(read("codex", &codex), none);
     for kind in ["pi", "opencode", "devin"] {
         assert_eq!(read(kind, &claude), none, "{kind}");
@@ -363,7 +402,7 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
     let real = real.to_string_lossy();
     assert_eq!(
         asked["trusts"],
-        json!({ "folder": real.strip_prefix(r"\\?\").unwrap_or(&real), "inside": true })
+        json!({ "folder": real.strip_prefix(r"\\?\").unwrap_or(&real), "inside": true, "servers_above": null })
     );
     let prompt = [
         "❯ Try \"fix lint errors\"",
@@ -371,7 +410,20 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
     ];
     assert_eq!(
         read("claude-code", &prompt),
-        json!({ "key": null, "prompt": true })
+        json!({ "asks": false, "key": null, "grants": false, "servers": false, "prompt": true, "names": false })
+    );
+    // A conversation that quotes the question's choices, drawn above a prompt: the watch
+    // reads the prompt first (the question's cursor is not placed in a quote), and the
+    // screen still names the choices, so a yes is not read from it (`cleared`, the exit's
+    // `yes_at_exit`).
+    let quoted = [
+        "  No, exit",
+        "  Yes, I trust this folder",
+        "  ⏵⏵ bypass permissions on (shift+tab to cycle)",
+    ];
+    assert_eq!(
+        read("claude-code", &quoted),
+        json!({ "asks": true, "key": null, "grants": false, "servers": false, "prompt": true, "names": true })
     );
 }
 

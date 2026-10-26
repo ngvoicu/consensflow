@@ -164,7 +164,7 @@ mod tests {
 
     fn said(reading: &Reading) -> &str {
         match reading {
-            Reading::Unknown(reason) => reason,
+            Reading::Unknown(reason) | Reading::Missing(reason) => reason,
             Reading::Known(_) => "known",
         }
     }

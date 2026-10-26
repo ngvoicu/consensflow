@@ -177,6 +177,12 @@ pub(crate) struct WindowPart {
     pub(crate) named: bool,
     /// Where it stands with its harness's question about trusting its folder.
     pub(crate) trust: Trusting,
+    /// How many keys ConsensFlow pressed into it toward a yes to its harness's questions.
+    pub(crate) trust_keys: usize,
+    /// Whether the first question was read with its choice placed: only that is a
+    /// question whose yes is carried to the project's other windows, the only ones a key
+    /// of ConsensFlow's can answer.
+    pub(crate) trust_sure: bool,
     /// The last stop this window process paid: its task and the sequence. It
     /// dies with the window, and a window opened later owes nothing for the
     /// stops asked before it opened.
@@ -241,6 +247,8 @@ impl Default for WindowPart {
             drawn: false,
             named: false,
             trust: Trusting::Past,
+            trust_keys: 0,
+            trust_sure: false,
             stopped: None,
             interrupted: None,
             unstopped: None,
@@ -374,6 +382,8 @@ impl Dispatcher {
             window.told_waiting = None;
             window.activity = Activity::of(ActivityState::Closed);
             window.trust = Trusting::Past;
+            window.trust_keys = 0;
+            window.trust_sure = false;
             taken
         };
         // What its task was held for went with it: a task held again in a window opened
@@ -501,6 +511,7 @@ impl Dispatcher {
             chief: participant.role == "chief",
             queued: false,
             free_since: None,
+            turned: false,
             entered_again: false,
             carried: Vec::new(),
             session: None,
@@ -1405,7 +1416,15 @@ impl Dispatcher {
         pane: &Pane,
     ) -> Result<bool, EngineError> {
         if !record.window.borrow().retiring {
+            // The kill is marked before anything is awaited, the look at the screen
+            // included: an exit that comes while the Close looks is the Close's, as one
+            // that comes while its kill is answered is, and a kill that then fails takes
+            // the mark off the task that exit paused (resume.rs, both reviews of 2026-10-16
+            // and the re-check of 2026-10-25).
             record.window.borrow_mut().killing = Some(Killing::default());
+            // The exit is settled here, and says nothing of the screen the window ends
+            // with: where it was asking, the human's yes in it is read off the screen now.
+            self.bank_yes_before_close(record, pane).await;
             let killed = self.kill(record, pane).await;
             let paused = record
                 .window
