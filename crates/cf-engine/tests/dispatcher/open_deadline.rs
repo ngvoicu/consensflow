@@ -10,6 +10,7 @@
 
 use cf_engine::testing::Context;
 use cf_ledger::NewTask;
+use cf_proto::trace::{Traced, WindowEvent};
 
 use crate::fixtures::{closed, native_of, Tiers};
 
@@ -125,6 +126,7 @@ fn the_next_window_of_a_session_waits_until_the_host_has_ended_the_one_given_up_
     let before = asked();
     passes(&context, 2);
     assert_eq!(asked(), before + 2, "asked again at each pass");
+    assert_eq!(kills_failed(&context), 1, "the trace says it once");
 
     follow_up(&context, &tiers, "Write the docs, again");
     passes(&context, 3);
@@ -144,4 +146,62 @@ fn the_next_window_of_a_session_waits_until_the_host_has_ended_the_one_given_up_
     );
     assert_eq!(tiers.task(3).task.state, "working");
     assert_ne!(context.host.last(&session).unwrap().pane, given_up);
+}
+
+/// How many times the trace said a kill failed.
+fn kills_failed(context: &Context) -> usize {
+    context
+        .trace
+        .lines
+        .borrow()
+        .iter()
+        .filter(|line| {
+            matches!(
+                &line.what,
+                Traced::Window {
+                    event: WindowEvent::KillFailed { .. },
+                    ..
+                }
+            )
+        })
+        .count()
+}
+
+/// The host's word that the window given up on ended comes after the next window of the
+/// session opened: it is nothing to that window, whose task goes on in it, and it proves
+/// nothing of the conversation the next window writes to.
+#[test]
+fn the_end_of_the_window_given_up_on_told_after_the_next_one_opened_is_nothing_to_it() {
+    let context = Context::new();
+    let (tiers, session) = session_done(&context);
+    context.host.unanswered.set(true);
+    context.host.hold_exits.set(true);
+    follow_up(&context, &tiers, "Write the docs");
+    passes(&context, 2);
+    assert_eq!(tiers.task(2).task.state, "failed");
+    let given_up = context.host.last(&session).unwrap().pane;
+    assert!(closed(&context, &given_up), "killed, its exit held");
+    context.host.hold_exits.set(false);
+
+    follow_up(&context, &tiers, "Write the docs, again");
+    passes(&context, 3);
+    assert_eq!(tiers.task(3).task.state, "working");
+    let next = context.host.last(&session).unwrap().pane;
+    assert_ne!(next, given_up);
+    let proof = proven(&context, &tiers, &session);
+
+    let host = std::rc::Rc::clone(&context.host);
+    context.run(async move { host.exited(given_up).await });
+    passes(&context, 2);
+    assert_eq!(tiers.task(3).task.state, "working");
+    assert_eq!(
+        context.dispatcher.pane(tiers.id(&session)),
+        Some(next.clone())
+    );
+    assert!(!closed(&context, &next), "the next window stays");
+    assert_eq!(
+        proven(&context, &tiers, &session),
+        proof,
+        "nothing proven of it"
+    );
 }

@@ -134,6 +134,8 @@ pub enum PaneError {
     NotFound(PaneKey),
     /// The daemon closed the window before its open reached the table.
     Cancelled(PaneKey),
+    /// The window is still being ended by a close before this one.
+    Ending(PaneKey),
     Pty(String),
     Io(io::Error),
     InvalidBacklog,
@@ -175,6 +177,11 @@ impl fmt::Display for PaneError {
             Self::Cancelled(key) => write!(
                 formatter,
                 "pane {} generation {} was closed before it opened",
+                key.id, key.generation
+            ),
+            Self::Ending(key) => write!(
+                formatter,
+                "pane {} generation {} is still being ended",
                 key.id, key.generation
             ),
             Self::Pty(message) => write!(formatter, "PTY error: {message}"),
@@ -389,6 +396,7 @@ pub struct PaneTable {
     next_id: AtomicU64,
     updating: AtomicBool,
     teardown: Arc<Teardown>,
+    ending: Arc<Ending>,
     /// The exits of the windows whose output is read, which are yet to be told.
     exits: Arc<owed::ExitsOwed>,
     /// How long a closed window's programs are given to end once asked to
@@ -427,6 +435,54 @@ impl Teardown {
     }
 }
 
+/// The windows whose programs are being ended now, by their keys: a kill of one that has
+/// left the table already waits for that end, so that its answer says the programs are
+/// gone (the daemon asks again for the end of a window whose open it gave up on where
+/// its first kill went unanswered, which may still be waiting out the grace).
+#[derive(Default)]
+struct Ending {
+    keys: Mutex<Vec<PaneKey>>,
+    ended: Condvar,
+}
+
+impl Ending {
+    /// `key`'s programs are being ended. Called with `panes`' lock held, as the pane
+    /// leaves the table.
+    fn begin(&self, key: &PaneKey) {
+        self.keys
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(key.clone());
+    }
+
+    /// `key`'s programs are ended, or what could be done to end them was.
+    fn end(&self, key: &PaneKey) {
+        let mut keys = self.keys.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(at) = keys.iter().position(|ending| ending == key) {
+            keys.swap_remove(at);
+        }
+        self.ended.notify_all();
+    }
+
+    /// Waits until nothing ends `key`'s programs, for up to `within`: whether nothing does.
+    fn wait(&self, key: &PaneKey, within: Duration) -> bool {
+        let deadline = Instant::now() + within;
+        let mut keys = self.keys.lock().unwrap_or_else(PoisonError::into_inner);
+        while keys.contains(key) {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            keys = self
+                .ended
+                .wait_timeout(keys, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        true
+    }
+}
+
 /// The installer owns admission until restart, or until failure drops this guard.
 pub struct UpdatePermit(Arc<PaneTable>);
 
@@ -453,6 +509,7 @@ impl PaneTable {
             next_id: AtomicU64::new(1),
             updating: AtomicBool::new(false),
             teardown: Arc::new(Teardown::default()),
+            ending: Arc::new(Ending::default()),
             exits: Arc::new(owed::ExitsOwed::default()),
             close_grace: grace,
         }
@@ -882,10 +939,15 @@ impl PaneTable {
         let Some(pane) = panes.remove(key) else {
             // Gone already, or not open yet: an open of it that comes now is one
             // the daemon gave up on (its answer came too late), and it never opens.
+            // One being ended by a close before this is gone once that close is over.
             self.cancel(key);
-            return Ok(());
+            drop(panes);
+            if self.ending.wait(key, self.close_grace + EXIT_GRACE) {
+                return Ok(());
+            }
+            return Err(PaneError::Ending(key.clone()));
         };
-        self.tear_down(panes, pane, told)
+        self.tear_down(panes, key, pane, told)
     }
 
     /// `key` is closed before its open reached the table: that open is refused.
@@ -929,17 +991,20 @@ impl PaneTable {
             return Ok(());
         };
         self.teardown.begin();
+        self.ending.begin(key);
         drop(panes);
         let (teardown, grace) = (Arc::clone(&self.teardown), self.close_grace);
-        let ender = Arc::clone(&teardown);
+        let (ender, ending, ended) = (Arc::clone(&teardown), Arc::clone(&self.ending), key.clone());
         std::thread::Builder::new()
             .name("consensflow-pty-ender".to_string())
             .spawn(move || {
                 let _ = end_pane(pane, &ender, grace, true);
+                ending.end(&ended);
             })
             .map(|_| ())
             .map_err(|error| {
                 teardown.resolve(false);
+                self.ending.end(key);
                 PaneError::Io(error)
             })
     }
@@ -969,7 +1034,7 @@ impl PaneTable {
             };
             if has_exited(pane)? {
                 if let Some(pane) = panes.remove(key) {
-                    self.tear_down(panes, pane, true)?;
+                    self.tear_down(panes, key, pane, true)?;
                 }
                 return Ok(true);
             }
@@ -987,12 +1052,16 @@ impl PaneTable {
     fn tear_down(
         &self,
         panes: MutexGuard<'_, HashMap<PaneKey, Pane>>,
+        key: &PaneKey,
         pane: Pane,
         told: bool,
     ) -> Result<(), PaneError> {
         self.teardown.begin();
+        self.ending.begin(key);
         drop(panes);
-        end_pane(pane, &self.teardown, self.close_grace, told)
+        let ended = end_pane(pane, &self.teardown, self.close_grace, told);
+        self.ending.end(key);
+        ended
     }
 
     /// The built-in ConPTY keeps a pane's output open after its program exits
@@ -1749,6 +1818,46 @@ mod tests {
             .expect("the next generation opens");
         table.kill(&next).expect("kill the next generation");
         assert_eq!(read_to_end(reader), b"");
+    }
+
+    /// A kill of a window that a kill before it is still ending answers once that one
+    /// has ended its program: the daemon asks again where its first kill of a window it
+    /// gave up on went unanswered, and opens the next window on the answer.
+    #[cfg(unix)]
+    #[test]
+    fn a_kill_of_a_window_another_kill_is_ending_answers_once_its_program_is_gone() {
+        let _pty_guard = serial_pty_test();
+        let table = Arc::new(PaneTable::closing_within(Duration::from_secs(2)));
+        let OpenedPane { key, mut reader } = open_shell(
+            &table,
+            "trap '' TERM HUP; printf ready; while :; do sleep 1; done",
+        );
+        let mut shown = Vec::new();
+        let mut chunk = [0_u8; 64];
+        while !String::from_utf8_lossy(&shown).contains("ready") {
+            let read = reader.read(&mut chunk).expect("read the pane");
+            assert!(read > 0, "the pane ended before it was ready");
+            shown.extend_from_slice(&chunk[..read]);
+        }
+        let pid = child_process_id(&table, &key);
+        let first = {
+            let (table, key) = (Arc::clone(&table), key.clone());
+            thread::spawn(move || table.kill(&key))
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !table.list().expect("list").is_empty() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            table.list().expect("list").is_empty(),
+            "the first kill took it"
+        );
+        assert!(process_exists(pid), "it waits out its grace");
+
+        table.kill(&key).expect("the second kill");
+        assert!(!process_exists(pid), "answered while its program still ran");
+        first.join().unwrap().expect("the first kill");
+        drop(reader);
     }
 
     /// The windows killed before they opened are the latest [`CANCELLED_KEPT`]: the kills

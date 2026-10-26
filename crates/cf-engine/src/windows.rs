@@ -260,7 +260,15 @@ pub(crate) struct WindowPart {
     /// run on the conversation the next window goes on with (a Codex thread one client
     /// holds alone). It is ended before another window of the participant opens
     /// ([`Dispatcher::end_abandoned`]).
-    pub(crate) abandoned: Option<Pane>,
+    pub(crate) abandoned: Option<Abandoned>,
+}
+
+/// A window whose open the host never answered by its deadline, which the engine ends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Abandoned {
+    pub(crate) pane: Pane,
+    /// Whether the trace said its kill failed: once, though it is asked at every step.
+    pub(crate) told: bool,
 }
 
 impl Default for WindowPart {
@@ -703,7 +711,10 @@ impl Dispatcher {
             // gave it, and nobody would see what it does. It is the participant's to
             // end before another of its windows opens.
             Ok(Opened::Unanswered) => {
-                record.window.borrow_mut().abandoned = Some(pane.clone());
+                record.window.borrow_mut().abandoned = Some(Abandoned {
+                    pane: pane.clone(),
+                    told: false,
+                });
                 let failed = self.not_opened(
                     record,
                     project,
@@ -1425,17 +1436,33 @@ impl Dispatcher {
         self: &Rc<Self>,
         record: &Rc<Record>,
     ) -> Result<bool, EngineError> {
-        let Some(pane) = record.window.borrow().abandoned.clone() else {
+        let Some(Abandoned { pane, told }) = record.window.borrow().abandoned.clone() else {
             return Ok(true);
         };
-        if !self.kill(record, &pane).await? {
-            return Ok(false);
+        let killed = returning(self.seams.host.kill(&pane)).await;
+        let error = match killed {
+            Ok(Killed::Killed) => {
+                let mut window = record.window.borrow_mut();
+                if window
+                    .abandoned
+                    .as_ref()
+                    .is_some_and(|abandoned| abandoned.pane == pane)
+                {
+                    window.abandoned = None;
+                }
+                return Ok(true);
+            }
+            Ok(Killed::Refused { error }) => error,
+            Err(error) => error.message,
+        };
+        // Said once: the kill is asked again at every step until the host takes it.
+        if !told {
+            if let Some(abandoned) = record.window.borrow_mut().abandoned.as_mut() {
+                abandoned.told = abandoned.pane == pane;
+            }
+            self.trace_window(record, WindowEvent::KillFailed { error: Some(error) })?;
         }
-        let mut window = record.window.borrow_mut();
-        if window.abandoned.as_ref() == Some(&pane) {
-            window.abandoned = None;
-        }
-        Ok(true)
+        Ok(false)
     }
 
     /// Kills a window: whether the pane host took the kill; the trace says

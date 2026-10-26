@@ -56,7 +56,7 @@ runs = ["od-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "                record.window.borrow_mut().abandoned = Some(pane.clone());"
+find = "                record.window.borrow_mut().abandoned = Some(Abandoned {\n                    pane: pane.clone(),\n                    told: false,\n                });"
 replace = "                let _ = &pane;"
 
 [[plant]]
@@ -67,7 +67,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "                record.window.borrow_mut().abandoned = Some(pane.clone());"
+find = "                record.window.borrow_mut().abandoned = Some(Abandoned {\n                    pane: pane.clone(),\n                    told: false,\n                });"
 replace = "                let _ = &pane;"
 
 [[plant]]
@@ -77,8 +77,8 @@ runs = ["od-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "                record.window.borrow_mut().abandoned = Some(pane.clone());"
-replace = "                record.window.borrow_mut().abandoned = Some(pane.clone());\n                if let Some(id) = resumed_on.filter(|_| proven) {\n                    self.seams.ledger.borrow_mut().set_program_gone(id, true)?;\n                }"
+find = "                record.window.borrow_mut().abandoned = Some(Abandoned {\n                    pane: pane.clone(),\n                    told: false,\n                });"
+replace = "                record.window.borrow_mut().abandoned = Some(Abandoned {\n                    pane: pane.clone(),\n                    told: false,\n                });\n                if let Some(id) = resumed_on.filter(|_| proven) {\n                    self.seams.ledger.borrow_mut().set_program_gone(id, true)?;\n                }"
 
 [[plant]]
 name = "open deadline: the next window of a session opens while the one given up on may run"
@@ -122,8 +122,8 @@ runs = ["od-panes"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty.rs"
-find = "            self.cancel(key);\n            return Ok(());"
-replace = "            let _ = key;\n            return Ok(());"
+find = "            self.cancel(key);\n            drop(panes);"
+replace = "            drop(panes);"
 
 [[plant]]
 name = "open deadline rig: a kill that finds no window lets its open come later, and the window given up on starts"
@@ -133,8 +133,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty.rs"
-find = "            self.cancel(key);\n            return Ok(());"
-replace = "            let _ = key;\n            return Ok(());"
+find = "            self.cancel(key);\n            drop(panes);"
+replace = "            drop(panes);"
 
 [[plant]]
 name = "open deadline: an open does not look at the windows killed before they opened"
@@ -175,3 +175,33 @@ runs = ["od-host"]
 file = "crates/cf-daemon/src/host.rs"
 find = "            .request(\"pane.open\", body, Some(self.open_deadline));"
 replace = "            .request(\"pane.open\", body, Some(OPEN_DEADLINE));"
+
+[[plant]]
+name = "open deadline: a kill of a window a kill before it is still ending answers before its program is gone"
+meant = "a_kill_of_a_window_another_kill_is_ending_answers_once_its_program_is_gone"
+runs = ["od-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = "            if self.ending.wait(key, self.close_grace + EXIT_GRACE) {"
+replace = "            if true || self.ending.wait(key, self.close_grace + EXIT_GRACE) {"
+
+[[plant]]
+name = "open deadline: the trace says the kill of the window given up on failed at every step"
+meant = "the_next_window_of_a_session_waits_until_the_host_has_ended_the_one_given_up_on"
+runs = ["od-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        if !told {"
+replace = "        if true || !told {"
+
+[[plant]]
+name = "open deadline: an exit is a window's by its id alone, and the end of the window given up on closes the next"
+meant = "the_end_of_the_window_given_up_on_told_after_the_next_one_opened_is_nothing_to_it"
+runs = ["od-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        let ended = |candidate: Option<&Pane>| candidate.is_some_and(|candidate| candidate == pane);"
+replace = "        let ended = |candidate: Option<&Pane>| candidate.is_some_and(|candidate| candidate.id == pane.id);"
