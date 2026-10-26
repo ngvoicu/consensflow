@@ -116,10 +116,10 @@ find = '''
         *self.pressed.borrow_mut() = None;
         self.restored.set(false);
         *self.left_open.borrow_mut() = None;
-    }'''
+'''
 replace = '''
         *self.left_open.borrow_mut() = None;
-    }'''
+'''
 
 [[plant]]
 name = "rest: a paste leaves the press for the turn it begins"

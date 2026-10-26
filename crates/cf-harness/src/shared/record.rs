@@ -1,9 +1,10 @@
 //! What every harness's record reader shares: the shape of a reading, a
 //! session's file found under a harness's folder, a JSONL file read on from
 //! where the last look stopped, the torn lines it passes over, the transcript
-//! followed from look to look, a SQLite store read as `node:sqlite` read it,
+//! followed from look to look and where a process began writing it, a SQLite store read as `node:sqlite` read it,
 //! the readers kept from look to look, and the user's home the stores are under.
 
+pub(crate) mod boundary;
 pub(crate) mod cache;
 pub(crate) mod find;
 pub(crate) mod followed;

@@ -31,10 +31,25 @@
 //! - A window opened again on a conversation runs a process of its own, the
 //!   one before gone with its window where the pane host proved it gone: what
 //!   that one had queued in its memory and not begun went with it, though its
-//!   record still says it is queued (T-442). The transcript's length when the
-//!   window is prepared is where the new process began, and every look the
-//!   window takes says so (`Options::relaunched_at`). Where the host could not
-//!   end the old program, or the engine never heard how it ended, none is told.
+//!   record still says it is queued (T-442). Where the transcript ended when the
+//!   window is prepared, its length and the bytes before it, is where the new
+//!   process began, and every look the window takes says so
+//!   (`Options::relaunched`). Claude Code's own statuses
+//!   say the same where the host could not: no Claude it runs shows the
+//!   conversation then, so none writes it ([`status::holders`]; a window open when
+//!   the app quit, ended after the daemon had gone, leaves no sign in the record
+//!   and no proof in the ledger, T-526). Where a Claude still shows it (one the
+//!   host could not end, or one the human started outside ConsensFlow), what it
+//!   writes past the boundary would be read as the new process's, and none is
+//!   told; so it is where neither the host nor the statuses can say.
+//! - A Claude the human starts outside ConsensFlow on a window's conversation
+//!   (`claude --resume <id>` in a terminal of their own) writes its turns into the
+//!   same transcript, in records no different from the window's: nothing in them
+//!   says which process wrote one. Its status names the conversation as the
+//!   window's does: a window that has seen another Claude show its conversation, or
+//!   one that showed it before the window opened, says so on every look
+//!   (`Observed::shared`) from then on, and the engine takes none of the record's
+//!   answers for its task's result.
 //! - The window's Claude process is the pane's own child when a status names
 //!   it, so the first look already sees a /clear. Otherwise (Claude may run
 //!   as another process the child starts) it is the process whose status
@@ -69,7 +84,7 @@ use crate::contract::{
     Readiness, Records, ServersChosen, Skill, Trusts, Waiting, Window, Work,
 };
 use crate::detect::executable;
-use crate::records::{Options, Reading, Settlement};
+use crate::records::{Boundary, Options, Reading, Settlement};
 use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, Unsent};
@@ -127,19 +142,28 @@ impl Adapter for ClaudeAdapter {
                 Some(resume) => self.records.has_transcript(Harness::Claude, resume).await?,
                 None => false,
             };
+            // The Claudes that show the conversation before this window exists:
+            // none of them is the window's.
+            let holders = if resumable {
+                status::holders(&statuses, &session)
+            } else {
+                Some(Vec::new())
+            };
             // What the record holds before this window exists is the old
             // process's, gone with its window where the pane host proved it
-            // (`Launch::previous_gone`): what it had queued and not begun went
-            // with it, and every look of this window says where the new one
-            // began (`Options::relaunched_at`). One the host could not end may
-            // still write to the record, and what it writes past the length
-            // taken would be read as the new process's: no length is taken.
-            let relaunched = if resumable && launch.previous_gone {
-                let length = self
+            // (`Launch::previous_gone`), or where Claude's statuses say no
+            // Claude shows the conversation: what it had queued and not begun
+            // went with it, and every look of this window says where the new
+            // one began (`Options::relaunched`). One still showing it may
+            // still write to the record, and what it writes past the boundary
+            // taken would be read as the new process's: none is taken.
+            let gone = holders.as_ref().map_or(launch.previous_gone, Vec::is_empty);
+            let relaunched = if resumable && gone {
+                let boundary = self
                     .records
-                    .transcript_length(Harness::Claude, &session)
+                    .transcript_boundary(Harness::Claude, &session)
                     .await?;
-                length.map(|at| (session.clone(), at))
+                boundary.map(|boundary| (session.clone(), boundary))
             } else {
                 None
             };
@@ -189,6 +213,8 @@ impl Adapter for ClaudeAdapter {
                     read_empty: Cell::new(None),
                     left_open: RefCell::new(left_open),
                     relaunched,
+                    before: RefCell::new(holders.unwrap_or_default()),
+                    shared: Cell::new(false),
                     trusts: trust::trusts(launch.directory),
                     directory: launch.directory.to_owned(),
                 }),
@@ -269,10 +295,16 @@ struct ClaudeWindow {
     /// The turn the record had open when the window was opened, while the
     /// window has begun no turn of its own: the old process's.
     left_open: RefCell<Option<LeftOpen>>,
-    /// The conversation the window was opened again on, and how many bytes its
-    /// transcript held then, the window it was on closed: where the program
-    /// the window runs began writing.
-    relaunched: Option<(String, u64)>,
+    /// The conversation the window was opened again on, and where its transcript
+    /// ended then, the window it was on closed: where the program the window runs
+    /// began writing.
+    relaunched: Option<(String, Boundary)>,
+    /// The Claudes that showed the launch's conversation before the window was
+    /// opened: none of them is the window's.
+    before: RefCell<Vec<u32>>,
+    /// Another Claude than the window's has shown its conversation since it
+    /// opened (`Observed::shared`).
+    shared: Cell<bool>,
     /// What a yes to Claude Code's question about the window's folder trusts.
     trusts: Trusts,
     /// The window's folder, whose local settings keep what Claude Code was told of the
@@ -282,11 +314,11 @@ struct ClaudeWindow {
 
 /// What a look at `session` is told: where the window's program began writing,
 /// when the window was opened again on that conversation.
-fn told(relaunched: Option<&(String, u64)>, session: &str) -> Options {
+fn told(relaunched: Option<&(String, Boundary)>, session: &str) -> Options {
     Options {
-        relaunched_at: relaunched
+        relaunched: relaunched
             .filter(|(on, _)| on == session)
-            .map(|(_, at)| *at),
+            .map(|(_, boundary)| boundary.clone()),
         ..Options::default()
     }
 }
@@ -314,6 +346,17 @@ impl ClaudeWindow {
             self.claude_pid.set(named.map(|(pid, _)| *pid));
         }
         self.claude_pid.get().and_then(of)
+    }
+
+    /// Whether another Claude than the window's shows its conversation now: one
+    /// that showed it before the window was opened, or a second beside the
+    /// window's own. Which of two is the window's need not be known.
+    fn shares(&self) -> bool {
+        let session = self.session.borrow();
+        status::holders(&self.statuses, &session).is_some_and(|holders| {
+            let before = self.before.borrow();
+            holders.len() > 1 || holders.iter().any(|pid| before.contains(pid))
+        })
     }
 
     /// Whether `status` names another conversation than the window's.
@@ -349,6 +392,10 @@ impl Window for ClaudeWindow {
         *self.pressed.borrow_mut() = None;
         self.restored.set(false);
         *self.left_open.borrow_mut() = None;
+        // Who showed the conversation the window left is no word on the one it
+        // shows now: another Claude there is seen beside the window's.
+        self.before.borrow_mut().clear();
+        self.shared.set(false);
     }
 
     fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
@@ -463,6 +510,9 @@ impl Window for ClaudeWindow {
             // a transcript its look had read before the status came back
             // could be older than the status.
             let live = self.status();
+            if self.shares() {
+                self.shared.set(true);
+            }
             let session = self.session.borrow().clone();
             let options = told(self.relaunched.as_ref(), &session);
             let reading = self.records.look(Harness::Claude, &session, &options).await;
@@ -487,6 +537,7 @@ impl Window for ClaudeWindow {
                 unnamed: false,
                 took_back,
                 at_prompt,
+                shared: self.shared.get(),
             };
             Ok(match live {
                 Some(live) if self.elsewhere(&live) => {

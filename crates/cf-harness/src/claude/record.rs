@@ -20,10 +20,18 @@
 //! went with it, and no record says so. ConsensFlow knows where a process
 //! ended, as it closes a window before it starts the program again on the
 //! window's conversation: a look is told how long the transcript was then
-//! (`Options::relaunched_at`), and the queue is empty from that byte on, what
+//! (`Options::relaunched`), and the queue is empty from that byte on, what
 //! the new process queued after it kept (`queues`). A reader keeps the latest
 //! it was told, as a look that tells none (the engine's own, of a window it
-//! does not hold) knows no better. Claude Code's own close of the turn the old
+//! does not hold) knows no better. The length holds in the transcript it was
+//! taken of, which still has the bytes it was taken after
+//! ([`Boundary::held_by`]), checked whenever the transcript is read from its
+//! start: one written anew without them has other bytes there, and what the
+//! running process wrote in it would be cut, so its boundary is void, and the
+//! process's next start tells a boundary of its own, shorter or not (both
+//! reviews of round 2 of the relaunch boundary, 2026-10-18). A void boundary
+//! clears nothing: what the old process left open holds the turn, and Finish
+//! takes the answer. Claude Code's own close of the turn the old
 //! process was cut in (`No response requested.`) is no answer: the item is the
 //! harness's commentary.
 //!
@@ -64,8 +72,8 @@ mod tests;
 mod text;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::path::Path;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use cf_base::env::Env;
 use cf_base::json::from_slice_lossy_keeping;
@@ -74,6 +82,7 @@ use serde_json::Value;
 
 use super::paths::transcript;
 use crate::shared::quota::Quota;
+use crate::shared::record::boundary::Boundary;
 use crate::shared::record::cache::{Look, Options};
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
@@ -93,43 +102,74 @@ pub fn reader(session: &str, env: &Env, local: &TimeZone) -> Box<dyn Look + Send
     let env = env.clone();
     let reading: Arc<str> = Arc::from(session);
     let local = local.clone();
-    let relaunched = Arc::new(AtomicU64::new(0));
+    let relaunched = Arc::new(Mutex::new(None));
     let told = Arc::clone(&relaunched);
     Box::new(Relaunched {
         reader: TranscriptReader::new(
             Followed::new(
                 Box::new(move || transcript(&locating, &env)),
-                Box::new(move || {
-                    let at = told.load(Ordering::Relaxed);
+                Box::new(move |file: &Path| {
+                    let at = checked(lock(&told).as_ref(), file);
                     Transcript::new(Arc::clone(&reading), local.clone(), at)
                 }),
             ),
             format!("claude session {session}"),
         ),
-        at: relaunched,
+        told: relaunched,
     })
 }
 
-/// A transcript's reader, and the byte the latest process ConsensFlow started
-/// on its conversation began at (0 for none told), which a state made afresh
-/// begins with.
+/// A transcript's reader, and where the latest process ConsensFlow started on
+/// its conversation began (none told), which a state made afresh begins with
+/// where the transcript it reads holds it.
 struct Relaunched {
     reader: TranscriptReader<Transcript>,
-    at: Arc<AtomicU64>,
+    told: Arc<Mutex<Option<Boundary>>>,
 }
 
 impl Look for Relaunched {
-    /// A look told of a later start than the reader knows has its state told
-    /// too, or read again from the transcript's start where it read past it.
+    /// A look told of a later start than the reader knows, or of any where the
+    /// one it knows no longer holds, has its state told too, or read again from
+    /// the transcript's start where it read past it. An earlier start told late
+    /// changes nothing: in a transcript that holds the later one, it is before it.
     fn look(&mut self, options: &Options, now_ms: i64) -> Arc<Reading> {
-        if let Some(at) = options
-            .relaunched_at
-            .filter(|at| *at > self.at.load(Ordering::Relaxed))
-        {
-            self.at.store(at, Ordering::Relaxed);
-            self.reader.retell(|state| state.relaunched(at));
+        if let Some(boundary) = options.relaunched.as_ref() {
+            let mut told = lock(&self.told);
+            let later = match told.as_ref() {
+                None => true,
+                Some(known) => boundary.at > known.at || !self.reader.holds(known),
+            };
+            if later && told.as_ref() != Some(boundary) {
+                *told = Some(boundary.clone());
+                drop(told);
+                // One the transcript does not hold is read from its start, where the
+                // state made afresh is told none.
+                self.reader.retell(|state, file| {
+                    checked(Some(boundary), file).is_some_and(|at| state.relaunched(at))
+                });
+            }
         }
         self.reader.look(options, now_ms)
+    }
+}
+
+/// The byte the boundary `told` is at, where `file` holds it: none where it was
+/// taken of a transcript `file` is no longer, or none was told.
+fn checked(told: Option<&Boundary>, file: &Path) -> Option<u64> {
+    told.filter(|told| told.at > 0 && told.held_by(file))
+        .map(|told| told.at)
+}
+
+/// What `told` holds, a panic of another holder's notwithstanding.
+fn lock(told: &Mutex<Option<Boundary>>) -> std::sync::MutexGuard<'_, Option<Boundary>> {
+    told.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+impl TranscriptReader<Transcript> {
+    /// Whether the transcript the reader reads holds `boundary`, so far as it
+    /// knows: one it has not found yet is not told otherwise.
+    fn holds(&self, boundary: &Boundary) -> bool {
+        self.file().is_none_or(|file| boundary.held_by(file))
     }
 }
 
@@ -218,8 +258,8 @@ struct Pending {
 impl Transcript {
     /// What the transcript of `session` says before any record, where the
     /// latest process ConsensFlow started on it began at the byte
-    /// `relaunched_at` (none where 0).
-    fn new(session: Arc<str>, local: TimeZone, relaunched_at: u64) -> Self {
+    /// `relaunched_at`, if one did where it holds.
+    fn new(session: Arc<str>, local: TimeZone, relaunched_at: Option<u64>) -> Self {
         Self {
             session,
             local,
@@ -240,10 +280,7 @@ impl Transcript {
             ancestry: Ancestry::default(),
             pending: Vec::new(),
             keys: Keys::default(),
-            relaunch: (relaunched_at > 0).then_some(Relaunch {
-                at: relaunched_at,
-                reached: false,
-            }),
+            relaunch: relaunched_at.map(|at| Relaunch { at, reached: false }),
             last_at: None,
         }
     }

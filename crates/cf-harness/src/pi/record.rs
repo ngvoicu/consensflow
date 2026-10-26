@@ -62,7 +62,7 @@ pub fn reader(session: &str, env: &Env, local: &TimeZone) -> Box<dyn Look + Send
         env: env.clone(),
         transcript: Followed::new(
             Box::new(move || transcript(&locating, &searched)),
-            Box::new(move || Session::new(Arc::clone(&reading), local.clone())),
+            Box::new(move |_: &Path| Session::new(Arc::clone(&reading), local.clone())),
         ),
     })
 }

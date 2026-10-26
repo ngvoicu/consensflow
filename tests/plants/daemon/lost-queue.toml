@@ -3,7 +3,7 @@
 # chief's reopen opened it again on its conversation, and the reopen's turn never read as over, since
 # the record still had that message to come. ConsensFlow knows where the new process began: the Claude
 # adapter takes the transcript's length when it prepares a window on a conversation that already
-# was, every look of the window says it (`Options::relaunched_at`), and Claude's reader empties the
+# was, every look of the window says it (`Options::relaunched`, the length and the bytes before it), and Claude's reader empties the
 # queue there, keeping what the new process queued after it
 # (`crates/cf-harness/src/claude/record.rs`, `crates/cf-harness/src/claude/adapter.rs`, the length
 # from the records seam: `crates/cf-harness/src/records/thread.rs`,
@@ -36,7 +36,7 @@ runs = ["lost-queue-adapter"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            let relaunched = if resumable && launch.previous_gone {"
+find = "            let relaunched = if resumable && gone {"
 replace = "            let relaunched = if resumable {"
 
 [[plant]]
@@ -144,14 +144,8 @@ runs = ["lost-queue-adapter", "lost-queue-reader"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
 find = '''
-        if let Some(at) = options
-            .relaunched_at
-            .filter(|at| *at > self.at.load(Ordering::Relaxed))
-        {
-            self.at.store(at, Ordering::Relaxed);
-            self.reader.retell(|state| state.relaunched(at));
-        }'''
-replace = ""
+        if let Some(boundary) = options.relaunched.as_ref() {'''
+replace = "        if let Some(boundary) = options.relaunched.as_ref().filter(|_| false) {"
 
 [[plant]]
 name = "lost-queue: a look's relaunch reaches no reader, and the answer to a reopen of a window that closed at rest with a notification queued is never the result"
@@ -162,14 +156,8 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
 find = '''
-        if let Some(at) = options
-            .relaunched_at
-            .filter(|at| *at > self.at.load(Ordering::Relaxed))
-        {
-            self.at.store(at, Ordering::Relaxed);
-            self.reader.retell(|state| state.relaunched(at));
-        }'''
-replace = ""
+        if let Some(boundary) = options.relaunched.as_ref() {'''
+replace = "        if let Some(boundary) = options.relaunched.as_ref().filter(|_| false) {"
 
 [[plant]]
 name = "lost-queue: the reader empties the queue at every look that tells no relaunch"
@@ -222,8 +210,8 @@ runs = ["lost-queue-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
-find = "            .filter(|at| *at > self.at.load(Ordering::Relaxed))"
-replace = "            .filter(|at| *at != self.at.load(Ordering::Relaxed))"
+find = "                Some(known) => boundary.at > known.at || !self.reader.holds(known),"
+replace = "                Some(known) => boundary.at != known.at || !self.reader.holds(known),"
 
 [[plant]]
 name = "lost-queue: the adapter takes no length of the transcript it opens a window again on"
@@ -232,8 +220,8 @@ runs = ["lost-queue-adapter"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "                length.map(|at| (session.clone(), at))"
-replace = "                length.and(None)"
+find = "                boundary.map(|boundary| (session.clone(), boundary))"
+replace = "                boundary.and(None)"
 
 [[plant]]
 name = "lost-queue: the window's looks tell no relaunch"
@@ -253,11 +241,11 @@ runs = ["lost-queue-adapter"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
 find = '''
-        relaunched_at: relaunched
+        relaunched: relaunched
             .filter(|(on, _)| on == session)
-            .map(|(_, at)| *at),'''
+            .map(|(_, boundary)| boundary.clone()),'''
 replace = '''
-        relaunched_at: relaunched.map(|(_, at)| *at),'''
+        relaunched: relaunched.map(|(_, boundary)| boundary.clone()),'''
 
 [[plant]]
 name = "lost-queue: the daemon's records seam tells no transcript's length, and the answer to a reopen is never the result"
@@ -269,13 +257,13 @@ builds = true
 file = "crates/cf-daemon/src/seams/boundary.rs"
 find = '''
 
-    fn transcript_length<'a>(
+    fn transcript_boundary<'a>(
         &'a self,
         harness: Harness,
         session: &'a str,
-    ) -> Work<'a, Result<Option<u64>, String>> {
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
         self.spawn
-            .arrival(self.records.transcript_length(harness, session))
+            .arrival(self.records.transcript_boundary(harness, session))
     }'''
 replace = ""
 

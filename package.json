@@ -63,6 +63,7 @@
     "live:tell": "cargo xtask live tell",
     "live:notes": "cargo xtask live notes",
     "live:wake-ups": "cargo xtask live wake-ups",
+    "live:outside-claude": "cargo xtask live outside-claude",
     "live:specs": "cargo xtask live specs",
     "live:commands-at-rest": "cargo xtask live commands-at-rest",
     "live:monitor-wait": "cargo xtask live monitor-wait",

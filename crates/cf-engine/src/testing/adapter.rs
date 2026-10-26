@@ -99,6 +99,9 @@ pub struct FakeAgent {
     /// Its harness says its window waits at its prompt, whatever its record says of the
     /// turn ([`Observed::at_prompt`]): set by [`FakeAdapter::answer_never_over`].
     pub at_prompt: bool,
+    /// Another program than the window's has shown its conversation since it opened
+    /// ([`Observed::shared`]): a Claude Code the human started outside ConsensFlow.
+    pub shared: bool,
     /// Its record says its turn is over though its status kept the look from
     /// reading it settled (`Observed::over`): Claude's busy while a background
     /// agent runs, after a turn an interrupt or a refusal ended.
@@ -887,6 +890,7 @@ impl Asked {
             takes_back: false,
             took_back: false,
             at_prompt: false,
+            shared: false,
             over: false,
             busy_when_interrupted: false,
             cannot_tell_a_cut: false,

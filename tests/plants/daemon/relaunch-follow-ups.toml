@@ -1,0 +1,195 @@
+# The relaunch boundary's three follow-ups (T-442's three, T-489): the boundary bound to a checked
+# prefix, a Claude the human starts outside ConsensFlow on a window's conversation, and an idle quit
+# that leaves no sign in the record.
+#
+# - The boundary is the transcript's length and the bytes before it (`Boundary`,
+#   `crates/cf-harness/src/shared/record/boundary.rs`), taken by the records seam
+#   (`crates/cf-harness/src/records.rs`), and holds only in a transcript that still has those bytes
+#   there; a later start told replaces the one the reader knows, or any where that one no longer
+#   holds (`crates/cf-harness/src/claude/record.rs`). The reader's tests are
+#   `crates/cf-harness/src/claude/record/tests/restart.rs`.
+# - Claude's statuses say who shows a conversation (`crates/cf-harness/src/claude/status.rs`): a
+#   window is told no boundary while a Claude shows its conversation, is told one where none does
+#   though the host proved nothing, and says so on every look once another Claude has shown it
+#   (`Observed::shared`, `crates/cf-harness/src/claude/adapter.rs`); the engine then takes no answer
+#   for the task's result and tells its requester once (`crates/cf-engine/src/turn_end.rs`). The
+#   adapter's tests are `crates/cf-harness/tests/launch/claude/outside.rs`, the engine's
+#   `crates/cf-engine/tests/dispatcher/shared.rs`.
+# - The Resume's look at a record no Claude shows is told where it ends
+#   (`Records::turn_cut`, `crates/cf-harness/src/contract.rs`): a message queued and never taken is
+#   no cut turn. The rig's cases are
+#   `crates/cf-e2e/tests/regressions/an_idle_quit_with_a_message_queued_read_as_a_cut_turn.rs`, which
+#   build the native `cf` from the sources as they are planted, so their plants say `builds`. The
+#   Resume's look tells the record's reader where the record ended before the window is prepared,
+#   and the reader keeps it, so on the rig the chief opened again after the app's quit is read right
+#   by either rule, the Resume's or the adapter's (the case goes red with both planted, not with one):
+#   the adapter's rule alone decides for a window opened once the reader has forgotten the Resume's
+#   word (`IDLE_MS`), and is held by its own tests (`outside.rs`).
+#
+# Every name holds `relaunch-follow-ups`, so `npm run plants:daemon -- "relaunch-follow-ups"` runs
+# them all.
+
+[run]
+relaunch-follow-ups-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::restart"]
+relaunch-follow-ups-boundary = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::boundary"]
+relaunch-follow-ups-status = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::status"]
+relaunch-follow-ups-adapter = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::outside"]
+relaunch-follow-ups-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shared::"]
+relaunch-follow-ups-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "an_idle_quit_with_a_message_queued_read_as_a_cut_turn::"]
+
+[[plant]]
+name = "relaunch-follow-ups: a boundary holds in a transcript written anew without the bytes it was taken after"
+meant = "a_transcript_rewritten_shorter_than_the_relaunch_keeps_the_new_process_answer"
+runs = ["relaunch-follow-ups-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = "    told.filter(|told| told.at > 0 && told.held_by(file))"
+replace = "    told.filter(|told| told.at > 0)"
+
+[[plant]]
+name = "relaunch-follow-ups: a start told after a rewrite, before the one the reader knows, is taken for an earlier one's"
+meant = "a_relaunch_told_after_a_rewrite_shorter_than_the_one_before_is_where_the_new_process_began"
+runs = ["relaunch-follow-ups-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = "                Some(known) => boundary.at > known.at || !self.reader.holds(known),"
+replace = "                Some(known) => boundary.at > known.at,"
+
+[[plant]]
+name = "relaunch-follow-ups: a boundary is checked against no bytes at all"
+meant = "a_boundary_holds_in_its_file_grown_and_in_no_file_written_anew_without_its_bytes"
+runs = ["relaunch-follow-ups-boundary"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/boundary.rs"
+find = "            .is_ok_and(|bytes| *bytes == *self.edge)"
+replace = "            .is_ok_and(|bytes| bytes.len() == self.edge.len())"
+
+[[plant]]
+name = "relaunch-follow-ups: a parked job is taken for a Claude that shows the conversation"
+meant = "the_holders_of_a_conversation_are_the_live_claudes_that_show_it_but_a_parked_job"
+runs = ["relaunch-follow-ups-status"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/status.rs"
+find = "                if status.session == session && !parked && !holders.contains(&pid) =>"
+replace = "                if status.session == session && !holders.contains(&pid) =>"
+
+[[plant]]
+name = "relaunch-follow-ups: a window opened again with no proof from the host is told no boundary though no Claude shows the conversation"
+meant = "a_window_opened_again_without_the_hosts_proof_is_told_where_its_program_began_when_no_claude_shows_the_conversation"
+runs = ["relaunch-follow-ups-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            let gone = holders.as_ref().map_or(launch.previous_gone, Vec::is_empty);"
+replace = "            let gone = holders.as_ref().map_or(launch.previous_gone, |_| launch.previous_gone);"
+
+[[plant]]
+name = "relaunch-follow-ups: a window opened again is told a boundary though a Claude still shows the conversation"
+meant = "a_window_opened_again_where_a_claude_still_shows_the_conversation_is_told_no_relaunch"
+runs = ["relaunch-follow-ups-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            let gone = holders.as_ref().map_or(launch.previous_gone, Vec::is_empty);"
+replace = "            let gone = holders.as_ref().map_or(launch.previous_gone, |_| true);"
+
+[[plant]]
+name = "relaunch-follow-ups: a second Claude beside the window's is not seen"
+meant = "a_window_whose_conversation_another_claude_shows_beside_it_says_so_from_then_on"
+runs = ["relaunch-follow-ups-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            holders.len() > 1 || holders.iter().any(|pid| before.contains(pid))"
+replace = "            holders.iter().any(|pid| before.contains(pid))"
+
+[[plant]]
+name = "relaunch-follow-ups: a Claude that showed the conversation before the window opened is taken for the window's"
+meant = "a_claude_that_showed_the_conversation_before_the_window_opened_is_never_taken_for_the_windows"
+runs = ["relaunch-follow-ups-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            holders.len() > 1 || holders.iter().any(|pid| before.contains(pid))"
+replace = "            holders.len() > 1"
+
+[[plant]]
+name = "relaunch-follow-ups: a window shares its conversation only while the other Claude runs"
+meant = "a_window_whose_conversation_another_claude_shows_beside_it_says_so_from_then_on"
+runs = ["relaunch-follow-ups-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = """
+            if self.shares() {
+                self.shared.set(true);
+            }
+"""
+replace = """
+            self.shared.set(self.shares());
+"""
+
+[[plant]]
+name = "relaunch-follow-ups: a window followed to another conversation still says the one it left was shared"
+meant = "a_window_followed_to_another_conversation_shares_it_only_if_another_claude_shows_that_one"
+runs = ["relaunch-follow-ups-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "        self.shared.set(false);"
+replace = ""
+
+[[plant]]
+name = "relaunch-follow-ups: an answer in a record another Claude writes too is taken for the task's result"
+meant = "an_answer_in_a_record_another_claude_writes_too_is_no_result_and_the_requester_is_told_once"
+runs = ["relaunch-follow-ups-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        if observed.shared {"
+replace = "        if false && observed.shared {"
+
+[[plant]]
+name = "relaunch-follow-ups: the requester is told on every look that another Claude shows the conversation"
+meant = "an_answer_in_a_record_another_claude_writes_too_is_no_result_and_the_requester_is_told_once"
+runs = ["relaunch-follow-ups-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            if held.told_shared == Some(number) {"
+replace = "            if held.told_shared == Some(number) && false {"
+
+[[plant]]
+name = "relaunch-follow-ups: the Resume reads a record no Claude shows with no boundary"
+meant = "a_record_no_claude_shows_was_cut_in_no_turn_for_a_message_its_program_queued_and_never_took"
+runs = ["relaunch-follow-ups-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = "                relaunched: self.transcript_left(harness, session).await.ok().flatten(),"
+replace = "                relaunched: None,"
+
+[[plant]]
+name = "relaunch-follow-ups: the record a Claude still shows is taken for one no program writes"
+meant = "a_record_no_claude_shows_was_cut_in_no_turn_for_a_message_its_program_queued_and_never_took"
+runs = ["relaunch-follow-ups-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/records.rs"
+find = "        Harness::Claude if claude::shown_by_none(session, env) => {"
+replace = "        Harness::Claude => {"
+
+[[plant]]
+name = "relaunch-follow-ups: a chief that quit idle with a message queued is told its turn was cut at the Resume"
+meant = "a_claude_chief_that_quit_idle_with_a_message_queued_is_given_no_note_at_a_resume"
+runs = ["relaunch-follow-ups-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = "                relaunched: self.transcript_left(harness, session).await.ok().flatten(),"
+replace = "                relaunched: None,"
