@@ -69,6 +69,7 @@ fn tarball(scratch: &Path, context: &Context, identity: &str, command: &str, id:
         steps: &[],
         command,
         env: &[],
+        node: r"C:\Program Files\nodejs",
     });
     let into = scratch.join(id);
     fs::create_dir_all(&into).unwrap();
@@ -141,6 +142,7 @@ fn start_after(
         steps: &[],
         command: "",
         env: &[],
+        node: r"C:\Program Files\nodejs",
     });
     let file = scratch.join(format!("run-{id}.ps1"));
     fs::write(&file, format!("{before}{sent}")).unwrap();
