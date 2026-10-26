@@ -70,11 +70,11 @@ runs = ["engine-dispatcher"]
 file = "crates/cf-engine/src/stops.rs"
 find = '''
                     self.pay(record, &stop);
-                    Ok(())'''
+                    // The window stays: what its turn left runs on, named and never ended.'''
 replace = '''
                     self.pay(record, &stop);
                     self.retire(record).await?;
-                    Ok(())'''
+                    // The window stays: what its turn left runs on, named and never ended.'''
 
 [[plant]]
 name = "pause closes: the close resumes the task by itself"

@@ -2927,6 +2927,8 @@ struct Closed {
     leader_ran: bool,
     /// The window's `pane.exit`.
     exit: Value,
+    /// What `pane.background` answered before the close, where it was asked.
+    looked: Option<Value>,
     /// What `ps` said of the job once the host had ended (empty where it had gone), and
     /// the signals it wrote that it was sent.
     after: String,
@@ -2958,6 +2960,13 @@ fn a_window_closed_over_a_job_its_tool_shell_detached(
     env: Value,
     program: &str,
 ) -> Closed {
+    closed_over_a_detached_job(tool, env, program, false)
+}
+
+/// [`a_window_closed_over_a_job_its_tool_shell_detached`], the host asked what the window
+/// left running (`pane.background`, as a pause asks it) before the close where `look` says.
+#[cfg(target_os = "macos")]
+fn closed_over_a_detached_job(tool: &str, env: Value, program: &str, look: bool) -> Closed {
     static MADE: AtomicU64 = AtomicU64::new(0);
     let mut outsider = Sentinel::start();
     let mut helper = Headless::spawn();
@@ -2986,6 +2995,13 @@ fn a_window_closed_over_a_job_its_tool_shell_detached(
     // SAFETY: getsid takes a number and reads no memory of ours.
     let session = unsafe { libc::getsid(job) };
     let leader_ran = process_exists(session);
+    let looked = look.then(|| {
+        helper.request(
+            "pane.background",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events,
+        )
+    });
 
     assert_eq!(
         helper.request(
@@ -3009,6 +3025,7 @@ fn a_window_closed_over_a_job_its_tool_shell_detached(
         session,
         leader_ran,
         exit,
+        looked,
         after,
         signals,
     }
@@ -3065,6 +3082,36 @@ fn a_window_closed_names_a_server_its_agents_tool_shell_detached_and_leaves_it_r
         "the server sleeps, neither stopped nor a zombie: {}",
         closed.after
     );
+    assert_eq!(closed.signals, "", "no signal reached the server");
+}
+
+/// A look at what a window left running while it is open, as a pause's (T-487), names the
+/// server its agent's tool shell detached as the close's exit does, and signals it no more
+/// than the close does.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_look_at_what_a_window_left_names_a_server_its_agents_tool_shell_detached_and_signals_nothing()
+{
+    let _pty_guard = serial_headless_test();
+    let closed = closed_over_a_detached_job(DETACHES_THE_SERVER, json!({}), "/Python", true);
+    let job = closed.job;
+    let alive = process_exists(job);
+    kill_process(job);
+    let looked = closed.looked.clone().expect("asked");
+    assert_eq!(looked["ok"], true, "{looked}");
+    assert_eq!(
+        looked["possiblyLeft"][0]["pid"].as_i64(),
+        Some(i64::from(job)),
+        "the look names the server: {looked}"
+    );
+    assert!(
+        looked["possiblyLeft"][0]["program"]
+            .as_str()
+            .is_some_and(|program| !program.is_empty()),
+        "{looked}"
+    );
+    assert_eq!(closed.possibly_left(), [i64::from(job)], "{}", closed.exit);
+    assert!(alive, "the server runs on");
     assert_eq!(closed.signals, "", "no signal reached the server");
 }
 

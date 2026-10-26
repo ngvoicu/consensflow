@@ -13,7 +13,7 @@ use cf_base::refusal::Refusal;
 use cf_harness::contract::{Adapter, Agent, LaunchId, Pane, Records, Work};
 use cf_harness::seams::Time;
 use cf_ledger::{Ledger, LedgerError, ParticipantView, ProjectView};
-use cf_proto::panes::Servers;
+use cf_proto::panes::{Background, Servers};
 use cf_proto::specs::AppSpecs;
 use cf_proto::trace::TraceLine;
 
@@ -299,6 +299,11 @@ pub trait BackgroundWork {
     /// The rests `keep` names, which monitors that run are left, are kept however many
     /// come after them.
     fn rest<'a>(&'a self, pane: &'a Pane, keep: &'a [u64]) -> Work<'a, Option<u64>>;
+
+    /// What `pane`'s tree runs now that its turn left running, and what may be the window's
+    /// outside its tree (`pane.background`), for a pause to name: none where the host gave
+    /// no answer.
+    fn left_running<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Background>>;
 }
 
 /// What a look at the commands of a window's harness found (`pane.commands`).

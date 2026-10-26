@@ -2,8 +2,8 @@
 //! `started`), look (`observe`, `drawn`), and close (`retire`, `close_if_free`,
 //! `close_own`). It owns the record's window part, the generation of each pane,
 //! and the chief's relaunch backoff. What a window owes a stop of its task, and
-//! how it is interrupted, is `stops`; the work its turn left running, which is
-//! ended as its task's result is taken, is `background`.
+//! how it is interrupted, is `stops`; the work its turn left running, which goes
+//! on until its window closes, is `background`.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -55,6 +55,12 @@ const RELAUNCH_MAX_MS: i64 = 5 * 60_000;
 /// ended at once (T-77, `kill_answer_times_with_the_real_grace` in `cf-panes`). Three
 /// times the longest, derived from the grace so that the two move together (T-414 P3-6).
 const KILL_ANSWER_WAIT: Duration = Duration::from_secs(3 * CLOSE_GRACE.as_secs());
+
+/// How long a window whose kill the host took is waited for its exit
+/// ([`Dispatcher::exit_overdue`]). The host answers the kill once the window's programs are
+/// gone, and tells the exit once its output has ended, a second at most after
+/// (`cf-panes`' `ENDED_WAIT`); the kill's own wait is ample for that too.
+const EXIT_WAIT: Duration = KILL_ANSWER_WAIT;
 
 /// A close of the engine's own under way ([`Dispatcher::close_own`]): the window it
 /// closes, and, where a member's give-up closes it, why the window was given up, which
@@ -184,6 +190,9 @@ pub(crate) struct WindowPart {
     pub(crate) token: Option<String>,
     /// A kill is on its way.
     pub(crate) retiring: bool,
+    /// When the host took the kill of `retire`, whose exit is waited for no longer than
+    /// [`EXIT_WAIT`] ([`Dispatcher::exit_overdue`]): none where the exit came first.
+    pub(crate) kill_taken: Option<i64>,
     /// The window whose exit is the engine's own (`close_own`): a chief's closes no
     /// project. Only that window's: a close whose kill was never answered leaves it
     /// set, and a later window of the record is no close of the engine's (T-414 P3-8).
@@ -270,6 +279,7 @@ impl Default for WindowPart {
             launch_id: None,
             token: None,
             retiring: false,
+            kill_taken: None,
             own_exit: None,
             killing: Vec::new(),
             closed_with: None,
@@ -405,6 +415,7 @@ impl Dispatcher {
             window.window = None;
             window.pane = None;
             window.retiring = false;
+            window.kill_taken = None;
             window.hidden = false;
             window.settled = false;
             window.stopped = None;
@@ -1376,11 +1387,42 @@ impl Dispatcher {
             Some(pane) => self.kill(record, &pane).await?,
             None => false,
         };
-        if !killed {
-            record.window.borrow_mut().retiring = false;
+        {
+            let mut part = record.window.borrow_mut();
+            if !killed {
+                part.retiring = false;
+            } else if part.retiring {
+                // Still closing: its exit has not come yet, which it may before the answer.
+                part.kill_taken = Some(self.now());
+            }
         }
         self.changed();
         Ok(killed)
+    }
+
+    /// A window closing by `retire` whose exit the host still owes, looked at in a pass:
+    /// once [`EXIT_WAIT`] has gone by since the host took its kill, its exit is settled
+    /// as the engine's own close settles one (`kill_and_settle`), knowing nothing of how
+    /// it ended, and the host's word, should it come later, is kept as for that close
+    /// (`heard_exit`). Without the bound, a close whose exit never came left the window
+    /// retiring for good: never looked at, reused or released (Astraeus on turn-end-min,
+    /// T-487).
+    pub(crate) async fn exit_overdue(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+    ) -> Result<(), EngineError> {
+        let pane = {
+            let part = record.window.borrow();
+            let overdue = part
+                .kill_taken
+                .is_some_and(|taken| self.now() - taken >= EXIT_WAIT.as_millis() as i64);
+            match (overdue, &part.pane) {
+                (true, Some(pane)) => pane.clone(),
+                _ => return Ok(()),
+            }
+        };
+        // Boxed, as `kill_and_settle`'s: an exit may close windows in turn.
+        Box::pin(self.exited(&pane, Shown::default())).await
     }
 
     /// Kills a window: whether the pane host took the kill; the trace says

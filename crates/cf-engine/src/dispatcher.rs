@@ -1104,8 +1104,9 @@ impl Dispatcher {
         participant: &ParticipantView,
         record: &Rc<Record>,
     ) -> Result<(), EngineError> {
+        // A window on its way out is not looked at; one whose exit is overdue is settled.
         if record.window.borrow().retiring {
-            return Ok(());
+            return self.exit_overdue(record).await;
         }
         // A participant forgotten while the step waits is done with.
         let observed = match returning(self.observe(participant, record)).await {

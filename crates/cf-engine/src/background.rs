@@ -57,7 +57,7 @@
 
 use cf_harness::contract::Pane;
 use cf_ledger::{NewNote, ParticipantView, ProjectView, TaskThread};
-use cf_proto::panes::{BackgroundProcess, PossiblyLeft};
+use cf_proto::panes::{Background, BackgroundProcess, PossiblyLeft};
 
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -112,6 +112,45 @@ impl Dispatcher {
                 body: closed_leaving(&format!("T-{number}'s window closed"), left, possibly),
             },
         )?;
+        Ok(())
+    }
+
+    /// A pause of task T-`number` paid in its window at rest, which stays open: what its turn
+    /// left running runs on, and so does what may be the window's outside its tree (a loop a
+    /// tool shell detached), which no pause, turn's end or Finish ends (the chief's decision of
+    /// 2026-10-24, a detached job is reported, never ended; T-160's retry loop, paused for disk
+    /// on 2026-10-22, ran on 37 minutes unnamed). Whoever gave the task is told, once, in the
+    /// words of a close's note, where the host names any and the task is still paused. Nothing
+    /// is signalled.
+    pub(crate) async fn tell_paused_left_running(
+        &self,
+        project: &ProjectView,
+        record: &Record,
+        number: i64,
+    ) -> Result<(), EngineError> {
+        let Some(pane) = record.window.borrow().pane.clone() else {
+            return Ok(());
+        };
+        let Some(left) = self.seams.background.left_running(&pane).await else {
+            return Ok(());
+        };
+        if left.total == 0 && left.possibly_left.is_empty() {
+            return Ok(());
+        }
+        let task = self.seams.ledger.borrow().task(project.id, number)?;
+        let Some(thread) = task.filter(|thread| thread.task.state == "paused") else {
+            return Ok(());
+        };
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: thread.task.requester.clone(),
+                task: Some(number),
+                body: paused_leaving(number, &left),
+            },
+        )?;
+        self.changed();
         Ok(())
     }
 
@@ -186,6 +225,23 @@ pub(crate) fn leaving(left: &[BackgroundProcess], possibly: &[PossiblyLeft]) -> 
         ));
     }
     if let Some(words) = possibly_left_words(possibly) {
+        said.push_str(&format!("; {words}"));
+    }
+    said
+}
+
+/// What the note of a pause whose window stays says of what it left running (`left`, which
+/// `pane.background` answered), in the words of a close's note but for the pause, which
+/// ends none of it.
+fn paused_leaving(number: i64, left: &Background) -> String {
+    let mut said = format!("T-{number} is paused");
+    if left.total > 0 {
+        said.push_str(&format!(
+            " with background work its window's turn left running, which the pause does not end: {}",
+            quote_of(&left.processes, left.total)
+        ));
+    }
+    if let Some(words) = possibly_left_words(&left.possibly_left) {
         said.push_str(&format!("; {words}"));
     }
     said

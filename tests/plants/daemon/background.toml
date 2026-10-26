@@ -1760,8 +1760,16 @@ runs = ["proto-lib-panes"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/panes.rs"
-find = "    pub possibly_left: Vec<PossiblyLeft>,"
-replace = """    #[serde(skip_deserializing)]
+find = """
+        deserialize_with = "or_none_said",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub possibly_left: Vec<PossiblyLeft>,"""
+replace = """
+        deserialize_with = "or_none_said",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    #[serde(skip_deserializing)]
     pub possibly_left: Vec<PossiblyLeft>,"""
 
 [[plant]]

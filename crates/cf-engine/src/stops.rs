@@ -208,7 +208,9 @@ impl Dispatcher {
                         self.take_back(participant, &stop, observed)?;
                     }
                     self.pay(record, &stop);
-                    Ok(())
+                    // The window stays: what its turn left runs on, named and never ended.
+                    self.tell_paused_left_running(project, record, stop.number)
+                        .await
                 }
                 Look::Work => {
                     self.interrupt_for(project, participant, record, &stop)
