@@ -325,4 +325,7 @@ and the hash that names a bundle of an extension is `$HASH`.
   them. The darwin rows were checked equal to what Rust reads, row for row; the
   win32 rows were moved the same way, paths written with `/` and no mode, as the
   recordings write every path. `no_codex_launch_of_either_platform_puts_its_role_on_a_command_line`
-  holds both files to it.
+  holds both files to it. The move is `tools/move_codex_role_goldens.py`, which
+  leaves a step already moved as it is: after a merge brings rows of the old shape,
+  run it on each file and let the scenarios test check it, rather than merging these
+  files by hand.

@@ -9,6 +9,12 @@
 //! ConsensFlow's supervisor (`cf codex-session`), which put it on the command lines of
 //! Codex's app-server and TUI as well. T-698 is the work.
 //!
+//! The board's token, which a window's environment holds, was on Codex's server's
+//! command line too (`-c shell_environment_policy.set.CONSENSFLOW_TOKEN=…`, so
+//! that a user policy of `inherit = "core"` kept it for the thread's commands),
+//! found in the review of the role's work (T-764): it goes to each thread in its
+//! `config` now.
+//!
 //! What the owner should have seen: the role is on the command line of none of the
 //! window's processes, and a pattern of its words matches none, while the thread the
 //! window starts still begins with it, once, as its developer instructions; and a
@@ -69,6 +75,19 @@ fn shown_nowhere(rig: &Rig, frame: &Value, word: &str) -> Outcome {
         code,
         Some(1),
         "a pattern of the role's words matches processes: {found}"
+    );
+    Ok(())
+}
+
+/// That no process on the machine has `secret` on its command line, as `ps` shows
+/// every process's to every user: read here rather than matched with `pgrep`,
+/// whose pattern a token would be.
+fn on_no_process(secret: &str, what: &str) -> Outcome {
+    let (_, all) = run("ps", &["-A", "-ww", "-o", "command="])?;
+    assert!(!all.trim().is_empty(), "ps listed processes");
+    assert!(
+        !all.contains(secret),
+        "a process has {what} on its command line"
     );
     Ok(())
 }
@@ -140,6 +159,13 @@ fn a_codex_chiefs_role_is_on_no_command_line_fresh_or_resumed_and_its_thread_beg
     })?;
     // The window's three programs are up, its thread begun.
     shown_nowhere(&rig, &first, &word)?;
+    // Nor is the board's token, which the window's environment holds.
+    let token = first["env"]["CONSENSFLOW_TOKEN"]
+        .as_str()
+        .filter(|token| !token.is_empty())
+        .ok_or("the window has no board token")?
+        .to_owned();
+    on_no_process(&token, "the window's board token")?;
     let began_with = rollout::said_by(&chief_record()?, "developer");
     assert_eq!(
         began_with.len(),
@@ -172,7 +198,19 @@ fn a_codex_chiefs_role_is_on_no_command_line_fresh_or_resumed_and_its_thread_beg
         programs.len() >= 2,
         "Codex's server and TUI ran: {programs:?}"
     );
+    // The thread was given ConsensFlow's variables for its commands, the token too.
+    assert!(
+        starts.iter().any(|run| run["started"]["config"]
+            ["shell_environment_policy.set.CONSENSFLOW_TOKEN"]
+            == token.as_str()),
+        "no start was given the board's token for its commands"
+    );
     for run in programs {
+        assert!(
+            !run["args"].to_string().contains(&token),
+            "Codex's {} was started with the board's token on its command line",
+            run["run"]
+        );
         assert!(
             !run["args"].to_string().contains(&word),
             "Codex's {} was started with its role: {}",
@@ -212,12 +250,26 @@ fn a_codex_chiefs_role_is_on_no_command_line_fresh_or_resumed_and_its_thread_beg
         Ok(project.lane("chief")?["activity"]["state"] == "idle")
     })?;
     shown_nowhere(&rig, &again, &word)?;
-    for run in codex_runs(&rig)?
-        .iter()
-        .filter(|run| run.get("args").is_some())
-    {
+    let token_again = again["env"]["CONSENSFLOW_TOKEN"]
+        .as_str()
+        .unwrap_or_default();
+    on_no_process(token_again, "the window's board token")?;
+    let runs = codex_runs(&rig)?;
+    for run in runs.iter().filter(|run| run.get("args").is_some()) {
         assert!(!run["args"].to_string().contains(&word), "{run}");
+        assert!(
+            !run["args"].to_string().contains(token_again),
+            "Codex's {} was started with the board's token on its command line",
+            run["run"]
+        );
     }
+    // The resumed thread was given ConsensFlow's variables for its commands.
+    assert!(
+        runs.iter().any(|run| run["resumed"]["config"]
+            ["shell_environment_policy.set.CONSENSFLOW_TOKEN"]
+            == token_again),
+        "the resume was not given the board's token for its commands"
+    );
     assert_eq!(
         rollout::said_by(&chief_record()?, "developer"),
         began_with,

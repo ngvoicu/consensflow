@@ -27,6 +27,8 @@ harness-launch-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--tes
 harness-scenarios = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "scenarios::"]
 # The stand-in Codex's own tests: what a thread begins with.
 fake-codex-own = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-codex"]
+# The rule over both platforms' launch goldens: no board token on a command line.
+harness-launch-secrets = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "secrets::"]
 # The regression: a Codex chief's role on no command line, fresh and resumed, and its thread
 # begins with it once.
 rig-regression-role-file = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_codex_windows_role_was_on_its_command_line::"]
@@ -42,8 +44,8 @@ runs = ["codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''            if main_start && (self.fresh_bypass || self.role.is_some()) {'''
-replace = '''            if main_start && self.fresh_bypass {'''
+find = '''        let role = self.role.as_deref().filter(|_| main_start);'''
+replace = '''        let role = self.role.as_deref().filter(|_| false);'''
 
 [[plant]]
 name = "codex role file: the broker gives the role to a resume and a fork too"
@@ -52,8 +54,8 @@ runs = ["codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''            if main_start && (self.fresh_bypass || self.role.is_some()) {'''
-replace = '''            if (main_start && self.fresh_bypass) || self.role.is_some() {'''
+find = '''        let role = self.role.as_deref().filter(|_| main_start);'''
+replace = '''        let role = self.role.as_deref().filter(|_| main_start || main_resume || main_fork);'''
 
 [[plant]]
 name = "codex role file: a main start keeps the instructions the TUI named"
@@ -226,3 +228,136 @@ find = '''        *held(&self.developer) = params["developerInstructions"]
             .or_else(|| self.configured.clone());'''
 replace = '''        let _ = params;
         *held(&self.developer) = self.configured.clone();'''
+
+# --- the review's items (T-764, T-765): starts the broker cannot tell, and ConsensFlow's
+# variables (the board's token among them) on no command line ---
+
+[[plant]]
+name = "codex role file: a start that does not say whether it is ephemeral is taken for a side one"
+meant = "a_start_that_does_not_say_whether_it_is_ephemeral_is_the_windows_own_and_is_given_the_role"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''        None | Some(Value::Null) => Some(false),'''
+replace = '''        None | Some(Value::Null) => Some(true),'''
+
+[[plant]]
+name = "codex role file: a start the broker cannot tell goes without its role unsaid"
+meant = "a_start_the_broker_cannot_tell_is_said_once_a_window_and_only_where_there_is_a_role"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''        self.told_unclassified = true;
+        Some(why)'''
+replace = '''        self.told_unclassified = true;
+        let _ = why;
+        None'''
+
+[[plant]]
+name = "codex role file: the note of a start the broker cannot tell is never sent"
+meant = "a_start_the_broker_cannot_tell_goes_as_it_came_and_the_window_says_so_once_in_a_note"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = '''            self.shared.say_unclassified(why);'''
+replace = '''            let _ = why;'''
+
+[[plant]]
+name = "codex role file: ConsensFlow's variables go to no thread"
+meant = "every_start_resume_and_fork_is_given_consensflows_variables_in_its_config_over_what_it_said"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''        ) && !self.shell_env.is_empty();'''
+replace = '''        ) && self.shell_env.is_empty();'''
+
+[[plant]]
+name = "codex role file: a thread's config is replaced by ConsensFlow's variables, not added to"
+meant = "every_start_resume_and_fork_is_given_consensflows_variables_in_its_config_over_what_it_said"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''        let mut config = params
+            .get("config")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();'''
+replace = '''        let mut config = Map::new();'''
+
+[[plant]]
+name = "codex role file: ConsensFlow's variables are on the server's command line again (the old code)"
+meant = "says_why_codexs_server_could_not_start_with_what_it_wrote_and_leaves_nothing_behind"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''        args.push("app-server".into());'''
+replace = '''        for (name, value) in consensflow_variables(plan.env) {
+            args.push("-c".into());
+            args.push(format!("shell_environment_policy.set.{name}={}", serde_json::Value::from(value)).into());
+        }
+        args.push("app-server".into());'''
+
+[[plant]]
+name = "codex role file rig: ConsensFlow's variables are on the server's command line again (the old code, the regression)"
+meant = "a_codex_chiefs_role_is_on_no_command_line_fresh_or_resumed_and_its_thread_begins_with_it_once"
+runs = ["rig-regression-role-file"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''        args.push("app-server".into());'''
+replace = '''        for (name, value) in consensflow_variables(plan.env) {
+            args.push("-c".into());
+            args.push(format!("shell_environment_policy.set.{name}={}", serde_json::Value::from(value)).into());
+        }
+        args.push("app-server".into());'''
+
+[[plant]]
+name = "codex role file rig: the supervisor hands the broker none of ConsensFlow's variables (the regression)"
+meant = "a_codex_chiefs_role_is_on_no_command_line_fresh_or_resumed_and_its_thread_begins_with_it_once"
+runs = ["rig-regression-role-file"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            shell_env: consensflow_variables(plan.env),'''
+replace = '''            shell_env: Vec::new(),'''
+
+[[plant]]
+name = "codex role file: a role variable set to nothing opens a window without its role"
+meant = "a_role_file_that_is_missing_or_empty_or_a_variable_set_to_nothing_is_refused"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''        return Err(SessionError::NoRoleFile);'''
+replace = '''        return Ok(None);'''
+
+[[plant]]
+name = "codex role file: Codex's programs are told where the role's file is (everywhere)"
+meant = "neither_of_codexs_programs_is_told_where_the_role_is_nor_given_an_openai_key"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''        .env_remove(ROLE_VARIABLE)
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "codex role file: a launch puts the board's token on its command line"
+meant = "no_launch_this_platforms_adapters_make_puts_the_board_token_or_its_name_on_a_command_line"
+runs = ["harness-launch-secrets"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''            args.extend(WINDOW.map(str::to_owned));'''
+replace = '''            args.extend(WINDOW.map(str::to_owned));
+            args.extend(["-c".to_owned(), "shell_environment_policy.set.CONSENSFLOW_TOKEN=x".to_owned()]);'''

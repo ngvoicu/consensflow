@@ -2,8 +2,12 @@
 //! the instructions it would have read anyway: the native resolver is asked for
 //! them, so the profile and project layering is kept, and no version is read.
 //!
-//! The text goes in a file of the launch's own, readable by this user alone, which
-//! the launch's environment names (`CF_CODEX_ROLE_FILE`). The window's supervisor
+//! The text goes in a file of the launch's own, which the launch's environment
+//! names (`CF_CODEX_ROLE_FILE`). On Unix it is 0600 in a folder 0700, readable by
+//! this user alone; Windows takes no mode there (cf-base's `make_folder` and
+//! `write_file`), and the file is as private as the folder it is in, under
+//! ConsensFlow's own in the user's profile (`AppData`), whose inherited permissions give
+//! the user, SYSTEM and administrators alone, as Devin's role file is. The window's supervisor
 //! reads it before Codex starts, and its broker gives it to the TUI's main thread
 //! starts as their developer instructions (`developerInstructions`, which replace
 //! what Codex's configuration says for that thread: probed on Codex 0.164.0, so the
@@ -64,7 +68,8 @@ pub(super) async fn text(
 }
 
 /// Writes `text` as the role of `launch`'s window, in its own folder made private
-/// to this user, and says the variable of the window's environment that names it.
+/// to this user (by its modes on Unix; on Windows by where it is, see the module),
+/// and says the variable of the window's environment that names it.
 pub(super) fn write(env: &Env, launch: &LaunchId, text: &str) -> Result<(String, String), String> {
     let folder = launch_folder(CODEX_FOLDER, env, launch)?;
     let file = path::join(&[&folder, FILE]);

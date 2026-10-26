@@ -1568,8 +1568,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''            if main_start && (self.fresh_bypass || self.role.is_some()) {'''
-replace = '''            if (main_start && self.fresh_bypass) || ((main_start || main_resume) && self.role.is_some()) {'''
+find = '''        let role = self.role.as_deref().filter(|_| main_start);'''
+replace = '''        let role = self.role.as_deref().filter(|_| main_start || main_resume);'''
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_codex.rs"
@@ -1594,8 +1594,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''            if main_start && (self.fresh_bypass || self.role.is_some()) {'''
-replace = '''            if (main_start && self.fresh_bypass) || ((main_start || main_resume) && self.role.is_some()) {'''
+find = '''        let role = self.role.as_deref().filter(|_| main_start);'''
+replace = '''        let role = self.role.as_deref().filter(|_| main_start || main_resume);'''
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_codex.rs"

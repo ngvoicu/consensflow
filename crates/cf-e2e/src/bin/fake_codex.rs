@@ -295,6 +295,9 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &
                 children::lose_a_parent();
             }
         }
+        if request["method"] == "thread/resume" {
+            record(json!({ "run": "server", "resumed": request["params"] }));
+        }
         if request["method"] == "thread/resume" && resume_hangs() {
             record(json!({ "run": "server", "unanswered": request["params"]["threadId"] }));
             continue;

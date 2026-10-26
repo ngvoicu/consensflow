@@ -8,6 +8,15 @@
 //! with the launch's token in its environment, never on its command line. The
 //! window ends when the TUI does, and the exit code is the TUI's.
 //!
+//! The window's role is read before anything starts, from the file its launch's
+//! environment names (`CF_CODEX_ROLE_FILE`), and handed to the broker, which gives
+//! it to the TUI's main starts: it is on none of the three command lines. A file
+//! that is named and cannot be read, or holds nothing, opens no window, and nor
+//! does the variable set to nothing: a window without its role would work as no one
+//! asked it to. Neither of Codex's programs is told the file's name. ConsensFlow's
+//! own variables (the board's token among them) are on no command line either: the
+//! broker gives them to each thread in its `config`.
+//!
 //! Each program is started through cf-process's `start_owned`, which on Windows runs it in a job of
 //! its own: ending it ends everything it started, what it starts as it is ended included (its id
 //! alone, ended with `taskkill /T`, leaves those; zeewin, T-322). A program that ended of itself has
@@ -31,7 +40,7 @@ use tokio::io::AsyncReadExt;
 use tokio::process::{ChildStderr, Command};
 use tokio::task::JoinHandle;
 
-use crate::arguments::{self, consensflow_shell_environment, MissingValue, Split, BYPASS};
+use crate::arguments::{self, consensflow_variables, MissingValue, Split, BYPASS};
 use crate::broker::{Broker, Config, StartError};
 use crate::endpoint::{Endpoint, EndpointError, Upstream};
 use crate::tail::Tail;
@@ -56,6 +65,8 @@ pub(crate) enum SessionError {
     Role { path: PathBuf, cause: io::Error },
     #[error("its role file {} holds nothing", path.display())]
     NoRole { path: PathBuf },
+    #[error("{ROLE_VARIABLE} names no file")]
+    NoRoleFile,
     #[error(transparent)]
     Endpoint(#[from] EndpointError),
     #[error("Codex server could not start: {0}")]
@@ -150,10 +161,14 @@ async fn supervise_with(env: &Env, args: &[OsString], setup: Setup) -> Result<i3
 }
 
 /// The window's role: the text of the file `env` names in [`ROLE_VARIABLE`], none
-/// where it names none.
+/// where the variable is not set. A variable set to nothing is refused, as an empty
+/// file is: a launch that meant to give a role and gave none.
 fn role_of(env: &Env) -> Result<Option<String>, SessionError> {
-    let Some(file) = env.path(ROLE_VARIABLE) else {
+    if env.os(ROLE_VARIABLE).is_none() {
         return Ok(None);
+    }
+    let Some(file) = env.path(ROLE_VARIABLE) else {
+        return Err(SessionError::NoRoleFile);
     };
     let path = file.to_path_buf();
     match std::fs::read_to_string(file) {
@@ -187,6 +202,7 @@ impl Session {
             upstream,
             fresh_bypass: plan.bypass,
             role: plan.role.clone(),
+            shell_env: consensflow_variables(plan.env),
             board: board_of(plan.env).map(Arc::new),
             question_wait: DOOR_WAIT,
         });
@@ -220,7 +236,6 @@ impl Session {
         tail: &Rc<RefCell<Tail>>,
     ) -> Result<JoinHandle<()>, SessionError> {
         let mut args = plan.split.backend.clone();
-        args.extend(consensflow_shell_environment(plan.env));
         args.push("app-server".into());
         args.extend(plan.endpoint.listen().iter().cloned());
         let (mut command, program) = command(plan, &args).map_err(SessionError::Unrunnable)?;
@@ -472,3 +487,6 @@ impl Signals {
 #[cfg(test)]
 #[cfg(unix)]
 mod tests;
+
+#[cfg(test)]
+mod everywhere;

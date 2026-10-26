@@ -75,31 +75,26 @@ fn json_string(text: &str) -> String {
     serde_json::Value::from(text).to_string()
 }
 
-/// ConsensFlow's own variables, set explicitly in Codex's shell policy: a
+/// ConsensFlow's own variables, to be set explicitly in Codex's shell policy: a
 /// user policy of `inherit = "core"` keeps only a handful of names, and a
 /// window whose commands lose `CONSENSFLOW_URL`, `_TOKEN` and `_NODE` has a
 /// `cf` that reaches nothing. Everything else stays as the user's policy says.
-/// Each `CONSENSFLOW_` variable that has a value is one `-c` pair, in name order.
-pub(crate) fn consensflow_shell_environment(env: &Env) -> Vec<OsString> {
-    let mut named: Vec<(&str, String)> = env
+/// Each `CONSENSFLOW_` variable that has a value, with it, in name order. The
+/// broker gives them to each thread in its `config`, never a command line: the
+/// token is a secret, and every user of the machine reads a command line.
+pub(crate) fn consensflow_variables(env: &Env) -> Vec<(String, String)> {
+    let mut named: Vec<(String, String)> = env
         .iter()
-        .filter_map(|(name, value)| Some((name.to_str()?, value.to_string_lossy().into_owned())))
+        .filter_map(|(name, value)| {
+            Some((
+                name.to_str()?.to_owned(),
+                value.to_string_lossy().into_owned(),
+            ))
+        })
         .filter(|(name, _)| is_consensflow_variable(name))
         .collect();
     named.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
     named
-        .into_iter()
-        .flat_map(|(name, value)| {
-            [
-                OsString::from("-c"),
-                format!(
-                    "shell_environment_policy.set.{name}={}",
-                    json_string(&value)
-                )
-                .into(),
-            ]
-        })
-        .collect()
 }
 
 /// `^CONSENSFLOW_[A-Z0-9_]+$`.
@@ -122,9 +117,15 @@ mod tests {
         words.iter().map(OsString::from).collect()
     }
 
+    fn pairs(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect()
+    }
+
     #[test]
-    fn sets_consensflows_own_variables_in_codexs_shell_policy_so_a_user_policy_that_inherits_only_core_ones_keeps_them(
-    ) {
+    fn names_consensflows_own_variables_with_their_values_in_name_order_and_nothing_else() {
         let env = Env::from_vars([
             ("CONSENSFLOW_URL", "http://127.0.0.1:4100"),
             ("CONSENSFLOW_TOKEN", "tok\"en"),
@@ -132,17 +133,13 @@ mod tests {
             ("HOME", "/home/user"),
         ]);
         assert_eq!(
-            consensflow_shell_environment(&env),
-            args(&[
-                "-c",
-                "shell_environment_policy.set.CONSENSFLOW_TOKEN=\"tok\\\"en\"",
-                "-c",
-                "shell_environment_policy.set.CONSENSFLOW_URL=\"http://127.0.0.1:4100\"",
+            consensflow_variables(&env),
+            pairs(&[
+                ("CONSENSFLOW_TOKEN", "tok\"en"),
+                ("CONSENSFLOW_URL", "http://127.0.0.1:4100"),
             ])
         );
-        assert!(
-            consensflow_shell_environment(&Env::from_vars([("HOME", "/home/user")])).is_empty()
-        );
+        assert!(consensflow_variables(&Env::from_vars([("HOME", "/home/user")])).is_empty());
     }
 
     #[test]
@@ -154,13 +151,8 @@ mod tests {
             ("CONSENSFLOW_EMPTY", ""),
         ]);
         assert_eq!(
-            consensflow_shell_environment(&env),
-            args(&[
-                "-c",
-                "shell_environment_policy.set.CONSENSFLOW_A1_B=\"kept\"",
-                "-c",
-                "shell_environment_policy.set.CONSENSFLOW_EMPTY=\"\"",
-            ])
+            consensflow_variables(&env),
+            pairs(&[("CONSENSFLOW_A1_B", "kept"), ("CONSENSFLOW_EMPTY", "")])
         );
     }
 
@@ -169,20 +161,18 @@ mod tests {
     fn a_name_with_lower_case_letters_is_none_of_consensflows_except_where_names_ignore_case() {
         let env = Env::from_vars([("CONSENSFLOW_lower", "mixed case")]);
         assert_eq!(
-            consensflow_shell_environment(&env).len(),
-            if cfg!(windows) { 2 } else { 0 }
+            consensflow_variables(&env).len(),
+            usize::from(cfg!(windows))
         );
     }
 
     #[test]
-    fn writes_a_value_as_the_json_string_javascript_wrote() {
-        let env = Env::from_vars([("CONSENSFLOW_HOME", "C:\\Users\\me\n\u{1}é😀\u{2028}")]);
+    fn a_value_is_carried_as_it_is() {
+        let value = "C:\\Users\\me\n\u{1}\u{e9}\u{1f600}\u{2028}";
+        let env = Env::from_vars([("CONSENSFLOW_HOME", value)]);
         assert_eq!(
-            consensflow_shell_environment(&env),
-            args(&[
-                "-c",
-                "shell_environment_policy.set.CONSENSFLOW_HOME=\"C:\\\\Users\\\\me\\n\\u0001é😀\u{2028}\"",
-            ])
+            consensflow_variables(&env),
+            pairs(&[("CONSENSFLOW_HOME", value)])
         );
     }
 

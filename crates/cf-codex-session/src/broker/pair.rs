@@ -240,8 +240,10 @@ impl Pair {
     }
 
     /// A frame the TUI said to Codex: what it may change is learned, and it
-    /// goes on as it came, except a main start that must open in
-    /// full-permission mode.
+    /// goes on as it came, except a start, resume or fork, which is given
+    /// ConsensFlow's variables, and a main start, the window's role too (and
+    /// full-permission mode while the first start must open in it). A start
+    /// that cannot be told is said once.
     fn process_tui(self: &Rc<Self>, text: Utf8Bytes) {
         let message = match reading(&text) {
             Reading::Message(message) => message,
@@ -253,6 +255,10 @@ impl Pair {
             &mut self.requests.borrow_mut(),
             &message,
         );
+        let unclassified = self.shared.state.borrow_mut().unclassified(&message);
+        if let Some(why) = unclassified {
+            self.shared.say_unclassified(why);
+        }
         let out = rewritten.map_or(text, |message| Utf8Bytes::from(message.to_string()));
         self.forward(&self.native, out);
     }

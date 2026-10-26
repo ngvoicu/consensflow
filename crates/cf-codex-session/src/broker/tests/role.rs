@@ -82,3 +82,53 @@ fn a_window_given_no_role_has_its_main_start_go_as_the_tui_sent_it() {
         assert_eq!(started["developerInstructions"], Value::Null);
     });
 }
+
+#[test]
+fn a_start_the_broker_cannot_tell_goes_as_it_came_and_the_window_says_so_once_in_a_note() {
+    use std::sync::Arc;
+
+    use cf_board::scripted::{reply, scripted};
+    use cf_board::Board;
+
+    use super::fixture::wait;
+
+    run(async {
+        let api = scripted(vec![
+            reply(200, json!({ "id": 9, "recipient": "chief" })),
+            reply(200, json!({ "id": 10, "recipient": "chief" })),
+        ]);
+        let f = Fixture::with(Options {
+            role: Some(ROLE.to_owned()),
+            board: Some(Arc::new(Board::new(Some(&api.url), "window-token"))),
+            ..Options::default()
+        })
+        .await;
+        let tui = f.connect().await;
+        let unknown = json!({ "ephemeral": false, "developerInstructions": null });
+        for id in [1, 2] {
+            let sent = f
+                .call(
+                    &tui,
+                    id,
+                    "thread/start",
+                    unknown.clone(),
+                    json!({ "thread": { "id": A } }),
+                )
+                .await;
+            assert_eq!(sent, unknown, "it goes as it came");
+        }
+        wait(|| !api.received().is_empty()).await;
+        let notes = api.received();
+        assert_eq!(notes.len(), 1, "said once a window");
+        assert_eq!(
+            (notes[0].method.as_str(), notes[0].path.as_str()),
+            ("POST", "/api/notes")
+        );
+        let body = notes[0].json().unwrap()["body"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(body.contains("was not given this window's role"), "{body}");
+        assert!(body.contains("it names no `threadSource`"), "{body}");
+    });
+}

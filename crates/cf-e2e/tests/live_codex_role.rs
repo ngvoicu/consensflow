@@ -32,7 +32,14 @@
 //!
 //! Each time, no process of the window (the supervisor, Codex's server, its TUI),
 //! nor any other process on the machine, has a word of the role or of the human's
-//! instructions on its command line: `ps` on the window's tree, and `pgrep -f`.
+//! instructions on its command line (`ps` on the window's tree, and `pgrep -f`), nor
+//! the window's board token (`ps` of every process). Codex's server had the token
+//! there (`-c shell_environment_policy.set.CONSENSFLOW_TOKEN=…`, found in T-764's
+//! review): the broker gives ConsensFlow's variables to each thread in its `config`
+//! now, and the run's `config.toml` holds a user policy of `inherit = "core"`, under
+//! which only that gives the thread's commands the token. The chief runs a command
+//! that says whether they have it (never its value), in the window the project
+//! opened and in the one opened again.
 //!
 //! ```text
 //! cargo xtask live codex-role
@@ -94,7 +101,7 @@ fn card(word: &str, replaces: bool) -> String {
         ""
     };
     format!(
-        "# A check of a Codex window's role\n\nYour role's code word is {word}.{again} When you are asked for your code words, answer in one line with every code word your instructions give you, separated by commas, and nothing else. Run no tools.\n"
+        "# A check of a Codex window's role\n\nYour role's code word is {word}.{again} When you are asked for your code words, answer in one line with every code word your instructions give you, separated by commas, and nothing else. Run no tools unless a message asks you to run a command: then run it and reply with its output alone.\n"
     )
 }
 
@@ -166,8 +173,23 @@ fn on_no_command_line(members: &Members, words: &[&str], log: &Log) -> Result {
             )));
         }
     }
+    // Nor the board's token, which the window's environment holds: read from every
+    // process's command line, not matched by `pgrep`, whose pattern it would be.
+    let token = window
+        .open
+        .as_ref()
+        .and_then(|open| open["env"]["CONSENSFLOW_TOKEN"].as_str())
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| Error::Daemon("the window was opened with no board token".to_owned()))?
+        .to_owned();
+    let (_, all) = run("ps", &["-A", "-ww", "-o", "command="])?;
+    if all.contains(&token) {
+        return Err(Error::Daemon(
+            "a process has the window's board token on its command line".to_owned(),
+        ));
+    }
     log.say(format!(
-        "ok: none of the {} processes of the window, nor any other, has the role on its command line",
+        "ok: none of the {} processes of the window, nor any other, has the role or the board's token on its command line",
         tree.len()
     ));
     Ok(())
@@ -208,12 +230,44 @@ fn answers_after(text: &str, nonce: &str) -> Vec<String> {
     said
 }
 
-/// The human asks the chief for its code words, as a paste and Enter into its window,
-/// and the chief's answer is waited for in its thread's record.
+/// The human asks the chief for its code words ([`asks`]).
 fn ask(members: &Members, home: &Path, round: usize, log: &Log) -> Result<String> {
+    asks(
+        members,
+        home,
+        &format!("Q{round}"),
+        "What are your code words?",
+        log,
+    )
+}
+
+/// What the human has the chief run: whether its commands have the board's token,
+/// which a user policy of `inherit = "core"` keeps only where the thread was given
+/// it (the broker gives it in the thread's `config`). The value is never printed.
+fn token_reaches_commands(members: &Members, home: &Path, round: usize, log: &Log) -> Result {
+    let said = asks(
+        members,
+        home,
+        &format!("C{round}"),
+        "Run this shell command and reply with its output alone: echo TOKEN_IS_$(test -n \"$CONSENSFLOW_TOKEN\" && echo SET || echo UNSET)",
+        log,
+    )?;
+    if said.contains("TOKEN_IS_SET") {
+        log.say("ok: the thread's commands have the board's token");
+        Ok(())
+    } else {
+        Err(Error::Daemon(
+            "the thread's commands have no board token (TOKEN_IS_SET not said)".to_owned(),
+        ))
+    }
+}
+
+/// The human says `words` to the chief, marked `mark`, as a paste and Enter into its
+/// window, and the chief's answer is waited for in its thread's record.
+fn asks(members: &Members, home: &Path, mark: &str, words: &str, log: &Log) -> Result<String> {
     wait_idle(members, log)?;
-    let nonce = format!("Q{round}-{}", std::process::id());
-    let question = format!("({nonce}) What are your code words?");
+    let nonce = format!("{mark}-{}", std::process::id());
+    let question = format!("({nonce}) {words}");
     log.say(format!("the human asks the chief: {question}"));
     let pane = members.lane(CHIEF)?["pane"].clone();
     members.paste(&pane, &question)?;
@@ -307,6 +361,7 @@ fn check(home: &CodexHome, card_file: &Path, words: &Words, log: &Log) -> Result
         let said = ask(&members, home.path(), 1, log)?;
         names(&said, &all, "the window the project opened")?;
         on_no_command_line(&members, &all, log)?;
+        token_reaches_commands(&members, home.path(), 1, log)?;
         let began = developer_holding(home.path(), &words.role)?;
         if began != 1 || developer_holding(home.path(), &words.own)? != 1 {
             return Err(Error::Daemon(format!(
@@ -319,6 +374,7 @@ fn check(home: &CodexHome, card_file: &Path, words: &Words, log: &Log) -> Result
         let said = ask(&members, home.path(), 2, log)?;
         names(&said, &all, "the window opened again")?;
         on_no_command_line(&members, &all, log)?;
+        token_reaches_commands(&members, home.path(), 2, log)?;
         if developer_holding(home.path(), &words.role)? != 1 {
             return Err(Error::Daemon(
                 "the thread opened again was given its role a second time".to_owned(),
@@ -361,7 +417,7 @@ fn a_codex_window_follows_a_role_no_command_line_holds_fresh_resumed_and_changed
     home.write(
         "config.toml",
         &format!(
-            "developer_instructions = \"The human's own code word is {}.\"\n",
+            "developer_instructions = \"The human's own code word is {}.\"\n\n[shell_environment_policy]\ninherit = \"core\"\n",
             words.own
         ),
     )?;

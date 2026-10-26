@@ -24,7 +24,7 @@ impl Window {
     /// A window that opens in full-permission mode where `fresh_bypass` says so,
     /// and whose main starts are given `role`.
     fn with(fresh_bypass: bool, role: Option<&str>) -> Self {
-        let mut selection = Selection::new(fresh_bypass, role.map(str::to_owned));
+        let mut selection = Selection::new(fresh_bypass, role.map(str::to_owned), Vec::new());
         selection.ready();
         Self {
             selection,
@@ -90,8 +90,21 @@ fn a_main_start_resume_and_fork_are_told_from_the_rest() {
             ),
             false,
         ),
+        // An `ephemeral` not said is false, as the server takes it.
         (
             params(json!({ "method": "thread/start", "params": { "threadSource": "user" } })),
+            true,
+        ),
+        (
+            params(
+                json!({ "method": "thread/start", "params": { "threadSource": "user", "ephemeral": null } }),
+            ),
+            true,
+        ),
+        (
+            params(
+                json!({ "method": "thread/start", "params": { "threadSource": "user", "ephemeral": "no" } }),
+            ),
             false,
         ),
         (
@@ -356,7 +369,7 @@ fn an_older_answer_before_the_latest_leaves_the_window_switching() {
 
 #[test]
 fn another_connections_answer_does_not_apply_to_the_owner() {
-    let mut selection = Selection::new(false, None);
+    let mut selection = Selection::new(false, None, Vec::new());
     selection.ready();
     let (mut first, mut second) = (Requests::default(), Requests::default());
     selection.tui_said(TUI, &mut first, &start(1));
@@ -395,7 +408,7 @@ fn the_owners_connection_lost_forgets_the_thread_and_another_ones_does_not() {
 
 #[test]
 fn a_connection_lost_before_it_chose_leaves_what_was_chosen() {
-    let mut selection = Selection::new(false, None);
+    let mut selection = Selection::new(false, None, Vec::new());
     selection.ready();
     let mut owner = Requests::default();
     selection.tui_said(TUI, &mut owner, &start(1));
@@ -649,7 +662,7 @@ fn a_closed_broker_shows_no_thread_and_takes_nothing() {
 
 #[test]
 fn a_broker_is_not_available_before_its_connection_is_initialized() {
-    let mut selection = Selection::new(false, None);
+    let mut selection = Selection::new(false, None, Vec::new());
     let mut requests = Requests::default();
     selection.tui_said(TUI, &mut requests, &start(1));
     selection.codex_said(TUI, &mut requests, &idle(1, A));
@@ -758,7 +771,7 @@ fn no_side_start_resume_fork_or_turn_is_given_the_role() {
         json!({ "id": 2, "method": "thread/start", "params": { "ephemeral": true, "threadSource": "user" } }),
         json!({ "id": 3, "method": "thread/start", "params": { "ephemeral": false, "threadSource": "subagent" } }),
         json!({ "id": 4, "method": "thread/start", "params": { "ephemeral": false, "threadSource": "system" } }),
-        json!({ "id": 5, "method": "thread/start", "params": { "threadSource": "user" } }),
+        json!({ "id": 5, "method": "thread/start", "params": { "threadSource": "user", "ephemeral": true } }),
         json!({ "id": 6, "method": "thread/start", "params": null }),
         resume(7, B),
         json!({ "id": 8, "method": "thread/fork", "params": { "threadId": A, "threadSource": "user", "runtimeWorkspaceRoots": [] } }),
@@ -767,4 +780,122 @@ fn no_side_start_resume_fork_or_turn_is_given_the_role() {
     ] {
         assert_eq!(window.says(message.clone()), None, "{message}");
     }
+}
+
+#[test]
+fn a_start_that_does_not_say_whether_it_is_ephemeral_is_the_windows_own_and_is_given_the_role() {
+    let mut window = Window::with(false, Some("the role"));
+    let sent = json!({ "id": 1, "method": "thread/start", "params": { "threadSource": "user" } });
+    assert_eq!(
+        window.says(sent).unwrap()["params"]["developerInstructions"],
+        "the role"
+    );
+}
+
+#[test]
+fn a_start_is_the_windows_own_a_side_one_or_one_the_broker_cannot_tell() {
+    let kind = |params: Value| start_kind(params.as_object().unwrap());
+    assert_eq!(
+        kind(json!({ "threadSource": "user", "ephemeral": false })),
+        Start::Main
+    );
+    assert_eq!(kind(json!({ "threadSource": "user" })), Start::Main);
+    assert_eq!(
+        kind(json!({ "threadSource": "user", "ephemeral": null })),
+        Start::Main
+    );
+    assert_eq!(
+        kind(json!({ "threadSource": "user", "ephemeral": true })),
+        Start::Side
+    );
+    assert_eq!(kind(json!({ "ephemeral": true })), Start::Side);
+    assert_eq!(kind(json!({ "threadSource": "subagent" })), Start::Side);
+    assert_eq!(
+        kind(json!({ "threadSource": "system", "ephemeral": false })),
+        Start::Side
+    );
+    assert!(matches!(kind(json!({})), Start::Unclassified(_)));
+    assert!(matches!(
+        kind(json!({ "threadSource": null })),
+        Start::Unclassified(_)
+    ));
+    assert!(matches!(
+        kind(json!({ "threadSource": 7 })),
+        Start::Unclassified(_)
+    ));
+    assert!(matches!(
+        kind(json!({ "threadSource": "user", "ephemeral": "no" })),
+        Start::Unclassified(_)
+    ));
+}
+
+#[test]
+fn a_start_the_broker_cannot_tell_is_said_once_a_window_and_only_where_there_is_a_role() {
+    let unknown = json!({ "id": 1, "method": "thread/start", "params": { "ephemeral": false } });
+    let mut window = Window::with(false, Some("the role"));
+    assert_eq!(window.says(unknown.clone()), None, "it goes as it came");
+    assert_eq!(
+        window.selection.unclassified(&unknown),
+        Some("it names no `threadSource`")
+    );
+    assert_eq!(
+        window.selection.unclassified(&unknown),
+        None,
+        "once a window"
+    );
+    // Nothing to say of a start that can be told, a resume, or a window with no role.
+    let mut window = Window::with(false, Some("the role"));
+    for told in [
+        start(1),
+        resume(2, B),
+        json!({ "id": 3, "method": "thread/start", "params": { "ephemeral": true } }),
+    ] {
+        assert_eq!(window.selection.unclassified(&told), None, "{told}");
+    }
+    assert_eq!(Window::new().selection.unclassified(&unknown), None);
+}
+
+#[test]
+fn every_start_resume_and_fork_is_given_consensflows_variables_in_its_config_over_what_it_said() {
+    let env = vec![
+        ("CONSENSFLOW_TOKEN".to_owned(), "tok".to_owned()),
+        (
+            "CONSENSFLOW_URL".to_owned(),
+            "http://127.0.0.1:1".to_owned(),
+        ),
+    ];
+    let mut selection = Selection::new(false, None, env);
+    selection.ready();
+    let mut requests = Requests::default();
+    let mut says = |message: Value| selection.tui_said(TUI, &mut requests, &message);
+    for message in [
+        start(1),
+        json!({ "id": 2, "method": "thread/start", "params": { "ephemeral": true, "config": { "model": "m", "shell_environment_policy.set.CONSENSFLOW_TOKEN": "stale" } } }),
+        resume(3, B),
+        json!({ "id": 4, "method": "thread/fork", "params": { "threadId": A, "threadSource": "user", "runtimeWorkspaceRoots": [], "config": null } }),
+    ] {
+        let sent = says(message.clone()).unwrap();
+        let config = &sent["params"]["config"];
+        assert_eq!(
+            config["shell_environment_policy.set.CONSENSFLOW_TOKEN"], "tok",
+            "{message}"
+        );
+        assert_eq!(
+            config["shell_environment_policy.set.CONSENSFLOW_URL"],
+            "http://127.0.0.1:1"
+        );
+        if let Some(model) = message["params"]["config"]["model"].as_str() {
+            assert_eq!(config["model"], model, "what it said of the rest stays");
+        }
+        assert_eq!(
+            sent["params"]["developerInstructions"],
+            Value::Null,
+            "no role: none given"
+        );
+    }
+    // A turn, or anything else, goes as it came.
+    assert_eq!(
+        says(json!({ "id": 5, "method": "turn/start", "params": { "threadId": A, "input": [] } })),
+        None
+    );
 }

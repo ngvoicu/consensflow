@@ -44,7 +44,7 @@ use url::form_urlencoded::byte_serialize;
 const DEAD: u32 = 999_999;
 
 /// The platform's name as Node's `process.platform` says it.
-fn platform() -> &'static str {
+pub(crate) fn platform() -> &'static str {
     if cfg!(windows) {
         "win32"
     } else if cfg!(target_os = "macos") {
@@ -1263,7 +1263,7 @@ impl Drop for Umask {
 }
 
 /// Plays `scenario` in a root of its own: each recorded step's record.
-fn play(scenario: &Value) -> Vec<Value> {
+pub(crate) fn play(scenario: &Value) -> Vec<Value> {
     let _mask = Umask::pin();
     let dir = tempfile::Builder::new()
         .prefix("cf-launch-golden-")
@@ -1392,5 +1392,27 @@ fn every_scenario_plays_as_node_played_it() {
         "{} differ:\n{}",
         differ.len(),
         differ.join("\n")
+    );
+}
+
+/// The launch goldens are the four recordings and nothing else: a copy left beside
+/// them (a move's output, 5.5 MB, once committed) is read by nothing and goes with
+/// every clone.
+#[test]
+fn the_launch_goldens_folder_holds_its_four_recordings_and_nothing_else() {
+    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/goldens/launch");
+    let mut names: Vec<String> = fs::read_dir(&folder)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "coverage.json",
+            "scenarios.darwin.json",
+            "scenarios.win32.json",
+            "tables.json"
+        ]
     );
 }
