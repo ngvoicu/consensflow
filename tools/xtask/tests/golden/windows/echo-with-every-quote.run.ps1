@@ -28,6 +28,9 @@ public static class CfJob {
   if ($made -eq [IntPtr]::Zero) { throw [CfJob]::Why }
   $job = $made
 } catch { Write-Output "== no job: $($_.Exception.Message), so a stop will not end at once what this run starts" }
+if ($null -ne $job) {
+  try { Add-Content -LiteralPath $owner -Value 'job' } catch { Write-Output "== no job record: $($_.Exception.Message), so a stop will walk this run's tree" }
+}
 $env:Path = "C:\Program Files\nodejs;$env:USERPROFILE\.cargo\bin;" + $env:Path
 $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorAction SilentlyContinue).Target
 if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
