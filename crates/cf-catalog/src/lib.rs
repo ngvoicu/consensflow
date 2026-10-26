@@ -26,7 +26,7 @@ pub use catalog::{efforts, Group};
 pub use cf_proto::agents::{
     AgentView, CatalogEntry, FoundEntry, Harness, Preferences, Profile, WorkTier, WorkTierInfo,
 };
-pub use presets::Preset;
+pub use presets::{Preset, Retired};
 pub use profile::{validate_work_tier, work_tier_info, Settings, WORK_TIERS};
 pub use roster::{roster_path, AgentRow, Roster};
 
@@ -39,12 +39,14 @@ pub enum CatalogError {
 }
 
 /// The catalog: the presets in the order the data lists them, each model's
-/// label by its key, and what is worked out from them once: the (harness,
-/// model) pairs the presets run, and the entries of every harness.
+/// label by its key, the agents it no longer carries, and what is worked out
+/// from them once: the (harness, model) pairs the presets run, and the
+/// entries of every harness.
 #[derive(Debug, Clone)]
 pub struct Catalog {
     presets: Vec<Preset>,
     model_labels: BTreeMap<String, String>,
+    retired: Vec<Retired>,
     known: profile::Known,
     groups: Vec<Group>,
 }
@@ -53,7 +55,9 @@ impl Catalog {
     /// The catalog built into this binary: read once, in `main`, and handed down.
     pub fn bundled() -> Result<Self, CatalogError> {
         let data = presets::bundled()?;
-        Ok(Self::new(data.presets, data.model_labels))
+        let mut catalog = Self::new(data.presets, data.model_labels);
+        catalog.retired = data.retired;
+        Ok(catalog)
     }
 
     fn new(presets: Vec<Preset>, model_labels: BTreeMap<String, String>) -> Self {
@@ -61,6 +65,7 @@ impl Catalog {
         let mut catalog = Self {
             presets,
             model_labels,
+            retired: Vec::new(),
             known,
             groups: Vec::new(),
         };
@@ -77,6 +82,15 @@ impl Catalog {
     pub fn model_label(&self, key: &str) -> Option<&str> {
         self.model_labels.get(key).map(String::as_str)
     }
+
+    /// The ready-made agent named `name` (one leading `@` taken off) that the
+    /// catalog no longer carries, and why: none for any other name. A
+    /// saved agent of the human's own under that name is theirs, and asked
+    /// of the roster first.
+    pub fn retired(&self, name: &str) -> Option<&Retired> {
+        let name = name.strip_prefix('@').unwrap_or(name);
+        self.retired.iter().find(|retired| retired.name == name)
+    }
 }
 
 #[cfg(test)]
@@ -86,7 +100,7 @@ mod tests {
     #[test]
     fn the_bundled_catalog_reads_whole_every_field_known() {
         let catalog = Catalog::bundled().unwrap();
-        assert_eq!(catalog.presets().len(), 121);
+        assert_eq!(catalog.presets().len(), 251);
         assert_eq!(
             catalog
                 .presets()

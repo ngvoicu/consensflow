@@ -2,8 +2,9 @@
 //! alone')` of Node's catalog suite.
 //!
 //! 2026-10-08: Claude Code 2.1.294 answers claude-haiku-5-5 as itself at every level it lists.
-//! Devin lists Claude only as Sonnet, and Pi and OpenCode (OpenRouter) carry Haiku 4.5 and a
-//! `~anthropic/claude-haiku-latest` alias, no 5.5: no other harness has a row for it.
+//! Pi and OpenCode (OpenRouter) carry Haiku 4.5 and a `~anthropic/claude-haiku-latest` alias,
+//! no 5.5. Devin lists it since (3000.11.205, 2026-10-25), at every level, and the catalog
+//! carries every model Devin lists: light work there too.
 //!
 //! The JS opens the window with `interactiveStart` and reads its `--model` and `--effort`. The
 //! Rust launch is the Claude adapter's, held by `cf-harness`'s own tests and by
@@ -19,7 +20,25 @@ fn is_the_one_haiku_of_the_catalog_with_its_label_its_route_and_its_effort() {
         .filter(|(_, entry)| entry.model.contains("haiku"))
         .map(|(harness, entry)| (harness, entry.name.as_str()))
         .collect();
-    assert_eq!(haiku, [(Harness::Claude, "huginn")]);
+    assert_eq!(
+        haiku,
+        [
+            (Harness::Devin, "sepa"),
+            (Harness::Devin, "tutu"),
+            (Harness::Devin, "unut"),
+            (Harness::Devin, "maahes"),
+            (Harness::Devin, "mandulis"),
+            (Harness::Claude, "huginn"),
+        ]
+    );
+    for (_, name) in &haiku {
+        let entry = found(&catalog, name);
+        assert_eq!(
+            entry.entry.profile.model_label, "Claude Haiku 5.5",
+            "{name}"
+        );
+        assert_eq!(entry.entry.profile.work_tier, WorkTier::Light, "{name}");
+    }
     let entry = found(&catalog, "huginn");
     assert_eq!(
         (

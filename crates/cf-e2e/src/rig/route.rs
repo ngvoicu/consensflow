@@ -9,7 +9,18 @@
 //! were asked by no one on the other side. A program may ask where the cursor
 //! is (a ConPTY made to inherit its cursor asks before a program may print at
 //! all; the pane host's are not); the page's xterm answers, and with no page
-//! the rig does.
+//! the rig does. And the page takes each frame a pane printed and says so
+//! (`pane.ack`), which frees the pane to print on: the host reads no more of a
+//! window whose unread output fills its budget (`backlogBytes`, 1 MiB unless the
+//! open names one). The rig says so too, as it gathers the frames, of the latest once
+//! [`ACK_EVERY`] bytes of them are taken (the host's answer to each ack shares its way
+//! out with the frames, and one to each frame filled it: `bridge writer queue is
+//! full`); till T-139 it said nothing, and every window of a rig froze once it had
+//! printed 1 MiB. A window opened with a budget under [`ACK_EVERY`] would freeze: the
+//! rig opens none.
+//!
+//! What a window printed is kept as its last [`KEPT`] bytes or so, and how much was let
+//! go of before them: a long run's windows print for hours.
 //!
 //! And a case can catch one paste of the daemon's ([`Catch`]): passed to the pane
 //! host or kept from it, its answer never reaches the daemon, which goes on
@@ -28,12 +39,22 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use super::report::plain;
 use crate::live::members::{Identity, Machine, ThisMachine};
 use crate::process::Sink;
 use crate::wire::{self, Pending};
 
 /// Where a terminal asks for the cursor's place.
 const CURSOR_QUERY: [u8; 4] = [0x1b, b'[', b'6', b'n'];
+
+/// How much of what a window printed is kept: its last 8 MiB, give or take a line.
+pub(super) const KEPT: usize = 8 * 1024 * 1024;
+
+/// How much more a window prints before what it printed first is let go of.
+const SLACK: usize = 2 * 1024 * 1024;
+
+/// How much of a window's output the rig takes before it says so to the pane host.
+pub(super) const ACK_EVERY: usize = 32 * 1024;
 
 /// What the page's xterm answers: the cursor is at row 1, column 1.
 const CURSOR_REPLY: [u8; 6] = [0x1b, b'[', b'1', b';', b'1', b'R'];
@@ -67,6 +88,48 @@ pub(super) struct Root {
     pub generation: Value,
     /// None where the host said no process, or it had gone by the time it was read.
     pub identity: Option<Identity>,
+}
+
+/// What a window printed: the last [`KEPT`] bytes of it or so, from the start of a line,
+/// and how many characters of its screen the bytes let go of before them made; and how
+/// many bytes were taken since the rig last said so to the pane host.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(super) struct Printed {
+    pub kept: Vec<u8>,
+    pub dropped: usize,
+    untold: usize,
+}
+
+impl Printed {
+    /// `bytes` taken: whether that makes [`ACK_EVERY`] since the rig last said so.
+    fn taken(&mut self, bytes: usize) -> bool {
+        self.untold += bytes;
+        let due = self.untold >= ACK_EVERY;
+        if due {
+            self.untold = 0;
+        }
+        due
+    }
+
+    /// `bytes`, printed after what is kept: once what is kept is past `kept` and `slack`
+    /// more, what came first is let go of, up to the start of a line at least `kept` from
+    /// the end and no more than `slack` before that (a line's start ends no character and
+    /// no control sequence of a screen's text), else to `kept` from the end; and the text
+    /// it made is counted.
+    fn push(&mut self, bytes: &[u8], kept: usize, slack: usize) {
+        self.kept.extend_from_slice(bytes);
+        if self.kept.len() <= kept + slack {
+            return;
+        }
+        let from = self.kept.len() - kept;
+        let earliest = from.saturating_sub(slack);
+        let cut = self.kept[earliest..from]
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map_or(from, |at| earliest + at + 1);
+        self.dropped += plain(&self.kept[..cut]).chars().count();
+        self.kept.drain(..cut);
+    }
 }
 
 /// The window a frame of the pane host's says it opened, its process read by `read` as it
@@ -108,8 +171,8 @@ pub(super) struct Seen {
     /// When the daemon told the page the board moved (`state.changed`, its reason
     /// `core`), in milliseconds since the epoch, in order.
     pub moves: Vec<i64>,
-    /// Everything each pane printed, by the pane's id.
-    pub printed: HashMap<String, Vec<u8>>,
+    /// What each pane printed, the end of it ([`Printed`]), by the pane's id.
+    pub printed: HashMap<String, Printed>,
     /// The body of each `pane.exit` the pane host told.
     pub exits: Vec<Value>,
     /// When the rig saw each of `exits`, in milliseconds since the epoch: a
@@ -501,6 +564,7 @@ impl Shared {
         };
         let id = frame["id"].as_str().unwrap_or_default();
         let mut reply = None;
+        let mut taken = None;
         // The window's process, read as the host says it opened it, before the answer goes on.
         let root = root_of(&frame, |pid| ThisMachine.identity(pid).ok().flatten());
         {
@@ -530,7 +594,19 @@ impl Shared {
                             "bytes": CURSOR_REPLY,
                         }));
                     }
-                    seen.printed.entry(pane).or_default().extend(bytes);
+                    let printed = seen.printed.entry(pane).or_default();
+                    printed.push(&bytes, KEPT, SLACK);
+                    let due = printed.taken(bytes.len());
+                    taken = frame["body"]["seq"]
+                        .as_u64()
+                        .filter(|seq| due && *seq > 0)
+                        .map(|seq| {
+                            json!({
+                                "id": frame["body"]["id"],
+                                "generation": frame["body"]["generation"],
+                                "seq": seq,
+                            })
+                        });
                 }
             }
             if frame["op"] == "pane.exit" {
@@ -542,6 +618,10 @@ impl Shared {
         if let Some(body) = reply {
             // Nobody waits for the answer, which stops at the next frame's check.
             host.send(wire::request(&self.next_host_id(), "pane.reply", &body));
+        }
+        if let Some(body) = taken {
+            // The frame is taken, as the page says once it drew it; nor is this answer waited for.
+            host.send(wire::request(&self.next_host_id(), "pane.ack", &body));
         }
         if frame["kind"] == "res"
             && (self.pending.answer(id, &frame["body"]) || id.starts_with(HOST))
@@ -917,7 +997,10 @@ mod tests {
             // When the host told it, which a look that comes later reads.
             assert_eq!(seen.exit_times.len(), 1);
             assert!((before..=after).contains(&seen.exit_times[0]));
-            assert_eq!(seen.printed["p1-chief"], [104, 105, 0x1b, 91, 54, 110, 33]);
+            assert_eq!(
+                seen.printed["p1-chief"].kept,
+                [104, 105, 0x1b, 91, 54, 110, 33]
+            );
             assert_eq!(
                 seen.exits,
                 [json!({"id": "p1-chief", "generation": 5, "code": 0})]
@@ -942,6 +1025,74 @@ mod tests {
             passed,
             [printed.to_string(), more.to_string(), exit.to_string()]
         );
+    }
+
+    #[test]
+    fn each_frame_a_pane_printed_is_taken_and_said_so_to_the_host_as_the_page_says_it() {
+        // T-139: the host reads no more of a window whose unread output fills its budget,
+        // and the rig said of none that it was read: every window of a rig froze at 1 MiB.
+        let shared = Shared::default();
+        let (host, host_lines, daemon, daemon_lines) = sinks();
+        // A frame of half the bytes the rig takes before it says so, one of a quarter.
+        let printed = |seq: u64, bytes: usize| {
+            json!({
+                "v": 1, "id": format!("e-{seq}"), "kind": "evt", "op": "pane.output",
+                "body": {"id": "p1-zeus", "generation": 2, "seq": seq, "bytes": vec![104; bytes]},
+            })
+        };
+        let frames = [
+            printed(1, ACK_EVERY / 2),
+            printed(2, ACK_EVERY / 4),
+            printed(3, ACK_EVERY / 4),
+            printed(4, ACK_EVERY / 2),
+            printed(5, ACK_EVERY / 2),
+        ];
+        for frame in &frames {
+            shared.route_host(&frame.to_string(), &host, &daemon);
+        }
+        // Said of the third, the latest of the first ACK_EVERY bytes, and of the fifth.
+        for seq in [3, 5] {
+            let ack: Value =
+                serde_json::from_str(&host_lines.recv_timeout(Duration::from_secs(10)).unwrap())
+                    .unwrap();
+            assert_eq!(ack["kind"], "req");
+            assert_eq!(ack["op"], "pane.ack");
+            assert_eq!(
+                ack["body"],
+                json!({"id": "p1-zeus", "generation": 2, "seq": seq})
+            );
+        }
+        assert!(host_lines.recv_timeout(Duration::from_millis(100)).is_err());
+        // The host's answer to an ack is the rig's own, and goes no further.
+        let answer = json!({"v": 1, "id": "n-test-1", "kind": "res", "op": "pane.ack", "body": {"ok": true}});
+        shared.route_host(&answer.to_string(), &host, &daemon);
+        let passed: Vec<String> = (0..frames.len())
+            .map(|_| daemon_lines.recv_timeout(Duration::from_secs(10)).unwrap())
+            .collect();
+        let frames: Vec<String> = frames.iter().map(Value::to_string).collect();
+        assert_eq!(passed, frames);
+        assert!(daemon_lines
+            .recv_timeout(Duration::from_millis(100))
+            .is_err());
+        assert_eq!(shared.seen().printed["p1-zeus"].kept.len(), 2 * ACK_EVERY);
+    }
+
+    #[test]
+    fn what_a_window_printed_is_kept_as_its_end_from_the_start_of_a_line_and_what_went_counted() {
+        // T-139: every byte a window printed was kept for the rig's life.
+        let mut printed = Printed::default();
+        for line in 1..=10 {
+            printed.push(format!("line {line:02}\r\n").as_bytes(), 20, 10);
+        }
+        // Nine bytes a line: kept to 30 at most, then let go of to a line's start 20 or
+        // more from the end.
+        assert_eq!(printed.kept, b"line 08\r\nline 09\r\nline 10\r\n");
+        assert_eq!(printed.dropped, plain(b"line 01\r\n").chars().count() * 7);
+        // A line longer than what is kept is cut where the bound falls.
+        let mut long = Printed::default();
+        long.push(&[b'x'; 40], 20, 10);
+        assert_eq!(long.kept, [b'x'; 20]);
+        assert_eq!(long.dropped, 20);
     }
 
     /// A `pane.write_paste` of the daemon's, numbered `id`, of `body`, and the host's

@@ -190,26 +190,35 @@ impl Names {
     }
 
     /// What a step recorded, with the root and the live processes written
-    /// as the scenario writes them (`written`).
-    fn written(&self, value: &Value) -> Value {
+    /// as the scenario writes them (`written`): `key` is the field the value
+    /// stands under, none at the top or in a list's items.
+    fn written(&self, value: &Value, key: Option<&str>) -> Value {
         match value {
-            Value::Array(items) => items.iter().map(|item| self.written(item)).collect(),
+            Value::Array(items) => items.iter().map(|item| self.written(item, None)).collect(),
             // A key beginning with `$` gets another, as Node's runner
             // writes it: the runner's own (`$utf16`) stand apart.
             Value::Object(fields) => Value::Object(
                 fields
                     .iter()
                     .map(|(key, item)| {
-                        let key = if key.starts_with('$') {
-                            format!("${key}")
-                        } else {
-                            key.clone()
-                        };
-                        (key, self.written(item))
+                        (
+                            if key.starts_with('$') {
+                                format!("${key}")
+                            } else {
+                                key.clone()
+                            },
+                            self.written(item, Some(key.as_str())),
+                        )
                     })
                     .collect(),
             ),
             Value::Number(number) => {
+                // A process id stands under `pid`, and only there: a timer of
+                // 250 ms is no process, whatever process id this run happens
+                // to have.
+                if key != Some("pid") {
+                    return value.clone();
+                }
                 let live = self.pids().into_iter().find(|&(name, pid)| {
                     name != "$DEAD" && number.as_u64() == Some(u64::from(pid))
                 });
@@ -701,8 +710,43 @@ fn a_key_beginning_with_a_dollar_is_written_with_another_as_node_s_runner_writes
     };
     let names = Names::new(root.to_owned(), None);
     assert_eq!(
-        names.written(&json!({"$utf16": [97], "plain": {"$ROOT": "$ROOT"}})),
+        names.written(&json!({"$utf16": [97], "plain": {"$ROOT": "$ROOT"}}), None),
         json!({"$$utf16": [97], "plain": {"$$ROOT": "$ROOT"}})
+    );
+}
+
+/// A live process's id is written by its name only where the key holds one
+/// (`pid`), as Node's runner wrote it: a number anywhere else stays one.
+/// Codex's and Devin's poll timers are 250 ms, so when a run's own id was
+/// 250 every `{"timer": 250}` was written `"$PID"` where Node's record has
+/// `250` — the "23 differ" flake of T-361's gate.
+#[test]
+fn a_number_is_named_a_live_process_only_under_pid() {
+    let root = if cfg!(windows) {
+        r"C:\nowhere"
+    } else {
+        "/nowhere"
+    };
+    let names = Names::new(root.to_owned(), Some(987_654));
+    let pid = u64::from(std::process::id());
+    assert_eq!(
+        names.written(
+            &json!({
+                "pending": [{ "op": 2, "waits": [{ "timer": pid }] }],
+                "opened": { "pid": pid },
+                "asked": [{ "op": "kill", "body": { "pid": 987_654, "timer": pid } }],
+                "still": { "pid": DEAD },
+                "limits": [pid, 3],
+            }),
+            None
+        ),
+        json!({
+            "pending": [{ "op": 2, "waits": [{ "timer": pid }] }],
+            "opened": { "pid": "$PID" },
+            "asked": [{ "op": "kill", "body": { "pid": "$OTHER", "timer": pid } }],
+            "still": { "pid": DEAD },
+            "limits": [pid, 3],
+        })
     );
 }
 
@@ -710,7 +754,7 @@ fn a_key_beginning_with_a_dollar_is_written_with_another_as_node_s_runner_writes
 #[test]
 fn the_root_is_named_by_how_a_record_spells_it_and_each_bundle_hash_by_its_order() {
     let names = Names::new("/tmp/cf-launch-golden-X y's".to_owned(), None);
-    let written = |text: &str| names.written(&json!(text));
+    let written = |text: &str| names.written(&json!(text), None);
     assert_eq!(
         written("/tmp/cf-launch-golden-X y's/home"),
         json!("$ROOT/home")
@@ -1166,7 +1210,7 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
     }
     fields.insert("draws".to_owned(), json!(played.fakes.entropy.take_draws()));
     fields.insert("tree".to_owned(), changes(&before, &tree(&root)));
-    played.names.written(&Value::Object(fields))
+    played.names.written(&Value::Object(fields), None)
 }
 
 /// The adapter a scenario plays against.

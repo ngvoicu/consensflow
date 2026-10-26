@@ -236,6 +236,8 @@ pub struct Record {
     /// The uuids of the user's records Claude Code marks as its summary of a compaction
     /// (`isCompactSummary: true`): the product copies each as an item of that id.
     summaries: BTreeSet<String>,
+    /// When a process that wrote the record was proved gone, in milliseconds ([`Record::gone_at`]).
+    gone: BTreeSet<i64>,
 }
 
 impl Record {
@@ -271,6 +273,16 @@ impl Record {
     /// the later line's words under it).
     pub fn is_summary(&self, uuid: &str) -> bool {
         self.summaries.contains(uuid) && self.lookup(Some(uuid)).is_some()
+    }
+
+    /// The process that wrote the record was proved gone at `at`, in milliseconds: the pane
+    /// host said its window exited and named nothing of it that it could not end. What it had
+    /// queued in its memory and not begun went with it, and so did the background agents its
+    /// last turn left running, though no line says so: what the record says after `at` is a
+    /// later process's. The product's reader empties them where ConsensFlow proved the same
+    /// before it opened the window again (T-442, `crates/cf-harness/src/claude/record.rs`).
+    pub fn gone_at(&mut self, at: i64) {
+        self.gone.insert(at);
     }
 
     /// Whether a line of the record carries `uuid`.
@@ -336,18 +348,31 @@ impl Record {
     /// begins no turn, and one in a turn leaves it at work. A message queued and not
     /// taken is a turn not over; a late ancestor begins none. The agents a turn's
     /// boundary counts are that turn's, and the next turn's work counts none until its
-    /// own boundary does.
+    /// own boundary does. Where the process that wrote it was proved gone ([`Record::gone_at`]),
+    /// its queue and its agents are emptied there, and its last answer ends no turn again,
+    /// as the product's reader empties them at a relaunch.
     fn replay(&self, at: i64) -> Replayed<'_> {
         let mut queues = Queues::default();
         let (mut open, mut agents, mut last) = (false, 0, None);
         // The answer that may end the turn, and the boundary that ended it (its parent).
         let mut candidate: Option<Option<&str>> = None;
         let mut ended: Option<(Option<&str>, Option<&str>)> = None;
+        let mut gone = self.gone.range(..=at).peekable();
         for entry in self
             .entries
             .iter()
             .filter(|entry| entry.at.is_none_or(|said| said <= at))
         {
+            let relaunched = entry.at.is_some_and(|said| {
+                let mut crossed = false;
+                while gone.next_if(|gone| **gone < said).is_some() {
+                    crossed = true;
+                }
+                crossed
+            });
+            if relaunched {
+                (queues, candidate, agents) = (Queues::default(), None, 0);
+            }
             match &entry.kind {
                 Kind::Output if last.is_some_and(|said| follows_its_command(said, entry)) => {
                     (open, candidate, ended, agents) = (false, None, None, 0);
@@ -401,6 +426,9 @@ impl Record {
                 Kind::Compaction | Kind::JobStarted(_) | Kind::JobEnded(_) => continue,
             }
             last = Some(entry);
+        }
+        if gone.next().is_some() {
+            (queues, agents) = (Queues::default(), 0);
         }
         Replayed {
             open,

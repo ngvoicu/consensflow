@@ -80,29 +80,48 @@ impl Rig {
         self.shared.stall_over()
     }
 
-    /// Everything the window `pane` printed so far, as the text on its screen:
-    /// control sequences stripped, and Windows' console host's cursor moves left
-    /// as the blanks and the line breaks they stand for, so that text reads the
-    /// same on every platform. Nothing of a window that printed nothing, or was
-    /// never opened. It is the whole of what was printed, not the screen as the
-    /// terminal now draws it: what was drawn over is still in it.
+    /// What the window `pane` printed so far, as the text on its screen: control
+    /// sequences stripped, and Windows' console host's cursor moves left as the
+    /// blanks and the line breaks they stand for, so that text reads the same on
+    /// every platform. Nothing of a window that printed nothing, or was never
+    /// opened. It is what was printed, not the screen as the terminal now draws it:
+    /// what was drawn over is still in it. A window that printed more than the rig
+    /// keeps (8 MiB) has its last 8 MiB or so in it, from the start of a line
+    /// ([`Rig::screen_and_dropped`] counts what went before).
     pub fn screen(&self, pane: &str) -> String {
-        let printed = self.shared.seen().printed.get(pane).cloned();
-        printed.map(|bytes| plain(&bytes)).unwrap_or_default()
+        let printed = self.printed(pane);
+        plain(&printed)
     }
 
-    /// Everything the window `pane` printed so far, as the bytes the pane host
-    /// gave and before anything is taken out of them: [`Rig::screen`] is these
-    /// with the control sequences cleaned away. What tells a window that printed
-    /// nothing from one that printed only what Windows' console host prints of its
-    /// own accord (a jump of the cursor, a title), which `screen` reads as blank.
-    /// Nothing of a window that printed nothing, or was never opened.
+    /// What [`Rig::screen`] says of the window `pane`, and how many characters of its
+    /// screen the rig let go of before it, its oldest: none until it printed more than
+    /// the rig keeps. Read together, where a count of a screen's characters marks a
+    /// place in it.
+    pub fn screen_and_dropped(&self, pane: &str) -> (String, usize) {
+        let (printed, dropped) = self
+            .shared
+            .seen()
+            .printed
+            .get(pane)
+            .map_or_else(Default::default, |printed| {
+                (printed.kept.clone(), printed.dropped)
+            });
+        (plain(&printed), dropped)
+    }
+
+    /// What the window `pane` printed so far, as the bytes the pane host gave and
+    /// before anything is taken out of them: [`Rig::screen`] is these with the
+    /// control sequences cleaned away. What tells a window that printed nothing
+    /// from one that printed only what Windows' console host prints of its own
+    /// accord (a jump of the cursor, a title), which `screen` reads as blank.
+    /// Nothing of a window that printed nothing, or was never opened. The last 8
+    /// MiB or so of it, as `screen`.
     pub fn printed(&self, pane: &str) -> Vec<u8> {
         self.shared
             .seen()
             .printed
             .get(pane)
-            .cloned()
+            .map(|printed| printed.kept.clone())
             .unwrap_or_default()
     }
 

@@ -12,6 +12,7 @@ use cf_catalog::{efforts, Catalog, CatalogEntry, FoundEntry, Harness, Preset, Se
 
 mod catalog_presentation_follows_actual_model_and_effort;
 mod claude_haiku_5_5_is_light_work_on_claude_code_alone;
+mod every_model_devin_lists_is_a_preset;
 mod every_tool_ships_a_list_of_ready_made_agents;
 mod nemotron_3_5_super_vl_is_light_work_on_opencode_zen_at_its_ceiling;
 
@@ -124,7 +125,7 @@ fn ships_all_compatible_low_medium_choices_with_stable_identities_and_pi_openrou
             assert_eq!(entry.entry.effort.as_deref(), Some(effort), "{name}");
         }
     }
-    assert_eq!(entries(&catalog).count(), 121);
+    assert_eq!(entries(&catalog).count(), 251);
     for name in ["orpheus", "linus", "erato", "kronos", "atlas"] {
         let entry = found(&catalog, name);
         assert!(
@@ -185,24 +186,41 @@ fn muse_contributor_variants_share_model_identity_while_retaining_route_terms_an
 }
 
 #[test]
-fn offers_devin_s_swe_1_6_by_name_plain_and_slow_and_no_agent_on_devin_s_own_setting() {
+fn offers_devin_s_swe_1_6_by_name_and_no_agent_on_devin_s_own_setting() {
     // 2026-10-02, the owner: no agent runs on a harness's own default model.
     let catalog = catalog();
     assert!(listed(&catalog, Harness::Devin)
         .iter()
         .all(|entry| entry.model != "default"));
-    for (name, model, label) in [
-        ("hapi", "swe-1-6", "SWE-1.6"),
-        ("khnum", "swe-1-6-slow", "SWE-1.6 Slow"),
-    ] {
-        let entry = found(&catalog, name);
-        assert_eq!(entry.harness, Harness::Devin, "{name}");
-        assert_eq!(entry.entry.model, model, "{name}");
-        // Devin lists SWE-1.6 with no levels: the row names none.
-        assert_eq!(entry.entry.effort, None, "{name}");
-        assert_eq!(entry.entry.profile.model_label, label, "{name}");
-        assert_eq!(entry.entry.profile.route_label, "Devin account", "{name}");
-    }
+    // Devin no longer lists SWE-1.6 Slow (3000.11.205, 2026-10-25): Khnum is gone,
+    // and the catalog says why to a staff or a chief that still names it.
+    assert_eq!(catalog.entry("khnum"), None);
+    let khnum = catalog.retired("@khnum").unwrap();
+    assert_eq!(
+        (
+            khnum.name.as_str(),
+            khnum.label.as_str(),
+            khnum.why.as_str()
+        ),
+        (
+            "khnum",
+            "Devin SWE-1.6 Slow",
+            "Devin no longer offers SWE-1.6 Slow"
+        )
+    );
+    assert_eq!(catalog.retired("hapi"), None);
+    // A retired name is no preset's: an agent is carried or it went.
+    assert!(catalog
+        .presets()
+        .iter()
+        .all(|preset| catalog.retired(&preset.id).is_none()));
+    let hapi = found(&catalog, "hapi");
+    assert_eq!(hapi.harness, Harness::Devin);
+    assert_eq!(hapi.entry.model, "swe-1-6");
+    // Devin lists SWE-1.6 with no levels: the row names none.
+    assert_eq!(hapi.entry.effort, None);
+    assert_eq!(hapi.entry.profile.model_label, "SWE-1.6");
+    assert_eq!(hapi.entry.profile.route_label, "Devin account");
     // No model at all is a chief from before every chief had an agent: Devin's own setting.
     let own = catalog.profile(&Settings {
         harness: Some("devin"),
@@ -234,11 +252,15 @@ fn assigns_four_work_tiers_by_model_and_effort_across_routes_without_agent_name_
         ("apollo", "complex"),
         ("kronos", "complex"),
         // Sol and Sonnet at max are complex work (Gabriel, 2026-09-30), and so
-        // is Opus 5.5 at medium and high, beside Sonnet at max (2026-10-03).
+        // is Opus 5.5 at high, beside Sonnet at max (2026-10-03).
         ("hyperion", "complex"),
         ("hermod", "complex"),
-        ("artemis", "complex"),
         ("poseidon", "complex"),
+        // Opus 5.5 at medium is standard work, on every harness (Gabriel, 2026-10-24).
+        ("artemis", "standard"),
+        ("anubis", "standard"),
+        ("atlas", "standard"),
+        ("vali", "standard"),
         ("thalia", "standard"),
         ("maia", "standard"),
         ("phoebus", "standard"),
@@ -291,12 +313,12 @@ fn assigns_four_work_tiers_by_model_and_effort_across_routes_without_agent_name_
         assert_eq!(sonnet.work_tier.as_str(), tier, "Sonnet 5.5 {effort}");
     }
     // Opus 5.5, as an agent of your own on Claude Code: max is critical work,
-    // low light, and every level between them complex.
+    // xhigh and high complex, medium standard and low light.
     for (effort, tier) in [
         ("max", "critical"),
         ("xhigh", "complex"),
         ("high", "complex"),
-        ("medium", "complex"),
+        ("medium", "standard"),
         ("low", "light"),
     ] {
         let opus = catalog.profile(&Settings {
@@ -343,9 +365,10 @@ fn carries_gpt_6_1_sol_wherever_sol_was_sonnet_5_5_and_mimo_v2_6_pro_through_ope
                 !version.is_empty() && version.chars().all(|c| c.is_ascii_digit() || c == '.')
             })
     };
+    // Devin also carries GPT-6 Sol, the generation before, as itself (2026-10-25).
     let sol: Vec<&CatalogEntry> = entries(&catalog)
         .map(|(_, entry)| entry)
-        .filter(|entry| is_sol(&entry.model))
+        .filter(|entry| is_sol(&entry.model) && entry.model != "gpt-6-sol")
         .collect();
     assert_eq!(sol.len(), 13);
     for entry in sol {
@@ -395,23 +418,30 @@ fn carries_gpt_6_1_sol_wherever_sol_was_sonnet_5_5_and_mimo_v2_6_pro_through_ope
 }
 
 #[test]
-fn offers_devin_s_flagship_models_as_presets_each_on_its_twin_s_tier() {
-    // 2026-10-01: Devin lists 54 model families; the catalog carries the ladders
-    // Claude Code and Codex carry (Fable 5.1, Opus 5.5, Sonnet 5.5, GPT-6 Astra,
-    // GPT-6.1 Sol) and Devin's own SWE-2. Devin writes the level into the model
-    // id: a row names family and effort, and the launch joins them. Every one
-    // answered "Upgrade to Pro" on a free plan; Devin says so itself, so a row
-    // carries no note about plans (the owner's call).
+fn offers_devin_s_models_as_presets_each_on_its_twin_s_tier() {
+    // 2026-10-01: the catalog carried the ladders Claude Code and Codex carry
+    // (Fable 5.1, Opus 5.5, Sonnet 5.5, GPT-6 Astra, GPT-6.1 Sol) and Devin's own
+    // SWE-2; since 2026-10-25 it carries every model Devin lists
+    // (`every_model_devin_lists_is_a_preset`). Devin writes the level into the
+    // model id: a row names family and effort, and the launch joins them. Every
+    // one answered "Upgrade to Pro" on a free plan; Devin says so itself, so a row
+    // carries no note about plans (the owner's call). A model another harness
+    // carries too is the same model there: its label and its tier are its twin's.
     let catalog = catalog();
     let devin: Vec<&CatalogEntry> = listed(&catalog, Harness::Devin)
         .iter()
         .filter(|entry| entry.effort.is_some())
         .collect();
-    assert_eq!(devin.len(), 25);
-    let twins: Vec<&CatalogEntry> = listed(&catalog, Harness::Claude)
-        .iter()
-        .chain(listed(&catalog, Harness::Codex))
-        .collect();
+    assert_eq!(devin.len(), 143);
+    let twins: Vec<&CatalogEntry> = [
+        Harness::Claude,
+        Harness::Codex,
+        Harness::Pi,
+        Harness::Opencode,
+    ]
+    .into_iter()
+    .flat_map(|harness| listed(&catalog, harness))
+    .collect();
     for entry in devin {
         let level = entry.effort.as_deref().unwrap();
         assert!(
@@ -437,17 +467,13 @@ fn offers_devin_s_flagship_models_as_presets_each_on_its_twin_s_tier() {
             assert_eq!(entry.profile.model_label, "SWE-2", "{}", entry.name);
             continue;
         }
-        let twin = twins
-            .iter()
-            .find(|t| {
-                t.profile.model_key == entry.profile.model_key && t.effort.as_deref() == Some(level)
-            })
-            .unwrap_or_else(|| {
-                panic!(
-                    "{}: {} has a Claude Code or Codex twin",
-                    entry.name, entry.model
-                )
-            });
+        // The label is the model's own, never the bare id it falls back to.
+        assert_ne!(entry.profile.model_label, entry.model, "{}", entry.name);
+        let Some(twin) = twins.iter().find(|t| {
+            t.profile.model_key == entry.profile.model_key && t.effort.as_deref() == Some(level)
+        }) else {
+            continue;
+        };
         assert_eq!(
             entry.profile.model_label, twin.profile.model_label,
             "{}",

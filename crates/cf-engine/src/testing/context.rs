@@ -7,7 +7,7 @@
 //! Node trace of the same test to be held against.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -163,6 +163,7 @@ impl Context {
         let roster = Rc::new(FakeRoster {
             recorder: recorder.clone(),
             gone: RefCell::new(HashSet::new()),
+            retired: RefCell::new(HashMap::new()),
             designers: RefCell::new(HashSet::new()),
             broken: Cell::new(false),
             model: RefCell::new(None),

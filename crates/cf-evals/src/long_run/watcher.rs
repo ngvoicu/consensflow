@@ -34,7 +34,7 @@ use super::tracker::{Found, Leftover, Tracker};
 use crate::measure::on_copy;
 use crate::{clock, Result};
 
-pub use exits::{exit_of, lines, Known};
+pub use exits::{exit_of, lines, proved_gone, Known};
 
 /// How many lines of a window's screen a look keeps.
 const TAIL: usize = 12;
@@ -109,6 +109,9 @@ pub struct Watcher {
     /// How many of the rig's exits were taken.
     exits_taken: usize,
     exits: Vec<Exit>,
+    /// Whose window's program the host proved gone, and when ([`proved_gone`]): what a Claude
+    /// Code record says after that is a later process's ([`Record::gone_at`]).
+    gone: Vec<(String, i64)>,
     /// The windows the run killed, by pane and generation.
     killed: Vec<(String, i64)>,
     /// The closes of the app whose host's last word was not read to its end.
@@ -134,6 +137,7 @@ impl Watcher {
             panes: BTreeMap::new(),
             exits_taken: 0,
             exits: Vec::new(),
+            gone: Vec::new(),
             killed: Vec::new(),
             unread: Vec::new(),
             claude,
@@ -149,13 +153,14 @@ impl Watcher {
         self.drop = Some(i64::try_from(span.as_millis()).unwrap_or(i64::MAX));
     }
 
-    /// The app quit at `at`, and `last` is what its rig said last, read to the end of
-    /// its host's output once it had closed, or as far as it was read (`unread`, why it
-    /// was not read to the end): every exit since the last look is taken (with what
-    /// each says its close ended, whose identity no look took), every window went, and
-    /// the next rig's exits are counted from its start.
-    pub fn quit(&mut self, last: &Last, at: i64, unread: Option<String>) {
-        self.take_exits(&last.exits, &last.kills);
+    /// The app began to quit at `began` and had quit at `at`, and `last` is what its rig
+    /// said last, read to the end of its host's output once it had closed, or as far as it
+    /// was read (`unread`, why it was not read to the end): every exit since the last look
+    /// is taken (with what each says its close ended, whose identity no look took; one told
+    /// from `began` on, the quit's), every window went, and the next rig's exits are counted
+    /// from its start.
+    pub fn quit(&mut self, last: &Last, began: i64, at: i64, unread: Option<String>) {
+        self.take_exits_of(&last.exits, &last.kills, Some(began));
         self.tracker.all_gone(at);
         self.exits_taken = 0;
         if let Some(why) = unread {
@@ -239,6 +244,18 @@ impl Watcher {
                     grown.unread = Some(DROPPED.to_owned());
                 } else {
                     grown.grow(&self.claude, session, &names);
+                }
+                // A participant's windows run one at a time: a program of theirs proved gone
+                // took what it had queued of any of their conversations.
+                let handle = ledger
+                    .participant(conversation.participant)
+                    .map(|participant| participant.handle.as_str());
+                for (_, at) in self
+                    .gone
+                    .iter()
+                    .filter(|(of, _)| Some(of.as_str()) == handle)
+                {
+                    grown.record.gone_at(*at);
                 }
             }
         }
@@ -385,19 +402,28 @@ impl Watcher {
     /// (`kills`, the daemon's closes); each window's processes are gone from then, with
     /// what its close ended.
     fn take_exits(&mut self, exits: &[(Value, i64)], kills: &[Value]) {
+        self.take_exits_of(exits, kills, None);
+    }
+
+    /// [`Watcher::take_exits`], of a rig that began to quit at `quit_from` where it did.
+    fn take_exits_of(&mut self, exits: &[(Value, i64)], kills: &[Value], quit_from: Option<i64>) {
         let known = Known {
             prefix: &self.prefix,
             panes: &self.panes,
             killed: &self.killed,
             kills,
+            quit_from,
         };
-        let taken: Vec<Exit> = exits
+        let taken: Vec<(Exit, bool)> = exits
             .iter()
             .skip(self.exits_taken)
-            .filter_map(|(body, at)| exit_of(body, *at, &known))
+            .filter_map(|(body, at)| Some((exit_of(body, *at, &known)?, proved_gone(body))))
             .collect();
         self.exits_taken = exits.len();
-        for exit in taken {
+        for (exit, gone) in taken {
+            if gone {
+                self.gone.push((exit.handle.clone(), exit.at));
+            }
             let owner = (exit.pane.clone(), exit.generation);
             self.tracker.gone(&owner, exit.at, &exit.ended);
             self.exits.push(exit);
@@ -548,6 +574,73 @@ mod reading_tests {
         assert_eq!(looked(15), [7]);
         assert!(looked(9).is_empty(), "before the first Claude Code result");
         assert!(looked(23).is_empty(), "after its span");
+    }
+
+    #[test]
+    fn a_window_the_host_proved_gone_takes_its_queue_out_of_its_participants_records() {
+        // T-139 (both reviewers of round 14, item 3): the worker's window closed with a job's
+        // notification queued, and opened again on the conversation; the new process answered
+        // the message it was given. The host's exit proves the old program gone, as the product
+        // takes it for the relaunch: the record's turn is at rest, not held by a queue no
+        // process has.
+        use crate::long_run::ledger::{Conversation, Participant};
+        use crate::long_run::record::Stood;
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let ledger = Ledger {
+            participants: vec![Participant {
+                id: 4,
+                handle: "long-claude-1".to_owned(),
+                role: "worker".to_owned(),
+                harness: Some("claude-code".to_owned()),
+                agent: None,
+            }],
+            conversations: vec![Conversation {
+                id: 7,
+                participant: 4,
+                harness: "claude-code".to_owned(),
+                session: Some("s-worker".to_owned()),
+                started_at: None,
+                ended_at: None,
+            }],
+            ..Ledger::default()
+        };
+        let second =
+            |second: u32| clock::millis(&format!("2026-10-15T10:00:{second:02}.000Z")).unwrap();
+        let stood = |exits: &[(Value, i64)]| {
+            let mut watcher = Watcher::new(PathBuf::from("/nowhere"), 1);
+            watcher.records.insert(
+                7,
+                Grown {
+                    file: Some(fixtures.join("record-relaunched.jsonl")),
+                    ..Grown::default()
+                },
+            );
+            watcher.take_exits(exits, &[]);
+            watcher.read_records(&ledger, second(10));
+            let (records, _) = kept(&watcher.records);
+            records[&7].stood_at(second(10)).unwrap().0
+        };
+        let exit = |fields: Value| {
+            let mut body = serde_json::json!({ "id": "p1-long-claude-1", "generation": 1 });
+            body.as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            (body, second(4) + 500)
+        };
+        assert_eq!(
+            stood(&[exit(serde_json::json!({ "exitCode": 0 }))]),
+            Stood::AtRest
+        );
+        // A program the host could not end may still hold its queue; no exit, nothing proved.
+        assert_eq!(
+            stood(&[exit(serde_json::json!({ "exitCode": 0, "survivor": 4242 }))]),
+            Stood::InFlight
+        );
+        assert_eq!(stood(&[]), Stood::InFlight);
+        // Another participant's window is none of this record's.
+        let mut other = exit(serde_json::json!({ "exitCode": 0 }));
+        other.0["id"] = "p1-long-claude-2".into();
+        assert_eq!(stood(&[other]), Stood::InFlight);
     }
 
     #[test]
@@ -736,7 +829,7 @@ mod tests {
         let mut watcher = Watcher::new(PathBuf::from("/nowhere"), 1);
         let now = jiff::Timestamp::now().as_millisecond();
         watcher.follow(&[showing(pid)], now + 1_000, processes::identities);
-        watcher.quit(&closed(), now, None);
+        watcher.quit(&closed(), now, now, None);
         let left = watcher.left_at_the_end(Duration::ZERO);
         assert_eq!(left.strangers.len(), 1, "{left:?}");
         let stranger = &left.strangers[0];
@@ -751,6 +844,32 @@ mod tests {
         );
         // The test started it, and ends it through the handle it holds.
         window.kill();
+    }
+
+    #[test]
+    fn a_window_the_apps_quit_ended_is_the_runs_and_one_that_ended_before_it_its_own() {
+        // T-139 (T-413's dry run): the restart killed the daemon, and the pane host ended
+        // every window as it stopped; nobody asked it to close any, and each was read as a
+        // window that closed by itself while its task was at work.
+        let mut watcher = Watcher::new(PathBuf::from("/nowhere"), 1);
+        let exit = |id: &str, at: i64| {
+            (
+                json!({ "id": id, "generation": 1, "exitCode": 0, "tail": [] }),
+                at,
+            )
+        };
+        let last = Last {
+            root: PathBuf::from("/nowhere"),
+            exits: vec![
+                exit("p1-long-worker-1", 1_000),
+                exit("p1-long-worker-2", 2_500),
+                exit("p1-long-devin-1", 2_600),
+            ],
+            kills: vec![json!({ "id": "p1-long-devin-1", "generation": 1 })],
+        };
+        watcher.quit(&last, 2_000, 3_000, None);
+        let closers: Vec<ClosedBy> = watcher.exits().iter().map(|exit| exit.closed_by).collect();
+        assert_eq!(closers, [ClosedBy::Itself, ClosedBy::Run, ClosedBy::Daemon]);
     }
 
     #[test]
@@ -786,7 +905,7 @@ mod tests {
         watcher.follow(&[showing(pid)], 1_000, failing);
         let now = jiff::Timestamp::now().as_millisecond();
         watcher.follow(&[showing(pid)], now, processes::identities);
-        watcher.quit(&closed(), now, None);
+        watcher.quit(&closed(), now, now, None);
         let left = watcher.left_at_the_end(Duration::ZERO);
         assert!(left.strangers.is_empty(), "{left:?}");
         assert_eq!(left.unresolved.len(), 1, "{left:?}");
@@ -821,6 +940,7 @@ mod tests {
         let mut watcher = Watcher::new(PathBuf::from("/nowhere"), 1);
         watcher.quit(
             &last,
+            2_000,
             2_000,
             Some("the host's output had not ended".to_owned()),
         );

@@ -41,6 +41,36 @@ fn a_machine_is_named_or_a_host_given_and_with_neither_the_default_is_chosen_whe
 }
 
 #[test]
+fn a_host_that_is_a_machines_name_is_that_machine_with_its_guards_and_its_node() {
+    // `--host zeewin2` once skipped poker-lab's lock, the disk floor and CI's Node (T-610).
+    for line in [
+        "--host zeewin2 -- cargo test",
+        "--host=zeewin2 -- cargo test",
+        "--machine=zeewin2 -- cargo test",
+    ] {
+        let machine = run(line).unwrap().machine.unwrap();
+        assert_eq!(Some(machine.clone()), Machine::named("zeewin2"), "{line}");
+        assert!(machine.shared.is_some(), "{line}");
+        assert_eq!(machine.node, r"$env:USERPROFILE\cf-tools\node", "{line}");
+    }
+    assert_eq!(
+        matrix("--host zeewin2 --scenario s --pair a:b")
+            .unwrap()
+            .machine,
+        Machine::named("zeewin2")
+    );
+    // zeewin is the same machine whichever way it is named; any other host is reached as it is.
+    assert_eq!(
+        run("--host zeewin -- x").unwrap().machine,
+        Machine::named("zeewin")
+    );
+    assert_eq!(
+        run("--host box -- x").unwrap().machine,
+        Some(Machine::at("box"))
+    );
+}
+
+#[test]
 fn every_option_is_read_by_name_with_its_value_after_it_or_after_an_equals_sign() {
     let options = run(
         "--host=zeewin --build --dir build-2 --in=app/src-tauri --env A=1 --env=B=x=y -- cargo test",

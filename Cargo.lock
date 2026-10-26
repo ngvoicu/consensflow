@@ -74,6 +74,7 @@ dependencies = [
  "tempfile",
  "time",
  "url",
+ "webview2-com",
  "windows-sys 0.61.2",
 ]
 

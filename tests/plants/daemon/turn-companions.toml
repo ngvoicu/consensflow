@@ -200,8 +200,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent.rs"
-find = '''    record_message(records, pid, first && window.seeded, text).map_err(failed)?;'''
-replace = '''    record_message(records, pid, first && window.seeded && false, text).map_err(failed)?;'''
+find = '''    record_message(records, pid, first && window.seeded, continuing, text).map_err(failed)?;'''
+replace = '''    record_message(records, pid, first && window.seeded && false, continuing, text).map_err(failed)?;'''
 
 # Round 3 (T-296, Calliope's review of both rounds, T-289): the history viewer's page drew what
 # Claude put ahead of a delivery as the human's typing (P3-1); a copy of an item made before the
@@ -314,12 +314,18 @@ replace = '''    let written = if launched {'''
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent.rs"
-find = '''    for record in written {
+find = '''    for mut record in written {
+        if meta {
+            record["isMeta"] = json!(true);
+        }
         records.append(pid, record)?;
     }
     Ok(())
 }'''
-replace = '''    for record in written {
+replace = '''    for mut record in written {
+        if meta {
+            record["isMeta"] = json!(true);
+        }
         records.append(pid, record)?;
     }
     if steps::is_notification(text) {
@@ -327,3 +333,4 @@ replace = '''    for record in written {
     }
     Ok(())
 }'''
+

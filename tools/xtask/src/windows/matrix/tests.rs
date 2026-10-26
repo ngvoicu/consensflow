@@ -340,6 +340,60 @@ fn a_matrix_that_is_stopped_ends_there_with_130_and_no_summary() {
 }
 
 #[test]
+fn a_run_the_machine_refuses_stops_the_matrix_and_the_rest_are_not_run() {
+    // poker-lab took the laptop between two evals: the next ones would be refused as well, and
+    // each reported as a failure of the eval (T-610). The matrix stops, says so, and answers 75.
+    let busy = "zeewin2 is busy: poker-lab's job holds it (~/.compile-lock/owner on zeelin), and no run goes while it does.";
+    let options = matrix(
+        &["round-trip", "chief-switch", "question-trip"],
+        vec![pair("devin", "devin"), pair("claude", "devin")],
+    );
+    let mut machine = Scripted::new(vec![
+        says(PASSED, 0),
+        Answer {
+            out: "zeewin2 is busy\n",
+            err: "",
+            ended: Ok(Outcome::Refused(busy.into())),
+        },
+    ]);
+    let (status, out, root) = go(&options, &mut machine);
+    assert_eq!(status, 75);
+    assert_eq!(
+        machine.asked.len(),
+        2,
+        "no run is asked for after a refusal"
+    );
+    let folder = root
+        .path()
+        .join("evals")
+        .join("reports")
+        .join("windows")
+        .join(FOLDER);
+    assert_eq!(
+        out,
+        format!(
+            "round-trip devin:devin…\n  PASS 2 checks · daemon native (rust 3.0.0)\n\
+             round-trip claude:devin…\n  not run: {busy}\n\
+             \nlogs: {folder}\n\
+             {:<36} PASS 2 checks · daemon native (rust 3.0.0)\n\
+             {:<36} not run: {busy}\n\
+             {:<36} skipped: a chief switch needs another harness on the staff\n\
+             {:<36} not run: {busy}\n\
+             {:<36} not run: {busy}\n\
+             {:<36} not run: {busy}\n\
+             \nstopped: {busy}\nThe runs marked `not run` did not start: run them again when the machine is free, or with --machine zeewin (its copy built, with --build).\n",
+            "round-trip devin:devin",
+            "round-trip claude:devin",
+            "chief-switch devin:devin",
+            "chief-switch claude:devin",
+            "question-trip devin:devin",
+            "question-trip claude:devin",
+            folder = folder.display(),
+        )
+    );
+}
+
+#[test]
 fn what_an_eval_says_is_read_for_its_checks_and_the_daemon_it_ran_against() {
     let log = Path::new("run.log");
     let said = |text: &str, status: i32| {

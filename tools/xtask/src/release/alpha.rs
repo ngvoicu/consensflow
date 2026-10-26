@@ -5,7 +5,7 @@
 use cf_publish::version::Version;
 use cf_release::version::source_version;
 
-use super::github::Watched;
+use super::github::{Left, Watched};
 use super::{notes_at, plain_of, refused, short, Error, Options, Release, ALPHA_FEED, STABLE_FEED};
 
 pub(super) fn release(release: &mut Release, options: &Options) -> Result<String, Error> {
@@ -31,26 +31,11 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
         short(&commit)
     ));
 
-    release.watch(&Watched {
-        label: "ci",
-        workflow: "ci.yml",
-        commit: &commit,
-        event: None,
-        before: None,
-        both_platforms: true,
-        tag: None,
-    })?;
-    let before = release.newest_run("release.yml", Some(&commit), Some("workflow_dispatch"))?;
-    release.dispatch("release.yml", "main")?;
-    release.watch(&Watched {
-        label: "dry run",
-        workflow: "release.yml",
-        commit: &commit,
-        event: Some("workflow_dispatch"),
-        before,
-        both_platforms: false,
-        tag: None,
-    })?;
+    // CI's green run of main's commit is the gate: the Release run of the tag
+    // checks that it passed (its `gate` job), by this same rule, and runs it no
+    // more, and its own jobs build, sign and smoke-test the packages before
+    // anything publishes.
+    release.ci_passed(&commit, Left::Nothing)?;
     if options.dry_run {
         return Ok(format!(
             "dry run: every check passed; {tag} would be tagged on {} with {} and pushed to origin and upstream\n",
@@ -67,8 +52,7 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
         commit: &commit,
         event: Some("push"),
         before,
-        both_platforms: false,
-        tag: Some(&tag),
+        left: Left::Tag(&tag),
     })?;
     release.wait_for_feed(ALPHA_FEED, &version, run)?;
     // By the release it names, read as the one before was: a 404 is no change.

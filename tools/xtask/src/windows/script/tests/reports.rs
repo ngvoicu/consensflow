@@ -66,7 +66,7 @@ fn powershell_lists_the_reports_of_a_folder_and_none_of_a_link() {
             &Env::from_vars(vars),
         )
         .unwrap();
-        assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+        assert_eq!(ran.code, 0, "{}", said(&ran));
         ran.stdout.replace("\r\n", "\n")
     };
 

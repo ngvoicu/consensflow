@@ -22,14 +22,24 @@ find = ".fold(34, usize::max)"
 replace = ".fold(33, usize::max)"
 
 [[plant]]
-name = "verbs: the model of an agent is padded to 35, not 36"
+name = "verbs: a column gets one unit over its widest value, not two"
 meant = "every_case_says_writes_and_exits_as_node_did"
 runs = ["goldens"]
 
 [[plant.edit]]
 file = "crates/cf/src/standalone/agent.rs"
-find = "pad_end(model, 36),"
-replace = "pad_end(model, 35),"
+find = "at.max(utf16_len(text) + 2)"
+replace = "at.max(utf16_len(text) + 1)"
+
+[[plant]]
+name = "verbs: a model past the old guess runs into the effort again"
+meant = "an_agent_list_row_keeps_two_spaces_between_its_columns_however_long_they_run"
+runs = ["units"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/agent.rs"
+find = "pad_end(model, models),"
+replace = "pad_end(model, 36),"
 
 [[plant]]
 name = "verbs: the home is made before an agent is refused"
