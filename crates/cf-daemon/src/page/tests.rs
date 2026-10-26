@@ -391,6 +391,7 @@ async fn an_operation_is_begun_where_its_frame_is_read_and_its_turns_end_before_
 
 mod app_specs;
 mod computer_use;
+mod deleting;
 mod describing;
 mod gate;
 mod held;

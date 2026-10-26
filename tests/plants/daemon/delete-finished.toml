@@ -1,0 +1,154 @@
+# Delete finished clears the Finished column (T-721, 3.0.6; Gabriel's board of 2026-10-26: 48 finished
+# tasks, every one needed by a task the chief held, so the control was gone and none could be deleted).
+# Deleting only takes a task off the board (`deleted_at`): what waits for it reads its state as before
+# (`release_ready` and a waiter's `needs` take it), so a finished task is kept only while a task not yet
+# finished needs it *and it can still change*: a failed one, which the chief can reopen (a deleted task
+# is not reopened). An accepted task is accepted for good and a cancelled one never will be, so each goes
+# though a task needs it. The page draws the control whenever the Finished column holds a task, and its
+# dialog says what goes, what stays and why, or that nothing may go; the ledger decides again.
+#
+# One plant takes one part out; a test of it fails: the browser's (`app/tests/core-page.spec.mjs`), the
+# ledger's own, the page's operation over a real ledger, or the rig's case in the field's shape (which
+# builds the native `cf` as planted, so its plant says `builds`). Every name holds `delete finished`, so
+# `npm run plants:daemon -- "delete finished"` runs them all.
+
+[run]
+ledger-delete-needed = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "delete_needed"]
+daemon-page-deleting = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::deleting"]
+page-delete-finished = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Delete finished when every finished|nothing can be deleted when every|deletes every finished task that may go"]
+rig-delete-finished = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "the_finished_column_could_not_be_cleared_while_its_tasks_were_needed"]
+
+# --- the page: the control and the dialog ---
+
+[[plant]]
+name = "delete finished: the control is drawn only while a finished task may go"
+meant = "says plainly that nothing can be deleted when every finished task is a failed one that others need, and deletes nothing"
+runs = ["page-delete-finished"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "if (!acts(board) || deletable.length + kept.length === 0) return []"
+replace = "if (!acts(board) || deletable.length === 0) return []"
+
+[[plant]]
+name = "delete finished: the page keeps every finished task a task needs, whatever its state"
+meant = "offers Delete finished when every finished task is needed, and deletes the accepted ones, which the tasks that need them still read as accepted"
+runs = ["page-delete-finished"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "const kept = (task) => task.state === 'failed' && task.neededBy.length > 0"
+replace = "const kept = (task) => task.neededBy.length > 0"
+
+[[plant]]
+name = "delete finished: the page offers a failed task a task needs for deletion"
+meant = "deletes every finished task that may go from the Finished heading, after one confirmation that says how many and which stay"
+runs = ["page-delete-finished"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "const kept = (task) => task.state === 'failed' && task.neededBy.length > 0"
+replace = "const kept = (task) => task.state === 'failed' && task.neededBy.length > 1000"
+
+[[plant]]
+name = "delete finished: the dialog keeps its Delete for good when nothing may go"
+meant = "says plainly that nothing can be deleted when every finished task is a failed one that others need, and deletes nothing"
+runs = ["page-delete-finished"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "  deleteTasksConfirm.hidden = nothing\n"
+replace = "  deleteTasksConfirm.hidden = false\n"
+
+[[plant]]
+name = "delete finished: the dialog does not name what goes"
+meant = "deletes every finished task that may go from the Finished heading, after one confirmation that says how many and which stay"
+runs = ["page-delete-finished"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "deleteTasksGoing.hidden = !going"
+replace = "deleteTasksGoing.hidden = true"
+
+# --- the rule: what the ledger keeps ---
+
+[[plant]]
+name = "delete finished: the ledger keeps every finished task a task needs"
+meant = "an_accepted_task_others_wait_for_is_deleted_and_they_are_released_when_the_rest_is_accepted"
+runs = ["ledger-delete-needed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = 'let needing = if task.state == "failed" {'
+replace = 'let needing = if task.state != "nothing" {'
+
+[[plant]]
+name = "delete finished: the page's delete of an accepted task a task needs is refused"
+meant = "the_page_deletes_an_accepted_task_others_need_and_they_still_read_it_accepted"
+runs = ["daemon-page-deleting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = 'let needing = if task.state == "failed" {'
+replace = 'let needing = if task.state != "nothing" {'
+
+[[plant]]
+name = "delete finished: the human's delete of an accepted task a held task needs is refused in the field's shape"
+meant = "an_accepted_task_a_held_task_needs_is_deleted_and_the_held_task_goes_on_when_resumed"
+runs = ["rig-delete-finished"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = 'let needing = if task.state == "failed" {'
+replace = 'let needing = if task.state != "nothing" {'
+
+[[plant]]
+name = "delete finished: the ledger deletes a failed task a task needs"
+meant = "a_failed_task_an_unfinished_one_needs_stays_until_that_one_is_finished"
+runs = ["ledger-delete-needed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = 'let needing = if task.state == "failed" {'
+replace = 'let needing = if task.state == "nothing" {'
+
+[[plant]]
+name = "delete finished: the page's delete of a failed task a task needs goes through"
+meant = "the_page_is_refused_a_failed_task_a_task_needs_in_the_ledgers_words_and_a_batch_with_it_deletes_none"
+runs = ["daemon-page-deleting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = 'let needing = if task.state == "failed" {'
+replace = 'let needing = if task.state == "nothing" {'
+
+[[plant]]
+name = "delete finished: the ledger keeps a cancelled task a task needs"
+meant = "a_cancelled_task_others_wait_for_is_deleted_too_for_it_never_releases_them"
+runs = ["ledger-delete-needed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = 'let needing = if task.state == "failed" {'
+replace = 'let needing = if task.state != "accepted" {'
+
+[[plant]]
+name = "delete finished: a deleted task counts as unaccepted when the task that needs it is released"
+meant = "an_accepted_task_others_wait_for_is_deleted_and_they_are_released_when_the_rest_is_accepted"
+runs = ["ledger-delete-needed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "WHERE n.task_id = t.id AND d.state != 'accepted')"
+replace = "WHERE n.task_id = t.id AND (d.state != 'accepted' OR d.deleted_at IS NOT NULL))"
+
+[[plant]]
+name = "delete finished: a task no longer reads a need that was deleted"
+meant = "an_accepted_task_others_wait_for_is_deleted_and_they_are_released_when_the_rest_is_accepted"
+runs = ["ledger-delete-needed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = "WHERE n.task_id = t.id ORDER BY d.number) d) AS needs"
+replace = "WHERE n.task_id = t.id AND d.deleted_at IS NULL ORDER BY d.number) d) AS needs"
