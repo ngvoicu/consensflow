@@ -90,9 +90,17 @@ fn a_window_at_rest_for_less_than_the_idle_time_or_in_a_turn_holds_the_first() {
 
 #[test]
 fn a_job_its_record_holds_or_its_turn_left_running_holds_the_first() {
-    let (scene, _) = rested_after("claude-code", "Command running in background with ID: b7x2");
+    // Its own record read at the look, saying nothing the copy does not: the job the copy's
+    // tool line started is all that holds the task, which a look that could not hold the
+    // window to its record would leave unjudged, never broken.
+    let (scene, conversation) =
+        rested_after("claude-code", "Command running in background with ID: b7x2");
     assert!(
-        found(&scene.look(ms(60, 0)), 1).is_empty(),
+        found(
+            &scene.look_with(ms(60, 0), conversation, Record::claude("")),
+            1
+        )
+        .is_empty(),
         "the job holds the task"
     );
     // Its end, said by Claude Code itself, lets the task go: then it is held for nothing
