@@ -334,6 +334,32 @@ fn a_first_message_behind_bypass_is_read_from_what_a_start_kept_of_its_swept_lau
     assert_eq!(texts(&staged), [stored, format!("/bypass {CHIEF}")]);
 }
 
+/// Calliope's P3 on T-697: a kept file no reader can read failed every Devin session's
+/// record, where it proves one session alone. It is passed over, and the rest is read.
+#[cfg(unix)]
+#[test]
+fn a_kept_file_no_reader_can_read_fails_no_session() {
+    use std::os::unix::fs::PermissionsExt;
+    const LAUNCH: &str = "11111111-1111-4111-8111-111111111111";
+    const OTHER: &str = "22222222-2222-4222-8222-222222222222";
+    let staged = Staged::new();
+    staged.launched_behind_bypass(LAUNCH, SESSION, MEMBER);
+    staged.launched_behind_bypass(OTHER, "other-session", CHIEF);
+    staged.chain(&[
+        json!({ "message_id": "u-1", "role": "user", "content": format!("/bypass {MEMBER}") }),
+    ]);
+    let home = staged.root.path().join("home");
+    crate::shared::launch_files::sweep_launches(&home.to_string_lossy()).unwrap();
+    let other = home.join(format!("integrations/devin-kept/{OTHER}.json"));
+    fs::set_permissions(&other, fs::Permissions::from_mode(0o000)).unwrap();
+    let reading = look(&mut staged.reader());
+    fs::set_permissions(&other, fs::Permissions::from_mode(0o600)).unwrap();
+    let Reading::Known(record) = &*reading else {
+        panic!("unread: {reading:?}");
+    };
+    assert_eq!(record.items[0].text.as_ref(), MEMBER);
+}
+
 #[test]
 fn requests_are_told_apart_as_javascript_keys_them() {
     // Two requests, each answered with a turn's end: the first reply is

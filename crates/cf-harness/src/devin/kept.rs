@@ -20,7 +20,7 @@ use std::fs;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
-use cf_base::file::is_missing;
+use cf_base::file::{is_missing, make_folder, write_file, FileError, Mkdir};
 use cf_base::path;
 use serde_json::{json, Value};
 
@@ -38,6 +38,8 @@ const KIND: &str = ".json";
 /// `kept`: the prompt ConsensFlow gave it behind `/bypass`, and the sessions its wire log
 /// names. Nothing where it gave none so, or its log names none, as Devin stored nothing
 /// of it then. Written whole: a start that stops halfway leaves no file half written.
+/// As private as the prompt file it copies (`install::prepare_prompt`): the folder its
+/// owner's alone, the file its owner's to read and write (Calliope's P2 on T-697).
 pub(crate) fn keep(launch: &Path, name: &str, kept: &Path) -> io::Result<()> {
     let Some(prompt) = behind_bypass(&launch.join("prompt.txt"))? else {
         return Ok(());
@@ -46,12 +48,11 @@ pub(crate) fn keep(launch: &Path, name: &str, kept: &Path) -> io::Result<()> {
     if sessions.is_empty() {
         return Ok(());
     }
-    fs::create_dir_all(kept)?;
+    let failed = |failed: FileError| io::Error::other(failed.to_string());
+    make_folder(kept, 0o700, Mkdir::Sync).map_err(failed)?;
     let partial = kept.join(format!("{name}{KIND}.partial"));
-    fs::write(
-        &partial,
-        json!({ "sessions": sessions, "prompt": prompt }).to_string(),
-    )?;
+    let said = json!({ "sessions": sessions, "prompt": prompt }).to_string();
+    write_file(&partial, said.as_bytes(), 0o600).map_err(failed)?;
     fs::rename(&partial, kept.join(format!("{name}{KIND}")))
 }
 
@@ -94,7 +95,10 @@ fn sessions(log: &Path) -> io::Result<BTreeSet<String>> {
 }
 
 /// What was kept, by its file's name, each read once: a file is written whole, once,
-/// and never again ([`keep`]). A file that is not one written so proves nothing.
+/// and never again ([`keep`]). A file that is not one written so proves nothing, and nor
+/// does one that cannot be read, which is passed over and read again at the next look:
+/// it proves one session, and fails no reader (Calliope's P3 on T-697). A reading has no
+/// place to say why, so the passing over is said nowhere.
 #[derive(Default)]
 pub(super) struct KeptFiles(BTreeMap<String, Option<Kept>>);
 
@@ -106,31 +110,27 @@ struct Kept {
 
 impl KeptFiles {
     /// Reads the folder `kept` again: a file new since the last read is read, and one
-    /// gone is forgotten. None is where nothing is kept.
-    pub(super) fn read(&mut self, kept: &str) -> Result<(), String> {
-        let names: BTreeSet<String> = match entries(Path::new(kept)) {
-            Ok(found) => found
-                .into_iter()
-                .map(|entry| entry.file_name().to_string_lossy().into_owned())
-                .filter(|name| name.ends_with(KIND))
-                .collect(),
-            Err(error) if is_missing(&error) => BTreeSet::new(),
-            Err(error) => return Err(format!("{kept}: {error}")),
-        };
+    /// gone is forgotten. None is where nothing is kept, or where the folder cannot be
+    /// read; a file that cannot be read proves nothing until it can be.
+    pub(super) fn read(&mut self, kept: &str) {
+        let names: BTreeSet<String> = entries(Path::new(kept))
+            .map(|found| {
+                found
+                    .into_iter()
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .filter(|name| name.ends_with(KIND))
+                    .collect()
+            })
+            .unwrap_or_default();
         self.0.retain(|name, _| names.contains(name));
         for name in names {
             if self.0.contains_key(&name) {
                 continue;
             }
-            let file = path::join(&[kept, &name]);
-            let said = match fs::read(&file) {
-                Ok(said) => said,
-                Err(error) if is_missing(&error) => continue,
-                Err(error) => return Err(format!("{file}: {error}")),
-            };
-            self.0.insert(name, Kept::of(&said));
+            if let Ok(said) = fs::read(path::join(&[kept, &name])) {
+                self.0.insert(name, Kept::of(&said));
+            }
         }
-        Ok(())
     }
 
     /// The prompts kept for `session`, each as it was behind the command, in the order

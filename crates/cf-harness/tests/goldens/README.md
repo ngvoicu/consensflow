@@ -189,6 +189,19 @@ once, with the reason here and in the commit.
   one look read `inFlight: true` and `settlement: in-flight`, and reads `false`
   and `settled` now; its items, `failed` and `quota` are Node's.
 
+- **A message through Pi's inbox is its owner's alone** (2026-10-26, T-762, the
+  class of Calliope's P2 on T-697: every file the harness writes that holds a
+  prompt is owner-only). Node made the folders of Pi's channel with its default
+  `0o777` and wrote each message's record with `0o666`, so under a usual umask a
+  message's words were anyone's to read beside a launch's own files, which are
+  `0o700` and `0o600`. The Rust channel makes the inbox and the acknowledgements'
+  folder `0o700` and writes the record, and its temporary, `0o600`
+  (`pi/channel/send.rs`). `launch/` moved for it in the macOS recording alone
+  (Windows keeps no modes), in 29 steps of 22 Pi scenarios: 65 modes, the `inbox`
+  and `ack` folders from 493 to 448 (21 each) and the `inbox/m-….json` records and
+  their `.tmp` from 420 to 384 (23). Nothing else moved: with those modes put back,
+  each step reads as Node recorded it.
+
 ## The launch scenarios
 
 A scenario of `launch/scenarios.<platform>.json` is data, and the Rust player

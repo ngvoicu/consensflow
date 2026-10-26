@@ -122,7 +122,16 @@ pub fn forget_launch(home: &str, launch: &LaunchId) -> Result<(), NotRemoved> {
 fn remove_launch(home: &str, harness: &str, folder: &Path, name: &str) -> io::Result<()> {
     if harness == "devin" {
         let kept = Path::new(home).join("integrations").join(kept::FOLDER);
-        kept::keep(folder, name, &kept)?;
+        // Said as the keep, and why, not as the removal it stopped (Calliope's P3 on T-697).
+        kept::keep(folder, name, &kept).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "what proves its first message could not be kept in {}: {error}",
+                    kept.display()
+                ),
+            )
+        })?;
     }
     remove(folder)
 }
@@ -268,6 +277,19 @@ mod tests {
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, [format!("{A}.json")]);
+        // A copy of a prompt is as private as the prompt (Calliope's P2 on T-697): the
+        // folder its owner's alone, the file its owner's to read and write.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |at: &Path| fs::metadata(at).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&kept), 0o700, "the kept folder");
+            assert_eq!(
+                mode(&kept.join(format!("{A}.json"))),
+                0o600,
+                "the kept file"
+            );
+        }
         let said: serde_json::Value =
             serde_json::from_slice(&fs::read(kept.join(format!("{A}.json"))).unwrap()).unwrap();
         assert_eq!(
@@ -333,5 +355,45 @@ mod tests {
         assert!(forgot.is_err(), "the window's close says it too");
         // Once it can go, the next sweep takes it.
         assert_eq!(sweep_launches(&home).unwrap(), 1);
+    }
+
+    /// Calliope's P3 on T-697: a keep that fails leaves its launch's folder, and the
+    /// start's failure says it was the keep, and why, not only that the folder stayed.
+    #[cfg(unix)]
+    #[test]
+    fn a_keep_that_fails_is_said_as_the_keep() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_string_lossy().into_owned();
+        let launch = dir.path().join("integrations/devin").join(A);
+        fs::create_dir_all(&launch).unwrap();
+        fs::write(
+            launch.join("prompt.txt"),
+            "/bypass [ConsensFlow m-2 · note]\nGo on.",
+        )
+        .unwrap();
+        fs::write(
+            launch.join("wire.jsonl"),
+            "{\"sessionId\":\"calm-river\",\"update\":{}}\n",
+        )
+        .unwrap();
+        let kept = dir.path().join("integrations").join(kept::FOLDER);
+        fs::create_dir_all(&kept).unwrap();
+        fs::set_permissions(&kept, fs::Permissions::from_mode(0o500)).unwrap();
+        let swept = sweep_launches(&home);
+        fs::set_permissions(&kept, fs::Permissions::from_mode(0o700)).unwrap();
+        let failed = swept.unwrap_err().to_string();
+        assert!(
+            failed.contains("its first message could not be kept")
+                && failed.contains(&kept.to_string_lossy().into_owned())
+                && failed.contains("ermission denied"),
+            "{failed}"
+        );
+        assert!(launch.exists(), "the folder stays with what it proves");
+        assert_eq!(
+            sweep_launches(&home).unwrap(),
+            1,
+            "and goes once it can be kept"
+        );
     }
 }

@@ -115,7 +115,7 @@ impl Wires {
         // What was kept of launches whose folders went is the launches' own word: what
         // came or went of it changes what the session reads.
         self.kept_files
-            .read(&path::join(&[&consensflow, "integrations", kept::FOLDER]))?;
+            .read(&path::join(&[&consensflow, "integrations", kept::FOLDER]));
         let kept = self.kept_files.for_session(session);
         let kept_changed = kept != self.kept;
         self.kept = kept;
