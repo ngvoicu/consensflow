@@ -34,6 +34,10 @@ daemon-wake-up-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib",
 daemon-suspended = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::suspended"]
 # The dialog and the menu, in the browser Playwright keeps, and New project's start.
 page-project-settings = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Project settings"]
+# The test of the board's button and the dialog's name alone: every test that opens the dialog
+# finds it by that name, so a renamed button fails them all, and their run passed the plant's
+# limit (399 s, T-607).
+page-project-settings-named = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "names the board's button and its dialog Project settings"]
 # The same, with the closed project's board that stays read-only beside them.
 page-closed-settings = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Project settings|closed project"]
 page-new-project = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "New project"]
@@ -284,7 +288,7 @@ replace = "const UNSET = { on: false, every: 2, unit: 'hours', text: DEFAULT_WAK
 [[plant]]
 name = "project settings: the board's button is still called Staff"
 meant = "names the board's button and its dialog Project settings, with Staff, Human approval, Wake-up calls and Specs as its sections, in that order"
-runs = ["page-project-settings"]
+runs = ["page-project-settings-named"]
 
 [[plant.edit]]
 file = "app/ui/index.html"

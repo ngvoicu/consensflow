@@ -3,7 +3,6 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { consoleText } from '../app/ui/core/console-text.js'
 import {
   askedUntilFree,
   droppedText,
@@ -15,7 +14,7 @@ import {
 /**
  * What a file dropped on a terminal window types (app/ui/core/file-drop.js):
  * each path as one word of the system's shell, which names no window takes,
- * what a window that reads key presses on Windows would not get as it is, and
+ * what a Codex window on Windows would not get as it is, and
  * where the app says the drop is, in the page's pixels. The page's Playwright
  * suite holds the rest (app/tests/core-page.spec.mjs, "file drop").
  */
@@ -149,35 +148,28 @@ describe('file drop: the words Windows types', () => {
   })
 })
 
-describe('file drop: what a window that reads key presses on Windows cannot take', () => {
-  it('is nothing of a path of ASCII and letters, which reaches it as it is, quoted or not', () => {
+describe('file drop: what a window cannot take as it is typed into it', () => {
+  it('is nothing for a Devin window on Windows, marks, letters, joining marks and emoji alike', () => {
     for (const path of [
       'C:\\Users\\me\\My Pictures\\a b.png',
-      'C:\\Users\\me\\résumé.txt',
-      'C:\\Users\\me\\日本語\\ファイル.txt',
-      'C:\\Ärger\\straße\\ăîș.txt',
+      'C:\\a — b “c” — d.png',
+      'C:\\€5 → £3.txt',
+      'C:\\10.30.00\u202fAM.png',
+      'C:\\re\u0301sume\u0301.txt',
+      'C:\\\u1100\u1161.txt',
+      'C:\\🙂.png',
     ]) {
-      assert.deepEqual(untakeable(path), [], path)
-      const typed = droppedText([path], WINDOWS)
-      assert.equal(consoleText(typed), typed, path)
+      assert.deepEqual(untakeable(path, 'devin', WINDOWS), [], path)
     }
   })
 
-  it('is every mark and symbol its console drops or the page spells in ASCII, each once', () => {
-    assert.deepEqual(untakeable('C:\\a — b “c” — d.png'), ['—', '“', '”'])
-    assert.deepEqual(untakeable('C:\\10.30.00\u202fAM.png'), ['\u202f'])
-    assert.deepEqual(untakeable('C:\\€5 → £3.txt'), ['€', '→', '£'])
+  it('is, for a Codex window on Windows, each character outside the Basic Multilingual Plane, once', () => {
+    assert.deepEqual(untakeable('C:\\a — b “c” → €.png', 'codex', WINDOWS), [])
+    assert.deepEqual(untakeable('C:\\🙂 and 🙂\\𝐀.png', 'codex', WINDOWS), ['🙂', '𝐀'])
   })
 
-  it('is a symbol the page leaves as it is too, which the console drops all the same', () => {
-    assert.deepEqual(untakeable('C:\\🙂.png'), ['🙂'])
-    assert.equal(consoleText('C:\\🙂.png'), 'C:\\🙂.png')
-  })
-
-  it('is what would be written otherwise: a mark that joins a letter, a letter of another form, letters joined', () => {
-    assert.deepEqual(untakeable('C:\\re\u0301sume\u0301.txt'), ['\u0301'])
-    assert.deepEqual(untakeable('C:\\\u2126.txt'), ['\u2126'])
-    assert.deepEqual(untakeable('C:\\\u1100\u1161.txt'), ['\u1100', '\u1161'])
+  it('is nothing elsewhere, Codex included', () => {
+    assert.deepEqual(untakeable('/Users/me/🙂 — €.png', 'codex', false), [])
   })
 })
 

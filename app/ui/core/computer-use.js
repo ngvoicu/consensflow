@@ -3,20 +3,28 @@ import { element, redraw } from '../dom.js'
 /**
  * Project settings, Computer use (T-540): for each harness with a computer use of its
  * own, whether it is on for the project, shown only while the project has a member on
- * that harness, the chief included; and ConsensFlow's two macOS permissions, which every
- * project's computer use works through, shown once for the parts above them.
+ * that harness, the chief included; and ConsensFlow's two macOS permissions, which
+ * Claude Code's computer use works through, shown once below the parts that need them.
  *
  * The daemon says what each harness's own configuration says for the project's folder
  * (`computer_use.get`, read and never written): Claude Code keeps its switch in its own
  * configuration, which the human turns on in Claude Code itself, so the part only says
- * where. Each permission opens its pane of System Settings (`computer_use.open`); the
- * state is read again when the dialog opens and when the human comes back to the app.
+ * where. Codex's comes from the ChatGPT app, for every folder, and works through the
+ * permissions of its own app, Codex Computer Use (T-548): its part leads to the same two
+ * panes, where the human allows that app, and can't say whether it is allowed. Each
+ * permission opens its pane of System Settings (`computer_use.open`); the state is read
+ * again when the dialog opens and when the human comes back to the app.
  */
 
-/** Each harness's part, by the harness's word, in the order they are shown. */
+/**
+ * Each harness's part, by the harness's word, in the order they are shown: `ours` where
+ * it works through ConsensFlow's permissions, and `own` the app whose permissions it
+ * works through where they are another app's.
+ */
 const PARTS = {
   'claude-code': {
     name: 'Claude Code',
+    ours: true,
     /** What the part says, of `said` (its harness's answer) on `system`. */
     lines(said, system) {
       if (system === 'windows') return ['Claude Code has no computer use on Windows.']
@@ -25,6 +33,20 @@ const PARTS = {
       return [
         'Off for this project.',
         `Turn it on in a Claude Code window in ${said.folder}: /mcp → computer-use → Enable.`,
+      ]
+    },
+  },
+  codex: {
+    name: 'Codex',
+    own: 'Codex Computer Use',
+    lines(said, system) {
+      if (system === 'windows') return ['Codex has no computer use on Windows.']
+      if (system !== 'macos') return ['Codex has computer use only on macOS.']
+      return [
+        ...(said.setUp
+          ? ['Set up on this Mac, for every project.']
+          : ['Not set up on this Mac.', 'Set it up in the ChatGPT app.']),
+        "It works through Codex Computer Use's own permissions, not ConsensFlow's: allow Codex Computer Use in each of these.",
       ]
     },
   },
@@ -118,11 +140,25 @@ export class ComputerUseSection {
         for (const line of part.lines(said.harnesses[harness], said.system)) {
           block.append(element('p', 'computer-use-line', line))
         }
+        // Another app's permissions: their panes, with no state, which ConsensFlow can't read.
+        if (part.own && said.system === 'macos') {
+          const grants = element('ul', 'computer-use-grants')
+          grants.append(
+            ...GRANTS.map(({ pane, name }) => {
+              const row = element('li', 'computer-use-grant')
+              row.dataset.grant = pane
+              row.append(element('span', 'computer-use-grant-name', name))
+              row.append(this.#opener(pane, `${name} (${part.own})`))
+              return row
+            }),
+          )
+          block.append(grants)
+        }
         return block
       }),
     )
     const permissions = said?.permissions ?? null
-    this.#permissions.hidden = parts.length === 0 || permissions === null
+    this.#permissions.hidden = !parts.some(([, part]) => part.ours) || permissions === null
     // A ConsensFlow started from another app (a `cf ui` in a terminal) has that app's
     // permissions, which are the ones shown.
     const grantsOf = typeof said?.grantsOf === 'string' ? said.grantsOf : null
@@ -147,16 +183,21 @@ export class ComputerUseSection {
                 allowed ? 'allowed' : 'not allowed',
               ),
             )
-            const open = element('button', 'quiet-button', 'Open System Settings')
-            open.type = 'button'
-            open.setAttribute('aria-label', `Open System Settings for ${name}`)
-            open.addEventListener('click', () =>
-              this.#page.act(() => this.#page.daemon('computer_use.open', { pane })),
-            )
-            row.append(open)
+            row.append(this.#opener(pane, name))
             return row
           }),
     )
+  }
+
+  /** The button that opens System Settings at `pane`, named for `what` it is opened for. */
+  #opener(pane, what) {
+    const open = element('button', 'quiet-button', 'Open System Settings')
+    open.type = 'button'
+    open.setAttribute('aria-label', `Open System Settings for ${what}`)
+    open.addEventListener('click', () =>
+      this.#page.act(() => this.#page.daemon('computer_use.open', { pane })),
+    )
+    return open
   }
 }
 

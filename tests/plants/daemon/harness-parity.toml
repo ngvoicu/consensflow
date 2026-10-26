@@ -11,7 +11,7 @@
 harness-claude-computer-use = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::computer_use"]
 engine-computer-use = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "computer_use::"]
 daemon-computer-use = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use"]
-page-computer-use = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "computer use|computer-use|another app"]
+page-computer-use = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "computer use|computer-use|another app|omputer use|both parts"]
 daemon-seams = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::"]
 regression-terminal-env = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_terminals_environment_reached_the_daemon_and_no_window"]
 live-kit-shim = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::wrapper"]
@@ -82,8 +82,8 @@ replace = '''            "screen-recording" => Some(Self::ScreenRecording),
             _ => Some(Self::Accessibility),'''
 
 [[plant]]
-name = "parity computer use: the row is shown for a project with no Claude Code member"
-meant = "Project settings: a project with no Claude Code member, the chief included, shows no computer use"
+name = "parity computer use: the row is shown for a project with no member on a harness with computer use"
+meant = "Project settings: a project with no member on a harness with computer use, the chief included, shows no computer use"
 runs = ["page-computer-use"]
 
 [[plant.edit]]

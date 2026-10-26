@@ -1,6 +1,7 @@
 //! Codex, as a live test starts it itself: with every MCP server it would
 //! start switched off, and, where a test needs to see what Codex says on the
-//! wire, its app-server driven over its standard streams.
+//! wire, its app-server driven over its standard streams; and a Codex home of a
+//! run's own, holding a copy of the machine's login ([`CodexHome`]).
 //!
 //! The MCP servers are the human's (a plugin, the ChatGPT app and `config.toml`
 //! each add some), and a window that runs unattended in full-permission mode on
@@ -17,6 +18,9 @@ use serde_json::{json, Value};
 use crate::process::{Run, Sink, Spawned};
 use crate::wire::{self, Pending};
 use crate::{Error, Result};
+
+mod home;
+pub use home::CodexHome;
 
 /// The MCP servers Codex would start, as it lists them (`codex mcp list
 /// --json`): each with its `name` and, in a Codex that says it, its `transport`.

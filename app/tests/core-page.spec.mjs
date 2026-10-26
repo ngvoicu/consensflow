@@ -377,6 +377,7 @@ async function open(page, data = model()) {
               on: said.on ?? false,
               folder: data.boards[project]?.project.directory,
             },
+            codex: { setUp: said.codexSetUp ?? false },
           },
         })
       },
@@ -2878,10 +2879,16 @@ test.describe('on Windows', () => {
     return new TextDecoder().decode(new Uint8Array(bytes))
   }
 
-  // Windows' console drops a non-ASCII mark on its way to a window that reads
-  // key presses (Devin, Codex); Claude reads its terminal as text.
-  test("the human's marks reach a Devin window in ASCII", async ({ page }) => {
-    expect(await sent(page, 'devin', 'a — “b” → €5, ăîș')).toBe('a -- "b" -> EUR5, ăîș')
+  // A window that reads key presses on Windows (Devin, Codex) gets what the human types as
+  // typed, marks included: the console host the app ships gives it them whole, where the page
+  // spelled them in ASCII until T-548 (and, for a round, wrote them as win32-input-mode keys,
+  // after which that host held every lone Escape). Claude reads its terminal as text.
+  test("the human's marks reach a Devin window as typed", async ({ page }) => {
+    expect(await sent(page, 'devin', 'a — “b” → €5, ăîș')).toBe('a — “b” → €5, ăîș')
+  })
+
+  test("the human's marks and Escape reach a Codex window as typed", async ({ page }) => {
+    expect(await sent(page, 'codex', '€ 😀\u001b\r')).toBe('€ 😀\u001b\r')
   })
 
   test("the human's marks reach a Claude window as typed", async ({ page }) => {
@@ -6239,11 +6246,11 @@ const computerUseLines = (dialog) =>
       ),
   )
 
-test('Project settings: a project with no Claude Code member, the chief included, shows no computer use', async ({
+test('Project settings: a project with no member on a harness with computer use, the chief included, shows no computer use', async ({
   page,
 }) => {
   const data = model()
-  allOn(data, 'codex')
+  allOn(data, 'devin')
   await open(page, data)
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
@@ -6256,7 +6263,7 @@ test('Project settings: computer use appears with a Claude Code member and goes 
   page,
 }) => {
   const data = model()
-  allOn(data, 'codex')
+  allOn(data, 'devin')
   await open(page, data)
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
@@ -6292,6 +6299,7 @@ test('Project settings: computer use says where Claude Code turns it on, and eac
   page,
 }) => {
   const data = model()
+  allOn(data, 'claude-code')
   data.computerUse = { permissions: { accessibility: true, screenRecording: false } }
   await open(page, data)
   await page.getByRole('button', { name: 'Project settings' }).click()
@@ -6318,6 +6326,7 @@ test('Project settings: computer use that is on says so, and on Windows says Cla
   page,
 }) => {
   const data = model()
+  allOn(data, 'claude-code')
   data.computerUse = { on: true, permissions: { accessibility: true, screenRecording: true } }
   await open(page, data)
   await page.getByRole('button', { name: 'Project settings' }).click()
@@ -6347,6 +6356,7 @@ test("Project settings: a ConsensFlow started from another app says the permissi
   page,
 }) => {
   const data = model()
+  allOn(data, 'claude-code')
   data.computerUse = {
     grantsOf: 'com.apple.Terminal',
     permissions: { accessibility: true, screenRecording: false },
@@ -6388,6 +6398,89 @@ test("a member's note with the words of ConsensFlow's computer-use note gets no 
     .locator('li[data-message="18"]')
   await expect(note).toBeVisible()
   await expect(note.getByRole('button', { name: /Open System Settings/ })).toHaveCount(0)
+})
+
+test("Project settings: Codex's computer use says whether the ChatGPT app set it up, and leads to Codex Computer Use's own permissions", async ({
+  page,
+}) => {
+  const data = model()
+  allOn(data, 'codex')
+  data.computerUse = { permissions: { accessibility: true, screenRecording: true } }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  // ConsensFlow's own permissions are not Codex's: they are not shown for it.
+  expect(await computerUseLines(dialog)).toEqual([
+    'Codex',
+    'Not set up on this Mac.',
+    'Set it up in the ChatGPT app.',
+    "It works through Codex Computer Use's own permissions, not ConsensFlow's: allow Codex Computer Use in each of these.",
+    'Accessibility Open System Settings',
+    'Screen & System Audio Recording Open System Settings',
+  ])
+  await expect(dialog.locator('.computer-use-permissions')).toBeHidden()
+  await dialog
+    .getByRole('button', { name: 'Open System Settings for Accessibility (Codex Computer Use)' })
+    .click()
+  await dialog
+    .getByRole('button', {
+      name: 'Open System Settings for Screen & System Audio Recording (Codex Computer Use)',
+    })
+    .click()
+  await expect
+    .poll(() => calls(page, 'computer_use.open'))
+    .toEqual([{ pane: 'accessibility' }, { pane: 'screen-recording' }])
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await page.evaluate(() => {
+    window.__model.computerUse = { codexSetUp: true, permissions: null }
+  })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  expect(await computerUseLines(dialog)).toEqual([
+    'Codex',
+    'Set up on this Mac, for every project.',
+    "It works through Codex Computer Use's own permissions, not ConsensFlow's: allow Codex Computer Use in each of these.",
+    'Accessibility Open System Settings',
+    'Screen & System Audio Recording Open System Settings',
+  ])
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await page.evaluate(() => {
+    window.__model.computerUse = { system: 'windows', codexSetUp: false, permissions: null }
+  })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  expect(await computerUseLines(dialog)).toEqual(['Codex', 'Codex has no computer use on Windows.'])
+})
+
+test("Project settings: a project with Claude Code and Codex members shows both parts, and ConsensFlow's permissions once", async ({
+  page,
+}) => {
+  const data = model()
+  allOn(data, 'codex')
+  data.boards[1].lanes.find((l) => l.participant.role === 'chief').participant.harness =
+    'claude-code'
+  data.computerUse = {
+    codexSetUp: true,
+    permissions: { accessibility: false, screenRecording: true },
+  }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  expect(await computerUseLines(dialog)).toEqual([
+    'Claude Code',
+    'Off for this project.',
+    'Turn it on in a Claude Code window in /work/harbour: /mcp → computer-use → Enable.',
+    'Codex',
+    'Set up on this Mac, for every project.',
+    "It works through Codex Computer Use's own permissions, not ConsensFlow's: allow Codex Computer Use in each of these.",
+    'Accessibility Open System Settings',
+    'Screen & System Audio Recording Open System Settings',
+    "ConsensFlow's permissions, for every project",
+    'Accessibility: not allowed Open System Settings',
+    'Screen & System Audio Recording: allowed Open System Settings',
+  ])
 })
 
 test("a note that ConsensFlow lacks computer use's permissions opens the System Settings pane of each it names", async ({
@@ -9279,8 +9372,10 @@ test.describe('file drop on Windows', () => {
       harness
     return { ...data, shortNames }
   }
+  /** A path with marks, which every window takes whole, and one with a character Codex drops. */
   const DASHED = 'C:\\Users\\me\\a — b “c”.png'
-  const ALIASED = { [DASHED]: { short: 'C:\\Users\\me\\A-BC~1.PNG' } }
+  const SMILING = 'C:\\Users\\me\\a 🙂 b.png'
+  const ALIASED = { [SMILING]: { short: 'C:\\Users\\me\\A-B~1.PNG' } }
   /** The paths the page asked the short names of, each time it asked. */
   const askedShort = (page) =>
     page.evaluate(() =>
@@ -9299,54 +9394,68 @@ test.describe('file drop on Windows', () => {
   const focusAsked = (page) =>
     page.evaluate(() => window.__calls.filter(([c]) => c === 'focus_after_drop').length)
 
-  test('types a path into a Devin window by its short name where its console would change the long one', async ({
+  test('types a path with marks into a Devin window whole, and asks no short name', async ({
     page,
   }) => {
     await sideBySide(page, chiefOn('devin', ALIASED))
-    const paths = [DASHED, 'C:\\Users\\me\\My Pictures\\plain.txt', 'C:\\Users\\me\\résumé.txt']
+    await dragged.drop(page, [DASHED, SMILING], told(await middleOf(page, 'chief'), 2))
+    await expect.poll(() => typedInto(page, 'p1-chief')).toEqual([`"${DASHED}" "${SMILING}"`])
+    expect(await askedShort(page)).toEqual([])
+  })
+
+  test('types a path into a Codex window by its short name where the long one holds a character Codex drops', async ({
+    page,
+  }) => {
+    await sideBySide(page, chiefOn('codex', ALIASED))
+    const paths = [
+      SMILING,
+      DASHED,
+      'C:\\Users\\me\\My Pictures\\plain.txt',
+      'C:\\Users\\me\\résumé.txt',
+    ]
     await dragged.drop(page, paths, told(await middleOf(page, 'chief'), 2))
-    // The others as they are: ASCII and letters reach it whole. Only the one is asked for.
+    // The others as they are: marks, letters and ASCII reach it whole. Only the one is asked for.
     await expect
       .poll(() => typedInto(page, 'p1-chief'))
       .toEqual([
-        'C:\\Users\\me\\A-BC~1.PNG "C:\\Users\\me\\My Pictures\\plain.txt" C:\\Users\\me\\résumé.txt',
+        `C:\\Users\\me\\A-B~1.PNG "${DASHED}" "C:\\Users\\me\\My Pictures\\plain.txt" C:\\Users\\me\\résumé.txt`,
       ])
-    expect(await askedShort(page)).toEqual([[DASHED]])
+    expect(await askedShort(page)).toEqual([[SMILING]])
     // The human did nothing meanwhile: the window has the keyboard, and the app comes in front.
     await expect.poll(() => typingIn(page)).toBe('chief')
     await expect.poll(() => focusAsked(page)).toBe(1)
     // Both asked of the drop by the number the app told it by.
-    expect(await askedOf(page, 'short_paths')).toEqual([[1, [DASHED]]])
+    expect(await askedOf(page, 'short_paths')).toEqual([[1, [SMILING]]])
     expect(await askedOf(page, 'focus_after_drop')).toEqual([1])
-    // A human paste into it still goes in the ASCII its console takes.
+    // A human paste into it goes as it was typed (T-548).
     await humanPaste(page, 'chief', 'a — b')
-    await expect.poll(async () => (await typedInto(page, 'p1-chief')).at(-1)).toBe('a -- b')
+    await expect.poll(async () => (await typedInto(page, 'p1-chief')).at(-1)).toBe('a — b')
   })
 
-  test('types nothing into a Codex window for a path its console would change and that has no short name it takes, and says why in the app’s words', async ({
+  test('types nothing into a Codex window for a path with a character Codex drops and no short name it takes, and says why in the app’s words', async ({
     page,
   }) => {
-    const NBSP = 'C:\\Users\\me\\x\u202fy.png'
-    const SHARED = '\\\\server\\share\\a — b.png'
+    const KEPT = 'C:\\Users\\me\\x🙂y.png'
+    const SHARED = '\\\\server\\share\\a 𝐀 b.png'
     // A volume that keeps no short names (the stand-in's answer where it is told none), an
-    // alias that still holds what the console drops, and a share that did not answer.
+    // alias that still holds what Codex drops, and a share that did not answer.
     const answered = {
-      [NBSP]: { short: 'C:\\Users\\me\\X\u202fY~1.PNG' },
+      [KEPT]: { short: 'C:\\Users\\me\\X🙂Y~1.PNG' },
       [SHARED]: { error: 'its network share did not answer' },
     }
     await sideBySide(page, chiefOn('codex', answered))
     await hearStatus(page)
     const chief = told(await middleOf(page, 'chief'), 2)
-    await dragged.drop(page, ['C:\\Users\\me\\plain.txt', DASHED], chief)
-    await dragged.drop(page, [NBSP], chief)
+    await dragged.drop(page, ['C:\\Users\\me\\plain.txt', SMILING], chief)
+    await dragged.drop(page, [KEPT], chief)
     await dragged.drop(page, [SHARED], chief)
     const cannot = "Nothing was typed: Chief of Staff's window cannot take"
     await expect
       .poll(() => heard(page))
       .toEqual([
-        `${cannot} — (U+2014), “ (U+201C), ” (U+201D) of ${DASHED}, and Windows keeps no short name for it.`,
-        `${cannot} \u202f (U+202F) of ${NBSP}, and its short name holds them too.`,
-        `${cannot} — (U+2014) of ${SHARED}, and its network share did not answer.`,
+        `${cannot} 🙂 (U+1F642) of ${SMILING}, and Windows keeps no short name for it.`,
+        `${cannot} 🙂 (U+1F642) of ${KEPT}, and its short name holds them too.`,
+        `${cannot} 𝐀 (U+1D400) of ${SHARED}, and its network share did not answer.`,
       ])
     await expect(page.locator('#status')).toHaveAttribute('data-tone', 'error')
     expect(await typedInto(page, 'p1-chief')).toEqual([])
@@ -9356,7 +9465,7 @@ test.describe('file drop on Windows', () => {
   test('types a drop typed after the human acted into the window it was dropped on, and takes no focus', async ({
     page,
   }) => {
-    await sideBySide(page, chiefOn('devin', ALIASED))
+    await sideBySide(page, chiefOn('codex', ALIASED))
     const chief = told(await middleOf(page, 'chief'), 2)
     const zeusKeys = page.locator(
       '#stage .terminal-card[data-handle="zeus"] .xterm-helper-textarea',
@@ -9374,7 +9483,7 @@ test.describe('file drop on Windows', () => {
     for (const [at, [name, act]] of acts.entries()) {
       await zeusKeys.focus()
       await hold(page, 'short_paths')
-      await dragged.drop(page, [DASHED], chief)
+      await dragged.drop(page, [SMILING], chief)
       await expect.poll(() => askedShort(page)).toHaveLength(at + 1)
       await act()
       await letGo(page, 'short_paths')
@@ -9387,31 +9496,31 @@ test.describe('file drop on Windows', () => {
   test('types the paths of the drops in the order they came, one waiting for the short names of the one before', async ({
     page,
   }) => {
-    await sideBySide(page, chiefOn('devin', ALIASED))
+    await sideBySide(page, chiefOn('codex', ALIASED))
     await hold(page, 'short_paths')
     const chief = told(await middleOf(page, 'chief'), 2)
-    await dragged.drop(page, [DASHED], chief)
+    await dragged.drop(page, [SMILING], chief)
     await dragged.drop(page, ['C:\\Users\\me\\second.png'], chief)
     await page.waitForTimeout(100)
     expect(await typedInto(page, 'p1-chief')).toEqual([])
     await letGo(page, 'short_paths')
     await expect
       .poll(() => typedInto(page, 'p1-chief'))
-      .toEqual(['C:\\Users\\me\\A-BC~1.PNG', 'C:\\Users\\me\\second.png'])
+      .toEqual(['C:\\Users\\me\\A-B~1.PNG', 'C:\\Users\\me\\second.png'])
   })
 
   test('types every drop that came while one waited for its short names, each looked up as the drop it is', async ({
     page,
   }) => {
-    const B = 'C:\\Users\\me\\b — 2.png'
-    const C = 'C:\\Users\\me\\c — 3.png'
-    const data = chiefOn('devin', {
+    const B = 'C:\\Users\\me\\b 🙂 2.png'
+    const C = 'C:\\Users\\me\\c 🙂 3.png'
+    const data = chiefOn('codex', {
       ...ALIASED,
       [B]: { short: 'C:\\Users\\me\\B-2~1.PNG' },
       [C]: { short: 'C:\\Users\\me\\C-3~1.PNG' },
     })
     data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus').participant.harness =
-      'devin'
+      'codex'
     await sideBySide(page, data)
     await hearStatus(page)
     const chief = told(await middleOf(page, 'chief'), 2)
@@ -9419,17 +9528,17 @@ test.describe('file drop on Windows', () => {
     // The first drop's short names are slow to come (a share far away); meanwhile one more
     // file is dropped on zeus, and another on the chief.
     await hold(page, 'short_paths')
-    await dragged.drop(page, [DASHED], chief)
+    await dragged.drop(page, [SMILING], chief)
     await expect.poll(() => askedShort(page)).toHaveLength(1)
     await dragged.drop(page, [B], zeus)
     await dragged.drop(page, [C], chief)
     await letGo(page, 'short_paths')
     await expect
       .poll(() => typedInto(page, 'p1-chief'))
-      .toEqual(['C:\\Users\\me\\A-BC~1.PNG', 'C:\\Users\\me\\C-3~1.PNG'])
+      .toEqual(['C:\\Users\\me\\A-B~1.PNG', 'C:\\Users\\me\\C-3~1.PNG'])
     await expect.poll(() => typedInto(page, 'p1-zeus')).toEqual(['C:\\Users\\me\\B-2~1.PNG'])
     expect(await askedOf(page, 'short_paths')).toEqual([
-      [1, [DASHED]],
+      [1, [SMILING]],
       [2, [B]],
       [3, [C]],
     ])
@@ -9441,22 +9550,22 @@ test.describe('file drop on Windows', () => {
   }) => {
     // A page before a reload left a lookup reading a share far away: the app is busy
     // with it for the first two asks.
-    await sideBySide(page, { ...chiefOn('devin', ALIASED), busyLookups: 2 })
+    await sideBySide(page, { ...chiefOn('codex', ALIASED), busyLookups: 2 })
     await hearStatus(page)
-    await dragged.drop(page, [DASHED], told(await middleOf(page, 'chief'), 2))
-    await expect.poll(() => typedInto(page, 'p1-chief')).toEqual(['C:\\Users\\me\\A-BC~1.PNG'])
-    expect(await askedShort(page)).toEqual([[DASHED], [DASHED], [DASHED]])
+    await dragged.drop(page, [SMILING], told(await middleOf(page, 'chief'), 2))
+    await expect.poll(() => typedInto(page, 'p1-chief')).toEqual(['C:\\Users\\me\\A-B~1.PNG'])
+    expect(await askedShort(page)).toEqual([[SMILING], [SMILING], [SMILING]])
     expect(await heard(page)).toEqual([])
   })
 
   test('types nothing into a window that closed while the short names were read, and says so', async ({
     page,
   }) => {
-    await sideBySide(page, chiefOn('devin', ALIASED))
+    await sideBySide(page, chiefOn('codex', ALIASED))
     await hearStatus(page)
     await hold(page, 'short_paths')
-    await dragged.drop(page, [DASHED], told(await middleOf(page, 'chief'), 2))
-    await expect.poll(() => askedShort(page)).toEqual([[DASHED]])
+    await dragged.drop(page, [SMILING], told(await middleOf(page, 'chief'), 2))
+    await expect.poll(() => askedShort(page)).toEqual([[SMILING]])
     await changed(page, () => {
       const chief = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
       Object.assign(chief, { activity: { state: 'closed' }, pane: null })

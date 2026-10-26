@@ -1,9 +1,11 @@
 //! A project's computer use, for the row Project settings shows (T-540): what the
 //! system is, ConsensFlow's macOS grants (the app's, shown where they matter), and
 //! for each harness with a computer use of its own what it says for the project's
-//! folder, under the harness's word. Claude Code's is read from its own
-//! configuration, never written. The page shows a harness's part only when the
-//! project has a member of that harness, the chief included.
+//! folder, under the harness's word. Claude Code's and Codex's are read from their
+//! own configuration, never written; Codex's is the machine's, the same for every
+//! folder, and works through the grants of its own app, not ConsensFlow's. The
+//! page shows a harness's part only when the project has a member of that
+//! harness, the chief included.
 //!
 //! `computer_use.open` opens one of the two System Settings panes where the human
 //! gives a grant, by the pane's name, and nothing else.
@@ -55,12 +57,14 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         })
     });
     let claude = machine.claude(&project.directory);
+    let codex = machine.codex();
     merged(json!({
         "system": system(),
         "permissions": permissions,
         "grantsOf": page.computer_use.grants_of,
         "harnesses": {
             "claude-code": { "on": claude.on, "folder": claude.folder },
+            "codex": { "setUp": codex.set_up },
         },
     }))
 }

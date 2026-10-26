@@ -54,18 +54,22 @@ nothing else. Load none of them and run no tool.";
 const WORK: Duration = Duration::from_secs(300);
 const LOOK: Duration = Duration::from_secs(2);
 
-/// The workers named (`cargo xtask live parity <harness>`), OpenCode where none is.
+/// The workers named (`cargo xtask live parity <harness>`), Codex and Devin where none
+/// is: OpenCode's cheap model is gone from its catalog, and OpenCode leaves in alpha.4, so
+/// it runs only when named (T-607). Each test takes the harnesses of its own.
 fn workers() -> Result<Vec<Harness>> {
     let named = live::list("harness");
     if named.is_empty() {
-        return Ok(vec![Harness::OpenCode]);
+        return Ok(vec![Harness::Codex, Harness::Devin]);
     }
     named
         .iter()
         .map(|word| match Who::named(word, "worker")? {
-            Who::Harness(Harness::OpenCode) => Ok(Harness::OpenCode),
+            Who::Harness(harness @ (Harness::OpenCode | Harness::Codex | Harness::Devin)) => {
+                Ok(harness)
+            }
             _ => Err(Error::Daemon(format!(
-                "live parity checks OpenCode's skills only, not {word}"
+                "live parity's workers are OpenCode, Codex and Devin, not {word}"
             ))),
         })
         .collect()
@@ -136,11 +140,27 @@ fn failure(members: &Members, harness: Harness, log: &Log) {
     log.block("the daemon's log", &live::warnings(&rig.log()).join("\n"));
 }
 
+// Codex's and Devin's parts (T-548), in `live_parity/`: cargo looks for the modules of a
+// test's root file beside it, where each would be a suite of its own.
+#[path = "live_parity/codex_devin.rs"]
+mod codex_devin;
+
+#[test]
+#[ignore = "opt-in: spends the machine's quota on two short tasks of each harness named; cargo xtask live parity codex devin"]
+fn a_codex_or_devin_worker_has_what_its_harness_has_in_a_terminal_and_takes_its_interrupt_after_typing(
+) -> Result {
+    let log = Log::begin("live parity")?;
+    codex_devin::run(&log, &workers()?)
+}
+
 #[test]
 #[ignore = "opt-in: spends the machine's quota on one short task of each harness named; cargo xtask live parity"]
 fn an_opencode_worker_has_the_skills_its_folders_own_configuration_names_and_its_roles() -> Result {
     let log = Log::begin("live parity")?;
-    for harness in workers()? {
+    for harness in workers()?
+        .into_iter()
+        .filter(|harness| *harness == Harness::OpenCode)
+    {
         let log = log.scoped(harness.name());
         let mut members = Members::open(&plan(harness), std::path::Path::new(FAKE_AGENT), &log)?;
         let said = answer(&mut members, harness, &log);

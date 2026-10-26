@@ -138,18 +138,30 @@ mod conpty {
     /// the bytes of each, as the engine writes them (the gaps of [`GAPS`]), and reads
     /// what the program makes of them.
     fn pressed(escape: &[u8]) -> Pressed {
+        pressed_after(None, escape)
+    }
+
+    /// [`pressed`], in a pane that has first been given `mark`, one key, when there is one:
+    /// what the human typed before the engine's round. The mark is the first key read, and
+    /// the Escapes are the ones after it.
+    fn pressed_after(mark: Option<&[u8]>, escape: &[u8]) -> Pressed {
         let _pty_guard = serial_pty_test();
         let table = Arc::new(PaneTable::new());
-        let (key, output) = open(&table, &key_reader(3), &HashMap::new(), 1 << 20);
+        let before = usize::from(mark.is_some());
+        let (key, output) = open(&table, &key_reader(3 + before), &HashMap::new(), 1 << 20);
         read_until(&table, &key, &output, "READY");
+        if let Some(mark) = mark {
+            table.write(&key, mark).expect("type the mark");
+            read_until(&table, &key, &output, "KEY1=");
+        }
         let mut reading = Reading {
             table: &table,
             key: &key,
             output: &output,
             seen: String::new(),
-            said_at: vec![None; 3],
+            said_at: vec![None; 3 + before],
         };
-        let mut written: Vec<Instant> = Vec::new();
+        let mut written: Vec<Instant> = vec![Instant::now(); before];
         for gap in std::iter::once(Duration::ZERO).chain(GAPS) {
             if let Some(last) = written.last() {
                 reading.until(*last + gap);
@@ -164,9 +176,17 @@ mod conpty {
         let delays = written
             .iter()
             .zip(&reading.said_at)
+            .skip(before)
             .map(|(written, said)| said.map(|said| said.saturating_duration_since(*written)))
             .collect();
-        let keys = keys_read(&reading.seen);
+        let keys = keys_read(&reading.seen)
+            .into_iter()
+            .filter(|read| read.number > before)
+            .map(|read| KeyRead {
+                number: read.number - before,
+                ..read
+            })
+            .collect();
         let seen = reading.seen;
         table.kill(&key).expect("close the pane");
         Pressed { keys, delays, seen }
@@ -203,6 +223,88 @@ mod conpty {
     fn the_escapes_written_in_win32_input_mode_reach_a_program_that_reads_key_events_as_three_escape_keys(
     ) {
         assert_three_escapes(&pressed(WIN32_INPUT), "the win32-input-mode form");
+    }
+
+    /// Why nothing writes a key in win32-input-mode to a pane: the console host the app
+    /// ships (ConPTY 1.25) dispatches a lone `ESC` at the end of a read as the Escape key
+    /// only until it has parsed one such sequence (`EncounteredWin32InputModeSequence`,
+    /// never reset; Calliope, T-607), and holds every one after it. After one mark typed
+    /// as a key, the engine's round of Escapes reached a program that reads key events as
+    /// no key at all (zeewin, 2026-10-25), and no interrupt of Devin's or Codex's would
+    /// stop it. If this fails, the host no longer holds them.
+    #[test]
+    fn after_one_key_in_win32_input_mode_the_console_host_holds_the_lone_escapes_the_engine_presses(
+    ) {
+        let pressed = pressed_after(Some(EM_DASH_AS_A_KEY), PLAIN);
+        assert!(
+            pressed.keys != (1..=3).map(KeyRead::escape).collect::<Vec<_>>(),
+            "the host gave the three Escapes after a key as they were: {:?}",
+            pressed.keys
+        );
+    }
+
+    /// The engine's round after the human typed a mark as text, as the page writes what is
+    /// typed: three Escape keys, as in a pane that was given nothing before them.
+    #[test]
+    fn the_escapes_the_engine_presses_after_a_mark_typed_as_text_reach_a_program_that_reads_key_events_as_three_escape_keys(
+    ) {
+        assert_three_escapes(
+            &pressed_after(Some("\u{2014}".as_bytes()), PLAIN),
+            "the plain byte after a mark as text",
+        );
+    }
+
+    /// The first key a program that reads key events reads of `bytes`, written to its pane
+    /// at once, and what its screen said.
+    fn first_key(bytes: &[u8]) -> (Vec<KeyRead>, String) {
+        let _pty_guard = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let (key, output) = open(&table, &key_reader(1), &HashMap::new(), 1 << 20);
+        read_until(&table, &key, &output, "READY");
+        let mut reading = Reading {
+            table: &table,
+            key: &key,
+            output: &output,
+            seen: String::new(),
+            said_at: vec![None],
+        };
+        table.write(&key, bytes).expect("type the mark");
+        let settled = Instant::now() + SETTLE;
+        while reading.said_at[0].is_none() && Instant::now() < settled {
+            reading.until((Instant::now() + Duration::from_millis(100)).min(settled));
+        }
+        table.kill(&key).expect("close the pane");
+        (keys_read(&reading.seen), reading.seen)
+    }
+
+    /// An em dash, no key of the layout's, as Windows Terminal writes it to a pseudoconsole
+    /// made to take keys: a key going down and coming up with no key code and no scan
+    /// code, and the character's code unit (8212).
+    const EM_DASH_AS_A_KEY: &[u8] = b"\x1b[0;0;8212;1;0;1_\x1b[0;0;8212;0;0;1_";
+
+    /// A mark no key of the layout types reaches a program that reads key events as
+    /// itself, written as text or as a key, through the console host the app ships beside
+    /// its pane host (Microsoft's own, which portable-pty loads, as `cargo test` finds it
+    /// beside the build). So the page writes what the human types into a Devin or Codex
+    /// window as it was typed, where it spelled marks in ASCII until T-548. (The system's
+    /// own host, which the app never loads, gives the same mark written as text as the Alt
+    /// key carrying it: T-548, Windows 11 26200.)
+    #[test]
+    fn a_mark_reaches_a_program_that_reads_key_events_as_itself_written_as_text_or_as_a_key() {
+        let mark = KeyRead {
+            number: 1,
+            key: "0".to_owned(),
+            character: 0x2014,
+            modifiers: 0,
+        };
+        let (as_text, seen) = first_key("—".as_bytes());
+        assert_eq!(
+            as_text,
+            std::slice::from_ref(&mark),
+            "written as text; its screen: {seen:?}"
+        );
+        let (as_key, seen) = first_key(EM_DASH_AS_A_KEY);
+        assert_eq!(as_key, [mark], "written as a key; its screen: {seen:?}");
     }
 }
 

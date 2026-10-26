@@ -846,6 +846,11 @@ mod tests {
             "a paste counts its line breaks"
         );
         assert_eq!(super::unsent_after(0, b"\x1b[200~unfinished"), 10);
+        // The page writes marks as text, in a paste too (T-548): a pasted line of them is
+        // its characters, and as many Backspaces leave nothing to hold a delivery over.
+        let pasted = super::unsent_after(0, "\x1b[200~ăîș — €\x1b[201~".as_bytes());
+        assert_eq!(pasted, 7, "a paste's marks are characters, not bytes");
+        assert_eq!(super::unsent_after(pasted, &[0x7f; 7]), 0);
         assert_eq!(
             super::unsent_after(0, b"\x16"),
             1,

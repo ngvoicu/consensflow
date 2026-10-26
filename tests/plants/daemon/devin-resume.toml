@@ -476,8 +476,13 @@ runs = ["rig-live-member-work", "e2e-lib-command"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/command.rs"
-find = '''        Ok(holding(&machine.processes()?, window, self.mark))'''
-replace = '''        Ok(machine.processes()?.into_iter().filter(|process| process.command.contains(self.mark)).collect())'''
+find = """        for process in descending_from(&all, window)
+            .into_iter()
+            .filter(|process| self.is_run_by(&process.command))"""
+replace = """        for process in all
+            .clone()
+            .into_iter()
+            .filter(|process| process.command.contains(self.mark))"""
 
 [[plant]]
 name = "devin resume: the check finds the command by the mark across the machine"

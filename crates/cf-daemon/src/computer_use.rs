@@ -1,10 +1,11 @@
 //! The machine's computer use, as the daemon gives it to the engine and the
 //! page (T-540): ConsensFlow's own macOS grants, which a program in its panes is
-//! given as its own, and whether Claude Code's computer use is on for a folder,
-//! read from Claude's own configuration in the daemon's environment and never
-//! written. The page's Open System Settings opens one of the two panes where the
-//! human gives a grant: a fixed address the daemon chooses by the pane's name,
-//! never words the page wrote.
+//! given as its own, whether Claude Code's computer use is on for a folder, and
+//! whether Codex's is set up (T-548), each read from the harness's own
+//! configuration in the daemon's environment and never written. The page's
+//! Open System Settings opens one of the two panes where the human gives a
+//! grant: a fixed address the daemon chooses by the pane's name, never words the
+//! page wrote.
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -88,6 +89,10 @@ impl ComputerUse for MachineComputerUse {
 
     fn claude(&self, directory: &str) -> computer_use::ComputerUse {
         self.configuration.computer_use(&self.env, directory)
+    }
+
+    fn codex(&self) -> cf_harness::codex::computer_use::ComputerUse {
+        cf_harness::codex::computer_use::computer_use(&self.env)
     }
 }
 
