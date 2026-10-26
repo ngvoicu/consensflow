@@ -507,19 +507,22 @@ fn the_close_of_a_cut_turn_is_no_part_of_any_answer() {
         .iter()
         .find(|item| &*item.text == "No response requested.")
         .expect("the close is an item");
-    assert_eq!((close.role, close.commentary), (Role::Assistant, true));
+    assert_eq!(
+        (close.role, close.commentary, close.synthetic),
+        (Role::Assistant, true, true)
+    );
     // Every other message is the agent's own words.
     assert!(read
         .items
         .iter()
         .filter(|item| item.id != close.id)
-        .all(|item| !item.commentary));
+        .all(|item| !item.commentary && !item.synthetic));
     // The same words the model wrote, or the API's refusal says, are not Claude's close.
     let words = |close: Value| {
         record_of(&[hello(), close])
             .items
             .iter()
-            .any(|item| item.commentary)
+            .any(|item| item.commentary || item.synthetic)
     };
     let said_by_the_model = in_message(closed("c1", "u1"), "model", Some(json!("claude-opus-5-5")));
     assert!(!words(said_by_the_model));
@@ -528,6 +531,55 @@ fn the_close_of_a_cut_turn_is_no_part_of_any_answer() {
         json!({ "isApiErrorMessage": true })
     )));
     assert!(words(closed("c1", "u1")));
+}
+
+/// The live run's record of a conversation the app's quit cut in a command and
+/// resumed (`quit-in-a-command-resumed.jsonl`), for the session of these tests.
+fn resumed_in_a_command() -> Vec<Value> {
+    include_str!("../../../../tests/fixtures/claude/quit-in-a-command-resumed.jsonl")
+        .replace("$SESSION", SESSION)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+#[test]
+fn the_close_of_a_cut_turn_is_written_with_no_model_behind_it_and_the_next_answer_is_the_models() {
+    // T-530: the check that a window got a turn through took Claude's close for an
+    // answer. Written with the next message, it is the last assistant's item until
+    // the model answers that message: dated, its turn neither failed nor refused, and
+    // only its marks tell it from a reply.
+    let records = resumed_in_a_command();
+    let asked = place(&records, |record| {
+        record["type"] == "user"
+            && record["message"]["content"]
+                .as_str()
+                .is_some_and(|text| text.contains("AFTER"))
+    });
+    let in_flight = record_of(&records[..=asked]);
+    let last = in_flight
+        .items
+        .iter()
+        .rev()
+        .find(|item| item.role == Role::Assistant)
+        .expect("an assistant's item");
+    assert_eq!(&*last.text, "No response requested.");
+    assert!(
+        !last.complete && last.at.as_ref().is_some_and(Value::is_string),
+        "{last:?}"
+    );
+    assert!(last.commentary && last.synthetic);
+    assert!(!in_flight.failed && in_flight.quota.is_none());
+    assert_eq!(in_flight.settlement, Settlement::InFlight);
+    // The model's answer is no one's close.
+    let answered = record_of(&records);
+    let last = answered
+        .items
+        .iter()
+        .rev()
+        .find(|item| item.role == Role::Assistant)
+        .expect("an assistant's item");
+    assert_eq!((&*last.text, last.synthetic), ("AFTER", false));
 }
 
 /// The live run's record (`monitor-wait.jsonl`) to the end of the turn its monitor's

@@ -117,9 +117,12 @@ impl Items {
     }
 
     /// The message at `place` is no one's words of the conversation: the
-    /// harness's own (`commentary`), which no answer holds.
-    pub(super) fn commentary(&mut self, place: usize) {
-        self.list[place].item.commentary = true;
+    /// harness's own (`commentary`), which no answer holds, written with no
+    /// model behind it (`synthetic`).
+    pub(super) fn synthetic(&mut self, place: usize) {
+        let item = &mut self.list[place].item;
+        item.commentary = true;
+        item.synthetic = true;
     }
 
     /// The assistant's message `id` names is complete, when there is one.
@@ -164,6 +167,7 @@ impl Entry {
                 // `record.timestamp ?? seq`: a Claude item's time is never undefined.
                 at: Some(at.clone()),
                 commentary: false,
+                synthetic: false,
                 compaction: false,
             },
             seq,

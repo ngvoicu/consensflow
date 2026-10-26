@@ -28,6 +28,7 @@ fn item(id: &str, role: Role, text: &str, complete: bool) -> Item {
         complete,
         at: None,
         commentary: false,
+        synthetic: false,
         compaction: false,
     }
 }

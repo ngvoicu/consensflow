@@ -371,6 +371,7 @@ impl FakeAdapter {
             complete: role == Role::Assistant,
             at: None,
             commentary: false,
+            synthetic: false,
             compaction: false,
         }
     }
@@ -632,6 +633,27 @@ impl FakeAdapter {
         item.at = Some(json!(at));
         item.complete = false;
         self.with(handle, |agent| agent.items.push(item));
+    }
+
+    /// The window, opened again on a conversation the app's quit cut in a turn, is
+    /// given `prompt`: Claude Code closes the cut turn with a message of its own
+    /// (`No response requested.`, no model behind it, dated `at`), the harness's
+    /// commentary and synthetic, as its reader reads it while `prompt`, just after
+    /// it, is in flight.
+    pub fn closes_a_cut_turn(&self, handle: &str, prompt: &str, at: &str) {
+        let mut close = self.item(Role::Assistant, "No response requested.");
+        close.at = Some(json!(at));
+        close.complete = false;
+        close.commentary = true;
+        close.synthetic = true;
+        let mut said = self.item(Role::User, prompt);
+        said.at = Some(json!(at));
+        self.with(handle, |agent| {
+            agent.items.extend([close, said]);
+            agent.settled = false;
+            agent.failed = false;
+            agent.quota = None;
+        });
     }
 
     /// The human switches the window to another conversation: from then on

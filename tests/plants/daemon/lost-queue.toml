@@ -312,7 +312,7 @@ runs = ["lost-queue-reader"]
 file = "crates/cf-harness/src/claude/record/replay.rs"
 find = '''
         if record.closes_a_cut_turn {
-            self.items.commentary(item);
+            self.items.synthetic(item);
         }'''
 replace = ""
 

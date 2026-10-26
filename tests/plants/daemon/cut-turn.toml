@@ -1,0 +1,116 @@
+# A turn that got through is the model's answer, never the harness's own words (T-550, the gap
+# T-530 found): the scheduler's check that a window of a member out of quota got a turn through
+# (`last_answer` in `crates/cf-engine/src/scheduler.rs`, read by `answered_since` and
+# `back_on_its_account`) took the last assistant's item with a time for an answer. Claude Code's
+# close of a turn it found cut (`No response requested.`, model `<synthetic>`), written when a
+# reopened window's next message comes, was such an item, so a member, or the chief out on its
+# account, came back before any turn got through. Pi writes a step of its own when a run fails or
+# is aborted before the model's first token, and OpenCode makes the assistant's message before the
+# reply: each the same. And OpenCode dates its messages in milliseconds, which the check never
+# read, so an OpenCode member came back only at its reset.
+#
+# The readers mark an assistant's item with nothing of the model's in it `synthetic`
+# (`crates/cf-harness/src/shared/record/reading.rs`; Claude's in `claude/record/items.rs`, Pi's in
+# `pi/record.rs`, OpenCode's in `opencode/record/answer.rs`), and the check passes over it and
+# reads a time in milliseconds. Codex's progress notes, the model's own, still count. The engine's
+# tests are in `crates/cf-engine/tests/dispatcher/out_of_quota.rs` and `quota_accounts.rs`; the
+# readers' beside each reader.
+#
+# Every name holds `cut-turn`, so `cargo xtask plants daemon cut-turn` runs them all.
+
+[run]
+cut-turn-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "out_of_quota::"]
+cut-turn-accounts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "quota_accounts::"]
+cut-turn-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::restart"]
+cut-turn-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record::tests::steps"]
+cut-turn-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record::tests::answers"]
+
+[[plant]]
+name = "cut-turn: Claude's close of a cut turn brings its member back"
+meant = "keeps_a_member_out_when_claude_only_closes_a_turn_the_quit_cut_and_takes_it_back_at_its_answer"
+runs = ["cut-turn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = ".find(|item| item.role == Role::Assistant && !item.synthetic)"
+replace = ".find(|item| item.role == Role::Assistant)"
+
+[[plant]]
+name = "cut-turn: Claude's close of a cut turn brings back the chief out on its member's account"
+meant = "a_chief_stays_out_when_its_members_window_only_closes_a_turn_the_quit_cut_and_is_back_at_its_answer"
+runs = ["cut-turn-accounts"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = ".find(|item| item.role == Role::Assistant && !item.synthetic)"
+replace = ".find(|item| item.role == Role::Assistant)"
+
+[[plant]]
+name = "cut-turn: a progress note of the model's is no turn through"
+meant = "takes_a_member_back_at_a_progress_note_of_a_turn_that_got_through"
+runs = ["cut-turn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = ".find(|item| item.role == Role::Assistant && !item.synthetic)"
+replace = ".find(|item| item.role == Role::Assistant && !item.commentary)"
+
+[[plant]]
+name = "cut-turn: an answer dated in milliseconds is no turn through"
+meant = "takes_a_member_back_at_an_answer_its_record_dates_in_milliseconds_and_not_at_a_reply_never_begun"
+runs = ["cut-turn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "            Value::Number(ms) => ms.as_i64().map(time::iso),\n"
+replace = "\n"
+
+[[plant]]
+name = "cut-turn: Claude's reader takes its close of a cut turn for the model's"
+meant = "the_close_of_a_cut_turn_is_written_with_no_model_behind_it_and_the_next_answer_is_the_models"
+runs = ["cut-turn-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/items.rs"
+find = "        item.synthetic = true;\n"
+replace = "\n"
+
+[[plant]]
+name = "cut-turn: Pi's reader takes the step Pi wrote of a failed run for the model's"
+meant = "a_step_pi_wrote_with_no_model_behind_it_is_synthetic_and_one_the_model_began_is_not"
+runs = ["cut-turn-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "                step.synthetic = true;\n"
+replace = "\n"
+
+[[plant]]
+name = "cut-turn: Pi's reader takes a step of the model's thinking alone for none of the model's"
+meant = "a_step_pi_wrote_with_no_model_behind_it_is_synthetic_and_one_the_model_began_is_not"
+runs = ["cut-turn-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "            Some(\"thinking\") => said(\"thinking\"),\n"
+replace = "\n"
+
+[[plant]]
+name = "cut-turn: OpenCode's reader takes a message the model has not begun for the model's"
+meant = "a_reply_with_nothing_of_the_models_in_it_is_synthetic_and_one_the_model_began_is_not"
+runs = ["cut-turn-opencode"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/record/answer.rs"
+find = "                synthetic: !the_model_wrote(parts),\n"
+replace = "\n"
+
+[[plant]]
+name = "cut-turn: OpenCode's reader takes a tool call for none of the model's"
+meant = "a_reply_with_nothing_of_the_models_in_it_is_synthetic_and_one_the_model_began_is_not"
+runs = ["cut-turn-opencode"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/record/answer.rs"
+find = "            Some(\"tool\") => true,\n"
+replace = "\n"

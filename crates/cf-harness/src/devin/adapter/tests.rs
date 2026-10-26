@@ -346,6 +346,7 @@ fn record_of(texts: &[&str]) -> Record {
             complete: true,
             at: None,
             commentary: false,
+            synthetic: false,
             compaction: false,
         });
     }
@@ -746,6 +747,7 @@ fn a_message_of_the_users_its_agent_has_not_answered_yet_is_a_turn_begun_for_a_w
         complete: true,
         at: Some(serde_json::json!(cf_base::time::iso(EPOCH_MS))),
         commentary: false,
+        synthetic: false,
         compaction: false,
     });
     let window = devin_window(

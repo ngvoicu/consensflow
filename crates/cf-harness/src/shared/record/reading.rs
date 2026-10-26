@@ -290,6 +290,11 @@ pub struct Item {
     pub at: Option<Value>,
     /// A progress note, as Codex marks one: said only when true.
     pub commentary: bool,
+    /// An assistant's item with nothing of the model's in it: Claude Code's close
+    /// of a turn it found cut, the step Pi writes of a run that failed or was aborted
+    /// before the model's first token, a message OpenCode made before the reply. No
+    /// turn got through it. Never said: a reading is the one Node wrote.
+    pub synthetic: bool,
     /// The summary a compaction writes in the user's place (Claude Code's
     /// `isCompactSummary`): the harness's own, and no message of the user's. Never
     /// said: a reading is the one Node wrote, which read it as the user's.
@@ -379,6 +384,7 @@ mod tests {
             complete: true,
             at: Some(json!("2026-09-06T17:27:06.000Z")),
             commentary: false,
+            synthetic: false,
             compaction: false,
         });
         record.items.push(Item {
@@ -388,6 +394,7 @@ mod tests {
             complete: false,
             at: None,
             commentary: true,
+            synthetic: false,
             compaction: false,
         });
         // A compaction's summary is the user's item it was to Node.
@@ -398,6 +405,7 @@ mod tests {
             complete: true,
             at: None,
             commentary: false,
+            synthetic: false,
             compaction: true,
         });
         record.settlement = Settlement::InFlight;
