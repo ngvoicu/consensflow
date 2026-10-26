@@ -13,8 +13,8 @@ use std::io;
 
 use super::Run;
 
-/// A signal a case sends. Windows has no `Interrupt`, `Stop` or `Continue`, and
-/// its `Terminate` is a kill.
+/// A signal a case sends. Windows has no `Interrupt`, `Hangup`, `Stop` or `Continue`,
+/// and its `Terminate` is a kill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
     /// SIGTERM: the polite end, which a window's supervisor answers by ending
@@ -22,6 +22,9 @@ pub enum Signal {
     Terminate,
     /// SIGINT: the interrupt a terminal sends.
     Interrupt,
+    /// SIGHUP: a terminal hung up, which the pane host sends right after SIGTERM
+    /// when it closes a window.
+    Hangup,
     /// SIGKILL: the end nothing answers to.
     Kill,
     /// SIGSTOP: the program is stopped where it is, and runs no more until it is
@@ -39,6 +42,7 @@ pub fn signal(pid: u32, signal: Signal) -> io::Result<()> {
     let sent = match signal {
         Signal::Terminate => Sent::SIGTERM,
         Signal::Interrupt => Sent::SIGINT,
+        Signal::Hangup => Sent::SIGHUP,
         Signal::Kill => Sent::SIGKILL,
         Signal::Stop => Sent::SIGSTOP,
         Signal::Continue => Sent::SIGCONT,
@@ -163,7 +167,10 @@ fn as_pid(pid: u32) -> io::Result<nix::unistd::Pid> {
 /// is what ends a process there.
 #[cfg(windows)]
 pub fn signal(pid: u32, signal: Signal) -> io::Result<()> {
-    if matches!(signal, Signal::Interrupt | Signal::Stop | Signal::Continue) {
+    if matches!(
+        signal,
+        Signal::Interrupt | Signal::Hangup | Signal::Stop | Signal::Continue
+    ) {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
             format!("Windows has no {signal:?} to send"),
