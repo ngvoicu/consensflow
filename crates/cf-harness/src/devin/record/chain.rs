@@ -138,7 +138,6 @@ impl Chain {
 fn with_cut_users<'a>(store: &'a Store, chain: Vec<&'a Row>) -> Result<Vec<&'a Row>, String> {
     let mut originals: Option<HashMap<&str, &Row>> = None;
     let on_chain: HashSet<&Key> = chain.iter().map(|row| &row.node).collect();
-    let mut ids: HashSet<&str> = HashSet::new();
     let mut rows = Vec::with_capacity(chain.len());
     // After a compaction's summary, until a user's message on the chain: the user's
     // message put back last.
@@ -168,7 +167,7 @@ fn with_cut_users<'a>(store: &'a Store, chain: Vec<&'a Row>) -> Result<Vec<&'a R
     if rows.len() > chain.len() {
         // A message put back that the chain holds as well is not put back: its id would
         // be the chain's twice.
-        ids.extend(chain.iter().filter_map(|row| row.message_id()));
+        let ids: HashSet<&str> = chain.iter().filter_map(|row| row.message_id()).collect();
         rows.retain(|row| {
             on_chain.contains(&row.node) || !ids.contains(row.message_id().unwrap_or(""))
         });

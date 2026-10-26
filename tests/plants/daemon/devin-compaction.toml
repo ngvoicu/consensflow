@@ -1,0 +1,139 @@
+# A Devin turn its async compactor compacted (T-655, from the live board's T-602 of
+# 2026-10-26, read in T-652): the compactor begins a chain of its own below a summary, the
+# steps it keeps copied below it with the ids Devin gave them, and the user's message the
+# turn answers is left outside the main chain. The reader reads that message back before the
+# first copy that answers it, found by the copies' originals; and a reply the chain names no
+# request for is its model request's (`metadata.request_id`), which the wire names as the
+# turn ends (`turnRequestId`, and `stats.requestId` the same). The reader's cases are in
+# `crates/cf-harness/src/devin/record/tests/compaction.rs`; the rig's, a stand-in Devin that
+# compacts (`COMPACT`), in `crates/cf-e2e/tests/rig/devin_compaction.rs`, and they build the
+# native `cf`. One plant takes one rule out, or puts one wrong:
+#
+# - the wire's end is not kept by the model request, or is kept where the end's statistics
+#   name another or none;
+# - a reply the chain names no request for is not read by its model request, or the reply's
+#   request is not read at all;
+# - a compacted reply is complete whatever words the wire streamed;
+# - no user's message is read back, a step's newest row off the chain is taken for its
+#   original, or a message the chain holds is read back as well.
+#
+# Every name holds `devin compaction`, so `npm run plants:daemon -- "devin compaction"` runs
+# them all.
+
+[run]
+harness-lib-devin-compaction = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record::tests::compaction::"]
+rig-devin-compaction = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "devin_compaction::"]
+
+[[plant]]
+name = "devin compaction: the wire's end is not kept by its model request"
+meant = "an_answer_no_copy_leads_back_from_to_its_users_message_is_complete_by_the_model_request_the_wire_ended"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "                    record(ended.natives, native, &outcome)?;"
+replace = "                    let _ = native;"
+
+[[plant]]
+name = "devin compaction: the wire's end is kept by a model request its statistics do not name"
+meant = "the_end_of_a_compacted_turn_that_names_no_model_request_or_two_proves_nothing"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "                    .filter(|native| !native.is_empty() && stated == Some(native))"
+replace = "                    .filter(|native| !native.is_empty() || stated == Some(native))"
+
+[[plant]]
+name = "devin compaction: a reply the chain names no request for is not read by its model request"
+meant = "an_answer_no_copy_leads_back_from_to_its_users_message_is_complete_by_the_model_request_the_wire_ended"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = '''        if entry.request == Key::Null {
+            Request::Native(&entry.native)'''
+replace = '''        if entry.request == Key::Null && false {
+            Request::Native(&entry.native)'''
+
+[[plant]]
+name = "devin compaction: a reply's model request is not read"
+meant = "an_answer_no_copy_leads_back_from_to_its_users_message_is_complete_by_the_model_request_the_wire_ended"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = '''                    keys.of(metadata("request_id"))'''
+replace = '''                    keys.of(metadata("finish_reason"))'''
+
+[[plant]]
+name = "devin compaction: a compacted reply is complete whatever words the wire streamed"
+meant = "a_compacted_answer_of_another_model_request_is_not_completed_by_the_same_text"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = '''                                && (outcome.text == *item.text
+                                    || comparable(&outcome.text) == comparable(&item.text))'''
+replace = '''                                && (outcome.text == *item.text
+                                    || comparable(&outcome.text) == comparable(&item.text)
+                                    || entry.request == Key::Null)'''
+
+[[plant]]
+name = "devin compaction: no user's message a compaction cut out is read back"
+meant = "a_users_message_a_compaction_cut_out_is_read_back_before_the_first_copy_of_a_step_that_answers_it"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = "            Some(\"system\") if summary(message) => cut = Some(None),"
+replace = "            Some(\"system\") if summary(message) => cut = None,"
+
+[[plant]]
+name = "devin compaction: a step's newest row off the chain is taken for its original"
+meant = "a_second_compaction_reads_back_the_users_message_of_the_steps_first_original"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = "            originals.entry(id).or_insert(row);"
+replace = "            originals.insert(id, row);"
+
+[[plant]]
+name = "devin compaction: a user's message the chain holds is read back as well"
+meant = "nothing_is_read_back_where_no_original_has_a_users_message_above_it_or_the_chain_holds_it"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = "    if rows.len() > chain.len() {"
+replace = "    if rows.len() > chain.len() && false {"
+
+[[plant]]
+name = "devin compaction: the rig's worker gives no result once its turn is compacted"
+meant = "a_devin_workers_result_is_taken_after_devin_compacted_the_turn_that_gives_it"
+runs = ["rig-devin-compaction"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = "            Some(\"system\") if summary(message) => cut = Some(None),"
+replace = "            Some(\"system\") if summary(message) => cut = None,"
+
+[[plant]]
+name = "devin compaction: the rig's waiting worker is never given its answer once its turn is compacted"
+meant = "a_devin_workers_answer_goes_in_once_into_the_same_window_after_devin_compacted_the_turn_that_asked"
+runs = ["rig-devin-compaction"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = "            Some(\"system\") if summary(message) => cut = Some(None),"
+replace = "            Some(\"system\") if summary(message) => cut = None,"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = '''        if entry.request == Key::Null {
+            Request::Native(&entry.native)'''
+replace = '''        if entry.request == Key::Null && false {
+            Request::Native(&entry.native)'''
