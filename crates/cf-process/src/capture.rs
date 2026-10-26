@@ -151,6 +151,8 @@ async fn captured(
     hold: Hold,
 ) -> Result<Captured, CaptureFailed> {
     let mut command = tokio::process::Command::from(run.command());
+    // What it starts may run on after it has answered: an installer's own children.
+    crate::descriptors::hold_only_the_streams(command.as_std_mut());
     command
         .env_clear()
         .envs(env.iter())

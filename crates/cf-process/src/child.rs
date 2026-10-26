@@ -54,6 +54,8 @@ pub struct Child {
 /// (`spawn <file> ENOENT`).
 pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Result<Child, String> {
     let mut command = tokio::process::Command::from(run.command());
+    // It runs for as long as this does, and holds what it is left to its end.
+    crate::descriptors::hold_only_the_streams(command.as_std_mut());
     command.env_clear().envs(env.iter());
     match streams {
         Streams::Lines => command
@@ -172,6 +174,21 @@ impl Child {
     /// Waits until it has exited and its streams have closed.
     pub async fn closed(&self) {
         poll_fn(|context| self.poll_closing(context)).await;
+    }
+
+    /// Waits until it has exited, its streams closed or not: a program it started, or one
+    /// started beside it that was left a copy of the pipe, can hold the error stream open
+    /// for as long as it lives, and what is waited for is the process.
+    pub async fn ended(&self) {
+        poll_fn(|context| {
+            let _ = self.poll_closing(context);
+            if self.live.exited() {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        })
+        .await;
     }
 
     /// Asks or forces it to end, not waiting: on Unix the signal `how` names,
@@ -328,6 +345,51 @@ mod tests {
             .build()
             .unwrap()
             .block_on(work)
+    }
+
+    /// A program that has exited while another it started holds its error stream open for
+    /// five seconds is ended, and not closed: the pipe is the other's to close.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_is_ended_when_it_exits_and_closed_when_its_error_stream_has_closed_too() {
+        let held = std::time::Instant::now();
+        let finished = block_on(async {
+            let child = spawn(
+                &shell("/bin/sleep 5 & echo $! >&2; exit 0"),
+                None,
+                &system_env(),
+                Streams::Quiet,
+            )
+            .unwrap();
+            tokio::time::timeout(Duration::from_secs(60), child.ended())
+                .await
+                .expect("it ended");
+            assert!(child.exited());
+            // The pipe is held by the program it started: closed is not, for a while.
+            let closed = tokio::time::timeout(Duration::from_millis(300), child.closed()).await;
+            assert!(
+                closed.is_err(),
+                "the error stream closed before the sleep ended"
+            );
+            child.ender()
+        });
+        assert!(held.elapsed() < Duration::from_secs(20));
+        drop(finished);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_exits_with_its_streams_closed_is_ended_and_closed_together() {
+        block_on(async {
+            let child = spawn(&shell("exit 0"), None, &system_env(), Streams::Quiet).unwrap();
+            tokio::time::timeout(Duration::from_secs(60), child.ended())
+                .await
+                .expect("it ended");
+            tokio::time::timeout(Duration::from_secs(60), child.closed())
+                .await
+                .expect("it closed");
+            assert!(child.exited());
+        });
     }
 
     #[cfg(unix)]

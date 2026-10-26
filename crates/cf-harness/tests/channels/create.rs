@@ -186,6 +186,44 @@ fn mints_distinct_ids_on_two_calls() {
     });
 }
 
+/// A server that has gone is stopped, whatever holds its error stream open after it: a
+/// program it started, or one started beside it that was left a copy of the pipe (on macOS
+/// std makes a pipe close-on-exec in a second step). The stop is for the port, which is free
+/// once the server has ended; the pipe's end is not the server's, and nothing reads what
+/// comes down it. The server's error stream reaches its end when that program ends, thirty
+/// seconds on, and the stop had waited for that: four seconds, and "failed to stop".
+#[cfg(unix)]
+#[test]
+fn a_server_that_has_exited_is_stopped_though_a_program_holds_its_error_stream() {
+    run(async {
+        let setup = Setup::new("holds-its-error-stream");
+        let begun = Instant::now();
+        let made = setup.create(FAKE, None).await;
+        let took = begun.elapsed();
+        let holder = setup
+            .left("holder")
+            .and_then(|pid| pid.trim().parse::<i32>().ok())
+            .map(nix::unistd::Pid::from_raw);
+        // The program still held the stream as the stop returned; it is ended whatever came of it.
+        let held = holder.is_some_and(|holder| nix::sys::signal::kill(holder, None).is_ok());
+        if let Some(holder) = holder {
+            let _ = nix::sys::signal::kill(holder, nix::sys::signal::Signal::SIGKILL);
+        }
+        assert!(
+            held,
+            "the program that holds the stream was running ({holder:?})"
+        );
+        let id = made.unwrap();
+        assert!(is_id(&id), "{id}");
+        assert!(took < Duration::from_secs(3), "{took:?}");
+        let started = setup.started().await.unwrap();
+        assert!(
+            setup.gone(&started).await,
+            "the server is gone, its port free"
+        );
+    });
+}
+
 #[test]
 fn refuses_a_missing_executable_without_a_child() {
     run(async {

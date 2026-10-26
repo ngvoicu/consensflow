@@ -28,6 +28,7 @@
 mod install;
 mod jobs;
 mod launch;
+mod left;
 mod names;
 mod observe;
 mod project;
@@ -48,7 +49,7 @@ use crate::daemon::Daemon;
 use crate::daemon_log::StartLine;
 use crate::live::members::Identity;
 use crate::outcome::{self, Verdict};
-use crate::process::{self, Ran, Run, Sink, Spawned};
+use crate::process::{Ran, Run, Sink, Spawned};
 use crate::{cf, checkout, files, wire, Error, Result};
 
 pub use jobs::Job;
@@ -823,16 +824,10 @@ impl Rig {
         // The pane host kills each window's process as it shuts down, and a
         // killed process leaves the process table a moment later (once it is
         // reaped): one still there after a few seconds was left behind.
-        let pids = files::read_string(&self.root.join("pids.jsonl")).unwrap_or_default();
-        for pid in pids
-            .lines()
-            .filter_map(|line| line.trim().parse::<u32>().ok())
-        {
-            if !wait::until(GONE, || !process::is_alive(pid)) {
-                return Err(Error::Daemon(format!(
-                    "fake harness process remains after bridge shutdown: {pid}"
-                )));
-            }
+        if let Some(left) = left::left_behind(&self.root.join("pids.jsonl"), GONE) {
+            return Err(Error::Daemon(format!(
+                "fake harness process remains after bridge shutdown: {left}"
+            )));
         }
         // Every window is gone: nothing writes in the Claude config folder any more.
         self.finish_claude_config()

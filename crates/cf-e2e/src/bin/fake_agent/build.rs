@@ -32,7 +32,7 @@ use cf_e2e::pattern;
 use cf_e2e::process::Run;
 use regex::Regex;
 
-use crate::background::{in_a_shell, say_its_process, until_up, JOB, THINKING};
+use crate::background::{in_a_shell, until_up, JOB, THINKING};
 use crate::reply::{Reply, Window};
 
 /// What the build is started with, first: no window is launched with it.
@@ -127,7 +127,8 @@ fn leave_a_daemon(seconds: &str, build: &Path, daemon: &Path) -> Result<(), Stri
     let written = |file: PathBuf, text: String| {
         fs::write(&file, text).map_err(|failed| format!("{}: {failed}", file.display()))
     };
-    say_its_process(&beside("pid")).map_err(|failed| failed.to_string())?;
+    cf_e2e::files::say_its_process(build)
+        .map_err(|failed| format!("{}: {failed}", build.display()))?;
     #[cfg(windows)]
     keep_own_handles();
     let program = std::env::current_exe().map_err(|failed| failed.to_string())?;

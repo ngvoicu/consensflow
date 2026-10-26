@@ -1,10 +1,10 @@
 # The stand-ins' process files, read as soon as they are there. A stand-in writes its process whole:
-# under another name, renamed to the file once written (`background::say_its_process`, as the Codex
-# stand-in's `fake_codex/servers.rs` does), so that a case that waits for the file reads a number,
-# and `Rig::jobs` never meets an empty file. Before, `fs::write` made the file and then wrote into it,
-# and a case that read the file at once read "": a flake of `ParseIntError`, or a job the rig did not
-# list. The Codex stand-in was made whole in T-72, and the cases read the process through
-# `stand_ins::pid_in`, which waits for a number.
+# under another name, renamed to the file once written (`cf_e2e::files::say_its_process`, which the
+# Codex stand-in's `fake_codex/servers.rs` and the fake agent's jobs and builds all use), so that a
+# case that waits for the file reads a number, and `Rig::jobs` never meets an empty file. Before,
+# `fs::write` made the file and then wrote into it, and a case that read the file at once read "": a
+# flake of `ParseIntError`, or a job the rig did not list. The Codex stand-in was made whole in T-72,
+# and the cases read the process through `stand_ins::pid_in`, which waits for a number.
 #
 # Each plant puts the in-place write back with a pause of 300 ms between the making of the file and
 # its writing, so the gap that was rare is in every run. The first is caught by the case that reads
@@ -23,16 +23,16 @@ meant = "the_stand_in_agents_job_writes_its_process_whole_or_not_at_all"
 runs = ["pid-files-whole"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/bin/fake_agent/background.rs"
+file = "crates/cf-e2e/src/files.rs"
 find = '''
     let mut writing = file.as_os_str().to_owned();
     writing.push(".writing");
-    fs::write(&writing, std::process::id().to_string())?;
+    fs::write(&writing, text)?;
     fs::rename(writing, file)'''
 replace = '''
     let mut made = fs::File::create(file)?;
-    thread::sleep(Duration::from_millis(300));
-    made.write_all(std::process::id().to_string().as_bytes())'''
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    io::Write::write_all(&mut made, text.as_bytes())'''
 
 [[plant]]
 name = "pid-files: the job's case reads its file as soon as it is there, and the job writes its process slowly"
@@ -56,16 +56,16 @@ replace = '''
     );'''
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/bin/fake_agent/background.rs"
+file = "crates/cf-e2e/src/files.rs"
 find = '''
     let mut writing = file.as_os_str().to_owned();
     writing.push(".writing");
-    fs::write(&writing, std::process::id().to_string())?;
+    fs::write(&writing, text)?;
     fs::rename(writing, file)'''
 replace = '''
     let mut made = fs::File::create(file)?;
-    thread::sleep(Duration::from_millis(300));
-    made.write_all(std::process::id().to_string().as_bytes())'''
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    io::Write::write_all(&mut made, text.as_bytes())'''
 
 [[plant]]
 name = "pid-files: the browser's case reads its file as soon as it is there, and the browser writes its process slowly"
@@ -84,13 +84,13 @@ replace = '''
         .parse()?;'''
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/bin/fake_agent/background.rs"
+file = "crates/cf-e2e/src/files.rs"
 find = '''
     let mut writing = file.as_os_str().to_owned();
     writing.push(".writing");
-    fs::write(&writing, std::process::id().to_string())?;
+    fs::write(&writing, text)?;
     fs::rename(writing, file)'''
 replace = '''
     let mut made = fs::File::create(file)?;
-    thread::sleep(Duration::from_millis(300));
-    made.write_all(std::process::id().to_string().as_bytes())'''
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    io::Write::write_all(&mut made, text.as_bytes())'''

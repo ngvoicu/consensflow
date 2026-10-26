@@ -106,6 +106,8 @@ impl Sentinel {
                 Ok(())
             });
         }
+        // It outlives the test, beside the others: what it was left of theirs it would hold.
+        cf_process::hold_only_the_streams(&mut command);
         let mut first = command.spawn().expect("start the sentinel");
         let mut line = String::new();
         BufReader::new(first.stdout.take().expect("its output"))
@@ -230,5 +232,32 @@ mod tests {
         let dropped = catch_unwind(AssertUnwindSafe(move || drop(sentinel)));
 
         assert!(dropped.is_err(), "it said so");
+    }
+
+    /// The sentinel and its job outlive the test, beside the other tests, which open sockets
+    /// and pipes: a descriptor left open and not close-on-exec as it starts is held by neither,
+    /// as `lsof` says.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[allow(clippy::disallowed_methods)] // `lsof`, asked what each holds.
+    fn a_sentinel_holds_nothing_of_the_tests_but_its_streams() {
+        use std::os::fd::AsRawFd;
+
+        let stray = std::fs::File::open("/dev/null").expect("a file");
+        let fd = stray.as_raw_fd();
+        // SAFETY: `fcntl` clears the flags of a descriptor this test holds.
+        assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+        let sentinel = Sentinel::start();
+        for process in [&sentinel.shell, &sentinel.job] {
+            let held = Command::new("/usr/sbin/lsof")
+                .args(["-a", "-p", &process.pid.to_string(), "-d", &fd.to_string()])
+                .output()
+                .expect("lsof");
+            assert!(
+                !String::from_utf8_lossy(&held.stdout).contains("/dev/null"),
+                "{} holds it",
+                process.pid
+            );
+        }
     }
 }

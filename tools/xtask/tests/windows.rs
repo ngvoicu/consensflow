@@ -10,7 +10,7 @@ mod common;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -30,7 +30,7 @@ fn tree(files: &[(&str, &str)]) -> tempfile::TempDir {
         fs::write(file, text).unwrap();
     }
     for words in [&["init", "-q"][..], &["add", "-A"]] {
-        let ran = Command::new("git")
+        let ran = common::command("git")
             .args(words)
             .current_dir(dir.path())
             .env_remove("GIT_DIR")
@@ -60,7 +60,7 @@ fn path_with(fakes: &Path) -> PathBuf {
 /// little-endian), its name, `file`, and its bytes. It is how the documentation of
 /// `windows` says a tree is told from another, written out here once more on purpose.
 fn tree_line(tree: &tempfile::TempDir) -> String {
-    let listing = Command::new("git")
+    let listing = common::command("git")
         .args(["ls-files", "-co", "--exclude-standard", "-z"])
         .current_dir(tree.path())
         .env_remove("GIT_DIR")
@@ -95,7 +95,7 @@ fn tree_line(tree: &tempfile::TempDir) -> String {
 /// The run script (`.windows-run.ps1`) in the tarball that the fake `scp` kept as number
 /// `n` (counting from 1), the file a run is asked for, in `keep`.
 fn run_script_kept(keep: &Path, n: usize) -> String {
-    let ran = Command::new("tar")
+    let ran = common::command("tar")
         .args(["-xzOf", &format!("{n}.tgz"), ".windows-run.ps1"])
         .current_dir(keep)
         .output()
@@ -601,7 +601,7 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
     );
     let tree = tree(&[("keep.txt", "kept")]);
     let manifest = tree.path().join("tools").join("xtask");
-    let mut xtask = Command::new(env!("CARGO_BIN_EXE_xtask"))
+    let mut xtask = common::command(env!("CARGO_BIN_EXE_xtask"))
         .current_dir(tree.path())
         .env("PATH", path_with(fakes.path()))
         .env("CARGO_MANIFEST_DIR", manifest)
@@ -706,7 +706,7 @@ fn live_tree(marker: &str) -> (tempfile::TempDir, String) {
         ),
     ]);
     let git = |words: &[&str]| {
-        let ran = Command::new("git")
+        let ran = common::command("git")
             .args(words)
             .current_dir(dir.path())
             .env_remove("GIT_DIR")
@@ -747,7 +747,7 @@ fn live_start(tree: &tempfile::TempDir, folder: &str, command: &[&str]) -> std::
         .collect();
     let program = std::env::var("CF_WINDOWS_XTASK")
         .unwrap_or_else(|_| env!("CARGO_BIN_EXE_xtask").to_owned());
-    let mut start = Command::new(program);
+    let mut start = common::command(program);
     start.env_clear();
     for (name, value) in own.iter() {
         let name = name.to_string_lossy();
@@ -788,7 +788,7 @@ fn live_start(tree: &tempfile::TempDir, folder: &str, command: &[&str]) -> std::
 /// `script` run on the machine, as the shell of its ssh server runs it (PowerShell).
 #[cfg(unix)]
 fn on_the_machine(script: &str) -> String {
-    let ran = Command::new("ssh")
+    let ran = common::command("ssh")
         .arg(live_host())
         .arg(script)
         .output()
@@ -806,7 +806,7 @@ struct Folder(String);
 impl Drop for Folder {
     fn drop(&mut self) {
         let folder = &self.0;
-        let _ = Command::new("ssh")
+        let _ = common::command("ssh")
             .arg(live_host())
             .arg(format!(
                 "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $env:USERPROFILE '{folder}'), (Join-Path $env:USERPROFILE '{folder}.*tgz')"

@@ -17,8 +17,10 @@ mod daemon;
 
 use std::time::{Duration, Instant};
 
+use cf_base::time::{parse, Clock, SystemClock};
 use daemon::{Client, Daemon, Root};
 use serde_json::{json, Value};
+use std::process::Command;
 
 /// How a daemon is asked to stop.
 #[derive(Debug, Clone, Copy)]
@@ -97,6 +99,78 @@ fn stop(daemon: &mut Daemon, how: How) -> Instant {
     }
 }
 
+/// When the daemon's log says its stop began (`stop: …`) and when it says it
+/// ended (`exit 0`), in milliseconds since the epoch: the daemon's own count of
+/// its stop, which a test that is slow to look does not read late.
+fn stop_in_its_log(log: &str) -> (i64, i64) {
+    let stamp = |line: &str| {
+        let at = log
+            .lines()
+            .find_map(|each| {
+                each.split_once(' ')
+                    .filter(|(_, rest)| rest.starts_with(line))
+            })
+            .and_then(|(at, _)| parse(at));
+        at.unwrap_or_else(|| panic!("no {line:?} line in the log:\n{log}"))
+    };
+    (stamp("info stop: "), stamp("info exit 0"))
+}
+
+/// How long a stop took, in the parts that a failure names: from the ask to the
+/// line of the daemon's log that says the stop began (the daemon reads the ask),
+/// the stop, and from the line that says it ended to the process gone (its exit:
+/// on Windows a console write to a pipe nobody reads is made there). The first
+/// two are the daemon's own count from its log; the whole is the test's, from
+/// the ask to the process found gone.
+struct Stopped {
+    how: How,
+    lead_in: i64,
+    stop: i64,
+    to_gone: i64,
+    took: Duration,
+}
+
+impl Stopped {
+    /// `asked_at` is when the ask was made (ms since the epoch), `took` how long
+    /// from it the process was found gone.
+    fn of(root: &Root, how: How, asked_at: i64, took: Duration) -> Self {
+        let (began, ended) = stop_in_its_log(&root.log());
+        let took_ms = i64::try_from(took.as_millis()).unwrap_or(i64::MAX);
+        Stopped {
+            how,
+            lead_in: began - asked_at,
+            stop: ended - began,
+            to_gone: took_ms - (ended - asked_at),
+            took,
+        }
+    }
+
+    fn phases(&self) -> String {
+        format!(
+            "{:?}: {} ms to begin, the stop {} ms, {} ms to be gone; {:?} in all",
+            self.how, self.lead_in, self.stop, self.to_gone, self.took
+        )
+    }
+
+    /// What every stop is held to, however much is open: the stop is one deadline of
+    /// a second and no more, the process is gone a moment after its last line (1-10 ms
+    /// where it was measured, on a Mac and on Windows: one that is not is slow to exit,
+    /// and the app's grace runs on until it is), and the whole of it, from the ask, is
+    /// inside the app's grace (`DAEMON_STOP_GRACE`, 2 s from closing the daemon's input
+    /// until the process is gone, which the app then kills).
+    ///
+    /// The parts are said as the test passes, for a run with `-- --nocapture`: that is how
+    /// they are measured on a machine, and no scratch test is needed.
+    #[allow(clippy::print_stdout)] // Said for a run with `--nocapture`: a helper is no test fn.
+    fn assert_within_a_deadline_and_the_apps_grace(&self) {
+        let phases = self.phases();
+        println!("{phases}");
+        assert!(self.stop < 1_600, "{phases}");
+        assert!(self.to_gone < 1_000, "slow to be gone: {phases}");
+        assert!(self.took < Duration::from_millis(2_000), "{phases}");
+    }
+}
+
 fn hows() -> Vec<How> {
     vec![
         How::InputEnded,
@@ -104,6 +178,15 @@ fn hows() -> Vec<How> {
         #[cfg(unix)]
         How::Sigterm,
     ]
+}
+
+#[test]
+fn a_stop_is_counted_from_the_stamps_of_the_lines_that_begin_and_end_it_across_midnight() {
+    let log = "2026-10-20T23:59:59.500Z info start pid 7 rust 3.0.5 home /h\n\
+               2026-10-20T23:59:59.900Z info stop: SIGTERM; rss 14 MB\n\
+               2026-10-21T00:00:00.950Z info exit 0\n";
+    let (began, ended) = stop_in_its_log(log);
+    assert_eq!(ended - began, 1_050);
 }
 
 #[test]
@@ -230,16 +313,19 @@ fn a_busy_daemon_is_stopped_within_one_deadline_whatever_is_open() {
             daemon.ping("r-last");
             std::thread::sleep(Duration::from_millis(300));
         }
+        let asked_at = SystemClock.now_ms();
         let asked = stop(&mut daemon, how);
         let (code, took) = daemon.exits(asked, Duration::from_secs(10));
         assert_eq!(code, Some(0), "{how:?}");
+        let stopped = Stopped::of(&root, how, asked_at, took);
         // One deadline of a second for all of it, which the body half sent
-        // and the pass hold to the end; the app waits 2 s.
+        // and the pass hold to the end.
         assert!(
-            took >= Duration::from_millis(900),
-            "{how:?}: the stop did not wait: {took:?}"
+            stopped.stop >= 900,
+            "the stop did not wait: {}",
+            stopped.phases()
         );
-        assert!(took < Duration::from_millis(1_600), "{how:?}: {took:?}");
+        stopped.assert_within_a_deadline_and_the_apps_grace();
 
         let (answered, ended) = door.read_to_the_end();
         assert!(ended, "{how:?}: the door's connection ended");
@@ -346,12 +432,14 @@ fn a_program_the_daemon_is_waiting_for_is_ended_when_it_stops() {
             daemon.ping("r-last");
             std::thread::sleep(Duration::from_millis(300));
         }
+        let asked_at = SystemClock.now_ms();
         let at = stop(&mut daemon, how);
         let (code, took) = daemon.exits(at, Duration::from_secs(10));
         assert_eq!(code, Some(0), "{how:?}");
         // The request that waits for the program is open at the deadline, and
-        // is dropped there: one deadline, as the busy daemon takes.
-        assert!(took < Duration::from_millis(1_600), "{how:?}: {took:?}");
+        // is dropped there: one deadline, as the busy daemon takes, held to the
+        // same parts.
+        Stopped::of(&root, how, asked_at, took).assert_within_a_deadline_and_the_apps_grace();
         assert!(
             waited.ends_soon(),
             "{how:?}: the program the daemon waited for outlived it"
@@ -407,7 +495,7 @@ fn cf_ui_is_the_daemon_in_a_home_the_flip_release_sent_to_node() {
 #[test]
 fn a_window_s_cf_ui_is_the_board_and_never_the_daemon() {
     let root = Root::new();
-    let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
+    let ran = cf()
         .args(["ui", "--json", "--no-open"])
         .env_clear()
         .env("CONSENSFLOW_TOKEN", "a-windows-token")
@@ -427,7 +515,7 @@ fn a_daemon_that_cannot_start_says_why_in_cf_s_words_and_exits_1() {
     let root = Root::new();
     // A ledger that is held: a second daemon on the same home.
     let first = Daemon::start(&root);
-    let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
+    let ran = cf()
         .args(["ui", "--json", "--no-open"])
         .env_clear()
         .env("CONSENSFLOW_HOME", root.home())
@@ -455,7 +543,7 @@ fn a_daemon_that_cannot_start_says_why_in_cf_s_words_and_exits_1() {
 
 #[test]
 fn an_option_cf_ui_does_not_know_is_refused_as_node_refuses_it() {
-    let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
+    let ran = cf()
         .args(["ui", "--foo"])
         .env_clear()
         .env("CONSENSFLOW_TOOL_FOLDERS", "")
@@ -477,4 +565,29 @@ fn the_handle_line_is_json_for_the_app() {
         panic!("the handle line is an object");
     };
     assert_eq!(handle.keys().collect::<Vec<_>>(), ["url", "token"]);
+}
+
+/// `cf`, as a test of this file starts it to its end: holding nothing of the test's but its
+/// streams, as the daemon a test keeps does.
+fn cf() -> Command {
+    let mut cf = Command::new(env!("CARGO_BIN_EXE_cf"));
+    cf_process::hold_only_the_streams(&mut cf);
+    cf
+}
+
+/// The daemon a test keeps runs beside the other tests, which open sockets and pipes: it holds
+/// nothing of the test's but its streams.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_daemon_a_test_keeps_holds_nothing_of_the_tests_but_its_streams() {
+    use std::os::fd::AsRawFd;
+
+    let root = Root::new();
+    let stray = cf_process::test_support::stray();
+    let daemon = Daemon::start(&root);
+    assert!(
+        !cf_process::test_support::holds_null(daemon.child.id(), stray.as_raw_fd()),
+        "the daemon holds it"
+    );
+    drop(daemon);
 }

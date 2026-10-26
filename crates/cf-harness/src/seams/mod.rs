@@ -253,6 +253,7 @@ mod tests {
     use crate::testing::{Driver, ManualTime};
     use std::cell::Cell;
     use std::net::TcpStream;
+    use std::time::Instant;
 
     /// Marks when it is dropped.
     struct Dropped(Rc<Cell<bool>>);
@@ -359,11 +360,52 @@ mod tests {
         assert_eq!(&drawn[14..15], "4");
     }
 
+    /// Binds `port`, which was free a moment ago. A program that was being started when
+    /// the listener closed holds a copy of its socket until it gets to run (std makes a
+    /// socket close-on-exec in a second step on macOS, and a start in between is left it),
+    /// a few milliseconds on a loaded Mac, so a bind that is refused is tried again, for
+    /// ten seconds at the most.
+    fn bound_once_free(port: u16) -> TcpListener {
+        let until = Instant::now() + Duration::from_secs(10);
+        loop {
+            match TcpListener::bind(("127.0.0.1", port)) {
+                Err(refused)
+                    if refused.kind() == std::io::ErrorKind::AddrInUse
+                        && Instant::now() < until =>
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                bound => return bound.unwrap(),
+            }
+        }
+    }
+
     #[test]
     fn a_free_port_on_loopback_is_one_a_listener_may_take() {
         let port = LoopbackPorts.free_loopback().unwrap();
         assert_ne!(port, 0);
-        TcpListener::bind(("127.0.0.1", port)).unwrap();
+        bound_once_free(port);
+    }
+
+    /// The moment, made to last: the port is held for a third of a second by a thread of the
+    /// test, as it is held by a program that is being started. It is refused at once and
+    /// bound when it is let go.
+    #[test]
+    fn a_port_held_for_a_moment_is_refused_at_once_and_bound_once_it_is_let_go() {
+        let port = LoopbackPorts.free_loopback().unwrap();
+        let (held, holding) = std::sync::mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let listener = bound_once_free(port);
+            held.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            drop(listener);
+        });
+        holding.recv().unwrap();
+        assert!(TcpListener::bind(("127.0.0.1", port)).is_err());
+        let waited = Instant::now();
+        bound_once_free(port);
+        assert!(waited.elapsed() >= Duration::from_millis(100));
+        holder.join().unwrap();
     }
 
     /// Whether a program listens on `port`, as a connection to it says.

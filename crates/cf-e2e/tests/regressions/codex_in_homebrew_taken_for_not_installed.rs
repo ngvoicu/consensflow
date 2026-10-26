@@ -182,14 +182,20 @@ fn a_window_of_a_daemon_on_the_finders_path_finds_a_program_in_the_systems_folde
     let rig = Rig::start(config().as_the_finder_starts_it())?;
     let node = named(&rig, "CONSENSFLOW_TOOL_FOLDERS").join("node");
     let found = named(&rig, "HOME").join("node-found");
+    // The shell makes the file when it opens it for the redirect and writes it after: a
+    // moment is made to last between the two, as a loaded machine makes one.
     files::write_executable(
         &node,
-        format!("#!/bin/sh\nprintf '%s\\n' \"$0\" > '{}'\n", found.display()),
+        format!(
+            "#!/bin/sh\n: > '{found}'\n/bin/sleep 1\nprintf '%s\\n' \"$0\" > '{found}'\n",
+            found = found.display()
+        ),
     )?;
     let project = Project::open(&rig, "chief", json!({}))?;
     rig.tell(project.id(), "RUN node --version")?;
+    // The line the `node` writes, whole: the file is there from the moment the shell opens it.
     rig.wait_for("the chief's window to find node", secs(30), || {
-        Ok(found.exists())
+        Ok(files::read_string(&found).is_ok_and(|said| said.ends_with('\n')))
     })?;
     assert_eq!(
         files::read_string(&found)?.trim_end(),

@@ -104,7 +104,8 @@ fn reads_of_the_marker_share_one_buffer_for_what_the_system_says_of_a_process() 
     assert!(made <= 1, "{made} buffers for four reads on one thread");
 }
 
-#[allow(clippy::disallowed_methods)] // A test's own program.
+// A test's own program, bare: it is ended within milliseconds.
+#[allow(clippy::disallowed_methods)]
 #[test]
 fn a_process_is_read_while_it_runs_ended_once_it_exits_and_unreadable_where_another_users() {
     let mut child = std::process::Command::new("/bin/sleep")
@@ -126,7 +127,9 @@ fn a_process_is_read_while_it_runs_ended_once_it_exits_and_unreadable_where_anot
     assert_eq!(looked(1), Looked::Unreadable);
 }
 
-#[allow(clippy::disallowed_methods)] // A test's own programs.
+// A test's own programs, bare: the clocks are read around a start, and a start that closes the
+// descriptors first is another start (`what_a_start_by_fork_costs`, cf-process).
+#[allow(clippy::disallowed_methods)]
 #[test]
 fn a_processs_two_starts_agree_with_the_clocks_read_around_it() {
     // T-334: the noise the pane's clock allows a process (`background::clock`'s

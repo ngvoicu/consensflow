@@ -57,6 +57,7 @@ dependencies = [
  "cf-launcher",
  "cf-panes",
  "cf-portable",
+ "cf-process",
  "cf-proto",
  "flate2",
  "libc",
@@ -351,6 +352,7 @@ dependencies = [
  "cf-proto",
  "form_urlencoded",
  "libc",
+ "nix",
  "serde",
  "serde_json",
  "tempfile",
@@ -422,6 +424,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "nix",
  "serde",
  "serde_json",
  "sha2",
@@ -478,6 +481,7 @@ version = "3.0.6-alpha.2"
 dependencies = [
  "cf-e2e",
  "cf-panes",
+ "cf-process",
  "jiff",
  "nix",
  "portable-pty",
@@ -578,6 +582,7 @@ dependencies = [
  "base64 0.22.1",
  "cf-base",
  "cf-ledger",
+ "cf-process",
  "cf-proto",
  "flate2",
  "rusqlite",
@@ -623,6 +628,7 @@ name = "cf-process"
 version = "3.0.6-alpha.2"
 dependencies = [
  "cf-base",
+ "cf-process",
  "libc",
  "nix",
  "tempfile",

@@ -154,7 +154,10 @@ pub(crate) fn says(history: &Value, role: &str, text: &str) -> bool {
 #[test]
 fn a_claude_chief_whose_conversation_was_compacted_while_idle_is_given_no_note_at_a_resume(
 ) -> Outcome {
-    let rig = Rig::start(config())?;
+    // The answer is written three seconds after the turn begins, so that the record holds the
+    // prompt alone for that long, as a loaded machine makes of any chief: the wait is for the
+    // turn's end, and not for the word its prompt held.
+    let rig = Rig::start(config().var("CF_TEST_ANSWER_MS", "3000"))?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let session = told(&rig, &project, "Reply with exactly: HELLO")?;
     wait_for_the_turn_to_end(&rig, &session, "Reply with exactly: HELLO")?;

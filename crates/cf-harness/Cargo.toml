@@ -74,6 +74,8 @@ required-features = ["test-support"]
 
 [dev-dependencies]
 cf-harness = { path = ".", features = ["test-support"] }
+# What a program a test starts holds.
+cf-process = { workspace = true, features = ["test-support"] }
 flate2.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt"] }

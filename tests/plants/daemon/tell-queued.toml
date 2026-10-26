@@ -397,15 +397,16 @@ meant = "the_stand_in_codexs_plugin_server_leads_a_group_of_its_own_and_starts_i
 runs = ["rig-stand-in-codex-workers"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/bin/fake_codex/servers.rs"
+file = "crates/cf-e2e/src/files.rs"
 find = '''
-    let writing = format!("{file}.pid.writing");
-    fs::write(&writing, std::process::id().to_string())?;
-    fs::rename(writing, format!("{file}.pid"))'''
+    let mut writing = file.as_os_str().to_owned();
+    writing.push(".writing");
+    fs::write(&writing, text)?;
+    fs::rename(writing, file)'''
 replace = '''
-    let mut made = fs::File::create(format!("{file}.pid"))?;
-    thread::sleep(Duration::from_millis(500));
-    made.write_all(std::process::id().to_string().as_bytes())'''
+    let mut made = fs::File::create(file)?;
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    io::Write::write_all(&mut made, text.as_bytes())'''
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/rig/stand_in_codex.rs"

@@ -3,6 +3,7 @@
 //! page it is downloaded from, opened in the browser. The page is made here
 //! from the version checked; nothing the feed says names it.
 
+use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
@@ -87,9 +88,16 @@ pub fn open(page: &str) -> Result<(), String> {
     } else {
         "xdg-open"
     };
-    // Explorer answers 1 even when the page opened: only a start that
-    // failed is a failure.
-    Command::new(opener)
+    open_with(Path::new(opener), page)
+}
+
+/// Opens `page` with `opener`. Explorer answers 1 even when the page
+/// opened: only a start that failed is a failure.
+fn open_with(opener: &Path, page: &str) -> Result<(), String> {
+    let mut command = Command::new(opener);
+    // Started while the app's other threads open sockets and pipes.
+    cf_process::hold_only_the_streams(&mut command);
+    command
         .arg(page)
         .status()
         .map(drop)
@@ -156,5 +164,51 @@ mod tests {
                 "{version}"
             );
         }
+    }
+
+    /// The page is opened while the app's other threads open sockets and pipes: here a
+    /// descriptor is left open and not close-on-exec as the opener starts, and the opener says
+    /// whether it has it, and which page it was given.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_opener_holds_nothing_of_the_apps_but_its_streams() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::PermissionsExt;
+
+        let folder = tempfile::tempdir().expect("a folder");
+        let said = folder.path().join("said");
+        let stray = std::fs::File::open("/dev/null").expect("a file");
+        let fd = stray.as_raw_fd();
+        // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+        assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+        let opener = folder.path().join("open");
+        std::fs::write(
+            &opener,
+            format!(
+                "#!/bin/sh\nif [ -e /dev/fd/{fd} ]; then held=held; else held=clear; fi; echo \"$held $1\" > '{}'\n",
+                said.display()
+            ),
+        )
+        .expect("the opener");
+        std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o755))
+            .expect("an executable");
+        let page = page_of("3.0.6");
+        // The opener was written a moment ago, and a program started on another thread
+        // meanwhile can hold it open for writing: such a start is refused, and tried again.
+        let opened = (0..50)
+            .map(|_| open_with(&opener, &page))
+            .find(|opened| {
+                let busy = matches!(opened, Err(refused) if refused.contains("Text file busy"));
+                if busy {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                !busy
+            })
+            .expect("the opener started");
+        assert_eq!(opened, Ok(()));
+        assert_eq!(
+            std::fs::read_to_string(&said).expect("what it said"),
+            format!("clear {page}\n")
+        );
     }
 }

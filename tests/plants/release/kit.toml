@@ -52,6 +52,8 @@ smoke-launchers = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask"
 # The app the smoke starts (what it reports, and that it is ended with all it made), and the machine of a case.
 smoke-app = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::app"]
 smoke-case = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::case::"]
+# The smoke's look at what the app started again holds of the installed app's.
+smoke-descriptors = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::descriptors"]
 # The app crate's tests of the portable app's collector, built as a worktree can build it.
 app-portable = ["cargo", "xtask", "app", "test", "portable::"]
 # The publisher, every state a run can be cut short in, and the workflow's steps run as written.

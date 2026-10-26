@@ -44,9 +44,9 @@ use std::time::{Duration, Instant};
 use crate::{Error, Result};
 
 #[cfg(unix)]
-pub use pid::group_of;
-#[cfg(unix)]
 pub use pid::stall;
+#[cfg(unix)]
+pub use pid::{age, described, group_of};
 pub use pid::{alive_among, end_all, is_alive, signal, started, Signal};
 pub use spawned::{Sink, Spawned};
 
@@ -266,6 +266,9 @@ impl Run {
     /// The program's command, with everything but its streams.
     fn command(&self) -> Command {
         let mut command = Command::new(&self.program);
+        // Daemons, hosts and stand-ins run for a whole case while other cases open sockets and
+        // pipes: one left another's would hold it to its end.
+        cf_process::hold_only_the_streams(&mut command);
         if !self.inherit {
             command
                 .env_clear()

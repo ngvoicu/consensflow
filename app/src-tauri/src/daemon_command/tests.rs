@@ -36,6 +36,40 @@ fn the_daemon_is_the_bundled_cf_running_ui_and_nothing_of_the_apps_is_added_to_i
     );
 }
 
+/// The daemon runs as long as the app does, and the app opens sockets and pipes on its other
+/// threads as it starts it. On macOS std makes each close-on-exec in a second step, and a
+/// program started between the two holds it for good: the daemon would hold a connection of the
+/// app's, and what the app closed would not be closed. Here a descriptor is left in that moment
+/// while the daemon starts, and the daemon is asked whether it has it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_daemon_holds_nothing_of_the_apps_but_its_streams_whatever_was_open_as_it_started() {
+    use std::os::fd::AsRawFd;
+
+    let folder = tempfile::tempdir().expect("a folder");
+    let stray = std::fs::File::open("/dev/null").expect("a file");
+    let fd = stray.as_raw_fd();
+    // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+    assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+    let cf = login_shell(
+        folder.path(),
+        &format!("if [ -e /dev/fd/{fd} ]; then echo held; else echo clear; fi"),
+    );
+    // The script was written a moment ago, and a program started on another thread meanwhile
+    // can hold it open for writing: such a start is refused, and tried again.
+    let said = (0..50)
+        .find_map(|_| match command_for(&cf).output() {
+            Ok(output) => Some(output),
+            Err(refused) if refused.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::sleep(Duration::from_millis(100));
+                None
+            }
+            Err(refused) => panic!("the daemon was not started: {refused}"),
+        })
+        .expect("the daemon started");
+    assert_eq!(String::from_utf8_lossy(&said.stdout), "clear\n");
+}
+
 #[test]
 fn the_cf_is_the_one_in_the_clis_folder_of_the_bundle_or_the_portable_runtime() {
     let cf = if cfg!(windows) { "cf.exe" } else { "cf" };
@@ -98,6 +132,31 @@ fn the_login_path_is_read_past_what_login_files_print() {
     );
 }
 
+/// The login shell is asked as the app starts, while its other threads open sockets and
+/// pipes, and what a login file starts may run on after it: here a descriptor is left open and
+/// not close-on-exec while the shell is asked, and the shell says, as its PATH, whether it has it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_login_shell_holds_nothing_of_the_apps_but_its_streams() {
+    use std::os::fd::AsRawFd;
+
+    let home = tempfile::tempdir().expect("home");
+    let stray = std::fs::File::open("/dev/null").expect("a file");
+    let fd = stray.as_raw_fd();
+    // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+    assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+    let shell = login_shell(
+        home.path(),
+        &format!(
+            "if [ -e /dev/fd/{fd} ]; then PATH=held; else PATH=clear; fi; export PATH; exec /bin/sh -c \"$2\""
+        ),
+    );
+    assert_eq!(
+        login_path_in(&shell, Duration::from_secs(5), &LoginLookup::default()).as_deref(),
+        Some("clear")
+    );
+}
+
 /// The pid a shell wrote in `file`, once it has.
 #[cfg(unix)]
 fn pid_in(file: &Path) -> i32 {
@@ -120,7 +179,7 @@ fn pid_in(file: &Path) -> i32 {
 /// Ends the process `pid`, which a test left running.
 #[cfg(unix)]
 fn kill(pid: i32) {
-    let _ = Command::new("/bin/kill")
+    let _ = crate::testing::command("/bin/kill")
         .args(["-9", &pid.to_string()])
         .status();
 }
@@ -210,7 +269,7 @@ fn a_lookup_the_app_has_quit_starts_no_shell() {
     std::fs::remove_file(&started).expect("the shell ran once");
     lookup.end();
     assert_eq!(login_path_in(&shell, Duration::from_secs(5), &lookup), None);
-    let mut asked = Command::new(&shell);
+    let mut asked = crate::testing::command(&shell);
     asked.stdout(Stdio::piped());
     assert!(lookup.start(&mut asked).is_none(), "a shell was started");
     assert!(lookup.status().is_err(), "a shell is held");
@@ -226,7 +285,7 @@ fn a_lookup_the_app_has_quit_starts_no_shell() {
 fn ending_a_lookup_ends_the_shell_it_asks_at_once_and_only_it() {
     let home = tempfile::tempdir().expect("home");
     let sleeper = home.path().join("sleeper.pid");
-    let mut shell = Command::new("/bin/sh");
+    let mut shell = crate::testing::command("/bin/sh");
     shell
         .args([
             "-c",
@@ -262,7 +321,7 @@ fn ending_a_lookup_ends_the_shell_it_asks_at_once_and_only_it() {
 fn a_lookup_given_up_on_has_ended_its_shell_before_a_quit_can_miss_it() {
     let home = tempfile::tempdir().expect("home");
     let beat = home.path().join("beat");
-    let mut shell = Command::new("/bin/sh");
+    let mut shell = crate::testing::command("/bin/sh");
     shell
         .args([
             "-c",

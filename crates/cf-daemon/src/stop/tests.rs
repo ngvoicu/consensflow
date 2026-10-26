@@ -185,57 +185,96 @@ async fn raw(api: &Api, request: &str) -> TcpStream {
     stream
 }
 
+/// Everything a stop can find open at once: a pass that never ends, a door
+/// waiting for the stop, an idle connection and a body half sent.
+struct Everything {
+    rig: Rig,
+    door: TcpStream,
+    idle: TcpStream,
+    half: TcpStream,
+}
+
+/// A daemon with all of it open, a moment after it is. Called inside the
+/// local set the test runs in.
+async fn everything_open() -> Everything {
+    let rig = rig(Box::new(|| Box::pin(pending()))).await;
+    rig.stopping.passes.get().unwrap().kick();
+    let api = &rig.stopping.api;
+    let door = raw(api, "GET /door HTTP/1.1\r\nHost: t\r\n\r\n").await;
+    let idle = TcpStream::connect(api.url().strip_prefix("http://").unwrap())
+        .await
+        .unwrap();
+    let half = raw(
+        api,
+        "POST /body HTTP/1.1\r\nHost: t\r\nContent-Length: 100\r\n\r\n{\"a\":1,\"b\"",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    Everything {
+        rig,
+        door,
+        idle,
+        half,
+    }
+}
+
+impl Everything {
+    /// What a stop leaves, however long it took: the daemon exited, the door
+    /// was answered at once, and what was open is gone.
+    async fn assert_stopped(mut self) {
+        assert_eq!(*self.rig.exited.borrow(), [0]);
+        let mut answered = Vec::new();
+        self.door.read_to_end(&mut answered).await.unwrap();
+        let text = String::from_utf8_lossy(&answered);
+        assert!(text.starts_with("HTTP/1.1 200 OK"), "{text}");
+        assert!(text.ends_with(r#"{"answer":null}"#), "{text}");
+        let mut end = [0; 1];
+        assert_eq!(
+            self.idle.read(&mut end).await.unwrap(),
+            0,
+            "the idle connection ended"
+        );
+        assert!(
+            matches!(self.half.read(&mut end).await, Ok(0) | Err(_)),
+            "so was the half-sent one"
+        );
+        let lines = log_lines(&self.rig);
+        assert!(lines
+            .first()
+            .unwrap()
+            .starts_with("info stop: SIGTERM; rss "));
+        assert_eq!(lines.last().map(String::as_str), Some("info exit 0"));
+    }
+}
+
+// What it waits is counted in the clock of the timers it waits on, not the machine's:
+// the connections are opened in real time, and time stands still from the ask. The
+// stop's own work (its first line in the log, the ledger's close) goes to the disk and
+// takes what the disk gives: 0.2 s for the line and over a second for the close beside
+// writers that fill it (T-376, `load.rs`), and a bound on the machine's clock (1.3 s)
+// failed once in a run of the whole crate beside other builds.
 #[tokio::test]
 async fn a_pass_that_never_ends_a_door_an_idle_connection_and_a_body_half_sent_cost_one_deadline() {
     LocalSet::new()
         .run_until(async {
-            let rig = rig(Box::new(|| Box::pin(pending()))).await;
-            rig.stopping.passes.get().unwrap().kick();
-            let api = &rig.stopping.api;
-            let mut door = raw(api, "GET /door HTTP/1.1\r\nHost: t\r\n\r\n").await;
-            let mut idle = TcpStream::connect(api.url().strip_prefix("http://").unwrap())
-                .await
-                .unwrap();
-            let mut half = raw(
-                api,
-                "POST /body HTTP/1.1\r\nHost: t\r\nContent-Length: 100\r\n\r\n{\"a\":1,\"b\"",
-            )
-            .await;
-            tokio::time::sleep(Duration::from_millis(100)).await;
-
-            let started = Instant::now();
-            rig.stopping.run("SIGTERM").await;
+            let open = everything_open().await;
+            tokio::time::pause();
+            let started = tokio::time::Instant::now();
+            open.rig.stopping.run("SIGTERM").await;
             let took = started.elapsed();
-            // One deadline of a second for all of it, and the tail after.
+            // One deadline of a second for all of it, and not the two that a stop
+            // takes which waits for the pass and then for the API, or twice for
+            // the API: the timers' tick, a millisecond, is all it may be over.
             assert!(
                 took >= Duration::from_secs(1),
                 "the body half sent and the pass hold it: {took:?}"
             );
-            assert!(took < Duration::from_millis(1_300), "{took:?}");
-            assert_eq!(*rig.exited.borrow(), [0]);
-
-            // The door was answered at once, and what was open is gone.
-            let mut answered = Vec::new();
-            door.read_to_end(&mut answered).await.unwrap();
-            let text = String::from_utf8_lossy(&answered);
-            assert!(text.starts_with("HTTP/1.1 200 OK"), "{text}");
-            assert!(text.ends_with(r#"{"answer":null}"#), "{text}");
-            let mut end = [0; 1];
-            assert_eq!(
-                idle.read(&mut end).await.unwrap(),
-                0,
-                "the idle connection ended"
-            );
             assert!(
-                matches!(half.read(&mut end).await, Ok(0) | Err(_)),
-                "so was the half-sent one"
+                took <= Duration::from_secs(1) + Duration::from_millis(1),
+                "one deadline for all of it: {took:?}"
             );
-            let lines = log_lines(&rig);
-            assert!(lines
-                .first()
-                .unwrap()
-                .starts_with("info stop: SIGTERM; rss "));
-            assert_eq!(lines.last().map(String::as_str), Some("info exit 0"));
+            tokio::time::resume();
+            open.assert_stopped().await;
         })
         .await;
 }
@@ -262,7 +301,10 @@ async fn with_only_doors_and_idle_connections_open_the_stop_is_prompt() {
         .await;
 }
 
-#[tokio::test]
+// In the clock of the timers it waits on, not the machine's: the stop's own work
+// is under 2 ms, and a bound on the machine's clock (700 ms) failed once at 779 on
+// a CI Windows that was running 500 tests beside this one.
+#[tokio::test(start_paused = true)]
 async fn a_pass_that_ends_within_the_deadline_is_waited_for_and_no_longer() {
     LocalSet::new()
         .run_until(async {
@@ -279,14 +321,43 @@ async fn a_pass_that_ends_within_the_deadline_is_waited_for_and_no_longer() {
             .await;
             rig.stopping.passes.get().unwrap().kick();
             tokio::time::sleep(Duration::from_millis(50)).await;
-            let started = Instant::now();
+            let started = tokio::time::Instant::now();
             rig.stopping.run("SIGTERM").await;
-            let took = started.elapsed();
             assert!(finished.get(), "it was let end");
-            assert!(
-                took >= Duration::from_millis(200) && took < Duration::from_millis(700),
-                "{took:?}"
+            // What the pass had left to run, and not the deadline, which a stop
+            // that waited on after the pass took.
+            assert_eq!(
+                started.elapsed(),
+                Duration::from_millis(250),
+                "waiting for the pass, not for the {DEADLINE:?} deadline"
             );
+        })
+        .await;
+}
+
+// The old test's bound (700 ms) was crossed by 761 ms of a stop whose tail the machine
+// stalled for half a second: the stall is the machine's time, and none of the stop's wait.
+#[tokio::test(start_paused = true)]
+async fn a_machine_that_stalls_in_the_tail_changes_nothing_of_how_long_the_stop_waited() {
+    LocalSet::new()
+        .run_until(async {
+            let mut rig = rig(Box::new(|| {
+                Box::pin(async {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    Ok(())
+                })
+            }))
+            .await;
+            let ends = Rc::clone(&rig.stopping.ends_children);
+            rig.stopping.ends_children = Rc::new(move || {
+                std::thread::sleep(Duration::from_millis(500));
+                ends();
+            });
+            rig.stopping.passes.get().unwrap().kick();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let started = tokio::time::Instant::now();
+            rig.stopping.run("SIGTERM").await;
+            assert_eq!(started.elapsed(), Duration::from_millis(250));
         })
         .await;
 }
@@ -340,6 +411,8 @@ async fn children_that_cannot_be_ended_are_written_down_and_the_ledger_is_still_
 // The stop ends the trees of the programs it ends, not only the programs.
 #[cfg(any(unix, windows))]
 mod tree;
+
+mod load;
 
 /// A program that runs for a minute: `sleep`, or on Windows `ping`.
 #[cfg(any(unix, windows))]

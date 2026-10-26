@@ -171,6 +171,9 @@ fn ended_within<S: AsRef<OsStr>>(
             command.env_remove(&*name);
         }
     }
+    // A `cf` that waits for a pipe lives until it is stopped: the tests run side by side, and it
+    // holds only its streams.
+    cf_process::hold_only_the_streams(&mut command);
     let mut child = command
         .args(args)
         .env("CONSENSFLOW_HOME", home.path())
@@ -202,7 +205,7 @@ fn ended_within<S: AsRef<OsStr>>(
 }
 
 #[cfg(unix)]
-#[allow(clippy::disallowed_methods)] // `mkfifo` makes the pipe.
+#[allow(clippy::disallowed_methods)] // `mkfifo` makes the pipe: bare, it runs to its end at once.
 #[test]
 fn a_pipe_no_one_writes_is_refused_at_once_and_never_waited_for() {
     let folder = tempfile::tempdir().expect("a folder");

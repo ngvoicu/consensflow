@@ -179,6 +179,22 @@ mod tests {
         );
     }
 
+    /// A rig dropped (a test that failed, or one that never asked) takes its stranger with it:
+    /// the handle ends it and waits for it, so nothing of it is left, not even an exit no one
+    /// collected. Its input closes with the handle too, and it would leave of itself, but as a
+    /// process no one waited for, which the system still answers for.
+    #[test]
+    fn a_stranger_dropped_is_ended_through_its_handle() {
+        let stranger = Stranger::start().unwrap();
+        let id = stranger.spawned.id();
+        assert!(is_alive(id));
+        drop(stranger);
+        assert!(
+            wait::until(Duration::from_secs(5), || !is_alive(id)),
+            "the stranger {id} is still there"
+        );
+    }
+
     #[test]
     fn a_stranger_whose_input_ends_leaves_of_itself_and_is_not_said_to_have_been_ended() {
         let mut stranger = Stranger::start().unwrap();

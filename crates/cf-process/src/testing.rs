@@ -92,6 +92,85 @@ impl Drop for Survivors {
     }
 }
 
+/// Set in a process [`alone`] started: a test run otherwise does nothing.
+#[cfg(unix)]
+const ALONE: &str = "CF_PROCESS_ALONE";
+
+/// Runs the test `name` of this binary in a process of its own, started by `through` (a program
+/// and its words, such as `sandbox-exec` and its profile, or none): a test that no program of
+/// another test may hold anything of, or that sets up its process as no other test beside it
+/// would survive. It is an ignored test that does nothing unless [`is_alone`].
+#[cfg(unix)]
+pub(crate) fn alone(through: &[&str], name: &str) {
+    let test = std::env::current_exe().unwrap();
+    let mut command = match through {
+        [] => command(&test),
+        [program, words @ ..] => {
+            let mut command = command(program);
+            command.args(words).arg(&test);
+            command
+        }
+    };
+    let ran = command
+        .args([
+            "--exact",
+            name,
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(ALONE, "1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&ran.stdout),
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert!(ran.status.success(), "{said}");
+    assert!(said.contains("1 passed"), "the test did not run: {said}");
+    assert!(said.contains(RAN), "the test's body did not run: {said}");
+}
+
+/// Whether this process is one [`alone`] started.
+#[cfg(unix)]
+#[allow(clippy::disallowed_methods)] // Libtest has no other word for it.
+pub(crate) fn is_alone() -> bool {
+    std::env::var_os(ALONE).is_some()
+}
+
+/// The command a test starts `program` with: holding only its streams, as every program this
+/// crate starts does, for the tests run side by side and a program of one would hold what another
+/// closed. The tests that start a program bare say why: the window shown, a measurement, a stress.
+#[cfg(unix)]
+#[allow(clippy::disallowed_methods)] // The tests' own programs.
+pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    crate::hold_only_the_streams(&mut command);
+    command
+}
+
+/// What a test [`alone`] ran says once its body has run to its end: the run that started it
+/// asserts it, so a body that returned at once (the variable lost on the way) is no pass.
+#[cfg(unix)]
+pub(crate) const RAN: &str = "the test ran alone to its end";
+
+/// Says [`RAN`] as it is dropped, at the end of the body it was made at the start of, unless the
+/// body panicked.
+#[cfg(unix)]
+pub(crate) struct Ran;
+
+#[cfg(unix)]
+impl Drop for Ran {
+    #[allow(clippy::print_stdout)] // To the run that started this one, which reads it.
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            println!("{RAN}");
+        }
+    }
+}
+
 /// How many programs [`helper_keeps_starting_programs`] starts at most, and how long it
 /// goes on starting them: a test that does not end it leaves this many, and no more
 /// (zeewin, T-322: a loop with no bound reached 15,800 pings).
@@ -140,7 +219,8 @@ fn keeps_starting_every(folder: &Path, pace: Duration) -> Run {
 /// The program [`keeps_starting_programs`] runs, and no test of its own.
 #[test]
 #[ignore = "a program the tests of ending a program start"]
-// The helper starts what the test ends, and waits for none of it.
+// The helper starts what the test ends, and waits for none of it. Bare: what an installer's
+// script starts holds the script's streams, and the helper is that script.
 #[allow(clippy::disallowed_methods, clippy::zombie_processes)]
 fn helper_keeps_starting_programs() {
     use std::io::Write;

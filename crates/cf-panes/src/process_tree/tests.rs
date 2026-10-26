@@ -70,10 +70,10 @@ const PARENT: &str = "import subprocess, sys; \
 #[test]
 fn a_selection_of_every_process_of_this_machine_would_signal_only_the_windows_own() {
     use std::io::{BufRead, BufReader, Write};
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let mut tree = ProcessTree::new();
-    let mut program = Command::new("/usr/bin/python3")
+    let mut program = crate::testing::command("/usr/bin/python3")
         .args(["-c", PARENT])
         .env(OWNER_ENV, &tree.marker)
         .stdin(Stdio::piped())
@@ -129,10 +129,10 @@ fn a_selection_of_every_process_of_this_machine_would_signal_only_the_windows_ow
 #[test]
 fn a_process_has_the_process_that_started_it_as_its_parent_until_that_has_gone() {
     use std::io::{BufRead, BufReader, Write};
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let mut tree = ProcessTree::new();
-    let mut parent = Command::new("/usr/bin/python3")
+    let mut parent = crate::testing::command("/usr/bin/python3")
         .args(["-c", PARENT])
         .env(OWNER_ENV, &tree.marker)
         .stdin(Stdio::piped())
@@ -197,10 +197,10 @@ const LEADER: &str = "import subprocess; \
 fn a_job_whose_shell_has_gone_is_in_the_tree_by_the_session_it_kept_and_has_no_parent() {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::process::CommandExt;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let mut tree = ProcessTree::new();
-    let mut command = Command::new("/usr/bin/python3");
+    let mut command = crate::testing::command("/usr/bin/python3");
     command
         .args(["-c", LEADER])
         .env(OWNER_ENV, &tree.marker)

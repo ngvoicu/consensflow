@@ -169,6 +169,8 @@ impl Daemon {
                 }
             }
         }
+        // It runs as long as the test, beside the others: what it was left of theirs it would hold.
+        cf_process::hold_only_the_streams(&mut command);
         let mut child = command.spawn().expect("cf ui starts");
         let errors = Arc::new(Mutex::new(String::new()));
         let mut stderr = child.stderr.take().expect("its error output");
@@ -257,15 +259,15 @@ impl Daemon {
         self.stdin = None;
     }
 
-    /// SIGTERM, with its input left open.
+    /// SIGTERM, with its input left open: sent by this process, as the app
+    /// sends it. (`kill` run as a program would put the start of a program in
+    /// the time a stop is counted from.) A signal that is not delivered is
+    /// said here, and not as a daemon that did not stop.
     #[cfg(unix)]
     pub fn terminate(&self) {
-        let pid = self.child.id().to_string();
-        let sent = Command::new("kill").args(["-TERM", &pid]).status();
-        assert!(
-            sent.is_ok_and(|status| status.success()),
-            "kill -TERM {pid}"
-        );
+        let pid = nix::unistd::Pid::from_raw(i32::try_from(self.child.id()).expect("a pid"));
+        nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM)
+            .unwrap_or_else(|failed| panic!("SIGTERM was not delivered to {pid}: {failed}"));
     }
 
     /// Waits for it to exit: its code and how long it took from `since`.

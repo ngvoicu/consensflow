@@ -360,6 +360,8 @@ fn command(plan: &Plan<'_>, args: &[OsString]) -> Result<(Command, String), Stri
     let run = runnable(plan.executable, args, plan.env)?;
     let program = run.program.display().to_string();
     let mut command = Command::from(run.command());
+    // Both run for as long as the window does.
+    cf_process::hold_only_the_streams(command.as_std_mut());
     command.env_remove("OPENAI_API_KEY").kill_on_drop(true);
     Ok((command, program))
 }

@@ -336,11 +336,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::disallowed_methods)] // The test starts what it ends.
     fn a_process_that_cannot_be_held_to_be_signalled_is_sent_nothing_and_why_is_said() {
         // Both reviewers' look at round 7: where Linux opened no pidfd of a process, it
         // was read and then signalled by its number, which may be another's by then.
-        let mut sleep = std::process::Command::new("/bin/sleep")
+        let mut sleep = crate::testing::command("/bin/sleep")
             .arg("30")
             .spawn()
             .unwrap();
@@ -390,12 +389,11 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::disallowed_methods)] // The test starts what it reads.
     fn a_process_is_found_with_its_parent_group_and_session_and_what_it_started_below_it() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("pids");
         // A shell that leads a group of its own, starts a sleep, and waits for it.
-        let mut shell = std::process::Command::new("/bin/sh")
+        let mut shell = crate::testing::command("/bin/sh")
             .arg("-c")
             .arg("sleep 30 & echo $! > \"$0\"; wait")
             .arg(&file)

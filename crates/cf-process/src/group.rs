@@ -337,9 +337,9 @@ mod tests {
 
     /// A sleep that leads a group of its own: a signal sent to the process or
     /// to its group ends it.
-    #[allow(clippy::disallowed_methods, clippy::unwrap_used)] // The test starts what it ends.
+    #[allow(clippy::unwrap_used)] // The test starts what it ends.
     fn sleeper() -> Child {
-        std::process::Command::new("/bin/sleep")
+        crate::testing::command("/bin/sleep")
             .arg("30")
             .process_group(0)
             .spawn()
@@ -432,12 +432,11 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::disallowed_methods)] // The test starts what it ends.
     fn a_process_found_in_the_session_is_signalled_only_while_it_is_in_it_still() {
         // Round 7, decision 5: a process found in the program's session is read again right
         // before it is signalled, and must be in that session still, though it descends
         // from the program too. The program leads a session, and a sleep is in it.
-        let mut leader = std::process::Command::new("/usr/bin/perl")
+        let mut leader = crate::testing::command("/usr/bin/perl")
             .args([
                 "-MPOSIX",
                 "-e",

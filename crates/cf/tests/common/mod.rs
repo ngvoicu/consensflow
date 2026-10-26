@@ -61,6 +61,8 @@ pub fn cf_at<S: AsRef<OsStr>>(
     }
     command.env("CONSENSFLOW_HOME", home.path());
     command.env("CONSENSFLOW_TOOL_FOLDERS", "");
+    // The tests run side by side: a `cf` left what another test had open would hold it.
+    cf_process::hold_only_the_streams(&mut command);
     let mut child = command
         .args(args.iter().map(AsRef::as_ref))
         .envs(env.iter().copied())

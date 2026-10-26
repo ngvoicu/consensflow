@@ -20,10 +20,19 @@ pub fn checkout() -> PathBuf {
         .to_path_buf()
 }
 
+/// The command a test starts `program` with, holding nothing of the test's but its streams: the
+/// tests run side by side, and a program one starts (an xtask that runs on, a fake `ssh` that
+/// sleeps) would hold what another closed.
+pub fn command(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    cf_process::hold_only_the_streams(&mut command);
+    command
+}
+
 /// xtask run in `cwd` with `args`, finding programs in `path` alone, and the
 /// fake child's instructions in `vars`.
 pub fn xtask(cwd: &Path, path: &Path, vars: &[(&str, &str)], args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_xtask"))
+    command(env!("CARGO_BIN_EXE_xtask"))
         .current_dir(cwd)
         .env("PATH", path)
         .envs(vars.iter().copied())

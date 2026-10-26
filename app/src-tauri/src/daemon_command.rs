@@ -69,6 +69,9 @@ pub(crate) fn daemon_command(
 fn command_for(cf: &Path) -> Command {
     let mut command = Command::new(cf);
     command.args(["ui", "--json", "--no-open"]);
+    // The daemon runs as long as the app does, and the app opens sockets and pipes on its
+    // other threads as it starts it: what it was left of those it would hold to the end.
+    cf_process::hold_only_the_streams(&mut command);
     command
 }
 
@@ -490,6 +493,9 @@ fn asked(
     use std::io::Read;
 
     let mut asked = Command::new(shell);
+    // A login file may start a program that runs on after the shell (an agent of ssh's, of
+    // gpg's), and the app opens sockets and pipes on its other threads as it asks.
+    cf_process::hold_only_the_streams(&mut asked);
     asked
         .args(args)
         .stdin(Stdio::null())
