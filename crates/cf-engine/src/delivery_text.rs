@@ -151,6 +151,14 @@ pub fn brief_first(brief: &MessageView, carried: &[MessageView]) -> String {
 /// paste, and the same tag closed after it, `</pasted_content id="b118">`.
 const PASTED: &str = "pasted_content";
 
+/// What Claude Code puts ahead of a paste whose lines are paths of images it can read
+/// (2.1.308; the field bug of 2026-10-21 in 2.1.306 and the live probe of 2026-10-22,
+/// `tests/live_image_paste.rs`): a placeholder for each image, `[Image #4]`, one space
+/// between them, and the paste after them with those lines gone, at once
+/// (`[Image #4][ConsensFlow m-…]`) or, where Claude wrapped it ([`PASTED`]), after a blank
+/// line. The attachments' sources are the next item of the record, which holds no header.
+const IMAGE: &str = "[Image #";
+
 /// Whether `text`, an item of what a window was given, is the paste of the
 /// message `message_id`, which proves it arrived: the message's own header begins
 /// it, as ConsensFlow pastes it, the lines of the window's text
@@ -160,51 +168,97 @@ const PASTED: &str = "pasted_content";
 ///   on a line of its own and closed with the same at the end (the reviews of
 ///   2026-10-16: a Claude chief's record of every result was taken for lacking, and
 ///   the result pasted again); the four others record the paste as it is given;
+/// - behind the placeholders of the images Claude Code attached ([`IMAGE`]: a result
+///   that starts with the path of a picture, the field bug of 2026-10-21, pasted three
+///   times and failed), the header at once, or a blank line and then the wrapper (the
+///   shape Claude writes; the header after the blank line with no wrapper is taken for
+///   the paste too, as a wrapper is read where it is and none is needed, a shape Claude
+///   does not write and no wider than the limit below);
 /// - after `first`, the exact paste a member's fresh window is given ahead of its
 ///   first message ([`brief_first`]), there and nowhere else.
 ///
 /// A header quoted in other words, the human's (`Why is "[ConsensFlow m-42 …]"
 /// queued?`) or a message's (`Investigate this:\n\n[ConsensFlow m-42 …]`), is no
-/// paste, and proves nothing arrived (the reviews of 2026-10-16). Limit: words
-/// that begin with a header as a paste does are taken for one, and a paste Devin
-/// glued behind words the human typed and never sent (it pastes behind what its
-/// input box holds, a record of 2026-10-02) is none: the window waits for those
-/// words to be sent first (`Held::Unsent`), so only a typing between that look and
-/// the paste can make one.
+/// paste, and proves nothing arrived (the reviews of 2026-10-16), whether words come
+/// before it or only placeholders do. Limits: words that begin with a header as a paste
+/// does are taken for one, and a paste Devin glued behind words the human typed and never
+/// sent (it pastes behind what its input box holds, a record of 2026-10-02) is none: the
+/// window waits for those words to be sent first (`Held::Unsent`), so only a typing
+/// between that look and the paste can make one. The brief `first` holds is never behind
+/// placeholders: Claude Code makes no attachment of the first message of a launch, which is an
+/// argument of the program and no paste (the probe of 2026-10-22, `launch_check` of
+/// `tests/live_image_paste.rs`).
 pub fn is_paste_of(text: &str, message_id: i64, first: Option<&str>) -> bool {
     let marker = marker_of(message_id);
     if !text.contains(&marker) {
         return false;
     }
     let text = window_text(text);
-    let paste = unwrapped(text.trim_start());
+    let text = text.trim_start();
+    // Behind the placeholders of the images Claude attached, the header at once or a blank
+    // line and then the wrapper (or the header itself, which no wrapper is needed for).
+    let paste = match after_placeholders(text) {
+        Some(head) => head.strip_prefix("\n\n").map_or(head, unwrapped),
+        None => unwrapped(text),
+    };
     let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));
     paste.starts_with(&marker) || behind.is_some_and(|rest| rest.starts_with(&marker))
 }
 
+/// What follows the image placeholders ([`IMAGE`]) that begin `text`: a run of them, one
+/// space between, each with a number; none where `text` does not begin with one.
+fn after_placeholders(text: &str) -> Option<&str> {
+    let mut rest = text;
+    let mut seen = false;
+    while let Some(after) = rest.strip_prefix(IMAGE) {
+        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+        let Some(next) = after[digits..].strip_prefix(']').filter(|_| digits > 0) else {
+            break;
+        };
+        (rest, seen) = (next, true);
+        match rest.strip_prefix(' ') {
+            Some(more) if more.starts_with(IMAGE) => rest = more,
+            _ => break,
+        }
+    }
+    seen.then_some(rest)
+}
+
+/// What follows the opening of Claude Code's wrapper ([`PASTED`]) that begins `text`: the
+/// tag's attributes, and what is after its line; none where `text` does not begin with one.
+fn after_wrapper_opening(text: &str) -> Option<(&str, &str)> {
+    let rest = text.strip_prefix('<')?.strip_prefix(PASTED)?;
+    let (attributes, inner) = rest.split_once(">\n")?;
+    let whole =
+        (attributes.is_empty() || attributes.starts_with(' ')) && !attributes.contains(['>', '\n']);
+    whole.then_some((attributes, inner))
+}
+
 /// The paste `text` holds where Claude Code wrapped it ([`PASTED`]), else `text`.
 fn unwrapped(text: &str) -> &str {
-    let Some(rest) = text
-        .strip_prefix('<')
-        .and_then(|rest| rest.strip_prefix(PASTED))
-    else {
+    let Some((attributes, inner)) = after_wrapper_opening(text) else {
         return text;
     };
-    let Some((attributes, inner)) = rest.split_once(">\n") else {
-        return text;
-    };
-    if !(attributes.is_empty() || attributes.starts_with(' ')) || attributes.contains(['>', '\n']) {
-        return text;
-    }
     inner
         .trim_end()
         .strip_suffix(&format!("</{PASTED}{attributes}>"))
         .unwrap_or(text)
 }
 
+/// Whether `before`, the text ahead of the header of a delivery in a record's item, is
+/// only what Claude Code put there itself and no word of the human's: the placeholders
+/// of the images it attached ([`IMAGE`]) and, where it wrapped the paste ([`PASTED`]),
+/// the line that opens the wrapper, after a blank line when placeholders come first.
+pub fn put_there_by_claude(before: &str) -> bool {
+    let before = before.trim_start();
+    let after = after_placeholders(before).map_or(before, str::trim_start);
+    after.is_empty() || after_wrapper_opening(after).is_some_and(|(_, inner)| inner.is_empty())
+}
+
 /// The message a window's record item, text of what it was given, is: the one
-/// whose header comes first in it. A paste begins with its own header, and
-/// carries the rows it keeps for the window under no header of their own, so
+/// whose header comes first in it. A paste begins with its own header (behind the
+/// placeholders of the images Claude Code attached to it, which are no header),
+/// and carries the rows it keeps for the window under no header of their own, so
 /// what comes first is the message; a header that the words of a message quote
 /// comes after it, and is the message's no more than any other words are. None
 /// where the text holds no header.
@@ -433,6 +487,128 @@ mod tests {
             marker_of(1)
         );
         assert!(!is_paste_of(&quoted, 1, None));
+    }
+
+    /// A result as the live probe of 2026-10-22 recorded it in Claude Code 2.1.308 once the
+    /// paths of its pictures were turned into attachments (`tests/live_image_paste.rs`).
+    const FIELD: &str = "[Image #4][ConsensFlow m-2619 · T-45 · result from @pygmalion-jolly-brook]\nWarm editorial desk scene.\n\nDecide with: cf task accept T-45 · cf task reopen T-45 \"…\"";
+
+    #[test]
+    fn a_paste_behind_the_placeholders_of_the_images_claude_attached_is_the_paste() {
+        // The field's shape: a space between placeholders, none before the header.
+        assert!(is_paste_of(FIELD, 2619, None));
+        assert!(is_paste_of(&FIELD.replace('\n', "\r\n"), 2619, None));
+        let header = "[ConsensFlow m-3 · T-1 · result from @pygmalion-jolly-brook]\nWarm.";
+        for placeholders in [
+            "[Image #1]",
+            "[Image #2] [Image #3]",
+            "[Image #14] [Image #15] [Image #16]",
+        ] {
+            assert!(
+                is_paste_of(&format!("{placeholders}{header}"), 3, None),
+                "{placeholders}"
+            );
+        }
+        // Wrapped, a blank line between them and the wrapper (the probe's rows of
+        // Claude Code 2.1.308), as a wrapped paste with no image has its blank lines first.
+        let wrapped = format!("[Image #7] [Image #8]\n\n<pasted_content id=\"f920\">\n{header}\nMore.\nAnd more.\n</pasted_content id=\"f920\">\n");
+        assert!(is_paste_of(&wrapped, 3, None));
+        assert!(is_paste_of(&wrapped.replace('\n', "\r\n"), 3, None));
+        let unattached = format!("\n\n<pasted_content id=\"f920\">\n{header}\n/tmp/gone.png\nMore.\n</pasted_content id=\"f920\">\n");
+        assert!(
+            is_paste_of(&unattached, 3, None),
+            "a path to a file Claude could not read"
+        );
+        assert!(
+            !is_paste_of(&wrapped, 33, None) && !is_paste_of(FIELD, 261, None),
+            "m-261 is not m-2619"
+        );
+        // The next item, where the attachments came from, is no message's paste.
+        assert!(!is_paste_of(
+            "[Image: source: /tmp/desk.png]\n[Image: source: /tmp/hero.png]",
+            3,
+            None
+        ));
+        // The header after a blank line with no wrapper is taken for the paste too: a shape
+        // Claude does not write (it wraps what it moves behind a blank line), and no wider
+        // than a header that begins words a paste does.
+        assert!(is_paste_of(&format!("[Image #5]\n\n{header}"), 3, None));
+        assert!(!is_paste_of(&format!("[Image #5]\n{header}"), 3, None));
+    }
+
+    #[test]
+    fn a_header_in_other_words_is_no_paste_for_the_placeholders_before_it() {
+        let header = "[ConsensFlow m-42 · T-1 · note from @zeus]";
+        for text in [
+            // Words between the placeholders and the header, on the line or after a blank one.
+            format!("[Image #5] Investigate this: {header}"),
+            format!("[Image #5]\n\nInvestigate this:\n\n{header}"),
+            format!("[Image #5]\nSee {header}"),
+            // Placeholders as Claude does not write them.
+            format!("[Image]{header}"),
+            format!("[Image #]{header}"),
+            format!("[Image #x]{header}"),
+            format!("[Image #5]  [Image #6]{header}"),
+            format!("[Image #5],[Image #6]{header}"),
+            format!("[Image #5] {header}"),
+            format!("[Image #5]\n{header}"),
+            // Placeholders after words.
+            format!("Look: [Image #5]{header}"),
+            // A header the paste quotes, behind its own.
+            format!("[Image #5][ConsensFlow m-43 · T-1 · note from @zeus]\nAs {header}"),
+        ] {
+            assert!(!is_paste_of(&text, 42, None), "{text}");
+        }
+        assert!(is_paste_of(
+            &format!("[Image #5][ConsensFlow m-43 · T-1 · note from @zeus]\n{header}"),
+            43,
+            None
+        ));
+        // A wrapper that is none of Claude's is the same behind placeholders as without.
+        assert!(!is_paste_of(
+            &format!("[Image #5]\n\n<quote>\n{header}\n</quote>\n"),
+            42,
+            None
+        ));
+    }
+
+    #[test]
+    fn the_message_of_an_item_is_found_behind_its_placeholders_too() {
+        assert_eq!(header_id(FIELD), Some(2619));
+        assert_eq!(header_id("[Image #2] [Image #3]\n\n<pasted_content id=\"f920\">\n[ConsensFlow m-6 · T-1 · result from @x]\nSaved.\n</pasted_content id=\"f920\">\n"), Some(6));
+        // The attachments' sources hold no header.
+        assert_eq!(header_id("[Image: source: /tmp/desk.png]"), None);
+    }
+
+    #[test]
+    fn what_claude_code_puts_ahead_of_a_paste_is_no_word_of_the_humans_and_nothing_else_is_that() {
+        let wrapper = "<pasted_content id=\"f920\">\n";
+        for ahead in [
+            "".to_owned(),
+            "[Image #4]".to_owned(),
+            "[Image #1] [Image #2]".to_owned(),
+            wrapper.to_owned(),
+            format!("\n\n{wrapper}"),
+            format!("[Image #7] [Image #8]\n\n{wrapper}"),
+            "<pasted_content>\n".to_owned(),
+        ] {
+            assert!(put_there_by_claude(&ahead), "{ahead:?}");
+        }
+        for ahead in [
+            "look".to_owned(),
+            "[Image #4]look".to_owned(),
+            "look [Image #4]".to_owned(),
+            "[Image #4] look".to_owned(),
+            "[Image #]".to_owned(),
+            "[Image #4][Image #5]".to_owned(),
+            "[Image #4]\n\nlook".to_owned(),
+            format!("[Image #4]\n\n{wrapper}look\n"),
+            format!("typed {wrapper}"),
+            "<pasted_content id=\"f\">look\n".to_owned(),
+            "<pasted_contentious>\n".to_owned(),
+        ] {
+            assert!(!put_there_by_claude(&ahead), "{ahead:?}");
+        }
     }
 
     #[test]

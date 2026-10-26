@@ -1,0 +1,329 @@
+# The record Claude Code writes beside a user's message, to say where the images it attached to it
+# came from (`turnCompanion`, with the sources: `[Image: source: <path>]`): the harness's own words,
+# and no message of the user's (Claude Code takes it for no prompt itself, 2.1.308). The reader makes
+# of it an item of the harness's own, as it does of what a hook added to a prompt, so the last user's
+# item of a window stays the message it is about. T-265, the second finding of T-215: the window of a
+# task that was called off, or one stopped before a word of its answer, was looked at by that last
+# item; the companion was it, held no header, and no Escape was pressed into the turn (the first), the
+# message not taken back (the second). Found by the brain's `issues/a-cancelled-tasks-turn-with-
+# images-attached-gets-no-escape.md`. The history of the chief did the same: the placeholders Claude
+# puts ahead of a delivery's header, and the wrapper's opening line, were the human's last words.
+#
+# The cases are the reader's, `claude::record::tests::companions` (and the field row of `fields`) in
+# `crates/cf-harness`, the engine's, `cancelled_task.rs` and `taken_back.rs` of the dispatcher's tests
+# and `tests/text/handoff.rs`, the rule's own, `delivery_text::tests`, and on the rig
+# `a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed`
+# (the stand-in Claude makes attachments of a paste as Claude Code does, and keeps a launch's first
+# message as it was).
+#
+# The merge with alpha.3 (T-515) added two cases where these rules meet main's: turn-end's result
+# (`paste_shapes.rs` of the dispatcher's tests: a worker resumed with a picture's path ends its turn
+# with its answer for the result, the harness's own items beside it none of it) and the stand-in's
+# notifications (`tests::a_notification_that_names_a_picture_...` of the `fake-agent` bin: a job's
+# notification is no paste, so no picture is attached from it).
+#
+# Every name holds `turn companion`, so `npm run plants:daemon -- "turn companion"` runs them all.
+
+[run]
+harness-companions = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::companions::"]
+harness-fields = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::fields::"]
+engine-dispatcher-companions = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "images_were_attached"]
+engine-dispatcher-paste-shapes = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paste_shapes::"]
+engine-text-handoff = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "names_what_claude_put_ahead"]
+engine-lib-delivery-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "delivery_text::"]
+engine-text-viewer = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "viewer::types_nothing_for_what_claude_put_ahead"]
+harness-ancestry = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::ancestry::"]
+ledger-healing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "whole_history", "healing::"]
+standin-notification = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "a_notification_that_names_a_picture"]
+rig-companions = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed::"]
+
+[[plant]]
+name = "turn companion: the reader takes no record for a companion, and the sources of the images are the user's last message"
+meant = "the_companion_of_a_message_is_an_item_of_the_harness_s_own_and_the_turn_is_settled_as_usual"
+runs = ["harness-companions", "rig-companions"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''    record.get("turnCompanion") == Some(&Value::Bool(true))'''
+replace = '''    record.get("turnCompanion") == Some(&Value::Bool(false))'''
+
+[[plant]]
+name = "turn companion: the reader takes any meta record for a companion"
+meant = "only_a_record_flagged_as_the_companion_of_a_turn_is_one"
+runs = ["harness-companions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''    record.get("turnCompanion") == Some(&Value::Bool(true))'''
+replace = '''    record.get("turnCompanion") == Some(&Value::Bool(true)) || record.get("isMeta") == Some(&Value::Bool(true))'''
+
+[[plant]]
+name = "turn companion: a flagged record that holds a tool's result is taken for a companion, and the result is lost"
+meant = "a_flagged_record_that_holds_a_tool_s_result_is_the_result_all_the_same"
+runs = ["harness-companions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''    if is_companion(record) && !holds_results && !js::trim(&text).is_empty() {'''
+replace = '''    if is_companion(record) && !js::trim(&text).is_empty() {'''
+
+[[plant]]
+name = "turn companion: a flagged record with no words adds an item of no words"
+meant = "a_flagged_record_with_no_words_adds_no_item_as_before"
+runs = ["harness-companions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''    if is_companion(record) && !holds_results && !js::trim(&text).is_empty() {'''
+replace = '''    if is_companion(record) && !holds_results {'''
+
+[[plant]]
+name = "turn companion: the line builds no value of the field, and the reader never sees a companion"
+meant = "each_field_replay_reads_of_a_record_changes_the_reading"
+runs = ["harness-fields"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/keep.rs"
+find = '''    ("turnCompanion", &Keep::Scalar),
+'''
+replace = ""
+
+[[plant]]
+name = "turn companion: the harness's own words are an item of the user's"
+meant = "the_last_user_message_of_a_look_is_the_message_before_its_companion"
+runs = ["harness-companions", "rig-companions"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''        self.items.push(id, Role::Custom, &hook.text, at, seq);'''
+replace = '''        self.items.push(id, Role::User, &hook.text, at, seq);'''
+
+[[plant]]
+name = "turn companion: the test adapter records the sources of the images as the user's item, and a cancel finds no turn about its task"
+meant = "interrupts_a_window_at_work_on_words_whose_images_were_attached_the_sources_after_them_being_no_message_of_the_users"
+runs = ["engine-dispatcher-companions", "engine-dispatcher-paste-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/testing/adapter.rs"
+find = '''                    agent.items.push(self.item(Role::Custom, &sources));'''
+replace = '''                    agent.items.push(self.item(Role::User, &sources));'''
+
+[[plant]]
+name = "turn companion: a stop paid at rest takes back nothing when the sources of the images follow the words"
+meant = "a_stop_paid_at_rest_keeps_the_words_that_resumed_a_task_when_their_images_were_attached_the_sources_after_them_being_no_message_of_the_users"
+runs = ["engine-dispatcher-companions"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/testing/adapter.rs"
+find = '''                    agent.items.push(self.item(Role::Custom, &sources));'''
+replace = '''                    agent.items.push(self.item(Role::User, &sources));'''
+
+[[plant]]
+name = "turn companion: what Claude puts ahead of a delivery is the human's words"
+meant = "what_claude_code_puts_ahead_of_a_paste_is_no_word_of_the_humans_and_nothing_else_is_that"
+runs = ["engine-lib-delivery-text", "engine-text-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''    after.is_empty() || after_wrapper_opening(after).is_some_and(|(_, inner)| inner.is_empty())'''
+replace = '''    after.is_empty() && after_wrapper_opening(after).is_some_and(|(_, inner)| inner.is_empty())'''
+
+[[plant]]
+name = "turn companion: the wrapper's opening line ahead of a delivery is the human's words"
+meant = "what_claude_code_puts_ahead_of_a_paste_is_no_word_of_the_humans_and_nothing_else_is_that"
+runs = ["engine-lib-delivery-text", "engine-text-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''    after.is_empty() || after_wrapper_opening(after).is_some_and(|(_, inner)| inner.is_empty())'''
+replace = '''    after.is_empty()'''
+
+[[plant]]
+name = "turn companion: any words ahead of a delivery's header are taken for what Claude put there"
+meant = "what_claude_code_puts_ahead_of_a_paste_is_no_word_of_the_humans_and_nothing_else_is_that"
+runs = ["engine-lib-delivery-text", "engine-text-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''    let after = after_placeholders(before).map_or(before, str::trim_start);'''
+replace = '''    let after = after_placeholders(before).map_or("", str::trim_start);'''
+
+[[plant]]
+name = "turn companion: the human's last words are the placeholders ahead of a delivery"
+meant = "names_what_claude_put_ahead_of_a_delivery_as_neither_the_human_s_words_nor_their_last"
+runs = ["engine-text-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff.rs"
+find = '''                Some(header) => typed_before(&item.text, &header),'''
+replace = '''                Some(header) => &item.text[..header.at],'''
+
+[[plant]]
+name = "turn companion: the history names the placeholders ahead of a delivery as the human's words"
+meant = "names_what_claude_put_ahead_of_a_delivery_as_neither_the_human_s_words_nor_their_last"
+runs = ["engine-text-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/entries.rs"
+find = '''    let before = js::trim(typed_before(text, &header));'''
+replace = '''    let before = js::trim(&text[..header.at]);'''
+
+[[plant]]
+name = "turn companion: the human's own words ahead of a delivery are taken for Claude's"
+meant = "names_what_claude_put_ahead_of_a_delivery_as_neither_the_human_s_words_nor_their_last"
+runs = ["engine-text-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/text.rs"
+find = '''    if put_there_by_claude(before) {
+        ""
+    } else {
+        before
+    }'''
+replace = '''    if !before.is_empty() {
+        ""
+    } else {
+        before
+    }'''
+
+# The stand-in Claude (`fake_agent`) keeps the first message of a launch as it is, as Claude Code
+# 2.1.308 does (the probe of 2026-10-22, T-265): the rig cases hand a worker its brief with its
+# launch, and a stand-in that made attachments of it would show a shape the field never had.
+
+[[plant]]
+name = "turn companion: the stand-in Claude makes attachments of the paths in the first message of a launch"
+meant = "the_brief_a_window_is_launched_with_is_no_paste_and_keeps_the_path_of_an_image_in_it"
+runs = ["rig-companions"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = '''    record_message(records, pid, first && window.seeded, text).map_err(failed)?;'''
+replace = '''    record_message(records, pid, first && window.seeded && false, text).map_err(failed)?;'''
+
+# Round 3 (T-296, Calliope's review of both rounds, T-289): the history viewer's page drew what
+# Claude put ahead of a delivery as the human's typing (P3-1); a copy of an item made before the
+# fix kept its role as it was (P3-2); the walk from a late user record to its answer stopped at a
+# companion (P3-5); and the pin of the blank-line shape behind the placeholders (P3-4).
+
+[[plant]]
+name = "turn companion: the viewer's page draws the placeholders ahead of a delivery as what the human typed with it"
+meant = "types_nothing_for_what_claude_put_ahead_of_a_delivery_and_keeps_the_words_a_human_typed"
+runs = ["engine-text-viewer"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = '''            let at = if typed_before(&item.text, &header).is_empty() {
+                0
+            } else {
+                header.at
+            };'''
+replace = '''            let at = header.at;'''
+
+[[plant]]
+name = "turn companion: the viewer's page counts none of a human's own words as typed where placeholders come first"
+meant = "types_nothing_for_what_claude_put_ahead_of_a_delivery_and_keeps_the_words_a_human_typed"
+runs = ["engine-text-viewer"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = '''            let at = if typed_before(&item.text, &header).is_empty() {'''
+replace = '''            let at = if !item.text.is_empty() {'''
+
+[[plant]]
+name = "turn companion: a copy again leaves an item's role as it was copied"
+meant = "an_item_copied_as_the_users_and_copied_again_as_the_harness_s_own_is_read_so_by_both_readers"
+runs = ["ledger-healing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''         SET seq = excluded.seq, role = excluded.role, text = excluded.text,'''
+replace = '''         SET seq = excluded.seq, text = excluded.text,'''
+
+[[plant]]
+name = "turn companion: a copy again writes no item whose role alone changed"
+meant = "an_item_copied_as_the_users_and_copied_again_as_the_harness_s_own_is_read_so_by_both_readers"
+runs = ["ledger-healing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''         WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete
+            OR transcript.role != excluded.role'''
+replace = '''         WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete'''
+
+[[plant]]
+name = "turn companion: the viewer's heads keep the role an item was first copied with"
+meant = "an_item_copied_as_the_users_and_copied_again_as_the_harness_s_own_is_read_so_by_both_readers"
+runs = ["ledger-healing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''         SET role = excluded.role, bytes = excluded.bytes, parts = excluded.parts,'''
+replace = '''         SET bytes = excluded.bytes, parts = excluded.parts,'''
+
+[[plant]]
+name = "turn companion: a companion between a late user record and its answer breaks the walk"
+meant = "a_companion_between_a_late_user_and_its_answer_is_no_break_in_the_chain"
+runs = ["harness-ancestry"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/ancestry.rs"
+find = '''                || record.get("turnCompanion") == Some(&Value::Bool(true)),'''
+replace = '''                || record.get("turnCompanion") == Some(&Value::Bool(false)),'''
+
+[[plant]]
+name = "turn companion: the header after a blank line behind the placeholders is no paste, and the pin of it is lost"
+meant = "a_paste_behind_the_placeholders_of_the_images_claude_attached_is_the_paste"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''        Some(head) => head.strip_prefix("\n\n").map_or(head, unwrapped),'''
+replace = '''        Some(head) => head
+            .strip_prefix("\n\n")
+            .map_or(head, |rest| if rest.starts_with('<') { unwrapped(rest) } else { "" }),'''
+
+[[plant]]
+name = "turn companion: the answer to the task takes an item of the harness's own for a message to the member"
+meant = "a_worker_resumed_with_words_that_name_a_picture_ends_its_turn_with_its_answer_as_the_result_the_sources_the_harness_wrote_beside_it_being_no_part_of_it"
+runs = ["engine-dispatcher-paste-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            Role::Tool if !of_the_role => final_run.clear(),'''
+replace = '''            Role::Tool if !of_the_role => final_run.clear(),
+            Role::Custom if !of_the_role => {
+                final_run.clear();
+                last = None;
+            }'''
+
+[[plant]]
+name = "turn companion: the stand-in makes attachments of the paths in a job's notification"
+meant = "a_notification_that_names_a_picture_is_written_as_a_notification_and_no_paste_attaches_it"
+runs = ["standin-notification"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = '''    if steps::is_notification(text) {
+        return steps::write_notification(records, pid, text);
+    }
+    let written = if launched {'''
+replace = '''    let written = if launched {'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = '''    for record in written {
+        records.append(pid, record)?;
+    }
+    Ok(())
+}'''
+replace = '''    for record in written {
+        records.append(pid, record)?;
+    }
+    if steps::is_notification(text) {
+        return steps::write_notification(records, pid, text);
+    }
+    Ok(())
+}'''

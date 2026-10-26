@@ -550,6 +550,7 @@ mod tests {
             tasks: Tasks::default(),
             wake: mpsc::channel().0,
             stop: Arc::new(Stop::default()),
+            seeded: false,
         }
     }
 

@@ -240,6 +240,11 @@ pub struct FakeAdapter {
     /// in (`<pasted_content id="…">`), and a launch's first message as it was
     /// given: not, as the fake of Node's suite, which recorded both as given.
     pub wraps_pastes: Cell<bool>,
+    /// Its windows' record holds a paste whose lines are paths of images as Claude Code
+    /// 2.1.308 keeps one (the field bug T-215): a `[Image #N]` for each at the head of
+    /// the message, those lines gone, and the sources as an item of their own after it.
+    /// A line is an image's path here when it is an absolute path ending in `.png`.
+    pub attaches_images: Cell<bool>,
     /// Its windows' record holds nothing of the first message a launch gives them:
     /// each goes before its harness takes it, where the fake of Node's suite recorded
     /// it as it prepared the launch.
@@ -317,6 +322,7 @@ impl FakeAdapter {
             record_holds: Holds::default(),
             cut_holds: Holds::default(),
             wraps_pastes: Cell::new(false),
+            attaches_images: Cell::new(false),
             forgets_first_messages: Cell::new(false),
             resumes_records: Cell::new(false),
             trusts: RefCell::new(None),
@@ -708,7 +714,16 @@ impl FakeAdapter {
                 } else {
                     text.to_owned()
                 };
+                let (recorded, sources) = if self.attaches_images.get() {
+                    attached(&recorded, agent.items.iter().map(|item| &*item.text))
+                } else {
+                    (recorded, None)
+                };
                 agent.items.push(self.item(Role::User, &recorded));
+                if let Some(sources) = sources {
+                    // The harness's own words, as the reader makes of the companion.
+                    agent.items.push(self.item(Role::Custom, &sources));
+                }
                 agent.settled = false;
                 agent.pending = Pending::default();
                 agent.monitors.clear();
@@ -723,6 +738,35 @@ impl FakeAdapter {
             }
         })
     }
+}
+
+/// What a window that attaches images records of `paste` (`attaches_images`): the words
+/// with a `[Image #N]` for each path on a line of its own at the head, a space between,
+/// and no line break before the rest, and the sources as the item that follows, one line
+/// to a picture; the words as they are, and none, where the paste names none. The
+/// numbers go on from those `earlier` items already hold.
+fn attached<'a>(paste: &str, earlier: impl Iterator<Item = &'a str>) -> (String, Option<String>) {
+    let (images, rest): (Vec<&str>, Vec<&str>) = paste
+        .lines()
+        .partition(|line| line.starts_with('/') && line.ends_with(".png"));
+    if images.is_empty() {
+        return (paste.to_owned(), None);
+    }
+    let first = earlier
+        .map(|text| text.matches("[Image #").count())
+        .sum::<usize>()
+        + 1;
+    let marks: Vec<String> = (first..first + images.len())
+        .map(|number| format!("[Image #{number}]"))
+        .collect();
+    let sources: Vec<String> = images
+        .iter()
+        .map(|path| format!("[Image: source: {path}]"))
+        .collect();
+    (
+        format!("{}{}", marks.join(" "), rest.join("\n")),
+        Some(sources.join("\n")),
+    )
 }
 
 /// The adapter as the engine asks it for one harness.

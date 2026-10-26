@@ -9,11 +9,12 @@
 //! |---|---|---|
 //! | `cut_note` | `message` (its id), `tasks` (the number of the task a member had at work or waiting, one; none for the chief) | the note that tells a window the human's Resume brings back that its turn was cut, as the window is given it: its header, and the engine's words; an error for several tasks, as a window that held several comes back for none |
 //! | `ours` | `lines` (a screen's last lines), `recipient` (the window's handle), `messages` (messages as the board gives them, each its `id`, `kind`, `sender`, `recipient`, `taskNumber` and `body`: those to `recipient` are what was pasted into the window) | for each line, whether it is ConsensFlow's, by the rule a failed turn's note reads the screen by (`shown::ours`) |
+//! | `is_paste_of` | `text` (an item of a harness's record), `message` (an id) | whether the engine takes the item for the paste of that message, which proves it arrived (`delivery_text::is_paste_of`) |
 
 use cf_proto::ledger::MessageView;
 use serde_json::{json, Value};
 
-use crate::delivery_text::delivery_text;
+use crate::delivery_text::{delivery_text, is_paste_of};
 use crate::resume::Coming;
 use crate::shown::{ours, Paste};
 
@@ -22,11 +23,26 @@ pub fn answer(question: &Value) -> Result<Value, String> {
     match question.get("op").and_then(Value::as_str) {
         Some("cut_note") => cut_note(question),
         Some("ours") => ours_of(question),
+        Some("is_paste_of") => paste_of(question),
         other => Err(format!(
-            "the question asks for {}, which is neither cut_note nor ours",
+            "the question asks for {}, which is none of cut_note, ours and is_paste_of",
             other.unwrap_or("nothing")
         )),
     }
+}
+
+/// Whether the engine takes the item `text` of a record for the paste of the message
+/// `message`.
+fn paste_of(question: &Value) -> Result<Value, String> {
+    let text = question
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or("the question names no text")?;
+    let id = question
+        .get("message")
+        .and_then(Value::as_i64)
+        .ok_or("the question names no message")?;
+    Ok(json!(is_paste_of(text, id, None)))
 }
 
 /// The note a window is given as the first thing the human's Resume gives it, when
@@ -199,5 +215,20 @@ mod tests {
             "messages": messages
         });
         assert_eq!(answer(&question).unwrap(), json!([true, false]));
+    }
+
+    #[test]
+    fn an_item_is_a_paste_of_the_message_the_engine_takes_it_for() {
+        let paste = |text: &str, message: i64| {
+            answer(&json!({ "op": "is_paste_of", "text": text, "message": message })).unwrap()
+        };
+        let header = "[ConsensFlow m-4 · T-1 · result from @designer]";
+        assert_eq!(paste(&format!("{header}\nDone."), 4), true);
+        // Behind the placeholders of the pictures Claude attached.
+        assert_eq!(paste(&format!("[Image #3]{header}\nDone."), 4), true);
+        assert_eq!(paste(&format!("[Image #3]{header}\nDone."), 5), false);
+        assert_eq!(paste(&format!("See {header}"), 4), false);
+        assert!(answer(&json!({ "op": "is_paste_of", "message": 4 })).is_err());
+        assert!(answer(&json!({ "op": "is_paste_of", "text": "x" })).is_err());
     }
 }

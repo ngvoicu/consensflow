@@ -1,6 +1,10 @@
 //! What the window answers a message with. Every message is one turn.
 //!
 //! - `Reply with exactly: X` answers X.
+//! - A line `SAVED <file>[,<file>...] <words>` is an image designer's turn: it saves a
+//!   picture under each name in the window's folder and answers the absolute path of
+//!   each, a line apiece, and then the words, as the designer's role asks its result
+//!   to begin (`skill/core/staff.md`).
 //! - A line `DISPATCH --tier standard <task>` (or `DISPATCH --review --tier
 //!   standard <task>`, and `--test` the same) runs `cf task add` with those
 //!   words and the task (`\n` in it becomes a line break), with this window's
@@ -128,6 +132,9 @@ pub struct Window {
     pub wake: Sender<String>,
     /// The Escape that stops the turn at work.
     pub stop: Arc<Stop>,
+    /// The window's first message came with its launch, as an argument of the program, and
+    /// was no paste: Claude Code makes no attachment of the paths of images in it.
+    pub seeded: bool,
 }
 
 /// What a turn answers.
@@ -254,6 +261,7 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static DISPATCH: OnceLock<Regex> = OnceLock::new();
     static VERB: OnceLock<Regex> = OnceLock::new();
     static REFUSED: OnceLock<Regex> = OnceLock::new();
+    static SAVED: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
     static RESULTS: OnceLock<Regex> = OnceLock::new();
 
@@ -431,6 +439,10 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     if refused(text, window, pattern::once(&REFUSED, "QUOTA-OUT")) {
         return Ok(Reply::Refused);
     }
+    if let Some(saved) = pattern::once(&SAVED, r"(?m)^SAVED (\S+) (.+)$").captures(text) {
+        let folder = std::env::current_dir().map_err(|failed| failed.to_string())?;
+        return saved_in(&folder, &saved[1], &saved[2]).map(Reply::Text);
+    }
     if let Some(exact) = pattern::once(&EXACT, r"Reply with exactly: (\S+)").captures(text) {
         return Ok(Reply::Text(exact[1].to_owned()));
     }
@@ -438,6 +450,20 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         "noted: {}",
         text.split('\n').next().unwrap_or_default()
     )))
+}
+
+/// An image designer's answer: a picture saved under each of `names` (a comma
+/// between) in `folder`, and then `words`, the paths first as its role asks.
+fn saved_in(folder: &Path, names: &str, words: &str) -> Result<String, String> {
+    let mut lines = Vec::new();
+    for name in names.split(',') {
+        let path = folder.join(name);
+        std::fs::write(&path, cf_e2e::png::SMALL)
+            .map_err(|failed| format!("SAVED {name}: {failed}"))?;
+        lines.push(path.display().to_string());
+    }
+    lines.push(words.to_owned());
+    Ok(lines.join("\n"))
 }
 
 /// The words of `cf task add` each `DISPATCH` line of `text` asks for, in the
@@ -522,6 +548,7 @@ mod tests {
             tasks: Tasks::default(),
             wake: std::sync::mpsc::channel().0,
             stop: Arc::new(Stop::default()),
+            seeded: false,
         }
     }
 
@@ -542,6 +569,31 @@ mod tests {
             &window(),
         );
         assert_eq!(text(reply), "ONE_DONE");
+    }
+
+    #[test]
+    fn a_designer_saves_its_pictures_and_answers_their_paths_before_its_words() {
+        let folder = tempfile::tempdir().unwrap();
+        let answer = saved_in(folder.path(), "desk.png,hero.png", "Warm editorial scene.").unwrap();
+        let (desk, hero) = (
+            folder.path().join("desk.png"),
+            folder.path().join("hero.png"),
+        );
+        assert_eq!(
+            answer,
+            format!(
+                "{}\n{}\nWarm editorial scene.",
+                desk.display(),
+                hero.display()
+            )
+        );
+        for picture in [desk, hero] {
+            let bytes = std::fs::read(picture).unwrap();
+            assert!(cf_e2e::png::inspect(&bytes).is_ok());
+        }
+        assert!(saved_in(&folder.path().join("none"), "a.png", "x")
+            .unwrap_err()
+            .starts_with("SAVED a.png: "));
     }
 
     #[test]

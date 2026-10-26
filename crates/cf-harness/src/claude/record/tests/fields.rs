@@ -99,6 +99,18 @@ fn hooked() -> Vec<Value> {
     vec![hook(json!(["ctx"]), Some("h1"))]
 }
 
+/// A message, and after it the record that says where its image came from: the
+/// companion, once it is flagged.
+fn companioned() -> Vec<Value> {
+    let sources = json!([text(json!("[Image: source: /pictures/desk.png]"))]);
+    vec![
+        hello(),
+        user("c1", json!("u1"), sources),
+        answer("a1", "c1"),
+        duration("d1", "a1"),
+    ]
+}
+
 fn fragments() -> Vec<Value> {
     vec![hello(), fragment("a1", "One"), fragment("a2", "Two")]
 }
@@ -724,6 +736,12 @@ fn read() -> Vec<Row> {
             is("promptSource", json!("queued")),
         ),
         ("isMeta", cleared, 1, is("isMeta", json!(true))),
+        (
+            "turnCompanion",
+            companioned,
+            1,
+            is("turnCompanion", json!(true)),
+        ),
         ("level", cleared, 1, is("level", json!("warn"))),
         (
             "content, of a /clear's output",

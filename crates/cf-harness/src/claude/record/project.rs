@@ -34,7 +34,8 @@ pub(super) enum Projected {
     /// A record replay passes over: of a type it does not read, or of one it
     /// reads that says nothing of the turn.
     Other,
-    /// What a `UserPromptSubmit` hook added to the prompt.
+    /// The harness's own words in the conversation: what a `UserPromptSubmit` hook added to
+    /// the prompt, and the companion of a turn (`turnCompanion`).
     Hook(Box<Hook>),
     /// Claude Code's own notification of a job's event or end, brought into a turn
     /// under way (an attachment, `queued_command` of
@@ -67,7 +68,8 @@ pub(super) struct Boundary {
     pub(super) agents: Option<usize>,
 }
 
-/// An attachment that holds a hook's context.
+/// The harness's own words, an item of its own and no user's: an attachment that holds a
+/// hook's context, or the companion of a turn.
 #[derive(Debug, PartialEq)]
 pub(super) struct Hook {
     pub(super) at: Option<Value>,
@@ -341,6 +343,16 @@ fn assistant(record: &Value, session: &str) -> Projected {
 fn user(record: &Value, session: &str) -> Projected {
     let content = field(record.get("message"), "content");
     let text = claude_text(content);
+    let holds_results = blocks(content)
+        .iter()
+        .any(|block| kind(block) == Some("tool_result"));
+    if is_companion(record) && !holds_results && !js::trim(&text).is_empty() {
+        return Projected::Hook(Box::new(Hook {
+            at: timestamp(record),
+            text,
+            uuid: text_id(record.get("uuid")),
+        }));
+    }
     let output_of = record
         .get("parentUuid")
         .and_then(Value::as_str)
@@ -369,6 +381,16 @@ fn user(record: &Value, session: &str) -> Projected {
             .then(|| stopped(record, content))
             .flatten(),
     }))
+}
+
+/// Whether the user's record is the companion of a turn: what Claude Code writes beside
+/// the message it was given, or a tool's call, and that is its own and no word of the
+/// user's (`turnCompanion`; 2.1.308 writes `[Image: source: <path>]`, a line for each
+/// picture it made an attachment of, after the message that named the paths). Claude Code
+/// takes it for no prompt of the user's itself. `isMeta` is on other records that are the
+/// user's turn all the same (the caveat of a command), and is no part of the test.
+fn is_companion(record: &Value) -> bool {
+    record.get("turnCompanion") == Some(&Value::Bool(true))
 }
 
 /// Whether a user's record is the turn Claude Code begins by itself for a notification
