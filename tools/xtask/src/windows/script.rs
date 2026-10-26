@@ -284,6 +284,9 @@ pub struct Script<'a> {
     pub command: &'a str,
     /// The variables the command is given (`parse_env`), in the order named.
     pub env: &'a [(String, String)],
+    /// The folder of the Node the run puts first on its PATH, in PowerShell's words
+    /// ([`super::machine::Machine::node`]).
+    pub node: &'a str,
 }
 
 /// The bootstrap: the run's own tarball ([`upload_name`]) unpacked into `dir` under the
@@ -357,6 +360,7 @@ pub fn run_script(script: &Script) -> String {
         RUN_TEMPLATE,
         &[
             ("job", JOB_SOURCE),
+            ("node", script.node),
             ("command_file", COMMAND_FILE),
             ("steps", &steps.join(", ")),
             ("given", &given),
@@ -584,7 +588,7 @@ try {
   if ($made -eq [IntPtr]::Zero) { throw [CfJob]::Why }
   $job = $made
 } catch { Write-Output "== no job: $($_.Exception.Message), so a stop will not end at once what this run starts" }
-$env:Path = "C:\Program Files\nodejs;$env:USERPROFILE\.cargo\bin;" + $env:Path
+$env:Path = "«node»;$env:USERPROFILE\.cargo\bin;" + $env:Path
 $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorAction SilentlyContinue).Target
 if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
 Set-Location $dir

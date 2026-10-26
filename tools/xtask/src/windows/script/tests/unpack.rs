@@ -32,6 +32,7 @@ fn the_tree_is_unpacked_by_tar_with_each_file_given_the_time_of_the_unpack() {
         steps: &[],
         command: "x",
         env: &[],
+        node: r"C:\Program Files\nodejs",
     });
     assert!(
         other.contains("$tarball = Join-Path $env:USERPROFILE 'build two.0000abcd-12345678.tgz'\n"),

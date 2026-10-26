@@ -244,8 +244,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/run.rs"
-find = "upload_name(&options.dir, &id)"
-replace = "upload_name(&options.dir, &run_id())"
+find = "let upload = upload_name(&options.dir, id);"
+replace = "let upload = upload_name(&options.dir, &run_id());"
 
 [[plant]]
 name = "windows runner: two runs of one process are named alike"
@@ -409,7 +409,7 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/run.rs"
-find = "        Ended::WrongTree(said) => {\n            let ended = end_there(context, options, &plan)?;\n"
+find = "        Ended::WrongTree(said) => {\n            let ended = end_there(context, machine, &plan)?;\n"
 replace = "        Ended::WrongTree(said) => {\n            let ended = Ending::Ended;\n"
 
 [[plant]]
@@ -647,8 +647,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/run.rs"
-find = "            let ended = end_there(context, options, &plan)?;\n            Err(Error::WrongTree {"
-replace = "            end_there(context, options, &plan)?;\n            let ended = Ending::Ended;\n            Err(Error::WrongTree {"
+find = "            let ended = end_there(context, machine, &plan)?;\n            Err(Error::WrongTree {"
+replace = "            end_there(context, machine, &plan)?;\n            let ended = Ending::Ended;\n            Err(Error::WrongTree {"
 
 # The files unpacked are the tree (T-263).
 
@@ -1006,7 +1006,7 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/fetch.rs"
-find = "        let _ = bring_back(context, options, console);\n"
+find = "        let _ = bring_back(context, machine, options, console);\n"
 replace = ""
 
 [[plant]]
@@ -1016,8 +1016,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/matrix.rs"
-find = "        super::fetch::run_keeping(self.context, options, console, self.interrupt)"
-replace = "        super::run::run(self.context, options, console, self.interrupt)"
+find = "        super::fetch::run_keeping(self.context, self.machine, options, console, self.interrupt)"
+replace = "        super::run::run(self.context, self.machine, options, console, self.interrupt)"
 
 [[plant]]
 name = "windows runner: a report this checkout has is replaced"
@@ -1195,3 +1195,132 @@ platforms = ["windows"]
 file = "tools/xtask/src/windows/script.rs"
 find = "if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {"
 replace = "if ($false) {"
+
+# Two machines (T-559, T-591, 2026-10-25): zeewin, and zeewin2, Gabriel's laptop, both through
+# Windows' own SSH server, alike but for zeewin2's Node (CI's, in its profile). poker-lab's jobs
+# hold the laptop at times (`~/.compile-lock/owner` in its Ubuntu, zeelin): zeelin is asked first,
+# with a short timeout, and a run it says is held is refused with 75, sending nothing; a zeelin
+# that does not answer is an Ubuntu that is not running, which holds no lock, and the run goes on.
+# A run is sent to zeewin2 only with 50 GiB of its disk free, as its PowerShell says. The default
+# goes to zeewin while zeewin2 is not free (those two, or a run holding its copy). zeewin's lines
+# and scripts are what they were: the goldens hold them.
+
+[[plant]]
+name = "windows runner: a run goes on zeewin2 while poker-lab holds it"
+meant = "a_run_on_zeewin2_while_poker_lab_holds_its_lock_is_refused_with_75_and_sends_nothing"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''            "held" => Lock::Held,'''
+replace = '''            "held" => Lock::Free,'''
+
+[[plant]]
+name = "windows runner: a zeelin that does not answer is taken for poker-lab's"
+meant = "a_run_on_zeewin2_whose_ubuntu_does_not_answer_goes_on_and_says_why"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "        Ok(answer) => Lock::NoAnswer(format!("
+replace = "        Ok(answer) if answer.code == 255 => Lock::Held,\n        Ok(answer) => Lock::NoAnswer(format!("
+
+[[plant]]
+name = "windows runner: zeelin is asked of the lock's folder, not its owner file"
+meant = "zeelin_is_asked_of_the_owner_file_and_nothing_else"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''                    lock: ".compile-lock/owner".into(),'''
+replace = '''                    lock: ".compile-lock".into(),'''
+
+[[plant]]
+name = "windows runner: zeelin is waited on as long as ssh likes"
+meant = "a_run_on_zeewin2_goes_through_its_own_ssh_server_as_zeewins_does_with_ci_s_node"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''        .args(["-o", &timeout, "-o", "BatchMode=yes"])'''
+replace = '''        .args(["-o", "BatchMode=yes"])'''
+
+[[plant]]
+name = "windows runner: a run goes on zeewin2 short of disk"
+meant = "a_run_on_zeewin2_short_of_disk_is_refused_with_75_and_sends_nothing"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "        if state.free_gib < shared.floor_gib {"
+replace = "        if state.free_gib < shared.floor_gib && false {"
+
+[[plant]]
+name = "windows runner: a run zeewin2 refuses is sent all the same"
+meant = "a_run_on_zeewin2_while_poker_lab_holds_its_lock_is_refused_with_75_and_sends_nothing"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run.rs"
+find = "            return Ok(Outcome::Exited(REFUSED));"
+replace = "            let _ = REFUSED;"
+
+[[plant]]
+name = "windows runner: zeewin2 runs the Node in Program Files"
+meant = "a_run_on_zeewin2_goes_through_its_own_ssh_server_as_zeewins_does_with_ci_s_node"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''            ("node", script.node),'''
+replace = '''            ("node", r"C:\Program Files\nodejs"),'''
+
+[[plant]]
+name = "windows runner: the disk asked is not the profile's"
+meant = "the_disk_is_asked_of_the_profiles_drive_and_the_run_of_the_copys_owner_file"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "(Get-Item $env:USERPROFILE).PSDrive.Free / 1GB"
+replace = "(Get-Item $env:SystemRoot).PSDrive.Free / 1GB"
+
+[[plant]]
+name = "windows runner: a run in zeewin2's copy is told by its lock, which stays"
+meant = "the_disk_is_asked_of_the_profiles_drive_and_the_run_of_the_copys_owner_file"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "(Join-Path $env:USERPROFILE '{dir}') '{OWNER}')"
+replace = "(Join-Path $env:USERPROFILE '{dir}') '.windows-run.lock')"
+
+[[plant]]
+name = "windows runner: the default takes zeewin2 whoever holds it"
+meant = "the_default_is_zeewin_while_zeewin2_is_not_free_and_says_why"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "    let (machine, why) = match first.free(context, dir) {"
+replace = "    let _ = Machine::free;\n    let (machine, why) = match Free::Yes {"
+
+[[plant]]
+name = "windows runner: the default does not see a run on zeewin2"
+meant = "the_default_is_zeewin_while_zeewin2_is_not_free_and_says_why"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''            Ok((Ready::Go(_), true)) => Free::No("a run goes on there".into()),'''
+replace = '''            Ok((Ready::Go(_), true)) => Free::Yes,'''
+
+[[plant]]
+name = "windows runner: --machine and --host together are taken"
+meant = "what_is_missing_or_wrong_is_refused_in_words"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/options.rs"
+find = '''        (Some(_), Some(_)) => Err("--machine and --host name the same thing: give one".into()),'''
+replace = '''        (Some(name), Some(_)) => Ok(Machine::named(name)),'''

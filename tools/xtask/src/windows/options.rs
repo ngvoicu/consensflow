@@ -8,6 +8,7 @@
 
 use std::ffi::OsString;
 
+use super::machine::{Machine, NAMES};
 use super::script::{parse_env, Refusal};
 
 /// The folder of the copy under the profile there, unless `--dir` names another.
@@ -16,8 +17,9 @@ pub const DEFAULT_DIR: &str = "consensflow-build";
 /// What a run on the machine is asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Options {
-    /// The ssh host the machine is.
-    pub host: String,
+    /// The machine, as `--machine` or `--host` named it: none for the default, chosen when the
+    /// run goes ([`super::machine::choose`]).
+    pub machine: Option<Machine>,
     /// Install the packages and build the page, a pane's cf.exe and the pane host first.
     pub build: bool,
     /// The folder of the copy, under the profile there.
@@ -33,7 +35,8 @@ pub struct Options {
 /// What a matrix of evals on the machine is asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatrixOptions {
-    pub host: String,
+    /// As [`Options`]'s.
+    pub machine: Option<Machine>,
     pub build: bool,
     pub env: Vec<(String, String)>,
     pub scenarios: Vec<String>,
@@ -55,8 +58,8 @@ impl Options {
     /// Reads the words after `windows`.
     pub fn parse(args: &[OsString]) -> Result<Self, String> {
         let words = read(args, &HOST_OPTIONS, Command::Allowed)?;
-        let host = host_of(&words)?;
-        if host.is_empty() || words.rest.is_empty() {
+        let machine = machine_of(&words)?;
+        if words.rest.is_empty() {
             return Err(USAGE.into());
         }
         let dir = words.one("dir").unwrap_or(DEFAULT_DIR);
@@ -69,7 +72,7 @@ impl Options {
             return Err(format!("--in is a folder of the copy: {inside}"));
         }
         Ok(Self {
-            host,
+            machine,
             build: words.flag("build"),
             dir: dir.to_owned(),
             inside: inside.to_owned(),
@@ -83,10 +86,10 @@ impl MatrixOptions {
     /// Reads the words after `windows-matrix`.
     pub fn parse(args: &[OsString]) -> Result<Self, String> {
         let words = read(args, &MATRIX_OPTIONS, Command::Refused)?;
-        let host = host_of(&words)?;
+        let machine = machine_of(&words)?;
         let scenarios = words.many("scenario");
         let pairs = words.many("pair");
-        if host.is_empty() || scenarios.is_empty() || pairs.is_empty() {
+        if scenarios.is_empty() || pairs.is_empty() {
             return Err(MATRIX_USAGE.into());
         }
         // Said well before the first run, not by the first one that fails on it.
@@ -104,7 +107,7 @@ impl MatrixOptions {
             })
             .collect::<Result<_, _>>()?;
         Ok(Self {
-            host,
+            machine,
             build: words.flag("build"),
             env,
             scenarios,
@@ -115,23 +118,29 @@ impl MatrixOptions {
     }
 }
 
-const USAGE: &str = "windows takes --host <ssh host> and the command to run there after a --: \
-    cargo xtask windows --host <ssh host> [--build] [--env NAME=VALUE] -- <command>";
+const USAGE: &str = "windows takes the command to run there after a --: \
+    cargo xtask windows [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--env NAME=VALUE] -- <command>";
 
-const MATRIX_USAGE: &str = "windows-matrix takes --host <ssh host>, a --scenario <name> and a \
+const MATRIX_USAGE: &str = "windows-matrix takes a --scenario <name> and a \
     --pair <chief>:<staff> (each as many times as there are): cargo xtask windows-matrix \
-    --host <ssh host> [--env NAME=VALUE] --scenario <name>... --pair <chief>:<staff>...";
+    [--machine zeewin2|zeewin | --host <ssh host>] [--env NAME=VALUE] --scenario <name>... --pair <chief>:<staff>...";
 
-/// The ssh host the words name (empty when they name none). It is given to `ssh`
-/// and `scp` as a word, so it may not be one that they would take for an option.
-fn host_of(words: &Words) -> Result<String, String> {
-    let host = words.one("host").unwrap_or_default();
-    if host.starts_with('-') {
-        return Err(format!(
+/// The machine the words name: by `--machine`, one of [`NAMES`]; by `--host`, an ssh host
+/// reached as zeewin is (it is given to `ssh` and `scp` as a word, so it may not be one that
+/// they would take for an option); none when they name neither, and never both.
+fn machine_of(words: &Words) -> Result<Option<Machine>, String> {
+    match (words.one("machine"), words.one("host")) {
+        (Some(_), Some(_)) => Err("--machine and --host name the same thing: give one".into()),
+        (Some(name), None) => Machine::named(name)
+            .map(Some)
+            .ok_or_else(|| format!("--machine is one of {}, not {name}", NAMES.join(", "))),
+        (None, Some(host)) if host.starts_with('-') => Err(format!(
             "--host is an ssh host, not an option of ssh: {host}"
-        ));
+        )),
+        (None, Some("")) => Err("--host is an ssh host, not an empty word".into()),
+        (None, Some(host)) => Ok(Some(Machine::at(host))),
+        (None, None) => Ok(None),
     }
-    Ok(host.to_owned())
 }
 
 /// The variables the words name, as `parse_env` reads them.
@@ -166,7 +175,8 @@ enum Command {
     Refused,
 }
 
-const HOST_OPTIONS: [(&str, Takes); 5] = [
+const HOST_OPTIONS: [(&str, Takes); 6] = [
+    ("machine", Takes::One),
     ("host", Takes::One),
     ("build", Takes::Nothing),
     ("dir", Takes::One),
@@ -174,7 +184,8 @@ const HOST_OPTIONS: [(&str, Takes); 5] = [
     ("env", Takes::Many),
 ];
 
-const MATRIX_OPTIONS: [(&str, Takes); 7] = [
+const MATRIX_OPTIONS: [(&str, Takes); 8] = [
+    ("machine", Takes::One),
     ("host", Takes::One),
     ("build", Takes::Nothing),
     ("scenario", Takes::Many),

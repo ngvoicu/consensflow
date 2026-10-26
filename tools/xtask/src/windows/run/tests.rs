@@ -128,7 +128,7 @@ impl Rig {
 
     fn options(&self) -> Options {
         Options {
-            host: "zeewin".into(),
+            machine: Some(Machine::at("zeewin")),
             build: false,
             dir: DEFAULT_DIR.into(),
             inside: ".".into(),
@@ -199,9 +199,19 @@ exec sleep 120"#
 }
 
 fn run_it(rig: &Rig, interrupt: &Interrupt) -> (Result<Outcome, Error>, String, String) {
+    run_on(rig, &Machine::at("zeewin"), interrupt)
+}
+
+/// A run of the rig's options on `machine`: how it ended, and what it wrote on each stream.
+fn run_on(
+    rig: &Rig,
+    machine: &Machine,
+    interrupt: &Interrupt,
+) -> (Result<Outcome, Error>, String, String) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let ended = run(
         &rig.context,
+        machine,
         &rig.options(),
         &mut Console {
             out: &mut out,
@@ -244,6 +254,7 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
             steps: &[],
             command: &command,
             env: &env,
+            node: r"C:\Program Files\nodejs",
         })
     );
 
@@ -280,6 +291,7 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
             steps: &[],
             command: &command,
             env: &env,
+            node: r"C:\Program Files\nodejs",
         })
     );
     assert!(
@@ -291,6 +303,182 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
     for name in [SYNCED, TREE, RUN] {
         assert!(!rig.checkout.path().join(name).exists(), "{name}");
     }
+}
+
+/// The laptop as a run meets it: `zeewin2`, Windows' own SSH server, which answers a script that
+/// asks for the free disk (`PSDrive`) with `free_gib` and runs any other as zeewin's does
+/// ([`machine`]); and `zeelin`, its Ubuntu, which says `zeelin` (`held`, `free`) of poker-lab's
+/// lock, or does not answer (`none`: ssh's 255, as a WSL that is not running gives). Each ssh is
+/// written down as its host and its command, the words before the host being ssh's options.
+fn laptop(zeelin: &str, free_gib: u64) -> String {
+    let run = machine(0);
+    format!(
+        r#"for word; do host=$last; last=$word; done
+printf '%s\n' "$*" >> "$CF_LOG.words"
+case "$host" in
+  zeelin)
+    printf 'ssh\t%s\t%s\n' "$host" "$last" >> "$CF_LOG"
+    case "{zeelin}" in
+      held) echo held ;;
+      free) echo free ;;
+      *) echo "ssh: connect to host 10.6.0.6 port 22: Operation timed out" >&2; exit 255 ;;
+    esac
+    exit 0 ;;
+esac
+script=$(printf '%s' "${{last##* }}" | base64 -d 2>/dev/null | iconv -f UTF-16LE -t UTF-8 2>/dev/null)
+case "$script" in *PSDrive*) printf 'ssh\t%s\t%s\n' "$host" "$last" >> "$CF_LOG"; echo "free {free_gib}"; exit 0 ;; esac
+set -- "$host" "$last"
+{run}"#
+    )
+}
+
+/// The rig's scp, which keeps what it is sent whatever the path there.
+const SENDS: &str = r#"printf 'scp\t%s\t%s\n' "$1" "$3" >> "$CF_LOG"; cp "$2" "$CF_TARBALL""#;
+
+/// The lines of the rig's log that are ssh's to `host`, their commands.
+fn asked(log: &[String], host: &str) -> Vec<String> {
+    log.iter()
+        .filter_map(|line| line.strip_prefix(&format!("ssh\t{host}\t")))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn a_run_on_zeewin2_goes_through_its_own_ssh_server_as_zeewins_does_with_ci_s_node() {
+    let rig = Rig::new();
+    rig.program("scp", SENDS);
+    rig.program("ssh", &laptop("free", 614));
+    let zeewin2 = Machine::named("zeewin2").unwrap();
+    let (ended, _, err) = run_on(&rig, &zeewin2, &Interrupt::default());
+    assert_eq!(ended.unwrap(), Outcome::Exited(0), "{err}");
+    let log = rig.log();
+    // zeelin was asked of poker-lab's lock, zeewin2 of its disk, then the tree went and ran.
+    assert_eq!(
+        asked(&log, "zeelin"),
+        ["if [ -e ~/.compile-lock/owner ]; then echo held; else echo free; fi"]
+    );
+    let words = fs::read_to_string(rig.bin.path().join("log.words")).unwrap();
+    assert!(
+        words
+            .lines()
+            .next()
+            .unwrap()
+            .contains("-o ConnectTimeout=5"),
+        "zeelin is asked with a short timeout: {words}"
+    );
+    let scp: Vec<&str> = log
+        .iter()
+        .find(|line| line.starts_with("scp\t"))
+        .unwrap()
+        .split('\t')
+        .collect();
+    let name = scp[2]
+        .strip_prefix(&format!("zeewin2:{DEFAULT_DIR}."))
+        .and_then(|rest| rest.strip_suffix(".tgz"))
+        .unwrap_or_else(|| panic!("not sent to the profile as zeewin's is: {}", scp[2]));
+    let on_zeewin2 = asked(&log, "zeewin2");
+    assert_eq!(on_zeewin2.len(), 2, "the disk, then the run: {log:?}");
+    let encoded = on_zeewin2[1]
+        .strip_prefix("powershell -NoProfile -NonInteractive -EncodedCommand ")
+        .unwrap_or_else(|| panic!("not zeewin's line: {}", on_zeewin2[1]));
+    let command = command_line(&["cargo", "xtask", "test", "integration"]);
+    let env = rig.options().env;
+    let script = Script {
+        id: name,
+        dir: DEFAULT_DIR,
+        inside: ".",
+        steps: &[],
+        command: &command,
+        env: &env,
+        node: r"$env:USERPROFILE\cf-tools\node",
+    };
+    assert_eq!(script_of(encoded), remote_script(&script));
+    let there = tempfile::tempdir().unwrap();
+    let untar = Invocation::new("tar", there.path())
+        .arg("xzf")
+        .arg(rig.tarball())
+        .arg("-C")
+        .arg(there.path());
+    assert_eq!(process::capture(&untar, &rig.context.env).unwrap().code, 0);
+    let run = fs::read_to_string(there.path().join(RUN)).unwrap();
+    assert_eq!(run, run_script(&script));
+    assert!(
+        run.contains(r#"$env:Path = "$env:USERPROFILE\cf-tools\node;$env:USERPROFILE\.cargo\bin;" + $env:Path"#),
+        "{run}"
+    );
+}
+
+#[test]
+fn a_run_on_zeewin2_while_poker_lab_holds_its_lock_is_refused_with_75_and_sends_nothing() {
+    let rig = Rig::new();
+    rig.program("scp", SENDS);
+    rig.program("ssh", &laptop("held", 614));
+    let zeewin2 = Machine::named("zeewin2").unwrap();
+    let (ended, out, _) = run_on(&rig, &zeewin2, &Interrupt::default());
+    assert_eq!(ended.unwrap(), Outcome::Exited(75));
+    assert_eq!(
+        out,
+        "zeewin2 is busy: poker-lab's job holds it (~/.compile-lock/owner on zeelin), and no run goes while it does.\n"
+    );
+    let log = rig.log();
+    assert_eq!(asked(&log, "zeelin").len(), 1, "{log:?}");
+    assert!(asked(&log, "zeewin2").is_empty(), "{log:?}");
+    assert!(!log.iter().any(|line| line.starts_with("scp")), "{log:?}");
+}
+
+#[test]
+fn a_run_on_zeewin2_whose_ubuntu_does_not_answer_goes_on_and_says_why() {
+    let rig = Rig::new();
+    rig.program("scp", SENDS);
+    rig.program("ssh", &laptop("none", 614));
+    let zeewin2 = Machine::named("zeewin2").unwrap();
+    let (ended, _, err) = run_on(&rig, &zeewin2, &Interrupt::default());
+    assert_eq!(ended.unwrap(), Outcome::Exited(0), "{err}");
+    assert!(
+        err.starts_with(
+            "windows: zeelin did not answer (ssh ended with status 255: ssh: connect to host 10.6.0.6 port 22: Operation timed out), so Ubuntu is not running there and no poker-lab job can hold its lock: going on\n"
+        ),
+        "{err}"
+    );
+    let log = rig.log();
+    assert_eq!(asked(&log, "zeewin2").len(), 2, "{log:?}");
+}
+
+#[test]
+fn a_run_on_zeewin2_short_of_disk_is_refused_with_75_and_sends_nothing() {
+    let rig = Rig::new();
+    rig.program("scp", SENDS);
+    rig.program("ssh", &laptop("free", 30));
+    let zeewin2 = Machine::named("zeewin2").unwrap();
+    let (ended, out, _) = run_on(&rig, &zeewin2, &Interrupt::default());
+    assert_eq!(ended.unwrap(), Outcome::Exited(75));
+    assert_eq!(
+        out,
+        "zeewin2 is short of disk: a run needs 50 GiB free there, and it has 30.\n"
+    );
+    let log = rig.log();
+    assert_eq!(
+        asked(&log, "zeewin2").len(),
+        1,
+        "only the disk was asked: {log:?}"
+    );
+    assert!(!log.iter().any(|line| line.starts_with("scp")), "{log:?}");
+}
+
+#[test]
+fn a_run_on_zeewin_asks_nothing_first() {
+    let rig = Rig::new();
+    rig.program("scp", SENDS);
+    rig.program("ssh", &laptop("held", 1));
+    let (ended, _, _) = run_on(
+        &rig,
+        &Machine::named("zeewin").unwrap(),
+        &Interrupt::default(),
+    );
+    assert_eq!(ended.unwrap(), Outcome::Exited(0));
+    let log = rig.log();
+    assert!(log[0].starts_with("scp\t"), "{log:?}");
+    assert_eq!(log.len(), 2, "{log:?}");
 }
 
 #[test]
@@ -535,6 +723,7 @@ fn a_stop_ends_the_run_there_by_a_second_ssh_that_runs_the_script_that_ends_it()
     }
     let ended = run(
         &rig.context,
+        &Machine::at("zeewin"),
         &rig.options(),
         &mut Console {
             out: &mut Then(&mut out, raise),
@@ -576,6 +765,7 @@ fn a_stop_the_machine_could_not_be_asked_to_carry_out_is_said() {
     let mut err = Vec::new();
     let ended = run(
         &rig.context,
+        &Machine::at("zeewin"),
         &rig.options(),
         &mut Console {
             out: &mut Then(raise),
@@ -621,6 +811,7 @@ fn a_run_whose_output_cannot_be_written_is_ended_there_too_and_says_why() {
     let mut err = Vec::new();
     let ended = run(
         &rig.context,
+        &Machine::at("zeewin"),
         &rig.options(),
         &mut Console {
             out: &mut Closed,
@@ -653,6 +844,7 @@ fn what_cannot_be_sent_is_refused_before_anything_is_done() {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let ended = run(
         &rig.context,
+        &Machine::at("zeewin"),
         &options,
         &mut Console {
             out: &mut out,
