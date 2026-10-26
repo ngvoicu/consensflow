@@ -1631,6 +1631,21 @@ file = "crates/cf-e2e/src/cf.rs"
 find = "        if let Some(run) = run {\n            files::write("
 replace = "        {\n            let run = run.unwrap_or(\"none\");\n            files::write("
 
+# A process of no run looks for the program between builds: the builds of the others make it again, and it is gone
+# for a moment as they do. A look half a second after its own build fell in a window of another's at a load of 25 to
+# 40 (4 of 5 gates of T-701; T-776), and the cargo of the case keeps it gone for a second, so that this look is caught
+# on any machine.
+
+[[plant]]
+name = "tooling (cf-e2e): a process that belongs to no run looks for the program half a second after its build, beside the builds of the others"
+meant = "processes_that_belong_to_no_run_each_build_their_own_and_write_down_nothing"
+runs = ["cf-e2e-lib-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/cf.rs"
+find = "                    taking_turns(&target(&root).join(BUILDS)).map(|_between| path.is_file())\n"
+replace = "                    std::thread::sleep(std::time::Duration::from_millis(500));\n                    Ok(path.is_file())\n"
+
 [[plant]]
 name = "tooling (cf-e2e): a build that did not succeed is passed over and written down as made for the run"
 meant = "a_build_that_did_not_succeed_is_not_written_down_as_made_for_the_run"
