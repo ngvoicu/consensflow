@@ -661,7 +661,7 @@ find = "                Ok(false) => {}"
 replace = "                Ok(false) => asked.push(identity),"
 
 [[plant]]
-name = "background bound: a stranger that leads a session of its own is under the program"
+name = "background bound: what began before the window's program is under it"
 meant = "a_selection_gone_wrong_asks_only_the_windows_own_to_end"
 runs = ["panes-lib-tree"]
 
@@ -669,7 +669,7 @@ runs = ["panes-lib-tree"]
 file = "crates/cf-panes/src/process_tree/bound.rs"
 find = "                || led.is_some_and(|session| at.session == Some(session))"
 replace = """                || led.is_some_and(|session| at.session == Some(session))
-                || at.session == Some(at.identity.pid)"""
+                || program.is_some_and(|program| at.identity.unique < program)"""
 
 [[plant]]
 name = "background bound: a close's ask sends its TERM around the bound"
