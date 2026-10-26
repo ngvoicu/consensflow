@@ -979,10 +979,11 @@ impl Dispatcher {
             return Ok(());
         };
         let after = &items[pasted + 1..];
-        if after
-            .iter()
-            .any(|item| item.role == Role::User && header_id(&item.text).is_some())
-        {
+        // Another paste of ConsensFlow's since; a compaction's summary that quotes a
+        // header is none (T-532's P3-1).
+        if after.iter().any(|item| {
+            item.role == Role::User && !item.compaction && header_id(&item.text).is_some()
+        }) {
             return Ok(());
         }
         // A compaction's summary, written in the user's place, is no turn of its own,

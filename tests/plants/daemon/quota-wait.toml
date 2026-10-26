@@ -248,8 +248,8 @@ runs = ["quota-wait-stand-in"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent.rs"
-find = "        Some((member, wait)) => is_session_of(participant, member).then(|| wait_of(Some(wait))),"
-replace = "        Some((_member, wait)) => Some(wait_of(Some(wait))),"
+find = "        .find(|(member, _)| is_session_of(participant, member))"
+replace = "        .find(|(member, _)| !member.is_empty())"
 
 [[plant]]
 name = "quota wait: the stand-in Claude never continues by itself after its limit resets"
@@ -386,8 +386,8 @@ runs = ["quota-wait-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = "            .any(|item| item.role == Role::User && header_id(&item.text).is_some())"
-replace = "            .any(|item| item.role == Role::User && header_id(&item.text).is_some() && false)"
+find = "            item.role == Role::User && !item.compaction && header_id(&item.text).is_some()"
+replace = "            item.role == Role::User && !item.compaction && header_id(&item.text).is_some() && false"
 
 [[plant]]
 name = "quota wait: Codex's refusal borrows the reset of a window far from spent, a week's wait for a minute's limit"
@@ -474,3 +474,27 @@ replace = '''
             }
             _ => return Err(not_going_on(number)),
 '''
+
+[[plant]]
+name = "quota wait: a compaction's summary that quotes the brief's header is taken for another paste, and the task waits for the resume words"
+meant = "a_held_tasks_window_whose_summary_quotes_its_briefs_header_goes_on_by_itself"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "            item.role == Role::User && !item.compaction && header_id(&item.text).is_some()"
+replace = "            item.role == Role::User && header_id(&item.text).is_some()"
+
+[[plant]]
+name = "quota wait: the chief's continuation brings nobody back on its account, and the worker's own goes on with no resume words"
+meant = "the_chief_continuing_first_brings_the_worker_back_and_the_task_ends_once_with_its_result"
+runs = ["quota-wait-continues"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = """
+        if !out {
+            let news = News::Turn {"""
+replace = """
+        if false && !out {
+            let news = News::Turn {"""

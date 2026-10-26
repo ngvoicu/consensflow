@@ -220,6 +220,8 @@ impl Dispatcher {
             return Ok(Turn::Open);
         };
         if observed.failed {
+            // A failed turn holds its task for nothing it left (T-532's P3-3).
+            record.held.borrow_mut().reset();
             let because = self
                 .why_it_failed(participant, record, observed)
                 .await?

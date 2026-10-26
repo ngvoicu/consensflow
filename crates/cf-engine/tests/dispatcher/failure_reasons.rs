@@ -695,3 +695,36 @@ fn a_turn_that_fails_while_its_task_waits_is_no_turn_of_the_task_where_only_a_qu
     assert_eq!(failures, Vec::<String>::new());
     assert_eq!(tiers.task(1).task.state, "waiting");
 }
+
+#[test]
+fn a_held_tasks_woken_turn_that_fails_holds_it_no_more_in_the_pass_that_fails_it() {
+    // Calliope's P3-3 of T-532: the failed path left the hold in the record until the
+    // next pass reset it, so `held_for` told a failed task held for its job for a pass,
+    // in a window that stays after its task: one the human keeps open.
+    let context = Context::new();
+    let tiers = working(&context);
+    let session = tiers.assignee(1);
+    context.open_window(tiers.project.id, &session).unwrap();
+    let zeus = tiers.id(&session);
+    context
+        .adapter
+        .answer_leaving_a_job("zeus", "The build runs; I will report when it ends");
+    context.pass().unwrap();
+    assert_eq!(
+        context.dispatcher.held_for(zeus).map(|hold| hold.task),
+        Some(1)
+    );
+    context.adapter.wake("zeus", ENDED);
+    context.pass().unwrap();
+    context.adapter.with("zeus", |agent| {
+        agent.failed = true;
+        agent.failure = Some("API Error: 529 Overloaded".to_owned());
+    });
+    context
+        .adapter
+        .answer("zeus", "The build ended; reading its log");
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "failed");
+    assert_eq!(context.dispatcher.held_for(zeus), None);
+}

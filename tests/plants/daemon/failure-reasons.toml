@@ -963,12 +963,10 @@ runs = ["failure-reason-engine"]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
         if observed.failed {
-            let because = self
-                .why_it_failed(participant, record, observed)'''
+            // A failed turn holds its task for nothing it left (T-532's P3-3).'''
 replace = '''
         if observed.failed && observed.pending().total() == 0 {
-            let because = self
-                .why_it_failed(participant, record, observed)'''
+            // A failed turn holds its task for nothing it left (T-532's P3-3).'''
 
 [[plant]]
 name = "failure reason: a held task's woken turn that fails is failed in the field's bare words"
@@ -1016,3 +1014,16 @@ replace = '''
         {
             return Ok(());
         }'''
+
+[[plant]]
+name = "failure reason: a failed turn leaves its task's hold in the record until the next pass"
+meant = "a_held_tasks_woken_turn_that_fails_holds_it_no_more_in_the_pass_that_fails_it"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+            // A failed turn holds its task for nothing it left (T-532's P3-3).
+            record.held.borrow_mut().reset();'''
+replace = '''
+            // A failed turn holds its task for nothing it left (T-532's P3-3).'''

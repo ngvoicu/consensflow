@@ -881,3 +881,36 @@ fn a_held_tasks_window_that_went_on_by_itself_and_compacted_after_its_answer_goe
     assert_eq!(results(&tiers), ["The parser is done."]);
     assert_eq!(pasted_saying(&context, &session, "Resumed:"), 0);
 }
+
+#[test]
+fn a_held_tasks_window_whose_summary_quotes_its_briefs_header_goes_on_by_itself() {
+    // Calliope's P3-1 of T-532: the check for another paste after the window's own turn
+    // read compaction summaries too, and a summary that quotes the brief's header was
+    // taken for a paste of ConsensFlow's: the task waited for the daemon's resume words.
+    let context = Context::new();
+    let (tiers, session) = held_for_two_hours(&context);
+    let brief = tiers.task(1).messages[0].id;
+    context.advance(60_000);
+    context
+        .adapter
+        .begins_its_own_turn(&session, CONTINUE, &now(&context));
+    context
+        .adapter
+        .ends_its_own_turn(&session, "The parser is done.", &now(&context));
+    let mut summary = context.adapter.item(
+        Role::User,
+        &format!(
+            "Summary: the task was {}T-1, write the parser",
+            cf_engine::delivery_text::marker_of(brief)
+        ),
+    );
+    summary.compaction = true;
+    context
+        .adapter
+        .with(&session, |agent| agent.items.push(summary));
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(results(&tiers), ["The parser is done."]);
+    assert_eq!(pasted_saying(&context, &session, "Resumed:"), 0);
+}

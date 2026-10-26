@@ -22,6 +22,9 @@
 //! - ConsensFlow first: its words resume the task, their answer is the one
 //!   result, and the task is over before Claude's timer fires; nothing is doubled
 //!   in what the chief is given.
+//! - The chief first (T-532): on one account every refused window continues by
+//!   itself; the chief's continuation gets through, brings the worker back, and the
+//!   resume words go in before the worker's own continuation: one result, no failure.
 
 use std::path::PathBuf;
 
@@ -165,6 +168,55 @@ fn claude_continuing_before_consensflow_resumes_the_task_its_report_is_the_resul
     assert!(
         resumed.iter().all(|m| m["state"] != "delivered"),
         "no words went in after its own turn: {resumed:?}"
+    );
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn the_chief_continuing_first_brings_the_worker_back_and_the_task_ends_once_with_its_result(
+) -> Outcome {
+    // Calliope's P3-2 of T-532: in the field every refused Claude window continues by
+    // itself. The chief's continuation gets through first, brings the worker back on
+    // the one account (T-295), and ConsensFlow types the resume words before the
+    // worker's own continuation comes, which then queues behind them.
+    let (_folder, refused) = account()?;
+    let rig = Rig::start(
+        config()
+            .var("CF_TEST_QUOTA_SPENT", "worker,chief")
+            .var("CF_TEST_QUOTA_FILE", refused.to_string_lossy())
+            .var("CF_TEST_AUTO_CONTINUE_MS", "chief 500,worker 8000"),
+    )?;
+    let project = held_on_a_spent_account(&rig)?;
+    let _ = std::fs::remove_file(&refused);
+    rig.wait_for("a result to reach the chief", secs(90), || {
+        Ok(!results(&project)?.is_empty())
+    })?;
+    // Past the worker's own timer, and a pass or two.
+    std::thread::sleep(std::time::Duration::from_secs(15));
+    let task = project.task(1)?;
+    assert_ne!(task["state"], "failed", "{task}");
+    assert!(
+        task["state"] != "working" && task["state"] != "queued",
+        "nothing left in flight: {task}"
+    );
+    let given = results(&project)?;
+    assert_eq!(given.len(), 1, "one result: {given:?}");
+    let session = task["assignee"].as_str().unwrap_or_default();
+    let resumed = project
+        .inbox(session)?
+        .into_iter()
+        .filter(|m| {
+            m["state"] == "delivered"
+                && m["body"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .starts_with("Resumed:")
+        })
+        .count();
+    assert_eq!(
+        resumed, 1,
+        "the chief's turn brought it back, and ConsensFlow resumed it"
     );
     rig.close()?;
     Ok(())

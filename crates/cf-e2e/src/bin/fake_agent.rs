@@ -360,14 +360,17 @@ fn wait_as_told(name: &str) {
 
 /// How long after its account has quota again the window of `participant`
 /// continues by itself, as `said` tells: its milliseconds for every window, or
-/// for the windows of the member it names (`<member> <milliseconds>`) alone, and
-/// none for any other, which waits for ConsensFlow to resume it (an account
-/// whose windows' timers fire apart).
+/// for the windows of each member it names (`<member> <milliseconds>`, a comma
+/// between them) alone, and none for any other, which waits for ConsensFlow to
+/// resume it (an account whose windows' timers fire apart).
 fn continues_after(said: &str, participant: &str) -> Option<Duration> {
-    match said.split_once(' ') {
-        Some((member, wait)) => is_session_of(participant, member).then(|| wait_of(Some(wait))),
-        None => Some(wait_of(Some(said))),
+    if !said.contains(' ') {
+        return Some(wait_of(Some(said)));
     }
+    said.split(',')
+        .filter_map(|pair| pair.trim().split_once(' '))
+        .find(|(member, _)| is_session_of(participant, member))
+        .map(|(_, wait)| wait_of(Some(wait)))
 }
 
 /// How late the window of `participant` comes up: the milliseconds `said`
@@ -860,6 +863,17 @@ mod tests {
         for participant in ["chief", "workers-amber", "reviewer-amber-pine"] {
             assert_eq!(continues_after(said, participant), None, "{participant}");
         }
+        // Each member its own timer.
+        let said = "chief 500,worker 8000";
+        assert_eq!(
+            continues_after(said, "chief"),
+            Some(Duration::from_millis(500))
+        );
+        assert_eq!(
+            continues_after(said, "worker-amber-pine"),
+            Some(Duration::from_millis(8000))
+        );
+        assert_eq!(continues_after(said, "reviewer-amber-pine"), None);
     }
 
     #[test]
