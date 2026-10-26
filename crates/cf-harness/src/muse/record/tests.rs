@@ -82,6 +82,17 @@ impl Stage {
         fs::write(self.log(), text).unwrap();
     }
 
+    /// `line` appended to the log, as Muse writes it.
+    fn append(&self, line: &str) {
+        use std::io::Write;
+        let mut log = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.log())
+            .unwrap();
+        writeln!(log, "{line}").unwrap();
+    }
+
     fn reader(&self) -> Box<dyn Look + Send> {
         reader(&self.session, &self.env())
     }
@@ -152,7 +163,7 @@ fn every_recorded_log_reads_the_same_read_on_a_record_at_a_time_as_read_fresh() 
         for (at, line) in log.lines().enumerate() {
             text.push_str(line);
             text.push('\n');
-            stage.write(&text);
+            stage.append(line);
             let on = look(&mut reading_on);
             let fresh = fresh_reading(&session, &text);
             assert_eq!(on, fresh, "{name}, after line {at}");

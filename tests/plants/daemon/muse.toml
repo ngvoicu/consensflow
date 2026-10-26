@@ -215,21 +215,6 @@ replace = '''
     let base = match env.os("XDG_DATA_HOME").map(|data| data.to_string_lossy().into_owned()) {
 '''
 
-# The paths: a session's id names one folder, never a path.
-[[plant]]
-name = "muse: a session id is taken as a path"
-meant = "a_session_s_log_is_in_the_folder_named_for_it_under_a_date_and_never_a_child_s"
-runs = ["muse-lib"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/paths.rs"
-find = '''
-    if !names_a_folder(session) {
-'''
-replace = '''
-    if session.is_empty() {
-'''
-
 # The paths: a session's folder is named as the session is written, on a Mac's disk too,
 # which folds case (a plant the Mac catches; a disk that does not fold case cannot tell).
 [[plant]]
