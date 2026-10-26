@@ -28,6 +28,7 @@ fn script(steps: &[&str], command: &str, env: &[(String, String)]) -> String {
         steps,
         command,
         env,
+        node: r"C:\Program Files\nodejs",
     })
 }
 
@@ -411,6 +412,7 @@ fn script_of_run(id: &str) -> String {
         steps: &[],
         command: "x",
         env: &[],
+        node: r"C:\Program Files\nodejs",
     })
 }
 
@@ -690,6 +692,7 @@ fn what_a_run_is_asked_for_is_in_the_run_script_and_the_bootstrap_does_not_depen
             steps,
             command,
             env,
+            node: r"C:\Program Files\nodejs",
         }
     }
     let (plain, heavy) = (
@@ -857,7 +860,7 @@ fn longest(env: &[&str]) -> Script<'static> {
     use crate::windows::options::{MatrixOptions, Pair};
 
     let options = MatrixOptions {
-        host: "zeewin".into(),
+        machine: Some(crate::windows::machine::Machine::at("zeewin")),
         build: true,
         env: Vec::new(),
         scenarios: vec!["chief-switch".into()],
@@ -880,6 +883,7 @@ fn longest(env: &[&str]) -> Script<'static> {
         steps: &BUILD_STEPS,
         command,
         env,
+        node: r"C:\Program Files\nodejs",
     }
 }
 
