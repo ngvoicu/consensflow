@@ -15,6 +15,7 @@
 //! started ends nothing there, for nothing has started.
 
 use super::interrupt::Interrupt;
+use super::machine::{Machine, Ready};
 use super::options::Options;
 use super::script::{
     command_line, encode_script, remote_script, run_id, run_script, stop_script, upload_name,
@@ -38,6 +39,8 @@ pub enum Outcome {
 /// What a run is made of: what ssh is given to run on the machine (PowerShell, the
 /// bootstrap encoded), what goes in the tarball for it to read, and what ends it.
 struct Plan {
+    /// Where the tarball is sent, as scp names it.
+    upload: String,
     /// The run itself: the bootstrap.
     run: String,
     /// What the run is asked for (the steps, the variables, the command): the script the
@@ -48,8 +51,8 @@ struct Plan {
 }
 
 impl Plan {
-    /// The run `id` of `options`.
-    fn new(options: &Options, id: &str) -> Result<Self, Refusal> {
+    /// The run `id` of `options` on `machine`.
+    fn new(machine: &Machine, options: &Options, id: &str) -> Result<Self, Refusal> {
         let command = command_line(&options.command);
         let steps: &[&str] = if options.build { &BUILD_STEPS } else { &[] };
         let script = Script {
@@ -59,11 +62,14 @@ impl Plan {
             steps,
             command: &command,
             env: &options.env,
+            node: &machine.node,
         };
+        let upload = upload_name(&options.dir, id);
         Ok(Self {
             run: powershell(&remote_script(&script))?,
             script: run_script(&script),
             stop: powershell(&stop_script(&options.dir, id))?,
+            upload: format!("{}:{upload}", machine.host),
         })
     }
 }
@@ -76,9 +82,14 @@ pub(super) fn powershell(script: &str) -> Result<String, Refusal> {
     ))
 }
 
-/// Whether the script a run makes can be sent: the refusal that says why not, before a run starts.
+/// The status of a run the machine could not take now, as its own lock refuses one.
+const REFUSED: i32 = 75;
+
+/// Whether the script a run makes can be sent: the refusal that says why not, before a run
+/// starts and before a machine is chosen. What goes on the line, the bootstrap and the stop, is
+/// the same for every machine (the Node's folder is the run script's, in the tarball).
 pub fn check(options: &Options) -> Result<(), Refusal> {
-    Plan::new(options, &run_id()).map(drop)
+    Plan::new(&Machine::at("zeewin"), options, &run_id()).map(drop)
 }
 
 /// ssh to `host`, asked to run `line` there.
@@ -86,16 +97,32 @@ pub(super) fn ssh(context: &Context, host: &str, line: &str) -> Invocation {
     Invocation::new("ssh", &context.root).arg(host).arg(line)
 }
 
-/// Runs `options.command` on the machine from this checkout as it is now; what it
+/// Runs `options.command` on `machine` from this checkout as it is now; what it
 /// says goes to `console` as it says it.
 pub fn run(
     context: &Context,
+    machine: &Machine,
     options: &Options,
     console: &mut Console,
     interrupt: &Interrupt,
 ) -> Result<Outcome, Error> {
     let id = run_id();
-    let plan = Plan::new(options, &id)?;
+    let plan = Plan::new(machine, options, &id)?;
+    // A machine the runner shares is asked first, and a run it may not take now is not sent.
+    match machine
+        .ready(context, &options.dir)
+        .map_err(Error::Unready)?
+    {
+        Ready::Refused(why) => {
+            writeln!(console.out, "{why}").map_err(Error::Output)?;
+            return Ok(Outcome::Exited(REFUSED));
+        }
+        Ready::Go(said) => {
+            for line in said {
+                writeln!(console.err, "windows: {line}").map_err(Error::Output)?;
+            }
+        }
+    }
     let scratch = tempfile::tempdir().map_err(Error::Scratch)?;
 
     // A stop is looked for after each step, before what it says is: a Ctrl-C ends
@@ -119,11 +146,7 @@ pub fn run(
     let scp = Invocation::new("scp", &context.root)
         .arg("-q")
         .arg(&tarball)
-        .arg(format!(
-            "{}:{}",
-            options.host,
-            upload_name(&options.dir, &id)
-        ));
+        .arg(&plan.upload);
     let sent = process::capture(&scp, &context.env);
     if stopped(interrupt, !matches!(&sent, Ok(done) if done.code == 0)) {
         return Ok(Outcome::Stopped);
@@ -139,12 +162,12 @@ pub fn run(
         return Err(Error::step(&scp, sent.code, ""));
     }
 
-    let run = ssh(context, &options.host, &plan.run);
+    let run = ssh(context, &machine.host, &plan.run);
     let tree_said = format!("{TREE_MARK}{identity}");
     match session::stream(&run, &context.env, console, interrupt, &tree_said)? {
         Ended::Exited(status) => Ok(Outcome::Exited(status)),
         Ended::WrongTree(said) => {
-            let ended = end_there(context, options, &plan)?;
+            let ended = end_there(context, machine, &plan)?;
             Err(Error::WrongTree {
                 sent: tree_said,
                 said,
@@ -152,11 +175,11 @@ pub fn run(
             })
         }
         Ended::Stopped => {
-            say_if_not_ended(end_there(context, options, &plan)?, console)?;
+            say_if_not_ended(end_there(context, machine, &plan)?, console)?;
             Ok(Outcome::Stopped)
         }
         Ended::Unwritten(cause) => {
-            say_if_not_ended(end_there(context, options, &plan)?, console)?;
+            say_if_not_ended(end_there(context, machine, &plan)?, console)?;
             Err(Error::Output(cause))
         }
     }
@@ -175,8 +198,8 @@ fn stopped(interrupt: &Interrupt, failed: bool) -> bool {
 
 /// Ends the run on the machine: its whole tree, and its record. Whether the machine
 /// was asked and said it was done.
-fn end_there(context: &Context, options: &Options, plan: &Plan) -> Result<Ending, Error> {
-    let stop = ssh(context, &options.host, &plan.stop);
+fn end_there(context: &Context, machine: &Machine, plan: &Plan) -> Result<Ending, Error> {
+    let stop = ssh(context, &machine.host, &plan.stop);
     Ok(match process::run(&stop, &context.env)? {
         0 => Ending::Ended,
         status => Ending::MayGoOn(status),

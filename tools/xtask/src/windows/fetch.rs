@@ -24,6 +24,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::interrupt::Interrupt;
+use super::machine::Machine;
 use super::options::Options;
 use super::run::{self, Outcome};
 use super::script::reports_script;
@@ -41,14 +42,15 @@ const SAID: usize = 4;
 /// report is the next run's to be pruned.
 pub fn run_keeping(
     context: &Context,
+    machine: &Machine,
     options: &Options,
     console: &mut Console,
     interrupt: &Interrupt,
 ) -> Result<Outcome, Error> {
-    let ended = run::run(context, options, console, interrupt)?;
+    let ended = run::run(context, machine, options, console, interrupt)?;
     if let Outcome::Exited(_) = ended {
         // What cannot be said is no more than what cannot be brought: the run's status stands.
-        let _ = bring_back(context, options, console);
+        let _ = bring_back(context, machine, options, console);
     }
     Ok(ended)
 }
@@ -104,9 +106,14 @@ fn is_report_name(name: &str) -> bool {
 
 /// Lists what the machine has in `evals/reports` and brings back what is not here, saying what it
 /// did on the error stream. Nothing is said where there was nothing to do.
-fn bring_back(context: &Context, options: &Options, console: &mut Console) -> Result<(), Error> {
+fn bring_back(
+    context: &Context,
+    machine: &Machine,
+    options: &Options,
+    console: &mut Console,
+) -> Result<(), Error> {
     let line = run::powershell(&reports_script(&options.dir))?;
-    let listed = process::capture(&run::ssh(context, &options.host, &line), &context.env)?;
+    let listed = process::capture(&run::ssh(context, &machine.host, &line), &context.env)?;
     if listed.code != 0 {
         writeln!(
             console.err,
@@ -131,7 +138,7 @@ fn bring_back(context: &Context, options: &Options, console: &mut Console) -> Re
         if to.exists() {
             continue;
         }
-        match fetch(context, options, &file, &to) {
+        match fetch(context, machine, options, &file, &to) {
             Ok(()) => brought.push(file.name),
             Err(said) => writeln!(
                 console.err,
@@ -197,7 +204,13 @@ fn told(brought: &[String], in_main: bool) -> Option<String> {
 
 /// Copies `file` from the machine to `to`: to a name of its own first, which is `to` once the
 /// size is the one listed (a copy that stopped half way is no report); why not, if it could not.
-fn fetch(context: &Context, options: &Options, file: &Listed, to: &Path) -> Result<(), String> {
+fn fetch(
+    context: &Context,
+    machine: &Machine,
+    options: &Options,
+    file: &Listed,
+    to: &Path,
+) -> Result<(), String> {
     let folder = to.parent().ok_or("it has no folder")?;
     fs::create_dir_all(folder).map_err(|cause| format!("{}: {cause}", folder.display()))?;
     let part = partial(to);
@@ -205,7 +218,7 @@ fn fetch(context: &Context, options: &Options, file: &Listed, to: &Path) -> Resu
         .arg("-q")
         .arg(format!(
             "{}:{}/evals/reports/{}",
-            options.host, options.dir, file.name
+            machine.host, options.dir, file.name
         ))
         .arg(&part);
     let copied = process::capture(&scp, &context.env).map_err(|failure| failure.to_string())?;
