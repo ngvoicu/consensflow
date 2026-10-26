@@ -210,6 +210,76 @@ fn a_window_opened_again_is_told_the_program_before_it_is_gone_only_where_the_ho
     );
 }
 
+/// The host's proof outlives the daemon that heard it (T-526, 2026-10-25): a worker's
+/// window closed with its program proven gone, an update restarted the daemon, and the
+/// chief's reopen opened the conversation again under the new daemon, which never saw the
+/// close. Told nothing, Claude Code's reader kept the notification the closed process had
+/// queued and taken, and read the reopen's answered turn as still under way for four
+/// hours. The new daemon is told what the old one proved, and nothing it did not: a
+/// program the host could not end, or a host that said nothing, proves nothing after a
+/// restart either.
+#[test]
+fn a_window_opened_again_after_a_restart_is_told_the_program_before_it_is_gone_where_the_daemon_before_proved_it(
+) {
+    let reopened = |says: &dyn Fn(&Context)| {
+        let context = Context::new();
+        let project = context.with_staff(&["zeus"]);
+        context.give(project.id, "zeus", "Parser");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        says(&context);
+        context.exit("zeus");
+        // The app is updated: its daemon stops with no window open, and a new one starts.
+        context.ledger.borrow_mut().suspend_for_restart().unwrap();
+        let after = context.make();
+        after.settle_after_restart().unwrap();
+        after.resume_project(project.id).unwrap();
+        context.resume_task(project.id, 1, "Carry on");
+        after.pass().unwrap();
+        after.pass().unwrap();
+        told_gone(&context, "zeus")
+    };
+    let ended = |context: &Context| context.host.exits_showing(Some(0), None, None);
+    assert_eq!(reopened(&ended), [false, true], "ended, and gone");
+    let outlived = |context: &Context| {
+        ended(context);
+        context.host.exits_with_a_survivor(4242);
+    };
+    assert_eq!(reopened(&outlived), [false, false], "may still run");
+    assert_eq!(
+        reopened(&|_: &Context| {}),
+        [false, false],
+        "a host that said nothing of the end"
+    );
+}
+
+/// The proof the ledger keeps is spent as the next window opens: a daemon started while
+/// that window's program may still run (its end never heard) is told nothing of the
+/// program before it.
+#[test]
+fn the_proof_a_restart_finds_is_spent_by_the_window_that_opened_after_it() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.host.exits_showing(Some(0), None, None);
+    context.exit("zeus");
+    context.resume_task(project.id, 1, "Carry on");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(told_gone(&context, "zeus"), [false, true]);
+
+    // The daemon stops with that window open, and no word of its end ever comes.
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    after.resume_project(project.id).unwrap();
+    after.pass().unwrap();
+    after.pass().unwrap();
+    assert_eq!(told_gone(&context, "zeus"), [false, true, false]);
+}
+
 /// The engine's own close settles a window before the host says how it ended: the
 /// host's word, when it comes, is what the next launch is told.
 #[test]
@@ -232,6 +302,37 @@ fn the_hosts_word_on_a_window_the_engine_closed_itself_is_what_its_next_launch_i
         context.pass().unwrap();
         context.pass().unwrap();
         context.pass().unwrap();
+        told_gone(&context, "zeus")
+    };
+    assert_eq!(closed_then(true), [false, true]);
+    assert_eq!(closed_then(false), [false, false]);
+}
+
+/// The same, with a restart between the host's word and the next launch: the word the
+/// host gave after the engine's own close is kept for the daemon after it too.
+#[test]
+fn the_hosts_word_on_a_window_the_engine_closed_itself_is_kept_for_the_daemon_after_a_restart() {
+    let closed_then = |word: bool| {
+        let context = Context::new();
+        let project = context.with_staff(&["zeus"]);
+        context.give(project.id, "zeus", "Parser");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        context.host.exits_showing(Some(0), None, None);
+        context.host.hold_exits.set(true);
+        context.close_project(project.id).unwrap();
+        context.host.hold_exits.set(false);
+        if word {
+            context.exit("zeus");
+        }
+        context.ledger.borrow_mut().suspend_for_restart().unwrap();
+        let after = context.make();
+        after.settle_after_restart().unwrap();
+        // The Resume brings back T-1, which the Close paused.
+        after.resume_project(project.id).unwrap();
+        after.pass().unwrap();
+        after.pass().unwrap();
+        after.pass().unwrap();
         told_gone(&context, "zeus")
     };
     assert_eq!(closed_then(true), [false, true]);

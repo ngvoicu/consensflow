@@ -494,6 +494,12 @@ pub struct Observed {
     /// of the conversation the window answers from, though its record still
     /// shows it.
     pub took_back: bool,
+    /// The harness's own word that the window waits at its prompt, whatever its record
+    /// says of the turn (Claude Code's status): what tells a window at rest whose record
+    /// never reads its turn as over (T-526: a conversation opened again with no proof that
+    /// the program before was gone keeps what that program had queued) from one still at
+    /// work. False from a harness that says no such thing apart from its record.
+    pub at_prompt: bool,
 }
 
 impl Observed {

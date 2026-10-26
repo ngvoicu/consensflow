@@ -36,6 +36,7 @@ pub(crate) fn record_state(reading: Arc<Reading>) -> Observed {
         switched: None,
         unnamed: false,
         took_back: false,
+        at_prompt: false,
     }
 }
 
@@ -59,6 +60,7 @@ pub(crate) fn switched_to(observed: Observed, session: String) -> Observed {
         settled: false,
         waiting: None,
         switched: Some(session),
+        at_prompt: false,
         ..observed
     }
 }

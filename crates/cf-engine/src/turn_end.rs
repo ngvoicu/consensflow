@@ -51,7 +51,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cf_base::js;
+use cf_base::{js, time};
 use cf_harness::contract::Observed;
 use cf_harness::records::{End, Item, Monitor, Pending, Reading, Role, Source};
 use cf_ledger::{NewNote, ParticipantView, ProjectView, TaskThread};
@@ -106,6 +106,11 @@ pub(crate) struct HeldPart {
     /// How many looks in a row found a command still running: the first is told nothing
     /// (Calliope on 136a7158: Claude Code's kill can take a second or more).
     running_looks: u32,
+    /// The task whose turn first looked finished, and when ([`Dispatcher::looks_finished`]),
+    /// while it does.
+    quiet: Option<(i64, i64)>,
+    /// The task whose requester was told its turn looks finished: told once.
+    told_finished: Option<i64>,
     /// The window's rests, which outlive the task's hold: they are the window's, and go
     /// with it, or with the conversation it shows ([`HeldPart::reset`]).
     pub(crate) rests: Rests,
@@ -174,6 +179,12 @@ const LOOKS_APART_MS: i64 = 60_000;
 /// none before.
 const CALL_MARGIN_MS: i64 = 1_000;
 
+/// How long a turn that looks finished ([`Dispatcher::looks_finished`]) has to look so before
+/// its requester is told: the wait between two looks that end nothing ([`LOOKS_APART_MS`]).
+/// Claude Code writes a turn's end within a moment of its answer, so a window that waits at
+/// its prompt that long with no end written has none to come.
+const LOOKS_FINISHED_MS: i64 = LOOKS_APART_MS;
+
 /// What a pass makes of the monitors that said they ended ([`Dispatcher::watch_monitors`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Watching {
@@ -218,6 +229,14 @@ impl Dispatcher {
             return Ok(Turn::Open);
         }
         if !observed.settled {
+            self.looks_finished(
+                project,
+                participant,
+                record,
+                &thread,
+                observed,
+                &items[start + 1..],
+            )?;
             return Ok(Turn::Open);
         }
         // Words told to the window before it was up are on their way to it (the brief was
@@ -289,6 +308,80 @@ impl Dispatcher {
             .record_result(project.id, thread.task.number, &body)?;
         self.changed();
         Ok(Turn::Answered)
+    }
+
+    /// A turn whose record never reads it as over, though it looks finished: the window
+    /// opened on a conversation whose last program the host never proved gone
+    /// (`WindowPart::unproven`), its harness says it waits at its prompt, nothing it left
+    /// runs that wakes its agent, and its answer to the task's latest message is complete.
+    /// T-526 (2026-10-25): the program before had queued and taken a notification that no
+    /// turn began, which Claude Code's reader, told no relaunch, read as a turn still to
+    /// come, and the task stayed working four hours after its answer, nobody told. Its
+    /// requester is told once, after it has looked so for [`LOOKS_FINISHED_MS`], how to
+    /// take the answer; nothing is recorded and nothing ends: the record's word stands,
+    /// and Finish is the requester's. `said` is the record after the task's message.
+    fn looks_finished(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        thread: &TaskThread,
+        observed: &Observed,
+        said: &[Item],
+    ) -> Result<(), EngineError> {
+        let number = thread.task.number;
+        let looks = record.window.borrow().unproven
+            && observed.at_prompt
+            && observed.waiting.is_none()
+            && observed.pending().total() == 0
+            && {
+                let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
+                answers_to_the_task(said, &replacements)
+                    .is_some_and(|answers| answers.last.is_some_and(|last| last.complete))
+            };
+        let since = {
+            let mut held = record.held.borrow_mut();
+            if !looks {
+                held.quiet = None;
+                return Ok(());
+            }
+            let now = self.now();
+            let since = match held.quiet {
+                Some((task, since)) if task == number => since,
+                _ => {
+                    held.quiet = Some((number, now));
+                    now
+                }
+            };
+            if now - since < LOOKS_FINISHED_MS || held.told_finished == Some(number) {
+                return Ok(());
+            }
+            held.told_finished = Some(number);
+            since
+        };
+        let way = match thread.task.requester.as_str() {
+            "human" => "Finish in the task's drawer takes that answer".to_owned(),
+            _ => format!("`cf task finish T-{number}` takes that answer"),
+        };
+        // The engine knows no zone of the human's: the time is said in UTC, as its notes'
+        // times are.
+        let at = time::iso(since);
+        let body = format!(
+            "T-{number} looks finished: its last answer is complete and @{}'s window has been idle since {} UTC, but its turn never read as over. {way}.",
+            participant.handle,
+            at.get(11..16).unwrap_or(&at),
+        );
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: thread.task.requester.clone(),
+                task: Some(number),
+                body,
+            },
+        )?;
+        self.changed();
+        Ok(())
     }
 
     /// The place among `items`, the window's record, of the latest message of the task

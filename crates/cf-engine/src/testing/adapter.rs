@@ -79,6 +79,9 @@ pub struct FakeAgent {
     /// The latest look found the window taken back so, until a message
     /// arrives that begins another turn.
     pub took_back: bool,
+    /// Its harness says its window waits at its prompt, whatever its record says of the
+    /// turn ([`Observed::at_prompt`]): set by [`FakeAdapter::answer_never_over`].
+    pub at_prompt: bool,
     /// Its record, read with no window open, cannot tell whether its turn was
     /// cut: Devin's, which reads a turn as going on only while its window shows it.
     pub cannot_tell_a_cut: bool,
@@ -344,6 +347,21 @@ impl FakeAdapter {
             agent.pending = Pending::default();
             agent.monitors.clear();
             agent.took_back = false;
+            agent.at_prompt = false;
+        });
+    }
+
+    /// The agent answers, and its window waits at its prompt, though its record never reads
+    /// the turn as over (T-526: a conversation opened again with no proof that the program
+    /// before was gone keeps what that program had queued).
+    pub fn answer_never_over(&self, handle: &str, text: &str) {
+        let item = self.item(Role::Assistant, text);
+        self.with(handle, |agent| {
+            agent.items.push(item);
+            agent.settled = false;
+            agent.at_prompt = true;
+            agent.pending = Pending::default();
+            agent.monitors.clear();
         });
     }
 
@@ -403,6 +421,7 @@ impl FakeAdapter {
             agent.pending = Pending::default();
             agent.monitors.clear();
             agent.took_back = false;
+            agent.at_prompt = false;
         });
     }
 
@@ -413,6 +432,7 @@ impl FakeAdapter {
             agent.pending = Pending::default();
             agent.monitors.clear();
             agent.took_back = false;
+            agent.at_prompt = false;
         });
     }
 
@@ -571,6 +591,7 @@ impl FakeAdapter {
                 // A message that arrives starts a turn: the one before it ended as it did.
                 agent.failed = false;
                 agent.took_back = false;
+                agent.at_prompt = false;
             }
             Admission::Admitted {
                 queued: agent.queued,
@@ -655,6 +676,7 @@ impl Asked {
             stops_when_interrupted: false,
             takes_back: false,
             took_back: false,
+            at_prompt: false,
             cannot_tell_a_cut: false,
             resumable: Some(true),
             unread: false,
