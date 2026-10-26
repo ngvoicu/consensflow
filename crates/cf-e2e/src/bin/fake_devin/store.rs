@@ -112,6 +112,20 @@ impl Store {
         self.cut.take()
     }
 
+    /// The words of the session's last user's message and of its last answer, as it held
+    /// them when it was opened: what a window opened again on it replays.
+    pub fn last_turn(&self) -> Result<(Option<String>, Option<String>), String> {
+        let messages = messages_of(&self.db, &self.session)?;
+        let last = |role: &str| {
+            messages
+                .iter()
+                .rev()
+                .find(|message| message["role"] == role)
+                .and_then(|message| message["content"].as_str().map(str::to_owned))
+        };
+        Ok((last("user"), last("assistant")))
+    }
+
     /// What a tool call came back with.
     pub fn tool(&mut self, text: &str) -> Result<(), String> {
         self.append(json!({ "role": "tool", "content": text, "metadata": {} }))

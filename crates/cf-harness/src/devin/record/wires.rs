@@ -10,7 +10,10 @@
 //! the window would read as working for good, its task never done. Nor is
 //! the history a window reopened on the conversation replays, which carries
 //! its timestamps and ends in no turn end (poker-lab's T-4 read as working
-//! for good after its window was opened again, 2026-10-03).
+//! for good after its window was opened again, 2026-10-03). Devin 3000.11
+//! stamps the work of a turn at work too: what tells it from a replay is the
+//! stream its words are said in, and Devin's own word that the turn is at work
+//! (`session_info_update`, `working` until `blocked`), which a replay never says.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -32,6 +35,10 @@ use crate::shared::record::key::Key;
 /// and a call's later words (a shell's output, its end) come after its turn's end as
 /// well.
 const WORK: [&str; 3] = ["agent_thought_chunk", "agent_message_chunk", "tool_call"];
+
+/// The words a stream of Devin's agent is said in: only those a turn at work streams carry
+/// a stream's id, which the history a reopened window replays has not.
+const STREAMED: [&str; 2] = ["agent_thought_chunk", "agent_message_chunk"];
 
 /// What the launches' wire logs said of a session.
 #[derive(Default)]
@@ -257,9 +264,24 @@ impl Said {
         let update = |name: &str| event.get("update").and_then(|update| update.get(name));
         let meta = |name: &str| update("_meta").and_then(|meta| meta.get(name));
         let kind = update("sessionUpdate").and_then(Value::as_str);
-        let replayed = meta("cognition.ai/timestamp").is_some();
+        // Devin 3000.11 stamps every record of its work with its time, as it stamps the
+        // history a reopened window replays: work stamped so is the turn's where its stream
+        // is named (a replay names none), and Devin says itself when a turn is at work
+        // (`statusEnum` `working`) and when it waits for its user (`blocked`, before the
+        // turn's end), which a replay never says at work (two probes of 2026-10-26, T-660:
+        // stamped work alone read a Devin turn at rest through a minute's command).
+        let replayed = meta("cognition.ai/timestamp").is_some()
+            && !(kind.is_some_and(|kind| STREAMED.contains(&kind))
+                && meta("cognition.ai/streamingMessageId").is_some());
         if kind.is_some_and(|kind| WORK.contains(&kind)) && !replayed {
             self.busy = true;
+        }
+        if kind == Some("session_info_update") {
+            match meta("cognition.ai/statusEnum").and_then(Value::as_str) {
+                Some("working") => self.busy = true,
+                Some("blocked") => self.busy = false,
+                _ => {}
+            }
         }
         if kind == Some("agent_message_chunk") {
             // History replay has timestamps but no streaming UUID.

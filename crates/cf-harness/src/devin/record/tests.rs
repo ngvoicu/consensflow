@@ -7,6 +7,7 @@ mod compaction;
 mod logs;
 mod messages;
 mod rows;
+mod stamped;
 
 use std::fs;
 use std::path::PathBuf;

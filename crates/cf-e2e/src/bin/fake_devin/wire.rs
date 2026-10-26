@@ -5,6 +5,14 @@
 //! that says how it ended (`cause`), and what that was is told with the request it
 //! answers (`turnClientMessageId`, the name the store holds the user's message
 //! by). Each record is one write, so a reader never meets one cut in two.
+//!
+//! A log [`Wire::stamped`] is written as Devin 3000.11 writes one (T-660, two probes
+//! of 2026-10-26): every record of the turn's work is stamped with its time, the
+//! agent's words are said in a stream, the turn begins with Devin's word that it works
+//! (`session_info_update`, `statusEnum` `working`) and the user's message said back, in
+//! place of the TUI's request, and ends with its word that it waits (`blocked`). A window
+//! opened again on its conversation replays its last turn: stamped, in no stream, and
+//! with no end of the turn.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
@@ -16,7 +24,16 @@ use serde_json::{json, Value};
 pub struct Wire {
     file: File,
     session: String,
+    stamped: bool,
 }
+
+/// The updates of a turn's work that Devin 3000.11 stamps with their time.
+const STAMPED: [&str; 4] = [
+    "user_message_chunk",
+    "agent_thought_chunk",
+    "agent_message_chunk",
+    "tool_call",
+];
 
 impl Wire {
     /// The log in `path`, made where it is not there, of the conversation `session`.
@@ -24,12 +41,64 @@ impl Wire {
         Ok(Self {
             file: OpenOptions::new().create(true).append(true).open(path)?,
             session: session.to_owned(),
+            stamped: false,
         })
     }
 
-    /// One record of the conversation, whole in one write.
+    /// The log written as Devin 3000.11 writes one, where `stamped`.
+    #[must_use]
+    pub fn stamped(mut self, stamped: bool) -> Self {
+        self.stamped = stamped;
+        self
+    }
+
+    /// Devin's word on the turn, `working` or `blocked`, stamped as Devin stamps it.
+    fn status(&mut self, state: &str) -> io::Result<()> {
+        let at = jiff::Timestamp::now().as_millisecond();
+        self.record(json!({
+            "update": {
+                "sessionUpdate": "session_info_update",
+                "_meta": {
+                    "cognition.ai/timestamp": at,
+                    "cognition.ai/eventType": "status_update",
+                    "cognition.ai/statusEnum": state,
+                    "cognition.ai/userActionRequired": null,
+                },
+            },
+        }))
+    }
+
+    /// The last turn of the conversation, replayed into a window opened again on it as
+    /// Devin 3000.11 replays one: the user's message and the answer, stamped and in no
+    /// stream, and Devin's word that it waits, with no end of the turn.
+    pub fn replayed(&mut self, user: Option<&str>, answer: Option<&str>) -> io::Result<()> {
+        if !self.stamped {
+            return Ok(());
+        }
+        for (kind, text) in [
+            ("user_message_chunk", user),
+            ("agent_message_chunk", answer),
+        ] {
+            if let Some(text) = text {
+                self.record(json!({
+                    "update": { "sessionUpdate": kind, "content": { "type": "text", "text": text } },
+                }))?;
+            }
+        }
+        self.status("blocked")
+    }
+
+    /// One record of the conversation, whole in one write: a record of the turn's work
+    /// stamped with its time where the log is [`Wire::stamped`].
     fn record(&mut self, mut record: Value) -> io::Result<()> {
         record["sessionId"] = json!(self.session);
+        let kind = record["update"]["sessionUpdate"]
+            .as_str()
+            .unwrap_or_default();
+        if self.stamped && STAMPED.contains(&kind) {
+            record["update"]["_meta"]["cognition.ai/timestamp"] =
+                json!(jiff::Timestamp::now().to_string());
+        }
         self.raw(&record)
     }
 
@@ -93,6 +162,17 @@ impl Wire {
     /// of a real one has it (the conversation in its params, the words in a block
     /// of text).
     pub fn prompt(&mut self, id: u64, text: &str) -> io::Result<()> {
+        if self.stamped {
+            // Devin 3000.11 logs no request of its TUI's: it says it works, and says the
+            // message back.
+            self.status("working")?;
+            return self.record(json!({
+                "update": {
+                    "sessionUpdate": "user_message_chunk",
+                    "content": { "type": "text", "text": text },
+                },
+            }));
+        }
         let session = self.session.clone();
         self.raw(&json!({
             "jsonrpc": "2.0",
@@ -104,13 +184,18 @@ impl Wire {
 
     /// The agent thinks: its turn is at work.
     pub fn thinking(&mut self, client: &str) -> io::Result<()> {
-        self.record(json!({
+        let mut record = json!({
             "turnClientMessageId": client,
             "update": {
                 "sessionUpdate": "agent_thought_chunk",
                 "content": { "type": "text", "text": "thinking" },
             },
-        }))
+        });
+        if self.stamped {
+            record["update"]["_meta"] =
+                json!({ "cognition.ai/streamingMessageId": format!("{client}-thought") });
+        }
+        self.record(record)
     }
 
     /// The agent says `text`, in the message `stream`.
@@ -132,6 +217,9 @@ impl Wire {
 
     /// The turn that answers `client` ended: `complete`, or `cancelled`.
     pub fn ended(&mut self, cause: &str, client: &str) -> io::Result<()> {
+        if self.stamped {
+            self.status("blocked")?;
+        }
         self.record(json!({ "turnClientMessageId": client, "cause": cause }))
     }
 
@@ -140,6 +228,9 @@ impl Wire {
     /// names the turn's message and its request (`turnRequestId`), then the cause, with
     /// the request again in its statistics.
     pub fn ended_in(&mut self, cause: &str, client: &str, request: &str) -> io::Result<()> {
+        if self.stamped {
+            self.status("blocked")?;
+        }
         self.record(json!({ "turnClientMessageId": client, "turnRequestId": request }))?;
         self.record(json!({ "cause": cause, "stats": { "requestId": request } }))
     }
@@ -169,6 +260,7 @@ impl Wire {
         Ok(Self {
             file: self.file.try_clone()?,
             session: self.session.clone(),
+            stamped: self.stamped,
         })
     }
 }
@@ -245,6 +337,57 @@ mod tests {
         assert_eq!(records[1]["cause"], "complete");
         assert_eq!(records[1]["stats"]["requestId"], "request-9");
         assert!(records[1].get("turnClientMessageId").is_none());
+    }
+
+    #[test]
+    fn a_stamped_turn_is_said_as_devin_3000_11_says_it_and_a_replay_with_no_stream_and_no_end() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("wire.jsonl");
+        let mut wire = Wire::open(&path, "calm-river").unwrap().stamped(true);
+        wire.prompt(2, "hello").unwrap();
+        wire.thinking("client-1").unwrap();
+        wire.said("DONE", "stream-1", "client-1").unwrap();
+        wire.ended("complete", "client-1").unwrap();
+        wire.replayed(Some("hello"), Some("DONE")).unwrap();
+        let records = records(&path);
+        let kind = |at: usize| records[at]["update"]["sessionUpdate"].clone();
+        let meta = |at: usize, name: &str| records[at]["update"]["_meta"][name].clone();
+        // No request of the TUI's: Devin's word that it works, and the message said back.
+        assert!(records.iter().all(|record| record.get("method").is_none()));
+        assert_eq!(kind(0), "session_info_update");
+        assert_eq!(meta(0, "cognition.ai/statusEnum"), "working");
+        assert!(meta(0, "cognition.ai/timestamp").is_i64());
+        assert_eq!(kind(1), "user_message_chunk");
+        // The work stamped, its words in streams.
+        for at in [1, 2, 3] {
+            assert!(
+                meta(at, "cognition.ai/timestamp").is_string(),
+                "{}",
+                records[at]
+            );
+        }
+        assert_eq!(
+            meta(2, "cognition.ai/streamingMessageId"),
+            "client-1-thought"
+        );
+        assert_eq!(meta(3, "cognition.ai/streamingMessageId"), "stream-1");
+        // Its word that it waits, then the end.
+        assert_eq!(meta(4, "cognition.ai/statusEnum"), "blocked");
+        assert_eq!(records[5]["cause"], "complete");
+        // The replay: stamped, in no stream, and Devin's word that it waits with no end.
+        assert_eq!(kind(6), "user_message_chunk");
+        assert_eq!(kind(7), "agent_message_chunk");
+        assert!(meta(7, "cognition.ai/timestamp").is_string());
+        assert!(meta(7, "cognition.ai/streamingMessageId").is_null());
+        assert_eq!(meta(8, "cognition.ai/statusEnum"), "blocked");
+        assert_eq!(records.len(), 9);
+        // A log not stamped replays nothing.
+        let plain = folder.path().join("plain.jsonl");
+        Wire::open(&plain, "calm-river")
+            .unwrap()
+            .replayed(Some("hello"), Some("DONE"))
+            .unwrap();
+        assert!(super::tests::records(&plain).is_empty());
     }
 
     #[test]
