@@ -320,6 +320,12 @@ impl Dispatcher {
     /// requester is told once, after it has looked so for [`LOOKS_FINISHED_MS`], how to
     /// take the answer; nothing is recorded and nothing ends: the record's word stands,
     /// and Finish is the requester's. `said` is the record after the task's message.
+    ///
+    /// Words told to the window that wait to go in (`told_waiting`) tell nothing: Finish
+    /// refuses then (`words-on-their-way`), and their own path speaks for them (the
+    /// chief's call on Calliope's P3-6, T-621). A job still running is no finished turn,
+    /// though Claude Code says it waits at its prompt (its `shell` status reads idle):
+    /// the count of what the turn left running stands between them (her P3-5).
     fn looks_finished(
         &self,
         project: &ProjectView,
@@ -338,7 +344,12 @@ impl Dispatcher {
                 let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
                 answers_to_the_task(said, &replacements)
                     .is_some_and(|answers| answers.last.is_some_and(|last| last.complete))
-            };
+            }
+            && !self
+                .seams
+                .ledger
+                .borrow()
+                .told_waiting(participant.id, thread.task.id)?;
         let since = {
             let mut held = record.held.borrow_mut();
             if !looks {
@@ -363,8 +374,10 @@ impl Dispatcher {
             "human" => "Finish in the task's drawer takes that answer".to_owned(),
             _ => format!("`cf task finish T-{number}` takes that answer"),
         };
-        // The engine knows no zone of the human's: the time is said in UTC, as its notes'
-        // times are.
+        // The time the engine first saw the turn look finished (`quiet`), the pass that
+        // first found it so: not Claude Code's own time of its status, which the look does
+        // not carry. The engine knows no zone of the human's: it is said in UTC, as its
+        // notes' times are.
         let at = time::iso(since);
         let body = format!(
             "T-{number} looks finished: its last answer is complete and @{}'s window has been idle since {} UTC, but its turn never read as over. {way}.",

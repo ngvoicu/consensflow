@@ -7,6 +7,9 @@
 //! once how to take the answer; the task is never finished for it.
 
 use cf_engine::testing::Context;
+use cf_harness::contract::Waiting;
+
+use cf_ledger::NewNote;
 
 /// The window's turns: what a look reads of each.
 enum Shape {
@@ -16,6 +19,10 @@ enum Shape {
     StillAtWork,
     /// At its prompt, with no answer written yet.
     Unanswered,
+    /// Answered, a job it started still running (Claude Code's `shell` status reads idle).
+    JobRunning,
+    /// Answered, its own dialog open.
+    Dialog,
 }
 
 /// T-1 given to zeus, its window closed with the host's word `proven` or none, and T-1
@@ -42,6 +49,18 @@ fn reopened(proven: bool, shape: &Shape) -> (Context, i64) {
                 .with("zeus", |agent| agent.at_prompt = false);
         }
         Shape::Unanswered => context.adapter.with("zeus", |agent| agent.at_prompt = true),
+        Shape::JobRunning => {
+            context.adapter.answer_never_over("zeus", "Landed.");
+            context.adapter.with("zeus", |agent| agent.pending.jobs = 1);
+        }
+        Shape::Dialog => {
+            context.adapter.answer_never_over("zeus", "Landed.");
+            context.adapter.with("zeus", |agent| {
+                agent.waiting = Some(Waiting {
+                    reason: Some("its own question dialog is open".to_owned()),
+                });
+            });
+        }
     }
     context.pass().unwrap();
     (context, project.id)
@@ -102,5 +121,48 @@ fn a_reopened_window_at_its_prompt_with_no_answer_yet_is_told_nothing() {
     let (context, project) = reopened(false, &Shape::Unanswered);
     context.advance(600_000);
     context.pass().unwrap();
+    assert!(looks_finished(&context, project).is_empty());
+}
+
+#[test]
+fn a_reopened_turn_with_a_job_still_running_is_told_nothing() {
+    let (context, project) = reopened(false, &Shape::JobRunning);
+    context.advance(600_000);
+    context.pass().unwrap();
+    assert!(looks_finished(&context, project).is_empty());
+}
+
+#[test]
+fn a_reopened_turn_with_its_dialog_open_is_told_nothing() {
+    let (context, project) = reopened(false, &Shape::Dialog);
+    context.advance(600_000);
+    context.pass().unwrap();
+    assert!(looks_finished(&context, project).is_empty());
+}
+
+/// Words told to the window wait for it to rest, which this window never does: Finish
+/// refuses while they wait (`words-on-their-way`), so the note that says to finish it is
+/// not given (Calliope's P3-6, T-621).
+#[test]
+fn a_reopened_turn_that_looks_finished_with_words_told_on_their_way_is_told_nothing() {
+    let (context, project) = reopened(false, &Shape::NeverOver);
+    // The chief's `cf tell`: words to T-1's window, which go in when it is next at rest.
+    let told = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project,
+            &NewNote {
+                from: Some("chief".to_owned()),
+                to: "zeus".to_owned(),
+                task: Some(1),
+                body: "Tag the release too".to_owned(),
+            },
+        )
+        .unwrap()
+        .id;
+    context.advance(600_000);
+    context.pass().unwrap();
+    assert_eq!(context.message(told).state, "queued", "on its way still");
     assert!(looks_finished(&context, project).is_empty());
 }

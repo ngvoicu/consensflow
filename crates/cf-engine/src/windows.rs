@@ -103,6 +103,9 @@ impl Activity {
 pub(crate) struct Opening {
     pub(crate) pane: Pane,
     pub(crate) exited: Option<Shown>,
+    /// The conversation its program will write to, where it goes on with one the ledger
+    /// holds: none for one opening on a new conversation, which no window wrote to yet.
+    pub(crate) conversation: Option<i64>,
 }
 
 /// The engine's own kill of a window, on its way, and the task (its project and
@@ -600,6 +603,7 @@ impl Dispatcher {
         record.window.borrow_mut().opening = Some(Opening {
             pane: pane.clone(),
             exited: None,
+            conversation: resumed_on,
         });
         // `.catch(...)` made a promise of its own to wait on, a turn after
         // the host's answer.

@@ -427,3 +427,43 @@ runs = ["lost-queue-engine"]
 file = "crates/cf-engine/src/windows.rs"
 find = "            self.seams.ledger.borrow_mut().set_program_gone(id, false)?;"
 replace = "            let _ = id;"
+
+# Calliope's P3-5 and P3-6 on 5c223bc8 (T-621, T-646): a dialog up or a job still running is no finished
+# turn (Claude Code's `shell` status reads idle while a job runs), and words told to the window that wait
+# to go in hold the note back, as they hold Finish back (`words-on-their-way`).
+
+[[plant]]
+name = "lost-queue: a turn with its dialog open is told as finished"
+meant = "a_reopened_turn_with_its_dialog_open_is_told_nothing"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            && observed.waiting.is_none()\n"
+replace = ""
+
+[[plant]]
+name = "lost-queue: a turn with a job still running is told as finished"
+meant = "a_reopened_turn_with_a_job_still_running_is_told_nothing"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            && observed.pending().total() == 0\n"
+replace = ""
+
+[[plant]]
+name = "lost-queue: a turn whose told words wait to go in is told to be finished, which Finish refuses"
+meant = "a_reopened_turn_that_looks_finished_with_words_told_on_their_way_is_told_nothing"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+            && !self
+                .seams
+                .ledger
+                .borrow()
+                .told_waiting(participant.id, thread.task.id)?;'''
+replace = ";"
+
