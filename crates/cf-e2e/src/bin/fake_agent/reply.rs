@@ -65,6 +65,9 @@
 //!   a synthetic AskUserQuestion event, and the turn answers with what the hook
 //!   handed back.
 //! - A question whose text says `REPLY <words>` is answered with `cf answer`.
+//! - `REPLY <words> THEN <line>` answers it so and goes on, in the same turn, with `line`
+//!   as the line it was given, and ends with what that answers: a window that answers
+//!   the chief's tell and carries on to its end (T-442).
 //! - Anything else is acknowledged.
 
 use std::path::Path;
@@ -353,12 +356,20 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         pattern::once(&ASKED, r"(?m)^\[ConsensFlow m-(\d+)[^\]]*question from @").captures(text);
     let reply = pattern::once(&REPLY, r"(?m)REPLY (.+)$").captures(text);
     if let (Some(asked), Some(reply)) = (asked, reply) {
+        let (answer, goes_on) = match reply[1].split_once(" THEN ") {
+            Some((answer, line)) => (answer, Some(line)),
+            None => (&reply[1], None),
+        };
         let words = [
             "answer".to_owned(),
             format!("m-{}", &asked[1]),
-            reply[1].to_owned(),
+            answer.to_owned(),
         ];
-        return Ok(Reply::Text(format!("replied: {}", run_cf(&words))));
+        let replied = run_cf(&words);
+        return match goes_on {
+            Some(line) => reply_to(line, window),
+            None => Ok(Reply::Text(format!("replied: {replied}"))),
+        };
     }
     let dispatched: Vec<String> = dispatches(
         text,

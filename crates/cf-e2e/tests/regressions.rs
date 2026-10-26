@@ -40,6 +40,8 @@ mod a_command_that_never_exits_held_a_workers_result;
 mod a_compact_typed_into_an_idle_chief_held_a_workers_result;
 #[path = "regressions/a_compaction_written_beside_an_answer_tore_its_line.rs"]
 mod a_compaction_written_beside_an_answer_tore_its_line;
+#[path = "regressions/a_final_answer_written_in_a_tells_turn_reached_nobody.rs"]
+mod a_final_answer_written_in_a_tells_turn_reached_nobody;
 #[path = "regressions/a_follow_up_after_a_restart_lost_its_windows_conversation.rs"]
 mod a_follow_up_after_a_restart_lost_its_windows_conversation;
 #[path = "regressions/a_follow_up_could_not_be_queued_behind_its_windows_own_work.rs"]

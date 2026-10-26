@@ -1836,7 +1836,7 @@ test('offers Finish for any working task of a member, held or not, and for none 
   await expect(finishOf(page, 'Task T-2')).toHaveCount(0)
 })
 
-test('says nothing of waiting on a task that is paused, though its lane is held for it, and offers no Finish', async ({
+test('says nothing of waiting on a task that is paused, though its lane is held for it, and offers Finish, which takes what its worker said last', async ({
   page,
 }) => {
   // A pause leaves the window and the job (the owner's decision): the task is paused first,
@@ -1857,7 +1857,12 @@ test('says nothing of waiting on a task that is paused, though its lane is held 
   await expect(drawer).toBeVisible()
   await expect(drawer.locator('.drawer-meta')).toContainText('Paused')
   await expect(drawer.locator('.drawer-meta')).not.toContainText('waiting on')
-  await expect(finishOf(page, 'Task T-12')).toHaveCount(0)
+  // The human's call, as the chief's `cf task finish` is: what the worker of a paused task
+  // said last since its latest message is the result (a tell's turn that ended with its
+  // answer, T-442), and nothing it left running is ended.
+  await expect(finishOf(page, 'Task T-12')).toHaveCount(1)
+  await finishOf(page, 'Task T-12').click()
+  await expect.poll(() => calls(page, 'task.finish')).toEqual([{ project: 1, task: 12 }])
 })
 
 test('offers no Finish on a closed project, where nothing acts, though its task is held', async ({

@@ -25,6 +25,7 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::holds::goes_on;
+use super::paused_answers::{keep_moved, prefixes as answer_prefixes};
 use crate::model::LedgerError;
 use crate::queue::{send, withdraw, Sent};
 use crate::store::Store;
@@ -230,6 +231,14 @@ pub(crate) fn tell_kept(
     Ok(())
 }
 
+/// Where a task goes as it leaves a wait: on (resumed, taken back to the board, taken by a
+/// member), or it stays paused, as a window that holds several tasks leaves one at a Resume.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Afterwards {
+    MovesOn,
+    StaysPaused,
+}
+
 /// A task that no longer waits (it was resumed, called off, taken back to the
 /// board, or taken by a member) is told no more. What its requester was told
 /// of it and has not been given yet is withdrawn, if it was told of the task
@@ -242,8 +251,15 @@ pub(crate) fn leave_pause_notes(
     store: &mut Store,
     task: &TaskRow,
     why: &str,
+    afterwards: Afterwards,
 ) -> Result<(), LedgerError> {
     let reason = format!("T-{} {why}", task.number);
+    // The answer of a paused task's window is not a word of its wait: it is what the task's
+    // window said, and it stays for whoever has not read it. Where the task moves on, in words
+    // true of a task that has; where it stays paused, as it was (`paused_answers`).
+    if afterwards == Afterwards::MovesOn {
+        keep_moved(store, task)?;
+    }
     let mut warnings: Vec<String> = Vec::new();
     let mut warn_of = |body: &str| warnings.extend(warning_in(body, task.number));
     // Whatever note of its own is queued for the requester about the task: a
@@ -252,15 +268,26 @@ pub(crate) fn leave_pause_notes(
     // before the pause goes with the rest. All but the news that the task went
     // on after a hold: that corrects what its requester was given, and a pause
     // that comes after it does not take it back.
+    let [paused, moved] = answer_prefixes(task.number);
     let withdrawn: Vec<String> = store
         .db
         .prepare(
             "UPDATE message SET state = 'cancelled', reason = ?
        WHERE task_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
-         AND state = 'queued' AND body != ? RETURNING body",
+         AND state = 'queued' AND body != ? AND substr(body, 1, length(?)) != ?
+         AND substr(body, 1, length(?)) != ? RETURNING body",
         )?
         .query_map(
-            params![reason, task.id, task.requester_id, goes_on(task.number)],
+            params![
+                reason,
+                task.id,
+                task.requester_id,
+                goes_on(task.number),
+                paused,
+                paused,
+                moved,
+                moved
+            ],
             |row| row.get(0),
         )?
         .collect::<rusqlite::Result<_>>()?;

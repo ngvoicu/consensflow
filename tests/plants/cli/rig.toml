@@ -32,7 +32,12 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
 find = '''
-        leave_pause_notes(store, &task, &format!("was taken by @{}", member.handle))?;
+        leave_pause_notes(
+            store,
+            &task,
+            &format!("was taken by @{}", member.handle),
+            Afterwards::MovesOn,
+        )?;
 '''
 replace = ""
 
@@ -47,7 +52,7 @@ builds = true
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
         // A refusal below writes nothing, this withdrawal with it.
-        leave_pause_notes(store, &task, "resumed")?;'''
+        leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)?;'''
 replace = ""
 
 [[plant]]

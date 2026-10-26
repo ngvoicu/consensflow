@@ -23,8 +23,9 @@ use super::{
     carrier_body, delivery_body, own_steps, require_on_board, require_task_state, task_by_id,
 };
 use crate::messages::{
-    drop_queued_but_told, fold, leave_pause_notes, say_again, tell_sent_back, told_waiting,
-    warnings_on_their_way, warnings_queued, Dropped,
+    drop_queued_but_told, fold, leave_pause_notes, put_back_paused_answers, queued_paused_answers,
+    say_again, tell_sent_back, told_waiting, warnings_on_their_way, warnings_queued,
+    withdraw_paused_answers, Afterwards, Dropped,
 };
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
@@ -47,13 +48,40 @@ pub(crate) fn record_result(
     number: i64,
     body: &str,
 ) -> Result<TaskMoved, LedgerError> {
+    record(store, project_id, number, body, &ACTIVE_TASK_STATES)
+}
+
+/// The chief or the human takes what the worker said last as the result (Finish):
+/// of a task at work, or of a paused one, whose worker's turn ended with its
+/// answer after the tell that paused it (`turn_end`'s paused answer). The pause
+/// is the finisher's own to end: the notes it left queued for the requester go
+/// ([`leave_pause_notes`]), as a resume's do.
+pub(crate) fn record_finished(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    body: &str,
+) -> Result<TaskMoved, LedgerError> {
+    record(store, project_id, number, body, &FINISHABLE_TASK_STATES)
+}
+
+/// The states a task can be finished at the word of the chief or the human.
+const FINISHABLE_TASK_STATES: [&str; 3] = ["working", "waiting", "paused"];
+
+fn record(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    body: &str,
+    states: &[&str],
+) -> Result<TaskMoved, LedgerError> {
     model::require_text(body, "body", MAX_BODY)?;
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
         if own_steps::is_own_step(store, &task)? {
             return own_steps::finish(store, project_id, &task, body);
         }
-        require_task_state(&task, &ACTIVE_TASK_STATES, "record a result for")?;
+        require_task_state(&task, states, "record a result for")?;
         if let Some(assignee) = task.assignee_id {
             if told_waiting(store, assignee, task.id)? {
                 return Err(LedgerError::refused_with(
@@ -64,6 +92,12 @@ pub(crate) fn record_result(
                     409,
                 ));
             }
+        }
+        // A refusal above writes nothing, these withdrawals with it. The words the paused
+        // task's window ended its turn with are the result: the note that gave them is moot.
+        if task.state == "paused" {
+            withdraw_paused_answers(store, &task, "finished")?;
+            leave_pause_notes(store, &task, "finished", Afterwards::MovesOn)?;
         }
         let message_id = queue(
             store,
@@ -447,7 +481,7 @@ pub(crate) fn call_off(
         ],
     )?;
     // A note of several that names it, still queued, names it no more.
-    leave_pause_notes(store, &task, "cancelled")?;
+    leave_pause_notes(store, &task, "cancelled", Afterwards::MovesOn)?;
     say_again(store, &task, "cancelled", warnings)?;
     store.move_task(&task, "cancelled", json!({ "by": by }))?;
     release_ready(store, project_id)?;
@@ -652,11 +686,16 @@ fn fail(
         let failable = [&["open", "queued"], &ACTIVE_TASK_STATES[..]].concat();
         require_task_state(&task, &failable, "fail")?;
         let told = Dropped::of(store, &task)?;
+        // The answer of a window's turn on a tell, noted for the requester and not yet given
+        // (an early resume, then a resumed turn that failed), waits for the reopen with the
+        // task: what the window said then is the chief's still (T-442).
+        let answers = queued_paused_answers(store, &task)?;
         if given_up {
             drop_queued_but_told(store, task.id)?;
         } else {
             drop_queued(store, task.id)?;
         }
+        put_back_paused_answers(store, &answers)?;
         store.move_task(&task, "failed", json!({ "reason": reason }))?;
         release_ready(store, project_id)?;
         let requester = store.participant_row(task.requester_id)?;

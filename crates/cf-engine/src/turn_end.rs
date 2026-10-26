@@ -44,6 +44,11 @@
 //! is known of the work the record no longer waits on, and how much of it is not known
 //! to have ended, is said in the result itself ([`leftovers`]).
 //!
+//! **A tell's turn on a paused task** (T-442): a task paused by `cf tell` takes no result,
+//! but the complete answer its window's turn ends with, after answering the tell, is not
+//! lost: whoever gave the task is told it once, with the words, and Finish takes it as the
+//! result ([`paused`]).
+//!
 //! **A window has one task** (`ownership`): no other task's message goes into a window
 //! once one task's has, whatever ended that task; so no later task's turn is woken by
 //! what an earlier one left, and no later task is given an earlier task's words.
@@ -57,7 +62,7 @@ use cf_harness::records::{End, Item, Monitor, Pending, Reading, Role, Source};
 use cf_ledger::{NewNote, ParticipantView, ProjectView, TaskThread};
 use serde_json::Value;
 
-use crate::delivery_text::is_paste_of;
+use crate::delivery_text::{header_id, is_paste_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
@@ -129,6 +134,20 @@ pub(crate) struct Rests {
 }
 
 impl HeldPart {
+    /// What a window keeps once its task is no longer one it works on (paused, queued for a
+    /// resume): not the hold, nor what the requester was told of it. The look at its monitors
+    /// is kept: `watch_monitors` keeps it itself (it clears it at a pass that has no monitor
+    /// to decide), and a paused task's turn that ended with a monitor that said it ended is
+    /// told only once a look found its command over (T-442, Calliope's P2 on round 2).
+    /// Nor whether its turn looked finished, or the note that said so: a resumed task that
+    /// sits finished again is told again (the chief's call at 3.0.6-alpha.3's integration B).
+    pub(crate) fn drop_hold(&mut self) {
+        self.holding = None;
+        self.told = None;
+        self.quiet = None;
+        self.told_finished = None;
+    }
+
     /// What a window keeps of its task's hold once no task of its is working: nothing of
     /// the hold, and its rests, which a window idle between its result and its close does
     /// not take again at every pass (Calliope on 136a7158).
@@ -216,7 +235,8 @@ impl Dispatcher {
             .borrow()
             .active_task(participant.id, false)?;
         let Some(thread) = task.filter(|thread| thread.task.state == "working") else {
-            record.held.borrow_mut().reset();
+            record.held.borrow_mut().drop_hold();
+            self.tell_paused_answer(project, participant, observed, watching)?;
             return Ok(Turn::Open);
         };
         let items = observed.items();
@@ -257,12 +277,7 @@ impl Dispatcher {
         else {
             return Ok(Turn::Open);
         };
-        let mut pending = observed.pending();
-        // The monitors that said they ended are over where a look found no command.
-        if watching == Watching::Seen(CommandsSeen::Running(0)) {
-            pending.jobs = pending.jobs.saturating_sub(pending.noticed);
-            pending.noticed = 0;
-        }
+        let pending = pending_after_look(observed, watching);
         let words = words_of(&answers.final_run);
         if pending.total() > 0 {
             let hold = Hold {
@@ -423,6 +438,36 @@ impl Dispatcher {
                 && !item.compaction
                 && is_paste_of(&item.text, latest.id, first.as_deref())
         }))
+    }
+
+    /// The place among `items` of the latest message about the task that was pasted into
+    /// the window: [`Dispatcher::delivered_at`]'s, or a later one ConsensFlow pasted since
+    /// (the Resume's word to go on, a question the chief put to the window), which no start is
+    /// taken from at a turn's end and is answered by what follows it. The harness's own
+    /// notifications, which wake a held task's turns, are none, nor is the note that says
+    /// the role (`replacements`, whose word is the role's), nor a compaction summary that
+    /// restates a header (the merge with Resume after Close, T-405's L10, and Calliope's P2
+    /// on it, T-444). None where `delivered_at` finds none.
+    pub(crate) fn latest_message_at(
+        &self,
+        thread: &TaskThread,
+        participant: &ParticipantView,
+        items: &[Item],
+        replacements: &[i64],
+    ) -> Result<Option<usize>, EngineError> {
+        let Some(start) = self.delivered_at(participant.id, thread, items)? else {
+            return Ok(None);
+        };
+        Ok(Some(
+            items[start + 1..]
+                .iter()
+                .rposition(|item| {
+                    item.role == Role::User
+                        && !item.compaction
+                        && header_id(&item.text).is_some_and(|id| !replacements.contains(&id))
+                })
+                .map_or(start, |later| start + 1 + later),
+        ))
     }
 
     /// What the monitors a worker's turn left that said they ended come to, at this pass
@@ -854,7 +899,20 @@ pub(crate) fn words_of(final_run: &[&Item]) -> String {
     }
 }
 
+/// What a worker's turn left pending, as a pass takes it: the monitors that said they ended
+/// are over where a look found no command in their window ([`Watching`]). A working task's
+/// turn ([`Dispatcher::collect`]) and a paused task's ([`paused`]) are held by the same count.
+pub(crate) fn pending_after_look(observed: &Observed, watching: Watching) -> Pending {
+    let mut pending = observed.pending();
+    if watching == Watching::Seen(CommandsSeen::Running(0)) {
+        pending.jobs = pending.jobs.saturating_sub(pending.noticed);
+        pending.noticed = 0;
+    }
+    pending
+}
+
 mod finish;
+mod paused;
 
 pub use finish::Finished;
 

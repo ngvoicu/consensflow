@@ -23,7 +23,12 @@ runs = ["waiting-notes-ledger", "waiting-notes-engine", "engine-dispatcher"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
 find = '''
-        leave_pause_notes(store, &task, &format!("was taken by @{}", member.handle))?;
+        leave_pause_notes(
+            store,
+            &task,
+            &format!("was taken by @{}", member.handle),
+            Afterwards::MovesOn,
+        )?;
 '''
 replace = ""
 
@@ -34,8 +39,10 @@ runs = ["waiting-notes-ledger", "waiting-notes-engine"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = '''         AND state = 'queued' AND body != ? RETURNING body",'''
-replace = '         AND body != ? RETURNING body",'
+find = '''         AND state = 'queued' AND body != ? AND substr(body, 1, length(?)) != ?
+         AND substr(body, 1, length(?)) != ? RETURNING body",'''
+replace = '''         AND body != ? AND substr(body, 1, length(?)) != ?
+         AND substr(body, 1, length(?)) != ? RETURNING body",'''
 
 [[plant]]
 name = "waiting notes: a take-over withdraws a note the chief wrote"
@@ -54,13 +61,15 @@ runs = ["waiting-notes-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = '''         AND state = 'queued' AND body != ? RETURNING body",'''
-replace = '''         AND state = 'queued' RETURNING body",'''
+find = '''         AND state = 'queued' AND body != ? AND substr(body, 1, length(?)) != ?
+         AND substr(body, 1, length(?)) != ? RETURNING body",'''
+replace = '''         AND state = 'queued' AND substr(body, 1, length(?)) != ?
+         AND substr(body, 1, length(?)) != ? RETURNING body",'''
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "            params![reason, task.id, task.requester_id, goes_on(task.number)],"
-replace = "            params![reason, task.id, task.requester_id],"
+find = "                goes_on(task.number),\n"
+replace = ""
 
 [[plant]]
 name = "waiting notes: a task taken or taken back stays in a note of several that named it"
@@ -80,7 +89,7 @@ runs = ["waiting-notes-ledger", "engine-dispatcher"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
 find = '''
-        leave_pause_notes(store, &task, "was taken back")?;
+        leave_pause_notes(store, &task, "was taken back", Afterwards::MovesOn)?;
 '''
 replace = ""
 
@@ -92,7 +101,7 @@ runs = ["waiting-notes-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
 find = '''
-        leave_pause_notes(store, &task, "was taken back")?;
+        leave_pause_notes(store, &task, "was taken back", Afterwards::MovesOn)?;
 '''
 replace = ""
 
@@ -103,7 +112,7 @@ find = '''
         Ok(TaskReleased {'''
 replace = '''
         release_ready(store, project_id)?;
-        leave_pause_notes(store, &task, "was taken back")?;
+        leave_pause_notes(store, &task, "was taken back", Afterwards::MovesOn)?;
         Ok(TaskReleased {'''
 
 [[plant]]

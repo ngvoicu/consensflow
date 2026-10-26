@@ -427,3 +427,17 @@ runs = ["lost-queue-engine"]
 file = "crates/cf-engine/src/windows.rs"
 find = "            self.seams.ledger.borrow_mut().set_program_gone(id, false)?;"
 replace = "            let _ = id;"
+
+# 3.0.6-alpha.3's integration B (T-664): tell-then-done's `drop_hold` keeps the window's look through a
+# pause, and the chief's call is that it drops whether the turn looked finished and the note that said so,
+# so a resumed task that sits finished again is told again.
+
+[[plant]]
+name = "lost-queue: a pause keeps the note a turn looked finished, and the resumed task is never told again"
+meant = "a_task_resumed_after_it_was_told_it_looks_finished_is_told_again_once_it_looks_finished_again"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        self.told_finished = None;\n"
+replace = ""

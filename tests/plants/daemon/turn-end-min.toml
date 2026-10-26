@@ -589,8 +589,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '        if thread.task.state != "working" {'
-replace = '        if thread.task.state != "working" && thread.task.state != "done" {'
+find = '        if !matches!(thread.task.state.as_str(), "working" | "paused") {'
+replace = '        if !matches!(thread.task.state.as_str(), "working" | "paused" | "done") {'
 
 [[plant]]
 name = "turn-end-min finish: the result says nothing of what still runs"
@@ -661,8 +661,8 @@ runs = ["tem-page-finish"]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = '''    if (task.state === 'working' && task.assignee !== null && task.assignee !== 'chief') {'''
-replace = '''    if (this.#held !== null && task.state === 'working' && task.assignee !== null && task.assignee !== 'chief') {'''
+find = '''    if (FINISHABLE.includes(task.state) && task.assignee !== null && task.assignee !== 'chief') {'''
+replace = '''    if (this.#held !== null && FINISHABLE.includes(task.state) && task.assignee !== null && task.assignee !== 'chief') {'''
 
 [[plant]]
 name = "turn-end-min cf: `cf task finish` is no command"
@@ -1007,8 +1007,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '        if watching == Watching::Seen(CommandsSeen::Running(0)) {'
-replace = '        if matches!(watching, Watching::Seen(CommandsSeen::Running(0) | CommandsSeen::Untold)) {'
+find = '    if watching == Watching::Seen(CommandsSeen::Running(0)) {'
+replace = '    if matches!(watching, Watching::Seen(CommandsSeen::Running(0) | CommandsSeen::Untold)) {'
 
 [[plant]]
 name = "turn-end-min engine: a held task is not told again when its monitor's notice comes"
@@ -1289,11 +1289,8 @@ runs = ["tem-engine-turn-end"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-        let rests = std::mem::take(&mut self.rests);
-        *self = HeldPart {
-            rests,
-            ..HeldPart::default()
-        };'''
+        self.holding = None;
+        self.told = None;'''
 replace = '''
         *self = HeldPart::default();'''
 
@@ -1849,9 +1846,9 @@ meant = "finish_of_a_task_the_resume_brought_back_waits_for_the_answer_to_its_co
 runs = ["tem-engine-resume"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '                item.role == Role::User'
-replace = '                false && item.role == Role::User'
+file = "crates/cf-engine/src/turn_end.rs"
+find = '                    item.role == Role::User'
+replace = '                    false && item.role == Role::User'
 
 [[plant]]
 name = "turn-end-min engine: a held task whose jobs the Resume retired has its result say nothing of them"
@@ -1892,9 +1889,9 @@ meant = "finish_takes_no_word_a_session_gave_its_role_for_an_answer_to_the_task"
 runs = ["tem-engine-role-members"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '                    && header_id(&item.text).is_some_and(|id| !replacements.contains(&id))'
-replace = '                    && header_id(&item.text).is_some()'
+file = "crates/cf-engine/src/turn_end.rs"
+find = '                        && header_id(&item.text).is_some_and(|id| !replacements.contains(&id))'
+replace = '                        && header_id(&item.text).is_some()'
 
 [[plant]]
 name = "turn-end-min engine: Finish takes a compaction summary that quotes a header for a message pasted since"
@@ -1902,12 +1899,12 @@ meant = "finish_takes_the_answer_of_a_held_task_whose_worker_compacted_after_it_
 runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/turn_end/finish.rs"
+file = "crates/cf-engine/src/turn_end.rs"
 find = """
-                    && !item.compaction
-                    && header_id"""
+                        && !item.compaction
+                        && header_id"""
 replace = """
-                    && header_id"""
+                        && header_id"""
 
 # The fix-forward of turn-end's landing (T-371): the stand-in's monitor ends once the case lets
 # it, after the chief was told the monitor alone runs.

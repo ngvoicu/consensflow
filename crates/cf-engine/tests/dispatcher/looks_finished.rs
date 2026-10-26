@@ -104,3 +104,44 @@ fn a_reopened_window_at_its_prompt_with_no_answer_yet_is_told_nothing() {
     context.pass().unwrap();
     assert!(looks_finished(&context, project).is_empty());
 }
+
+#[test]
+fn a_task_resumed_after_it_was_told_it_looks_finished_is_told_again_once_it_looks_finished_again() {
+    // The chief's call at 3.0.6-alpha.3's integration B (T-664): tell-then-done's
+    // `drop_hold` keeps a window's look through a pause, and the note was told once for
+    // the task, so a resumed task that sat finished again was told nothing. The pause
+    // drops what the note was told, as it drops the hold.
+    let (context, project) = reopened(false, &Shape::NeverOver);
+    context.advance(60_000);
+    context.pass().unwrap();
+    assert_eq!(looks_finished(&context, project).len(), 1, "told once");
+    // The pause stops the window, and its stopped turn reads as over.
+    context.pause_task(project, 1);
+    context.adapter.answer("zeus", "Stopped there.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    context.resume_task(project, 1, "Land the rest");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "working");
+    context
+        .adapter
+        .answer_never_over("zeus", "Landed the rest.");
+    context.pass().unwrap();
+    assert_eq!(
+        looks_finished(&context, project).len(),
+        1,
+        "not yet a minute"
+    );
+    context.advance(60_000);
+    context.pass().unwrap();
+    assert_eq!(
+        looks_finished(&context, project).len(),
+        2,
+        "told again for the resumed turn"
+    );
+    context.advance(600_000);
+    context.pass().unwrap();
+    assert_eq!(looks_finished(&context, project).len(), 2, "and once");
+}

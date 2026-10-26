@@ -51,6 +51,17 @@ impl Ledger {
         tasks::record_result(&mut self.store, project_id, number, body)
     }
 
+    /// The chief or the human takes what the worker said last as the task's result: of a
+    /// task at work, or of a paused one.
+    pub fn record_finished(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        body: &str,
+    ) -> Result<TaskMoved, LedgerError> {
+        tasks::record_finished(&mut self.store, project_id, number, body)
+    }
+
     /// A coordinator accepts a task's result.
     pub fn accept_task(
         &mut self,

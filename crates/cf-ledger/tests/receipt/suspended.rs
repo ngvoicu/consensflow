@@ -1243,3 +1243,36 @@ fn a_ledger_from_before_the_mark_keeps_every_paused_task_paused_through_a_resume
         "and the chief is still to be told of it"
     );
 }
+
+/// Calliope's P3 on T-442's round 2: the Resume of a project leaves a task of a window that
+/// holds several paused (`leave_several_paused`), and the note that gives its requester the
+/// answer of the window's turn on a tell says it is paused still: a task that stays paused
+/// has not moved on, so the note is not written again in the words of one that has.
+#[test]
+fn the_answer_note_of_a_task_that_stays_paused_through_the_resume_stays_in_the_words_of_a_paused_task(
+) {
+    let mut w = world();
+    let (first, second) = holding_two(&mut w);
+    let session = session_of(&w, first);
+    closed_with(&mut w, &[first, second], CLOSED);
+    let note = w
+        .ledger
+        .note_paused_answer(w.project, first, &session, 7, "Parser done")
+        .expect("the ledger")
+        .expect("a note");
+    assert!(note
+        .body
+        .starts_with(&format!("T-{first} is paused, and @")));
+
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+
+    assert_eq!([w.state(first), w.state(second)], ["paused", "paused"]);
+    let kept = w.message(note.id);
+    assert_eq!(
+        (kept.state.as_str(), kept.body.as_str()),
+        ("queued", note.body.as_str()),
+        "the same words: the task is paused still"
+    );
+}

@@ -100,6 +100,26 @@ impl Ledger {
         messages::tell_queued(&mut self.store, project_id, number, from, body)
     }
 
+    /// Tells T-`number`'s requester what the window of `handle` ended its turn on tell `tell`
+    /// with, while the task is paused: `words`, its last complete answer after the tell. A note
+    /// for each tell; none where there is one.
+    pub fn note_paused_answer(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        handle: &str,
+        tell: i64,
+        words: &str,
+    ) -> Result<Option<MessageView>, LedgerError> {
+        messages::note_paused_answer(&mut self.store, project_id, number, handle, tell, words)
+    }
+
+    /// Whether the chief's tell to a participant's window about a task is still on its way to
+    /// it: what the window said last is not the answer to it until it is in.
+    pub fn tell_on_its_way(&self, participant_id: i64, task_id: i64) -> Result<bool, LedgerError> {
+        messages::tell_on_its_way(&self.store, participant_id, task_id)
+    }
+
     /// Whether words told to a participant's window about a task are still on
     /// their way to it: its answer is not the task's result until they are in.
     pub fn told_waiting(&self, participant_id: i64, task_id: i64) -> Result<bool, LedgerError> {

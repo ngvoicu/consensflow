@@ -11,7 +11,7 @@ use super::{
     a_pool, delivery_body, m_list, pool_name, release_ready, require_task_state, task_by_id,
     task_row_by_id,
 };
-use crate::messages::{leave_pause_notes, transfer};
+use crate::messages::{leave_pause_notes, transfer, Afterwards};
 use crate::model::{
     self, title_of, LedgerError, ACTIVE_TASK_STATES, COORDINATOR_ROLES, MAX_BODY, POOLS, PURPOSES,
 };
@@ -406,7 +406,12 @@ pub(crate) fn assign_task(
         }
         let pool = task.pool.as_deref().unwrap_or_default();
         let session = start_session(store, project_id, &member, pool)?;
-        leave_pause_notes(store, &task, &format!("was taken by @{}", member.handle))?;
+        leave_pause_notes(
+            store,
+            &task,
+            &format!("was taken by @{}", member.handle),
+            Afterwards::MovesOn,
+        )?;
         let at = store.at();
         store.db.execute(
             "UPDATE task SET assignee_id = ?, updated_at = ? WHERE id = ?",
@@ -459,7 +464,7 @@ pub(crate) fn release_task(
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
         require_releasable(&task)?;
-        leave_pause_notes(store, &task, "was taken back")?;
+        leave_pause_notes(store, &task, "was taken back", Afterwards::MovesOn)?;
         // A task paused before anyone took it has nobody to take it from.
         let member = task
             .assignee_id
