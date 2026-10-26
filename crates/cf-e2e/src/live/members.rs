@@ -469,6 +469,11 @@ impl Members {
         })
     }
 
+    /// The daemon's home, where the launches' files are.
+    pub fn home(&self) -> PathBuf {
+        self.rig.home()
+    }
+
     /// Ends the rig: the daemon, the pane host and their windows, and the
     /// records of the stand-ins. The harnesses' windows are given the time the
     /// host gives them to leave, and a rig that does not end says which of its

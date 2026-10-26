@@ -6,8 +6,16 @@
 //! folder: ConsensFlow's own copy of Specmint is in `integrations/specmint`
 //! ([`super::specmint`]), which neither a window's end nor a start touches, and
 //! a harness's folder holds launches' folders and nothing else (Devin's wire
-//! logs are read by listing it).
+//! logs are read by listing it). What a Devin launch proves of its first message is
+//! kept when its folder goes, at a window's close as at a start, until a start has
+//! settled what was on its way (`devin::kept`): a window's exit reads its record
+//! once its files went, and a start once it swept them.
+//!
+//! Each folder goes on its own: one that cannot go (a file Windows holds open)
+//! stops none after it, and is said with the others that could not (gap 5's P2 of
+//! the Devin arrival gaps: one error left every later folder for good).
 
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -18,6 +26,7 @@ use cf_base::path;
 use cf_proto::agents::Harness;
 
 use crate::contract::LaunchId;
+use crate::devin::kept;
 use crate::shared::record::find::entries;
 
 /// The name Codex goes by under `integrations`. It keeps no files of a launch's
@@ -27,9 +36,35 @@ use crate::shared::record::find::entries;
 pub(crate) const CODEX_FOLDER: &str = "codex";
 
 /// The harness folders a launch's files are in, in the order Node goes through
-/// them: a removal that fails stops there, leaving the folders after it. Codex's,
-/// which Node had no files for, comes last.
+/// them. Codex's, which Node had no files for, comes last.
 const FOLDERS: [&str; 5] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER];
+
+/// The folders a removal could not take, each with why: every other went.
+#[derive(Debug)]
+pub struct NotRemoved(Vec<(String, io::Error)>);
+
+impl fmt::Display for NotRemoved {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (at, (folder, error)) in self.0.iter().enumerate() {
+            if at > 0 {
+                f.write_str("; ")?;
+            }
+            write!(f, "{folder}: {error}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for NotRemoved {}
+
+/// What went wrong of removals each tried on its own: nothing, or the folders that stayed.
+fn removed(failed: Vec<(String, io::Error)>) -> Result<(), NotRemoved> {
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(NotRemoved(failed))
+    }
+}
 
 /// The folder under `integrations` a harness keeps its launches' files in:
 /// Codex is given what it runs with, and keeps no role there ([`CODEX_FOLDER`]).
@@ -69,32 +104,54 @@ fn folder(home: &str, harness_folder: &str, launch: &str) -> String {
 }
 
 /// A window closed: its files go (`forgetLaunch`), from every harness's
-/// folder in `home`, ConsensFlow's folder.
-pub fn forget_launch(home: &str, launch: &LaunchId) -> io::Result<()> {
+/// folder in `home`, ConsensFlow's folder, each on its own.
+pub fn forget_launch(home: &str, launch: &LaunchId) -> Result<(), NotRemoved> {
+    let mut failed = Vec::new();
     for harness in FOLDERS {
-        remove(Path::new(&folder(home, harness, launch.as_str())))?;
+        let folder = folder(home, harness, launch.as_str());
+        if let Err(error) = remove_launch(home, harness, Path::new(&folder), launch.as_str()) {
+            failed.push((folder, error));
+        }
     }
-    Ok(())
+    removed(failed)
+}
+
+/// The folder `folder` of the launch `name` in `harness`'s folder goes, what a Devin
+/// launch proves of its first message kept first (`devin::kept`): a folder whose proof
+/// cannot be kept stays.
+fn remove_launch(home: &str, harness: &str, folder: &Path, name: &str) -> io::Result<()> {
+    if harness == "devin" {
+        let kept = Path::new(home).join("integrations").join(kept::FOLDER);
+        kept::keep(folder, name, &kept)?;
+    }
+    remove(folder)
 }
 
 /// At a start, when no window is open: every launch's files go
-/// (`sweepLaunches`), and what is not named by a launch id stays. How many
-/// went; a harness's folder that cannot be read holds none.
-pub fn sweep_launches(home: &str) -> io::Result<usize> {
+/// (`sweepLaunches`), each on its own ([`remove_launch`]), and what is not named
+/// by a launch id stays. How many went; a harness's folder that cannot be read
+/// holds none.
+pub fn sweep_launches(home: &str) -> Result<usize, NotRemoved> {
     let mut swept = 0;
+    let mut failed = Vec::new();
     for harness in FOLDERS {
         let parent = path::join(&[home, "integrations", harness]);
         let Ok(names) = entries(Path::new(&parent)) else {
             continue;
         };
         for entry in names {
-            if LaunchId::new(&entry.file_name().to_string_lossy()).is_some() {
-                remove(&entry.path())?;
-                swept += 1;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if LaunchId::new(&name).is_none() {
+                continue;
+            }
+            let launch = entry.path();
+            match remove_launch(home, harness, &launch, &name) {
+                Ok(()) => swept += 1,
+                Err(error) => failed.push((launch.to_string_lossy().into_owned(), error)),
             }
         }
     }
-    Ok(swept)
+    removed(failed).map(|()| swept)
 }
 
 /// `rmSync(path, { recursive: true, force: true })`: a folder with all it
@@ -154,5 +211,127 @@ mod tests {
         assert!(at("extensions/pi").exists());
         let nowhere = path::join(&[&home, "nowhere"]);
         assert_eq!(sweep_launches(&nowhere).unwrap(), 0);
+    }
+
+    /// Gap 5 of the Devin arrival gaps: what a swept Devin launch proves of its first
+    /// message is kept, outside the folders a start sweeps: the prompt it was given
+    /// behind `/bypass`, and the sessions its log named. A launch given no such prompt,
+    /// or whose log named no session, keeps nothing, and nor does another harness's.
+    #[test]
+    fn a_sweep_keeps_what_a_devin_launch_proves_of_its_first_message_behind_bypass() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_string_lossy().into_owned();
+        let launch = |harness: &str, id: &str, prompt: Option<&str>, wire: &[&str]| {
+            let folder = dir.path().join("integrations").join(harness).join(id);
+            fs::create_dir_all(&folder).unwrap();
+            if let Some(prompt) = prompt {
+                fs::write(folder.join("prompt.txt"), prompt).unwrap();
+            }
+            let lines: String = wire.iter().map(|line| format!("{line}\n")).collect();
+            fs::write(folder.join("wire.jsonl"), lines).unwrap();
+        };
+        let named = |session: &str| {
+            format!(
+                r#"{{"sessionId":"{session}","update":{{"sessionUpdate":"available_commands_update"}}}}"#
+            )
+        };
+        let (one, two) = (named("calm-river"), named("still-lake"));
+        launch(
+            "devin",
+            A,
+            Some("/bypass [ConsensFlow m-2 · note]\nGo on."),
+            &[&one, "{torn", &two, &one],
+        );
+        launch(
+            "devin",
+            B,
+            Some("[ConsensFlow m-3 · note]\nNo command."),
+            &[&one],
+        );
+        let c = "33333333-3333-4333-8333-333333333333";
+        launch(
+            "devin",
+            c,
+            Some("/bypass [ConsensFlow m-4 · note]\nNo session."),
+            &[],
+        );
+        launch(
+            "claude",
+            c,
+            Some("/bypass [ConsensFlow m-5 · note]\nNot Devin's."),
+            &[&one],
+        );
+        assert_eq!(sweep_launches(&home).unwrap(), 4);
+        let kept = dir.path().join("integrations").join(kept::FOLDER);
+        let names: Vec<String> = fs::read_dir(&kept)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, [format!("{A}.json")]);
+        let said: serde_json::Value =
+            serde_json::from_slice(&fs::read(kept.join(format!("{A}.json"))).unwrap()).unwrap();
+        assert_eq!(
+            said,
+            serde_json::json!({
+                "sessions": ["calm-river", "still-lake"],
+                "prompt": "[ConsensFlow m-2 · note]\nGo on.",
+            })
+        );
+        // A start that stopped before its settle sweeps nothing more, and keeps it.
+        assert_eq!(sweep_launches(&home).unwrap(), 0);
+        assert!(kept.join(format!("{A}.json")).exists());
+        assert!(crate::devin::forget_kept(&home).is_empty());
+        assert_eq!(fs::read_dir(&kept).unwrap().count(), 0);
+        // A window's close keeps it as a start does: its exit reads its record after.
+        launch(
+            "devin",
+            B,
+            Some("/bypass [ConsensFlow m-6 · note]\nHandoff."),
+            &[&two],
+        );
+        forget_launch(&home, &LaunchId::new(B).unwrap()).unwrap();
+        assert!(!dir.path().join("integrations/devin").join(B).exists());
+        let said: serde_json::Value =
+            serde_json::from_slice(&fs::read(kept.join(format!("{B}.json"))).unwrap()).unwrap();
+        assert_eq!(said["sessions"], serde_json::json!(["still-lake"]));
+    }
+
+    /// Gap 5's P2 (both reviewers of B5's round 12): one folder that could not go stopped
+    /// the sweep there, and every later one stayed. Each goes on its own now, and the one
+    /// that stays is said.
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_that_cannot_go_stops_no_other() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_string_lossy().into_owned();
+        for relative in [
+            format!("integrations/claude/{A}/inner"),
+            format!("integrations/pi/{A}"),
+            format!("integrations/devin/{B}"),
+            format!("integrations/opencode/{A}"),
+        ] {
+            fs::create_dir_all(dir.path().join(&relative)).unwrap();
+            fs::write(dir.path().join(&relative).join("file"), "x").unwrap();
+        }
+        // Claude's launch holds a folder nothing can be removed from.
+        let stuck = dir.path().join(format!("integrations/claude/{A}/inner"));
+        fs::set_permissions(&stuck, fs::Permissions::from_mode(0o555)).unwrap();
+        let swept = sweep_launches(&home);
+        let forgot = forget_launch(&home, &LaunchId::new(A).unwrap());
+        fs::set_permissions(&stuck, fs::Permissions::from_mode(0o755)).unwrap();
+        let failed = swept.unwrap_err().to_string();
+        assert!(failed.contains(&format!("claude/{A}")), "{failed}");
+        assert!(!failed.contains("devin"), "{failed}");
+        for gone in [
+            format!("integrations/pi/{A}"),
+            format!("integrations/devin/{B}"),
+            format!("integrations/opencode/{A}"),
+        ] {
+            assert!(!dir.path().join(&gone).exists(), "{gone} went");
+        }
+        assert!(forgot.is_err(), "the window's close says it too");
+        // Once it can go, the next sweep takes it.
+        assert_eq!(sweep_launches(&home).unwrap(), 1);
     }
 }

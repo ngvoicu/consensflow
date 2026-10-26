@@ -378,9 +378,9 @@ runs = ["daemon-lib-start"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
 find = '''        match contain(settling.settle_after_restart()).await {
-            Ok(Ok(())) => {}'''
+            Ok(Ok(())) => {'''
 replace = '''        match contain(async { Ok::<(), cf_engine::seams::EngineError>(()) }).await {
-            Ok(Ok(())) => {}'''
+            Ok(Ok(())) => {'''
 
 [[plant]]
 name = "start suspended: the page's Resume opens the project and no window"

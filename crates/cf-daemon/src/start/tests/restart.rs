@@ -164,16 +164,18 @@ async fn a_start_settles_what_was_on_its_way_into_a_window_and_it_waits_for_the_
 const DEVIN_SESSION: &str = "calm-river";
 const DEVIN_LAUNCH: &str = "11111111-1111-4111-8111-111111111111";
 
-/// The limit the Devin record reader names (`devin::record::answer`): the previous daemon
-/// stopped while the first message of a resumed Devin window was on its way, after Devin
-/// had stored it with the command it ran under, `/bypass <message>`. A start sweeps the
-/// launch folders before it settles what was on its way, the launch's prompt file with
-/// them, so the record is read as Devin stored it: no paste, and the message goes back
-/// to its queue, to be given again. (Settled first and swept after, a failed settle
-/// still lost the proof, and a settled reading outlived the wire log it rested on: the
-/// reviews of round 12.)
+/// Gap 5 of the Devin arrival gaps (`issues/devin-arrival-gaps-main-has-too.md`): the
+/// previous daemon stopped while the first message of a resumed Devin window was on its
+/// way, after Devin had stored it with the command it ran under, `/bypass <message>`. A
+/// start sweeps the launch folders before it settles what was on its way, the launch's
+/// prompt file and wire log with them; the record was read as Devin stored it, no paste,
+/// and the message went back to its queue to be given again. The sweep keeps what the
+/// launch proves of its first message (`cf_harness::devin::kept`), the settle reads the
+/// stored message as its paste, and what was kept goes once it is settled. (Settled
+/// first and swept after, a failed settle still lost the proof, and a settled reading
+/// outlived the wire log it rested on: the reviews of B5's round 12.)
 #[tokio::test]
-async fn a_start_sweeps_the_launch_folders_first_so_a_first_message_devin_stored_behind_bypass_goes_back_to_its_queue(
+async fn a_first_message_devin_stored_behind_bypass_is_settled_as_received_though_the_start_swept_its_launch(
 ) {
     LocalSet::new()
         .run_until(async {
@@ -261,12 +263,19 @@ async fn a_start_sweeps_the_launch_folders_first_so_a_first_message_devin_stored
                 .and_then(|messages| messages.iter().find(|message| message["id"] == note.id))
                 .cloned()
                 .unwrap();
-            assert_eq!(settled["state"], "queued", "{settled}");
-            assert_eq!(
-                settled["reason"], "the daemon stopped before it arrived",
-                "{settled}"
-            );
+            assert_eq!(settled["state"], "delivered", "{settled}");
+            assert_eq!(settled["attempts"], 1, "given once: {settled}");
             assert!(!launch.exists(), "the launch's folder went");
+            let kept = root
+                .path()
+                .join("consensflow")
+                .join("integrations")
+                .join("devin-kept");
+            assert_eq!(
+                std::fs::read_dir(&kept).map(Iterator::count).unwrap_or(0),
+                0,
+                "what the sweep kept went once the start had settled"
+            );
             daemon.stop("SIGTERM");
             daemon.finished().await;
         })

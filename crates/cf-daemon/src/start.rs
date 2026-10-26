@@ -476,12 +476,23 @@ async fn run(
     // What was on its way into a window is settled, and the loop is woken
     // either way. Nothing is opened: what was open waits, suspended, for the
     // human's Resume. It is begun here, where Node began its resume, and what
-    // its first part woke is run to its end.
+    // its first part woke is run to its end. What was kept of Devin's launches
+    // whose folders went (at this sweep, or a window's close before it) goes once
+    // it is settled; a settle that failed leaves it for the next start's
+    // (`cf_harness::forget_kept`).
     let (settling, settle_errors) = (Rc::clone(&dispatcher), Rc::clone(&errors));
     let settle_kick = Rc::clone(&kick);
+    let settled_home = home.to_string_lossy().into_owned();
     let settle = begin(&*spawn, async move {
         match contain(settling.settle_after_restart()).await {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => {
+                for stayed in cf_harness::forget_kept(&settled_home) {
+                    settle_errors.log().error(
+                        "what a start kept of a launch could not be removed",
+                        Some(&stayed),
+                    );
+                }
+            }
             Ok(Err(failed)) => {
                 settle_errors.log().error(
                     "settling what was on its way failed",

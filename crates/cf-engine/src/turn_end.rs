@@ -280,15 +280,17 @@ impl Dispatcher {
             )?;
             return Ok(Turn::Open);
         }
-        // Words told to the window before it was up are on their way to it (the brief was
-        // in flight when they were told): they go in next, and the answer to them is the
-        // result. This answer is neither the result nor a hold, and the requester is told
-        // nothing of it (field-306's B3; Calliope's L1 on the merge, T-370).
+        // Notes to the window about the task are on their way to it: words told before it
+        // was up (the brief was in flight when they were told), or ConsensFlow's own that a
+        // start let go of from a paste they rode in (Devin arrival gap 4). They go in next,
+        // and the answer to them is the result. This answer is neither the result nor a
+        // hold, and the requester is told nothing of it (field-306's B3; Calliope's L1 on
+        // the merge, T-370).
         let told = self
             .seams
             .ledger
             .borrow()
-            .told_waiting(participant.id, thread.task.id)?;
+            .notes_waiting(participant.id, thread.task.id)?;
         if told {
             return Ok(Turn::Open);
         }

@@ -199,19 +199,20 @@ impl Dispatcher {
         let run = answers_to_the_task(&items[start + 1..], &replacements)
             .and_then(|answers| answers.complete_run)
             .ok_or_else(none)?;
-        // Words told to the window that have not reached it yet go in when it is next at
-        // rest, and the answer to them is the result: finishing now would take an answer
-        // that came before them (Calliope's L1 on the merge with field-306, T-370).
+        // Notes to the window about the task that have not reached it yet (told words, or
+        // ConsensFlow's own) go in when it is next at rest, and the answer to them is the
+        // result: finishing now would take an answer that came before them (Calliope's L1
+        // on the merge with field-306, T-370; Devin arrival gap 4).
         let told = self
             .seams
             .ledger
             .borrow()
-            .told_waiting(participant.id, thread.task.id)?;
+            .notes_waiting(participant.id, thread.task.id)?;
         if told {
             return Err(refused(
                 "words-on-their-way",
                 format!(
-                    "cannot finish T-{number}: words told to @{} are on their way to its window, and its answer to them is the result; finish it once it has answered them, or cancel it",
+                    "cannot finish T-{number}: words for @{} are on their way to its window, and its answer to them is the result; finish it once it has answered them, or cancel it",
                     participant.handle
                 ),
             ));

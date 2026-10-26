@@ -26,7 +26,8 @@ pub mod records;
 pub mod seams;
 mod shared;
 
-pub use shared::launch_files::{forget_launch, sweep_launches};
+pub use devin::forget_kept;
+pub use shared::launch_files::{forget_launch, sweep_launches, NotRemoved};
 pub use shared::specmint::bundled_specmint;
 
 // Fakes other crates' tests compile too: a failure in one is the test's.

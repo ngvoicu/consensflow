@@ -225,6 +225,163 @@ fn a_note_that_rode_in_the_words_that_resume_a_task_goes_in_with_them_after_the_
     context.close();
 }
 
+/// Gap 4 of the Devin arrival gaps main has too (`issues/devin-arrival-gaps-main-has-too.md`,
+/// from B5 round 11's reviews): a start let go of the notes that rode in words an earlier
+/// build had begun to paste (migration 0019, or `release_stranded` for Node's carriers),
+/// and the words went in again on their own. The worker's turn after them ended with a
+/// complete answer while one note was being pasted and the other still waited, and the
+/// answer quotes the second note's header. That answer is no result: the task waits for
+/// both notes by their own receipts, and its result is the answer after the last of them.
+#[test]
+fn notes_a_start_let_go_of_hold_their_task_till_each_reaches_the_worker_whatever_its_answer_quotes()
+{
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.give(project.id, "zeus", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    // The chief pauses T-1 and resumes it, and two notes ride in the words: the chief's,
+    // and one of ConsensFlow's own.
+    context.pause_task(project.id, 1);
+    context.resume_task(project.id, 1, "Carry on");
+    let note = |from: Option<&str>, body: &str| {
+        context
+            .ledger
+            .borrow_mut()
+            .note(
+                project.id,
+                &NewNote {
+                    from: from.map(str::to_owned),
+                    to: "zeus".to_owned(),
+                    body: body.to_owned(),
+                    task: Some(1),
+                },
+            )
+            .unwrap()
+    };
+    let one = note(Some("chief"), "Output must be YAML");
+    let two = note(None, "Keep the old reader too");
+    let words = context
+        .task(project.id, 1)
+        .messages
+        .into_iter()
+        .find(|message| message.body == "Resumed: Carry on")
+        .unwrap();
+    // The build before stopped with a paste of the words begun, and the start lets go of
+    // what rode in them, as 0019 does.
+    context.edit_ledger(|file| {
+        let db = rusqlite::Connection::open(file).unwrap();
+        let released = db
+            .execute(
+                "UPDATE message SET carried_by = NULL WHERE id IN (?1, ?2) AND carried_by = ?3",
+                [one.id, two.id, words.id],
+            )
+            .unwrap();
+        assert_eq!(released, 2, "both rode in the words");
+        db.execute_batch(&format!(
+            "INSERT INTO event (project_id, at, kind, data)
+               SELECT project_id, created_at, 'message.uncarried',
+                      json_object('carrier', {words}, 'released', json_array({one}, {two}))
+                 FROM message WHERE id = {words};",
+            one = one.id,
+            two = two.id,
+            words = words.id
+        ))
+        .unwrap();
+    });
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    after.resume_project(project.id).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(context.message(words.id).state, "delivered");
+    // The words' turn ends with a complete answer that quotes the second note's header,
+    // while the first note's paste is slow to show.
+    context.adapter.with("zeus", |agent| agent.arrive = false);
+    let quoted = delivery_text(&context.message(two.id), &[]);
+    context.adapter.answer(
+        "zeus",
+        &format!("The parser writes JSON. You said:\n{quoted}"),
+    );
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    let states = || {
+        (
+            context.message(one.id).state,
+            context.message(two.id).state,
+            context.task(project.id, 1).task.state,
+        )
+    };
+    let (first, _, task) = states();
+    assert_eq!(first, "delivering", "the first note is on its way");
+    assert_eq!(
+        task, "working",
+        "not finished while the notes are on their way"
+    );
+    // The first note shows, and the second goes in after it.
+    let shown = context
+        .adapter
+        .item(Role::User, &delivery_text(&context.message(one.id), &[]));
+    context.adapter.with("zeus", |agent| {
+        agent.arrive = true;
+        agent.items.push(shown);
+        agent.settled = false;
+    });
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(context.message(one.id).state, "delivered");
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    context.adapter.answer("zeus", "Read the first note.");
+    // The chief's Finish and the worker's `cf task done` wait for ConsensFlow's own note
+    // as for the chief's.
+    let refused = after.finish_task(project.id, 1, "chief").unwrap_err();
+    assert!(
+        refused.to_string().starts_with(&format!(
+            "cannot finish T-1: words for @{} are on their way to its window",
+            context.task(project.id, 1).task.assignee.unwrap()
+        )),
+        "{refused}"
+    );
+    let done = context
+        .ledger
+        .borrow_mut()
+        .record_result(project.id, 1, "Read the first note.")
+        .unwrap_err();
+    assert_eq!(done.code(), Some("words-on-their-way"), "{done}");
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        states(),
+        (
+            "delivered".to_owned(),
+            "delivered".to_owned(),
+            "working".to_owned()
+        ),
+        "the second note reached the worker, and the answer before it is no result"
+    );
+    context
+        .adapter
+        .answer("zeus", "The parser writes YAML and keeps the old reader.");
+    after.pass().unwrap();
+    after.pass().unwrap();
+    let thread = context.task(project.id, 1);
+    assert_eq!(thread.task.state, "done");
+    let result = thread.messages.iter().find(|m| m.kind == "result").unwrap();
+    assert_eq!(
+        result.body, "The parser writes YAML and keeps the old reader.",
+        "the result is the turn after the last note"
+    );
+    context.close();
+}
+
 #[test]
 fn sends_nothing_again_that_its_harness_took_though_the_copy_of_its_window_missed_it() {
     let context = Context::new();
