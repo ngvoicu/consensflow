@@ -180,19 +180,20 @@ fn the_turn_a_reopened_window_replays_is_no_work_however_it_is_stamped() {
     ]);
     let mut reader = staged.reader();
     // Devin 3000.11.205's replay (a probe of 2026-10-26): the turn's words and calls, each
-    // stamped and in no stream, and its word that it waits, with no turn's end.
-    staged.wire(
-        "launch-2",
-        &[
-            stamped("user_message_chunk", Some("Review T-1"), None),
-            stamped("agent_thought_chunk", Some("…"), None),
-            stamped("tool_call", None, None),
-            stamped("tool_call_update", None, None),
-            stamped("agent_message_chunk", Some("Done."), None),
-            record(json!({ "sessionUpdate": "session_info_update", "_meta": {} })),
-            status("blocked"),
-        ],
-    );
+    // stamped and in no stream, then the window's setup, and its word that it waits, with
+    // no turn's end. A look in the middle of it reads no work.
+    let mut wire = vec![
+        stamped("user_message_chunk", Some("Review T-1"), None),
+        stamped("agent_thought_chunk", Some("…"), None),
+        stamped("tool_call", None, None),
+        stamped("tool_call_update", None, None),
+        stamped("agent_message_chunk", Some("Done."), None),
+        record(json!({ "sessionUpdate": "session_info_update", "_meta": {} })),
+    ];
+    staged.wire("launch-2", &wire);
+    assert_eq!(both(&staged, &mut reader, "replaying"), settled());
+    wire.push(status("blocked"));
+    staged.wire("launch-2", &wire);
     assert_eq!(both(&staged, &mut reader, "replayed"), settled());
 }
 
