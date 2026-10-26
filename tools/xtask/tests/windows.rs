@@ -356,6 +356,51 @@ fn a_run_starts_no_ssh_when_the_tree_could_not_be_sent() {
     assert_eq!(out(&ran).matches("cwd: ").count(), 1, "{}", out(&ran));
 }
 
+/// A run on the laptop while poker-lab's job holds it, as a person starts it (`--machine zeewin2`,
+/// or `--host zeewin2`, which once skipped every guard, T-610): zeelin is asked, says `held`, and the
+/// run ends with 75 having started nothing else. The ssh and scp are scripts that write down
+/// what they are given.
+#[cfg(unix)]
+#[test]
+fn a_run_on_zeewin2_while_poker_lab_holds_it_ends_with_75_having_sent_nothing_by_either_name() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for on_zeewin2 in [["--machine", "zeewin2"], ["--host", "zeewin2"]] {
+        let fakes = tempfile::tempdir().unwrap();
+        let log = fakes.path().join("log");
+        for (name, answer) in [
+            ("ssh", "case \"$*\" in *zeelin*) echo held ;; esac"),
+            ("scp", ""),
+        ] {
+            let program = fakes.path().join(name);
+            fs::write(
+                &program,
+                format!(
+                    "#!/bin/sh\nprintf '{name} %s\\n' \"$*\" >> '{}'\n{answer}\n",
+                    log.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let tree = tree(&[("keep.txt", "kept")]);
+        let mut words = vec!["windows"];
+        words.extend(on_zeewin2);
+        words.extend(["--", "cargo", "test"]);
+        let ran = on(&tree, fakes.path(), &[], &words);
+        assert_eq!(ran.status.code(), Some(75), "{on_zeewin2:?}: {}", err(&ran));
+        assert_eq!(
+            out(&ran),
+            "zeewin2 is busy: poker-lab's job holds it (~/.compile-lock/owner on zeelin), and no run goes while it does.\n",
+            "{on_zeewin2:?}"
+        );
+        let asked = fs::read_to_string(&log).unwrap();
+        assert_eq!(asked.lines().count(), 1, "{on_zeewin2:?}: {asked}");
+        assert!(asked.starts_with("ssh -o ConnectTimeout=5 "), "{asked}");
+        assert!(asked.contains(" zeelin "), "{asked}");
+    }
+}
+
 #[test]
 fn a_run_asks_for_the_folder_the_build_and_the_variables_it_was_given() {
     let fakes = programs(&["scp", "ssh"]);
@@ -670,7 +715,8 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
 }
 
 /// The Windows machine the live case below runs on: `CF_WINDOWS_MACHINE` (zeewin2 or zeewin,
-/// as `--machine` names them), else the ssh host `CF_WINDOWS_HOST`, else zeewin.
+/// as `--machine` names them), else the ssh host `CF_WINDOWS_HOST` (a name of a machine there
+/// is that machine, as `--host` reads it), else zeewin.
 #[cfg(unix)]
 fn live_machine() -> Option<String> {
     std::env::var("CF_WINDOWS_MACHINE").ok()

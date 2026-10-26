@@ -2,11 +2,12 @@
 //! this checkout is tried on (`zeewin` and `zeewin2`, over ssh), and the matrix of
 //! the chief evals run there.
 //!
-//! `--machine zeewin2|zeewin` names the machine, `--host` any ssh host that is reached
-//! as zeewin is, and with neither the run goes to zeewin2 while it is free and else to
-//! zeewin ([`machine`]: zeewin2 is Gabriel's laptop, and poker-lab's jobs hold it at times,
-//! which its Ubuntu beside it says; it is asked before a run is sent). Each machine
-//! is its own copy and its own lock: what follows holds on each.
+//! `--machine zeewin2|zeewin` names the machine, `--host` an ssh host (one of those names is
+//! that machine, with all it is asked; any other is reached as zeewin is), and with neither
+//! the run goes to zeewin2 while it is free and else to zeewin ([`machine`]: zeewin2 is
+//! Gabriel's laptop, and poker-lab's jobs hold it at times, which its Ubuntu beside it says; it
+//! is asked before a run is sent, and a run it refuses ends with 75 having sent nothing). Each
+//! machine is its own copy and its own lock: what follows holds on each.
 //!
 //! `windows` runs a command on a Windows machine, over SSH, on this working tree
 //! as it is now: every tracked file, and new ones not ignored, go over as one
@@ -299,9 +300,19 @@ fn windows(context: &Context, args: &[OsString], console: &mut Console) -> Resul
     let mut options = Options::parse(args).map_err(Failure::Usage)?;
     run::check(&options).map_err(|refusal| Failure::Usage(refusal.to_string()))?;
     let interrupt = Interrupt::listen()?;
-    let machine = on(context, &mut options.machine, &options.dir, console)?;
+    let Some(machine) = on(
+        context,
+        &mut options.machine,
+        &options.dir,
+        console,
+        &interrupt,
+    )?
+    else {
+        return Ok(STOPPED);
+    };
     match fetch::run_keeping(context, &machine, &options, console, &interrupt) {
         Ok(Outcome::Exited(status)) => Ok(status),
+        Ok(Outcome::Refused(_)) => Ok(run::REFUSED),
         Ok(Outcome::Stopped) => Ok(STOPPED),
         Err(error) => {
             writeln!(console.err, "windows: {error}")?;
@@ -317,7 +328,16 @@ fn windows_matrix(
 ) -> Result<i32, Failure> {
     let mut options = MatrixOptions::parse(args).map_err(Failure::Usage)?;
     let interrupt = Interrupt::listen()?;
-    let machine = on(context, &mut options.machine, DEFAULT_DIR, console)?;
+    let Some(machine) = on(
+        context,
+        &mut options.machine,
+        DEFAULT_DIR,
+        console,
+        &interrupt,
+    )?
+    else {
+        return Ok(STOPPED);
+    };
     let mut reached = Reached {
         context,
         machine: &machine,
@@ -333,17 +353,21 @@ fn windows_matrix(
 }
 
 /// The machine a run goes to: the one `asked` names, or the default, which is then written into
-/// it ([`machine::choose`], which says which).
+/// it ([`machine::choose`], which says which). None if a stop was heard while it was chosen.
 fn on(
     context: &Context,
     asked: &mut Option<Machine>,
     dir: &str,
     console: &mut Console,
-) -> io::Result<Machine> {
+    interrupt: &Interrupt,
+) -> io::Result<Option<Machine>> {
     let machine = match asked {
         Some(machine) => machine.clone(),
-        None => machine::choose(context, dir, console)?,
+        None => match machine::choose(context, dir, console, interrupt)? {
+            Some(machine) => machine,
+            None => return Ok(None),
+        },
     };
     *asked = Some(machine.clone());
-    Ok(machine)
+    Ok(Some(machine))
 }

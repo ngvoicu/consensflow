@@ -332,6 +332,17 @@ set -- "$host" "$last"
     )
 }
 
+/// The laptop as a Ctrl-C meets it: the ssh asked of `host` (`zeelin` or `zeewin2`) is ended by
+/// the signal, as the terminal's group ends it, and the other answers as `laptop("free", 614)`.
+fn laptop_cut_off_at(host: &str) -> String {
+    format!(
+        r#"for word; do asked=$last; last=$word; done
+if [ "$asked" = {host} ]; then kill -INT $$; fi
+{}"#,
+        laptop("free", 614)
+    )
+}
+
 /// The rig's scp, which keeps what it is sent whatever the path there.
 const SENDS: &str = r#"printf 'scp\t%s\t%s\n' "$1" "$3" >> "$CF_LOG"; cp "$2" "$CF_TARBALL""#;
 
@@ -415,11 +426,9 @@ fn a_run_on_zeewin2_while_poker_lab_holds_its_lock_is_refused_with_75_and_sends_
     rig.program("ssh", &laptop("held", 614));
     let zeewin2 = Machine::named("zeewin2").unwrap();
     let (ended, out, _) = run_on(&rig, &zeewin2, &Interrupt::default());
-    assert_eq!(ended.unwrap(), Outcome::Exited(75));
-    assert_eq!(
-        out,
-        "zeewin2 is busy: poker-lab's job holds it (~/.compile-lock/owner on zeelin), and no run goes while it does.\n"
-    );
+    let busy = "zeewin2 is busy: poker-lab's job holds it (~/.compile-lock/owner on zeelin), and no run goes while it does.";
+    assert_eq!(ended.unwrap(), Outcome::Refused(busy.into()));
+    assert_eq!(out, format!("{busy}\n"));
     let log = rig.log();
     assert_eq!(asked(&log, "zeelin").len(), 1, "{log:?}");
     assert!(asked(&log, "zeewin2").is_empty(), "{log:?}");
@@ -451,11 +460,9 @@ fn a_run_on_zeewin2_short_of_disk_is_refused_with_75_and_sends_nothing() {
     rig.program("ssh", &laptop("free", 30));
     let zeewin2 = Machine::named("zeewin2").unwrap();
     let (ended, out, _) = run_on(&rig, &zeewin2, &Interrupt::default());
-    assert_eq!(ended.unwrap(), Outcome::Exited(75));
-    assert_eq!(
-        out,
-        "zeewin2 is short of disk: a run needs 50 GiB free there, and it has 30.\n"
-    );
+    let short = "zeewin2 is short of disk: a run needs 50 GiB free there, and it has 30.";
+    assert_eq!(ended.unwrap(), Outcome::Refused(short.into()));
+    assert_eq!(out, format!("{short}\n"));
     let log = rig.log();
     assert_eq!(
         asked(&log, "zeewin2").len(),
@@ -463,6 +470,40 @@ fn a_run_on_zeewin2_short_of_disk_is_refused_with_75_and_sends_nothing() {
         "only the disk was asked: {log:?}"
     );
     assert!(!log.iter().any(|line| line.starts_with("scp")), "{log:?}");
+}
+
+#[test]
+fn a_stop_heard_while_the_laptop_is_asked_is_a_stop_and_nothing_is_said_of_it() {
+    // The terminal's Ctrl-C ends the probe's ssh with the program: that is a stop, not a zeelin
+    // that did not answer (which would go on) or a disk that was not said (exit 1) (T-610).
+    for host in ["zeelin", "zeewin2"] {
+        let rig = Rig::new();
+        rig.program("scp", SENDS);
+        rig.program("ssh", &laptop_cut_off_at(host));
+        let zeewin2 = Machine::named("zeewin2").unwrap();
+        let interrupt = Interrupt::default();
+        interrupt.raise();
+        let (ended, out, err) = run_on(&rig, &zeewin2, &interrupt);
+        assert_eq!(ended.unwrap(), Outcome::Stopped, "{host}");
+        assert_eq!((out.as_str(), err.as_str()), ("", ""), "{host}");
+        let log = rig.log();
+        assert!(!log.iter().any(|line| line.starts_with("scp")), "{log:?}");
+    }
+}
+
+#[test]
+fn a_probe_ended_by_something_else_is_no_stop() {
+    // Without a stop heard, a zeelin ended by a signal cannot say whether the lock is held.
+    let rig = Rig::new();
+    rig.program("scp", SENDS);
+    rig.program("ssh", &laptop_cut_off_at("zeelin"));
+    let zeewin2 = Machine::named("zeewin2").unwrap();
+    let (ended, out, _) = run_on(&rig, &zeewin2, &Interrupt::default());
+    assert!(matches!(ended, Ok(Outcome::Refused(_))), "{ended:?}");
+    assert!(
+        out.starts_with("zeewin2 may be busy: zeelin answered, but not with whether"),
+        "{out}"
+    );
 }
 
 #[test]
