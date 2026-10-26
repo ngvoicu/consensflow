@@ -229,6 +229,9 @@ struct Caches {
 
 impl Caches {
     /// Caches that begin at `now_ms`, each opening its readers with `opens`.
+    // Its error is only ever `Reading::Unknown` or `Reading::Missing`, a reason string, never a
+    // record (3.0.6-alpha.3's integration B, T-664; the openers are to return the reason itself).
+    #[allow(clippy::result_large_err)]
     fn new(opens: &Opens, now_ms: i64) -> Self {
         let cache = || {
             let opens = Arc::clone(opens);

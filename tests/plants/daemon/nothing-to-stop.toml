@@ -67,8 +67,8 @@ runs = ["harness-launch-claude-agents"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "observed(at_rest, settled && !at_rest, waiting, by_press)"
-replace = "observed(at_rest, false, waiting, by_press)"
+find = '''observed(at_rest, settled && !at_rest, waiting, by_press, at_prompt)'''
+replace = '''observed(at_rest, false, waiting, by_press, at_prompt)'''
 
 [[plant]]
 name = "nothing to stop: a close is told to the human and to the requester"

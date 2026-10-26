@@ -40,6 +40,9 @@ pub use thread::Thread;
 /// places `env` names (`recordReader`): each look reads on from where the
 /// last one stopped. A conversation with no session has none: its reading
 /// is that the session is missing.
+// Its error is only ever `Reading::Unknown` or `Reading::Missing`, a reason string, never a
+// record (3.0.6-alpha.3's integration B, T-664; the openers are to return the reason itself).
+#[allow(clippy::result_large_err)]
 pub fn reader(
     harness: Harness,
     session: &str,
@@ -75,6 +78,9 @@ pub fn machine_zone() -> TimeZone {
 }
 
 /// How a [`Cache`] opens its readers: with [`reader`].
+// Its error is only ever `Reading::Unknown` or `Reading::Missing`, a reason string, never a
+// record (3.0.6-alpha.3's integration B, T-664; the openers are to return the reason itself).
+#[allow(clippy::result_large_err)]
 pub fn open(local: TimeZone) -> Open {
     Box::new(move |harness, session, env| reader(harness, session, env, &local))
 }

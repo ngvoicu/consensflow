@@ -314,12 +314,18 @@ replace = '''    let written = if launched {'''
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent.rs"
-find = '''    for record in written {
+find = '''    for mut record in written {
+        if meta {
+            record["isMeta"] = json!(true);
+        }
         records.append(pid, record)?;
     }
     Ok(())
 }'''
-replace = '''    for record in written {
+replace = '''    for mut record in written {
+        if meta {
+            record["isMeta"] = json!(true);
+        }
         records.append(pid, record)?;
     }
     if steps::is_notification(text) {
@@ -327,3 +333,4 @@ replace = '''    for record in written {
     }
     Ok(())
 }'''
+
