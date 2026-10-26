@@ -8,12 +8,21 @@ const INPUT_CHUNK_BYTES = 32 * 1024
  * them), keystrokes and emulator replies back (in chunks, each admitted with a
  * ticket and waited for, so a large paste keeps later typing behind it), and
  * the emulator's size into the pane. Pane ownership stays in Rust.
+ *
+ * The host stops reading a pane once a window of its output is owed an
+ * acknowledgement, and its program then waits on its terminal. So each message
+ * goes to the emulator as it comes, which parses as many as it holds at its
+ * next turn, and one acknowledgement frees everything up to the last it drew.
+ * A page throttled behind a hidden window or a locked screen gets a turn a
+ * second or so, and one message a turn, each waiting on the acknowledgement of
+ * the one before, held an agent that printed faster to the page's pace (T-454).
  */
 export class TerminalLink {
   #invoke
   #registry
   #report
-  #outputs = new Map()
+  /** By pane: the last message drawn, the last acknowledged, and whether an acknowledgement is on its way. */
+  #acks = new Map()
   #inputs = new Map()
   #sequences = new Map()
   #sizes = new Map()
@@ -29,23 +38,41 @@ export class TerminalLink {
   output(message, emulatorFor) {
     if (message === null || typeof message !== 'object') return
     const key = paneKey(message)
-    if (this.#retired.has(key)) return
-    const previous = this.#outputs.get(key) ?? Promise.resolve()
-    const next = previous
-      .then(async () => {
-        // Retired while these bytes waited their turn: no emulator comes back for them.
-        if (this.#retired.has(key)) return
-        const emulator = emulatorFor(message)
-        if (emulator === null) return
-        await emulator.write(new Uint8Array(message.bytes ?? []))
-        await this.#invoke('pane_ack', {
-          id: message.id,
-          generation: message.generation,
-          seq: message.seq,
-        })
-      })
+    // A pane let go of while its program still runs is read all the same: what it prints
+    // is acknowledged and drawn nowhere, or the host would stop reading it for good.
+    if (this.#retired.has(key)) return this.#drawn(key, message)
+    const emulator = emulatorFor(message)
+    if (emulator === null) return
+    emulator
+      .write(new Uint8Array(message.bytes ?? []))
+      .then(() => this.#drawn(key, message))
       .catch((cause) => this.#report(cause))
-    this.#outputs.set(key, next)
+  }
+
+  /**
+   * A pane's output is drawn up to `seq`: acknowledged, one acknowledgement on its way at
+   * a time, each for the last drawn when it goes.
+   */
+  #drawn(key, { id, generation, seq }) {
+    const ack = this.#acks.get(key) ?? { id, generation, drawn: 0, sent: 0, sending: false }
+    this.#acks.set(key, ack)
+    ack.drawn = Math.max(ack.drawn, seq)
+    if (!ack.sending) void this.#acknowledge(ack)
+  }
+
+  async #acknowledge(ack) {
+    ack.sending = true
+    try {
+      while (ack.sent < ack.drawn) {
+        const seq = ack.drawn
+        await this.#invoke('pane_ack', { id: ack.id, generation: ack.generation, seq })
+        ack.sent = seq
+      }
+    } catch (cause) {
+      this.#report(cause)
+    } finally {
+      ack.sending = false
+    }
   }
 
   /** What the human types into a pane. */
@@ -69,10 +96,9 @@ export class TerminalLink {
     void this.#syncSize(key)
   }
 
-  /** A pane that is gone: no more output, input or resizes for it. */
+  /** A pane that is gone: its output acknowledged and drawn nowhere, and no more input or resizes for it. */
   retire(key) {
     this.#retired.add(key)
-    this.#outputs.delete(key)
     this.#inputs.delete(key)
     this.#sequences.delete(key)
     this.#sizes.delete(key)

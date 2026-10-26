@@ -289,7 +289,7 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "        .filter(|now| reaches(now))"
+find = "        .filter(|now| tellable(now))"
 replace = "        .filter(|_| false)"
 
 [[plant]]

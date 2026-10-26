@@ -92,30 +92,137 @@ find = '"productName": "ConsensFlow Candidate",'
 replace = '''"productName": "ConsensFlow Candidate",
   "build": { "beforeBuildCommand": "npm run bundle:ui" },'''
 
-# The daemons' black-box suites run in two steps of the gate, a limit for each: the
-# daemon's and the rig's, and the regressions. Between them, each file once.
+# The daemons' black-box suites run in one step of the gate, in shards (T-558): between the
+# gate's steps, each file once, and the shards each of N once.
 [[plant]]
-name = "wiring: the gate leaves the regressions out of its steps"
+name = "wiring: the gate leaves the daemons out of its steps"
 meant = "the_steps_of_the_gate_between_them_run_each_test_file_of_the_daemons_once"
 runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = '''
-      - run: npm run test:regressions
-        timeout-minutes: 35
-'''
+find = """
+      - run: npm run test:daemons
+        env:
+          CF_TEST_SHARD: ${{ matrix.shard }}
+        timeout-minutes: 30
+"""
 replace = ""
 
 [[plant]]
-name = "wiring: the gate runs the whole of the daemons beside the regressions"
+name = "wiring: the gate runs the regressions beside the daemons"
 meant = "the_steps_of_the_gate_between_them_run_each_test_file_of_the_daemons_once"
 runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "      - run: npm run test:daemon-and-rig"
-replace = "      - run: npm run test:daemons"
+find = "      - run: npm run test:clis\n"
+replace = "      - run: npm run test:regressions\n      - run: npm run test:clis\n"
+
+[[plant]]
+name = "wiring: the gate runs two shards of three"
+meant = "ci_runs_the_daemons_in_each_shard_of_n_once_on_each_platform"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "shard: ['1/3', '2/3', '3/3']"
+replace = "shard: ['1/3', '2/3']"
+
+[[plant]]
+name = "wiring: the gate's shards are not named to the suite, which runs whole in each"
+meant = "ci_runs_the_daemons_in_each_shard_of_n_once_on_each_platform"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = """
+        env:
+          CF_TEST_SHARD: ${{ matrix.shard }}
+"""
+replace = ""
+
+[[plant]]
+name = "wiring: the gate's check passes a job that was skipped or cancelled"
+meant = "the_gate_is_green_only_when_every_other_job_of_ci_passed"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '.result == "success"'
+replace = '.result != "failure"'
+
+[[plant]]
+name = "wiring: the gate's check is skipped when a job fails"
+meant = "the_gate_is_green_only_when_every_other_job_of_ci_passed"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "    needs: [checks, workspace, daemons]\n    if: always()\n"
+replace = "    needs: [checks, workspace, daemons]\n"
+
+[[plant]]
+name = "wiring: the gate's check does not wait for the daemons"
+meant = "the_gate_is_green_only_when_every_other_job_of_ci_passed"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "needs: [checks, workspace, daemons]"
+replace = "needs: [checks, workspace]"
+
+# A shard of a suite (tools/xtask/src/suites/shard.rs): the shards between them run each
+# case once, each by its whole name, and a run is the shard its variable names.
+[[plant]]
+name = "shard: the last of N shards takes no case"
+meant = "the_shards_between_them_take_each_case_once_and_about_as_many_each"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = "tools/xtask/src/suites/shard.rs"
+find = "position % self.count == self.index - 1"
+replace = "position % self.count == self.index"
+
+[[plant]]
+name = "shard: the cases are given as filters, which run every case whose name holds one"
+meant = "a_file_is_asked_for_its_cases_and_run_with_them_by_their_whole_names"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = "tools/xtask/src/suites/shard.rs"
+find = '.args(["--", "--exact"])'
+replace = '.arg("--")'
+
+[[plant]]
+name = "shard: the cases are taken in the order the program lists them"
+meant = "the_cases_are_the_lines_a_test_program_lists_as_tests_in_the_order_of_their_names"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = "tools/xtask/src/suites/shard.rs"
+find = "    names.sort();\n"
+replace = ""
+
+[[plant]]
+name = "shard: every name of a shard goes on one command line"
+meant = "names_past_the_bound_of_one_command_line_are_run_in_several"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = "tools/xtask/src/suites/shard.rs"
+find = "Some(part) if size + name.len() < NAMES_AT_MOST => part.push(name),"
+replace = "Some(part) => part.push(name),"
+
+[[plant]]
+name = "shard: a suite runs whole whatever its variable says"
+meant = "the_shard_a_run_is_comes_from_its_variable"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = "tools/xtask/src/suites.rs"
+find = "if let Some(named) = context.env.text(shard::SHARD) {"
+replace = "if let Some(named) = context.env.text(\"CF_TEST_SHARD_NOT\") {"
 
 [[plant]]
 name = "wiring: the daemon and rig suite runs the regressions too"

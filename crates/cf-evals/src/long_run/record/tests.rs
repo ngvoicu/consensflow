@@ -789,3 +789,62 @@ fn the_agents_a_turn_left_are_that_turns_and_the_next_turn_counts_none_of_them()
     // While it ran, before its end, none were its own either.
     assert_eq!(record(&lines).agents_pending_at(at(35)), 0);
 }
+
+#[test]
+fn what_a_process_proved_gone_had_queued_went_with_it_as_the_product_reads_a_relaunch() {
+    // T-139: the product's T-442 fixture (crates/cf-harness/tests/launch/claude/relaunched.rs).
+    // The worker's turn ended, a job's notification was queued, and its window closed before
+    // Claude took it; the window opened again on the conversation, and the new process took
+    // the message it was given and answered it. Both reviewers of round 14 (item 3): the
+    // replay kept the old process's queue, and read the new turn's end in flight.
+    let notification =
+        "<task-notification>\n<task-id>bjob00001</task-id>\n<status>failed</status>\n</task-notification>";
+    let reopened = "[ConsensFlow m-2 · T-1 · task from @chief]\nRun it once more";
+    let mut lines = vec![
+        prompt(1, "[ConsensFlow m-1 · T-1 · task from @chief]\nRun it"),
+        answer(2, "Done", "end_turn"),
+        duration(3),
+        queue(4, "enqueue", notification),
+        prompt(5, reopened),
+        answer(6, "Done again", "end_turn"),
+        duration(7),
+    ];
+    let mut relaunched = record(&lines);
+    assert_eq!(
+        relaunched.stood_at(at(10)).unwrap().0,
+        Stood::InFlight,
+        "no process is told gone: the queue holds"
+    );
+    // The host said the old window exited at second 4.5, naming nothing it could not end.
+    relaunched.gone_at(at(4) + 500);
+    assert_eq!(relaunched.stood_at(at(10)).unwrap().0, Stood::AtRest);
+    // Before the process went, its queue held the turn; once gone, nothing waits, though
+    // the new process has written nothing yet.
+    assert_eq!(relaunched.stood_at(at(4)).unwrap().0, Stood::InFlight);
+    assert_eq!(relaunched.stood_at(at(5) - 100).unwrap().0, Stood::AtRest);
+    // What the new process queues itself holds its turn as any.
+    lines.push(queue(8, "enqueue", notification));
+    let mut queued_again = record(&lines);
+    queued_again.gone_at(at(4) + 500);
+    assert_eq!(queued_again.stood_at(at(10)).unwrap().0, Stood::InFlight);
+}
+
+#[test]
+fn the_agents_a_process_proved_gone_left_running_went_with_it() {
+    // The product's T-442 case of a turn that ended with a background agent running: the
+    // agent went with its process.
+    let lines = vec![
+        prompt(0, "Run the audit."),
+        answer(10, "Agents started.", "end_turn"),
+        line(
+            11,
+            json!({ "type": "system", "subtype": "turn_duration", "isSidechain": false,
+                    "durationMs": 1000, "messageCount": 4, "pendingBackgroundAgentCount": 1 }),
+        ),
+    ];
+    let mut record = record(&lines);
+    assert_eq!(record.agents_pending_at(at(20)), 1);
+    record.gone_at(at(15));
+    assert_eq!(record.agents_pending_at(at(14)), 1, "before it went");
+    assert_eq!(record.agents_pending_at(at(20)), 0);
+}

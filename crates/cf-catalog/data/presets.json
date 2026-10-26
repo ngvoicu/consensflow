@@ -91,6 +91,16 @@
       "effort": "medium"
     },
     {
+      "preset": "ammit",
+      "id": "ammit",
+      "name": "Ammit",
+      "label": "Devin Claude Opus 5.5 LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-opus-5-5",
+      "effort": "low"
+    },
+    {
       "preset": "ptah",
       "id": "ptah",
       "name": "Ptah",
@@ -111,6 +121,16 @@
       "effort": "xhigh"
     },
     {
+      "preset": "meretseger",
+      "id": "meretseger",
+      "name": "Meretseger",
+      "label": "Devin Claude Sonnet 5.5 HIGH",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "claude-sonnet-5-5",
+      "effort": "high"
+    },
+    {
       "preset": "bastet",
       "id": "bastet",
       "name": "Bastet",
@@ -119,6 +139,16 @@
       "kind": "devin",
       "model": "claude-sonnet-5-5",
       "effort": "medium"
+    },
+    {
+      "preset": "meskhenet",
+      "id": "meskhenet",
+      "name": "Meskhenet",
+      "label": "Devin Claude Sonnet 5.5 LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-sonnet-5-5",
+      "effort": "low"
     },
     {
       "preset": "amun",
@@ -260,13 +290,1217 @@
       "model": "swe-1-6"
     },
     {
-      "preset": "khnum",
-      "id": "khnum",
-      "name": "Khnum",
-      "label": "Devin SWE-1.6 Slow",
-      "description": "Devin’s own SWE-1.6 Slow: everyday implementation and tests.",
+      "preset": "amunet",
+      "id": "amunet",
+      "name": "Amunet",
+      "label": "Devin Adaptive",
+      "description": "Small code changes and focused reviews.",
       "kind": "devin",
-      "model": "swe-1-6-slow"
+      "model": "adaptive"
+    },
+    {
+      "preset": "anhur",
+      "id": "anhur",
+      "name": "Anhur",
+      "label": "Devin GPT 6 Sol MAX",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "gpt-6-sol",
+      "effort": "max"
+    },
+    {
+      "preset": "anuket",
+      "id": "anuket",
+      "name": "Anuket",
+      "label": "Devin GPT 6 Sol XHIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-6-sol",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "apep",
+      "id": "apep",
+      "name": "Apep",
+      "label": "Devin GPT 6 Sol HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-6-sol",
+      "effort": "high"
+    },
+    {
+      "preset": "apis",
+      "id": "apis",
+      "name": "Apis",
+      "label": "Devin GPT 6 Sol MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-6-sol",
+      "effort": "medium"
+    },
+    {
+      "preset": "babi",
+      "id": "babi",
+      "name": "Babi",
+      "label": "Devin GPT 6 Sol LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-6-sol",
+      "effort": "low"
+    },
+    {
+      "preset": "bes",
+      "id": "bes",
+      "name": "Bes",
+      "label": "Devin GPT 6 Luna MAX",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-6-luna",
+      "effort": "max"
+    },
+    {
+      "preset": "buchis",
+      "id": "buchis",
+      "name": "Buchis",
+      "label": "Devin GPT 6 Luna XHIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-6-luna",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "dedun",
+      "id": "dedun",
+      "name": "Dedun",
+      "label": "Devin GPT 6 Luna HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-6-luna",
+      "effort": "high"
+    },
+    {
+      "preset": "duamutef",
+      "id": "duamutef",
+      "name": "Duamutef",
+      "label": "Devin GPT 6 Luna MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-6-luna",
+      "effort": "medium"
+    },
+    {
+      "preset": "hedetet",
+      "id": "hedetet",
+      "name": "Hedetet",
+      "label": "Devin GPT 6 Luna LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-6-luna",
+      "effort": "low"
+    },
+    {
+      "preset": "heka",
+      "id": "heka",
+      "name": "Heka",
+      "label": "Devin Gemini 4 Argon HIGH",
+      "description": "Complex debugging, architecture and detailed review.",
+      "kind": "devin",
+      "model": "gemini-4-argon",
+      "effort": "high"
+    },
+    {
+      "preset": "heqet",
+      "id": "heqet",
+      "name": "Heqet",
+      "label": "Devin Gemini 4 Argon MEDIUM",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "gemini-4-argon",
+      "effort": "medium"
+    },
+    {
+      "preset": "hesat",
+      "id": "hesat",
+      "name": "Hesat",
+      "label": "Devin Gemini 4 Argon LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gemini-4-argon",
+      "effort": "low"
+    },
+    {
+      "preset": "iabet",
+      "id": "iabet",
+      "name": "Iabet",
+      "label": "Devin Kimi K3 MAX",
+      "description": "Complex debugging, architecture and detailed review.",
+      "kind": "devin",
+      "model": "kimi-k3",
+      "effort": "max"
+    },
+    {
+      "preset": "imentet",
+      "id": "imentet",
+      "name": "Imentet",
+      "label": "Devin Kimi K3 HIGH",
+      "description": "Complex debugging, architecture and detailed review.",
+      "kind": "devin",
+      "model": "kimi-k3",
+      "effort": "high"
+    },
+    {
+      "preset": "imsety",
+      "id": "imsety",
+      "name": "Imsety",
+      "label": "Devin Kimi K3 LOW",
+      "description": "Complex debugging, architecture and detailed review.",
+      "kind": "devin",
+      "model": "kimi-k3",
+      "effort": "low"
+    },
+    {
+      "preset": "iusaaset",
+      "id": "iusaaset",
+      "name": "Iusaaset",
+      "label": "Devin GLM 5.2 MAX",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "glm-5-2",
+      "effort": "max"
+    },
+    {
+      "preset": "kebechet",
+      "id": "kebechet",
+      "name": "Kebechet",
+      "label": "Devin GLM 5.2",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "glm-5-2"
+    },
+    {
+      "preset": "mafdet",
+      "id": "mafdet",
+      "name": "Mafdet",
+      "label": "Devin GLM 5.3 MAX",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "glm-5-3",
+      "effort": "max"
+    },
+    {
+      "preset": "mehen",
+      "id": "mehen",
+      "name": "Mehen",
+      "label": "Devin GLM 5.3 HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "glm-5-3",
+      "effort": "high"
+    },
+    {
+      "preset": "menhit",
+      "id": "menhit",
+      "name": "Menhit",
+      "label": "Devin GLM 5.3 LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "glm-5-3",
+      "effort": "low"
+    },
+    {
+      "preset": "montu",
+      "id": "montu",
+      "name": "Montu",
+      "label": "Devin Gemini 3.8 Flash HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gemini-3-8-flash",
+      "effort": "high"
+    },
+    {
+      "preset": "mnevis",
+      "id": "mnevis",
+      "name": "Mnevis",
+      "label": "Devin Gemini 3.8 Flash MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gemini-3-8-flash",
+      "effort": "medium"
+    },
+    {
+      "preset": "nefertum",
+      "id": "nefertum",
+      "name": "Nefertum",
+      "label": "Devin Gemini 3.8 Flash LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gemini-3-8-flash",
+      "effort": "low"
+    },
+    {
+      "preset": "nehebkau",
+      "id": "nehebkau",
+      "name": "Nehebkau",
+      "label": "Devin Claude Opus 4.7 MAX",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-opus-4-7",
+      "effort": "max"
+    },
+    {
+      "preset": "nekhbet",
+      "id": "nekhbet",
+      "name": "Nekhbet",
+      "label": "Devin Claude Opus 4.7 XHIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-opus-4-7",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "neper",
+      "id": "neper",
+      "name": "Neper",
+      "label": "Devin Claude Opus 4.7 HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-opus-4-7",
+      "effort": "high"
+    },
+    {
+      "preset": "naunet",
+      "id": "naunet",
+      "name": "Naunet",
+      "label": "Devin Claude Opus 4.7 MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-opus-4-7",
+      "effort": "medium"
+    },
+    {
+      "preset": "pakhet",
+      "id": "pakhet",
+      "name": "Pakhet",
+      "label": "Devin Claude Opus 4.7 LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-opus-4-7",
+      "effort": "low"
+    },
+    {
+      "preset": "qebehsenuef",
+      "id": "qebehsenuef",
+      "name": "Qebehsenuef",
+      "label": "Devin Claude Opus 4.8 MAX",
+      "description": "Complex debugging, architecture and detailed review.",
+      "kind": "devin",
+      "model": "claude-opus-4-8",
+      "effort": "max"
+    },
+    {
+      "preset": "raet",
+      "id": "raet",
+      "name": "Raet",
+      "label": "Devin Claude Opus 4.8 XHIGH",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "claude-opus-4-8",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "renenutet",
+      "id": "renenutet",
+      "name": "Renenutet",
+      "label": "Devin Claude Opus 4.8 HIGH",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "claude-opus-4-8",
+      "effort": "high"
+    },
+    {
+      "preset": "renpet",
+      "id": "renpet",
+      "name": "Renpet",
+      "label": "Devin Claude Opus 4.8 MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-opus-4-8",
+      "effort": "medium"
+    },
+    {
+      "preset": "reshep",
+      "id": "reshep",
+      "name": "Reshep",
+      "label": "Devin Claude Opus 4.8 LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-opus-4-8",
+      "effort": "low"
+    },
+    {
+      "preset": "satet",
+      "id": "satet",
+      "name": "Satet",
+      "label": "Devin Claude Opus 5 MAX",
+      "description": "Complex debugging, architecture and detailed review.",
+      "kind": "devin",
+      "model": "claude-opus-5",
+      "effort": "max"
+    },
+    {
+      "preset": "serket",
+      "id": "serket",
+      "name": "Serket",
+      "label": "Devin Claude Opus 5 XHIGH",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "claude-opus-5",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "seth",
+      "id": "seth",
+      "name": "Seth",
+      "label": "Devin Claude Opus 5 HIGH",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "claude-opus-5",
+      "effort": "high"
+    },
+    {
+      "preset": "shai",
+      "id": "shai",
+      "name": "Shai",
+      "label": "Devin Claude Opus 5 MEDIUM",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "claude-opus-5",
+      "effort": "medium"
+    },
+    {
+      "preset": "shezmu",
+      "id": "shezmu",
+      "name": "Shezmu",
+      "label": "Devin Claude Opus 5 LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-opus-5",
+      "effort": "low"
+    },
+    {
+      "preset": "sopdet",
+      "id": "sopdet",
+      "name": "Sopdet",
+      "label": "Devin Claude Fable 5 MAX",
+      "description": "Complex debugging, architecture and detailed review.",
+      "kind": "devin",
+      "model": "claude-5-fable",
+      "effort": "max"
+    },
+    {
+      "preset": "sopdu",
+      "id": "sopdu",
+      "name": "Sopdu",
+      "label": "Devin Claude Fable 5 XHIGH",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "claude-5-fable",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "tatenen",
+      "id": "tatenen",
+      "name": "Tatenen",
+      "label": "Devin Claude Fable 5 HIGH",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "claude-5-fable",
+      "effort": "high"
+    },
+    {
+      "preset": "taweret",
+      "id": "taweret",
+      "name": "Taweret",
+      "label": "Devin Claude Fable 5 MEDIUM",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "claude-5-fable",
+      "effort": "medium"
+    },
+    {
+      "preset": "tayet",
+      "id": "tayet",
+      "name": "Tayet",
+      "label": "Devin Claude Fable 5 LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-5-fable",
+      "effort": "low"
+    },
+    {
+      "preset": "wepwawet",
+      "id": "wepwawet",
+      "name": "Wepwawet",
+      "label": "Devin Claude Sonnet 5 MAX",
+      "description": "Complex debugging, architecture and detailed review.",
+      "kind": "devin",
+      "model": "claude-sonnet-5",
+      "effort": "max"
+    },
+    {
+      "preset": "wosret",
+      "id": "wosret",
+      "name": "Wosret",
+      "label": "Devin Claude Sonnet 5 XHIGH",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "claude-sonnet-5",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "weneg",
+      "id": "weneg",
+      "name": "Weneg",
+      "label": "Devin Claude Sonnet 5 HIGH",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "claude-sonnet-5",
+      "effort": "high"
+    },
+    {
+      "preset": "mehetweret",
+      "id": "mehetweret",
+      "name": "Mehetweret",
+      "label": "Devin Claude Sonnet 5 MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-sonnet-5",
+      "effort": "medium"
+    },
+    {
+      "preset": "nemty",
+      "id": "nemty",
+      "name": "Nemty",
+      "label": "Devin Claude Sonnet 5 LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-sonnet-5",
+      "effort": "low"
+    },
+    {
+      "preset": "sepa",
+      "id": "sepa",
+      "name": "Sepa",
+      "label": "Devin Claude Haiku 5.5 MAX",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-haiku-5-5",
+      "effort": "max"
+    },
+    {
+      "preset": "tutu",
+      "id": "tutu",
+      "name": "Tutu",
+      "label": "Devin Claude Haiku 5.5 XHIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-haiku-5-5",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "unut",
+      "id": "unut",
+      "name": "Unut",
+      "label": "Devin Claude Haiku 5.5 HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-haiku-5-5",
+      "effort": "high"
+    },
+    {
+      "preset": "maahes",
+      "id": "maahes",
+      "name": "Maahes",
+      "label": "Devin Claude Haiku 5.5 MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-haiku-5-5",
+      "effort": "medium"
+    },
+    {
+      "preset": "mandulis",
+      "id": "mandulis",
+      "name": "Mandulis",
+      "label": "Devin Claude Haiku 5.5 LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-haiku-5-5",
+      "effort": "low"
+    },
+    {
+      "preset": "andjety",
+      "id": "andjety",
+      "name": "Andjety",
+      "label": "Devin Gemini 3.5 Flash HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gemini-3-5-flash",
+      "effort": "high"
+    },
+    {
+      "preset": "ihy",
+      "id": "ihy",
+      "name": "Ihy",
+      "label": "Devin Gemini 3.5 Flash MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gemini-3-5-flash",
+      "effort": "medium"
+    },
+    {
+      "preset": "anat",
+      "id": "anat",
+      "name": "Anat",
+      "label": "Devin Gemini 3.5 Flash LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gemini-3-5-flash",
+      "effort": "low"
+    },
+    {
+      "preset": "astarte",
+      "id": "astarte",
+      "name": "Astarte",
+      "label": "Devin Gemini 3.6 Flash HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gemini-3-6-flash",
+      "effort": "high"
+    },
+    {
+      "preset": "qetesh",
+      "id": "qetesh",
+      "name": "Qetesh",
+      "label": "Devin Gemini 3.6 Flash MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gemini-3-6-flash",
+      "effort": "medium"
+    },
+    {
+      "preset": "aker",
+      "id": "aker",
+      "name": "Aker",
+      "label": "Devin Gemini 3.6 Flash LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gemini-3-6-flash",
+      "effort": "low"
+    },
+    {
+      "preset": "hauhet",
+      "id": "hauhet",
+      "name": "Hauhet",
+      "label": "Devin Gemini 3.7 Flash HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gemini-3-7-flash",
+      "effort": "high"
+    },
+    {
+      "preset": "kauket",
+      "id": "kauket",
+      "name": "Kauket",
+      "label": "Devin Gemini 3.7 Flash MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gemini-3-7-flash",
+      "effort": "medium"
+    },
+    {
+      "preset": "heh",
+      "id": "heh",
+      "name": "Heh",
+      "label": "Devin Gemini 3.7 Flash LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gemini-3-7-flash",
+      "effort": "low"
+    },
+    {
+      "preset": "narmer",
+      "id": "narmer",
+      "name": "Narmer",
+      "label": "Devin GPT 5.6 Sol MAX",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-sol",
+      "effort": "max"
+    },
+    {
+      "preset": "menes",
+      "id": "menes",
+      "name": "Menes",
+      "label": "Devin GPT 5.6 Sol XHIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-sol",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "djer",
+      "id": "djer",
+      "name": "Djer",
+      "label": "Devin GPT 5.6 Sol HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-sol",
+      "effort": "high"
+    },
+    {
+      "preset": "merneith",
+      "id": "merneith",
+      "name": "Merneith",
+      "label": "Devin GPT 5.6 Sol MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-sol",
+      "effort": "medium"
+    },
+    {
+      "preset": "khasekhemwy",
+      "id": "khasekhemwy",
+      "name": "Khasekhemwy",
+      "label": "Devin GPT 5.6 Sol LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-sol",
+      "effort": "low"
+    },
+    {
+      "preset": "djoser",
+      "id": "djoser",
+      "name": "Djoser",
+      "label": "Devin GPT 5.6 Terra MAX",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-terra",
+      "effort": "max"
+    },
+    {
+      "preset": "sneferu",
+      "id": "sneferu",
+      "name": "Sneferu",
+      "label": "Devin GPT 5.6 Terra XHIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-terra",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "khufu",
+      "id": "khufu",
+      "name": "Khufu",
+      "label": "Devin GPT 5.6 Terra HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-terra",
+      "effort": "high"
+    },
+    {
+      "preset": "khafre",
+      "id": "khafre",
+      "name": "Khafre",
+      "label": "Devin GPT 5.6 Terra MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-terra",
+      "effort": "medium"
+    },
+    {
+      "preset": "menkaure",
+      "id": "menkaure",
+      "name": "Menkaure",
+      "label": "Devin GPT 5.6 Terra LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-terra",
+      "effort": "low"
+    },
+    {
+      "preset": "userkaf",
+      "id": "userkaf",
+      "name": "Userkaf",
+      "label": "Devin GPT 5.6 Luna MAX",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-luna",
+      "effort": "max"
+    },
+    {
+      "preset": "sahure",
+      "id": "sahure",
+      "name": "Sahure",
+      "label": "Devin GPT 5.6 Luna XHIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-luna",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "unas",
+      "id": "unas",
+      "name": "Unas",
+      "label": "Devin GPT 5.6 Luna HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-luna",
+      "effort": "high"
+    },
+    {
+      "preset": "teti",
+      "id": "teti",
+      "name": "Teti",
+      "label": "Devin GPT 5.6 Luna MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-luna",
+      "effort": "medium"
+    },
+    {
+      "preset": "pepi",
+      "id": "pepi",
+      "name": "Pepi",
+      "label": "Devin GPT 5.6 Luna LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-6-luna",
+      "effort": "low"
+    },
+    {
+      "preset": "mentuhotep",
+      "id": "mentuhotep",
+      "name": "Mentuhotep",
+      "label": "Devin Grok 4.6 XHIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "grok-4-6",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "amenemhat",
+      "id": "amenemhat",
+      "name": "Amenemhat",
+      "label": "Devin Grok 4.6 HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "grok-4-6",
+      "effort": "high"
+    },
+    {
+      "preset": "senusret",
+      "id": "senusret",
+      "name": "Senusret",
+      "label": "Devin Grok 4.6 MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "grok-4-6",
+      "effort": "medium"
+    },
+    {
+      "preset": "sobekneferu",
+      "id": "sobekneferu",
+      "name": "Sobekneferu",
+      "label": "Devin Grok 4.6 LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "grok-4-6",
+      "effort": "low"
+    },
+    {
+      "preset": "ahmose",
+      "id": "ahmose",
+      "name": "Ahmose",
+      "label": "Devin Grok 4.7 XHIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "grok-4-7",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "kamose",
+      "id": "kamose",
+      "name": "Kamose",
+      "label": "Devin Grok 4.7 HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "grok-4-7",
+      "effort": "high"
+    },
+    {
+      "preset": "hatshepsut",
+      "id": "hatshepsut",
+      "name": "Hatshepsut",
+      "label": "Devin Grok 4.7 MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "grok-4-7",
+      "effort": "medium"
+    },
+    {
+      "preset": "thutmose",
+      "id": "thutmose",
+      "name": "Thutmose",
+      "label": "Devin Grok 4.7 LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "grok-4-7",
+      "effort": "low"
+    },
+    {
+      "preset": "amenhotep",
+      "id": "amenhotep",
+      "name": "Amenhotep",
+      "label": "Devin Muse Wonder MAX",
+      "description": "Complex debugging, architecture and detailed review.",
+      "kind": "devin",
+      "model": "muse-wonder-1-0",
+      "effort": "max"
+    },
+    {
+      "preset": "akhenaten",
+      "id": "akhenaten",
+      "name": "Akhenaten",
+      "label": "Devin Muse Wonder XHIGH",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "muse-wonder-1-0",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "nefertiti",
+      "id": "nefertiti",
+      "name": "Nefertiti",
+      "label": "Devin Muse Wonder HIGH",
+      "description": "Implementation, code review and planning.",
+      "kind": "devin",
+      "model": "muse-wonder-1-0",
+      "effort": "high"
+    },
+    {
+      "preset": "tutankhamun",
+      "id": "tutankhamun",
+      "name": "Tutankhamun",
+      "label": "Devin Muse Wonder MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "muse-wonder-1-0",
+      "effort": "medium"
+    },
+    {
+      "preset": "horemheb",
+      "id": "horemheb",
+      "name": "Horemheb",
+      "label": "Devin Muse Wonder LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "muse-wonder-1-0",
+      "effort": "low"
+    },
+    {
+      "preset": "ramesses",
+      "id": "ramesses",
+      "name": "Ramesses",
+      "label": "Devin GLM 5.3 Flash MAX",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "glm-5-3-flash",
+      "effort": "max"
+    },
+    {
+      "preset": "seti",
+      "id": "seti",
+      "name": "Seti",
+      "label": "Devin GLM 5.3 Flash HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "glm-5-3-flash",
+      "effort": "high"
+    },
+    {
+      "preset": "merneptah",
+      "id": "merneptah",
+      "name": "Merneptah",
+      "label": "Devin GLM 5.3 Flash LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "glm-5-3-flash",
+      "effort": "low"
+    },
+    {
+      "preset": "nefertari",
+      "id": "nefertari",
+      "name": "Nefertari",
+      "label": "Devin DeepSeek V4 Flash MAX",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "deepseek-v4-flash",
+      "effort": "max"
+    },
+    {
+      "preset": "tiye",
+      "id": "tiye",
+      "name": "Tiye",
+      "label": "Devin DeepSeek V4 Flash HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "deepseek-v4-flash",
+      "effort": "high"
+    },
+    {
+      "preset": "taharqa",
+      "id": "taharqa",
+      "name": "Taharqa",
+      "label": "Devin DeepSeek V4.1 Flash MAX",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "deepseek-v4-1-flash-1017",
+      "effort": "max"
+    },
+    {
+      "preset": "piye",
+      "id": "piye",
+      "name": "Piye",
+      "label": "Devin DeepSeek V4.1 Flash HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "deepseek-v4-1-flash-1017",
+      "effort": "high"
+    },
+    {
+      "preset": "psamtik",
+      "id": "psamtik",
+      "name": "Psamtik",
+      "label": "Devin DeepSeek V4.1 Flash LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "deepseek-v4-1-flash-1017",
+      "effort": "low"
+    },
+    {
+      "preset": "nectanebo",
+      "id": "nectanebo",
+      "name": "Nectanebo",
+      "label": "Devin SWE-1.7 MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "swe-1-7",
+      "effort": "medium"
+    },
+    {
+      "preset": "imhotep",
+      "id": "imhotep",
+      "name": "Imhotep",
+      "label": "Devin SWE-1.7",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "swe-1-7"
+    },
+    {
+      "preset": "ankhesenamun",
+      "id": "ankhesenamun",
+      "name": "Ankhesenamun",
+      "label": "Devin Claude Opus 4.6",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-opus-4-6"
+    },
+    {
+      "preset": "shepseskaf",
+      "id": "shepseskaf",
+      "name": "Shepseskaf",
+      "label": "Devin GPT 5.4 XHIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-4",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "neferirkare",
+      "id": "neferirkare",
+      "name": "Neferirkare",
+      "label": "Devin GPT 5.4 HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-4",
+      "effort": "high"
+    },
+    {
+      "preset": "djedkare",
+      "id": "djedkare",
+      "name": "Djedkare",
+      "label": "Devin GPT 5.4 MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-4",
+      "effort": "medium"
+    },
+    {
+      "preset": "khety",
+      "id": "khety",
+      "name": "Khety",
+      "label": "Devin GPT 5.4 LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-4",
+      "effort": "low"
+    },
+    {
+      "preset": "intef",
+      "id": "intef",
+      "name": "Intef",
+      "label": "Devin GPT 5.5 XHIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-5",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "ahhotep",
+      "id": "ahhotep",
+      "name": "Ahhotep",
+      "label": "Devin GPT 5.5 HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-5",
+      "effort": "high"
+    },
+    {
+      "preset": "smenkhkare",
+      "id": "smenkhkare",
+      "name": "Smenkhkare",
+      "label": "Devin GPT 5.5 MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-5",
+      "effort": "medium"
+    },
+    {
+      "preset": "khentkaus",
+      "id": "khentkaus",
+      "name": "Khentkaus",
+      "label": "Devin GPT 5.5 LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-5",
+      "effort": "low"
+    },
+    {
+      "preset": "hetepheres",
+      "id": "hetepheres",
+      "name": "Hetepheres",
+      "label": "Devin GPT 5.4 Mini XHIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-4-mini",
+      "effort": "xhigh"
+    },
+    {
+      "preset": "meresankh",
+      "id": "meresankh",
+      "name": "Meresankh",
+      "label": "Devin GPT 5.4 Mini HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-4-mini",
+      "effort": "high"
+    },
+    {
+      "preset": "nitocris",
+      "id": "nitocris",
+      "name": "Nitocris",
+      "label": "Devin GPT 5.4 Mini MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-4-mini",
+      "effort": "medium"
+    },
+    {
+      "preset": "twosret",
+      "id": "twosret",
+      "name": "Twosret",
+      "label": "Devin GPT 5.4 Mini LOW",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "gpt-5-4-mini",
+      "effort": "low"
+    },
+    {
+      "preset": "sekhemkhet",
+      "id": "sekhemkhet",
+      "name": "Sekhemkhet",
+      "label": "Devin Claude Sonnet 4.6",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "claude-sonnet-4-6"
+    },
+    {
+      "preset": "huni",
+      "id": "huni",
+      "name": "Huni",
+      "label": "Devin Kimi K2.6",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "kimi-k2-6"
+    },
+    {
+      "preset": "radjedef",
+      "id": "radjedef",
+      "name": "Radjedef",
+      "label": "Devin Kimi K2.7",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "kimi-k2-7"
+    },
+    {
+      "preset": "khaba",
+      "id": "khaba",
+      "name": "Khaba",
+      "label": "Devin Nemotron 3 Ultra HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "nemotron-3-ultra",
+      "effort": "high"
+    },
+    {
+      "preset": "nebka",
+      "id": "nebka",
+      "name": "Nebka",
+      "label": "Devin Nemotron 3 Ultra MEDIUM",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "nemotron-3-ultra",
+      "effort": "medium"
+    },
+    {
+      "preset": "sanakht",
+      "id": "sanakht",
+      "name": "Sanakht",
+      "label": "Devin DeepSeek V4 Pro MAX",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "deepseek-v4-pro",
+      "effort": "max"
+    },
+    {
+      "preset": "djedefre",
+      "id": "djedefre",
+      "name": "Djedefre",
+      "label": "Devin DeepSeek V4 Pro HIGH",
+      "description": "Small code changes and focused reviews.",
+      "kind": "devin",
+      "model": "deepseek-v4-pro",
+      "effort": "high"
     },
     {
       "preset": "hemera",
@@ -909,6 +2143,36 @@
       "thinking": "high"
     },
     {
+      "preset": "hecate",
+      "id": "hecate",
+      "name": "Hecate",
+      "label": "Pi Gemini 4 Argon HIGH",
+      "description": "Google's newest model: coding, analysis and reviews.",
+      "kind": "pi",
+      "model": "openrouter/google/gemini-4-argon",
+      "thinking": "high"
+    },
+    {
+      "preset": "dione",
+      "id": "dione",
+      "name": "Dione",
+      "label": "Pi Gemini 4 Argon MEDIUM",
+      "description": "Google's newest model: coding, analysis and reviews.",
+      "kind": "pi",
+      "model": "openrouter/google/gemini-4-argon",
+      "thinking": "medium"
+    },
+    {
+      "preset": "tyche",
+      "id": "tyche",
+      "name": "Tyche",
+      "label": "Pi Gemini 4 Argon LOW",
+      "description": "Google's newest model: coding, analysis and reviews.",
+      "kind": "pi",
+      "model": "openrouter/google/gemini-4-argon",
+      "thinking": "low"
+    },
+    {
       "preset": "freya",
       "id": "freya",
       "name": "Freya",
@@ -1015,6 +2279,36 @@
       "kind": "pi",
       "model": "openrouter/moonshotai/kimi-k3",
       "thinking": "max"
+    },
+    {
+      "preset": "themis",
+      "id": "themis",
+      "name": "Themis",
+      "label": "Pi Kimi K3.1 Pro MAX",
+      "description": "Coding and analysis across longer tasks.",
+      "kind": "pi",
+      "model": "openrouter/moonshotai/kimi-k3.1-pro",
+      "thinking": "max"
+    },
+    {
+      "preset": "crius",
+      "id": "crius",
+      "name": "Crius",
+      "label": "Pi Kimi K3.1 Pro HIGH",
+      "description": "Coding and analysis across longer tasks.",
+      "kind": "pi",
+      "model": "openrouter/moonshotai/kimi-k3.1-pro",
+      "thinking": "high"
+    },
+    {
+      "preset": "coeus",
+      "id": "coeus",
+      "name": "Coeus",
+      "label": "Pi Kimi K3.1 Pro LOW",
+      "description": "Coding and analysis across longer tasks.",
+      "kind": "pi",
+      "model": "openrouter/moonshotai/kimi-k3.1-pro",
+      "thinking": "low"
     },
     {
       "preset": "nyx",
@@ -1230,6 +2524,40 @@
     "mimo-v2.6-pro": "MiMo V2.6 Pro",
     "swe-2": "SWE-2",
     "swe-1-6": "SWE-1.6",
-    "swe-1-6-slow": "SWE-1.6 Slow"
-  }
+    "gpt-6-sol": "GPT-6 Sol",
+    "gpt-6-luna": "GPT-6 Luna",
+    "gpt-5.6-sol": "GPT-5.6 Sol",
+    "gpt-5.4": "GPT-5.4",
+    "gpt-5.5": "GPT-5.5",
+    "gpt-5.4-mini": "GPT-5.4 Mini",
+    "gemini-4-argon": "Gemini 4 Argon",
+    "gemini-3.5-flash": "Gemini 3.5 Flash",
+    "gemini-3.6-flash": "Gemini 3.6 Flash",
+    "gemini-3.7-flash": "Gemini 3.7 Flash",
+    "glm-5.2": "GLM 5.2",
+    "grok-4.6": "Grok 4.6",
+    "claude-opus-5": "Claude Opus 5",
+    "claude-opus-4.8": "Claude Opus 4.8",
+    "claude-opus-4.7": "Claude Opus 4.7",
+    "claude-opus-4.6": "Claude Opus 4.6",
+    "claude-sonnet-5": "Claude Sonnet 5",
+    "claude-sonnet-4.6": "Claude Sonnet 4.6",
+    "muse-wonder-1.0": "Muse Wonder",
+    "deepseek-v4-flash": "DeepSeek V4 Flash",
+    "deepseek-v4.1-flash-1017": "DeepSeek V4.1 Flash (1017)",
+    "deepseek-v4-pro": "DeepSeek V4 Pro",
+    "kimi-k2.6": "Kimi K2.6",
+    "kimi-k2.7": "Kimi K2.7",
+    "kimi-k3.1-pro": "Kimi K3.1 Pro",
+    "nemotron-3-ultra": "Nemotron 3 Ultra",
+    "swe-1-7": "SWE-1.7",
+    "adaptive": "Adaptive"
+  },
+  "retired": [
+    {
+      "name": "khnum",
+      "label": "Devin SWE-1.6 Slow",
+      "why": "Devin no longer offers SWE-1.6 Slow"
+    }
+  ]
 }

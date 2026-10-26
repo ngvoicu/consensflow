@@ -108,6 +108,8 @@ mod live_members;
 mod live_support;
 #[path = "rig/pending_agents.rs"]
 mod pending_agents;
+#[path = "rig/printed_output.rs"]
+mod printed_output;
 #[path = "rig/reports.rs"]
 mod reports;
 #[path = "rig/specs.rs"]

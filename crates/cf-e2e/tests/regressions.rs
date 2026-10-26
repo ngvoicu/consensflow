@@ -31,6 +31,9 @@ mod a_brief_could_not_be_edited_once_added;
 mod a_builds_daemon_held_a_workers_task;
 #[path = "regressions/a_cancelled_compact_held_the_chief_and_took_its_next_message.rs"]
 mod a_cancelled_compact_held_the_chief_and_took_its_next_message;
+#[cfg(unix)]
+#[path = "regressions/a_close_waited_for_a_codex_chiefs_server_to_end.rs"]
+mod a_close_waited_for_a_codex_chiefs_server_to_end;
 #[path = "regressions/a_codex_chief_opened_again_after_a_restart_read_starting_for_good.rs"]
 mod a_codex_chief_opened_again_after_a_restart_read_starting_for_good;
 #[cfg(unix)]

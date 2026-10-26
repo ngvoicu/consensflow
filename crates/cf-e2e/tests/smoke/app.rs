@@ -248,6 +248,11 @@ impl App {
         Error::Timeout(said)
     }
 
+    /// The app's process id.
+    pub fn pid(&self) -> u32 {
+        self.process.id()
+    }
+
     /// The app's own quit: the end of its input, and then its real exit.
     pub fn quit(&self) {
         self.process.end_input();

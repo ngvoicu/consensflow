@@ -70,7 +70,9 @@ and Pi and OpenCode (OpenRouter) carry Haiku 4.5 and a
 `~anthropic/claude-haiku-latest` alias, no 5.5. Claude Code 2.1.294 answers
 `claude-haiku-5-5` as itself, in a real window, at each of its five levels
 (`npm run live:agent -- --effort low …`). Light work at every level, so one row,
-at the ceiling like the other cheap models here (hermod, freya).
+at the ceiling like the other cheap models here (hermod, freya). Devin lists it
+since (3000.11.205, 2026-10-25), and carries it at every level with the rest of
+its list: light work there too.
 
 ## Fable 5.1 (updated 2026-09-10)
 
@@ -179,6 +181,51 @@ Devin's SWE-1.6 (2026-10-02): Devin lists it with no levels, under three ids:
 `swe-1-6`, `swe-1-6-fast` and `swe-1-6-slow`. The owner asked for the plain one
 and the slow one; the slow one is what a free Devin plan runs (proven
 2026-09-19, when plain `swe-1-6` answered "Upgrade to Pro" there).
+
+## Every model Devin lists (2026-10-25)
+
+The owner: "add from devin all models it has". Devin 3000.11.205 lists 44 families
+(`devin models list --format json`, and the same 44 rows in its `/model`
+dialog, walked in a pty); `crates/cf-catalog/tests/catalog/devin-models.json`
+keeps the ids and labels, and the test beside it holds that every family is a
+row at each of its levels from low to max, and every model with no level a row
+by its plain id (Adaptive, GLM 5.2, SWE-1.6, SWE-1.7, Opus 4.6, Sonnet 4.6, Kimi
+K2.6 and K2.7): 151 rows. Left out, as the owner decided: the 575 Fusion pairs
+(a lead model and a sidekick), the `none` and `minimal` levels below low, and
+the dialog's toggles (fast mode `-fast`, `-priority` on GPT, `-lightning` on
+SWE-2, a 1M context `-1m`, thinking `-thinking`), which a row cannot name: the
+launch joins a family and its effort, nothing more. The new rows carry Egyptian
+names, gods first and then kings and queens, and say their work in the words of
+their tier.
+
+Devin spells versions with dashes; the profile reads them as the catalog
+spells them (`gemini-3-8-flash` is `gemini-3.8-flash`, `claude-5-fable` is
+`claude-fable-5`), so a model Pi carries too shares its card and its tier.
+DeepSeek V4.1 Flash on Devin is the `1017` snapshot, kept apart from
+OpenRouter's, as other snapshots are.
+
+The tiers of the models the table did not know were proposed by the chief and
+decided by the owner (2026-10-25): Fable 5 and Opus 5 take Sonnet 5.5's ladder,
+Opus 4.8, Sonnet 5 and Muse Wonder take GPT-6.1 Sol's, GPT-6 Sol is standard
+work at max only, Gemini 4 Argon is complex at high, standard at medium and
+light at low; SWE-2 stays light at every level, and so does every other model
+Devin lists. Opus 5.5 at medium is standard work now, on every harness.
+
+Kimi K3.1 Pro is not on Devin's list; Pi reaches it through OpenRouter at low,
+high and max (its thinking map has no other level), complex at max, standard at
+high and light at low. Gemini 4 Argon is on Pi too, through OpenRouter, at its
+three levels. OpenCode lists both and gains neither: it leaves ConsensFlow
+(the owner, 2026-10-25), and adds no row until then. A one-shot answered on OpenCode
+for both; Pi's one-shots got OpenRouter's 402 (Pi asks for the model's whole
+942k output tokens, beyond the account's credits) and a hang, the account's and
+Pi's, not the rows'.
+
+Khnum (Devin SWE-1.6 Slow) went: Devin no longer lists `swe-1-6-slow`. The data
+keeps it under `retired`, with why, so a project whose staff or chief still
+names it says so in plain words (the board's row, the staff in Project settings,
+the chief's card and Switch chief, a task taken back, the chief's note) and asks
+the human to pick another agent, rather than to define it again on a model Devin
+no longer has.
 
 ## The Pi model zoo (Greek names) and the OpenCode zoo (Norse names)
 

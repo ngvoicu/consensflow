@@ -197,10 +197,34 @@ jobs:
   windows:
     uses: ./.github/workflows/windows-build.yml
 
-  # The whole gate (ci.yml) on the commit being released: what goes out passed
-  # it on both platforms, not only its build and the packaged smoke.
+  # The whole gate (ci.yml) passed the commit being released on both platforms:
+  # CI's run of this very commit (a push to main or to a release/ branch, or by
+  # hand) ended green with each platform's summary green, which fails unless
+  # every job of its platform passed. The gate is not run again here: that took
+  # 70 to 75 minutes of a release whose own work is about 15 (3.0.6-alpha.2). A
+  # tag on a commit CI never passed, or has not passed yet, is refused here, and
+  # nothing publishes; once CI is green, rerun this run's failed jobs. The rule is
+  # cf-release's (`ci-passed`), built where no secret is. A hand run is told what
+  # a tag would be refused for, and is not failed by it.
   gate:
-    uses: ./.github/workflows/ci.yml
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustup update stable --no-self-update && rustup default stable
+      - name: Build the release tool
+        run: cargo build --release --locked -p cf-release
+      - name: CI passed this commit on both platforms
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          app/src-tauri/target/release/cf-release ci-passed --github "$GITHUB_REPOSITORY" \
+            --commit "$GITHUB_SHA" --event "$GITHUB_EVENT_NAME"
 
   # What runs under the repository's write token is built here, where there is no
   # token and no secret, and does not run here: one binary of one crate,

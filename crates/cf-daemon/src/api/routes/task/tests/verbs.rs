@@ -323,13 +323,19 @@ async fn a_tell_pauses_the_task_for_the_question_it_puts_to_the_window() {
 }
 
 #[tokio::test]
-async fn a_task_with_no_window_is_not_told_and_says_what_it_is() {
+async fn a_task_that_is_over_is_not_told_and_says_what_it_is() {
     let scene = scene();
-    let open = open_task(&scene);
+    let (number, _) = queued_task(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .cancel_task(1, number, "chief")
+        .unwrap();
     let said = post(
         &scene,
         &scene.chief,
-        &format!("{open}/tell"),
+        &format!("{number}/tell"),
         r#"{"body":"Hey"}"#,
     )
     .await;
@@ -338,13 +344,130 @@ async fn a_task_with_no_window_is_not_told_and_says_what_it_is() {
         (
             409,
             "no-window",
-            format!("T-{open} has no window to tell: it is open").as_str()
+            format!("T-{number} has no window to tell: it is cancelled").as_str()
         )
     );
     // Not even the words are looked at.
-    let said = post(&scene, &scene.chief, &format!("{open}/tell"), "{}").await;
+    let said = post(&scene, &scene.chief, &format!("{number}/tell"), "{}").await;
     assert_eq!(said.1["error"], "no-window");
     assert_eq!(scene.kicks.get(), 0);
+}
+
+#[tokio::test]
+async fn an_open_task_is_told_with_no_pause_and_its_words_wait_in_its_brief_for_the_window_that_takes_it(
+) {
+    let scene = scene();
+    let open = open_task(&scene);
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/tell"),
+        r#"{"body":"Use the v2 grammar"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        said.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["task"],
+        "no message: no window has the words yet"
+    );
+    assert_eq!(said["task"]["state"], "open", "nothing is paused or queued");
+    assert_eq!(state_of(&scene, open), "open");
+    let (_, thread) = get(&scene, &scene.chief, &format!("{open}")).await;
+    assert_eq!(
+        thread["task"]["body"],
+        "Lexer\n\nTold by @chief before a window had it: Use the v2 grammar"
+    );
+    // The window the daemon gives it is given the words with the brief.
+    let moved = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .assign_task(scene.project.id, open, scene.id("zeus"))
+        .unwrap();
+    assert_eq!(
+        moved.message.unwrap().body,
+        "Lexer\n\nTold by @chief before a window had it: Use the v2 grammar"
+    );
+
+    // No words are none, and nothing is kept for them.
+    let open = open_task(&scene);
+    let said = post(&scene, &scene.chief, &format!("{open}/tell"), "{}").await;
+    assert_eq!(said.1["error"], "invalid-text");
+    let (_, thread) = get(&scene, &scene.chief, &format!("{open}")).await;
+    assert_eq!(thread["task"]["body"], "Lexer");
+}
+
+#[tokio::test]
+async fn an_open_task_a_window_is_given_while_its_words_come_in_is_told_as_a_queued_one() {
+    // Open when it was read; the daemon gives it to a window while the words come in:
+    // it is queued for it, and the words are kept for the window, after its brief.
+    let scene = scene();
+    let open = open_task(&scene);
+    let member = scene.id("zeus");
+    let context = std::rc::Rc::clone(&scene.context);
+    let queued = read_while(r#"{"body":"Use the v2 grammar"}"#, move || {
+        context
+            .ledger
+            .borrow_mut()
+            .assign_task(1, open, member)
+            .unwrap();
+    });
+    let asked = with_body(
+        Method::POST,
+        &format!("/api/tasks/{open}/tell"),
+        &scene.chief,
+        queued,
+    );
+    let (status, said) = through(&scene, asked).await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        [&said["message"]["kind"], &said["task"]["state"]],
+        [&json!("note"), &json!("queued")]
+    );
+}
+
+#[tokio::test]
+async fn a_queued_task_taken_back_to_the_board_while_its_words_come_in_is_told_as_an_open_one() {
+    // Queued for its window when it was read; its member runs out of quota while the words
+    // come in, and the task is back on the board for another: no window has it, and the
+    // words are added to its brief.
+    let scene = scene();
+    let number = open_task(&scene);
+    let member = scene.id("zeus");
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .assign_task(1, number, member)
+        .unwrap();
+    assert_eq!(state_of(&scene, number), "queued");
+    let context = std::rc::Rc::clone(&scene.context);
+    let released = read_while(r#"{"body":"Use the v2 grammar"}"#, move || {
+        context
+            .ledger
+            .borrow_mut()
+            .release_task(1, number, "its member ran out of quota")
+            .unwrap();
+    });
+    let asked = with_body(
+        Method::POST,
+        &format!("/api/tasks/{number}/tell"),
+        &scene.chief,
+        released,
+    );
+    let (status, said) = through(&scene, asked).await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["state"], "open");
+    assert_eq!(said.get("message"), None, "no window has it to be told");
+    let (_, thread) = get(&scene, &scene.chief, &format!("{number}")).await;
+    assert!(
+        thread["task"]["body"]
+            .as_str()
+            .unwrap()
+            .ends_with("Told by @chief before a window had it: Use the v2 grammar"),
+        "{thread}"
+    );
 }
 
 #[tokio::test]

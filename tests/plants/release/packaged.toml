@@ -248,8 +248,18 @@ runs = ["smoke-command", "smoke-command-run"]
 
 [[plant.edit]]
 file = "tools/xtask/src/smoke.rs"
-find = 'tests(context, app, &["--".into(), "--nocapture".into()])'
+find = 'tests(context, app, &["--nocapture".into()])'
 replace = "tests(context, app, &[])"
+
+[[plant]]
+name = "packaged smoke: the smoke's cases run beside each other"
+meant = "the_smoke_is_the_smoke_test_of_cf_e2e_asked_for_its_ignored_case_and_its_own_output"
+runs = ["smoke-command", "smoke-command-run"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = '["--".into(), "--test-threads=1".into()]'
+replace = '["--".into()]'
 
 [[plant]]
 name = "packaged smoke: the smoke the plants run is told not to capture"
@@ -259,7 +269,7 @@ runs = ["smoke-command"]
 [[plant.edit]]
 file = "tools/xtask/src/smoke.rs"
 find = "tests(context, app, &[])"
-replace = 'tests(context, app, &["--".into(), "--nocapture".into()])'
+replace = 'tests(context, app, &["--nocapture".into()])'
 
 [[plant]]
 name = "packaged smoke: the smoke the plants run is not told the app it is given"
@@ -835,3 +845,55 @@ requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
 file = "crates/cf-e2e/tests/smoke.rs"
 find = "home: &machine.state,"
 replace = "home: &machine.probe,"
+
+# The hidden app's case (smoke/hidden.rs, T-454): a window that prints a flood while
+# the app is hidden is read as fast as shown.
+[[plant]]
+name = "packaged smoke, on the app: the hidden app's window never prints its flood"
+meant = "the_built_app_reads_its_windows_while_it_is_hidden"
+runs = ["smoke-on-the-app"]
+requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/fixtures/smoke-hidden-harness.sh"
+find = 'while [ ! -f "$CFSMOKE_GO" ]; do sleep 0.2; done'
+replace = 'while [ ! -f "$CFSMOKE_GO.never" ]; do sleep 0.2; done'
+
+[[plant]]
+name = "packaged smoke, on the app: the app is shown again before its window prints"
+meant = "the_built_app_reads_its_windows_while_it_is_hidden"
+runs = ["smoke-on-the-app"]
+requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/hidden.rs"
+find = "    thread::sleep(HIDDEN_FOR);\n"
+replace = "    thread::sleep(HIDDEN_FOR);\n    let _ = hide(app.pid(), false);\n"
+
+[[plant]]
+name = "packaged smoke, the hidden case: whether the app is hidden is asked once"
+meant = "whether_the_app_is_hidden_is_asked_again_while_it_says_not_or_cannot_say"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/hidden.rs"
+find = "    for _ in 1..times {"
+replace = "    for _ in 1..1 {"
+
+# The Windows app's UI smoke (app/scripts/windows-smoke.mjs), on the desktop of the user
+# the runner runs as (windows-smoke-desktop.mjs), with the app's crate built from the
+# planted sources (`--build-app`: the runner's xtask cannot be linked again while it runs,
+# and the staged parts are a build's before): its last step crashes the page's renderer,
+# and a page whose process failed is loaded again (app/src-tauri/src/page_crash.rs,
+# T-454). The run says no more than its status; the exe it leaves is the planted one
+# until the next build.
+[[plant]]
+name = "windows smoke, on the app: a page whose process failed is not loaded again (Windows)"
+meant = "a page whose process failed is loaded again and shows the board"
+runs = [["node", "app/scripts/windows-smoke-desktop.mjs", "--build-app"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "        page_crash::load_again_when_it_fails(&window);"
+replace = "        let _ = &window;"
