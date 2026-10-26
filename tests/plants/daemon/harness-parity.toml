@@ -1,0 +1,265 @@
+# Harness parity (T-540, the owner's ask of 2026-10-25: a member has what the same harness
+# has when the human opens it in a terminal in the project's folder). Claude Code's computer use is read
+# from Claude's own configuration under the entry it keeps for the project's repository,
+# never written (`crates/cf-harness/src/claude/computer_use.rs`); a Claude launch where it
+# is on while ConsensFlow lacks a macOS grant tells the human once per missing state
+# (`crates/cf-engine/src/computer_use.rs`); the page's row shows a harness's part only with
+# a member on it, and opens only the two System Settings panes. One plant takes one rule
+# out; a test of it fails. Every name holds `parity`.
+
+[run]
+harness-claude-computer-use = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::computer_use"]
+engine-computer-use = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "computer_use::"]
+daemon-computer-use = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use"]
+page-computer-use = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "computer use|computer-use|another app"]
+daemon-seams = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::"]
+regression-terminal-env = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_terminals_environment_reached_the_daemon_and_no_window"]
+live-kit-shim = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::wrapper"]
+
+[[plant]]
+name = "parity computer use: a worktree is read under its own folder"
+meant = "a_folder_of_a_repository_and_a_linked_worktree_take_the_main_checkouts_entry"
+runs = ["harness-claude-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use.rs"
+find = '''    let folder = trusts(directory).folder;'''
+replace = '''    let folder = directory.to_owned();
+    let _ = trusts;'''
+
+[[plant]]
+name = "parity computer use: any enabled server is read as Claude's computer use"
+meant = "a_configuration_that_is_not_there_or_no_json_or_lists_no_server_is_off"
+runs = ["harness-claude-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use.rs"
+find = '''        .is_some_and(|servers| servers.iter().any(|server| server == SERVER))'''
+replace = '''        .is_some_and(|servers| !servers.is_empty() || SERVER.is_empty())'''
+
+[[plant]]
+name = "parity computer use: every launch tells the human again"
+# The project's last note stands for a state said before a mend; what is kept in memory
+# is what keeps a state lost again from being said at each launch after.
+meant = "each_missing_state_is_said_once_and_a_state_mended_and_lost_is_said_again"
+runs = ["engine-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/computer_use.rs"
+find = '''        if !self.computer_use.told.borrow_mut().insert(('''
+replace = '''        if self.computer_use.told.borrow().is_empty() && !self.computer_use.told.borrow_mut().insert(('''
+
+[[plant]]
+name = "parity computer use: a state mended and lost again is never said again"
+meant = "each_missing_state_is_said_once_and_a_state_mended_and_lost_is_said_again"
+runs = ["engine-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/computer_use.rs"
+find = '''                .retain(|(id, ..)| *id != project.id);'''
+replace = '''                .retain(|(id, ..)| *id != project.id || project.id > 0);'''
+
+[[plant]]
+name = "parity computer use: the human is told where Claude's computer use is off"
+meant = "nothing_is_said_where_computer_use_is_off_or_every_permission_is_given_or_none_runs"
+runs = ["engine-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/computer_use.rs"
+find = '''        if !self.seams.computer_use.claude(&project.directory).on {'''
+replace = '''        if !self.seams.computer_use.claude(&project.directory).on && project.id < 0 {'''
+
+[[plant]]
+name = "parity computer use: open opens a pane the page did not name"
+meant = "open_opens_only_the_two_named_panes"
+runs = ["daemon-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/computer_use.rs"
+find = '''            "screen-recording" => Some(Self::ScreenRecording),
+            _ => None,'''
+replace = '''            "screen-recording" => Some(Self::ScreenRecording),
+            _ => Some(Self::Accessibility),'''
+
+[[plant]]
+name = "parity computer use: the row is shown for a project with no Claude Code member"
+meant = "Project settings: a project with no Claude Code member, the chief included, shows no computer use"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''      ([harness]) => present.has(harness) && said?.harnesses?.[harness],'''
+replace = '''      ([harness]) => said?.harnesses?.[harness],'''
+
+[[plant]]
+name = "parity computer use: any note gets the System Settings buttons"
+meant = "a note that ConsensFlow lacks computer use's permissions opens the System Settings pane of each it names"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''  if (message.kind !== 'note' || message.sender != null) return []
+  if (!message.body?.startsWith(NOTE_OPENING)) return []
+  const named = message.body.slice(message.body.indexOf('allow it '))'''
+replace = '''  if (message.kind !== 'note') return []
+  const named = message.body.includes('allow it ') ? message.body : 'Accessibility'''
+
+[[plant]]
+name = "parity computer use: the permissions are not read again as the dialog opens"
+meant = "Project settings: computer use that is on says so, and on Windows says Claude Code has none there"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    this.#computerUse.show(computerUse)
+'''
+replace = '''    if (computerUse === undefined) this.#computerUse.show(computerUse)
+'''
+
+# Round 3 (Calliope's review T-590): every window is given what the app took of the
+# human's terminal; the note is once per missing state across the app's starts too, and
+# only ConsensFlow's own note stands for it or gets the buttons; Claude's configuration
+# is read again only once it changed; the row says whose grants a dev run shows; the
+# live kit's stand-in keeps the Claude folder a run was given.
+[[plant]]
+name = "parity env: no window is given what the app took of the terminal"
+meant = "every_window_is_given_what_the_app_took_of_a_terminals_environment_before_its_own"
+runs = ["daemon-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''        let mut env = self.terminal.clone();'''
+replace = '''        let mut env: Vec<(String, String)> = Vec::new();
+        let _ = &self.terminal;'''
+
+[[plant]]
+name = "parity env: a window takes ConsensFlow's own variables from the terminal"
+meant = "every_window_is_given_what_the_app_took_of_a_terminals_environment_before_its_own"
+runs = ["daemon-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''        .filter(|name| !name.starts_with("CONSENSFLOW_") && !name.eq_ignore_ascii_case("PATH"))'''
+replace = '''        .filter(|name| !name.eq_ignore_ascii_case("PATH"))'''
+
+[[plant]]
+name = "parity env: a member window starts without the rc's export"
+meant = "a_member_window_is_given_what_the_app_took_of_the_humans_terminal"
+runs = ["regression-terminal-env"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''        .filter(|name| !name.starts_with("CONSENSFLOW_") && !name.eq_ignore_ascii_case("PATH"))'''
+replace = '''        .filter(|name| name.starts_with("CONSENSFLOW_") && !name.eq_ignore_ascii_case("PATH"))'''
+
+[[plant]]
+name = "parity computer use: a state said before the app started again is said again"
+meant = "a_missing_state_said_before_a_restart_is_not_said_again_and_another_is"
+runs = ["engine-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/computer_use.rs"
+find = '''            .newest_own_note(human.id, NOTE_OPENING)?'''
+replace = '''            .newest_own_note(-human.id, NOTE_OPENING)?'''
+
+[[plant]]
+name = "parity computer use: a mend seen while the app runs is forgotten"
+meant = "each_missing_state_is_said_once_and_a_state_mended_and_lost_is_said_again"
+runs = ["engine-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/computer_use.rs"
+find = '''            self.computer_use.mended.borrow_mut().insert(project.id);'''
+replace = '''            let _ = &self.computer_use.mended;'''
+
+[[plant]]
+name = "parity computer use: a member's note with the words stands for ConsensFlow's"
+meant = "a_members_note_with_the_same_words_is_not_consensflows_and_does_not_stand_for_it"
+runs = ["engine-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '''m.sender_id IS NULL AND '''
+replace = ''''''
+
+[[plant]]
+name = "parity computer use: Claude's configuration is read whole at every ask"
+meant = "the_file_is_read_again_only_once_it_changed_size_or_time"
+runs = ["harness-claude-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use.rs"
+find = '''            .is_some_and(|read| read.file == file && read.stamp == stamp);'''
+replace = '''            .is_some_and(|read| read.file == file && read.stamp == stamp && read.on_in.len() > usize::MAX - 1);'''
+
+[[plant]]
+name = "parity computer use: a changed configuration is not read again"
+meant = "the_file_is_read_again_only_once_it_changed_size_or_time"
+runs = ["harness-claude-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use.rs"
+find = '''            .is_some_and(|read| read.file == file && read.stamp == stamp);'''
+replace = '''            .is_some_and(|read| read.file == file);'''
+
+[[plant]]
+name = "parity computer use: a terminal's grants are shown as ConsensFlow's"
+meant = "the_row_is_told_whose_grants_they_are_where_another_app_started_the_daemon"
+runs = ["daemon-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/computer_use.rs"
+find = '''    (!own).then(|| app.to_owned())'''
+replace = '''    (!own && app.is_empty()).then(|| app.to_owned())'''
+
+[[plant]]
+name = "parity computer use: the Candidate's grants are another app's"
+meant = "the_grants_are_another_apps_where_the_daemon_was_started_from_one"
+runs = ["daemon-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/computer_use.rs"
+find = '''            .is_some_and(|rest| rest.starts_with('.'));'''
+replace = '''            .is_some_and(|rest| rest.is_empty());'''
+
+[[plant]]
+name = "parity computer use: a member's note gets the System Settings buttons"
+meant = "a member's note with the words of ConsensFlow's computer-use note gets no System Settings button"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''  if (message.kind !== 'note' || message.sender != null) return []'''
+replace = '''  if (message.kind !== 'note') return []'''
+
+[[plant]]
+name = "parity computer use: the row never says whose grants a dev run shows"
+meant = "Project settings: a ConsensFlow started from another app says the permissions shown are that app's"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''    this.#grantsOf.hidden = grantsOf === null'''
+replace = '''    this.#grantsOf.hidden = true'''
+
+[[plant]]
+name = "parity live kit: the stand-in writes in the machine's Claude folder whatever the run was given"
+meant = "a_stand_in_keeps_the_claude_folder_a_run_was_given_and_else_the_machines"
+runs = ["live-kit-shim"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''CLAUDE_CONFIG_DIR=\"${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}\" exec {}'''
+replace = '''CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec {}'''
+
+[[plant]]
+name = "parity env: a Claude window keeps the billing key an rc exports"
+meant = "a_member_window_is_given_what_the_app_took_of_the_humans_terminal"
+runs = ["regression-terminal-env"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/window_args.rs"
+find = '''                drop_env: &["ANTHROPIC_API_KEY"],'''
+replace = '''                drop_env: &[],'''

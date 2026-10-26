@@ -446,6 +446,16 @@ impl Ledger {
         messages::decline_message(&mut self.store, message_id, by)
     }
 
+    /// The newest note ConsensFlow itself left the participant whose body opens with
+    /// `opening`.
+    pub fn newest_own_note(
+        &self,
+        participant_id: i64,
+        opening: &str,
+    ) -> Result<Option<MessageView>, LedgerError> {
+        messages::newest_own_note(&self.store, participant_id, opening)
+    }
+
     /// A participant's messages, newest first, at most `limit` (Node's default: 100).
     pub fn inbox(&self, participant_id: i64, limit: i64) -> Result<Vec<MessageView>, LedgerError> {
         messages::inbox(&self.store, participant_id, limit)

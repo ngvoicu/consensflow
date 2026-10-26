@@ -16,6 +16,13 @@ use std::path::{Path, PathBuf};
 /// set to nothing, it names none.
 pub const TOOL_FOLDERS: &str = "CONSENSFLOW_TOOL_FOLDERS";
 
+/// The variable the app gives its daemon naming, as a JSON list of names (never their
+/// values), what it took of the environment a terminal's shell gives a program: the
+/// human's interactive login shell on macOS, their PowerShell profile on Windows. The
+/// daemon has the values themselves, and gives each window's pane the named ones, which
+/// the app's own terminal would not have otherwise (T-540).
+pub const TERMINAL_ENV: &str = "CONSENSFLOW_TERMINAL_ENV";
+
 /// The folders a package manager of the system puts its programs in, which a
 /// login shell puts on the PATH and an app the Finder started is not given:
 /// on a Mac, Homebrew's (`/opt/homebrew`, and `/usr/local` on Intel, which the

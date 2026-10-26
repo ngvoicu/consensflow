@@ -256,7 +256,7 @@ fn isolated_home(
 /// socket and token reach into the parent session. Only this identity is
 /// removed; configuration such as `CLAUDE_CONFIG_DIR` or
 /// `CLAUDE_CODE_USE_BEDROCK` stays.
-const CLAUDE_SESSION_IDENTITY: [&str; 11] = [
+pub(crate) const CLAUDE_SESSION_IDENTITY: [&str; 11] = [
     "CLAUDECODE",
     "CLAUDE_CODE_ENTRYPOINT",
     "CLAUDE_CODE_SESSION_ID",

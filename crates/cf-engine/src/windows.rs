@@ -723,6 +723,12 @@ impl Dispatcher {
         // A harness that asks whether to trust the window's folder is answered, or
         // the human told, as its window shows the question (`trust`).
         self.watch_trust(record, project, participant, &pane).await;
+        // A Claude window where Claude Code's computer use is on, while ConsensFlow lacks
+        // a permission it needs: the human is told once (`computer_use`). What fails to be
+        // written down is the log's, not the launch's.
+        if let Err(cause) = self.tell_computer_use_once(project, participant) {
+            self.write_down(&cause);
+        }
         // The adapter's `started` is an `async` function, and `.catch(...)`
         // made a promise of its own to wait on.
         let admitting = Admitting::new(self, project.id);

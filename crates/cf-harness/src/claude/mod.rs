@@ -4,6 +4,7 @@
 //! hooks of ours an older version left in its settings.
 
 mod adapter;
+pub mod computer_use;
 pub(crate) mod install;
 pub(crate) mod paths;
 mod question_hook;

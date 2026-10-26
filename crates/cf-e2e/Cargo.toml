@@ -108,6 +108,10 @@ uuid.workspace = true
 cf-e2e = { path = ".", features = ["test-support"] }
 # Node's `--import` takes a module as a file URL, on Windows as anywhere.
 url.workspace = true
+# The live parity case opens Claude Code in a terminal of ConsensFlow's own (a ConPTY on
+# Windows), plainly and as a member, with no daemon (`tests/live_parity/claude.rs`).
+cf-panes = { workspace = true, features = ["test-support"] }
+portable-pty.workspace = true
 
 # Signals by process id, whether a process is there, the group it is in, and the
 # terminal's raw mode, which std does not give (this crate allows unsafe code only in

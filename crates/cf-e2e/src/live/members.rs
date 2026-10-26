@@ -148,6 +148,12 @@ impl Members {
             rig_for(&installs, shims.path(), stand_in)?,
             |config, (name, value)| config.var(name, value),
         );
+        let config = plan
+            .daemon_vars
+            .iter()
+            .fold(config, |config, (name, value)| {
+                config.daemon_var(name, value)
+            });
         let mut rig = Rig::start(config.clone())?;
         if super::keep_requested() {
             log.say(format!(

@@ -27,6 +27,7 @@ mod install;
 mod looks;
 mod roles;
 mod seeds;
+mod skills;
 mod stage;
 mod versions;
 

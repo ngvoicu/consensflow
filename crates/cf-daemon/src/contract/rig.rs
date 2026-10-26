@@ -241,11 +241,16 @@ impl Rig {
             credentials: Rc::new(Credentials::new()),
             pane_env: Rc::new(WindowEnv::new(&env, "http://127.0.0.1:1", "/bundle/bin")),
             roster: Rc::new(AnyAgent),
-            roles: Rc::new(RoleTexts::new(env, "/bundle/bin/cf".to_owned())),
+            roles: Rc::new(RoleTexts::new(env.clone(), "/bundle/bin/cf".to_owned())),
             trace: Rc::new(Trace::new(home)),
             log: Rc::new(Log::new(home)),
             launch_files: Rc::new(LaunchFolders::new(home.to_path_buf(), Rc::clone(errors))),
             spawn: Rc::clone(spawn) as Rc<dyn Spawn>,
+            // A machine with no computer use: no launch here is told of it.
+            computer_use: Rc::new(crate::computer_use::MachineComputerUse::granting(
+                env.clone(),
+                Rc::new(|| None),
+            )),
             limits: Limits::default(),
         };
         let dispatcher = Dispatcher::new(seams);

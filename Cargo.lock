@@ -477,8 +477,10 @@ name = "cf-e2e"
 version = "3.0.6-alpha.2"
 dependencies = [
  "cf-e2e",
+ "cf-panes",
  "jiff",
  "nix",
+ "portable-pty",
  "regex",
  "rusqlite",
  "serde_json",

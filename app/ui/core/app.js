@@ -157,6 +157,7 @@ const tryAgain = (participant) =>
 // A crowded cell's cards are listed in the stack dialog, the board's own.
 const board = new BoardView(boardRoot, $('#stack-dialog'), {
   onRead: (message) => act(() => daemon('message.read', { message: message.id })),
+  onSystemSettings: (pane) => act(() => daemon('computer_use.open', { pane })),
   // What waits for the human's approval goes on, goes back, or is declined with a word to its sender.
   onApprove: (message) =>
     act(async () => {

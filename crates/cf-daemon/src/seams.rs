@@ -8,7 +8,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use cf_base::env::Env;
+use cf_base::env::{Env, TERMINAL_ENV};
 use cf_engine::roles::{role_instructions, staff_of, ProjectSpecs};
 use cf_engine::runtime::{Executor, LocalWork, Spawn};
 use cf_engine::seams::{Adapters, LaunchFiles, LaunchIds, PaneEnv, Roles};
@@ -25,13 +25,19 @@ mod boundary;
 pub use boundary::{DaemonRecords, DaemonTime};
 
 /// The environment a window's pane starts with before its harness's own (as
-/// Node's daemon gave it): where the API is, which project and participant the
+/// Node's daemon gave it): what the app took of a terminal's environment for its
+/// daemon ([`TERMINAL_ENV`]), where the API is, which project and participant the
 /// window is, and a PATH with the bundle's `bin` first, so the `cf` of this
-/// install is the one a window finds. The token is added at launch.
+/// install is the one a window finds. The token is added at launch. The pane host
+/// starts each pane from the app's own environment, which a terminal's shell never
+/// added to (T-540): so the terminal's variables come first, and what ConsensFlow
+/// sets, and the harness's own after them, wins over them.
 pub struct WindowEnv {
     /// The API's address, with no slash at its end.
     pub url: String,
     path: String,
+    /// What the app took of a terminal's environment, as the daemon was given it.
+    terminal: Vec<(String, String)>,
 }
 
 impl WindowEnv {
@@ -45,20 +51,37 @@ impl WindowEnv {
                 Some(path) => format!("{bin}{delimiter}{}", path.to_string_lossy()),
                 None => bin.to_owned(),
             },
+            terminal: terminal_of(env),
         }
     }
 }
 
+/// The variables of `env` that [`TERMINAL_ENV`] names, as `env` holds them: none of
+/// ConsensFlow's own nor the PATH, which a window is given otherwise, and none whose
+/// value is no text a pane's environment can hold.
+fn terminal_of(env: &Env) -> Vec<(String, String)> {
+    let names: Vec<String> = env
+        .text(TERMINAL_ENV)
+        .and_then(|said| serde_json::from_str(said).ok())
+        .unwrap_or_default();
+    names
+        .into_iter()
+        .filter(|name| !name.starts_with("CONSENSFLOW_") && !name.eq_ignore_ascii_case("PATH"))
+        .filter_map(|name| Some((name.clone(), env.text(&name)?.to_owned())))
+        .collect()
+}
+
 impl PaneEnv for WindowEnv {
     fn env(&self, participant: &ParticipantView, project: &ProjectView) -> Vec<(String, String)> {
-        let mut env = vec![
+        let mut env = self.terminal.clone();
+        env.extend([
             ("CONSENSFLOW_URL".to_owned(), self.url.clone()),
             ("CONSENSFLOW_PROJECT".to_owned(), project.id.to_string()),
             (
                 "CONSENSFLOW_PARTICIPANT".to_owned(),
                 participant.handle.clone(),
             ),
-        ];
+        ]);
         env.push(("PATH".to_owned(), self.path.clone()));
         env
     }

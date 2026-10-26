@@ -39,6 +39,7 @@ use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
 use crate::background::quote;
 use crate::chief_switch::SwitchTo;
+use crate::computer_use::ComputerUseState;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
@@ -107,6 +108,8 @@ pub struct Dispatcher {
     pub(crate) resumes: ResumeState,
     /// What the questions of windows about trusting their folder were said of (`trust`).
     pub(crate) trust: TrustState,
+    /// The missing permissions each project's notes spoke of already (`computer_use`).
+    pub(crate) computer_use: ComputerUseState,
 }
 
 impl Dispatcher {
@@ -124,6 +127,7 @@ impl Dispatcher {
             closings: Closings::default(),
             resumes: ResumeState::default(),
             trust: TrustState::default(),
+            computer_use: ComputerUseState::default(),
         })
     }
 

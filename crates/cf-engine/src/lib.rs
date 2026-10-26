@@ -17,6 +17,7 @@
 mod arrival;
 mod background;
 mod chief_switch;
+pub mod computer_use;
 mod deliveries;
 pub mod delivery_text;
 pub mod dispatcher;

@@ -114,6 +114,15 @@ impl Fake {
             Line::Starts("plutil -extract CFBundleExecutable"),
             [said("app\n")],
         );
+        // A bundle signed with ConsensFlow's entitlements, whose Info.plist says why.
+        fake.answer(
+            Line::Starts("codesign -d --entitlements"),
+            [said(super::super::signing::ENTITLEMENTS)],
+        );
+        fake.answer(
+            Line::Starts("plutil -extract NS"),
+            [said("A program running in ConsensFlow would like to …\n")],
+        );
         fake.answer(Line::Starts("xcrun notarytool submit"), [said(accepted)]);
         fake.answer(Line::Starts("spctl"), [assessed]);
         fake

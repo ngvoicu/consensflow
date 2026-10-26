@@ -6,6 +6,16 @@
 //! instructions, each once. The skills folder of ConsensFlow's own copy of
 //! Specmint, where the chief is given one, goes after the role's.
 //!
+//! The paths come after the ones OpenCode's own files give the window's folder
+//! (its global and project configurations), asked of OpenCode itself
+//! (`opencode debug config`, [`configured_paths`]): it reads this configuration
+//! last and a list in it replaces the files' own, so a member that was told only
+//! of the role's folder lost the skills the human keeps elsewhere, which the same
+//! OpenCode opened in a terminal there has (T-540, 2026-10-25). A path is kept as
+//! OpenCode says it: it resolves a relative one against the window's folder from
+//! whichever layer it came. An OpenCode that cannot be asked, or answers no
+//! configuration, gives none, and the window goes on as it did before.
+//!
 //! The window is also told not to update itself (`"autoupdate": false`), as
 //! Devin's is: OpenCode updates itself to the latest release when it starts,
 //! which is how a working 1.x became the 2 that no window opens on (`version`).
@@ -21,32 +31,98 @@
 //!   pair in each, has each half written as U+FFFD, as a Rust text holds
 //!   no half of one.
 
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::time::Duration;
+
 use cf_base::env::Env;
 use cf_base::json::from_slice_lossy;
 use cf_base::{js, path};
 use cf_proto::agents::Harness;
 use serde_json::{Map, Value};
 
+use super::child_env::{child_env, Declared};
 use crate::contract::LaunchId;
+use crate::seams::processes::{Limits, Processes, Program};
 use crate::shared::paths::set;
 use crate::shared::role::write_role;
 
+/// How long OpenCode has to say its configuration, and how much it may say:
+/// it answers in about a second (1.19.4).
+const ASKED: Limits = Limits {
+    timeout: Duration::from_secs(30),
+    max_buffer: 4 * 1024 * 1024,
+};
+
+/// The skill paths OpenCode's own configuration gives a window opened in
+/// `directory`, as the OpenCode at `executable` resolves it there (`opencode
+/// debug config`), with the configuration the environment names: the one a
+/// terminal's OpenCode would read. It is asked with its updates off, as the
+/// window will be, so that asking never updates it. None where it cannot be
+/// asked, or answers no configuration whose paths are a list of texts.
+pub(super) async fn configured_paths(
+    processes: &Rc<dyn Processes>,
+    env: &Env,
+    executable: &str,
+    directory: &str,
+) -> Vec<String> {
+    let current = set(env, "OPENCODE_CONFIG_CONTENT");
+    let content = match from_slice_lossy(current.as_deref().unwrap_or("{}").as_bytes()) {
+        Ok(Value::Object(mut configuration)) => {
+            not_to_update(&mut configuration);
+            js::stringify(&Value::Object(configuration))
+        }
+        // Refused as the window's own configuration is (`merged`).
+        _ => current.unwrap_or_default(),
+    };
+    let asked = Env::from_vars(
+        env.iter()
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .chain([("OPENCODE_CONFIG_CONTENT".into(), content.into())]),
+    );
+    let program = Program {
+        executable: PathBuf::from(executable),
+        args: vec!["debug".to_owned(), "config".to_owned()],
+        cwd: Some(PathBuf::from(directory)),
+        env: child_env(&asked, &Declared::default()),
+    };
+    let Ok(said) = processes.run(program, ASKED).await else {
+        return Vec::new();
+    };
+    from_slice_lossy(said.as_bytes())
+        .ok()
+        .and_then(|configuration| {
+            paths(
+                configuration
+                    .get("skills")
+                    .and_then(|skills| skills.get("paths")),
+                "",
+            )
+            .ok()
+        })
+        .unwrap_or_default()
+}
+
 /// The `OPENCODE_CONFIG_CONTENT` a window of `role` runs with: what the
-/// environment names (nothing, `{}`) with the role added, the skills
-/// folder `specmint` of a copy of Specmint that is kept for the window, and
-/// its own updates off. The role's text is written first, so a configuration
-/// that is refused leaves it in its launch's folder, as it did in Node.
+/// environment names (nothing, `{}`) with the role added, its skills
+/// folder after the paths OpenCode's files give the window (`configured`,
+/// [`configured_paths`]), the skills folder `specmint` of a copy of Specmint
+/// that is kept for the window, and its own updates off. The role's text is
+/// written first, so a configuration that is refused leaves it in its
+/// launch's folder, as it did in Node.
 pub(super) fn configure(
     env: &Env,
     launch: &LaunchId,
     role: &str,
     content: &str,
     specmint: Option<String>,
+    configured: &[String],
 ) -> Result<String, String> {
     let written = write_role(Harness::Opencode, role, env, launch, content)?;
     let skills = path::join(&[&written.root, ".claude", "skills"]);
     let current = set(env, "OPENCODE_CONFIG_CONTENT");
-    let mut folders = vec![skills.as_str()];
+    let mut folders: Vec<&str> = configured.iter().map(String::as_str).collect();
+    folders.push(&skills);
     folders.extend(specmint.as_deref());
     let mut configuration = merged(current.as_deref().unwrap_or("{}"), &folders, &written.file)?;
     not_to_update(&mut configuration);

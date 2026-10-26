@@ -318,14 +318,23 @@ fn finder(shell: Option<&Path>, folders: &[PathBuf]) -> Env {
 #[cfg(unix)]
 fn the_daemons(app: &Env, timeout: Duration) -> (Command, Option<String>) {
     let mut command = command_for(Path::new("/bundle/cli/bin/cf"));
-    let said = on_login_path(&mut command, app, timeout, &LoginLookup::default());
+    let said = on_login_environment(&mut command, app, timeout, &LoginLookup::default());
     (command, said)
 }
 
-/// The PATH the daemon's `command` is given, and nothing else.
+/// The variables the daemon's `command` is given.
 #[cfg(unix)]
 fn given(command: &Command) -> Vec<(String, String)> {
     described(command).2
+}
+
+/// The value the daemon's `command` is given of the variable `name`.
+#[cfg(unix)]
+fn given_of(command: &Command, name: &str) -> Option<String> {
+    given(command)
+        .into_iter()
+        .find(|(held, _)| held == name)
+        .map(|(_, value)| value)
 }
 
 /// A loaded machine's login shell, slower than the five seconds it was
@@ -346,7 +355,7 @@ fn a_login_shell_slower_than_five_seconds_still_gives_its_path() {
         LOGIN_PATH_TIMEOUT,
     );
     assert!(started.elapsed() >= Duration::from_secs(6), "it answered");
-    assert_eq!(given(&command), [("PATH".to_owned(), login)]);
+    assert_eq!(given_of(&command, "PATH"), Some(login));
     assert_eq!(said, None);
 }
 
@@ -522,4 +531,317 @@ fn a_verbatim_windows_path_is_spelled_plainly() {
         plain_path(PathBuf::from("/Applications/ConsensFlow.app/cf")),
         PathBuf::from("/Applications/ConsensFlow.app/cf")
     );
+}
+
+/// A stand-in for a shell whose interactive rc file runs `rc` before the command it
+/// is given, as zsh runs `.zshrc` for `-i`; started without `-i` it runs the command
+/// alone, as a login shell's `-lc` does.
+#[cfg(unix)]
+fn shell_with_rc(home: &Path, rc: &str) -> PathBuf {
+    login_shell(
+        home,
+        &format!("case \"$1\" in *i*) {rc} ;; esac\nexec /bin/sh -c \"$2\""),
+    )
+}
+
+/// What a terminal's shell gives a harness, a member window has (T-540): a
+/// variable only the interactive rc exports reaches the daemon, a value of any
+/// bytes as it is, and the app's log says nothing of it.
+#[cfg(unix)]
+#[test]
+fn a_variable_only_the_interactive_shell_sets_reaches_the_daemon_as_it_is_and_is_not_logged() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "export PARITY_ONLY_INTERACTIVE='a value = with = signs\nand a second line'; \
+         export LANG=en_GB.UTF-8; export PATH=\"/rc/bin:$PATH\"",
+    );
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    assert_eq!(
+        given_of(&command, "PARITY_ONLY_INTERACTIVE").as_deref(),
+        Some("a value = with = signs\nand a second line")
+    );
+    assert_eq!(given_of(&command, "LANG").as_deref(), Some("en_GB.UTF-8"));
+    let path = given_of(&command, "PATH").expect("a PATH");
+    assert!(path.starts_with("/rc/bin:"), "{path}");
+    assert_eq!(said, None, "the log says nothing of a shell that answered");
+}
+
+/// What says where the shell was, how deep, its last command and its terminal is no
+/// pane's, and is not taken.
+#[cfg(unix)]
+#[test]
+fn the_shells_place_depth_last_command_and_terminal_are_not_taken() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "cd /; export OLDPWD=/tmp SHLVL=7 TERM=dumb TERM_PROGRAM=iTerm.app TERMINFO=/x \
+         PARITY_KEPT=yes",
+    );
+    let (command, _) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    let names: Vec<String> = given(&command).into_iter().map(|(name, _)| name).collect();
+    for dropped in [
+        "PWD",
+        "OLDPWD",
+        "SHLVL",
+        "_",
+        "TERM",
+        "TERM_PROGRAM",
+        "TERMINFO",
+    ] {
+        assert!(
+            !names.iter().any(|name| name == dropped),
+            "{dropped} was taken"
+        );
+    }
+    assert_eq!(given_of(&command, "PARITY_KEPT").as_deref(), Some("yes"));
+}
+
+/// An interactive rc that hangs (one that `exec`s a terminal multiplexer, say) costs
+/// the start no more than its one limit, both questions together, and the daemon still
+/// gets the login shell's PATH: it is never worse off than before the environment was
+/// asked.
+#[cfg(unix)]
+#[test]
+fn an_interactive_rc_that_hangs_falls_back_to_the_login_path_within_its_time() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(home.path(), "exec /bin/sleep 30");
+    let started = Instant::now();
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(2));
+    assert!(
+        started.elapsed() < Duration::from_millis(2_900),
+        "the start waited {:?}, past its one limit",
+        started.elapsed()
+    );
+    assert_eq!(given_of(&command, "PATH"), std::env::var("PATH").ok());
+    assert_eq!(given_of(&command, "PARITY_ONLY_INTERACTIVE"), None);
+    assert_eq!(said, None);
+}
+
+/// An entry of `env -0` is a variable by its first `=`; one with no name is none.
+#[test]
+fn an_entry_is_named_by_its_first_equals_sign_and_one_without_a_name_is_none() {
+    assert_eq!(
+        variable(b"A=b=c"),
+        Some((OsString::from("A"), OsString::from("b=c")))
+    );
+    assert_eq!(
+        variable(b"EMPTY="),
+        Some((OsString::from("EMPTY"), OsString::new()))
+    );
+    assert_eq!(variable(b"=x"), None);
+    assert_eq!(variable(b"no-equals"), None);
+}
+
+/// The PowerShell a Windows terminal opens: PowerShell 7 where a folder of the PATH has
+/// it, else Windows PowerShell, under the system's root.
+#[test]
+fn the_powershell_asked_is_pwsh_where_the_path_has_it_else_windows_powershell() {
+    let folder = tempfile::tempdir().expect("a folder");
+    let other = tempfile::tempdir().expect("another");
+    let env = |path: &[&Path]| {
+        Env::from_vars([
+            (
+                std::ffi::OsString::from("PATH"),
+                std::env::join_paths(path).expect("a PATH"),
+            ),
+            (
+                std::ffi::OsString::from("SystemRoot"),
+                std::ffi::OsString::from("/Windows-root"),
+            ),
+        ])
+    };
+    assert_eq!(
+        powershell_of(&env(&[other.path(), folder.path()])),
+        Path::new("/Windows-root").join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+    );
+    let pwsh = folder.path().join("pwsh.exe");
+    std::fs::write(&pwsh, "").expect("a pwsh");
+    assert_eq!(powershell_of(&env(&[other.path(), folder.path()])), pwsh);
+}
+
+/// Windows names its PATH `Path`: an environment that has it is taken whole.
+#[test]
+fn a_printed_environment_is_taken_by_its_path_whatever_its_case() {
+    let printed = b"Path=C:\\Windows\0SystemRoot=C:\\Windows\0PWD=/x\0";
+    let vars = taken(printed).expect("taken");
+    let names: Vec<String> = vars
+        .iter()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["Path", "SystemRoot"]);
+    assert_eq!(taken(b"SystemRoot=C:\\Windows\0"), None, "no PATH: none");
+}
+
+/// The real Windows PowerShell answers what this process has, as a terminal's gives it:
+/// its Path and SystemRoot come back as they are, within the time.
+#[cfg(windows)]
+#[test]
+fn windows_powershell_says_its_environment_in_utf8_between_the_markers() {
+    let env = Env::from_process();
+    let started = Instant::now();
+    let vars = profile_environment_in(
+        &powershell_of(&env),
+        Duration::from_secs(60),
+        &LoginLookup::default(),
+    )
+    .expect("PowerShell gave its environment");
+    assert!(started.elapsed() < Duration::from_secs(60));
+    let value = |name: &str| {
+        vars.iter()
+            .find(|(held, _)| held.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.clone())
+    };
+    assert_eq!(value("SystemRoot"), std::env::var_os("SystemRoot"));
+    assert!(value("PATH").is_some_and(|path| !path.is_empty()));
+}
+
+/// What the app sets for itself wins over the rc, and the rc over what the app was started
+/// with: ConsensFlow's own variables and the loader's are never taken, nor a Claude
+/// session's identity, while a harness's home is, as in a terminal.
+#[cfg(unix)]
+#[test]
+fn consensflows_own_the_loaders_and_a_claude_sessions_variables_are_never_taken_and_a_harness_home_is(
+) {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "export CONSENSFLOW_HOME=/rc/home CF_ANYTHING=1 DYLD_INSERT_LIBRARIES=/x.dylib \
+         LD_PRELOAD=/x.so CLAUDECODE=1 CLAUDE_CODE_SESSION_ID=s1 \
+         CLAUDE_CONFIG_DIR=/rc/claude CODEX_HOME=/rc/codex",
+    );
+    let (command, _) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    for never in [
+        "CONSENSFLOW_HOME",
+        "CF_ANYTHING",
+        "DYLD_INSERT_LIBRARIES",
+        "LD_PRELOAD",
+        "CLAUDECODE",
+        "CLAUDE_CODE_SESSION_ID",
+    ] {
+        assert_eq!(given_of(&command, never), None, "{never} was taken");
+    }
+    assert_eq!(
+        given_of(&command, "CLAUDE_CONFIG_DIR").as_deref(),
+        Some("/rc/claude")
+    );
+    assert_eq!(
+        given_of(&command, "CODEX_HOME").as_deref(),
+        Some("/rc/codex")
+    );
+}
+
+/// A run that starts the app with a harness home of its own keeps it, whatever the rc
+/// says: the daemon is not given the rc's, nor told its name, so it and every window keep
+/// the app's. A home the app has none of is the rc's.
+#[cfg(unix)]
+#[test]
+fn a_harness_home_the_app_was_started_with_is_kept_over_the_rcs() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "export CLAUDE_CONFIG_DIR=/rc/claude CODEX_HOME=/rc/codex",
+    );
+    let mut vars: Vec<(OsString, OsString)> = finder(Some(shell.as_path()), &[])
+        .iter()
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .collect();
+    vars.push(("CLAUDE_CONFIG_DIR".into(), "/test/claude".into()));
+    let (command, _) = the_daemons(&Env::from_vars(vars), Duration::from_secs(10));
+    assert_eq!(
+        given_of(&command, "CLAUDE_CONFIG_DIR"),
+        None,
+        "the app's is kept"
+    );
+    assert_eq!(
+        given_of(&command, "CODEX_HOME").as_deref(),
+        Some("/rc/codex"),
+        "a home the app has none of is the rc's"
+    );
+    let names = given_of(&command, TERMINAL_ENV).unwrap_or_default();
+    assert!(!names.contains("CLAUDE_CONFIG_DIR"), "{names}");
+    assert!(names.contains("CODEX_HOME"), "{names}");
+}
+
+/// The daemon is told which names it was given of the terminal's environment, by name
+/// only and without the PATH, which it gives every pane itself: so that each window's
+/// pane gets them too.
+#[cfg(unix)]
+#[test]
+fn the_daemon_is_told_the_names_it_was_given_and_never_their_values() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "export PARITY_SECRET=do-not-print LANG=en_GB.UTF-8 PATH=\"/rc/bin:$PATH\"",
+    );
+    let (command, _) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    let said = given_of(&command, TERMINAL_ENV).expect("the names");
+    let names: Vec<String> = serde_json::from_str(&said).expect("a list of names");
+    assert!(
+        names.iter().any(|name| name == "PARITY_SECRET"),
+        "{names:?}"
+    );
+    assert!(names.iter().any(|name| name == "LANG"), "{names:?}");
+    assert!(
+        !names.iter().any(|name| name.eq_ignore_ascii_case("PATH")),
+        "{names:?}"
+    );
+    assert!(!said.contains("do-not-print"), "a value crossed: {said}");
+    // A shell that gave nothing names nothing.
+    let failing = login_shell(home.path(), "/bin/sh -c \"$2\"; exit 3");
+    let (command, _) = the_daemons(
+        &finder(Some(failing.as_path()), &[]),
+        Duration::from_secs(5),
+    );
+    assert_eq!(given_of(&command, TERMINAL_ENV), None);
+}
+
+/// On Windows the PowerShell asked has no console window of its own: started from a
+/// windowed app, one would flash up at every start for as long as the profile takes.
+#[cfg(windows)]
+#[test]
+fn the_powershell_asked_has_no_console_window() {
+    let marker = marker("window");
+    let script = format!(
+        "Add-Type -Namespace Cf -Name Console -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern System.IntPtr GetConsoleWindow();'; \
+         [Console]::Out.Write('{marker}' + [Cf.Console]::GetConsoleWindow() + '{marker}')"
+    );
+    let env = Env::from_process();
+    let said = asked(
+        &powershell_of(&env),
+        &[
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &script,
+        ],
+        &marker,
+        Duration::from_secs(60),
+        &LoginLookup::default(),
+    )
+    .expect("PowerShell answered");
+    assert_eq!(
+        String::from_utf8_lossy(&said),
+        "0",
+        "it had a console window"
+    );
+}
+
+/// A shell whose login files hang too is given one limit in all, not one for each
+/// question: the start waits no longer than `LOGIN_PATH_TIMEOUT` says.
+#[cfg(unix)]
+#[test]
+fn a_shell_that_hangs_on_every_question_costs_the_start_one_limit() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = login_shell(home.path(), "exec /bin/sleep 30");
+    let started = Instant::now();
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(2));
+    assert!(
+        started.elapsed() < Duration::from_millis(2_900),
+        "the start waited {:?}",
+        started.elapsed()
+    );
+    assert_eq!(given_of(&command, "PATH").as_deref(), Some(FINDER_PATH));
+    assert!(said.is_some(), "the log says the shell gave none");
 }

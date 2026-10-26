@@ -103,6 +103,9 @@ fn window(
                 command: "claude",
                 args: seeded(args),
                 prompt: None,
+                // Taken off whatever else of the human's shell the window keeps: a
+                // leftover export would move the window off the human's subscription
+                // login onto per-token API billing, with no word on the board.
                 drop_env: &["ANTHROPIC_API_KEY"],
             }
         }
@@ -132,6 +135,8 @@ fn window(
                 command: "codex",
                 args: seeded(args),
                 prompt: None,
+                // As Claude's key: a leftover export would move the window off the
+                // human's ChatGPT login onto per-token API billing.
                 drop_env: &["OPENAI_API_KEY"],
             }
         }

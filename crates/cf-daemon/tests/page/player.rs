@@ -144,6 +144,17 @@ impl Player {
             specs: page::Specs::opening_with(Rc::new(|_, _| {
                 Box::pin(async { Err("the trace player opens no file".to_owned()) })
             })),
+            // No trace of Node's asks of computer use: a machine with none, which opens nothing.
+            computer_use: page::ComputerUsePage {
+                machine: Rc::new(cf_daemon::computer_use::MachineComputerUse::granting(
+                    self.world.env(),
+                    Rc::new(|| None),
+                )),
+                open: Rc::new(|_| {
+                    Box::pin(async { Err("the trace player opens nothing".to_owned()) })
+                }),
+                grants_of: None,
+            },
         });
         let (daemon_end, app_end) = duplex(256 * 1024);
         let (daemon_input, daemon_output) = split(daemon_end);

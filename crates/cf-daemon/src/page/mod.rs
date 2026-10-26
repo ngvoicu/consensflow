@@ -34,6 +34,7 @@ mod agents;
 mod app_specs;
 mod board;
 mod body;
+mod computer_use;
 mod engine;
 mod history;
 mod messages;
@@ -57,6 +58,7 @@ use cf_proto::page::PageOperation;
 use futures_util::future::LocalBoxFuture;
 use serde_json::{json, Map, Value};
 
+pub use computer_use::ComputerUsePage;
 pub use engine::Engine;
 pub use viewer::{Opener, Specs};
 
@@ -74,6 +76,8 @@ pub struct Page {
     /// Wakes the dispatcher: what the loop kick does.
     pub kick: Rc<dyn Fn()>,
     pub specs: Specs,
+    /// The machine's computer use, and the opener of System Settings panes.
+    pub computer_use: ComputerUsePage,
 }
 
 /// What an operation serves: the fields of its answer, which follow `ok: true`,

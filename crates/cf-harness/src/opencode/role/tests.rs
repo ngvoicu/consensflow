@@ -184,7 +184,7 @@ fn the_role_is_written_in_the_launchs_folder_before_the_configuration_is_looked_
         vars.extend(config.map(|config| ("OPENCODE_CONFIG_CONTENT".to_owned(), config.to_owned())));
         Env::from_vars(vars)
     };
-    let refused = configure(&env(Some("[]")), &launch, "worker", "role text", None);
+    let refused = configure(&env(Some("[]")), &launch, "worker", "role text", None, &[]);
     assert_eq!(
         refused.unwrap_err(),
         "OpenCode process configuration must be an object"
@@ -202,7 +202,7 @@ fn the_role_is_written_in_the_launchs_folder_before_the_configuration_is_looked_
     let file = path::join(&[&role, "consensflow-worker", "SKILL.md"]);
     assert_eq!(fs::read_to_string(&file).unwrap(), "role text");
     for config in [None, Some("")] {
-        let made = configure(&env(config), &launch, "worker", "role text", None).unwrap();
+        let made = configure(&env(config), &launch, "worker", "role text", None, &[]).unwrap();
         assert_eq!(
             made,
             js::stringify(&serde_json::json!({
@@ -227,7 +227,15 @@ fn configured(config: Option<&str>) -> Value {
         ("CONSENSFLOW_HOME".to_owned(), path::join(&[&home, "app"])),
     ];
     vars.extend(config.map(|config| ("OPENCODE_CONFIG_CONTENT".to_owned(), config.to_owned())));
-    let made = configure(&Env::from_vars(vars), &launch, "worker", "role text", None).unwrap();
+    let made = configure(
+        &Env::from_vars(vars),
+        &launch,
+        "worker",
+        "role text",
+        None,
+        &[],
+    )
+    .unwrap();
     serde_json::from_str(&made).unwrap()
 }
 
@@ -290,7 +298,7 @@ fn a_window_without_its_role_text_is_refused_before_the_configuration_is_looked_
     ]);
     let launch = LaunchId::new("0a1b2c3d-4e5f-4061-8a7b-9c0d1e2f3a4b").unwrap();
     assert_eq!(
-        configure(&env, &launch, "worker", "", None).unwrap_err(),
+        configure(&env, &launch, "worker", "", None, &[]).unwrap_err(),
         "the worker window needs its role text"
     );
     assert!(!dir.path().join("integrations").exists());

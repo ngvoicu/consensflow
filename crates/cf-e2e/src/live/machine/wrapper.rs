@@ -25,8 +25,9 @@ pub fn isolated_claude(folder: &Path, claude: &Path) -> Result<PathBuf> {
 }
 
 /// A program called `claude-shimmed` that runs the stand-in agent at `stand_in`,
-/// with the Claude config folder of the machine (`$HOME/.claude`, where the
-/// daemon looks for the records of a window), for the window whose agent's model
+/// with the Claude config folder the daemon looks for the records of a window in
+/// (the run's own, `CLAUDE_CONFIG_DIR`, where it was given one, and else the
+/// machine's, `$HOME/.claude`), for the window whose agent's model
 /// is `fake` or `fake-chief`, and the real Claude Code at `claude` as
 /// [`isolated_claude`] does for every other: a project whose chief and some
 /// members are stand-ins and whose other members are real. Made in `folder`.
@@ -96,11 +97,12 @@ fn shimming_script(claude: &Path, stand_in: &Path, servers: Option<&Path>) -> St
     format!(
         "#!/bin/sh\n\
          # Written by a live test: a window whose agent's model is fake or fake-chief is the\n\
-         # stand-in's, which writes its records where the daemon reads Claude's; every other\n\
+         # stand-in's, which writes its records where the daemon reads Claude's (the run's own\n\
+         # Claude folder, else the machine's); every other\n\
          # Claude window reaches no MCP server and no browser.\n\
          for arg in \"$@\"; do\n\
          \x20 case \"$arg\" in\n\
-         \x20   fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec {} \"$@\" ;;\n\
+         \x20   fake | fake-chief) CLAUDE_CONFIG_DIR=\"${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}\" exec {} \"$@\" ;;\n\
          \x20 esac\n\
          done\n\
          exec {} {servers}{} \"$@\"\n",
@@ -150,7 +152,7 @@ mod tests {
         // The stand-in's window is as it was: it has no server of the harness's.
         assert!(
             script.contains(
-                "fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec '/the/fake-agent' \"$@\" ;;"
+                "fake | fake-chief) CLAUDE_CONFIG_DIR=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\" exec '/the/fake-agent' \"$@\" ;;"
             ),
             "{script}"
         );
@@ -169,7 +171,7 @@ mod tests {
         );
         assert!(
             script.contains(
-                "fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec '/the/fake-agent' \"$@\" ;;"
+                "fake | fake-chief) CLAUDE_CONFIG_DIR=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\" exec '/the/fake-agent' \"$@\" ;;"
             ),
             "{script}"
         );
@@ -231,6 +233,33 @@ mod tests {
                 "{model}"
             );
         }
+    }
+
+    /// A run given a Claude config folder of its own (`--claude-config`) has the daemon
+    /// read Claude's records there: the stand-in chief must write its own there too, or
+    /// its window never reads as idle (T-540's live case met it).
+    #[cfg(unix)]
+    #[test]
+    fn a_stand_in_keeps_the_claude_folder_a_run_was_given_and_else_the_machines() {
+        let folder = tempfile::tempdir().unwrap();
+        let shim =
+            shimmed_claude(folder.path(), Path::new("/bin/echo"), Path::new("/bin/sh")).unwrap();
+        let run = |config: Option<&str>| {
+            let run = crate::process::Run::new("/bin/sh")
+                .arg(&shim)
+                .args(["-c", "echo $CLAUDE_CONFIG_DIR", "fake-chief"])
+                .var("HOME", "/h");
+            match config {
+                Some(config) => run.var("CLAUDE_CONFIG_DIR", config),
+                None => run,
+            }
+            .run()
+            .unwrap()
+            .stdout
+        };
+        assert_eq!(run(Some("/run/own config")), "/run/own config\n");
+        assert_eq!(run(Some("")), "/h/.claude\n");
+        assert_eq!(run(None), "/h/.claude\n");
     }
 
     #[cfg(unix)]
