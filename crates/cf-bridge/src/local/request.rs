@@ -4,7 +4,7 @@ use std::future::Future;
 use std::rc::Rc;
 use std::time::Duration;
 
-use cf_proto::bridge::{too_large_body, Frame, PROTOCOL_VERSION};
+use cf_proto::bridge::{too_large_body, Frame, DEADLINE, PROTOCOL_VERSION};
 use serde_json::Value;
 use tokio::sync::oneshot;
 use tokio::time::{timeout_at, Instant};
@@ -67,7 +67,7 @@ impl Bridge {
                     _forget,
                 } => match timeout_at(until, answered).await {
                     Ok(answer) => answer.unwrap_or(Err(BridgeError::Eof)),
-                    Err(_) => Ok(refusal("deadline")),
+                    Err(_) => Ok(refusal(DEADLINE)),
                 },
             }
         }

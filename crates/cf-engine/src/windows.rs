@@ -15,6 +15,7 @@ use cf_ledger::{
     Begun, ConversationView, HandOver, MessageView, NewNote, ParticipantView, ProjectView, Stop,
 };
 use cf_proto::agents::Harness;
+use cf_proto::bridge::DEADLINE;
 use cf_proto::panes::{Servers, CLOSE_GRACE};
 use cf_proto::trace::WindowEvent;
 use futures_util::future::{select, Either};
@@ -254,6 +255,12 @@ pub(crate) struct WindowPart {
     pub(crate) owner: Option<i64>,
     /// The task whose requester was told it waits for this window to close.
     pub(crate) told_waiting: Option<i64>,
+    /// The window of its last launch whose open the host never answered by the open's
+    /// deadline: the host may have started its program since, or may yet, and it would
+    /// run on the conversation the next window goes on with (a Codex thread one client
+    /// holds alone). It is ended before another window of the participant opens
+    /// ([`Dispatcher::end_abandoned`]).
+    pub(crate) abandoned: Option<Pane>,
 }
 
 impl Default for WindowPart {
@@ -292,6 +299,7 @@ impl Default for WindowPart {
             unproven: false,
             owner: None,
             told_waiting: None,
+            abandoned: None,
         }
     }
 }
@@ -498,6 +506,11 @@ impl Dispatcher {
         participant: &ParticipantView,
         message: Option<MessageView>,
     ) -> Result<(), EngineError> {
+        // A window whose open went unanswered is ended before another opens; until the
+        // host says it has, the launch waits for the next step.
+        if !self.end_abandoned(record).await? {
+            return Ok(());
+        }
         record.window.borrow_mut().launches += 1;
         let harness = participant.harness.clone().unwrap_or_default();
         // A role the window took before it closed, though its arrival was never
@@ -631,7 +644,8 @@ impl Dispatcher {
         // was proven of the last one on it holds no more, kept so before anything of
         // the new one runs, so that a restart while it is open does not take it for
         // gone (`ownership`). A host that refuses the open ran nothing, and the proof
-        // is kept again; one whose answer never came may have. A window on a new
+        // is kept again; one whose answer never came may have, or may yet (kluris,
+        // 2026-10-26: it started three seconds after the deadline). A window on a new
         // conversation leaves the one before as it was.
         let resumed = resume.is_some() && planned.native_session == resume;
         let resumed_on = planned
@@ -683,6 +697,24 @@ impl Dispatcher {
                     &launch_id,
                     &error,
                 );
+            }
+            // The host goes on with an open it did not answer in time: the window's
+            // program may run, on the conversation and with whatever its command line
+            // gave it, and nobody would see what it does. It is the participant's to
+            // end before another of its windows opens.
+            Ok(Opened::Unanswered) => {
+                record.window.borrow_mut().abandoned = Some(pane.clone());
+                let failed = self.not_opened(
+                    record,
+                    project,
+                    participant,
+                    failing,
+                    &token,
+                    &launch_id,
+                    DEADLINE,
+                );
+                self.end_abandoned(record).await?;
+                return failed;
             }
             Err(error) => {
                 return self.not_opened(
@@ -1381,6 +1413,29 @@ impl Dispatcher {
         }
         self.changed();
         Ok(killed)
+    }
+
+    /// Ends the window whose open went unanswered ([`WindowPart::abandoned`]): whether
+    /// none is left. The host's kill ends it where it has opened, its programs and what
+    /// they started, and where its open has not reached the host yet, the host never
+    /// opens it (`cf_panes`' cancelled windows); either way the window is nothing more
+    /// of the participant's. A kill the host refused, or did not answer, leaves it, and
+    /// the participant's next step asks again.
+    pub(crate) async fn end_abandoned(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+    ) -> Result<bool, EngineError> {
+        let Some(pane) = record.window.borrow().abandoned.clone() else {
+            return Ok(true);
+        };
+        if !self.kill(record, &pane).await? {
+            return Ok(false);
+        }
+        let mut window = record.window.borrow_mut();
+        if window.abandoned.as_ref() == Some(&pane) {
+            window.abandoned = None;
+        }
+        Ok(true)
     }
 
     /// Kills a window: whether the pane host took the kill; the trace says

@@ -11,6 +11,12 @@
 //! the turn goes on beside the connections, one at a time, and writes what Codex
 //! writes of one: it started, the message, the answer, it is complete.
 //!
+//! A thread is one server's at a time, as Codex's is: the server that begins its
+//! rollout, or resumes it, holds it (a lock beside the rollout names its process),
+//! and while that process lives another server asked to resume the thread answers
+//! with it read-only, as Codex answered the window a second client opened on a thread
+//! another held ("open in another app", kluris, 2026-10-26: [`Agent::hold`]).
+//!
 //! A thread keeps the instructions it began with. The server is given the role's
 //! text as Codex is (`-c developer_instructions=…`), and the first turn of a thread
 //! it starts writes it into the rollout as the developer's message. A thread it
@@ -42,6 +48,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use cf_e2e::live::members::{Identity, Machine, ThisMachine};
 use cf_e2e::process::own_var;
 use cf_e2e::{files, pattern};
 use regex::Regex;
@@ -168,6 +175,33 @@ impl Agent {
         thread::spawn(move || agent.turn(&text));
     }
 
+    /// Whether this server holds its thread, which it takes where no other server that
+    /// still runs does: the lock beside the rollout names the one that holds it, by its
+    /// process and when that began. A thread with no rollout yet is nobody's.
+    pub fn hold(&self) -> bool {
+        let Some(rollout) = held(&self.rollout).clone() else {
+            return true;
+        };
+        let lock = PathBuf::from(format!("{}.lock", rollout.display()));
+        let ours = ThisMachine.identity(std::process::id()).ok().flatten();
+        let holder = fs::read_to_string(&lock).ok().and_then(|text| {
+            let (pid, started) = text.trim().split_once(' ')?;
+            Some(Identity {
+                pid: pid.parse().ok()?,
+                started: started.parse().ok()?,
+            })
+        });
+        if let Some(holder) = holder.filter(|holder| Some(*holder) != ours) {
+            if ThisMachine.identity(holder.pid).ok().flatten() == Some(holder) {
+                return false;
+            }
+        }
+        if let Some(ours) = ours {
+            let _ = fs::write(&lock, format!("{} {}\n", ours.pid, ours.started));
+        }
+        true
+    }
+
     /// The thread's first turn begins its rollout, as Codex's does with what it ran
     /// in: a thread that has had none has no rollout to resume.
     fn begin_rollout(&self) {
@@ -183,6 +217,7 @@ impl Agent {
             }
             *rollout = Some(path);
         }
+        self.hold();
         self.write(
             "session_meta",
             json!({ "session_id": thread, "id": thread, "originator": "codex-tui" }),

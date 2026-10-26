@@ -3,7 +3,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
@@ -45,6 +45,11 @@ const EXIT_GRACE: Duration = Duration::from_secs(5);
 /// what the program printed last.
 #[cfg(windows)]
 const EXIT_FLUSH: Duration = Duration::from_secs(1);
+
+/// How many windows killed before they opened a table keeps ([`PaneTable::kill`]): an
+/// open the daemon gave up on reaches the host a moment after its kill, and the kills
+/// of windows long gone, which find nothing too, make room for the latest.
+const CANCELLED_KEPT: usize = 256;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PaneKey {
@@ -127,6 +132,8 @@ pub enum PaneError {
     ProgramNotAbsolute(PathBuf),
     AlreadyOpen(PaneKey),
     NotFound(PaneKey),
+    /// The daemon closed the window before its open reached the table.
+    Cancelled(PaneKey),
     Pty(String),
     Io(io::Error),
     InvalidBacklog,
@@ -163,6 +170,11 @@ impl fmt::Display for PaneError {
             Self::NotFound(key) => write!(
                 formatter,
                 "pane {} generation {} is not open",
+                key.id, key.generation
+            ),
+            Self::Cancelled(key) => write!(
+                formatter,
+                "pane {} generation {} was closed before it opened",
                 key.id, key.generation
             ),
             Self::Pty(message) => write!(formatter, "PTY error: {message}"),
@@ -369,6 +381,10 @@ impl OutputFlow {
 
 pub struct PaneTable {
     panes: Mutex<HashMap<PaneKey, Pane>>,
+    /// The windows killed before their open reached the table, the latest
+    /// [`CANCELLED_KEPT`]: one of them never opens. Taken under `panes`' lock,
+    /// after it, by a kill and an open alike.
+    cancelled: Mutex<VecDeque<PaneKey>>,
     #[cfg(any(test, feature = "test-support"))]
     next_id: AtomicU64,
     updating: AtomicBool,
@@ -432,6 +448,7 @@ impl PaneTable {
     pub fn closing_within(grace: Duration) -> Self {
         Self {
             panes: Mutex::new(HashMap::new()),
+            cancelled: Mutex::new(VecDeque::new()),
             #[cfg(any(test, feature = "test-support"))]
             next_id: AtomicU64::new(1),
             updating: AtomicBool::new(false),
@@ -524,6 +541,9 @@ impl PaneTable {
         }
         if panes.contains_key(&key) {
             return Err(PaneError::AlreadyOpen(key));
+        }
+        if self.uncancel(&key) {
+            return Err(PaneError::Cancelled(key));
         }
 
         // A window whose tree cannot be owned does not open: closing it could not end
@@ -860,9 +880,40 @@ impl PaneTable {
     fn close_pane(&self, key: &PaneKey, told: bool) -> Result<(), PaneError> {
         let mut panes = self.lock_panes()?;
         let Some(pane) = panes.remove(key) else {
+            // Gone already, or not open yet: an open of it that comes now is one
+            // the daemon gave up on (its answer came too late), and it never opens.
+            self.cancel(key);
             return Ok(());
         };
         self.tear_down(panes, pane, told)
+    }
+
+    /// `key` is closed before its open reached the table: that open is refused.
+    /// Called with `panes`' lock held, as the open checks it with that lock held,
+    /// so a kill and an open of one window are the one or the other way round.
+    fn cancel(&self, key: &PaneKey) {
+        let mut cancelled = self
+            .cancelled
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if cancelled.contains(key) {
+            return;
+        }
+        if cancelled.len() == CANCELLED_KEPT {
+            cancelled.pop_front();
+        }
+        cancelled.push_back(key.clone());
+    }
+
+    /// Whether `key` was closed before its open reached the table, which then
+    /// takes it off the list. Called with `panes`' lock held.
+    fn uncancel(&self, key: &PaneKey) -> bool {
+        let mut cancelled = self
+            .cancelled
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let at = cancelled.iter().position(|cancelled| cancelled == key);
+        at.and_then(|at| cancelled.remove(at)).is_some()
     }
 
     /// [`PaneTable::kill`], with the close on a thread of its own: the pane is out of the
@@ -1448,7 +1499,7 @@ mod tests {
         process_exists, serial_pty_test, write_paste_via, OpenedPane, PaneEnvironment, PaneKey,
         Sentinel,
     };
-    use super::{PaneError, PaneTable};
+    use super::{PaneError, PaneTable, CANCELLED_KEPT};
 
     fn terminal_size(rows: u16, cols: u16) -> PtySize {
         PtySize {
@@ -1654,6 +1705,69 @@ mod tests {
                 idle_ms: 0,
             }]
         );
+    }
+
+    /// A window the daemon killed before its open reached the table never opens: the
+    /// daemon gave up on that open at its deadline and its kill found nothing (kluris,
+    /// 2026-10-26: the window started three seconds after the deadline and worked on
+    /// unseen). The next generation of the window opens as ever.
+    #[cfg(unix)]
+    #[test]
+    fn a_window_killed_before_its_open_never_opens_and_its_next_generation_does() {
+        let _pty_guard = serial_pty_test();
+        let table = PaneTable::new();
+        let argv = shell("sleep 1000");
+        let env = HashMap::new();
+        let given_up = PaneKey::new("worker", 1);
+        table
+            .kill(&given_up)
+            .expect("a kill that finds nothing is no failure");
+
+        let late = table.open_at(
+            given_up.clone(),
+            Path::new("/tmp"),
+            &argv,
+            &env,
+            terminal_size(24, 80),
+        );
+        match late {
+            Err(PaneError::Cancelled(key)) => assert_eq!(key, given_up),
+            Err(other) => panic!("refused for another reason: {other}"),
+            Ok(_) => panic!("the window given up on opened"),
+        }
+        assert!(table.list().expect("list").is_empty());
+
+        let next = PaneKey::new("worker", 2);
+        let reader = table
+            .open_at(
+                next.clone(),
+                Path::new("/tmp"),
+                &argv,
+                &env,
+                terminal_size(24, 80),
+            )
+            .expect("the next generation opens");
+        table.kill(&next).expect("kill the next generation");
+        assert_eq!(read_to_end(reader), b"");
+    }
+
+    /// The windows killed before they opened are the latest [`CANCELLED_KEPT`]: the kills
+    /// of windows long gone, which find nothing as well, push out the oldest, and a window
+    /// is kept from opening once.
+    #[test]
+    fn the_windows_killed_before_they_opened_are_the_latest_few() {
+        let table = PaneTable::new();
+        let key = |generation: u64| PaneKey::new("worker", generation);
+        for generation in 0..=u64::try_from(CANCELLED_KEPT).unwrap() {
+            table.kill(&key(generation)).expect("kill");
+        }
+        let panes = table.lock_panes().expect("lock");
+        assert!(!table.uncancel(&key(0)), "the oldest made room");
+        assert!(table.uncancel(&key(1)));
+        assert!(!table.uncancel(&key(1)), "once");
+        let last = u64::try_from(CANCELLED_KEPT).unwrap();
+        assert!(table.uncancel(&key(last)));
+        drop(panes);
     }
 
     #[cfg(unix)]

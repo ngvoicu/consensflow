@@ -84,6 +84,8 @@ mod a_terminals_environment_reached_the_daemon_and_no_window;
 mod a_torn_record_line_hid_the_rest_of_a_conversation;
 #[path = "regressions/a_trust_question_after_git_init_stopped_every_launch.rs"]
 mod a_trust_question_after_git_init_stopped_every_launch;
+#[path = "regressions/a_window_whose_open_missed_its_deadline_worked_on_unseen.rs"]
+mod a_window_whose_open_missed_its_deadline_worked_on_unseen;
 #[path = "regressions/a_window_with_nothing_to_stop_was_closed_and_its_work_ended.rs"]
 mod a_window_with_nothing_to_stop_was_closed_and_its_work_ended;
 #[path = "regressions/a_worker_that_waited_on_its_run_with_monitor_lost_it.rs"]

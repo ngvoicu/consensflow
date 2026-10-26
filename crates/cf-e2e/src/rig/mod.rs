@@ -55,7 +55,7 @@ use crate::{cf, checkout, files, wire, Error, Result};
 pub use jobs::Job;
 pub use names::project_name;
 pub use project::{write_staff, Project};
-pub use route::Pasted;
+pub use route::{Held, Pasted};
 
 pub(crate) use observe::events_of;
 

@@ -15,7 +15,7 @@
 //! a thread starts; while the file `CF_TEST_CODEX_RESUME_HANGS` names is there, it
 //! never answers a resume, and `CF_TEST_CODEX_RESUME_MS` answers one that many
 //! milliseconds late. `CF_TEST_CODEX_TUI=wait` has the TUI wait for its window to
-//! end it.
+//! end it. A thread another server still holds is resumed read-only (`agent`).
 //!
 //! The server listens where it is told, as Codex's does: on a Unix socket
 //! (`unix://<path>`), or on loopback (`ws://127.0.0.1:0`, Windows'), where it
@@ -338,9 +338,14 @@ fn resumed(id: &Value, params: &Value, agent: &Arc<Agent>) -> Value {
         thread::sleep(Duration::from_millis(slow));
     }
     if agent.resume(thread) {
+        // A thread another server still holds is this one's to read, not to work in.
+        let read_only = !agent.hold();
+        if read_only {
+            record(json!({ "run": "server", "readOnly": thread }));
+        }
         result(
             id,
-            json!({ "thread": { "id": thread, "turns": [], "status": { "type": "idle" } } }),
+            json!({ "thread": { "id": thread, "turns": [], "status": { "type": "idle" } }, "readOnly": read_only }),
         )
     } else {
         json!({

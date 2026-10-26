@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
-use cf_proto::bridge::{Frame, Role};
+use cf_proto::bridge::{Frame, Role, DEADLINE};
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 use tokio::time::Instant;
@@ -166,7 +166,7 @@ impl Inner {
             return;
         }
         let answer = if Instant::now() >= request.until {
-            refusal("deadline")
+            refusal(DEADLINE)
         } else {
             body
         };

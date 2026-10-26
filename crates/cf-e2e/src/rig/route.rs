@@ -16,6 +16,9 @@
 //! waiting for it, as a daemon stopped between a paste and its receipt left it.
 //! Or stall the pane host at one ([`Stall`]): the paste and every frame after it
 //! between the two wait here for a while, then go on in the order they came.
+//! Or hold one window's open ([`OpenHold`]): the daemon's `pane.open`, or the pane
+//! host's answer to it, waits here until the case lets it go, as an open the loaded
+//! Mac took longer than its deadline over, while every other frame goes on.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -171,6 +174,32 @@ impl Stall {
     }
 }
 
+/// What of a window's open a case holds ([`crate::rig::Rig::hold_open`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Held {
+    /// The daemon's `pane.open`, before the pane host has it: the window's program is
+    /// not started until it goes on, and whatever the daemon asks meanwhile (a kill of
+    /// that window) reaches the host first.
+    TheRequest,
+    /// The pane host's answer to it: the program is started, and the daemon is not
+    /// told so until it goes on.
+    TheAnswer,
+}
+
+/// An open a case set out to hold: armed for the daemon's next `pane.open` of a window
+/// whose id begins with some words, it holds that frame or the host's answer to it
+/// until the case lets it go.
+#[derive(Debug, Default)]
+pub(super) struct OpenHold {
+    armed: Option<(String, Held)>,
+    /// The id of the request whose answer is to be held, once the request went on.
+    answer_of: Option<String>,
+    /// The window held (`id`, `generation`), once one is.
+    window: Option<Value>,
+    /// The frame held, and the side it goes to.
+    frame: Option<(String, Held)>,
+}
+
 /// What the routers share with the case.
 #[derive(Debug, Default)]
 pub(super) struct Shared {
@@ -183,6 +212,7 @@ pub(super) struct Shared {
     stall: Arc<Mutex<Stall>>,
     /// The daemon's looks at a window's screen are refused here while it is set.
     refusing_snapshots: AtomicBool,
+    open_hold: Mutex<OpenHold>,
 }
 
 impl Shared {
@@ -271,6 +301,87 @@ impl Shared {
             stall.to_daemon.push(line.to_owned());
         }
         stall.holding
+    }
+
+    /// The daemon's next `pane.open` of a window whose id begins with `pane` is held as
+    /// `held` says, until [`Shared::let_open_go`]; one set before and not yet begun is
+    /// replaced.
+    pub fn hold_open(&self, pane: &str, held: Held) {
+        *self.open_hold() = OpenHold {
+            armed: Some((pane.to_owned(), held)),
+            ..OpenHold::default()
+        };
+    }
+
+    /// The window whose open is held (`id`, `generation`), once one is.
+    pub fn open_held(&self) -> Option<Value> {
+        let hold = self.open_hold();
+        hold.frame.as_ref().and(hold.window.clone())
+    }
+
+    /// Lets the frame of the open held go on to the side it was for: whether one was
+    /// held. Nothing is held after it.
+    pub fn let_open_go(&self, host: &Sink, daemon: &Sink) -> bool {
+        let mut hold = self.open_hold();
+        hold.armed = None;
+        hold.answer_of = None;
+        let Some((line, held)) = hold.frame.take() else {
+            return false;
+        };
+        match held {
+            Held::TheRequest => host.send(line),
+            Held::TheAnswer => daemon.send(line),
+        }
+        true
+    }
+
+    fn open_hold(&self) -> MutexGuard<'_, OpenHold> {
+        self.open_hold
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Whether `line`, a frame of the daemon's, is the open held, or the request whose
+    /// answer is to be: the first is kept here, the second goes on.
+    fn holds_open_request(&self, frame: &Value, line: &str) -> bool {
+        if frame["kind"] != "req" || frame["op"] != "pane.open" {
+            return false;
+        }
+        let mut hold = self.open_hold();
+        let is_for = |pane: &str| {
+            frame["body"]["id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with(pane))
+        };
+        let Some((_, held)) = hold.armed.take_if(|(pane, _)| is_for(pane)) else {
+            return false;
+        };
+        hold.window =
+            Some(json!({ "id": frame["body"]["id"], "generation": frame["body"]["generation"] }));
+        match held {
+            Held::TheRequest => {
+                hold.frame = Some((line.to_owned(), held));
+                true
+            }
+            Held::TheAnswer => {
+                hold.answer_of = frame["id"].as_str().map(str::to_owned);
+                false
+            }
+        }
+    }
+
+    /// Whether `line`, a frame of the pane host's, is the answer held.
+    fn holds_open_answer(&self, frame: &Value, line: &str) -> bool {
+        let mut hold = self.open_hold();
+        if frame["kind"] != "res"
+            || hold.answer_of.is_none()
+            || frame["id"] != hold.answer_of.as_deref().unwrap_or_default()
+        {
+            return false;
+        }
+        hold.answer_of = None;
+        hold.frame = Some((line.to_owned(), Held::TheAnswer));
+        true
     }
 
     /// From now on, while `refused`, the daemon's every `pane.snapshot` is answered
@@ -363,6 +474,9 @@ impl Shared {
             return;
         }
         let line = format!("{line}\n");
+        if self.holds_open_request(&frame, &line) {
+            return;
+        }
         if self.stalls_daemon(&frame, &line, host, daemon) {
             return;
         }
@@ -438,6 +552,9 @@ impl Shared {
             return;
         }
         let line = format!("{line}\n");
+        if self.holds_open_answer(&frame, &line) {
+            return;
+        }
         if self.stalls_host(&line) {
             return;
         }
@@ -891,6 +1008,81 @@ mod tests {
         assert!(shared.paste_caught());
         assert!(host_lines.recv_timeout(Duration::from_millis(100)).is_err());
         assert_eq!(shared.seen().daemon, 1, "it is counted, as every frame is");
+    }
+
+    /// An open frame of the daemon's, for the window `pane` at `generation`.
+    fn open_of(id: &str, pane: &str, generation: u64) -> String {
+        json!({ "v": 1, "id": id, "kind": "req", "op": "pane.open", "body": { "id": pane, "generation": generation } })
+            .to_string()
+    }
+
+    #[test]
+    fn an_open_held_before_the_host_waits_until_it_is_let_go_and_what_comes_meanwhile_goes_on() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, _) = sinks();
+        shared.hold_open("p1-worker", Held::TheRequest);
+        // Another window's open is not held.
+        let chief = open_of("d-1", "p1-chief", 1);
+        shared.route_daemon(&chief, &host, &daemon);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            chief
+        );
+        let held = open_of("d-2", "p1-worker-amber-pine", 7);
+        shared.route_daemon(&held, &host, &daemon);
+        assert_eq!(
+            shared.open_held(),
+            Some(json!({ "id": "p1-worker-amber-pine", "generation": 7 }))
+        );
+        let kill = r#"{"v":1,"id":"d-3","kind":"req","op":"pane.kill","body":{"id":"p1-worker-amber-pine","generation":7}}"#;
+        shared.route_daemon(kill, &host, &daemon);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            kill
+        );
+        assert!(shared.let_open_go(&host, &daemon));
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            held
+        );
+        assert_eq!(shared.open_held(), None);
+        assert!(!shared.let_open_go(&host, &daemon), "one is held, once");
+        // The next open of the window goes on.
+        let again = open_of("d-4", "p1-worker-amber-pine", 8);
+        shared.route_daemon(&again, &host, &daemon);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            again
+        );
+    }
+
+    #[test]
+    fn the_answer_to_an_open_held_waits_until_it_is_let_go() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, daemon_lines) = sinks();
+        shared.hold_open("p1-worker", Held::TheAnswer);
+        let open = open_of("d-2", "p1-worker-amber-pine", 7);
+        shared.route_daemon(&open, &host, &daemon);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            open
+        );
+        assert_eq!(
+            shared.open_held(),
+            None,
+            "nothing is held until the answer comes"
+        );
+        let answer = r#"{"v":1,"id":"d-2","kind":"res","op":"pane.open","body":{"ok":true,"id":"p1-worker-amber-pine","generation":7}}"#;
+        shared.route_host(answer, &host, &daemon);
+        assert!(daemon_lines
+            .recv_timeout(Duration::from_millis(100))
+            .is_err());
+        assert!(shared.open_held().is_some());
+        assert!(shared.let_open_go(&host, &daemon));
+        assert_eq!(
+            daemon_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            answer
+        );
     }
 
     #[test]

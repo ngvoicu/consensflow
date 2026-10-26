@@ -104,9 +104,11 @@ fn an_open_s_answer_is_read_as_the_dispatcher_read_it() {
         refused("no answer from the pane host")
     );
     assert_eq!(opened(&json!({ "error": 5 })), refused("5"));
+    // No answer by the open's deadline is no refusal: the host goes on with the open,
+    // and its window may start after (kluris, 2026-10-26).
     assert_eq!(
         opened(&json!({ "ok": false, "error": "deadline" })),
-        refused("deadline")
+        Opened::Unanswered
     );
 }
 
@@ -126,7 +128,7 @@ fn a_kill_s_answer_is_taken_or_the_words_the_host_gave() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_open_the_host_never_answers_is_refused_as_the_deadline_after_sixty_seconds() {
+async fn an_open_the_host_never_answers_is_unanswered_after_sixty_seconds_not_refused() {
     LocalSet::new()
         .run_until(async {
             let (daemon, app) = bridge_pair();
@@ -137,13 +139,25 @@ async fn an_open_the_host_never_answers_is_refused_as_the_deadline_after_sixty_s
             let host = host_over(&daemon);
             let started = tokio::time::Instant::now();
             let answer = host.open(open(&[])).await;
-            assert_eq!(
-                answer,
-                Ok(Opened::Refused {
-                    error: "deadline".to_owned()
-                })
-            );
+            assert_eq!(answer, Ok(Opened::Unanswered));
             assert_eq!(started.elapsed(), Duration::from_secs(60));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_open_waits_as_long_as_the_daemon_gives_the_host() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            app.on("pane.open", |_, _| async {
+                pending::<()>().await;
+                Ok(json!({}))
+            });
+            let host = host_over(&daemon).opening_within(Duration::from_secs(3));
+            let started = tokio::time::Instant::now();
+            assert_eq!(host.open(open(&[])).await, Ok(Opened::Unanswered));
+            assert_eq!(started.elapsed(), Duration::from_secs(3));
         })
         .await;
 }

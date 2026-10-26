@@ -193,6 +193,13 @@ impl Dispatcher {
             .and_then(|record| record.window.borrow().pane.clone())
     }
 
+    /// Whether the participant has a window whose open went unanswered and which the
+    /// host has not said it ended ([`crate::windows::WindowPart::abandoned`]).
+    fn abandoned(&self, participant: i64) -> bool {
+        self.record(participant)
+            .is_some_and(|record| record.window.borrow().abandoned.is_some())
+    }
+
     /// Refuses a harness ConsensFlow has no adapter for.
     pub fn requires_adapter(&self, harness: &str) -> Result<(), EngineError> {
         self.require_adapter(harness)
@@ -652,7 +659,8 @@ impl Dispatcher {
                 }
                 let idle = participant.member_id.is_some()
                     && !working.contains(&participant.id)
-                    && self.pane(participant.id).is_none();
+                    && self.pane(participant.id).is_none()
+                    && !self.abandoned(participant.id);
                 if idle {
                     continue;
                 }
@@ -1031,6 +1039,11 @@ impl Dispatcher {
         let record = self.record_of(participant.id);
         if record.window.borrow().pane.is_some() {
             return self.step_open(project, participant, &record).await;
+        }
+        // A window whose open went unanswered is asked to end again at each step until
+        // the host says it has: a member with nothing more for it is still stepped.
+        if !self.end_abandoned(&record).await? {
+            return Ok(());
         }
         if project.state != "open" {
             return Ok(());

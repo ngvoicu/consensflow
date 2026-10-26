@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde_json::{json, Map, Value};
 
 use super::report::plain;
-use super::route::Pasted;
+use super::route::{Held, Pasted};
 use super::{Project, Rig, IDLE};
 use crate::{files, Error, Result};
 
@@ -49,6 +49,30 @@ impl Rig {
     /// is replaced.
     pub fn stall_host_at_paste(&self, words: &str, lasting: Duration) {
         self.shared.stall_at_paste(words, lasting);
+    }
+
+    /// The daemon's next `pane.open` of a window whose id begins with `pane` is held
+    /// in the rig as `held` says (the request, before the pane host starts anything;
+    /// or the host's answer, once it has started the program), until the case lets it
+    /// go ([`Rig::let_open_go`]): an open that took longer than its deadline, as one did
+    /// on the Mac under a load of 100 (kluris, 2026-10-26), with every other frame
+    /// passing meanwhile. One set before and not yet begun is replaced.
+    pub fn hold_open(&self, pane: &str, held: Held) {
+        self.shared.hold_open(pane, held);
+    }
+
+    /// The window whose open is held (`id`, `generation`), while one is.
+    pub fn open_held(&self) -> Option<Value> {
+        self.shared.open_held()
+    }
+
+    /// Lets the open held go on: the request to the pane host, or its answer to the
+    /// daemon. Whether one was held.
+    pub fn let_open_go(&self) -> bool {
+        match (self.host.sink(), self.daemon.sink()) {
+            (Some(host), Some(daemon)) => self.shared.let_open_go(&host, &daemon),
+            _ => false,
+        }
     }
 
     /// Whether the stall set out held a paste and is over.
