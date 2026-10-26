@@ -91,7 +91,8 @@ mod tests {
             .skip(1)
             .all(|line| line.starts_with(&" ".repeat(CONTINUED))));
         assert!(tell.contains("then cf task resume T-3"));
-        assert!(tell.ends_with("(queued: kept for its window, to go in after its brief)"));
+        assert!(tell
+            .ends_with("(queued or open: kept for its window, to go in with or after its brief)"));
     }
 
     #[test]

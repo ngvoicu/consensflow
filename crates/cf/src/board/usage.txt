@@ -35,7 +35,7 @@ cf inside a ConsensFlow window: the board's commands.
                                     result; what its turn left running is not ended
   cf tell T-3 "…"                   stop T-3 and put this to its window: its answer arrives as
                                     a message; then cf task resume T-3 "…"
-                                    (queued: kept for its window, to go in after its brief)
+                                    (queued or open: kept for its window, to go in with or after its brief)
   cf inbox [read m-12]              what is waiting for you, or one message in full
   cf ask "…"                        a question to the chief (a member's; the chief asks the
                                     human in its own terminal)

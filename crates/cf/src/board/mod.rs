@@ -292,7 +292,20 @@ fn tell(
         "cf tell T-<n> \"what to put to its window now\"",
     )?;
     let sent = brief::sent(&what);
-    let message = posted(board, &format!("/api/tasks/{number}/tell"), body_of(what))?;
+    let mut answer = board.post(
+        &format!("/api/tasks/{number}/tell"),
+        &Value::Object(body_of(what)),
+    )?;
+    // A task still open has no message for the words: they are added to its brief, and the
+    // answer holds the task alone.
+    if answer.value().get("message").is_none() {
+        let task = answer.take("task")?;
+        let text = format!(
+            "T-{number} is open: no window has it yet, so your words are added to its brief and go, once, to whichever window takes it. Nothing is paused, and nothing waits for an answer.\n{sent}"
+        );
+        return Ok(Said::new(task, text));
+    }
+    let message = answer.take("message")?;
     let (id, window) = (
         js::text(message.get("id")),
         js::text(message.get("recipient")),
