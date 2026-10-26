@@ -234,10 +234,10 @@ pub(crate) fn leaving(left: &[BackgroundProcess], possibly: &[PossiblyLeft]) -> 
 /// `pane.background` answered), in the words of a close's note but for the pause, which
 /// ends none of it.
 fn paused_leaving(number: i64, left: &Background) -> String {
-    let mut said = format!("T-{number} is paused");
+    let mut said = format!("T-{number}'s window stays open while T-{number} is paused");
     if left.total > 0 {
         said.push_str(&format!(
-            " with background work its window's turn left running, which the pause does not end: {}",
+            ", with background work its turn left running, which the pause does not end: {}",
             quote_of(&left.processes, left.total)
         ));
     }
