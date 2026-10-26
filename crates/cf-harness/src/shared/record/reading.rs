@@ -92,6 +92,25 @@ pub struct Record {
     /// Code's): said only where there are any, and no reading Node wrote has them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub monitors: Vec<Monitor>,
+    /// Where the record's lines stand: those torn and passed over, and the record each
+    /// item began in. Never said: no reading Node wrote has it.
+    #[serde(skip)]
+    pub lines: Box<Lines>,
+}
+
+/// Where a record's lines stand, as its reader read them (T-223, T-290). Behind a box in
+/// [`Record`], which a reader's `Err` holds too ([`crate::records::Open`]): a reading stays
+/// as small as one without them (the merge with turn-end, T-494).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Lines {
+    /// The lines of the record that were torn and passed over, each by the
+    /// place among the records it stood at, in order: records lost, which the
+    /// items miss.
+    pub lost: Vec<usize>,
+    /// The place among the records of the record each item began in, one an
+    /// item, which [`Lines::lost`] is counted in: none where the harness's
+    /// items are not its record's lines (Devin's, from its store).
+    pub places: Option<Vec<usize>>,
 }
 
 /// A monitor a turn armed that its harness has said no end of: its task's id, what its
@@ -218,6 +237,7 @@ impl Record {
             settlement: Settlement::Unknown,
             pending: Pending::default(),
             monitors: Vec::new(),
+            lines: Box::default(),
         }
     }
 }

@@ -94,6 +94,12 @@ impl Dispatcher {
             window.follow(session);
         }
         *record.copied.borrow_mut() = None;
+        // Another conversation's record: what the last one lost is not this one's.
+        {
+            let mut delivery = record.delivery.borrow_mut();
+            delivery.lost = 0;
+            delivery.lost_before = None;
+        }
         // The rests were the other conversation's: a monitor of this one was never seen
         // missing at them (Calliope on 136a7158).
         record.held.borrow_mut().rests = Rests::default();

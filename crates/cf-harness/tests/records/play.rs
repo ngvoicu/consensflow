@@ -4,6 +4,11 @@
 //! daemon's will: a cached one through a [`Cache`] that [`records::open`] opens
 //! readers for, a fresh one through [`records::answers`].
 //!
+//! Node failed a look at a torn line of a JSONL record (`malformed JSONL at
+//! record N`); this build passes such a line over (T-223). A look Node failed
+//! so is held to read anything but that failure, and what it read is said
+//! back ([`Played::departed`]), for the test to hold to what it read instead.
+//!
 //! Like the runner, the player owns time: the clock starts at [`START`] and
 //! moves only by a step, and each file step sets the file's times to the
 //! clock, a millisecond after the step before it. A store's writer is a
@@ -43,9 +48,21 @@ static LOCAL_ZONE: LazyLock<TimeZone> = LazyLock::new(|| {
     TimeZoneDatabase::bundled().get(name).unwrap()
 });
 
-/// Plays `scenario`, holding each look to Node's: how many it held.
-/// `ours` are the beginnings of ConsensFlow's own reasons.
-pub fn play(scenario: &Scenario, ours: &[String]) -> usize {
+/// Node's sentence of a look it failed at a torn line.
+const TORN: &str = "unreadable: malformed JSONL at record ";
+
+/// What a scenario's play held.
+pub struct Played {
+    /// The looks held to what Node read.
+    pub answered: usize,
+    /// Each look Node failed at a torn line, by its name, with what it read here.
+    pub departed: Vec<(String, String)>,
+}
+
+/// Plays `scenario`, holding each look to Node's: how many it held, and the
+/// looks that departed from Node's on purpose. `ours` are the beginnings of
+/// ConsensFlow's own reasons.
+pub fn play(scenario: &Scenario, ours: &[String]) -> Played {
     let root = tempfile::tempdir().unwrap();
     let env = environment(root.path(), &scenario.env);
     let idle = scenario
@@ -62,11 +79,15 @@ pub fn play(scenario: &Scenario, ours: &[String]) -> usize {
         handed_out: Vec::new(),
         quotas: Vec::new(),
         answered: 0,
+        departed: Vec::new(),
     };
     for (index, step) in scenario.steps.iter().enumerate() {
         stage.step(step, index);
     }
-    stage.answered
+    Played {
+        answered: stage.answered,
+        departed: stage.departed,
+    }
 }
 
 /// A scenario being played.
@@ -86,6 +107,8 @@ struct Stage<'a> {
     quotas: Vec<(Arc<Quota>, usize)>,
     /// The looks held to what Node read.
     answered: usize,
+    /// The looks Node failed at a torn line, and what they read here.
+    departed: Vec<(String, String)>,
 }
 
 impl Stage<'_> {
@@ -155,8 +178,9 @@ impl Stage<'_> {
             let reading = self
                 .cache
                 .look(harness, &look.session, &env, &options, self.clock);
-            self.hold(&reading, look.read.unwrap(), &format!("{name}, cached"));
-            self.identity(&reading, look, index, &name);
+            if !self.hold(&reading, look.read.unwrap(), &format!("{name}, cached")) {
+                self.identity(&reading, look, index, &name);
+            }
         }
         if matches!(look.look, Reader::Fresh | Reader::Both) {
             let reading = records::answers(
@@ -208,8 +232,23 @@ impl Stage<'_> {
     }
 
     /// Holds `reading` to the reading Node's look read, as text. A
-    /// platform's reason is promised only as a class.
-    fn hold(&self, reading: &Reading, at: usize, name: &str) {
+    /// platform's reason is promised only as a class. One Node failed at a
+    /// torn line departs: it is held to read otherwise, and kept with what it
+    /// read. Whether it departed.
+    fn hold(&mut self, reading: &Reading, at: usize, name: &str) -> bool {
+        let node = &self.scenario.readings[at];
+        if node["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.starts_with(TORN))
+        {
+            let read = match reading {
+                Reading::Unknown(reason) | Reading::Missing(reason) => reason.clone(),
+                Reading::Known(record) => format!("{} items", record.items.len()),
+            };
+            assert!(!read.starts_with(TORN), "{name}: {read}");
+            self.departed.push((name.to_owned(), read));
+            return true;
+        }
         let read = match reading {
             Reading::Unknown(reason)
                 if !self
@@ -237,6 +276,7 @@ impl Stage<'_> {
             }
         }
         assert_eq!(js::stringify(&read), js::stringify(&expected), "{name}");
+        false
     }
 
     /// Holds the cached reader to the objects Node's handed out: the reading

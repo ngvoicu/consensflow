@@ -23,6 +23,8 @@
 //! - The queue is bounded: a look asked when it is full waits for room.
 //! - A reader that panics fails its look, as any other record that cannot be
 //!   read does, and not the worker (see [`reopening`]).
+//! - What a reader passes over, a torn line of a record, it says where the
+//!   thread was told to (`say`): the daemon's log.
 //!
 //! Dropping the [`Thread`] closes the queue: the worker reads what was asked,
 //! and ends.
@@ -43,6 +45,7 @@ use super::{
 };
 use crate::contract::{Records, Work};
 use crate::seams::Time;
+use crate::shared::record::torn::{say_with, Say};
 use reopening::Reopening;
 
 mod reopening;
@@ -106,27 +109,32 @@ impl Thread {
     /// The records of the places `env` names, read on a thread of their own,
     /// at the times `time` says. A reset that names a time of day in no zone
     /// is read in `zone`, the machine's own. The caches begin when this is
-    /// called, as the clock reads then.
+    /// called, as the clock reads then. What a reader passes over it says
+    /// with `say`.
     ///
     /// Fails where the system will not start the thread.
-    pub fn new(env: Env, zone: TimeZone, time: Rc<dyn Time>) -> io::Result<Self> {
-        Self::start(env, time, QUEUE, move || open(zone.clone()))
+    pub fn new(env: Env, zone: TimeZone, time: Rc<dyn Time>, say: Say) -> io::Result<Self> {
+        Self::start(env, time, QUEUE, move || open(zone.clone()), say)
     }
 
-    /// A thread whose queue holds `queue` asks, and whose readers `opens`
-    /// opens.
+    /// A thread whose queue holds `queue` asks, whose readers `opens` opens,
+    /// and that says what they pass over with `say`.
     fn start(
         env: Env,
         time: Rc<dyn Time>,
         queue: usize,
         opens: impl Fn() -> Open + Send + Sync + 'static,
+        say: Say,
     ) -> io::Result<Self> {
         let opens: Opens = Arc::new(opens);
         let caches = Caches::new(&opens, time.wall_ms());
         let (asks, waiting) = mpsc::channel(queue);
         std::thread::Builder::new()
             .name("records".to_owned())
-            .spawn(move || serve(waiting, &env, caches))?;
+            .spawn(move || {
+                say_with(say);
+                serve(waiting, &env, caches);
+            })?;
         Ok(Self { time, asks })
     }
 

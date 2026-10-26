@@ -110,6 +110,13 @@ pub(crate) struct DeliveryPart {
     /// T-245). Known limit, kept on purpose (the chief, T-274): this is the
     /// record's alone, so after a restart the same outage may be told once more.
     pub(crate) failure_told: Option<String>,
+    /// How many lines of the window's record were lost (torn, and passed
+    /// over) as its last look read it: for a harness whose reading cannot say
+    /// where its turn began ([`lost_in_turn`](crate::turn_end::lost_in_turn)).
+    pub(crate) lost: usize,
+    /// The message last handed over to the window, and how many lines its
+    /// record had lost before it: one lost since is lost from that turn.
+    pub(crate) lost_before: Option<(i64, usize)>,
     /// A paste whose Enter was withheld (`arrival`), which the window's input box
     /// may hold: nothing is pasted into that window until the host has taken the
     /// keys that empty it ([`Dispatcher::clear_box`]), unless the window's record
@@ -487,6 +494,10 @@ impl Dispatcher {
         // What is pasted is what the ledger says it is when delivery begins: the
         // message, and the rows it carries still waiting, which are the set from now.
         let begun = self.seams.ledger.borrow_mut().begin_delivery(message.id)?;
+        {
+            let mut delivery = record.delivery.borrow_mut();
+            delivery.lost_before = Some((message.id, delivery.lost));
+        }
         if begun.message.kind == "task" {
             self.pay_with_words(record)?;
         }

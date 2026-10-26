@@ -107,13 +107,7 @@ fn a_log_that_is_not_there_or_cannot_be_read_is_a_conversation_unavailable() {
     for log in [
         None,
         Some("null\n".to_owned()),
-        Some("not json\n".to_owned()),
-        Some(format!("\u{feff}{}", shows("mild-coin"))),
-        Some(format!(
-            "{}not json\n{}",
-            shows("mild-coin"),
-            shows("mild-coin")
-        )),
+        Some(format!("{}null\n", shows("mild-coin"))),
     ] {
         match &log {
             Some(text) => fs::write(&wire, text).unwrap(),
@@ -127,6 +121,43 @@ fn a_log_that_is_not_there_or_cannot_be_read_is_a_conversation_unavailable() {
         );
     }
     assert!(host.asked.borrow().is_empty());
+}
+
+#[test]
+fn a_torn_line_of_the_log_refuses_no_paste_into_the_conversation_after_it() {
+    // A short write left half a record of the log, and the next append made one
+    // line of it and itself, before the window configured the conversation it shows.
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    let half = &shows("another-one")[..30];
+    fs::write(
+        &wire,
+        format!(
+            "{}{half}{}{}",
+            shows("another-one"),
+            shows("another-one"),
+            shows("mild-coin")
+        ),
+    )
+    .unwrap();
+    let host = taking();
+    let sent = send_into(&host, &wire, Some("mild-coin"), "hi");
+    assert!(sent.ok, "{sent:?}");
+    // A line that is not JSON says nothing either way: what the log said before it holds.
+    for (log, error) in [
+        (
+            "not json\n".to_owned(),
+            "Devin is displaying another conversation",
+        ),
+        (
+            format!("\u{feff}{}", shows("mild-coin")),
+            "Devin is displaying another conversation",
+        ),
+    ] {
+        fs::write(&wire, &log).unwrap();
+        let sent = send_into(&host, &wire, Some("mild-coin"), "hi");
+        assert_eq!(sent.error.as_deref(), Some(error), "{log:?}");
+    }
 }
 
 #[test]

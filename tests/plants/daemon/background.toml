@@ -1515,6 +1515,38 @@ replace = '''
         let _ = SETTLE;
         Ok(first)'''
 
+# Re-anchored on turn-end's call site (T-494, the merge into torn-line; on the call failure-reasons
+# made async at 3.0.6-alpha.3's integration B): the plant turn-end
+# (0eec91d2) retired with the ending it held, its regression kept. The task is held while the
+# host finds a command of the window's running, as before 2026-10-13.
+[[plant]]
+name = "background regression: a command that never exits holds the worker’s task"
+meant = "a_worker_that_leaves_a_command_that_never_exits_running_gives_the_chief_its_result_and_the_chief_accepts_it"
+runs = ["regression-never-exits"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = """
+                let watching = self.watch_monitors(participant, record, &observed).await;
+                self.collect(project, participant, record, &observed, watching)
+                    .await?;"""
+replace = """
+                let watching = self.watch_monitors(participant, record, &observed).await;
+                // Held for the commands the host finds running, as before 2026-10-13.
+                let pane = record.window.borrow().pane.clone();
+                let running = match pane {
+                    Some(pane) => matches!(
+                        self.seams.background.commands(&pane, None, None).await,
+                        crate::seams::CommandsSeen::Running(count) if count > 0
+                    ),
+                    None => false,
+                };
+                if !running {
+                    self.collect(project, participant, record, &observed, watching)
+                        .await?;
+                }"""
+
 [[plant]]
 name = "background regression: a build's daemon, its build ended, is taken for the turn's work and told as left"
 meant = "a_workers_build_that_leaves_its_daemon_running_has_its_task_done_and_the_daemon_is_neither_waited_for_nor_ended"

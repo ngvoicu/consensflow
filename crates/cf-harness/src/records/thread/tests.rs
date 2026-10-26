@@ -363,8 +363,14 @@ fn a_transcript_is_had_as_the_switch_says_and_a_failure_travels_too() {
     );
     keep(&[".local", "share", "opencode"], "opencode.db");
     let time: Rc<dyn Time> = Rc::new(ManualTime::new(0));
-    let thread = Thread::new(env.clone(), TimeZone::UTC, Rc::clone(&time)).unwrap();
-    let bare = Thread::new(Env::default(), TimeZone::UTC, time).unwrap();
+    let thread = Thread::new(
+        env.clone(),
+        TimeZone::UTC,
+        Rc::clone(&time),
+        Box::new(|_| {}),
+    )
+    .unwrap();
+    let bare = Thread::new(Env::default(), TimeZone::UTC, time, Box::new(|_| {})).unwrap();
     on_engine(async {
         for harness in Harness::ALL {
             for session in ["s", "q7"] {

@@ -1272,10 +1272,13 @@ fn differs(step: &Value, index: u64, record: &Value, node: &Value) -> Option<Str
     let Some(kept) = step.get("kept") else {
         return (record != node).then(|| format!("\n  rust {record}\n  node {node}"));
     };
+    // The step whose operation it settles, where that is another's (a wait the
+    // clock ends settles the operation that began it).
+    let op = kept["op"].as_u64().unwrap_or(index);
     let own = |record: &Value| {
         record["settled"]
             .as_array()
-            .and_then(|settled| settled.iter().find(|entry| entry["op"] == json!(index)))
+            .and_then(|settled| settled.iter().find(|entry| entry["op"] == json!(op)))
             .cloned()
     };
     let (Some(rust), Some(node_own)) = (own(record), own(node)) else {
@@ -1284,7 +1287,7 @@ fn differs(step: &Value, index: u64, record: &Value, node: &Value) -> Option<Str
         ));
     };
     let mut held = kept["answer"].clone();
-    held["op"] = json!(index);
+    held["op"] = json!(op);
     if rust != held {
         return Some(format!(" (kept: {}):\n  rust {rust}", kept["why"]));
     }
@@ -1297,7 +1300,7 @@ fn differs(step: &Value, index: u64, record: &Value, node: &Value) -> Option<Str
             .as_array()
             .unwrap()
             .iter()
-            .filter(|entry| entry["op"] != json!(index))
+            .filter(|entry| entry["op"] != json!(op))
             .cloned()
             .collect::<Vec<_>>());
         record

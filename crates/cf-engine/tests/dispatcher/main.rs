@@ -61,6 +61,7 @@ mod launch_stops;
 mod launch_wait;
 mod looks;
 mod looks_finished;
+mod lost_lines;
 mod meeting_main;
 mod no_adapter;
 mod not_ready;

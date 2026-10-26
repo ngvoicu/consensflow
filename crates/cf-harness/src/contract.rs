@@ -615,6 +615,26 @@ impl Observed {
         last_word(self.items())
     }
 
+    /// The lines of the conversation's record that were torn and passed over,
+    /// each by the place among the records it stood at: none where its record
+    /// could not be read.
+    pub fn lost(&self) -> &[usize] {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => &record.lines.lost,
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => &[],
+        }
+    }
+
+    /// The place among the records of the record each item began in, where the
+    /// harness says it: none for Devin, whose items are its store's, and where
+    /// the record could not be read.
+    pub fn places(&self) -> Option<&[usize]> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => record.lines.places.as_deref(),
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => None,
+        }
+    }
+
     /// What the conversation's turn ended and left running: the window takes
     /// input between turns, and its agent is woken as each ends.
     pub fn pending(&self) -> Pending {

@@ -43,6 +43,7 @@ fn reading(items: Vec<Item>, settlement: Settlement) -> Arc<Reading> {
         settlement,
         pending: Default::default(),
         monitors: Vec::new(),
+        lines: Box::default(),
     }))
 }
 

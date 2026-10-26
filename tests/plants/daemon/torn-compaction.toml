@@ -53,11 +53,14 @@ find = '''        let record = rig.transcript(session);
 replace = '''        Ok(rig.transcript(session).contains(said))'''
 
 [[plant]]
-name = "torn compaction: the reader fails a look at a record whose last line is half written"
+name = "torn compaction: the reader fails a look at a record whose last line can never be JSON"
 meant = "the_summary_a_compaction_writes_in_pieces_is_read_once_whole_and_no_look_between_fails"
 runs = ["harness-claude-compaction"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record/jsonl.rs"
-find = "            Err(_) if json_prefix_state(&text) == Prefix::Incomplete => {}\n"
-replace = ""
+find = '''            Err(_) if is_json_lossy(&line) => return Err(cannot_hold(records)),
+'''
+replace = '''            Err(_) if is_json_lossy(&line) => return Err(cannot_hold(records)),
+            Err(_) if true => return Err(Stop::Failed(format!("malformed JSONL at record {records}"))),
+'''

@@ -43,6 +43,36 @@ fn learns_the_session_this_window_opened_from_its_own_wire_log() {
     assert_eq!(*looked.looked.borrow(), ["mild-coin"]);
 }
 
+#[test]
+fn a_torn_line_of_its_wire_log_before_the_session_s_line_neither_stops_the_launch_nor_a_paste() {
+    // A short write left half of the log's first record, and Devin's next append
+    // made one line of it and itself, before its window named the conversation it
+    // opened (the brain's issue a-torn-transcript-line-stops-...; T-246).
+    let home = Home::new();
+    let adapter = home.adapter();
+    let window = window(&adapter, &Request::default());
+    let first = shows("another-one");
+    home.selects("another-one");
+    fs::write(home.wire(), &first[..first.len() / 2]).unwrap();
+    home.appends(&shows("another-one"));
+    home.appends(&shows("mild-coin"));
+    assert_eq!(
+        finished(window.started(&ScriptedHost::default())),
+        Ok(Some("mild-coin".to_owned())),
+        "the launch learns its session past the torn line"
+    );
+    let host = AnsweringHost::new(|op| {
+        Ok(match op {
+            "pane.snapshot" => json!({ "ok": true, "pasteInFlight": false, "unsent": false }),
+            _ => json!({ "ok": true }),
+        })
+    });
+    assert_eq!(
+        finished(window.deliver(&host, &pane(), "hi")).unwrap(),
+        Admission::Admitted { queued: false }
+    );
+}
+
 /// How many milliseconds a window opened on `request` waits for Devin's wire
 /// log to name a conversation before it says that none was named.
 fn waits_for_the_session(request: &Request) -> i64 {

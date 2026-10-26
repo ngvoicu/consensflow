@@ -88,7 +88,13 @@ impl Reader {
     /// What the session says now, or why it cannot be read.
     fn read(&mut self, options: &Options, now_ms: i64) -> Result<Reading, String> {
         match self.transcript.read(now_ms).map_err(|stop| stop.reason())? {
-            Some(read) => read.state.result(&self.env, options, now_ms, &read.file),
+            Some(read) => {
+                let mut reading = read.state.result(&self.env, options, now_ms, &read.file)?;
+                if let Reading::Known(record) = &mut reading {
+                    record.lines.lost = read.lost;
+                }
+                Ok(reading)
+            }
             None => {
                 if !evidence::working(&self.session, &self.env, options)? {
                     return Ok(Reading::missing(&format!("pi session {}", self.session)));
@@ -108,6 +114,10 @@ struct Session {
     /// The zone a reset that names none is read in.
     local: TimeZone,
     items: Vec<Item>,
+    /// The place among the records of the record each item is of.
+    places: Vec<usize>,
+    /// The place among the records of the one being read.
+    reading: usize,
     /// The tool calls made and not yet answered in the turn.
     open_tools: HashSet<Key>,
     turn_open: bool,
@@ -143,6 +153,8 @@ impl Session {
             session,
             local,
             items: Vec::new(),
+            places: Vec::new(),
+            reading: 0,
             open_tools: HashSet::new(),
             turn_open: false,
             terminal: None,
@@ -155,6 +167,7 @@ impl Session {
     }
 
     fn push(&mut self, id: Arc<str>, role: Role, text: String, complete: bool, at: Value) {
+        self.places.push(self.reading);
         self.items.push(Item {
             id,
             role,
@@ -326,6 +339,7 @@ impl Session {
             };
         let mut record = Record::new();
         record.items = self.items.clone();
+        record.lines.places = Some(self.places.clone());
         record.in_flight = in_flight;
         record.failed = self.failed;
         record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
@@ -344,6 +358,7 @@ impl Session {
 impl Parser for Session {
     fn visit(&mut self, record: Value, index: usize) -> Result<(), Stop> {
         self.records += 1;
+        self.reading = index;
         if record.is_null() {
             return Err(Stop::Failed(null_record(index)));
         }

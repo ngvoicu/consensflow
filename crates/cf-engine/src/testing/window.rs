@@ -18,7 +18,7 @@ use cf_harness::contract::{
     Admission, Held, Observed, Pane, PaneHost, Question, Readiness, Trusts, Waiting, Window, Work,
     NOT_ADMITTED,
 };
-use cf_harness::records::{Item, Reading, Record, Role, Settlement};
+use cf_harness::records::{Item, Lines, Reading, Record, Role, Settlement};
 use serde_json::{json, Value};
 
 use super::adapter::{FakeAdapter, FakeAgent, Taking};
@@ -356,6 +356,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
         if let Some(reason) = &agent.unreadable {
             return Some(Arc::new(Reading::Unknown(reason.clone())));
         }
+        let places = agent.says_places.then(|| (0..items.len()).collect());
         Some(Arc::new(Reading::Known(Record {
             items,
             in_flight: false,
@@ -366,6 +367,10 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             settlement: Settlement::Unknown,
             pending: agent.pending,
             monitors: agent.monitors.clone(),
+            lines: Box::new(Lines {
+                lost: agent.lost.clone(),
+                places,
+            }),
         })))
     };
     // A window that shows another conversation than its launch's: that

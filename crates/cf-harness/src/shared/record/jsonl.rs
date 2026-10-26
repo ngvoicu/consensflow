@@ -4,8 +4,22 @@
 //! A line is a record once its newline is written. An unterminated last
 //! line that is already whole JSON is visited too, and remembered, so that
 //! the newline which ends it later adds nothing. One that is not whole yet
-//! waits for a later look, and one that never can be fails, as a malformed
-//! whole line does.
+//! waits for a later look, and so does one that never can be: a torn line
+//! still waiting for its newline.
+//!
+//! A whole line that is not JSON is torn: a short write (a full disk, a
+//! process killed in a large write) left part of a record, and the next
+//! append made one line of it and itself. The harness goes on past it, and so
+//! does a look, once a record follows it: the line is passed over, once, and
+//! the daemon's log told ([`torn`]). One with no record after it yet waits
+//! for one, as an unfinished last line does, the records before it read, for
+//! [`TORN_WAIT_MS`] at most, and is then passed over all the same, with the
+//! torn lines after it. A look says where it passed lines over
+//! ([`Seen::passed_over`]), which the reading carries. Whole records run
+//! together in one line, a newline lost between them, are each read in their
+//! place. An unfinished last line that is no record and has not grown for the
+//! wait is said in the daemon's log, once. A line of JSON this build cannot
+//! hold is no torn line: it fails the look.
 //!
 //! The file read so far is known by four things: its identity, the bytes
 //! just before where the last look stopped (the edge), the unterminated
@@ -16,22 +30,28 @@
 //! [`settled`] when the look that found it began; one within a file time's
 //! step of it is checked for its edge and tail.
 
-mod prefix;
-
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use cf_base::file::{identity, mtime_ms, settled, Identity};
 use cf_base::json::{from_slice_lossy, is_json_lossy, DEEPEST};
+use serde::de::IgnoredAny;
 use serde_json::Value;
 
-use prefix::{json_prefix_state, Prefix};
+use super::torn;
 
 /// How many bytes before where a look stopped the next look checks are unchanged.
 const EDGE_BYTES: u64 = 1024;
 /// How much of the file a look reads at a time.
 const CHUNK: usize = 64 * 1024;
+/// How long a torn line with no record after it waits for one before it is
+/// passed over, and an unfinished last line that does not grow before it is
+/// said: 5 s. A belt: no shape is known in which a whole line that is not JSON
+/// becomes one, since a writer's newline comes after its bytes. It costs
+/// nothing, for the records before the line are read while it waits, so a
+/// window that tore its last line and went quiet is never blind.
+pub(crate) const TORN_WAIT_MS: i64 = 5_000;
 
 /// Where a look at a file stopped: the next look reads on from here.
 #[derive(Debug, Clone, PartialEq)]
@@ -49,12 +69,34 @@ pub(crate) struct Seen {
     tail: Vec<u8>,
     /// How many records were visited.
     records: usize,
+    /// The torn lines passed over, each by the place among the records it
+    /// stood at: how many records were lost, and where.
+    passed_over: Vec<usize>,
+    /// When the look began that first found the line at `offset` torn, with
+    /// no record after it: it waits for one, or for [`TORN_WAIT_MS`].
+    torn_since: Option<i64>,
+    /// The unfinished last line, at the file's `size`, that is no record.
+    unfinished: Option<Unfinished>,
+}
+
+/// An unfinished last line that is no record, as long as when it was first found.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Unfinished {
+    /// When the look began that first found it so.
+    since: i64,
+    /// It has not grown for [`TORN_WAIT_MS`], and the daemon's log was told.
+    said: bool,
 }
 
 impl Seen {
     /// When the file was last written, as the look found it (`mtimeMs`).
     pub(crate) fn mtime_ms(&self) -> f64 {
         self.mtime_ms
+    }
+
+    /// The torn lines passed over, each by the place among the records it stood at.
+    pub(crate) fn passed_over(&self) -> &[usize] {
+        &self.passed_over
     }
 }
 
@@ -130,8 +172,9 @@ pub(crate) type Parse = fn(&[u8]) -> serde_json::Result<Value>;
 
 /// [`read_on`], each line read by `parse`, and each record handed to `visit`
 /// with the byte its line begins at too. It reads as `from_slice_lossy` does,
-/// or fails where that fails: a line it cannot read is a failure of the look,
-/// malformed or too much for a value, said as `read_on` says it.
+/// or fails where that fails: a line it cannot read is torn where that one is
+/// malformed, and a failure of the look where it is too much for a value, said
+/// as `read_on` says it.
 pub(crate) fn read_on_with(
     file: &Path,
     seen: Option<&Seen>,
@@ -145,11 +188,25 @@ pub(crate) fn read_on_with(
     let file_identity = identity(&handle)?;
     let size = metadata.len();
     let written = mtime_ms(&metadata)?;
+    let waited = |since: i64| looked_ms.saturating_sub(since) >= TORN_WAIT_MS;
+    // The torn line the last look stopped at, if its wait is over: it is passed
+    // over, and every torn line after it with it, the file changed or not.
+    let done_waiting = seen
+        .filter(|seen| seen.torn_since.is_some_and(waited))
+        .map(|seen| seen.offset);
+    // An unfinished last line that has not grown for the wait, and is not said yet.
+    let unfinished_due = seen.is_some_and(|seen| {
+        seen.unfinished
+            .is_some_and(|it| !it.said && waited(it.since))
+    });
     if let Some(seen) = seen {
         if file_identity != seen.identity {
             return Ok(Looked::NotTheFile);
         }
-        let same = size == seen.size && written == seen.mtime_ms;
+        let same = size == seen.size
+            && written == seen.mtime_ms
+            && done_waiting.is_none()
+            && !unfinished_due;
         if same && settled(written, seen.looked_ms) {
             return Ok(Looked::Unchanged);
         }
@@ -170,7 +227,18 @@ pub(crate) fn read_on_with(
     let mut offset = seen.map_or(0, |seen| seen.offset);
     let mut tail = seen.map(|seen| seen.tail.clone()).unwrap_or_default();
     let mut records = seen.map_or(0, |seen| seen.records);
+    let mut passed = Passed {
+        file,
+        places: seen
+            .map(|seen| seen.passed_over.clone())
+            .unwrap_or_default(),
+    };
     let holds_only = |line: &[u8]| only.is_none_or(|wanted| contains(line, wanted));
+    // The torn lines read since the last record, which wait for one; the look
+    // stops at the first unless one comes.
+    let mut waiting: Vec<Torn> = Vec::new();
+    // The torn line whose wait is over was met: the torn lines after it go with it.
+    let mut passing = false;
     // The line being read; `visited` while it is the rest of `tail`'s line.
     let mut line: Vec<u8> = Vec::new();
     let mut visited = !tail.is_empty();
@@ -196,7 +264,26 @@ pub(crate) fn read_on_with(
                     visited = false;
                     tail.clear();
                 } else if holds_only(&line) {
-                    records = consume_line(&line, records, offset, parse, visit)?;
+                    let (whole, torn) = whole_line(&line, records, parse)?;
+                    let led = !whole.is_empty();
+                    for record in whole {
+                        passed.all(&mut waiting);
+                        passing = false;
+                        visit(record, records, offset)?;
+                        records += 1;
+                    }
+                    if torn {
+                        passing |= done_waiting == Some(offset);
+                        // A rest after whole records cannot become one: it goes at once.
+                        if led || passing {
+                            passed.one(records, offset);
+                        } else {
+                            waiting.push(Torn {
+                                at: offset,
+                                index: records,
+                            });
+                        }
+                    }
                 }
                 line.clear();
                 offset = at + end as u64 + 1;
@@ -206,6 +293,7 @@ pub(crate) fn read_on_with(
             at += read as u64;
         }
     }
+    let mut unfinished = None;
     if visited {
         if !is_blank(&line) {
             return Ok(Looked::NotTheFile);
@@ -214,14 +302,41 @@ pub(crate) fn read_on_with(
         let text = String::from_utf8_lossy(&line);
         match parse(text.as_bytes()) {
             Ok(record) => {
+                passed.all(&mut waiting);
                 visit(record, records, offset)?;
                 records += 1;
                 tail = line;
             }
-            // A live writer may have left only the final, unterminated append.
-            Err(_) if json_prefix_state(&text) == Prefix::Incomplete => {}
-            Err(_) => return Err(unread(&line, records)),
+            Err(_) if is_json_lossy(&line) => return Err(cannot_hold(records)),
+            // Not whole yet: a live writer's final append, or a torn line the
+            // next is being written into. Either waits for its newline; one
+            // that has not grown for the wait is said, once.
+            Err(_) => {
+                let mut it = match seen {
+                    Some(seen) if seen.size == at => seen.unfinished,
+                    _ => None,
+                }
+                .unwrap_or(Unfinished {
+                    since: looked_ms,
+                    said: false,
+                });
+                if !it.said && waited(it.since) {
+                    torn::unfinished(file, records, offset);
+                    it.said = true;
+                }
+                unfinished = Some(it);
+            }
         }
+    }
+    // A torn line with no record after it: the look stops before it, and it
+    // waits from when a look first found it there.
+    let mut torn_since = None;
+    if let Some(first) = waiting.first() {
+        offset = first.at;
+        torn_since = Some(match seen {
+            Some(seen) if seen.offset == offset => seen.torn_since.unwrap_or(looked_ms),
+            _ => looked_ms,
+        });
     }
     let edge = match seen {
         Some(seen) if seen.offset == offset => seen.edge.clone(),
@@ -236,41 +351,80 @@ pub(crate) fn read_on_with(
         edge,
         tail,
         records,
+        passed_over: passed.places,
+        torn_since,
+        unfinished,
     }))
 }
 
-/// One whole line, which begins at the byte `at`: a record for `visit` at
-/// `index`, nothing when blank, a failure when malformed. A carriage return
-/// before the newline is JSON's white space: a line ended `\r\n` reads as one
-/// ended `\n`.
-fn consume_line(
-    raw: &[u8],
-    index: usize,
+/// A torn line read and not yet passed over: the byte it begins at, and the
+/// place among the records it stands at, which the record after it takes.
+struct Torn {
     at: u64,
-    parse: Parse,
-    visit: &mut dyn FnMut(Value, usize, u64) -> Result<(), Stop>,
-) -> Result<usize, Stop> {
-    if is_blank(raw) {
-        return Ok(index);
-    }
-    let record = parse(raw).map_err(|_| unread(raw, index))?;
-    visit(record, index, at)?;
-    Ok(index + 1)
+    index: usize,
 }
 
-/// Why the line at `index`, which is no record here, fails its look: it is
-/// malformed, as Node said; or it is JSON a value here cannot hold, nested
-/// past [`DEEPEST`] levels or with a number past a double's range. Node
-/// read such a line, and this does not: a difference kept on purpose, said
-/// in a sentence of its own so that a store holding one can be counted.
-fn unread(line: &[u8], index: usize) -> Stop {
-    if is_json_lossy(line) {
-        Stop::Failed(format!(
-            "JSON this build cannot hold at record {index}: nested past {DEEPEST} levels, or a number past a double's range"
-        ))
-    } else {
-        Stop::Failed(format!("malformed JSONL at record {index}"))
+/// The torn lines of `file` passed over: where each stood among the records.
+struct Passed<'a> {
+    file: &'a Path,
+    places: Vec<usize>,
+}
+
+impl Passed<'_> {
+    /// The torn line at the byte `at`, where the record `index` would be, is passed over.
+    fn one(&mut self, index: usize, at: u64) {
+        self.places.push(index);
+        torn::passed_over(self.file, index, at);
     }
+
+    /// A record has come after the torn lines `waiting`: each is passed over.
+    fn all(&mut self, waiting: &mut Vec<Torn>) {
+        for line in waiting.drain(..) {
+            self.one(line.index, line.at);
+        }
+    }
+}
+
+/// One whole line, which would be the record `index`: the records it holds,
+/// and whether the rest of it is torn (not JSON, where Node failed the look).
+/// A line of one record is that record; a blank one holds none. One that is
+/// not JSON holds the whole records it begins with, run together, as a short
+/// write that dropped only a newline leaves two, each in the place it would
+/// have had; the rest of it, if any, is torn. JSON this build cannot hold is a
+/// failure. A carriage return before the newline is JSON's white space: a line
+/// ended `\r\n` reads as one ended `\n`.
+fn whole_line(raw: &[u8], index: usize, parse: Parse) -> Result<(Vec<Value>, bool), Stop> {
+    if is_blank(raw) {
+        return Ok((Vec::new(), false));
+    }
+    match parse(raw) {
+        Ok(record) => Ok((vec![record], false)),
+        Err(_) if is_json_lossy(raw) => Err(cannot_hold(index)),
+        Err(_) => {
+            let mut whole = Vec::new();
+            let mut values = serde_json::Deserializer::from_slice(raw).into_iter::<IgnoredAny>();
+            let mut start = 0;
+            while let Some(Ok(_)) = values.next() {
+                let end = values.byte_offset();
+                let Ok(record) = parse(&raw[start..end]) else {
+                    break;
+                };
+                whole.push(record);
+                start = end;
+            }
+            Ok((whole, !is_blank(&raw[start..])))
+        }
+    }
+}
+
+/// Why the line at `index`, JSON a value here cannot hold, nested past
+/// [`DEEPEST`] levels or with a number past a double's range, fails its look.
+/// Node read such a line, and this does not: a difference kept on purpose,
+/// said in a sentence of its own so that a store holding one can be counted.
+fn cannot_hold(index: usize) -> Stop {
+    Stop::Failed(format!(
+        "JSON this build cannot hold at record {index}: nested past {DEEPEST} levels, or a number past a double's range"
+    ))
 }
 
 /// JSON's own white space: four bytes, where JavaScript's `trim` takes many more.

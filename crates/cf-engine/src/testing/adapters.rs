@@ -87,6 +87,7 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
             },
             pending: Default::default(),
             monitors: Vec::new(),
+            lines: Box::default(),
         }),
     }
 }

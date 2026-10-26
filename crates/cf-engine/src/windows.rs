@@ -550,6 +550,11 @@ impl Dispatcher {
             carried: Vec::new(),
             session: None,
         });
+        // A turn begins with the first message: what the record lost so far is not its.
+        if let Some(first) = first.as_ref() {
+            let mut delivery = record.delivery.borrow_mut();
+            delivery.lost_before = Some((first.id, delivery.lost));
+        }
         // What fails with a launch that does not come up: its first message, or
         // the one that would have been, which the role goes ahead of. A member's
         // is its first message in any case: where its role is to be said first,

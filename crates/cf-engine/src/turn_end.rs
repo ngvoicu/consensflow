@@ -337,6 +337,11 @@ impl Dispatcher {
             return Ok(Turn::Held);
         }
         record.held.borrow_mut().reset();
+        let words = with_lost(
+            words,
+            &participant.handle,
+            lost_in_turn(record, observed, Some(start)),
+        );
         let body = with_leftovers(words, &leftovers(&participant.handle, pending, None, true));
         self.seams
             .ledger
@@ -900,6 +905,56 @@ pub(crate) fn with_leftovers(words: String, said: &str) -> String {
         words
     } else {
         format!("{words}\n\n(ConsensFlow: {said})")
+    }
+}
+
+/// The first line of the window's record lost in its turn, by the place among
+/// the records it stood at. The turn is what follows the paste that began it,
+/// the item `pasted`: where the reading says the record each item is of, a line
+/// past that paste's own record is the turn's, and nothing is kept, so a
+/// restart or a resume loses nothing; a record with no paste in it has no turn
+/// to mark. A line lost there may have been the final answer itself, or a word
+/// that a job it waits on ended: the result is marked whatever the turn came to.
+/// Devin's reading cannot say (its items are its store's, its lost lines its
+/// wire log's): the count taken at the last hand-over stands in, and where there
+/// is none (the daemon started since) every line counts, so a result is marked
+/// rather than taken whole in silence.
+pub(crate) fn lost_in_turn(
+    record: &Record,
+    observed: &Observed,
+    pasted: Option<usize>,
+) -> Option<usize> {
+    let lost = observed.lost();
+    let Some(places) = observed.places() else {
+        let before = record
+            .delivery
+            .borrow()
+            .lost_before
+            .map_or(0, |(_, lost)| lost);
+        return lost.get(before).copied();
+    };
+    let began = *places.get(pasted?)?;
+    lost.iter().copied().find(|&line| line > began)
+}
+
+/// The item of the last paste the window's record shows: where its latest turn
+/// of ConsensFlow's began.
+pub(crate) fn last_paste(observed: &Observed) -> Option<usize> {
+    observed.items().iter().rposition(|item| {
+        item.role == Role::User
+            && header_id(&item.text).is_some_and(|id| is_paste_of(&item.text, id, None))
+    })
+}
+
+/// `words`, and after them the line that says a line of the record of `handle`'s window
+/// was lost in the turn (`lost`, its record): the result may have a hole. Ahead of what
+/// ConsensFlow says of the leftovers ([`with_leftovers`]).
+pub(crate) fn with_lost(words: String, handle: &str, lost: Option<usize>) -> String {
+    match lost {
+        Some(lost) => format!(
+            "{words}\n\nA line of @{handle}'s record was lost (record {lost}); this result may miss part of the turn."
+        ),
+        None => words,
     }
 }
 

@@ -69,6 +69,9 @@ pub(crate) struct Read<'a, P> {
     pub(crate) file: PathBuf,
     /// Whether the look read anything since the last.
     pub(crate) changed: bool,
+    /// The torn lines passed over so far, each by the place among the records
+    /// it stood at.
+    pub(crate) lost: Vec<usize>,
 }
 
 impl<P: Parser> Followed<P> {
@@ -129,10 +132,16 @@ impl<P: Parser> Followed<P> {
                     if let Looked::Held(seen) | Looked::Read(seen) = looked {
                         self.seen = Some(seen);
                     }
+                    let lost = self
+                        .seen
+                        .as_ref()
+                        .map(|seen| seen.passed_over().to_vec())
+                        .unwrap_or_default();
                     return Ok(Some(Read {
                         state: self.state.get_or_insert_with(|| (self.parse)()),
                         file,
                         changed,
+                        lost,
                     }));
                 }
                 // Another file, or a parser that wants every record again: the
@@ -207,7 +216,8 @@ impl<P: Parser + Answer> Look for TranscriptReader<P> {
                     return Arc::clone(answer);
                 }
                 match read.state.result() {
-                    Ok(record) => {
+                    Ok(mut record) => {
+                        record.lines.lost = read.lost;
                         let answer = Arc::new(Reading::Known(record));
                         self.answer = Some(Arc::clone(&answer));
                         answer
@@ -247,7 +257,7 @@ mod tests {
     fn a_transcript_that_could_not_be_read_is_not_read_again_until_it_changes() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("t.jsonl");
-        fs::write(&file, "{\"a\":1}\n{bad}\n").unwrap();
+        fs::write(&file, "{\"a\":1}\n{\"x\":1e400}\n").unwrap();
         let made = Arc::new(AtomicUsize::new(0));
         let visits = Arc::new(AtomicUsize::new(0));
         let located = file.clone();
@@ -261,7 +271,10 @@ mod tests {
         );
         let counts = || (made.load(Ordering::Relaxed), visits.load(Ordering::Relaxed));
         let failed = followed.read(LONG_AFTER_MS).err().unwrap().reason();
-        assert_eq!(failed, "malformed JSONL at record 1");
+        assert!(
+            failed.starts_with("JSON this build cannot hold at record 1"),
+            "{failed}"
+        );
         assert_eq!(counts(), (1, 1));
         assert_eq!(followed.read(LONG_AFTER_MS).err().unwrap().reason(), failed);
         assert_eq!(
@@ -273,6 +286,44 @@ mod tests {
         std::io::Write::write_all(&mut appended, b"{\"b\":2}\n").unwrap();
         assert_eq!(followed.read(LONG_AFTER_MS).err().unwrap().reason(), failed);
         assert_eq!(counts(), (2, 2), "changed: read again from its start");
+    }
+
+    #[test]
+    fn a_torn_line_breaks_nothing_the_state_goes_on_and_reads_the_records_after_it() {
+        // A short write left part of a record, and the next append made one line of
+        // it and itself: the state read so far is kept, and given what comes after.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("t.jsonl");
+        fs::write(&file, "{\"a\":1}\n{\"a\":2,\"b\":\"cut sh").unwrap();
+        let made = Arc::new(AtomicUsize::new(0));
+        let visits = Arc::new(AtomicUsize::new(0));
+        let located = file.clone();
+        let (making, visiting) = (Arc::clone(&made), Arc::clone(&visits));
+        let mut followed = Followed::new(
+            Box::new(move || Ok(Some(located.clone()))),
+            Box::new(move || {
+                making.fetch_add(1, Ordering::Relaxed);
+                Counting(Arc::clone(&visiting))
+            }),
+        );
+        let counts = || (made.load(Ordering::Relaxed), visits.load(Ordering::Relaxed));
+        let append = |text: &str| {
+            let mut appended = fs::OpenOptions::new().append(true).open(&file).unwrap();
+            std::io::Write::write_all(&mut appended, text.as_bytes()).unwrap();
+        };
+        assert!(followed.read(LONG_AFTER_MS).is_ok());
+        assert_eq!(counts(), (1, 1), "the piece waits");
+        append("{\"a\":3}\n");
+        assert!(followed.read(LONG_AFTER_MS).is_ok(), "torn: it waits");
+        assert_eq!(counts(), (1, 1));
+        append("{\"a\":4}\n");
+        assert!(followed.read(LONG_AFTER_MS).unwrap().unwrap().changed);
+        assert_eq!(
+            counts(),
+            (1, 2),
+            "the same state, given the record after it"
+        );
+        assert!(followed.broken.is_none());
     }
 
     /// Writes `text` to `file`, last written at `at_ms` whatever the file system's clock.
@@ -295,7 +346,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("t.jsonl");
         let looked = EPOCH_MS;
-        let (broken, mended) = ("{\"a\":1}\n{\"b\":!}\n", "{\"a\":1}\n{\"b\":2}\n");
+        let (broken, mended) = ("{\"a\":1}\n{\"b\":1e999}\n", "{\"a\":1}\n{\"b\":22222}\n");
         assert_eq!(broken.len(), mended.len());
         write_at(&file, broken, looked - 1_000);
         let located = file.clone();

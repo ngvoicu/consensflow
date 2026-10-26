@@ -49,6 +49,11 @@ pub struct FakeAgent {
     pub pending: Pending,
     /// The monitors among those jobs, as the reading says them.
     pub monitors: Vec<Monitor>,
+    /// The lines of its record torn and passed over, by their places (the reading says so).
+    pub lost: Vec<usize>,
+    /// Its reading says the record each item is of, as every harness's but
+    /// Devin's does: each item a record of its own, at its place.
+    pub says_places: bool,
     pub waiting: Option<Waiting>,
     pub quota: Option<Arc<Quota>>,
     /// Whether a delivery is taken.
@@ -257,6 +262,9 @@ pub struct FakeAdapter {
     /// where its harness may ask one ([`FakeAdapter::asks_to_trust`]): none, as an
     /// adapter that never asks, which the fake of Node's suite was.
     pub trusts: RefCell<Option<Trusts>>,
+    /// The readings of the windows opened from now on say the record each item
+    /// is of: every harness's but Devin's, whose items are its store's.
+    pub says_places: Cell<bool>,
 }
 
 impl FakeAdapter {
@@ -326,6 +334,7 @@ impl FakeAdapter {
             forgets_first_messages: Cell::new(false),
             resumes_records: Cell::new(false),
             trusts: RefCell::new(None),
+            says_places: Cell::new(true),
         })
     }
 
@@ -477,6 +486,16 @@ impl FakeAdapter {
             agent.took_back = false;
             agent.at_prompt = false;
         });
+    }
+
+    /// A line of the agent's record is torn and passed over, where its next
+    /// record goes: its reading says so from now on. The place it stood at.
+    pub fn loses_a_line(&self, handle: &str) -> usize {
+        self.with(handle, |agent| {
+            let place = agent.items.len();
+            agent.lost.push(place);
+            place
+        })
     }
 
     /// The agent is at work on a turn.
@@ -679,6 +698,17 @@ impl FakeAdapter {
     /// window's on it, none where no window had it, and whether the turn it
     /// ends in is over (an agent that was never answered is in one still, as a
     /// window the app's quit cut).
+    /// The lines the record of `session` lost, as its last window's reading had them.
+    fn lost_of(&self, session: &str) -> Vec<usize> {
+        let agents = self.agents.borrow();
+        agents
+            .iter()
+            .rev()
+            .find(|agent| agent.native == session)
+            .map(|agent| agent.lost.clone())
+            .unwrap_or_default()
+    }
+
     pub(super) fn record_of(&self, session: &str) -> Option<(Vec<Item>, bool)> {
         let agents = self.agents.borrow();
         agents
@@ -822,6 +852,11 @@ impl Asked {
             .filter(|_| fake.resumes_records.get())
             .and_then(|session| fake.record_of(session))
             .map(|(items, _)| items);
+        // A window opened again on a conversation reads its record again, lost lines and all.
+        let lost = launch
+            .resume
+            .map(|session| fake.lost_of(session))
+            .unwrap_or_default();
         let mut agent = FakeAgent {
             launch: id.clone(),
             handle: launch.handle.to_owned(),
@@ -830,6 +865,8 @@ impl Asked {
             settled: true,
             pending: Pending::default(),
             monitors: Vec::new(),
+            lost,
+            says_places: fake.says_places.get(),
             waiting: None,
             quota: None,
             admit: true,

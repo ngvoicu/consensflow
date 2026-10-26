@@ -73,6 +73,7 @@ fn look(items: Vec<Item>) -> Observed {
             settlement: Settlement::Unknown,
             pending: Default::default(),
             monitors: Vec::new(),
+            lines: Box::default(),
         }))),
         settled: true,
         over: false,

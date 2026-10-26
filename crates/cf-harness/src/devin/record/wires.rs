@@ -167,6 +167,16 @@ impl Wires {
         }
     }
 
+    /// The torn lines of the session's own that the logs passed over, each by
+    /// the place among its log's records it stood at, the logs in launch order.
+    pub(super) fn lost(&self) -> Vec<usize> {
+        self.launches
+            .iter()
+            .filter_map(|launch| self.logs.get(launch)?.seen.as_ref())
+            .flat_map(|seen| seen.passed_over().iter().copied())
+            .collect()
+    }
+
     /// Whether Devin is at work on the session, as the log written last of
     /// those that said something of it says: another session's, written
     /// later, says nothing of this one. Of two written at once, the one

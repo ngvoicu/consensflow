@@ -49,6 +49,7 @@ use crate::shown::Shown;
 use crate::stalls::StallsState;
 use crate::steps::{Step, StepsState};
 use crate::trust::{self, TrustState, Trusting};
+use crate::turn_end::{last_paste, lost_in_turn};
 use crate::windows::{Activity, ActivityState, WindowsState};
 
 /// When a Switch chief goes: now, or once the chief's turn ends.
@@ -1118,6 +1119,7 @@ impl Dispatcher {
                 return Ok(());
             }
         };
+        record.delivery.borrow_mut().lost = observed.lost().len();
         // Quota belongs to the member: a session that runs out takes its member out.
         let owner = self.member_of(project, participant);
         // A window with nothing in its record may still be drawing its screen.
@@ -1150,10 +1152,23 @@ impl Dispatcher {
                     state: ActivityState::Waiting,
                     reason: waiting.reason.clone(),
                 }
-            } else if observed.settled {
-                Activity::of(ActivityState::Idle)
             } else {
-                Activity::of(ActivityState::Working)
+                let state = if observed.settled {
+                    ActivityState::Idle
+                } else {
+                    ActivityState::Working
+                };
+                // A line of the record lost in the turn is said while the turn is the last.
+                match lost_in_turn(record, &observed, last_paste(&observed)) {
+                    Some(lost) => Activity::because(
+                        state,
+                        format!(
+                            "a line of @{}'s record was lost (record {lost})",
+                            participant.handle
+                        ),
+                    ),
+                    None => Activity::of(state),
+                }
             };
             self.set_activity(record, activity)?;
         }

@@ -1,0 +1,397 @@
+# A line of a harness's record torn for good (T-187, T-213, T-223, 2026-10-22): a short write
+# leaves part of a record and the next append makes one line of it and itself, which is not JSON.
+# The reader failed every look at the record from then on, as Node's did, and the engine read
+# nothing more of the conversation: no delivery confirmed, no turn's end, no result, no copy. The
+# rules (crates/cf-harness/src/shared/record/jsonl.rs): a torn line is passed over once a record
+# follows it, and said once in the daemon's log by its file and record; one with nothing after it
+# waits, the records before it read, for TORN_WAIT_MS, and is then passed over; an unterminated
+# last line waits, whatever it holds. The cases are the reader's own
+# (`shared::record::jsonl::tests`, `shared::record::followed::tests`) and the rig's
+# `crates/cf-e2e/tests/regressions/a_torn_record_line_hid_the_rest_of_a_conversation.rs`, which
+# builds the native `cf` from the sources as planted, so its plants say `builds`. Every name
+# begins `torn line`, so `npm run plants:daemon -- "torn line"` runs them all.
+
+[run]
+base-append = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "file::append"]
+base-append-processes = ["cargo", "test", "--offline", "-p", "cf-base", "--test", "append_processes"]
+harness-codex-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record::tests"]
+engine-lost-lines = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "lost_lines::"]
+harness-claude-torn = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::torn"]
+harness-launch-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "devin::"]
+harness-pi-steps = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record::tests::steps"]
+rig-regression-torn-line = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_torn_record_line_hid_the_rest_of_a_conversation::"], builds = true }
+harness-record-shared = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::"]
+
+[[plant]]
+name = "torn line: a torn line fails the look, as Node's did, and the worker's task is never done"
+meant = "a_worker_whose_record_tore_a_line_is_read_past_it_its_results_taken_and_its_conversation_copied"
+runs = ["rig-regression-torn-line"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = "        Err(_) if is_json_lossy(raw) => Err(cannot_hold(index)),\n"
+replace = "        Err(_) if is_json_lossy(raw) => Err(cannot_hold(index)),\n        Err(_) if true => Err(Stop::Failed(format!(\"malformed JSONL at record {index}\"))),\n"
+
+[[plant]]
+name = "torn line: the reader fails the look at a torn line with records after it"
+meant = "a_torn_line_with_records_after_it_is_passed_over_once_and_they_are_read"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = "        Err(_) if is_json_lossy(raw) => Err(cannot_hold(index)),\n"
+replace = "        Err(_) if is_json_lossy(raw) => Err(cannot_hold(index)),\n        Err(_) if true => Err(Stop::Failed(format!(\"malformed JSONL at record {index}\"))),\n"
+
+[[plant]]
+name = "torn line: a torn last line with nothing after it waits for good"
+meant = "a_torn_last_line_with_nothing_after_it_is_passed_over_once_its_wait_is_over"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = ".filter(|seen| seen.torn_since.is_some_and(waited))"
+replace = ".filter(|_| false)"
+
+[[plant]]
+name = "torn line: a quiet record whose torn line's wait is over is taken as unchanged"
+meant = "a_torn_last_line_with_nothing_after_it_is_passed_over_once_its_wait_is_over"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = "            && done_waiting.is_none()\n"
+replace = ""
+
+[[plant]]
+name = "torn line: a torn line's wait starts again at each look that reads it"
+meant = "a_torn_last_line_with_nothing_after_it_is_passed_over_once_its_wait_is_over"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = "Some(seen) if seen.offset == offset => seen.torn_since.unwrap_or(looked_ms),"
+replace = "Some(_) => looked_ms,"
+
+[[plant]]
+name = "torn line: an unterminated last line that cannot become JSON fails the look"
+meant = "a_last_line_that_cannot_become_json_waits_for_its_newline_and_fails_nothing"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''            Err(_) if is_json_lossy(&line) => return Err(cannot_hold(records)),
+'''
+replace = '''            Err(_) if is_json_lossy(&line) => return Err(cannot_hold(records)),
+            Err(_) if true => return Err(Stop::Failed(format!("malformed JSONL at record {records}"))),
+'''
+
+[[plant]]
+name = "torn line: a torn line is said again each time its record is read from the start"
+meant = "a_torn_line_with_records_after_it_is_passed_over_once_and_they_are_read"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/torn.rs"
+find = "if saying.said.insert((file.to_owned(), at, unfinished)) {"
+replace = "if saying.said.insert((file.to_owned(), at, unfinished)) || at > 0 {"
+
+[[plant]]
+name = "torn line: the daemon's log is never told of a torn line passed over"
+meant = "a_worker_whose_record_tore_a_line_is_read_past_it_its_results_taken_and_its_conversation_copied"
+runs = ["rig-regression-torn-line"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = "                Box::new(move |line| said.warn(line, None))"
+replace = "                Box::new(move |line| drop((&said, line)))"
+
+[[plant]]
+name = "torn line: the stand-in's TORN writes its record whole, and the case tears nothing"
+meant = "a_worker_whose_record_tore_a_line_is_read_past_it_its_results_taken_and_its_conversation_copied"
+runs = ["rig-regression-torn-line"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/records.rs"
+find = "self.open()?.write_all(&line.as_bytes()[..line.len() / 2])"
+replace = "self.open()?.write_all(format!(\"{line}\\n\").as_bytes())"
+
+[[plant]]
+name = "torn line: the records thread's readers are told nowhere to say a torn line"
+meant = "a_worker_whose_record_tore_a_line_is_read_past_it_its_results_taken_and_its_conversation_copied"
+runs = ["rig-regression-torn-line"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/records/thread.rs"
+find = "                say_with(say);\n"
+replace = "                drop(say);\n"
+
+# Round 2 (T-248, Calliope's T-246).
+
+[[plant]]
+name = "torn line: Devin's wire log refuses every paste and the launch's session at a torn line"
+meant = "a_torn_line_of_its_wire_log_before_the_session_s_line_neither_stops_the_launch_nor_a_paste"
+runs = ["harness-launch-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire.rs"
+find = '''        let Ok(record) = from_slice_lossy(record) else {
+            continue;
+        };'''
+replace = "        let record = from_slice_lossy(record).map_err(|_| Unreadable)?;"
+
+[[plant]]
+name = "torn line: the reading does not carry the lines it passed over"
+meant = "a_reading_past_a_torn_line_says_where_it_was_and_reads_what_follows"
+runs = ["harness-claude-torn"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/followed.rs"
+find = "                        record.lines.lost = read.lost;\n"
+replace = "                        drop(read.lost);\n"
+
+[[plant]]
+name = "torn line: a result taken past a line lost in its turn says nothing of it"
+meant = "a_result_taken_past_a_line_lost_in_its_turn_ends_with_a_line_for_the_chief_and_the_window_says_it"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            lost_in_turn(record, observed, Some(start)),\n"
+replace = "            lost_in_turn(record, observed, Some(start)).filter(|_| false),\n"
+
+[[plant]]
+name = "torn line: the window's activity says nothing of a line lost in its turn"
+meant = "a_result_taken_past_a_line_lost_in_its_turn_ends_with_a_line_for_the_chief_and_the_window_says_it"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                match lost_in_turn(record, &observed, last_paste(&observed)) {"
+replace = "                match lost_in_turn(record, &observed, last_paste(&observed)).filter(|_| false) {"
+
+[[plant]]
+name = "torn line: a message handed over takes the record's lost lines for its turn's"
+meant = "devins_message_pasted_into_an_open_window_begins_a_turn_that_has_lost_nothing_yet"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            delivery.lost_before = Some((message.id, delivery.lost));"
+replace = "            delivery.lost_before = Some((message.id, 0));"
+
+[[plant]]
+name = "torn line: a launch's first message takes the record's lost lines for its turn's"
+meant = "devins_line_lost_before_a_launch_s_first_message_is_no_part_of_its_turn"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            delivery.lost_before = Some((first.id, delivery.lost));"
+replace = "            delivery.lost_before = Some((first.id, 0));"
+
+[[plant]]
+name = "torn line: torn lines one after another at a quiet end wait one after another"
+meant = "torn_lines_one_after_another_at_the_end_of_a_quiet_record_wait_together"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = "passing |= done_waiting == Some(offset);"
+replace = "passing = done_waiting == Some(offset);"
+
+[[plant]]
+name = "torn line: an unfinished last line that never grows is never said"
+meant = "an_unfinished_last_line_that_does_not_grow_is_said_once_after_the_wait"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = "                    torn::unfinished(file, records, offset);\n"
+replace = "                    drop((records, offset));\n"
+
+[[plant]]
+name = "torn line: a quiet record whose unfinished line's wait is over is taken as unchanged"
+meant = "an_unfinished_last_line_that_does_not_grow_is_said_once_after_the_wait"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = "            && !unfinished_due;"
+replace = ";"
+
+[[plant]]
+name = "torn line: whole records run together in a line are lost with it"
+meant = "whole_records_run_together_in_one_line_are_each_read_in_their_place"
+runs = ["harness-record-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = "            while let Some(Ok(_)) = values.next() {"
+replace = "            while let Some(Ok(_)) = values.next().filter(|_| false) {"
+
+[[plant]]
+name = "torn line (pi): a record whose newline a short write dropped is lost, and the records after it move"
+meant = "a_record_whose_newline_a_short_write_dropped_keeps_its_place_and_its_time"
+runs = ["harness-pi-steps"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = "            while let Some(Ok(_)) = values.next() {"
+replace = "            while let Some(Ok(_)) = values.next().filter(|_| false) {"
+
+[[plant]]
+name = "torn line: two threads that append at the log's limit both move it aside, neither the process's turn nor the lock beside the file taken"
+meant = "two_threads_that_append_at_the_limit_move_the_file_aside_once_and_lose_no_line"
+runs = ["base-append"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file/append.rs"
+find = '''    let _turn = APPENDING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);'''
+replace = "    let _turn = &APPENDING;"
+
+[[plant.edit]]
+file = "crates/cf-base/src/file/append.rs"
+find = "    let _held = held(file);"
+replace = "    let _held = ();"
+
+# Round 3 (T-290, Calliope's T-285).
+
+[[plant]]
+name = "torn line: a turn is counted from the count kept at its hand-over, which a restart loses, though the record says where its paste is"
+meant = "a_line_lost_before_a_turn_is_no_part_of_it_after_a_restart"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "    let Some(places) = observed.places() else {"
+replace = "    let Some(places) = observed.places().filter(|_| false) else {"
+
+[[plant]]
+name = "torn line: the window's activity finds no paste in its record to count its turn from"
+meant = "a_result_taken_past_a_line_lost_in_its_turn_ends_with_a_line_for_the_chief_and_the_window_says_it"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "    observed.items().iter().rposition(|item| {"
+replace = "    observed.items().iter().rposition(|item| false && {"
+
+[[plant]]
+name = "torn line: a Claude item is said at no record of its own"
+meant = "a_reading_past_a_torn_line_says_where_it_was_and_reads_what_follows"
+runs = ["harness-claude-torn"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/items.rs"
+find = "            began: seq,"
+replace = "            began: 0,"
+
+[[plant]]
+name = "torn line: a Codex item is said at no record of its own"
+meant = "each_item_is_said_with_the_place_of_the_record_that_first_named_it"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = "            began: self.reading,"
+replace = "            began: 0,"
+
+[[plant]]
+name = "torn line: a Pi item is said at no record of its own"
+meant = "a_record_whose_newline_a_short_write_dropped_keeps_its_place_and_its_time"
+runs = ["harness-pi-steps"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "        self.places.push(self.reading);"
+replace = "        self.places.push(0);"
+
+[[plant]]
+name = "torn line: two processes that append at the log's limit both move it aside"
+meant = "two_processes_that_append_at_the_limit_move_the_file_aside_once_and_lose_no_line"
+runs = ["base-append-processes"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file/append.rs"
+find = "    let _held = held(file);"
+replace = "    let _held = ();"
+
+# The merge with turn-end (T-494): a result is recorded at a turn's end, held or not
+# (`turn_end::collect`), and by `cf task finish` (`turn_end/finish.rs`); each is marked past a
+# line lost in the turn, the line ahead of what ConsensFlow says of the leftovers.
+
+[[plant]]
+name = "torn line: a task finished past a line lost in its turn has its result say nothing of it"
+meant = "a_task_finished_past_a_line_lost_in_its_turn_has_its_result_marked_ahead_of_the_leftovers"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = "            lost_in_turn(record, &observed, Some(delivered)),\n"
+replace = "            lost_in_turn(record, &observed, Some(delivered)).filter(|_| false),\n"
+
+[[plant]]
+name = "torn line: a finished task's turn is counted from the start of its record"
+meant = "a_task_finished_past_a_line_lost_before_its_turn_has_its_result_unmarked"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = "            lost_in_turn(record, &observed, Some(delivered)),\n"
+replace = "            lost_in_turn(record, &observed, Some(0)),\n"
+
+[[plant]]
+name = "torn line: a finished task's result says its lost line after ConsensFlow's word on the leftovers"
+meant = "a_task_finished_past_a_line_lost_in_its_turn_has_its_result_marked_ahead_of_the_leftovers"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = """
+        let words = with_lost(
+            words_of(&run),
+            &participant.handle,
+            lost_in_turn(record, &observed, Some(delivered)),
+        );
+        let body = with_leftovers(
+            words,
+            &leftovers(&participant.handle, pending, Some(by), observed.settled),
+        );"""
+replace = """
+        let body = with_lost(
+            with_leftovers(
+                words_of(&run),
+                &leftovers(&participant.handle, pending, Some(by), observed.settled),
+            ),
+            &participant.handle,
+            lost_in_turn(record, &observed, Some(delivered)),
+        );"""
+
+[[plant]]
+name = "torn line: a held turn's result its job's end brings forgets the line the turn lost"
+meant = "a_line_lost_in_a_turn_held_for_its_job_marks_the_result_its_jobs_end_brings"
+runs = ["engine-lost-lines"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            lost_in_turn(record, observed, Some(start)),\n"
+replace = "            lost_in_turn(record, observed, Some(start)).filter(|_| record.held.borrow().told.is_none()),\n"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = """
+        record.held.borrow_mut().reset();
+        let words = with_lost("""
+replace = """
+        let words = with_lost("""
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        let body = with_leftovers(words, &leftovers(&participant.handle, pending, None, true));\n"
+replace = "        record.held.borrow_mut().reset();\n        let body = with_leftovers(words, &leftovers(&participant.handle, pending, None, true));\n"

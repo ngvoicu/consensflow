@@ -437,6 +437,7 @@ pub(super) fn empty_record() -> Reading {
         settlement: Settlement::Unknown,
         pending: Default::default(),
         monitors: Vec::new(),
+        lines: Box::default(),
     })
 }
 
@@ -460,5 +461,6 @@ pub(super) fn working_record() -> Record {
         settlement: Settlement::InFlight,
         pending: Default::default(),
         monitors: Vec::new(),
+        lines: Box::default(),
     }
 }

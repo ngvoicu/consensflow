@@ -27,7 +27,7 @@ mod promises;
 mod sync;
 mod write;
 
-pub use append::{append_rotating, aside};
+pub use append::{append_rotating, aside, lock_beside};
 pub use errno::{errno_name, error_code, is_missing, uv_words};
 pub use error::FileError;
 pub use promises::{read_file, rename, rm_force};

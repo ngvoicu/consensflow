@@ -44,7 +44,7 @@ use std::rc::Rc;
 use cf_base::refusal::Refusal;
 use cf_ledger::{ParticipantView, TaskThread, TaskView};
 
-use super::{leftovers, with_leftovers, words_of};
+use super::{leftovers, lost_in_turn, with_leftovers, with_lost, words_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
@@ -193,6 +193,9 @@ impl Dispatcher {
                     ),
                 )
             })?;
+        // Where torn-line counts the lines its record lost from (`lost_in_turn`): the paste of
+        // the latest message about the task, before any later one (3.0.6-alpha.3's integration B).
+        let delivered = self.delivered_at(participant.id, &thread, items)?;
         let run = answers_to_the_task(&items[start + 1..], &replacements)
             .and_then(|answers| answers.complete_run)
             .ok_or_else(none)?;
@@ -214,8 +217,13 @@ impl Dispatcher {
             ));
         }
         let pending = observed.pending();
-        let body = with_leftovers(
+        let words = with_lost(
             words_of(&run),
+            &participant.handle,
+            lost_in_turn(record, &observed, delivered),
+        );
+        let body = with_leftovers(
+            words,
             &leftovers(&participant.handle, pending, Some(by), observed.settled),
         );
         let moved = self

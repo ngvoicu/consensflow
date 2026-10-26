@@ -27,6 +27,8 @@ pub(super) struct Items {
 struct Entry {
     item: Item,
     seq: usize,
+    /// The place of the record it began in, which no later record moves.
+    began: usize,
     fragments: Fragments,
 }
 
@@ -129,8 +131,9 @@ impl Items {
 
     /// The items in the record's order: an item's `seq` is its line's place,
     /// and those of one line are ordered by id, as `localeCompare` orders
-    /// under ICU's root collation, whatever the machine's locale.
-    pub(super) fn sorted(&self) -> Result<Vec<Item>, String> {
+    /// under ICU's root collation, whatever the machine's locale; and the
+    /// place of the record each began in.
+    pub(super) fn sorted(&self) -> Result<(Vec<Item>, Vec<usize>), String> {
         let entries: Vec<&Entry> = self.list.iter().collect();
         let sorted = sort(entries, |left, right| {
             let order = left
@@ -143,7 +146,10 @@ impl Items {
                 std::cmp::Ordering::Greater => 1.0,
             })
         })?;
-        Ok(sorted.into_iter().map(|entry| entry.item.clone()).collect())
+        Ok(sorted
+            .into_iter()
+            .map(|entry| (entry.item.clone(), entry.began))
+            .unzip())
     }
 }
 
@@ -161,6 +167,7 @@ impl Entry {
                 compaction: false,
             },
             seq,
+            began: seq,
             fragments: Fragments::default(),
         }
     }
