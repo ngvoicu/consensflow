@@ -49,7 +49,7 @@ use crate::daemon::Daemon;
 use crate::daemon_log::StartLine;
 use crate::live::members::Identity;
 use crate::outcome::{self, Verdict};
-use crate::process::{self, Ran, Run, Sink, Spawned};
+use crate::process::{Ran, Run, Sink, Spawned};
 use crate::{cf, checkout, files, wire, Error, Result};
 
 pub use forget::project_name;
