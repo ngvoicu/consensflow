@@ -257,6 +257,36 @@ impl PaneHost for Admitting<'_> {
 }
 
 impl Dispatcher {
+    /// Whether `message`, handed over into a window that holds the task `owner`'s work,
+    /// begins a turn: in a member's window that holds a task, only one its result is taken
+    /// from, as the ledger's `last_pasted` finds it (the task's message, an answer, or words
+    /// told to its assignee); in any other window, every message. Only such a hand-over
+    /// moves the count a turn's lost lines are counted from ([`DeliveryPart::lost_before`]):
+    /// a note that goes into a member's window during its task's turn leaves it (Calliope's
+    /// P3 (d), T-624).
+    fn begins_a_turn(
+        &self,
+        owner: Option<i64>,
+        message: &MessageView,
+    ) -> Result<bool, EngineError> {
+        let Some(owner) = owner else {
+            return Ok(true);
+        };
+        let Some(number) = message.task_number.filter(|&number| number == owner) else {
+            return Ok(false);
+        };
+        if matches!(message.kind.as_str(), "task" | "answer") {
+            return Ok(true);
+        }
+        let task = self
+            .seams
+            .ledger
+            .borrow()
+            .task(message.project_id, number)?;
+        let assignee = task.and_then(|thread| thread.task.assignee);
+        Ok(is_told(message, assignee.as_deref()))
+    }
+
     /// Whether `project` is open now, as a delivery asks after each wait: a
     /// closed project's window is handed nothing.
     pub(crate) fn in_open_project(&self, project: i64) -> Result<bool, EngineError> {
@@ -452,7 +482,8 @@ impl Dispatcher {
         // What is pasted is what the ledger says it is when delivery begins: the
         // message, and the rows it carries still waiting, which are the set from now.
         let begun = self.seams.ledger.borrow_mut().begin_delivery(message.id)?;
-        {
+        let owner = record.window.borrow().owner;
+        if self.begins_a_turn(owner, &begun.message)? {
             let mut delivery = record.delivery.borrow_mut();
             delivery.lost_before = Some((message.id, delivery.lost));
         }

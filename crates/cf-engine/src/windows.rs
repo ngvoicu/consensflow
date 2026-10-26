@@ -489,11 +489,6 @@ impl Dispatcher {
             entered_again: false,
             carried: Vec::new(),
         });
-        // A turn begins with the first message: what the record lost so far is not its.
-        if let Some(first) = first.as_ref() {
-            let mut delivery = record.delivery.borrow_mut();
-            delivery.lost_before = Some((first.id, delivery.lost));
-        }
         // What fails with a launch that does not come up: its first message, or
         // the one that would have been, which the role goes ahead of. A member's
         // is its first message in any case: where its role is to be said first,
@@ -652,6 +647,18 @@ impl Dispatcher {
                     .ledger
                     .borrow_mut()
                     .set_conversation_role_text(started.id, instructions)?;
+            }
+        }
+        // A turn begins with the first message: what the record lost so far is not its. A
+        // conversation begun afresh has lost nothing, whatever the last one's record did
+        // (Calliope's P3 (d), T-624).
+        {
+            let mut delivery = record.delivery.borrow_mut();
+            if !resumed {
+                delivery.lost = 0;
+            }
+            if let Some(first) = first.as_ref() {
+                delivery.lost_before = Some((first.id, delivery.lost));
             }
         }
         {

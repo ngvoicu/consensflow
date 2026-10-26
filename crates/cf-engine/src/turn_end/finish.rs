@@ -148,15 +148,6 @@ impl Dispatcher {
             })?;
         // The task may have moved while the window was read.
         let (thread, _, _) = self.finishable(project, number)?;
-        let none = || {
-            refused(
-                "no-answer",
-                format!(
-                    "cannot finish T-{number}: @{} has written no complete answer since its latest message about it; wait for one, or cancel it",
-                    participant.handle
-                ),
-            )
-        };
         let items = observed.items();
         let delivered = self
             .delivered_at(participant.id, &thread, items)?
@@ -169,6 +160,24 @@ impl Dispatcher {
                     ),
                 )
             })?;
+        let lost = lost_in_turn(record, &observed, Some(delivered));
+        // A line lost in the turn may have been the answer: the refusal says so (Calliope's
+        // P3 (a), T-624).
+        let none = || {
+            let handle = &participant.handle;
+            let because = match lost {
+                Some(line) => format!(
+                    "; a line of @{handle}'s record was lost (record {line}) in the turn, which may have been its answer: send it a message about the task, or cancel it"
+                ),
+                None => "; wait for one, or cancel it".to_owned(),
+            };
+            refused(
+                "no-answer",
+                format!(
+                    "cannot finish T-{number}: @{handle} has written no complete answer since its latest message about it{because}"
+                ),
+            )
+        };
         let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
         // A message ConsensFlow pasted into the window since (the Resume's word to go on,
         // which no start is taken from) is answered by what follows it, as at a turn's end;
@@ -205,11 +214,7 @@ impl Dispatcher {
             ));
         }
         let pending = observed.pending();
-        let words = with_lost(
-            words_of(&run),
-            &participant.handle,
-            lost_in_turn(record, &observed, Some(delivered)),
-        );
+        let words = with_lost(words_of(&run), &participant.handle, lost);
         let body = with_leftovers(
             words,
             &leftovers(&participant.handle, pending, Some(by), observed.settled),
