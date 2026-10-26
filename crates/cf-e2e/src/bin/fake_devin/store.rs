@@ -1,7 +1,9 @@
 //! Devin's store of its sessions, as the daemon reads it: `cli/sessions.db` in
 //! Devin's data folder. A session is a row (`sessions`: its id and the node its
 //! main chain ends in), and a message a node (`message_nodes`: the node, its
-//! parent, and the message as JSON). The daemon opens it read-only and never
+//! parent, and the message as JSON). What the TUI submits is a row of its history
+//! (`prompt_history`), written at the Enter, before its turn takes it in, as Devin
+//! 3000.11.92 writes it ([`submitted`]). The daemon opens it read-only and never
 //! waits on a writer, so the stand-in writes in WAL mode, where a reader sees the
 //! last whole write and a write waits for no reader.
 
@@ -44,7 +46,10 @@ fn made(db: &Connection) -> rusqlite::Result<()> {
             "PRAGMA journal_mode = WAL;
              CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
              CREATE TABLE IF NOT EXISTS message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
-               node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT);",
+               node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT);
+             CREATE TABLE IF NOT EXISTS prompt_history (id INTEGER PRIMARY KEY AUTOINCREMENT,
+               content TEXT NOT NULL, timestamp INTEGER NOT NULL, session_id TEXT NOT NULL,
+               is_shell INTEGER NOT NULL DEFAULT 0);",
         );
         match tried {
             Err(rusqlite::Error::SqliteFailure(failure, _))
@@ -56,6 +61,21 @@ fn made(db: &Connection) -> rusqlite::Result<()> {
             tried => return tried,
         }
     }
+}
+
+/// The TUI of `session` submitted `text`: its history row in the store in `file`, at the
+/// Enter, the second it is in, as Devin 3000.11.92 writes it whether a turn is at work or
+/// not (T-102, probed live).
+pub fn submitted(file: &Path, session: &str, text: &str) -> Result<(), String> {
+    let db = Connection::open(file).map_err(said)?;
+    db.busy_timeout(Duration::from_secs(5)).map_err(said)?;
+    let second = jiff::Timestamp::now().as_second();
+    db.execute(
+        "INSERT INTO prompt_history (content, timestamp, session_id) VALUES (?, ?, ?)",
+        params![text, second, session],
+    )
+    .map_err(said)?;
+    Ok(())
 }
 
 impl Store {

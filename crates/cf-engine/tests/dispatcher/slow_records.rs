@@ -29,7 +29,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use cf_engine::delivery_text::{delivery_text, marker_of};
+use cf_engine::delivery_text::{delivery_text, delivery_text_sent_again, marker_of};
 use cf_engine::testing::Context;
 use cf_harness::contract::Waiting;
 use cf_harness::records::Role;
@@ -779,4 +779,404 @@ fn pastes_a_note_about_a_task_its_recipient_has_no_task_message_for_alone_and_a_
         assert_eq!(text, &delivery_text(&context.message(note.id), &[]));
         assert_eq!(text.matches("[ConsensFlow m-").count(), 1, "{text}");
     }
+}
+
+/// The reviews of 2026-10-18: Devin's TUI put the paste to its agent (`Window::took`), and
+/// the human ran `/new` before the record showed it. The window was followed to the new
+/// conversation with the paste still on its way, whose record never shows it, and the
+/// window's queue waited behind it for good. The conversation it went into says what
+/// came of it.
+fn taken_then_switched(context: &Context) -> (i64, MessageView, Rc<Cell<usize>>, String) {
+    switched(context, true)
+}
+
+/// A paste handed over, then the human's `/new`: `took` where its harness said it took
+/// the paste first.
+fn switched(context: &Context, took: bool) -> (i64, MessageView, Rc<Cell<usize>>, String) {
+    let project = holding(context);
+    let pasted = counting(context);
+    let note = context.note(project, "zeus", "chief", "hello");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| agent.took = took);
+    context.advance(5_000);
+    context.pass().unwrap();
+    let left = context.adapter.with("chief", |agent| agent.native.clone());
+    context.adapter.switch_to("chief", "native-new");
+    context.advance(1_000);
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 1);
+    (project, note, pasted, left)
+}
+
+#[test]
+fn gives_back_to_its_queue_a_paste_taken_in_a_conversation_the_human_left_once_its_record_rests_without_it(
+) {
+    let context = Context::new();
+    let (project, note, pasted, _) = taken_then_switched(&context);
+    // The first look on the conversation it shows now reads the one left at rest.
+    context.advance(1_000);
+    context.pass().unwrap();
+    context.advance(ARRIVAL_MS - 1_000);
+    context.pass().unwrap();
+    assert_eq!(
+        pasted.get(),
+        1,
+        "its record has had no arrival window of rest yet"
+    );
+    context.advance(2_000);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        pasted.get(),
+        2,
+        "pasted into the conversation the window shows now"
+    );
+    assert_eq!(
+        why_retried(&context, project),
+        "its window was switched to another conversation, whose record never showed it"
+    );
+    let again = context.message(note.id);
+    assert_eq!(
+        (again.state.as_str(), again.attempts),
+        ("delivering", 1),
+        "given back with its attempt"
+    );
+}
+
+#[test]
+fn confirms_a_paste_taken_in_a_conversation_the_human_left_when_its_record_shows_it() {
+    let context = Context::new();
+    let (_, note, pasted, left) = taken_then_switched(&context);
+    // The conversation left runs it: its record, at work, shows it, however late.
+    context.adapter.with("chief", |agent| {
+        agent.records_settled.insert(left.clone(), false);
+    });
+    for _ in 0..4 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted.get(), 1, "a record at work is waited for");
+    assert_eq!(context.message(note.id).state, "delivering");
+    let item = context
+        .adapter
+        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    context.adapter.with("chief", |agent| {
+        agent.records.entry(left.clone()).or_default().push(item);
+    });
+    context.pass().unwrap();
+    let delivered = context.message(note.id);
+    assert_eq!(
+        (delivered.state.as_str(), delivered.attempts),
+        ("delivered", 1)
+    );
+    assert_eq!(pasted.get(), 1, "never pasted again");
+}
+
+/// The review of c2e29f2d (P1): Devin's reader answers unknown for a session its store
+/// holds no row of, which it writes with the session's first message. The human ran
+/// `/new`, a paste went into the fresh conversation, and the human switched again before
+/// Devin ran it: that conversation's record could never be read, and the paste waited
+/// for good. A record that cannot be read is at rest with nothing in it, as a look reads
+/// one: the paste goes back after a whole arrival window.
+#[test]
+fn gives_back_a_paste_taken_in_a_conversation_the_human_left_whose_record_cannot_be_read() {
+    let context = Context::new();
+    let (project, note, pasted, left) = taken_then_switched(&context);
+    context
+        .adapter
+        .with("chief", |agent| agent.records_unreadable.push(left.clone()));
+    context.advance(1_000);
+    context.pass().unwrap();
+    context.advance(ARRIVAL_MS - 1_000);
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 1, "a whole arrival window first");
+    context.advance(2_000);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 2, "pasted into the conversation shown now");
+    assert_eq!(
+        why_retried(&context, project),
+        "its window was switched to another conversation, whose record never showed it"
+    );
+    assert_eq!(context.message(note.id).attempts, 1, "with its attempt");
+}
+
+/// The review of c2e29f2d (P2): a conversation the human left in the middle of a turn may
+/// read at work for good, no end ever written for it. Its record unchanged for half an
+/// hour, the paste goes back; a record that changes is a turn that goes on.
+#[test]
+fn gives_back_a_paste_in_a_conversation_left_at_work_once_its_record_has_not_changed_for_half_an_hour(
+) {
+    // A harness that says nothing of having taken it: the half hour is its bound.
+    let context = Context::new();
+    let (project, note, pasted, left) = switched(&context, false);
+    context.adapter.with("chief", |agent| {
+        agent.records_settled.insert(left.clone(), false);
+    });
+    for _ in 0..50 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted.get(), 1, "25 minutes at work");
+    // It writes something: a turn that goes on, and the half hour starts again.
+    let item = context.adapter.item(Role::Assistant, "still at it");
+    context.adapter.with("chief", |agent| {
+        agent.records.entry(left.clone()).or_default().push(item);
+    });
+    for _ in 0..50 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted.get(), 1, "25 minutes from its last change");
+    for _ in 0..12 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 2, "half an hour unchanged: the switch cut it");
+    assert_eq!(
+        why_retried(&context, project),
+        "its window was switched to another conversation, whose record read a turn at work, unchanged, and never showed it"
+    );
+    assert_eq!(context.message(note.id).attempts, 1);
+}
+
+/// The review of c2e29f2d (P3): the window closed while a paste it had taken was in the
+/// conversation the human left. Its end read the conversation shown, which never holds
+/// it, and the next window was given it again, though the conversation left had run it.
+#[test]
+fn a_window_that_closes_with_a_paste_in_the_conversation_left_settles_it_by_that_record() {
+    let context = Context::new();
+    let (_, note, pasted, left) = taken_then_switched(&context);
+    let item = context
+        .adapter
+        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    context.adapter.with("chief", |agent| {
+        agent.records_settled.insert(left.clone(), false);
+        agent.records.entry(left.clone()).or_default().push(item);
+    });
+    context.exit("chief");
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.advance(ARRIVAL_MS);
+    }
+    let delivered = context.message(note.id);
+    assert_eq!(
+        (delivered.state.as_str(), delivered.attempts),
+        ("delivered", 1)
+    );
+    assert_eq!(pasted.get(), 1, "never pasted again");
+}
+
+/// The review of 6c8fc595: Devin's `/new` cuts no turn (T-107's probe): it switches once
+/// the turn ends, and runs the paste queued behind it in the conversation left. A paste
+/// its harness said it took, behind a step longer than half an hour, was given back at the
+/// half hour and then run in the old conversation as well. Its harness's word holds it:
+/// the record is waited for, however long it reads at work, and confirms it when it shows.
+#[test]
+fn waits_past_half_an_hour_on_a_paste_its_harness_took_in_a_conversation_left_at_work() {
+    let context = Context::new();
+    let (_, note, pasted, left) = taken_then_switched(&context);
+    context.adapter.with("chief", |agent| {
+        agent.records_settled.insert(left.clone(), false);
+    });
+    for _ in 0..130 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted.get(), 1, "an hour at work: never given back");
+    assert_eq!(context.message(note.id).state, "delivering");
+    let item = context
+        .adapter
+        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    context.adapter.with("chief", |agent| {
+        agent.records.entry(left.clone()).or_default().push(item);
+    });
+    context.pass().unwrap();
+    let delivered = context.message(note.id);
+    assert_eq!(
+        (delivered.state.as_str(), delivered.attempts),
+        ("delivered", 1)
+    );
+    assert_eq!(pasted.get(), 1);
+}
+
+/// The review of 6c8fc595 (the second half of c2e29f2d's P3): a paste its harness took,
+/// the human's `/new`, the conversation left ran the paste, and the daemon stopped before
+/// a look read that record. The start read the conversation the window shows now, which
+/// never holds it, gave it back and pasted it again there. The ledger keeps the
+/// conversation each delivery went into, and the start reads that one.
+#[test]
+fn a_restart_settles_a_paste_by_the_conversation_it_went_into_not_the_one_the_window_shows_now() {
+    let context = Context::new();
+    let (project, note, pasted, left) = taken_then_switched(&context);
+    let item = context
+        .adapter
+        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    context.adapter.with("chief", |agent| {
+        agent.records.entry(left.clone()).or_default().push(item);
+    });
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    let settled = context.message(note.id);
+    assert_eq!(
+        (settled.state.as_str(), settled.attempts),
+        ("delivered", 1),
+        "the conversation it went into ran it"
+    );
+    after.resume_project(project).unwrap();
+    after.pass().unwrap();
+    after.pass().unwrap();
+    assert_eq!(pasted.get(), 1, "never pasted again");
+}
+
+/// Calliope's look at round 3 (T-275), and the chief's call on it (T-280): Devin holds a
+/// paste queued behind a turn and writes it to its record only when the turn takes it
+/// in. A paste its TUI took, the human's `/new`, and the daemon stopped while the
+/// conversation left still worked: its record does not show the paste, and Devin's store
+/// says its TUI took it. Its window went with the daemon's stop, most likely with what
+/// its queue held, and a message confirmed and lost is a result nobody reads: the start
+/// gives it back, and it goes again saying in its header that it may be there already.
+/// Its record proves it as any paste's.
+#[test]
+fn a_restart_sends_again_saying_so_a_paste_its_harness_took_that_the_conversation_it_went_into_does_not_show(
+) {
+    let context = Context::new();
+    let (project, note, _, left) = taken_then_switched(&context);
+    let text = delivery_text(&context.message(note.id), &[]);
+    context.adapter.with("chief", |agent| {
+        agent.records_settled.insert(left.clone(), false);
+        agent.stored.insert(left.clone(), vec![text]);
+    });
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    let settled = context.message(note.id);
+    assert_eq!(
+        (settled.state.as_str(), settled.attempts),
+        ("queued", 0),
+        "given back"
+    );
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        given_after_the_restart(&context, note.id),
+        [delivery_text_sent_again(&context.message(note.id), &[])],
+        "sent again, saying so"
+    );
+    let delivered = context.message(note.id);
+    assert_eq!(
+        (delivered.state.as_str(), delivered.attempts),
+        ("delivered", 1),
+        "its record proves it"
+    );
+}
+
+/// What the chief's window opened after the restart was given of the message `id`.
+fn given_after_the_restart(context: &Context, id: i64) -> Vec<String> {
+    given_to(context, "chief", id)
+}
+
+/// What the window of `handle` was given of the message `id`.
+fn given_to(context: &Context, handle: &str, id: i64) -> Vec<String> {
+    context.adapter.with(handle, |agent| {
+        agent
+            .items
+            .iter()
+            .filter(|item| item.text.contains(&marker_of(id)))
+            .map(|item| item.text.to_string())
+            .collect()
+    })
+}
+
+/// The same, with a store that has no row of the paste: its harness never took it, and
+/// it goes back to its queue and again as it always did, with no word: it was never
+/// there.
+#[test]
+fn a_restart_gives_back_a_paste_its_harness_says_it_never_took_and_it_goes_again_with_no_word() {
+    let context = Context::new();
+    let (project, note, _, left) = taken_then_switched(&context);
+    context.adapter.with("chief", |agent| {
+        agent
+            .stored
+            .insert(left.clone(), vec!["another prompt".to_owned()]);
+    });
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    let settled = context.message(note.id);
+    assert_eq!((settled.state.as_str(), settled.attempts), ("queued", 0));
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        given_after_the_restart(&context, note.id),
+        [delivery_text(&context.message(note.id), &[])]
+    );
+    assert_eq!(context.message(note.id).state, "delivered");
+}
+
+/// A message a start sent again after a restart says so wherever it goes in, the first
+/// message of a window opened for it too (`launch_text`): a worker's brief, here.
+#[test]
+fn a_window_opened_with_a_message_a_restart_sent_again_is_given_it_saying_so() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let brief = context
+        .give(project.id, "zeus", "Write the parser")
+        .message
+        .expect("the brief");
+    {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.begin_delivery(brief.id).unwrap();
+        ledger
+            .retry_delivery(
+                brief.id,
+                "the daemon stopped before its record showed it, and its window took it",
+                true,
+            )
+            .unwrap();
+    }
+    context.pass().unwrap();
+    assert_eq!(
+        given_to(&context, "zeus", brief.id),
+        [delivery_text_sent_again(&context.message(brief.id), &[])]
+    );
+}
+
+/// Where this branch meets Resume after Close (the merge of main after T-82): a paste a
+/// start sent again saying so may be turned away at its hand-over (its project closed,
+/// a row withdrawn) and given back for that. A copy may still be in the conversation it
+/// first went into all the same: the paste that goes after says so still.
+#[test]
+fn a_message_sent_again_after_a_restart_still_says_so_after_another_give_back() {
+    let context = Context::new();
+    let (project, note, _, left) = taken_then_switched(&context);
+    let text = delivery_text(&context.message(note.id), &[]);
+    context.adapter.with("chief", |agent| {
+        agent.records_settled.insert(left.clone(), false);
+        agent.stored.insert(left.clone(), vec![text]);
+    });
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.begin_delivery(note.id).unwrap();
+        ledger
+            .retry_delivery(note.id, "its project was closed before its hand-over", true)
+            .unwrap();
+    }
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        given_after_the_restart(&context, note.id),
+        [delivery_text_sent_again(&context.message(note.id), &[])]
+    );
 }

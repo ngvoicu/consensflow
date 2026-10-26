@@ -54,6 +54,13 @@ replace = '''
             ..self.rested(record, observed, self.held(record))
         };'''
 
+# Devin's store says it took a paste from its Enter on (3000.11.92, and the stand-in that
+# plays it), which keeps the note once whatever this rule does: it is taken out too (T-107).
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/history.rs"
+find = "                let took = seen.took || (pasted.is_some() && self.seen.get().took);"
+replace = "                let took = false;"
+
 [[plant]]
 name = "notes twice: the engine counts the arrival window from the hand-over, its turns or none"
 meant = "waits_for_the_record_of_a_message_while_its_window_is_in_a_turn_and_pastes_it_once"
@@ -120,8 +127,8 @@ find = "&& waited <= self.seams.limits.arrival_ms"
 replace = ""
 
 [[plant]]
-name = "notes twice: Devin's window is read at rest in the turn its TUI began by a prompt to its agent"
-meant = "a_window_its_record_reads_at_rest_is_read_in_the_turn_its_tui_begins_by_a_prompt_for_the_gap"
+name = "notes twice: Devin's window is read at rest in the turn a message of the user's began, before its agent's first word"
+meant = "a_message_of_the_users_its_agent_has_not_answered_yet_is_a_turn_begun_for_a_while"
 runs = ["harness-devin"]
 
 [[plant.edit]]
@@ -130,77 +137,14 @@ find = "                observed.settled = false;"
 replace = ""
 
 [[plant]]
-name = "notes twice: Devin's window is read in a turn its agent never says a word of, for good"
-meant = "a_window_its_record_reads_at_rest_is_read_in_the_turn_its_tui_begins_by_a_prompt_for_the_gap"
+name = "notes twice: the window is never told the message about to be pasted, so its store is never said to have it"
+meant = "the_tui_took_a_paste_once_its_store_has_a_row_of_it_whole_in_the_conversation_shown_since_the_hand_over"
 runs = ["harness-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = "            && asked_at.is_some_and(|at| self.time.wall_ms() - at < PROMPT_GAP_MS)"
-replace = "            && asked_at.is_some_and(|_| true)"
-
-[[plant]]
-name = "notes twice: a prompt begins a turn of a conversation whose record holds no message yet"
-meant = "a_prompt_begins_no_turn_of_a_conversation_whose_record_holds_no_message_yet"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = "        !observed.items().is_empty()"
-replace = "        true"
-
-[[plant]]
-name = "notes twice: the end of a turn does not close the prompts asked of it"
-meant = "a_prompt_the_tui_puts_to_its_agent_is_asked_from_the_look_that_reads_it_until_a_turn_ends"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '''
-            if record.get("sessionId").and_then(Value::as_str) == self.shown.as_deref() {
-                self.asked.clear();'''
-replace = '''
-            if record.get("sessionId").and_then(Value::as_str) == self.shown.as_deref() {'''
-
-[[plant]]
-name = "notes twice: the answer to a prompt's request does not close it"
-meant = "a_prompt_is_closed_by_the_answer_to_its_request_by_the_id_and_by_no_other"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "                self.asked.retain(|asked| asked.id != *id);"
+find = "            self.history.expect(&body, self.time.wall_ms());"
 replace = ""
-
-[[plant]]
-name = "notes twice: a prompt of another conversation than the one shown is asked"
-meant = "only_a_prompt_of_the_conversation_shown_is_asked_and_only_its_turns_end_closes_it"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '        if method == "session/prompt" && session.is_some() && session == self.shown.as_deref() {'
-replace = '        if method == "session/prompt" {'
-
-[[plant]]
-name = "notes twice: the log is never told the message about to be pasted, so no turn is ever said to hold it"
-meant = "a_message_pasted_is_held_in_the_turn_of_the_tuis_prompt_its_line_begins_and_no_longer"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = "            self.wire.expect(first.unwrap_or_default());"
-replace = ""
-
-[[plant]]
-name = "notes twice: Devin's window never says a paste is in a turn"
-meant = "a_message_pasted_is_held_in_the_turn_of_the_tuis_prompt_its_line_begins_and_no_longer"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = "            .is_ok_and(|wire| wire.held)"
-replace = "            .is_ok_and(|_| false)"
 
 [[plant]]
 name = "notes twice: a paste never shown waits for good while its window's rest is cut by short turns"

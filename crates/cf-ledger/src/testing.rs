@@ -50,6 +50,7 @@
 mod compaction;
 mod described;
 mod handed;
+mod pasted_into;
 mod paused_with_project;
 mod program_gone;
 mod role_note;
@@ -60,6 +61,7 @@ use serde_json::{Map, Value};
 
 pub use compaction::undo_migration_0020;
 pub use handed::undo_migration_0022;
+pub use pasted_into::undo_migration_0023;
 pub use paused_with_project::undo_migration_0021;
 pub use program_gone::undo_migration_0024;
 
@@ -128,6 +130,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
         .chain(compaction::COLUMNS)
         .chain(paused_with_project::COLUMNS)
         .chain(handed::COLUMNS)
+        .chain(pasted_into::COLUMNS)
         .chain(program_gone::COLUMNS)
     {
         take_column_out(tables, table, column);
@@ -192,6 +195,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             .chain(compaction::made("INDEX"))
             .any(|made| made == name)
     });
+    schema.retain(|entry| entry["name"] != pasted_into::TRIGGER);
     for entry in schema {
         let name = entry["name"].as_str().map(str::to_owned);
         let Some(Value::String(sql)) = entry.get_mut("sql") else {
@@ -225,6 +229,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                 *sql = sql
                     .replace(role_note::COLUMN_LINES, "")
                     .replace(handed::COLUMN_LINES, "");
+                *sql = sql.replace(pasted_into::COLUMN_LINES, "");
             }
             Some("transcript") => {
                 *sql = sql.replace(compaction::COLUMN_LINES, "");

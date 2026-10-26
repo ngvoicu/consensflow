@@ -60,6 +60,23 @@ pub(super) fn devin_ready(question: &Value) -> Result<Value, String> {
     Ok(json!({ "shown": read.shown, "mode": read.mode, "command": read.command }))
 }
 
+/// Whether Devin's store of the question's `env` says the TUI of a window on `session`
+/// took the text `pasted`, handed over at `atMs` (a history row of it, written since), as
+/// the engine asks the window after the paste; and how many history rows the session has.
+pub(super) fn devin_took(question: &Value) -> Result<Value, String> {
+    let at_ms = question
+        .get("atMs")
+        .and_then(Value::as_i64)
+        .ok_or("the question names no atMs")?;
+    let (took, prompts) = crate::devin::store_took(
+        &super::env(question)?,
+        text(question, "session")?,
+        text(question, "pasted")?,
+        at_ms,
+    );
+    Ok(json!({ "took": took, "prompts": prompts }))
+}
+
 /// The hooks ConsensFlow adds to the owner's in a Devin launch (`member`: a member's,
 /// whose question tool is answered from the board; else the chief's), its session hook
 /// run by the question's `cf`: each event with the entries added, as the launch's config

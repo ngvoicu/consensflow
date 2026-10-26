@@ -6,7 +6,7 @@
 
 use cf_base::json::js_order;
 use cf_proto::ledger::{Begun, MessageView};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
 use super::again::tell_failed_answer;
@@ -749,6 +749,85 @@ pub(crate) fn give_up_delivery(
         }
         Ok((known_message(store, message_id)?, GivenUp::Failed))
     })
+}
+
+/// Message `message_id`, on its way, goes into the conversation `conversation_id` of an
+/// open window (`pasted_into`, which a trigger clears once it is on its way no more). A
+/// launch's first message is not: its window's conversation is made after it is begun.
+pub(crate) fn paste_into(
+    store: &mut Store,
+    message_id: i64,
+    conversation_id: i64,
+) -> Result<(), LedgerError> {
+    store.write(|store| {
+        store.db.execute(
+            "UPDATE message SET pasted_into = ? WHERE id = ? AND state = 'delivering'",
+            [conversation_id, message_id],
+        )?;
+        Ok(())
+    })
+}
+
+/// The native session of the conversation message `message_id` was pasted into, while
+/// it is on its way (the trigger clears it after) and that conversation has one: none
+/// otherwise.
+pub(crate) fn pasted_into(store: &Store, message_id: i64) -> Result<Option<String>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT c.native_session FROM message m JOIN conversation c ON c.id = m.pasted_into
+              WHERE m.id = ?",
+            [message_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten()
+        .filter(|session| !session.is_empty()))
+}
+
+/// When the attempt of message `message_id` on its way now began (its latest
+/// `delivery.begun`: a start's give-back does not count the attempt, so its number comes
+/// again), to the second, in milliseconds of the ledger's clock: none where it is not on
+/// its way. A start asks a harness that keeps its own word of what its window took for
+/// one written since (Devin's history row): an earlier attempt's is no word of this one.
+pub(crate) fn delivery_begun_ms(
+    store: &Store,
+    message_id: i64,
+) -> Result<Option<i64>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT CAST(strftime('%s', e.at) AS INTEGER) * 1000 FROM message m
+               JOIN event e ON e.project_id = m.project_id AND e.kind = 'delivery.begun'
+                AND json_extract(e.data, '$.message') = m.id
+              WHERE m.id = ? AND m.state = 'delivering'
+              ORDER BY e.id DESC LIMIT 1",
+            [message_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+/// Whether message `message_id` was ever given back to its queue for `reason` (a
+/// `delivery.retried` that says it), whatever gave it back after. The engine words a
+/// paste by it: one a start gave back though its window took it is sent again saying
+/// so, every time it goes, since that first copy may be there still.
+pub(crate) fn given_back_because(
+    store: &Store,
+    message_id: i64,
+    reason: &str,
+) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM message m
+               JOIN event e ON e.project_id = m.project_id AND e.kind = 'delivery.retried'
+                AND json_extract(e.data, '$.message') = m.id
+                AND json_extract(e.data, '$.reason') = ?2
+              WHERE m.id = ?1",
+        )?
+        .exists(params![message_id, reason])?)
 }
 
 /// Every message on its way to a window, oldest first. At start none of

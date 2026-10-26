@@ -130,12 +130,14 @@ runs = ["engine-dispatcher-window-went"]
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
 find = '''
-        let arrived = self.arrived(&message).await?;
+            .arrived(&message, delivering.session.as_deref())
+            .await?;
         let Some(message) = self.still_delivering(message.id)? else {
             return Ok(());
         };'''
 replace = '''
-        let arrived = self.arrived(&message).await?;'''
+            .arrived(&message, delivering.session.as_deref())
+            .await?;'''
 
 [[plant]]
 name = "window went: the old chief window's exit suspends the project of the chief the human switched to while its record was read (the reviews of 2026-10-16)"

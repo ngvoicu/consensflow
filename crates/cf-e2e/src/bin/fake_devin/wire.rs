@@ -27,6 +27,12 @@ impl Wire {
         })
     }
 
+    /// What the window writes from now on is of the conversation `session` (`/new`): the
+    /// window's key reader said it shows it.
+    pub fn switch(&mut self, session: &str) {
+        session.clone_into(&mut self.session);
+    }
+
     /// One record of the conversation, whole in one write.
     fn record(&mut self, mut record: Value) -> io::Result<()> {
         record["sessionId"] = json!(self.session);

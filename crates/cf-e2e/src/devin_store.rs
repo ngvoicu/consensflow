@@ -120,6 +120,78 @@ pub fn messages_of(file: &Path, session: &str) -> Result<Vec<Message>> {
     read(file, Some(session))
 }
 
+/// What the TUI submitted, from the store in `file`'s history (`prompt_history`): the
+/// session and the words of each row, in the order they were written. Devin 3000.11.92
+/// writes a row at the Enter, before the turn takes the message in.
+pub fn history(file: &Path) -> Result<Vec<(String, String)>> {
+    let said = |failed: rusqlite::Error| {
+        Error::Daemon(format!("Devin's store {}: {failed}", file.display()))
+    };
+    let db = Connection::open_with_flags(
+        file,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(said)?;
+    db.busy_timeout(HELD_FOR).map_err(said)?;
+    let mut rows = db
+        .prepare("SELECT session_id, content FROM prompt_history ORDER BY id")
+        .map_err(said)?;
+    let written = rows
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(said)?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(said)?;
+    Ok(written)
+}
+
+/// The store in `file` gains the user's message `text` in `session`, the node its main
+/// chain goes on in, as Devin writes a message its turn took in: what a case writes of
+/// a window whose program is gone, which ran the message while no daemon looked.
+pub fn append_user(file: &Path, session: &str, text: &str) -> Result<()> {
+    let said = |failed: rusqlite::Error| {
+        Error::Daemon(format!("Devin's store {}: {failed}", file.display()))
+    };
+    let mut db = Connection::open(file).map_err(said)?;
+    db.busy_timeout(HELD_FOR).map_err(said)?;
+    let written = db.transaction().map_err(said)?;
+    let head: Option<String> = written
+        .query_row(
+            "SELECT main_chain_id FROM sessions WHERE id = ?",
+            [session],
+            |row| row.get(0),
+        )
+        .map_err(said)?;
+    let count: i64 = written
+        .query_row(
+            "SELECT count(*) FROM message_nodes WHERE session_id = ?",
+            [session],
+            |row| row.get(0),
+        )
+        .map_err(said)?;
+    let node = format!("{session}-node-written-{count}");
+    let at = jiff::Timestamp::now().to_string();
+    let message = serde_json::json!({
+        "role": "user",
+        "content": text,
+        "message_id": format!("{session}-message-written-{count}"),
+        "metadata": { "created_at": at },
+    });
+    written
+        .execute(
+            "INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
+             VALUES (?, ?, ?, ?, ?)",
+            rusqlite::params![session, node, head, message.to_string(), at],
+        )
+        .map_err(said)?;
+    written
+        .execute(
+            "UPDATE sessions SET main_chain_id = ? WHERE id = ?",
+            rusqlite::params![node, session],
+        )
+        .map_err(said)?;
+    written.commit().map_err(said)
+}
+
 /// The messages of `session`, or of every session, as [`messages`] says them.
 fn read(file: &Path, session: Option<&str>) -> Result<Vec<Message>> {
     let said = |failed: rusqlite::Error| {
@@ -342,6 +414,53 @@ mod tests {
         assert!(found[1].holds("User skipped this tool call"));
         assert!(found[0].holds("echo x"));
         assert!(!found[2].holds("User skipped this tool call"));
+    }
+
+    /// What a case writes of a window that ran a message while no daemon looked, and
+    /// what it reads of what the TUI submitted.
+    #[test]
+    fn a_message_written_goes_on_the_sessions_main_chain_and_the_history_is_read_in_order() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("sessions.db");
+        let db = Connection::open(&file).unwrap();
+        db.execute_batch(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
+             CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
+               node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT);
+             CREATE TABLE prompt_history (id INTEGER PRIMARY KEY AUTOINCREMENT,
+               content TEXT NOT NULL, timestamp INTEGER NOT NULL, session_id TEXT NOT NULL,
+               is_shell INTEGER NOT NULL DEFAULT 0);
+             INSERT INTO sessions VALUES ('left', 'left-node-1');
+             INSERT INTO message_nodes (session_id, node_id, chat_message)
+               VALUES ('left', 'left-node-1', '{\"message_id\": \"a\", \"role\": \"user\", \"content\": \"first\"}');
+             INSERT INTO prompt_history (content, timestamp, session_id) VALUES ('first', 1, 'left');
+             INSERT INTO prompt_history (content, timestamp, session_id) VALUES ('second', 2, 'shown');",
+        )
+        .unwrap();
+        append_user(&file, "left", "[ConsensFlow m-3 \u{b7} note]\nwords").unwrap();
+        let texts: Vec<String> = messages_of(&file, "left")
+            .unwrap()
+            .into_iter()
+            .map(|message| message.text)
+            .collect();
+        assert_eq!(texts, ["first", "[ConsensFlow m-3 \u{b7} note]\nwords"]);
+        let (head, parent): (String, String) = db
+            .query_row(
+                "SELECT s.main_chain_id, n.parent_node_id FROM sessions s
+                 JOIN message_nodes n ON n.node_id = s.main_chain_id WHERE s.id = 'left'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_ne!(head, "left-node-1");
+        assert_eq!(parent, "left-node-1", "below the head it was");
+        assert_eq!(
+            history(&file).unwrap(),
+            [
+                ("left".to_owned(), "first".to_owned()),
+                ("shown".to_owned(), "second".to_owned())
+            ]
+        );
     }
 
     #[test]

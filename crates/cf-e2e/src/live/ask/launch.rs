@@ -35,6 +35,36 @@ pub fn devin_ready(wire: &Path) -> Result<DevinReady> {
     })
 }
 
+/// What the daemon reads of a paste in Devin's store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DevinTook {
+    /// The TUI took the paste (`Window::took`): a history row of it, written since.
+    pub took: bool,
+    /// How many history rows the session has.
+    pub prompts: u64,
+}
+
+/// What Devin's store, in the places `env` names, says of `pasted`, the text a window on
+/// `session` was given as it was pasted at `at_ms`, as the daemon reads the window after
+/// a paste.
+pub fn devin_took(
+    env: &[(String, String)],
+    session: &str,
+    pasted: &str,
+    at_ms: i64,
+) -> Result<DevinTook> {
+    let answer = question(&json!({
+        "op": "devin_took", "env": env_object(env), "session": session,
+        "pasted": pasted, "atMs": at_ms,
+    }))?;
+    match (answer["took"].as_bool(), answer["prompts"].as_u64()) {
+        (Some(took), Some(prompts)) => Ok(DevinTook { took, prompts }),
+        _ => Err(Error::Daemon(format!(
+            "harness-ask said nothing of a paste taken: {answer}"
+        ))),
+    }
+}
+
 /// The hooks ConsensFlow adds to the owner's in a Devin launch (`member`'s, or the
 /// chief's), its session hook run by `cf`: each event with the entries added, as the
 /// launch's config has them written.

@@ -66,6 +66,15 @@ pub struct FakeAgent {
     pub shows: Option<String>,
     /// Each conversation's record, once the window switched away from it.
     pub records: HashMap<String, Vec<Item>>,
+    /// Whether each of those records, read with no window open, reads at rest: as the
+    /// window was when it switched away, unless the test says otherwise.
+    pub records_settled: HashMap<String, bool>,
+    /// What the harness's own store says each conversation's window took, read with no
+    /// window open (`Records::took`, Devin's history rows): a conversation it holds no
+    /// list of cannot tell, as every harness but Devin.
+    pub stored: HashMap<String, Vec<String>>,
+    /// Those of them that cannot be read: Devin's of a session its store holds no row of.
+    pub records_unreadable: Vec<String>,
     /// Why the window has not said which conversation it shows yet.
     pub unnamed: Option<String>,
     /// How often the engine told the window it pressed the interrupt keys.
@@ -513,6 +522,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             let shown = agent.shows.clone().unwrap_or_else(|| agent.native.clone());
             let items = std::mem::take(&mut agent.items);
+            agent.records_settled.insert(shown.clone(), agent.settled);
             agent.records.insert(shown, items);
             agent.items = agent.records.get(native).cloned().unwrap_or_default();
             agent.shows = Some(native.to_owned());
@@ -543,6 +553,17 @@ impl FakeAdapter {
             .map(|agent| !agent.settled)
     }
 
+    /// Whether the store of `session` says its window took a paste that begins with
+    /// `pasted` (`Records::took`): none where the test gave it no store.
+    pub(super) fn took_of(&self, session: &str, pasted: &str) -> Option<bool> {
+        let agents = self.agents.borrow();
+        agents
+            .iter()
+            .rev()
+            .find_map(|agent| agent.stored.get(session))
+            .map(|rows| rows.iter().any(|row| row.starts_with(pasted)))
+    }
+
     /// What the harness says of going on with `session`: what the latest window
     /// that opened on it, or shows it now, is set to say, and that it holds it where
     /// no window had it, as every harness did before it was asked.
@@ -565,7 +586,17 @@ impl FakeAdapter {
             .iter()
             .rev()
             .find(|agent| agent.native == session)
-            .map(|agent| (agent.items.clone(), agent.settled))
+            .filter(|agent| !agent.records_unreadable.iter().any(|left| left == session))
+            .map(
+                |agent| match agent.shows.as_ref().filter(|shows| *shows != session) {
+                    // A conversation the window switched away from is its record as it was left.
+                    Some(_) => (
+                        agent.records.get(session).cloned().unwrap_or_default(),
+                        agent.records_settled.get(session).copied().unwrap_or(true),
+                    ),
+                    None => (agent.items.clone(), agent.settled),
+                },
+            )
     }
 
     /// A delivery into `launch`'s window, as the fake takes it.
@@ -671,6 +702,9 @@ impl Asked {
             failed: false,
             shows: None,
             records: HashMap::new(),
+            records_settled: HashMap::new(),
+            stored: HashMap::new(),
+            records_unreadable: Vec::new(),
             unnamed: None,
             interrupted: 0,
             stops_when_interrupted: false,

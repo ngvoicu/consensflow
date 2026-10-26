@@ -15,7 +15,7 @@ use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
 use crate::arrival::ENTER_AGAIN_QUIET_MS;
-use crate::delivery_text::{delivery_text, is_paste_of, marker_of};
+use crate::delivery_text::{is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::Prelude;
@@ -51,6 +51,10 @@ pub(crate) struct Delivering {
     /// sends with it (`arrival`). None for a launch's first message, which is
     /// never pressed for.
     pub(crate) carried: Vec<i64>,
+    /// The conversation it was pasted into (its harness's session), where it was
+    /// pasted into an open window's: one the human switched the window away from
+    /// before its record showed it says what came of it (`arrival`).
+    pub(crate) session: Option<String>,
 }
 
 /// The record's delivery part.
@@ -59,6 +63,10 @@ pub(crate) struct DeliveryPart {
     pub(crate) delivering: Option<Delivering>,
     /// A message waits for what the human typed and has not sent.
     pub(crate) unsent: bool,
+    /// For the message on its way, pasted into a conversation the window left: how many
+    /// items that conversation's record held while it read a turn at work, and since when
+    /// it has held as many (`arrival`'s `watch_left`).
+    pub(crate) left_at_work: Option<(i64, usize, i64)>,
     /// The message a window not ready for a paste holds, told to the trace once.
     pub(crate) held: Option<i64>,
     /// What goes into the window before anything else of its queue, in this
@@ -453,8 +461,18 @@ impl Dispatcher {
         if let Some(number) = begun.message.task_number.filter(|_| member) {
             record.window.borrow_mut().owner.get_or_insert(number);
         }
-        let text = delivery_text(&begun.message, &begun.carried);
+        let text = self.delivery_text_of(&begun.message, &begun.carried)?;
         let carried: Vec<i64> = begun.carried.iter().map(|row| row.id).collect();
+        // The conversation the window shows as it is handed over, which the paste goes
+        // into: the ledger keeps it, for a start that finds it on its way still.
+        let conversation = self.seams.ledger.borrow().current_conversation(record.id)?;
+        if let Some(conversation) = &conversation {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .paste_into(message.id, conversation.id)?;
+        }
+        let session = conversation.and_then(|conversation| conversation.native_session);
         // The box is emptied once the delivery is begun, so that a paste follows
         // the key; a key the host did not take spends the attempt, as a refused
         // paste does, and the last fails the delivery (the same review).
@@ -510,6 +528,7 @@ impl Dispatcher {
         // shows when the harness gets to it, and sending it again would only make
         // a duplicate.
         delivering.queued = matches!(outcome, Admission::Admitted { queued: true });
+        delivering.session = session;
         if let Admission::Refused { reason } = &outcome {
             return self.settle_failure(delivering, reason, true);
         }
@@ -602,6 +621,7 @@ impl Dispatcher {
             queued: false,
             entered_again: false,
             carried,
+            session: None,
         }
     }
 

@@ -335,6 +335,29 @@ impl Ledger {
         messages::fail_delivery(&mut self.store, message_id, reason)
     }
 
+    /// Message `message_id`, on its way, goes into the conversation `conversation_id`
+    /// of an open window: what a start reads for it, where the window is switched away.
+    pub fn paste_into(&mut self, message_id: i64, conversation_id: i64) -> Result<(), LedgerError> {
+        messages::paste_into(&mut self.store, message_id, conversation_id)
+    }
+
+    /// The native session of the conversation message `message_id` was pasted into,
+    /// while it is on its way: the one its window may have been switched away from.
+    pub fn pasted_into(&self, message_id: i64) -> Result<Option<String>, LedgerError> {
+        messages::pasted_into(&self.store, message_id)
+    }
+
+    /// When the attempt of message `message_id` on its way now began, to the second, in
+    /// milliseconds: none where it is not on its way.
+    pub fn delivery_begun_ms(&self, message_id: i64) -> Result<Option<i64>, LedgerError> {
+        messages::delivery_begun_ms(&self.store, message_id)
+    }
+
+    /// Whether message `message_id` was ever given back to its queue for `reason`.
+    pub fn given_back_because(&self, message_id: i64, reason: &str) -> Result<bool, LedgerError> {
+        messages::given_back_because(&self.store, message_id, reason)
+    }
+
     /// [`Ledger::fail_delivery`], saying what it did: failed, kept for the task's
     /// resume, or withdrawn ([`GivenUp`]).
     pub fn give_up_delivery(

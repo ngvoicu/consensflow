@@ -336,7 +336,7 @@ pub trait Window {
     /// handed to it to its agent: its record shows it when it gets to it, however long
     /// that is. A harness that says so at the hand-over ([`Admission::Admitted`]'s
     /// `queued`) needs no answer here; one that can say it only later, by what it
-    /// writes (Devin's wire log), does. The engine asks at each look until the answer
+    /// writes (Devin's store), does. The engine asks at each look until the answer
     /// is yes.
     fn took(&self) -> bool {
         false
@@ -572,6 +572,21 @@ pub trait Records {
         _session: &'a str,
     ) -> Work<'a, Result<Option<u64>, String>> {
         Box::pin(async { Ok(None) })
+    }
+
+    /// Whether `harness`'s own store says, with no window open, that the window of
+    /// `session` took a paste that begins with `pasted`, handed over at `at_ms` or
+    /// later, though its record may not show it yet (Devin holds a paste queued behind
+    /// a turn, and writes it to the record when the turn takes it in): none where the
+    /// harness keeps no such word, as all but Devin.
+    fn took<'a>(
+        &'a self,
+        _harness: Harness,
+        _session: &'a str,
+        _pasted: &'a str,
+        _at_ms: i64,
+    ) -> Work<'a, Option<bool>> {
+        Box::pin(async { None })
     }
 
     /// Whether `harness`'s record of `session`, read with no window open, ends in

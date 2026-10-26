@@ -198,6 +198,7 @@ impl Dispatcher {
             free_since: None,
             entered_again: false,
             carried: Vec::new(),
+            session: None,
         })
     }
 

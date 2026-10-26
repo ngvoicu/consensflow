@@ -38,7 +38,9 @@ use cf_proto::agents::Harness;
 use jiff::tz::TimeZone;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{has_transcript, open, transcript_length, Cache, Open, Options, Reading, IDLE_MS};
+use super::{
+    has_transcript, open, took, transcript_length, Cache, Open, Options, Reading, IDLE_MS,
+};
 use crate::contract::{Records, Work};
 use crate::seams::Time;
 use reopening::Reopening;
@@ -90,6 +92,13 @@ enum Ask {
         harness: Harness,
         session: String,
         answer: oneshot::Sender<Result<Option<u64>, String>>,
+    },
+    Took {
+        harness: Harness,
+        session: String,
+        pasted: String,
+        at_ms: i64,
+        answer: oneshot::Sender<Option<bool>>,
     },
 }
 
@@ -178,6 +187,25 @@ impl Records for Thread {
                 answer,
             });
             asked.await.unwrap_or_else(|| Err(ENDED.to_owned()))
+        })
+    }
+
+    fn took<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+        pasted: &'a str,
+        at_ms: i64,
+    ) -> Work<'a, Option<bool>> {
+        Box::pin(async move {
+            let asked = self.ask(|answer| Ask::Took {
+                harness,
+                session: session.to_owned(),
+                pasted: pasted.to_owned(),
+                at_ms,
+                answer,
+            });
+            asked.await.flatten()
         })
     }
 }
@@ -271,6 +299,19 @@ fn serve(mut waiting: mpsc::Receiver<Ask>, env: &Env, mut caches: Caches) {
                         Err(format!("the transcript's length panicked: {panicked}"))
                     });
                 let _ = answer.send(length);
+            }
+            Ask::Took {
+                harness,
+                session,
+                pasted,
+                at_ms,
+                answer,
+            } => {
+                // A store that cannot be read, or a reader that panicked, cannot tell.
+                let took = panics_to_text(|| took(harness, &session, &pasted, at_ms, env))
+                    .ok()
+                    .flatten();
+                let _ = answer.send(took);
             }
         }
     }

@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use cf_ledger::{
     migrate, open_ledger, HistoryEntry, HistoryFrom, Options, HISTORY_PART, MIGRATIONS,
+    SCHEMA_VERSION,
 };
 use rusqlite::{params, Connection};
 
@@ -215,9 +216,11 @@ fn a_ledger_3_0_5_wrote_migrates_to_the_viewer_s_0020_once_and_is_read_and_its_l
     drop(ledger);
     open_ledger(&file, Options::default()).expect("and open again");
     let db = Connection::open(&file).expect("the file");
-    // The viewer's 0020, the Resume's 0021 and 0022 after it, 0023, and the exit proof's
-    // 0024.
-    assert_eq!(version(&db), 24);
+    assert_eq!(
+        version(&db),
+        SCHEMA_VERSION as i64,
+        "0020 and every one after it"
+    );
     assert_eq!(heads(&db).expect("the heads"), 3, "one head an item");
     let parts: i64 = db
         .query_row(
@@ -263,9 +266,10 @@ fn a_fresh_ledger_is_made_at_0020_after_b5_s_0019_with_the_viewer_s_tables() {
     let version: i64 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("a version");
-    // The Resume's 0021 and 0022 follow the viewer's 0020, then 0023 and the exit
-    // proof's 0024.
-    assert_eq!(version, 24);
+    assert_eq!(
+        version, SCHEMA_VERSION as i64,
+        "0020 and every one after it"
+    );
     let tables: i64 = db
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master
@@ -507,10 +511,10 @@ fn schema_of(file: &PathBuf) -> Vec<(String, String)> {
     schema
 }
 
-/// What 3.0.5 left, version 19 with B5's 0019, opens at 24: the viewer's 0020, then
-/// the Resume's 0021 (its task reads paused by nothing but the human, so its Resume
-/// leaves it paused) and 0022 (its message was handed nothing it marked), and the
-/// 0023 and the exit proof's 0024. A second open migrates nothing again.
+/// What 3.0.5 left, version 19 with B5's 0019, opens at the build's version: the
+/// viewer's 0020, then the Resume's 0021 (its task reads paused by nothing but the
+/// human, so its Resume leaves it paused) and 0022 (its message was handed nothing it
+/// marked), and every one after them. A second open migrates nothing again.
 #[test]
 fn a_ledger_3_0_5_wrote_migrates_to_the_resume_s_0021_and_0022_after_the_viewer_s_0020_once() {
     let dir = tempfile::tempdir().expect("a folder");
@@ -520,20 +524,26 @@ fn a_ledger_3_0_5_wrote_migrates_to_the_resume_s_0021_and_0022_after_the_viewer_
     assert_eq!(resume_columns(&file), (19, None, None));
 
     drop(open_ledger(&file, Options::default()).expect("migrated and open"));
-    assert_eq!(resume_columns(&file), (24, Some(0), Some(None)));
+    assert_eq!(
+        resume_columns(&file),
+        (SCHEMA_VERSION as i64, Some(0), Some(None))
+    );
     let schema = schema_of(&file);
     assert!(
         schema.iter().any(|(name, _)| name == "transcript_head"),
         "the viewer's 0020 ran too"
     );
     drop(open_ledger(&file, Options::default()).expect("and open again"));
-    assert_eq!(resume_columns(&file), (24, Some(0), Some(None)));
+    assert_eq!(
+        resume_columns(&file),
+        (SCHEMA_VERSION as i64, Some(0), Some(None))
+    );
     assert_eq!(schema_of(&file), schema, "nothing migrated again");
 }
 
 /// A ledger the next release would write before the Resume lands, version 20 with
-/// the viewer's 0020, opens at 24 with the Resume's columns. A second open migrates
-/// nothing again.
+/// the viewer's 0020, opens at the build's version with the Resume's columns. A second
+/// open migrates nothing again.
 #[test]
 fn a_ledger_at_the_viewer_s_0020_migrates_to_the_resume_s_0022() {
     let dir = tempfile::tempdir().expect("a folder");
@@ -543,21 +553,27 @@ fn a_ledger_at_the_viewer_s_0020_migrates_to_the_resume_s_0022() {
     assert_eq!(resume_columns(&file), (20, None, None));
 
     drop(open_ledger(&file, Options::default()).expect("migrated and open"));
-    assert_eq!(resume_columns(&file), (24, Some(0), Some(None)));
+    assert_eq!(
+        resume_columns(&file),
+        (SCHEMA_VERSION as i64, Some(0), Some(None))
+    );
     let schema = schema_of(&file);
     drop(open_ledger(&file, Options::default()).expect("and open again"));
-    assert_eq!(resume_columns(&file), (24, Some(0), Some(None)));
+    assert_eq!(
+        resume_columns(&file),
+        (SCHEMA_VERSION as i64, Some(0), Some(None))
+    );
     assert_eq!(schema_of(&file), schema, "nothing migrated again");
 }
 
-/// A fresh ledger is made at 24: main's 0019 and 0020 (B5's, the viewer's), then
-/// the Resume's 0021 and 0022, then 0023 (devin-arrival's, T-433) and the exit
-/// proof's 0024, in that order.
+/// A fresh ledger is made at the build's version: main's 0019 and 0020 (B5's, the
+/// viewer's), then the Resume's 0021 and 0022, then 0023 of the conversation a paste
+/// went into, and the exit proof's 0024, in that order.
 #[test]
 fn a_fresh_ledger_is_made_at_0022_with_main_s_migrations_first_and_the_resume_s_after() {
     assert_eq!(
         (MIGRATIONS.len(), MIGRATIONS[18], MIGRATIONS[19]),
-        (24, B5_0019, VIEWER_0020),
+        (SCHEMA_VERSION, B5_0019, VIEWER_0020),
         "main's 0019 and 0020 where main has them"
     );
     assert!(
@@ -567,6 +583,10 @@ fn a_fresh_ledger_is_made_at_0022_with_main_s_migrations_first_and_the_resume_s_
     assert!(
         MIGRATIONS[21].contains("ADD COLUMN handed_at"),
         "0022 is the Resume's hand-over"
+    );
+    assert!(
+        MIGRATIONS[22].contains("ADD COLUMN pasted_into"),
+        "0023 is the conversation a paste went into"
     );
     assert!(
         MIGRATIONS[23].contains("ADD COLUMN program_gone"),
@@ -585,13 +605,14 @@ fn a_fresh_ledger_is_made_at_0022_with_main_s_migrations_first_and_the_resume_s_
     };
     assert!(table("task").contains("paused_with_project"));
     assert!(table("message").contains("handed_at"));
+    assert!(table("message").contains("pasted_into"));
     assert!(table("conversation").contains("program_gone"));
     assert!(!table("transcript_head").is_empty(), "the viewer's table");
     let db = Connection::open(&file).expect("the file");
     let version: i64 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("a version");
-    assert_eq!(version, 24);
+    assert_eq!(version, SCHEMA_VERSION as i64);
 }
 
 /// What alpha.2 left, version 22 with the Resume's 0021 and 0022, opens at 24: 0023,

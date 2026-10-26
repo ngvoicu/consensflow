@@ -242,4 +242,15 @@ impl Records for DaemonRecords {
         self.spawn
             .arrival(self.records.transcript_length(harness, session))
     }
+
+    fn took<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+        pasted: &'a str,
+        at_ms: i64,
+    ) -> Work<'a, Option<bool>> {
+        self.spawn
+            .arrival(self.records.took(harness, session, pasted, at_ms))
+    }
 }

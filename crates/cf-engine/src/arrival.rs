@@ -8,8 +8,8 @@
 //! and one the record never showed is pasted again, by this rule:
 //!
 //! - **Taken.** A harness that says its own queue has the message, at the hand-over
-//!   (`Admission::Admitted`'s `queued`) or after it (`Window::took`: Devin's TUI put
-//!   the paste to its agent), has it: the message is waited for until its record
+//!   (`Admission::Admitted`'s `queued`) or after it (`Window::took`: Devin's store
+//!   has the paste's history row, written at its Enter), has it: the message is waited for until its record
 //!   shows it or the window closes, and never pasted again.
 //! - **Held.** While the harness says the paste is in a turn it is in still
 //!   (`Window::held`: the turn it went into, or the one the harness began with it),
@@ -23,6 +23,14 @@
 //!   a turn starts that again: the turn may hold what it was given), or at the
 //!   window's first rest past [`RECONCILE_MS`] since then, however turns cut its
 //!   rest, so no turns hold the queue behind it for good.
+//! - **Left.** A paste whose window the human switched to another conversation
+//!   (`/new`, `/resume`, `/clear`) before its record showed it went into the one left
+//!   (`Delivering::session`): that record, read with no window open, confirms it, or
+//!   gives it back to its queue, with its attempt, once it has read at rest without it
+//!   for a whole arrival window (a record that cannot be read is at rest, as a look
+//!   reads one), or has read a turn at work, unchanged, for [`RECONCILE_MS`]: the
+//!   switch cut it, unless its harness said it took the paste. The harness's word on
+//!   its queue was that conversation's.
 //!
 //! So a paste the window did not drop goes once: a turn that holds it ends, Devin
 //! runs it within seconds, and the first look after reads its prompt (taken), before
@@ -42,13 +50,13 @@
 //! before its prompt is read. A harness's word that its queue has the message is not
 //! withdrawn: one that then loses it leaves the message waited for until the window
 //! closes. A paste held in a turn that never ends waits with it, and the window's
-//! queue behind it, until the human stops the turn or closes the window. A turn that
-//! begins between the window's readiness and the paste is not known to hold it until
-//! a look reads its prompt; were it to end before the next look, and that look come a
-//! whole arrival window after the hand-over and within seconds of its end, the paste
-//! would go again while Devin had it queued. The one Enter is pressed whatever the
+//! queue behind it, until the human stops the turn or closes the window. The one Enter is pressed whatever the
 //! window shows (a quiet dialog may take it), and the screen is looked at apart from
-//! the press, so a human's typing in between can meet it.
+//! the press, so a human's typing in between can meet it. What the daemon's stop leaves
+//! on its way is settled at the start by the record alone (`in_flight`): one it does not
+//! show goes again, so a paste a window held queued when the daemon stopped, and ran
+//! later, is read twice. Where Devin's store says its TUI took it, the paste that goes
+//! again says in its header that it may be there already.
 //!
 //! What a hand-over is and how it fails are `deliveries`'; the wait is the part of
 //! the record's delivery part this owns.
@@ -57,11 +65,11 @@ use std::rc::Rc;
 
 use cf_base::js;
 use cf_harness::contract::{Input, Observed};
-use cf_harness::records::Role;
+use cf_harness::records::{Reading, Role, Settlement};
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
-use crate::deliveries::{Enter, Uncleared};
+use crate::deliveries::{Delivering, Enter, Uncleared};
 use crate::delivery_text::is_paste_of;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -124,6 +132,12 @@ impl Dispatcher {
         let Some(arrived) = arrived else {
             return Ok(false);
         };
+        // A paste the window's harness queued behind a turn that the app's Stop then
+        // cancelled is in its record all the same, and delivered: Devin keeps it in the
+        // conversation, unanswered and never run, and its agent reads it in the next
+        // turn (T-102, 3 of 3 runs on Devin 3000.11.92). The Stop is a pause, and every
+        // resume sends words, so the next turn comes for a task that goes on; giving it
+        // back would put it in the conversation twice.
         let receipt = json!({ "item": &*arrived.id });
         self.confirm_delivered(&message, &receipt)?;
         record.delivery.borrow_mut().delivering = None;
@@ -187,6 +201,11 @@ impl Dispatcher {
             closing.await?;
             return Ok(());
         }
+        // The human switched the window away from the conversation it was pasted into:
+        // that conversation's record says what came of it, the queued one's too.
+        if let Some(left) = self.left(record, &delivering)? {
+            return self.watch_left(record, delivering, &left).await;
+        }
         if delivering.queued {
             return Ok(());
         }
@@ -246,6 +265,124 @@ impl Dispatcher {
             "the harness record never showed it".to_owned()
         };
         self.settle_failure(delivering, &because, true)
+    }
+
+    /// The conversation the message on its way was pasted into, where the window is on
+    /// another now (the human ran `/new` or `/resume` in it, or `/clear`).
+    fn left(
+        &self,
+        record: &Record,
+        delivering: &Delivering,
+    ) -> Result<Option<String>, EngineError> {
+        let Some(pasted) = &delivering.session else {
+            return Ok(None);
+        };
+        let now = self
+            .seams
+            .ledger
+            .borrow()
+            .current_conversation(record.id)?
+            .and_then(|conversation| conversation.native_session);
+        Ok(now.filter(|now| now != pasted).map(|_| pasted.clone()))
+    }
+
+    /// The message on its way went into the conversation `left`, which its window
+    /// shows no longer: no look at the window reads its record again, and the harness's
+    /// word of its own queue was of that conversation. Its record, read with no window
+    /// open, confirms it where it shows it; one that has read at rest without it for a
+    /// whole arrival window gives it back to its queue, with its attempt, for the
+    /// conversation the window shows now (the reviews of 2026-10-18: a paste the
+    /// harness had queued was waited for in the new conversation's record, which never
+    /// shows it, and everything behind it waited for good). A record that cannot be
+    /// read is at rest, with nothing in it, as a look at a window reads one (the review
+    /// of c2e29f2d: Devin reads a session it holds no row of as unknown, and a paste into
+    /// a conversation the human left before it ran waited for good). One that reads a
+    /// turn at work is waited for, but no longer than [`RECONCILE_MS`] of reading the
+    /// same: a turn the switch cut, which no end will close. Unless its harness said it
+    /// took the paste (`queued`): Devin's `/new` cuts no turn, and runs the paste queued
+    /// behind it in the conversation left once the turn ends, however long its step (the
+    /// review of 6c8fc595), so its record is waited for as on the window's own path.
+    async fn watch_left(
+        &self,
+        record: &Record,
+        delivering: Delivering,
+        left: &str,
+    ) -> Result<(), EngineError> {
+        let reading = self.record_left(record.id, left).await?;
+        // The window may have gone, and another message gone on its way, while the
+        // record was read: this one is settled no more here.
+        let this = |record: &Record| {
+            record
+                .delivery
+                .borrow()
+                .delivering
+                .as_ref()
+                .is_some_and(|now| now.message == delivering.message)
+        };
+        if !this(record) {
+            return Ok(());
+        }
+        let Some(message) = self.seams.ledger.borrow().message(delivering.message)? else {
+            return Ok(());
+        };
+        if message.state != "delivering" {
+            return Ok(());
+        }
+        let found = match reading.as_deref() {
+            Some(Reading::Known(found)) => Some(found),
+            _ => None,
+        };
+        let arrived = found.and_then(|found| {
+            found
+                .items
+                .iter()
+                .find(|item| item.role == Role::User && is_paste_of(&item.text, message.id, None))
+        });
+        if let Some(arrived) = arrived {
+            self.confirm_delivered(&message, &json!({ "item": &*arrived.id }))?;
+            record.delivery.borrow_mut().delivering = None;
+            self.changed();
+            return Ok(());
+        }
+        let at_rest = found.is_none_or(|found| {
+            found.settlement == Settlement::Settled
+                || (found.settlement != Settlement::InFlight
+                    && found.items.is_empty()
+                    && !found.in_flight)
+        });
+        let items = found.map_or(0, |found| found.items.len());
+        let now = self.now();
+        let (rested, at_work) = {
+            let mut part = record.delivery.borrow_mut();
+            let held = part.left_at_work;
+            let Some(on_its_way) = part.delivering.as_mut() else {
+                return Ok(());
+            };
+            if at_rest {
+                let rested = now - *on_its_way.rested_since.get_or_insert(now);
+                part.left_at_work = None;
+                (rested, 0)
+            } else {
+                on_its_way.rested_since = None;
+                let since = match held {
+                    Some((of, seen, since)) if of == delivering.message && seen == items => since,
+                    _ => now,
+                };
+                part.left_at_work = Some((delivering.message, items, since));
+                (0, now - since)
+            }
+        };
+        let because = if rested > self.seams.limits.arrival_ms {
+            "its window was switched to another conversation, whose record never showed it"
+        } else if at_work > RECONCILE_MS && !delivering.queued {
+            "its window was switched to another conversation, whose record read a turn at work, unchanged, and never showed it"
+        } else {
+            return Ok(());
+        };
+        record.delivery.borrow_mut().delivering = None;
+        self.give_back(delivering.message, because)?;
+        self.changed();
+        Ok(())
     }
 
     /// Whether the window takes what it is handed pasted into its input box.

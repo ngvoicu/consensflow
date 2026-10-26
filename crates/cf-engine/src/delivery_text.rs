@@ -28,6 +28,22 @@ const OPENING: usize = 15_000;
 /// `windowText` drops before the text reaches a window. Here the half is
 /// dropped at the cut, so what a window is given is the same.
 pub fn delivery_text(message: &MessageView, carried: &[MessageView]) -> String {
+    text_of(message, carried, "")
+}
+
+/// What a header says, after who the message is from, of a message a start gave back
+/// though its window's harness said the window took it (`in_flight`): it may be in the
+/// conversation already, and reads again as one the reader may have read.
+pub const SENT_AGAIN: &str = " · sent again after a restart, it may be there already";
+
+/// [`delivery_text`] of a message sent again after a restart ([`SENT_AGAIN`]): the
+/// word is in its header, after its marker, so its record proves it as any paste's.
+pub fn delivery_text_sent_again(message: &MessageView, carried: &[MessageView]) -> String {
+    text_of(message, carried, SENT_AGAIN)
+}
+
+/// [`delivery_text`], `again` said at the end of its header.
+fn text_of(message: &MessageView, carried: &[MessageView], again: &str) -> String {
     let id = message.id;
     let from = from_of(message);
     let task = message
@@ -44,7 +60,7 @@ pub fn delivery_text(message: &MessageView, carried: &[MessageView]) -> String {
         ))
     };
     format!(
-        "[ConsensFlow m-{id}{task} · {} from {from}]\n{body}{}",
+        "[ConsensFlow m-{id}{task} · {} from {from}{again}]\n{body}{}",
         message.kind,
         footer(message)
     )
@@ -318,6 +334,25 @@ mod tests {
                 !whole
             );
         }
+    }
+
+    /// A message a start gave back though its window took it says so in its header,
+    /// after its marker, and its record proves it as any paste's (T-280).
+    #[test]
+    fn a_message_sent_again_after_a_restart_says_so_in_its_header_and_its_record_proves_it() {
+        let said = message(12, Some(3), "Look at this".to_owned());
+        let again = delivery_text_sent_again(&said, &[]);
+        assert_eq!(
+            again.lines().next(),
+            Some("[ConsensFlow m-12 \u{b7} T-3 \u{b7} note from ConsensFlow \u{b7} sent again after a restart, it may be there already]")
+        );
+        assert_eq!(
+            again.replacen(SENT_AGAIN, "", 1),
+            delivery_text(&said, &[]),
+            "the word, and nothing else"
+        );
+        assert!(is_paste_of(&again, 12, None));
+        assert_eq!(header_id(&again), Some(12));
     }
 
     #[test]
