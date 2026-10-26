@@ -7,8 +7,8 @@
 # `crates/cf-harness/src/claude/record/replay.rs`, `project.rs`, `patterns.rs`, `record.rs`); the
 # adapter reads the box on the screen before the next paste and clears it with one Ctrl+C where it
 # shows text and the human typed nothing, pastes with no key where it reads empty, and holds the
-# paste where the screen shows no box (`crates/cf-harness/src/claude/adapter.rs`,
-# `shared/input_box.rs`). The long run's watch reads a command the system writes whole as no turn
+# paste as the human's unsent words where the screen shows no box, which the board says
+# (`holding`; `crates/cf-harness/src/claude/adapter.rs`, `shared/input_box.rs`). The long run's watch reads a command the system writes whole as no turn
 # (`crates/cf-evals/src/long_run/record.rs`, `Kind::Printed`). The reader's tests are
 # `crates/cf-harness/src/claude/record/tests/commands.rs`, the adapter's
 # `crates/cf-harness/tests/launch/claude/compact_cancelled.rs` (on a live run's records), the
@@ -145,7 +145,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            None => Readiness::Held(Held::Because(PUT_BACK_UNREAD.to_owned())),"
+find = "            None => Readiness::Held(Held::Unsent),"
 replace = "            None => Readiness::Ready,"
 
 [[plant]]
@@ -222,3 +222,13 @@ runs = ["compact-cancelled-kit"]
 file = "crates/cf-e2e/src/live/claude.rs"
 find = "        .filter(|kind| kind.starts_with(\"api-request\"))\n"
 replace = "        .filter(|_| false)\n"
+
+[[plant]]
+name = "compact-cancelled: a box the screen does not show after a cancel holds the paste for a reason the board never shows the human"
+meant = "a_box_the_screen_does_not_show_after_the_cancel_holds_the_paste"
+runs = ["compact-cancelled-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            None => Readiness::Held(Held::Unsent),"
+replace = "            None => Readiness::Held(Held::Because(\"the box is not shown\".to_owned())),"

@@ -288,10 +288,6 @@ struct ClaudeWindow {
     directory: String,
 }
 
-/// Why a paste waits for a box that may hold the `/compact` Claude put back.
-const PUT_BACK_UNREAD: &str =
-    "Claude's input box may still hold the /compact it put back when the compaction was cancelled, and the screen does not show the box";
-
 /// What a look at `session` is told: where the window's program began writing,
 /// when the window was opened again on that conversation.
 fn told(relaunched: Option<&(String, u64)>, session: &str) -> Options {
@@ -349,7 +345,9 @@ impl ClaudeWindow {
     /// human's keys having left nothing unsent: the box on the screen empty, or
     /// holding what Claude put back, which the paste clears first (one Ctrl+C,
     /// only where the box shows text: at an empty box a second one in a row ends
-    /// Claude). A box the screen does not show holds the paste.
+    /// Claude). A box the screen does not show holds the paste as the human's own
+    /// words do, for the `/compact` they typed may be there unsent, and the board
+    /// tells them so (`holding`).
     async fn put_back_cleared(&self, host: &dyn PaneHost, pane: &Pane) -> Readiness {
         match input_box::on_screen(host, pane, Harness::Claude).await {
             Some(InputBox::Empty) => Readiness::Ready,
@@ -357,7 +355,7 @@ impl ClaudeWindow {
                 self.clear_first.set(true);
                 Readiness::Ready
             }
-            None => Readiness::Held(Held::Because(PUT_BACK_UNREAD.to_owned())),
+            None => Readiness::Held(Held::Unsent),
         }
     }
 }

@@ -164,10 +164,10 @@ fn a_box_the_screen_does_not_show_after_the_cancel_holds_the_paste() {
     assert!(cancelled.settled());
     for bottom in [None, Some(json!(["fake agent started on s-1"]))] {
         let unread = host(false, bottom);
-        let ready = handed(&cancelled, &unread, "Result: DONE");
-        assert!(
-            matches!(&ready, Readiness::Held(Held::Because(why)) if why.contains("/compact")),
-            "{ready:?}"
+        // Held as the human's unsent words are, which the board tells them.
+        assert_eq!(
+            handed(&cancelled, &unread, "Result: DONE"),
+            Readiness::Held(Held::Unsent)
         );
         assert_eq!(asked(&unread), [], "nothing pressed, nothing pasted");
     }

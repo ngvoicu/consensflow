@@ -23,8 +23,9 @@
 //! writes of the cancel and puts the `/compact` back in its input box (`fake_agent`'s
 //! `cancelled`), its box drawn as Claude draws it (`CF_TEST_INPUT_BOX`). The worker's result
 //! must reach the chief as a message that begins with its header, and nothing be compacted.
-//! In the second case the chief draws no box the adapter can read: the result must wait, and
-//! nothing go in behind the `/compact` (a paste into a box not known empty would).
+//! In the second case the chief draws no box the adapter can read: the result must wait, the
+//! board telling the human the window holds what they typed, and nothing go in behind the
+//! `/compact` (a paste into a box not known empty would).
 
 use std::thread::sleep;
 use std::time::Duration;
@@ -191,6 +192,8 @@ fn a_claude_chief_whose_box_cannot_be_read_after_a_cancelled_compact_is_handed_n
         result(&project)?.is_some_and(|(_, delivered)| !delivered),
         "the result was handed over"
     );
+    // The board tells the human the window waits for what is in its box.
+    assert_eq!(project.lane("chief")?["holding"], true);
     rig.close()?;
     Ok(())
 }
