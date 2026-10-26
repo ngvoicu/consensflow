@@ -1,0 +1,228 @@
+# A Codex window's role on no command line (T-698, 2026-10-26). A Codex window was given its role
+# text as `-c developer_instructions=<JSON>` on the supervisor's command line, which the supervisor
+# put on Codex's app-server's and TUI's as well: every user of the machine reads a command line
+# (`ps` is setuid root on macOS), and a pattern of its words matched the window. The harness writes
+# the text (Codex's own instructions, then the role) to a file of the launch's own, 0600, and names
+# it in the window's environment (`CF_CODEX_ROLE_FILE`); the supervisor reads it before Codex
+# starts (a file named and unreadable, or empty, opens no window), tells neither program its name,
+# and hands the text to the broker, which gives it to the TUI's main thread starts as their
+# `developerInstructions` (which replace what Codex's configuration says for the thread, so the
+# text holds Codex's own as well), in place of any the TUI named, and to no other start, resume or
+# fork. The stand-in Codex begins a thread with what its start names. One plant takes one rule out,
+# or puts the old code back; a test of it fails. The broker's and the supervisor's plants run the
+# crate's own tests, the harness's its role tests and the launch suite (its rule test over both
+# platforms' recordings and the adapter, and the scenarios), the stand-in's its own; the
+# `codex role file rig:` plants run the regression and the rig's case of a Codex chief (a real
+# daemon, the real pane host, the stand-in Codex), and say `builds`: the family builds the native
+# `cf` again once each is put back. Every name holds `codex role file`.
+
+[run]
+# The broker's and the supervisor's own tests.
+codex-session = ["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib"]
+# The harness's tests of the role's text and its file.
+harness-codex-role = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::role"]
+# The launch suite's Codex cases: the rule test, the launch, the specs.
+harness-launch-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "codex::"]
+# Every adapter's scenarios as Node played them, moved where the role left the command line.
+harness-scenarios = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "scenarios::"]
+# The stand-in Codex's own tests: what a thread begins with.
+fake-codex-own = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-codex"]
+# The regression: a Codex chief's role on no command line, fresh and resumed, and its thread
+# begins with it once.
+rig-regression-role-file = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_codex_windows_role_was_on_its_command_line::"]
+# The rig's case of a Codex chief given specs: its thread begins with its role.
+rig-specs-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "specs_codex::"]
+
+# --- the broker ---
+
+[[plant]]
+name = "codex role file: the broker gives no main start the role"
+meant = "every_main_start_is_given_the_windows_role_in_place_of_the_instructions_it_named"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''            if main_start && (self.fresh_bypass || self.role.is_some()) {'''
+replace = '''            if main_start && self.fresh_bypass {'''
+
+[[plant]]
+name = "codex role file: the broker gives the role to a resume and a fork too"
+meant = "no_side_start_resume_fork_or_turn_is_given_the_role"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''            if main_start && (self.fresh_bypass || self.role.is_some()) {'''
+replace = '''            if (main_start && self.fresh_bypass) || self.role.is_some() {'''
+
+[[plant]]
+name = "codex role file: a main start keeps the instructions the TUI named"
+meant = "every_main_start_is_given_the_windows_role_in_place_of_the_instructions_it_named"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''        params.insert("developerInstructions".into(), role.into());'''
+replace = '''        params
+            .entry("developerInstructions")
+            .or_insert_with(|| role.into());'''
+
+# --- the supervisor ---
+
+[[plant]]
+name = "codex role file rig: Codex's programs are told where the role's file is (the regression)"
+meant = "a_codex_chiefs_role_is_on_no_command_line_fresh_or_resumed_and_its_thread_begins_with_it_once"
+runs = ["rig-regression-role-file"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''        .env_remove(ROLE_VARIABLE)
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "codex role file: a role file that cannot be read opens a window without its role"
+meant = "a_role_file_that_is_named_and_cannot_be_read_or_holds_nothing_is_refused_before_anything_starts"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''        Err(cause) => Err(SessionError::Role { path, cause }),'''
+replace = '''        Err(_) => Ok(None),'''
+
+[[plant]]
+name = "codex role file: an empty role file opens a window with an empty role"
+meant = "a_role_file_that_is_named_and_cannot_be_read_or_holds_nothing_is_refused_before_anything_starts"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''        Ok(text) if text.is_empty() => Err(SessionError::NoRole { path }),
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "codex role file rig: the supervisor does not hand the broker the role (the regression)"
+meant = "a_codex_chiefs_role_is_on_no_command_line_fresh_or_resumed_and_its_thread_begins_with_it_once"
+runs = ["rig-regression-role-file"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            role: plan.role.clone(),'''
+replace = '''            role: None,'''
+
+[[plant]]
+name = "codex role file rig: the supervisor does not hand the broker the role (the rig)"
+meant = "a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a_message_and_once_for_its_thread_keeps_what_it_began_with"
+runs = ["rig-specs-codex"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            role: plan.role.clone(),'''
+replace = '''            role: None,'''
+
+# --- the harness ---
+
+[[plant]]
+name = "codex role file: the role is on the command line again (the old code)"
+meant = "no_codex_window_this_adapter_launches_has_its_role_on_its_command_line"
+runs = ["harness-launch-codex", "harness-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''            let role = role::write(&services.env, launch.id, &role)?;
+            let mut args = Vec::new();'''
+replace = '''            let setting = format!(
+                "developer_instructions={}",
+                cf_base::js::stringify(&serde_json::Value::String(role.clone()))
+            );
+            let role = role::write(&services.env, launch.id, &role)?;
+            let mut args = vec!["-c".to_owned(), setting];'''
+
+[[plant]]
+name = "codex role file rig: the role is on the command line again (the old code, the regression)"
+meant = "a_codex_chiefs_role_is_on_no_command_line_fresh_or_resumed_and_its_thread_begins_with_it_once"
+runs = ["rig-regression-role-file"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''            let role = role::write(&services.env, launch.id, &role)?;
+            let mut args = Vec::new();'''
+replace = '''            let setting = format!(
+                "developer_instructions={}",
+                cf_base::js::stringify(&serde_json::Value::String(role.clone()))
+            );
+            let role = role::write(&services.env, launch.id, &role)?;
+            let mut args = vec!["-c".to_owned(), setting];'''
+
+[[plant]]
+name = "codex role file: the window's environment names no role file"
+meant = "no_codex_window_this_adapter_launches_has_its_role_on_its_command_line"
+runs = ["harness-launch-codex", "harness-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''                env: launched.env.into_iter().chain([role]).collect(),'''
+replace = '''                env: { let _ = role; launched.env },'''
+
+[[plant]]
+name = "codex role file: the role's file is readable by everyone"
+meant = "the_text_is_written_in_the_launchs_own_folder_readable_by_its_owner_alone_and_named_by_the_variable_the_supervisor_reads"
+runs = ["harness-codex-role", "harness-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = '''    write_file(Path::new(&file), text.as_bytes(), 0o600).map_err(said)?;'''
+replace = '''    write_file(Path::new(&file), text.as_bytes(), 0o644).map_err(said)?;'''
+
+[[plant]]
+name = "codex role file: the role's file is in a folder every launch shares"
+meant = "the_text_is_written_in_the_launchs_own_folder_readable_by_its_owner_alone_and_named_by_the_variable_the_supervisor_reads"
+runs = ["harness-codex-role", "harness-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = '''    let folder = launch_folder(CODEX_FOLDER, env, launch)?;'''
+replace = '''    let folder = launch_folder(CODEX_FOLDER, env, launch)?;
+    let folder = std::path::Path::new(&folder)
+        .parent()
+        .map_or(folder.clone(), |up| up.to_string_lossy().into_owned());'''
+
+[[plant]]
+name = "codex role file: the role leaves out what Codex has of its own"
+meant = "the_role_follows_what_codex_has_of_its_own_in_one_text"
+runs = ["harness-codex-role", "harness-launch-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = '''        "{existing}\n\nYour ConsensFlow role is {role}.'''
+replace = '''        "{}Your ConsensFlow role is {role}.'''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = '''wait for the user's request.\n\n{content}"
+    ))'''
+replace = '''wait for the user's request.\n\n{content}", if existing.is_empty() { "" } else { "" }
+    ))'''
+
+# --- the stand-in Codex ---
+
+[[plant]]
+name = "codex role file: the stand-in Codex begins a thread with its server's instructions, whatever its start names"
+meant = "a_thread_whose_start_names_developer_instructions_begins_with_them_in_place_of_its_servers"
+runs = ["fake-codex-own"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
+find = '''        *held(&self.developer) = params["developerInstructions"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| self.configured.clone());'''
+replace = '''        let _ = params;
+        *held(&self.developer) = self.configured.clone();'''

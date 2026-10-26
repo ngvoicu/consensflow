@@ -6,7 +6,7 @@
 //! its terminal). Given `resume <thread>` the TUI resumes that thread instead, as
 //! the real one asks (`thread/resume`, in the shape Codex 0.159.2 sent it): the
 //! server goes on in the thread's rollout, which keeps the developer instructions
-//! the thread began with, and the window ends with 1 where the server has no
+//! the thread began with (those its start named, the role the broker gave it), and the window ends with 1 where the server has no
 //! rollout of it, as Codex's does: a thread has one only once it has had a turn.
 //! Each run writes what it was given, and what it saw, to `CF_TEST_CODEX_LOG`.
 //! `CF_TEST_CODEX_BACKEND` says how the server goes: `fail` at once, `die` once a
@@ -128,9 +128,15 @@ fn api_key() -> Value {
     own_var("OPENAI_API_KEY").map_or(Value::Null, Value::from)
 }
 
+/// The file of the window's role, where this run was told of it: the supervisor
+/// reads it, and tells neither of Codex's programs where it is.
+fn role_file() -> Value {
+    own_var("CF_CODEX_ROLE_FILE").map_or(Value::Null, Value::from)
+}
+
 /// Codex's server.
 fn server(args: &[String]) -> ExitCode {
-    record(json!({ "run": "server", "args": args, "apiKey": api_key() }));
+    record(json!({ "run": "server", "args": args, "apiKey": api_key(), "roleFile": role_file() }));
     let how = own_var("CF_TEST_CODEX_BACKEND").unwrap_or_default();
     if how == "fail" {
         let _ = writeln!(std::io::stderr(), "not logged in");
@@ -281,6 +287,7 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &
         let start = request["method"] == "thread/start";
         if start {
             record(json!({ "run": "server", "started": request["params"] }));
+            agent.started(&request["params"]);
             if behavior.spawns {
                 children::keep_starting();
             }
@@ -389,7 +396,9 @@ fn tui(args: &[String]) -> ExitCode {
         fail("the TUI is given --remote <url> --remote-auth-token-env <name>");
     };
     let token = own_var(token_name);
-    record(json!({ "run": "tui", "args": args, "token": token, "apiKey": api_key() }));
+    record(
+        json!({ "run": "tui", "args": args, "token": token, "apiKey": api_key(), "roleFile": role_file() }),
+    );
     // It draws its screen, as the real one does: a window that printed nothing is
     // still being drawn to the daemon, which delivers nothing to it until it has
     // held still (a chief's, which has no first message to show it by).

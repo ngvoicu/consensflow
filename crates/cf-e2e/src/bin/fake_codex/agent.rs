@@ -11,12 +11,15 @@
 //! the turn goes on beside the connections, one at a time, and writes what Codex
 //! writes of one: it started, the message, the answer, it is complete.
 //!
-//! A thread keeps the instructions it began with. The server is given the role's
-//! text as Codex is (`-c developer_instructions=…`), and the first turn of a thread
-//! it starts writes it into the rollout as the developer's message. A thread it
-//! resumes goes on in the rollout it has, which already holds that message, and is
-//! given no other: what the server is configured with now is read and unused, as the
-//! live Codex 0.162.1 did with a chief resumed after its role changed (2026-10-13).
+//! A thread keeps the instructions it began with. A thread starts with the
+//! developer instructions its start names (`developerInstructions`, which the
+//! window's broker gives the TUI's main start: the role's text), or else those its
+//! server is configured with (`-c developer_instructions=…`), as Codex 0.164.0 does;
+//! the first turn of the thread writes them into the rollout as the developer's
+//! message. A thread it resumes goes on in the rollout it has, which already holds
+//! that message, and is given no other: what the server is configured with now is
+//! read and unused, as the live Codex 0.162.1 did with a chief resumed after its
+//! role changed (2026-10-13).
 //!
 //! What a turn does is what the stand-in agent's does: the `SLEEP <seconds>` line of
 //! its message is how long it works, `Reply with exactly: X` is its answer, and
@@ -65,8 +68,10 @@ pub struct Agent {
     /// The rollout of its thread, once it has one: its first turn begins it.
     rollout: Mutex<Option<PathBuf>>,
     /// The developer instructions the server is configured with, which a thread it
-    /// starts begins with.
-    developer: Option<String>,
+    /// starts begins with where its start names none.
+    configured: Option<String>,
+    /// The developer instructions the thread it started begins with.
+    developer: Mutex<Option<String>>,
     /// Whether the thread has its developer message in the rollout already: a thread
     /// writes it once, with its first turn, and a resumed one has it from before.
     instructed: AtomicBool,
@@ -85,10 +90,10 @@ fn held<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Agent {
-    /// The agent a run is told to be by its environment, and `developer`, the
+    /// The agent a run is told to be by its environment, and `configured`, the
     /// developer instructions its server was given (none where it was given none).
     /// The servers its Codex opens with the window start now.
-    pub fn start(developer: Option<String>) -> Result<Arc<Self>, String> {
+    pub fn start(configured: Option<String>) -> Result<Arc<Self>, String> {
         let number = |name: &str| {
             own_var(name)
                 .and_then(|text| text.parse::<usize>().ok())
@@ -106,7 +111,7 @@ impl Agent {
         Ok(Arc::new(Self::on(
             thread,
             own_var("CODEX_HOME").map(PathBuf::from),
-            developer,
+            configured,
             plugins,
         )))
     }
@@ -115,14 +120,15 @@ impl Agent {
     fn on(
         thread: String,
         home: Option<PathBuf>,
-        developer: Option<String>,
+        configured: Option<String>,
         plugins: Plugins,
     ) -> Self {
         Self {
             thread: Mutex::new(thread),
             home,
             rollout: Mutex::new(None),
-            developer,
+            developer: Mutex::new(configured.clone()),
+            configured,
             instructed: AtomicBool::new(false),
             plugins,
             turns: Mutex::new(()),
@@ -134,6 +140,15 @@ impl Agent {
     /// The thread the server is on.
     pub fn thread(&self) -> String {
         held(&self.thread).clone()
+    }
+
+    /// The server starts its thread, as `params` (those of `thread/start`) ask: with
+    /// the developer instructions they name, or those the server is configured with.
+    pub fn started(&self, params: &Value) {
+        *held(&self.developer) = params["developerInstructions"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| self.configured.clone());
     }
 
     /// The server is asked to resume `thread`: it goes on with it where the Codex
@@ -211,7 +226,7 @@ impl Agent {
         // The first turn of a thread writes what the thread begins with: the
         // developer's instructions, which no later turn, and no resume, writes again.
         if !self.instructed.swap(true, Ordering::Relaxed) {
-            if let Some(instructions) = &self.developer {
+            if let Some(instructions) = held(&self.developer).clone() {
                 self.write(
                     "response_item",
                     json!({
@@ -495,6 +510,36 @@ mod tests {
         assert_eq!(kinds[0], ("session_meta", "-"));
         assert_eq!(kinds[2], ("response_item", "developer"));
         assert_eq!(kinds[3], ("response_item", "user"));
+    }
+
+    #[test]
+    fn a_thread_whose_start_names_developer_instructions_begins_with_them_in_place_of_its_servers()
+    {
+        let home = tempfile::tempdir().unwrap();
+        let agent = server(
+            home.path(),
+            "thread-1",
+            "what the server is configured with",
+        );
+        agent.started(&json!({ "developerInstructions": "the role its start names" }));
+        agent.turn("first");
+        assert_eq!(
+            developers(&records(home.path(), "thread-1")),
+            ["the role its start names"]
+        );
+        // A start that names none, or names them as null, begins with the server's.
+        let other = tempfile::tempdir().unwrap();
+        let agent = server(
+            other.path(),
+            "thread-2",
+            "what the server is configured with",
+        );
+        agent.started(&json!({ "developerInstructions": null }));
+        agent.turn("first");
+        assert_eq!(
+            developers(&records(other.path(), "thread-2")),
+            ["what the server is configured with"]
+        );
     }
 
     #[test]

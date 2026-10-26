@@ -1,8 +1,8 @@
 //! The Specmint skill a Codex chief is given where its project has specs on:
 //! ConsensFlow's own copy, kept where it is the same for every launch, and read
 //! by its path, which the role text names; or the human's own, where Codex has
-//! the variant installed, and then nothing is written. Codex keeps no files of
-//! its launches' own, with specs on or off.
+//! the variant installed, and then nothing is written for it. A launch's own
+//! folder holds its role's file and nothing else, with specs on or off.
 
 use std::fs;
 use std::path::Path;
@@ -20,9 +20,40 @@ fn consensflow(home: &Home) -> String {
     path::join(&[&home.root, "consensflow"])
 }
 
-/// Where the launch's own files for Codex would be: it keeps none.
+/// Where the launch's own files for Codex are: its role's alone.
 fn launch_folder(home: &Home) -> String {
     path::join(&[&consensflow(home), "integrations", "codex", LAUNCH])
+}
+
+/// Every file under ConsensFlow's `integrations` in `home`, by its path below it.
+fn integrations(home: &Home) -> Vec<String> {
+    fn walk(folder: &Path, below: &str, found: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(folder) else {
+            return;
+        };
+        for entry in entries {
+            let entry = entry.unwrap();
+            let name = format!("{below}{}", entry.file_name().to_string_lossy());
+            if entry.file_type().unwrap().is_dir() {
+                walk(&entry.path(), &format!("{name}/"), found);
+            } else {
+                found.push(name);
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(
+        &Path::new(&consensflow(home)).join("integrations"),
+        "",
+        &mut found,
+    );
+    found.sort();
+    found
+}
+
+/// What a launch writes of its own: its role's file.
+fn the_role_alone() -> Vec<String> {
+    vec![format!("codex/{LAUNCH}/developer-instructions.md")]
 }
 
 #[test]
@@ -34,11 +65,10 @@ fn a_chief_given_specs_has_the_skill_written_where_its_role_text_names_it_and_co
         let (off_adapter, _fakes) = adapter(&off_home);
         let (adapter, _fakes) = adapter(&home);
         let off = prepare(&off_adapter, &Request::chief()).unwrap();
-        assert!(
-            !Path::new(&consensflow(&off_home))
-                .join("integrations")
-                .exists(),
-            "with specs off Codex writes nothing of its own"
+        assert_eq!(
+            integrations(&off_home),
+            the_role_alone(),
+            "with specs off Codex writes its role and nothing else"
         );
         let request = Request {
             specs: Some(variant),
@@ -68,11 +98,12 @@ fn a_chief_given_specs_has_the_skill_written_where_its_role_text_names_it_and_co
         assert_eq!(
             kept::names_in(&kept::skills(&consensflow(&home), "codex", variant)),
             [variant.skill_name()],
-            "the skill alone: Codex is given its role as text"
+            "the skill alone: Codex's role is in the launch's folder"
         );
-        assert!(
-            !Path::new(&launch_folder(&home)).exists(),
-            "the launch has no folder of its own: the copy outlasts it"
+        assert_eq!(
+            fs::read_dir(launch_folder(&home)).unwrap().count(),
+            1,
+            "the launch's folder holds its role alone: the copy outlasts it"
         );
     }
 }
@@ -127,9 +158,10 @@ fn a_codex_that_has_the_variant_installed_in_the_agents_skills_or_its_own_is_giv
         };
         prepare(&adapter, &request).unwrap();
     }
-    assert!(
-        !Path::new(&consensflow(&home)).join("integrations").exists(),
-        "an installed copy is the harness's own: nothing is written"
+    assert_eq!(
+        integrations(&home),
+        the_role_alone(),
+        "an installed copy is the harness's own: nothing is written for it"
     );
     // Neither installed variant is the core one: ConsensFlow's own is written.
     assert!(matches!(

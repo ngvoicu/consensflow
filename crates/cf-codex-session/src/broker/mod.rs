@@ -54,6 +54,9 @@ pub(crate) struct Config {
     pub(crate) upstream: Upstream,
     /// Whether the window's first start opens in full-permission mode.
     pub(crate) fresh_bypass: bool,
+    /// The developer instructions every main start of the window is given (its
+    /// role), read from the file ConsensFlow wrote; none for a window given none.
+    pub(crate) role: Option<String>,
     /// The board Codex's questions go to; none outside a window.
     pub(crate) board: Option<Arc<Board>>,
     /// How long a question waits for the board before the TUI's dialog takes over.
@@ -103,6 +106,7 @@ impl Broker {
             bridge,
             upstream,
             fresh_bypass,
+            role,
             board,
             question_wait,
         } = config;
@@ -112,7 +116,7 @@ impl Broker {
             upstream,
             board,
             question_wait,
-            state: RefCell::new(Selection::new(fresh_bypass)),
+            state: RefCell::new(Selection::new(fresh_bypass, role)),
             control: RefCell::new(None),
             pairs: RefCell::new(HashMap::new()),
             tasks: RefCell::new(Vec::new()),

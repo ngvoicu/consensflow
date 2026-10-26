@@ -246,17 +246,27 @@ fn replies(body: &str) -> Served {
     }
 }
 
-/// The launch arguments without the role text, which every window carries as
-/// `-c developer_instructions=…`.
+/// The launch arguments, which hold no role text: a window's goes by the file its
+/// environment names ([`role_file`]).
 fn without_role(argv: &[String]) -> Vec<String> {
-    let at = argv
+    assert!(
+        !argv
+            .iter()
+            .any(|arg| arg.contains("developer_instructions")),
+        "the role is on the command line: {argv:?}"
+    );
+    argv.to_vec()
+}
+
+/// The role text a window was launched with: the file its environment names, as
+/// its supervisor reads it.
+fn role_file(plan: &Prepared) -> String {
+    let file = plan
+        .env
         .iter()
-        .position(|arg| arg.starts_with("developer_instructions="))
-        .expect("the role text rides along");
-    assert_eq!(argv[at - 1], "-c");
-    let mut rest = argv.to_vec();
-    rest.drain(at - 1..=at);
-    rest
+        .find_map(|(name, value)| (name == "CF_CODEX_ROLE_FILE").then_some(value))
+        .expect("the window's environment names its role's file");
+    fs::read_to_string(file).expect("the role's file is there")
 }
 
 fn words(words: &[&str]) -> Vec<String> {
@@ -311,12 +321,24 @@ fn runs_codex_under_its_supervisor_in_full_permission_mode_with_the_task_last() 
         TASK,
     ]));
     assert_eq!(without_role(&plan.argv), expected);
-    let [(name, bridge)] = &plan.env[..] else {
+    let [(name, bridge), (role, file)] = &plan.env[..] else {
         panic!("{:?}", plan.env);
     };
     assert_eq!(name, "CF_CODEX_SESSION_BRIDGE");
     let told: Value = serde_json::from_str(bridge).unwrap();
     assert_eq!(told["launchId"], LAUNCH);
+    assert_eq!(role, "CF_CODEX_ROLE_FILE");
+    assert_eq!(
+        *file,
+        path::join(&[
+            &home.root,
+            "consensflow",
+            "integrations",
+            "codex",
+            LAUNCH,
+            "developer-instructions.md"
+        ])
+    );
     assert_eq!(plan.drop_env, ["OPENAI_API_KEY"]);
 }
 

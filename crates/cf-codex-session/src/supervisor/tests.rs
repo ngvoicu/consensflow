@@ -30,12 +30,35 @@ impl Home {
 
     /// A short path, so a socket in it fits.
     fn bridged(bridge: Option<&str>) -> Self {
+        Self::made(bridge, None)
+    }
+
+    /// A home whose window's role is a file holding `role`, named as a launch names it.
+    fn with_role(role: &str) -> Self {
+        Self::made(Some(BRIDGE), Some(Ok(role)))
+    }
+
+    /// A home whose window names `file`, in the home, as its role's, which is not there.
+    fn naming_a_missing_role(file: &str) -> Self {
+        Self::made(Some(BRIDGE), Some(Err(file)))
+    }
+
+    /// A home with `bridge`, and a role's file: one holding the text of `Ok`, or one
+    /// named `Err` and not written.
+    fn made(bridge: Option<&str>, role: Option<Result<&str, &str>>) -> Self {
         let dir = tempfile::Builder::new()
             .prefix("cf-sup-")
             .tempdir_in("/tmp")
             .unwrap();
         let mut vars = vec![("CONSENSFLOW_HOME", dir.path().to_str().unwrap().to_string())];
         vars.extend(bridge.map(|bridge| ("CF_CODEX_SESSION_BRIDGE", bridge.to_string())));
+        if let Some(role) = role {
+            let file = dir.path().join(role.err().unwrap_or("role.md"));
+            if let Ok(text) = role {
+                fs::write(&file, text).unwrap();
+            }
+            vars.push((ROLE_VARIABLE, file.to_str().unwrap().to_string()));
+        }
         let env = Env::from_vars(vars);
         Self { dir, env }
     }
@@ -331,6 +354,27 @@ fn a_flag_that_wants_a_value_and_has_none_is_refused_before_anything_starts() {
 }
 
 #[test]
+fn a_role_file_that_is_named_and_cannot_be_read_or_holds_nothing_is_refused_before_anything_starts()
+{
+    for home in [Home::naming_a_missing_role("gone.md"), Home::with_role("")] {
+        let started = home.dir.path().join("started");
+        let codex = home.codex(&format!("echo started > '{}'", started.display()));
+        let failed = home
+            .supervise(codex, &[], Duration::from_secs(5))
+            .unwrap_err()
+            .to_string();
+        let file = home.env.path(ROLE_VARIABLE).unwrap().display().to_string();
+        assert!(
+            failed == format!("its role file {file} holds nothing")
+                || failed.starts_with(&format!("could not read its role from {file}: ")),
+            "{failed}"
+        );
+        assert!(!started.exists(), "Codex started without its role");
+        assert!(!home.dir.path().join("tmp").exists(), "nothing was made");
+    }
+}
+
+#[test]
 fn no_program_named_is_said() {
     let home = Home::new();
     let setup = Setup {
@@ -454,6 +498,32 @@ fn a_window_on_loopback_as_windows_runs_one_hands_the_server_its_tokens_hash_and
 }
 
 #[test]
+fn a_windows_role_is_on_neither_programs_command_line() {
+    let role = "Your ConsensFlow role is worker. The code word is ROLE-ON-NO-LINE.";
+    let home = Home::with_role(role);
+    let code = crate::block_on_local(async {
+        let codex = FakeCodex::start(Behaviour::Ready).await;
+        let program = codex_on_loopback(&home, codex.address.port(), "");
+        let setup = Setup {
+            startup: Duration::from_secs(10),
+            endpoint: |_| Endpoint::loopback(),
+            ..Setup::standard()
+        };
+        let args = [program.into_os_string(), "-m".into(), "gpt-5.6-luna".into()];
+        supervise_with(&home.env, &args, setup).await
+    })
+    .unwrap();
+    assert_eq!(code.unwrap(), 7, "the window opened");
+    // (What the programs inherit is the window's own environment, which a test's
+    // process does not have: the rig's stand-in Codex says it is told nothing of
+    // the file, `regressions/a_codex_windows_role_was_on_its_command_line.rs`.)
+    for program in ["server", "tui"] {
+        let args = fs::read_to_string(home.dir.path().join(format!("{program}-args"))).unwrap();
+        assert!(!args.contains("ROLE-ON-NO-LINE"), "{program}");
+    }
+}
+
+#[test]
 #[allow(clippy::disallowed_methods)] // The test asks the system whether a process is there.
 fn a_server_that_does_not_end_when_asked_is_killed_after_a_moment_and_the_tuis_code_stands() {
     let home = Home::new();
@@ -512,6 +582,7 @@ fn the_servers_standard_error_is_read_for_as_long_as_it_runs_not_only_until_it_i
             env: &home.env,
             executable: &codex,
             bridge: Bridge::parse(BRIDGE).unwrap(),
+            role: None,
             split: Split::default(),
             endpoint: Endpoint::open(&home.env).unwrap(),
             bypass: false,

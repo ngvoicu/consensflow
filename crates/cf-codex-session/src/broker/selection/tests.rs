@@ -18,7 +18,13 @@ impl Window {
     }
 
     fn bypassing(fresh_bypass: bool) -> Self {
-        let mut selection = Selection::new(fresh_bypass);
+        Self::with(fresh_bypass, None)
+    }
+
+    /// A window that opens in full-permission mode where `fresh_bypass` says so,
+    /// and whose main starts are given `role`.
+    fn with(fresh_bypass: bool, role: Option<&str>) -> Self {
+        let mut selection = Selection::new(fresh_bypass, role.map(str::to_owned));
         selection.ready();
         Self {
             selection,
@@ -350,7 +356,7 @@ fn an_older_answer_before_the_latest_leaves_the_window_switching() {
 
 #[test]
 fn another_connections_answer_does_not_apply_to_the_owner() {
-    let mut selection = Selection::new(false);
+    let mut selection = Selection::new(false, None);
     selection.ready();
     let (mut first, mut second) = (Requests::default(), Requests::default());
     selection.tui_said(TUI, &mut first, &start(1));
@@ -389,7 +395,7 @@ fn the_owners_connection_lost_forgets_the_thread_and_another_ones_does_not() {
 
 #[test]
 fn a_connection_lost_before_it_chose_leaves_what_was_chosen() {
-    let mut selection = Selection::new(false);
+    let mut selection = Selection::new(false, None);
     selection.ready();
     let mut owner = Requests::default();
     selection.tui_said(TUI, &mut owner, &start(1));
@@ -643,7 +649,7 @@ fn a_closed_broker_shows_no_thread_and_takes_nothing() {
 
 #[test]
 fn a_broker_is_not_available_before_its_connection_is_initialized() {
-    let mut selection = Selection::new(false);
+    let mut selection = Selection::new(false, None);
     let mut requests = Requests::default();
     selection.tui_said(TUI, &mut requests, &start(1));
     selection.codex_said(TUI, &mut requests, &idle(1, A));
@@ -701,4 +707,64 @@ fn an_answer_names_its_request_as_a_javascript_map_finds_it() {
     window.says(start(json!([3])));
     window.answers(json!({ "id": [3], "result": { "thread": { "id": A } } }));
     assert_eq!(window.shown(), None);
+}
+
+#[test]
+fn every_main_start_is_given_the_windows_role_in_place_of_the_instructions_it_named() {
+    let mut window = Window::with(false, Some("the role"));
+    let sent = json!({
+        "id": 1,
+        "method": "thread/start",
+        "params": {
+            "ephemeral": false,
+            "threadSource": "user",
+            "developerInstructions": null,
+            "cwd": "/work",
+        },
+    });
+    assert_eq!(
+        window.says(sent).unwrap().to_string(),
+        r#"{"id":1,"method":"thread/start","params":{"ephemeral":false,"threadSource":"user","developerInstructions":"the role","cwd":"/work"}}"#
+    );
+    window.answers(idle(1, A));
+    // A /new is a main start too, and one that named instructions of its own has the role in their place.
+    let named = json!({
+        "id": 2,
+        "method": "thread/start",
+        "params": { "ephemeral": false, "threadSource": "user", "developerInstructions": "the TUI's" },
+    });
+    assert_eq!(
+        window.says(named).unwrap()["params"]["developerInstructions"],
+        "the role"
+    );
+    // A window given no role has its starts go as they are.
+    assert_eq!(Window::new().says(start(1)), None);
+}
+
+#[test]
+fn the_role_and_the_first_starts_full_permissions_go_in_one_message() {
+    let mut window = Window::with(true, Some("the role"));
+    assert_eq!(
+        window.says(start(1)).unwrap().to_string(),
+        r#"{"id":1,"method":"thread/start","params":{"ephemeral":false,"threadSource":"user","approvalPolicy":"never","sandbox":"danger-full-access","permissions":null,"developerInstructions":"the role"}}"#
+    );
+}
+
+#[test]
+fn no_side_start_resume_fork_or_turn_is_given_the_role() {
+    let mut window = Window::with(false, Some("the role"));
+    window.starts(1, json!({ "id": A }));
+    for message in [
+        json!({ "id": 2, "method": "thread/start", "params": { "ephemeral": true, "threadSource": "user" } }),
+        json!({ "id": 3, "method": "thread/start", "params": { "ephemeral": false, "threadSource": "subagent" } }),
+        json!({ "id": 4, "method": "thread/start", "params": { "ephemeral": false, "threadSource": "system" } }),
+        json!({ "id": 5, "method": "thread/start", "params": { "threadSource": "user" } }),
+        json!({ "id": 6, "method": "thread/start", "params": null }),
+        resume(7, B),
+        json!({ "id": 8, "method": "thread/fork", "params": { "threadId": A, "threadSource": "user", "runtimeWorkspaceRoots": [] } }),
+        json!({ "id": 9, "method": "thread/fork", "params": { "threadId": A, "threadSource": "user", "runtimeWorkspaceRoots": [], "ephemeral": true } }),
+        json!({ "id": 10, "method": "turn/start", "params": { "threadId": A, "input": [] } }),
+    ] {
+        assert_eq!(window.says(message.clone()), None, "{message}");
+    }
 }

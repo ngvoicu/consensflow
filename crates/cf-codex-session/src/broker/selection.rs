@@ -8,6 +8,16 @@
 //! the latest switch and its connection still owns the window. The server
 //! numbers the requests it sends the TUI on its own, so only a response (a
 //! message with no `method`) ever answers a request of the TUI's.
+//!
+//! A main start is also where the window's role goes in: the broker gives it the
+//! window's developer instructions (`developerInstructions`, which replace what
+//! Codex's own configuration says for that thread, and so already hold that), so
+//! the role is on no command line. Nothing else is given them. A resumed or forked
+//! thread keeps the developer message it began with (probed on Codex 0.162.1 and
+//! 0.164.0), and a side thread (ephemeral, or of a source other than the user's) is
+//! no conversation of the window's. A sub-agent Codex spawns starts in the server,
+//! never through here: Codex 0.164.0 gives it the developer instructions of the
+//! thread that spawned it, as it did when they were configuration.
 
 use std::collections::HashMap;
 
@@ -97,13 +107,16 @@ pub(crate) struct Selection {
     idle: HashMap<String, bool>,
     /// Whether the window's first start is still to open in full-permission mode.
     fresh_bypass: bool,
+    /// The developer instructions every main start of the window is given: its
+    /// role. None for a window given none.
+    role: Option<String>,
     closed: bool,
     /// Whether the broker's own connection to Codex is initialized.
     ready: bool,
 }
 
 impl Selection {
-    pub(crate) fn new(fresh_bypass: bool) -> Self {
+    pub(crate) fn new(fresh_bypass: bool, role: Option<String>) -> Self {
         Self {
             selected: None,
             empty: false,
@@ -112,6 +125,7 @@ impl Selection {
             revision: 0,
             idle: HashMap::new(),
             fresh_bypass,
+            role,
             closed: false,
             ready: false,
         }
@@ -193,7 +207,8 @@ impl Selection {
 
     /// What a TUI connection said to Codex. Remembers it if it may change the
     /// window's thread or permissions, and returns the message to send in its
-    /// place when the first start must open in full-permission mode.
+    /// place where it is a main start: given the window's role, and opened in
+    /// full-permission mode while the first start must be.
     pub(crate) fn tui_said(
         &mut self,
         client: ClientId,
@@ -241,8 +256,12 @@ impl Selection {
                     main_resume,
                 },
             );
-            if main_start && self.fresh_bypass {
-                rewritten = Some(with_full_permissions(message));
+            if main_start && (self.fresh_bypass || self.role.is_some()) {
+                rewritten = Some(main_start_of(
+                    message,
+                    self.fresh_bypass,
+                    self.role.as_deref(),
+                ));
             }
         }
         let names_selected = self.selected.is_some()
@@ -391,17 +410,23 @@ fn status_is_idle(thread: Option<&Value>) -> bool {
         == Some("idle")
 }
 
-/// `message` with its params opening the thread in full-permission mode, the
-/// way it goes out: keys in the order JavaScript wrote them.
-fn with_full_permissions(message: &Value) -> Value {
+/// The main start `message` as it goes out: its params opening the thread in
+/// full-permission mode where `bypass` says so, and with `role` as its developer
+/// instructions in place of any it had; keys in the order JavaScript wrote them.
+fn main_start_of(message: &Value, bypass: bool, role: Option<&str>) -> Value {
     let mut params = message
         .get("params")
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    params.insert("approvalPolicy".into(), "never".into());
-    params.insert("sandbox".into(), "danger-full-access".into());
-    params.insert("permissions".into(), Value::Null);
+    if bypass {
+        params.insert("approvalPolicy".into(), "never".into());
+        params.insert("sandbox".into(), "danger-full-access".into());
+        params.insert("permissions".into(), Value::Null);
+    }
+    if let Some(role) = role {
+        params.insert("developerInstructions".into(), role.into());
+    }
     let mut message = message.clone();
     if let Some(object) = message.as_object_mut() {
         object.insert("params".into(), Value::Object(params));

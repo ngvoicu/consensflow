@@ -5,7 +5,7 @@
 # keeps_first_instructions`, Codex alone); the ledger records the text each conversation was
 # last told (migration 0016); the engine compares it with the text a resumed window would be
 # given and, where it differs, opens the window with no first message and, once it is up, gives
-# it a note from ConsensFlow first (by paste, so the role is on the command line once): the new
+# it a note from ConsensFlow first (by paste): the new
 # text in full and said to replace the one the thread began with, then the message the launch
 # would have begun with, then the rest of its queue. The text is recorded in the very write that
 # confirms the note's delivery, so that it is given once; a role told in part (cut at what a paste
@@ -1561,9 +1561,23 @@ find = '''                &format!("{}-{commit}", variant.as_str()),'''
 replace = '''                &format!("{}-{commit}{}", variant.as_str(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos())),'''
 
 [[plant]]
-name = "codex role rig: the stand-in Codex gives a resumed thread the instructions its server has now (the rig)"
+name = "codex role rig: a resumed thread is given its role again, by the broker and a stand-in Codex that takes it (the rig)"
 meant = "a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a_message_and_once_for_its_thread_keeps_what_it_began_with"
 runs = ["rig-codex-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''            if main_start && (self.fresh_bypass || self.role.is_some()) {'''
+replace = '''            if (main_start && self.fresh_bypass) || ((main_start || main_resume) && self.role.is_some()) {'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex.rs"
+find = '''            Some("thread/resume") => resumed(id, &request["params"], agent),'''
+replace = '''            Some("thread/resume") => {
+                agent.started(&request["params"]);
+                resumed(id, &request["params"], agent)
+            }'''
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
@@ -1573,9 +1587,23 @@ replace = '''        self.instructed
             .store(has_developer_message(&text) && false, Ordering::Relaxed);'''
 
 [[plant]]
-name = "codex role rig: the stand-in Codex gives a resumed thread the instructions its server has now (the regression)"
+name = "codex role rig: a resumed thread is given its role again, by the broker and a stand-in Codex that takes it (the regression)"
 meant = "a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_record_and_the_skill_it_names_is_there"
 runs = ["rig-regression-codex-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''            if main_start && (self.fresh_bypass || self.role.is_some()) {'''
+replace = '''            if (main_start && self.fresh_bypass) || ((main_start || main_resume) && self.role.is_some()) {'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex.rs"
+find = '''            Some("thread/resume") => resumed(id, &request["params"], agent),'''
+replace = '''            Some("thread/resume") => {
+                agent.started(&request["params"]);
+                resumed(id, &request["params"], agent)
+            }'''
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"

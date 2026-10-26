@@ -618,6 +618,7 @@ fn parse(raw: &[u8]) -> Reply {
 /// What a fixture's broker is started with.
 pub(crate) struct Options {
     pub(crate) fresh_bypass: bool,
+    pub(crate) role: Option<String>,
     pub(crate) board: Option<Arc<Board>>,
     pub(crate) question_wait: Duration,
 }
@@ -626,6 +627,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             fresh_bypass: false,
+            role: None,
             board: None,
             question_wait: Duration::from_secs(5),
         }
@@ -764,6 +766,7 @@ pub(crate) fn config_for(codex: &FakeCodex, options: Options) -> Config {
             authorization: None,
         },
         fresh_bypass: options.fresh_bypass,
+        role: options.role,
         board: options.board,
         question_wait: options.question_wait,
     }

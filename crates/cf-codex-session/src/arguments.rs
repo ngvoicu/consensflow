@@ -187,12 +187,12 @@ mod tests {
     }
 
     #[test]
-    fn keeps_native_tui_arguments_while_explicitly_forwarding_backend_model_effort_and_full_role_configuration(
+    fn keeps_native_tui_arguments_while_explicitly_forwarding_backend_model_effort_and_configuration(
     ) {
-        let role = "developer_instructions=\"existing instructions\\ncomplete chief role\"";
+        let setting = "check_for_update_on_startup=false";
         let given = args(&[
             "-c",
-            role,
+            setting,
             "--model",
             "native-model",
             "-c",
@@ -205,7 +205,7 @@ mod tests {
             split.backend,
             args(&[
                 "-c",
-                role,
+                setting,
                 "-c",
                 "model=\"native-model\"",
                 "-c",
@@ -225,10 +225,10 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert_eq!(
-            super::split(&args(&["-c", role, "resume", THREAD])).unwrap(),
+            super::split(&args(&["-c", setting, "resume", THREAD])).unwrap(),
             Split {
-                backend: args(&["-c", role]),
-                tui: args(&["-c", role, "resume", THREAD]),
+                backend: args(&["-c", setting]),
+                tui: args(&["-c", setting, "resume", THREAD]),
             }
         );
     }

@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use cf_base::env::Env;
 use cf_board::door::{board_of, DOOR_WAIT};
 use cf_process::{runnable, start_owned, Ending, Owned};
-use cf_proto::codex::{Bridge, InvalidBridge, BRIDGE_VARIABLE};
+use cf_proto::codex::{Bridge, InvalidBridge, BRIDGE_VARIABLE, ROLE_VARIABLE};
 use tokio::io::AsyncReadExt;
 use tokio::process::{ChildStderr, Command};
 use tokio::task::JoinHandle;
@@ -52,6 +52,10 @@ pub(crate) enum SessionError {
     Bridge(#[from] InvalidBridge),
     #[error(transparent)]
     Arguments(#[from] MissingValue),
+    #[error("could not read its role from {}: {cause}", path.display())]
+    Role { path: PathBuf, cause: io::Error },
+    #[error("its role file {} holds nothing", path.display())]
+    NoRole { path: PathBuf },
     #[error(transparent)]
     Endpoint(#[from] EndpointError),
     #[error("Codex server could not start: {0}")]
@@ -74,6 +78,8 @@ struct Plan<'a> {
     env: &'a Env,
     executable: &'a Path,
     bridge: Bridge,
+    /// The developer instructions the window's main threads start with.
+    role: Option<String>,
     split: Split,
     endpoint: Endpoint,
     /// Whether the window opens in full-permission mode.
@@ -119,12 +125,14 @@ pub(crate) async fn supervise(env: &Env, args: &[OsString]) -> Result<i32, Sessi
 async fn supervise_with(env: &Env, args: &[OsString], setup: Setup) -> Result<i32, SessionError> {
     let (executable, codex_args) = args.split_first().ok_or(SessionError::NoProgram)?;
     let bridge = Bridge::parse(env.text(BRIDGE_VARIABLE).unwrap_or_default())?;
+    let role = role_of(env)?;
     let split = arguments::split(codex_args)?;
     let endpoint = (setup.endpoint)(env)?;
     let plan = Plan {
         env,
         executable: Path::new(executable),
         bridge,
+        role,
         split,
         endpoint,
         bypass: codex_args.iter().any(|arg| arg == BYPASS),
@@ -139,6 +147,20 @@ async fn supervise_with(env: &Env, args: &[OsString], setup: Setup) -> Result<i3
     session.say_what_ran_in_no_job(setup.say);
     finished?;
     outcome
+}
+
+/// The window's role: the text of the file `env` names in [`ROLE_VARIABLE`], none
+/// where it names none.
+fn role_of(env: &Env) -> Result<Option<String>, SessionError> {
+    let Some(file) = env.path(ROLE_VARIABLE) else {
+        return Ok(None);
+    };
+    let path = file.to_path_buf();
+    match std::fs::read_to_string(file) {
+        Ok(text) if text.is_empty() => Err(SessionError::NoRole { path }),
+        Ok(text) => Ok(Some(text)),
+        Err(cause) => Err(SessionError::Role { path, cause }),
+    }
 }
 
 /// The processes of one window, and its broker.
@@ -164,6 +186,7 @@ impl Session {
             bridge: plan.bridge.clone(),
             upstream,
             fresh_bypass: plan.bypass,
+            role: plan.role.clone(),
             board: board_of(plan.env).map(Arc::new),
             question_wait: DOOR_WAIT,
         });
@@ -353,7 +376,8 @@ fn remove_folder(folder: &Path) -> io::Result<()> {
 /// `plan`'s program as it starts here, with `args`, and the program that
 /// starts (what a failure to start names); or why it cannot start (a Codex
 /// that is an npm shim, with no Node to run it on). An OpenAI API key in this
-/// environment never reaches Codex, which has its own login; and a program
+/// environment never reaches Codex, which has its own login, nor the name of the
+/// role's file, which is the broker's to read; and a program
 /// still running when its handle is dropped is killed, not orphaned (and everything it started
 /// with it, on Windows).
 fn command(plan: &Plan<'_>, args: &[OsString]) -> Result<(Command, String), String> {
@@ -362,7 +386,10 @@ fn command(plan: &Plan<'_>, args: &[OsString]) -> Result<(Command, String), Stri
     let mut command = Command::from(run.command());
     // Both run for as long as the window does.
     cf_process::hold_only_the_streams(command.as_std_mut());
-    command.env_remove("OPENAI_API_KEY").kill_on_drop(true);
+    command
+        .env_remove("OPENAI_API_KEY")
+        .env_remove(ROLE_VARIABLE)
+        .kill_on_drop(true);
     Ok((command, program))
 }
 

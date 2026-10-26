@@ -34,6 +34,10 @@ mod a_builds_daemon_held_a_workers_task;
 mod a_close_waited_for_a_codex_chiefs_server_to_end;
 #[path = "regressions/a_codex_chief_opened_again_after_a_restart_read_starting_for_good.rs"]
 mod a_codex_chief_opened_again_after_a_restart_read_starting_for_good;
+// The stand-in Codex is a script, so Unix's, and so are `ps` and `pgrep`.
+#[cfg(unix)]
+#[path = "regressions/a_codex_windows_role_was_on_its_command_line.rs"]
+mod a_codex_windows_role_was_on_its_command_line;
 #[cfg(unix)]
 #[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]
 mod a_command_that_goes_on_reporting_held_a_devin_workers_result;

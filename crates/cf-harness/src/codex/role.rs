@@ -2,31 +2,36 @@
 //! the instructions it would have read anyway: the native resolver is asked for
 //! them, so the profile and project layering is kept, and no version is read.
 //!
-//! It is read once for a thread: the developer message a thread's first turn
-//! wrote is the one it keeps, and a resumed thread is given the arguments below
-//! and does not use them ([`crate::contract::Adapter::keeps_first_instructions`],
-//! which the Codex adapter answers yes to). A role that changed since the thread
-//! began reaches it as a message the engine says.
+//! The text goes in a file of the launch's own, readable by this user alone, which
+//! the launch's environment names (`CF_CODEX_ROLE_FILE`). The window's supervisor
+//! reads it before Codex starts, and its broker gives it to the TUI's main thread
+//! starts as their developer instructions (`developerInstructions`, which replace
+//! what Codex's configuration says for that thread: probed on Codex 0.164.0, so the
+//! text holds Codex's own as well). It is on no command line, where every user of
+//! the machine could read it (`ps` is setuid root on macOS) and a pattern matching
+//! its words matched the window; a role's length is no command line's limit either.
+//! The file goes with the launch's folder, when its window closes.
 //!
-//! The arguments are on the window's command line whether the thread is new or
-//! resumed, and the role is on it once: where it changed, it goes in by paste once
-//! the window is up, and no first message says it again. Windows' `CreateProcess`
-//! takes 32,767 UTF-16 units of command line, and this word, JSON and quoted as
-//! Windows quotes it, is 15,654 units for a chief with specs on and a staff of 25
-//! (each row two roles), about 50 more for each row; with the rest of the line
-//! (about 400) the most it holds is 354 rows, or 301 with 2,500 units of Codex's
-//! own instructions in it, or 382 without specs. The arithmetic, which a test
-//! holds to the real text, is in the engine's `role_change`. Nothing handles it:
-//! past it the window does not open (`the window did not open: …`).
+//! It is read once for a thread: the developer message a thread's first turn
+//! wrote is the one it keeps, and a resumed thread is not given it again
+//! ([`crate::contract::Adapter::keeps_first_instructions`], which the Codex adapter
+//! answers yes to). A role that changed since the thread began reaches it as a
+//! message the engine says.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use cf_base::env::Env;
+use cf_base::file::{make_folder, write_file, Mkdir};
 use cf_base::js;
 use cf_base::json::from_slice_lossy;
+use cf_base::path;
+use cf_proto::codex::ROLE_VARIABLE;
 use serde_json::{json, Value};
 
+use crate::contract::LaunchId;
 use crate::seams::processes::{Child, Ending, Program, Streams};
 use crate::seams::{arm, Services};
+use crate::shared::launch_files::{launch_folder, CODEX_FOLDER};
 
 /// Why a launch is refused when Codex's own instructions could not be read.
 const UNREAD: &str = "Cannot read native Codex instructions safely";
@@ -37,30 +42,36 @@ const ANSWER_WITHIN_MS: u64 = 10_000;
 /// The most a line of the app-server's may say.
 const LINE_LIMIT: usize = 2 * 1024 * 1024;
 
-/// The arguments that give a window of `role` its role: Codex's own
-/// instructions for a window opened in `cwd`, then the role's `content`, as
-/// the developer's instructions.
-pub(super) async fn arguments(
+/// The name of the role's file in its launch's folder.
+const FILE: &str = "developer-instructions.md";
+
+/// The text a window of `role` is given as its developer instructions: Codex's
+/// own instructions for a window opened in `cwd`, then the role's `content`.
+pub(super) async fn text(
     services: &Services,
     role: &str,
     executable: &str,
     cwd: &str,
     content: &str,
-) -> Result<Vec<String>, String> {
+) -> Result<String, String> {
     if content.is_empty() {
         return Err(format!("the {role} window needs its role text"));
     }
     let existing = instructions(services, executable, cwd).await?;
-    let text = format!(
+    Ok(format!(
         "{existing}\n\nYour ConsensFlow role is {role}. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n{content}"
-    );
-    Ok(vec![
-        "-c".to_owned(),
-        format!(
-            "developer_instructions={}",
-            js::stringify(&Value::String(text))
-        ),
-    ])
+    ))
+}
+
+/// Writes `text` as the role of `launch`'s window, in its own folder made private
+/// to this user, and says the variable of the window's environment that names it.
+pub(super) fn write(env: &Env, launch: &LaunchId, text: &str) -> Result<(String, String), String> {
+    let folder = launch_folder(CODEX_FOLDER, env, launch)?;
+    let file = path::join(&[&folder, FILE]);
+    let said = |error: cf_base::file::FileError| error.to_string();
+    make_folder(Path::new(&folder), 0o700, Mkdir::Promise).map_err(said)?;
+    write_file(Path::new(&file), text.as_bytes(), 0o600).map_err(said)?;
+    Ok((ROLE_VARIABLE.to_owned(), file))
 }
 
 /// The instructions Codex itself would give a window opened in `cwd`, asked of
