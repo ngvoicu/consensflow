@@ -25,6 +25,7 @@
 //! that finds it ended by something else when it ends fails: the pane host ends a
 //! window's own and nothing of the machine's.
 
+mod bundle;
 mod forget;
 mod install;
 mod jobs;
@@ -49,7 +50,7 @@ use crate::daemon_log::StartLine;
 use crate::live::members::Identity;
 use crate::outcome::{self, Verdict};
 use crate::process::{self, Ran, Run, Sink, Spawned};
-use crate::{cf, checkout, files, wire, Error, Result};
+use crate::{checkout, files, wire, Error, Result};
 
 pub use forget::project_name;
 pub use jobs::Job;
@@ -91,6 +92,8 @@ pub struct Config {
     path: Vec<PathBuf>,
     existing_root: Option<PathBuf>,
     daemon: Option<PathBuf>,
+    /// The `cf` the daemon's copy is made of, where it is not the release build.
+    cf: Option<PathBuf>,
     stand_in_records: Option<PathBuf>,
     codex: Option<PathBuf>,
     devin: Option<PathBuf>,
@@ -159,6 +162,7 @@ impl Config {
             path: Vec::new(),
             existing_root: None,
             daemon: None,
+            cf: None,
             stand_in_records: None,
             codex: None,
             devin: None,
@@ -339,6 +343,14 @@ impl Config {
         self
     }
 
+    /// With the daemon's `cf` copied from `program`, and not from the release build:
+    /// for the case that takes the program away once the rig is up, as a build does.
+    #[must_use]
+    pub fn cf_from(mut self, program: impl Into<PathBuf>) -> Self {
+        self.cf = Some(program.into());
+        self
+    }
+
     /// With the stand-in agents writing their records in the Claude config
     /// folder `config`, the machine's own (`~/.claude`: a program that plays the
     /// stand-in for some windows and starts the real Claude Code for the others
@@ -381,6 +393,9 @@ pub struct Rig {
     shared: Arc<Shared>,
     daemon: Daemon,
     host: Spawned,
+    /// The `cf` the daemon runs, which its windows find first on their `PATH`: the rig's own
+    /// copy ([`bundle`]).
+    cf: PathBuf,
     /// A process none of the windows' is, which nothing may have ended when they are.
     stranger: Stranger,
     /// What the rig takes away of the machine's own Claude folder when it
@@ -416,6 +431,12 @@ impl Rig {
     /// Which daemon this is, as its own start line says.
     pub fn start_line(&self) -> &StartLine {
         &self.start_line
+    }
+
+    /// The `cf` the daemon runs: the one a window of the rig finds first, and the one
+    /// whose path the daemon writes in what it gives the windows.
+    pub fn cf(&self) -> &Path {
+        &self.cf
     }
 
     /// The daemon's process id.
@@ -570,7 +591,7 @@ impl Rig {
         S: AsRef<std::ffi::OsStr>,
     {
         let env = &frame["env"];
-        Run::new(cf::binary()?)
+        Run::new(&self.cf)
             .vars(self.env.iter().map(|(name, value)| (name, value)))
             .var(
                 "CONSENSFLOW_URL",

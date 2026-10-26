@@ -29,6 +29,9 @@
 mod a_brief_could_not_be_edited_once_added;
 #[path = "regressions/a_builds_daemon_held_a_workers_task.rs"]
 mod a_builds_daemon_held_a_workers_task;
+#[cfg(unix)]
+#[path = "regressions/a_cf_a_build_took_away_left_a_window_none.rs"]
+mod a_cf_a_build_took_away_left_a_window_none;
 #[path = "regressions/a_codex_chief_opened_again_after_a_restart_read_starting_for_good.rs"]
 mod a_codex_chief_opened_again_after_a_restart_read_starting_for_good;
 #[cfg(unix)]

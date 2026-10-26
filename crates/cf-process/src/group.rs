@@ -170,8 +170,8 @@ impl Group {
     /// Forces every process of the session the program `pid` leads, every one still
     /// descended from it, and every one noted as it was asked that is still the process
     /// it was, to end: but the program, which goes with its group. Each pass of the
-    /// table that found any is followed by another, three at most, for what one of them
-    /// started meanwhile.
+    /// table that sent a signal is followed by another, for what one of them started
+    /// meanwhile, until a pass finds nothing to send one to or [`SWEEP_WITHIN`] is up.
     #[cfg(unix)]
     fn sweep(&self, pid: u32) {
         let Ok(leader) = i32::try_from(pid) else {
@@ -255,6 +255,16 @@ impl Group {
     }
 }
 
+/// How long the sweep of what a program held whole left goes on while processes are still
+/// ending. A process sent the signal ends when it is next scheduled, not before, and one that
+/// was starting another when it was sent it starts it first: the sweep that stops after three
+/// passes (a few milliseconds) leaves that one running. A pass that signals nobody ends the
+/// sweep; this is for a process that does not end (T-581: a `sleep` the program's child was
+/// forking when the passes went round was left holding the program's streams in 3 of 230
+/// runs at a load of 100).
+#[cfg(unix)]
+const SWEEP_WITHIN: Duration = Duration::from_millis(500);
+
 /// `Group::sweep`'s, of the program `leader`, given the processes `noted` as it was
 /// asked, and how a process is read again before it is signalled (`read`, the system's
 /// but for a test): one found by the session must be in it still, and every one born
@@ -266,7 +276,8 @@ fn sweep(
     read: &dyn Fn(i32) -> Option<table::Process>,
 ) -> Vec<(Identity, String)> {
     let mut unpinned = Vec::new();
-    for _ in 0..3 {
+    let until = std::time::Instant::now() + SWEEP_WITHIN;
+    loop {
         let now = table::processes();
         let mut doomed: Vec<(Identity, Option<i32>)> = now
             .iter()
@@ -289,16 +300,22 @@ fn sweep(
         doomed.dedup_by_key(|(identity, _)| *identity);
         // One that could not be held is found again, and is no more to sweep for.
         doomed.retain(|(identity, _)| !unpinned.iter().any(|(held, _)| held == identity));
-        if doomed.is_empty() {
-            break;
-        }
+        let mut sent = false;
         for (identity, session) in doomed {
-            if let table::Signalled::Unpinned(why) =
-                table::signal_if_same(identity, session, libc::SIGKILL, read)
-            {
-                unpinned.push((identity, why));
+            match table::signal_if_same(identity, session, libc::SIGKILL, read) {
+                table::Signalled::Sent => sent = true,
+                table::Signalled::Unpinned(why) => {
+                    unpinned.push((identity, why));
+                }
+                table::Signalled::NotSent => {}
             }
         }
+        // What was sent the signal is looked at again: it may be starting a process as it
+        // ends, and is not gone until it is.
+        if !sent || std::time::Instant::now() >= until {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
     }
     unpinned
 }
@@ -329,10 +346,12 @@ impl Drop for Group {
 #[cfg(all(test, unix))]
 mod tests {
     use std::os::unix::process::{CommandExt, ExitStatusExt};
+    use std::path::Path;
     use std::process::Child;
     use std::time::Duration;
 
     use super::*;
+    use crate::spawning::StartedUnderTheLock as _;
     use crate::testing::Survivors;
 
     /// A sleep that leads a group of its own: a signal sent to the process or
@@ -342,7 +361,7 @@ mod tests {
         std::process::Command::new("/bin/sleep")
             .arg("30")
             .process_group(0)
-            .spawn()
+            .spawn_locked()
             .unwrap()
     }
 
@@ -431,6 +450,82 @@ mod tests {
         assert_eq!(noted.wait().unwrap().signal(), Some(libc::SIGKILL));
     }
 
+    /// Asks the process in the session that starts a sleep for each line it is sent to start one
+    /// now, and waits until it has: its pid is the `count`th in `pids`.
+    #[allow(clippy::unwrap_used)]
+    fn started_in_the_session(fifo: &Path, pids: &Path, count: usize) {
+        use std::io::Write;
+        let mut asking = std::fs::OpenOptions::new().write(true).open(fifo).unwrap();
+        asking.write_all(b"go\n").unwrap();
+        drop(asking);
+        let until = std::time::Instant::now() + Duration::from_secs(10);
+        while crate::testing::pids_so_far(pids).len() < count {
+            assert!(
+                std::time::Instant::now() < until,
+                "the session started no sleep"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    #[allow(clippy::disallowed_methods)] // The test starts what it ends.
+    fn a_sweep_goes_on_for_what_is_started_in_the_session_while_it_goes_round() {
+        // T-581: a process that is being ended starts one more as the passes go round, and it
+        // is not in the table the pass read. A sweep that stops after three passes leaves the
+        // one started in the last. Here, each time the sweep is about to signal one of the first
+        // five, the session starts a sleep, so that it is always one pass ahead of it.
+        let dir = tempfile::tempdir().unwrap();
+        let (fifo, pids) = (dir.path().join("start"), dir.path().join("pids"));
+        assert!(std::process::Command::new("/usr/bin/mkfifo")
+            .arg(&fifo)
+            .status_locked()
+            .unwrap()
+            .success());
+        // The session's leader: it starts a sleep for each line it reads from the pipe, and
+        // writes the sleep's pid down. The pipe is held open for reading and writing, so that a
+        // sleep it started ending (SIGCHLD) does not cut the next open short.
+        let mut leader = std::process::Command::new("/usr/bin/perl")
+            .args([
+                "-MPOSIX",
+                "-e",
+                "POSIX::setsid(); exec @ARGV",
+                "/bin/sh",
+                "-c",
+                "exec 3<>\"$0\"; while read line <&3; do /bin/sleep 30 & echo $! >> \"$1\"; done",
+            ])
+            .arg(&fifo)
+            .arg(&pids)
+            .spawn_locked()
+            .unwrap();
+        let session = i32::try_from(leader.id()).unwrap();
+        let _left = Survivors(vec![leader.id()]);
+        started_in_the_session(&fifo, &pids, 1);
+        let reads = std::cell::Cell::new(0);
+        let read = |pid: i32| {
+            if reads.get() < 5 {
+                reads.set(reads.get() + 1);
+                started_in_the_session(&fifo, &pids, 1 + reads.get());
+            }
+            table::process(pid)
+        };
+        sweep(session, &[], &read);
+        let started = crate::testing::pids_so_far(&pids);
+        assert!(
+            started.len() > 3,
+            "the session started a sleep as each pass went round: {started:?}"
+        );
+        let _sleeping = Survivors(started.clone());
+        for pid in started {
+            assert!(
+                crate::testing::gone_within(pid, Duration::from_secs(5)),
+                "the sleep {pid} the session started as the sweep went round was left running"
+            );
+        }
+        leader.kill().unwrap();
+        leader.wait().unwrap();
+    }
+
     #[test]
     #[allow(clippy::disallowed_methods)] // The test starts what it ends.
     fn a_process_found_in_the_session_is_signalled_only_while_it_is_in_it_still() {
@@ -444,7 +539,7 @@ mod tests {
                 "POSIX::setsid(); exec '/bin/sh', '-c', '/bin/sleep 30 & wait'",
             ])
             .stderr(std::process::Stdio::null())
-            .spawn()
+            .spawn_locked()
             .unwrap();
         let session = i32::try_from(leader.id()).unwrap();
         let mut left = Survivors(vec![leader.id()]);

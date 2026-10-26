@@ -2482,7 +2482,12 @@ mod tests {
         let _pty_guard = serial_pty_test();
         const BACKLOG_BYTES: usize = 64;
         const INPUT_BYTES: usize = 1 + 511 * 1024;
-        const FLOW_TIMEOUT: Duration = Duration::from_secs(10);
+        // How long the flow may go without a step: a chunk of output, an ack, the write's end.
+        // The flow itself is not timed: it is a thousand round trips of 64 bytes of output
+        // and an ack each, then half a megabyte of input, and takes 4 s alone and over ten at
+        // a load of 100 (T-581: 3 of 7 runs out of ten seconds at that load, the output
+        // flowing all the while). A flow that is stuck is stuck for ever.
+        const STALL: Duration = Duration::from_secs(30);
 
         let table = Arc::new(PaneTable::new());
         let streamed = table
@@ -2506,7 +2511,7 @@ mod tests {
         let mut last_seq = 0;
         while initial_output.len() < BACKLOG_BYTES {
             let chunk = output
-                .recv_timeout(Duration::from_secs(1))
+                .recv_timeout(STALL)
                 .expect("fill raw child output window");
             last_seq = chunk.seq;
             initial_output.extend(chunk.bytes);
@@ -2544,11 +2549,25 @@ mod tests {
             Err(std::sync::mpsc::TryRecvError::Empty)
         ));
 
-        let started = Instant::now();
-        table
-            .write(&responsive_key, b"R")
+        // The write to the other pane returns while this one's is blocked: it would, if it
+        // were held up by the flow, wait for acks that only come once it has returned.
+        let (answer_sender, answer_receiver) = std::sync::mpsc::channel();
+        let (answering_table, answering_key) = (Arc::clone(&table), responsive_key.clone());
+        let answering = thread::spawn(move || {
+            let _ = answer_sender.send(answering_table.write(&answering_key, b"R"));
+        });
+        answer_receiver
+            .recv_timeout(STALL)
+            .expect("write to unrelated pane returns while the flood cycle is blocked")
             .expect("write to unrelated pane while the flood cycle is blocked");
-        assert!(started.elapsed() < Duration::from_millis(500));
+        answering.join().expect("responsive writer thread");
+        assert!(
+            matches!(
+                write_receiver.try_recv(),
+                Err(std::sync::mpsc::TryRecvError::Empty)
+            ),
+            "the blocked write was still blocked when the other returned"
+        );
         assert_eq!(
             String::from_utf8(read_to_end(responsive_reader))
                 .expect("responsive recorder output")
@@ -2564,7 +2583,6 @@ mod tests {
             consumer_table
                 .ack(&consumer_key, last_seq)
                 .expect("release initial output window");
-            let deadline = Instant::now() + FLOW_TIMEOUT;
             loop {
                 let compact = String::from_utf8_lossy(&terminal_output)
                     .split_whitespace()
@@ -2572,10 +2590,9 @@ mod tests {
                 if compact.contains("INPUT:5a") {
                     return terminal_output;
                 }
-                assert!(Instant::now() < deadline, "raw child did not consume input");
                 let chunk = output
-                    .recv_timeout(Duration::from_secs(1))
-                    .expect("receive flood output after ack");
+                    .recv_timeout(STALL)
+                    .expect("raw child did not consume input: no output after an ack");
                 consumer_table
                     .ack(&consumer_key, chunk.seq)
                     .expect("ack flood output");
@@ -2583,12 +2600,14 @@ mod tests {
             }
         });
 
+        // The child prints INPUT once it has consumed all the input, and the write is over
+        // by then: the output is followed to there, and the write's end is waited for after.
+        let terminal_output = consumer.join().expect("output consumer thread");
         write_receiver
-            .recv_timeout(FLOW_TIMEOUT)
+            .recv_timeout(STALL)
             .expect("blocked input write resumes after output acks")
             .expect("write complete input body");
         writer.join().expect("input writer thread");
-        let terminal_output = consumer.join().expect("output consumer thread");
         assert!(String::from_utf8_lossy(&terminal_output)
             .split_whitespace()
             .collect::<String>()

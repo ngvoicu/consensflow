@@ -135,6 +135,78 @@ pub(crate) fn process(pid: i32) -> Option<Process> {
     })
 }
 
+/// The processes of the group `group` there are now that are not zombies (a zombie is in its
+/// group until it is reaped, and is nothing to end): none where the system will not say.
+#[cfg(target_os = "macos")]
+pub(crate) fn in_group(group: i32) -> Vec<Process> {
+    let mut pids = vec![0i32; 4096];
+    let Ok(size) = i32::try_from(pids.len() * std::mem::size_of::<i32>()) else {
+        return Vec::new();
+    };
+    #[allow(unsafe_code)]
+    // SAFETY: the buffer is `pids`, writable for the `size` bytes passed with it, and
+    // proc_listpgrppids writes no more than that: it answers how many it wrote.
+    let read = unsafe { libc::proc_listpgrppids(group, pids.as_mut_ptr().cast(), size) };
+    let Ok(read) = usize::try_from(read) else {
+        return Vec::new();
+    };
+    pids.iter()
+        .take(read.min(pids.len()))
+        .filter_map(|pid| process(*pid))
+        .collect()
+}
+
+/// As on macOS, from what `/proc` shows.
+#[cfg(target_os = "linux")]
+pub(crate) fn in_group(group: i32) -> Vec<Process> {
+    processes()
+        .into_iter()
+        .filter(|process| process.group == group)
+        .collect()
+}
+
+/// No other Unix says its processes here.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub(crate) fn in_group(_group: i32) -> Vec<Process> {
+    Vec::new()
+}
+
+/// Whether the process `pid`, which `kill(pid, 0)` finds, has ended and waits to be reaped:
+/// the system tells nothing of a process so (`proc_pidinfo` answers no bytes), as it tells of
+/// every other.
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) fn is_zombie(pid: i32) -> bool {
+    #[allow(unsafe_code)]
+    // SAFETY: proc_bsdinfo is plain data, for which zeroes are a value.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let Ok(size) = i32::try_from(std::mem::size_of_val(&info)) else {
+        return false;
+    };
+    #[allow(unsafe_code)]
+    // SAFETY: the buffer is `info`, writable for the `size` bytes passed with it, and
+    // proc_pidinfo writes no more than that.
+    let read =
+        unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
+    read != size || info.pbi_status == libc::SZOMB
+}
+
+/// As on macOS, from what `/proc/<pid>/stat` says.
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) fn is_zombie(pid: i32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+        stat.rfind(')')
+            .and_then(|at| stat.get(at + 1..))
+            .and_then(|rest| rest.split_whitespace().next().map(|state| state == "Z"))
+            .unwrap_or(false)
+    })
+}
+
+/// No other Unix says.
+#[cfg(all(test, not(any(target_os = "macos", target_os = "linux"))))]
+pub(crate) fn is_zombie(_pid: i32) -> bool {
+    false
+}
+
 /// No other Unix says its processes here.
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn processes() -> Vec<Process> {
@@ -320,6 +392,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::spawning::StartedUnderTheLock as _;
     use crate::testing::{pids_written_to, Survivors};
 
     /// A process "held" by its number alone, as a test holds it.
@@ -342,7 +415,7 @@ mod tests {
         // was read and then signalled by its number, which may be another's by then.
         let mut sleep = std::process::Command::new("/bin/sleep")
             .arg("30")
-            .spawn()
+            .spawn_locked()
             .unwrap();
         let _left = Survivors(vec![sleep.id()]);
         let pid = i32::try_from(sleep.id()).unwrap();
@@ -400,7 +473,7 @@ mod tests {
             .arg("sleep 30 & echo $! > \"$0\"; wait")
             .arg(&file)
             .process_group(0)
-            .spawn()
+            .spawn_locked()
             .unwrap();
         let sleep = i32::try_from(pids_written_to(&file, 1)[0]).unwrap();
         let _left = Survivors(vec![u32::try_from(sleep).unwrap(), shell.id()]);

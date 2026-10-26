@@ -114,6 +114,7 @@ mod windows {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spawning::StartedUnderTheLock as _;
 
     #[test]
     fn this_process_is_alive_and_one_long_gone_is_not() {
@@ -128,7 +129,7 @@ mod tests {
     #[test]
     #[allow(clippy::disallowed_methods)] // The test starts what it waits for.
     fn a_child_reaped_is_gone() {
-        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let mut child = std::process::Command::new("true").spawn_locked().unwrap();
         let pid = child.id();
         child.wait().unwrap();
         assert!(!alive(pid));
@@ -140,7 +141,7 @@ mod tests {
     fn a_child_that_exited_with_the_code_still_active_reads_as_is_gone() {
         let mut child = std::process::Command::new("cmd")
             .args(["/c", "exit 259"])
-            .spawn()
+            .spawn_locked()
             .unwrap();
         let pid = child.id();
         let status = child.wait().unwrap();

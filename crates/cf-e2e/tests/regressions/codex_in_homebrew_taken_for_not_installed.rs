@@ -176,7 +176,10 @@ fn a_task_for_a_codex_worker_runs_the_codex_in_its_home_and_not_an_older_one_of_
 
 /// What a window runs of Homebrew's, here a `node` only in the system's folder that
 /// writes down where it was found: a command the chief's turn runs by a shell, as an
-/// agent runs one, finds it on the window's PATH.
+/// agent runs one, finds it on the window's PATH. The file is there before a word is
+/// in it, as the shell's `>` makes it before the `printf` writes (and the stand-in
+/// is slow to write, so that the case is always read at that moment): the case waits
+/// for what is written, and not for the file.
 #[test]
 fn a_window_of_a_daemon_on_the_finders_path_finds_a_program_in_the_systems_folder() -> Outcome {
     let rig = Rig::start(config().as_the_finder_starts_it())?;
@@ -184,12 +187,17 @@ fn a_window_of_a_daemon_on_the_finders_path_finds_a_program_in_the_systems_folde
     let found = named(&rig, "HOME").join("node-found");
     files::write_executable(
         &node,
-        format!("#!/bin/sh\nprintf '%s\\n' \"$0\" > '{}'\n", found.display()),
+        format!(
+            "#!/bin/sh\n: > '{found}'\n/bin/sleep 1\nprintf '%s\\n' \"$0\" >> '{found}'\n",
+            found = found.display()
+        ),
     )?;
     let project = Project::open(&rig, "chief", json!({}))?;
     rig.tell(project.id(), "RUN node --version")?;
     rig.wait_for("the chief's window to find node", secs(30), || {
-        Ok(found.exists())
+        Ok(!files::read_finished_lines(&found)
+            .unwrap_or_default()
+            .is_empty())
     })?;
     assert_eq!(
         files::read_string(&found)?.trim_end(),

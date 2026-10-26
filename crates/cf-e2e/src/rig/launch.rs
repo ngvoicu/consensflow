@@ -11,6 +11,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::Value;
 
+use super::bundle;
 use super::forget::Forget;
 use super::install::{environment, var, write_fake_install, write_roster};
 use super::route::Shared;
@@ -85,8 +86,17 @@ impl Rig {
 
         // Beside the pane host, before any window: none of theirs.
         let stranger = Stranger::start()?;
-        let (mut daemon, start_line) = start_daemon(&config, &env)?;
-        let (mut host, host_output) = start_host(&env)?;
+        let copies = bundle::folder(&root);
+        let cf = bundle::copy_of(
+            match &config.cf {
+                Some(program) => program,
+                None => cf::binary()?,
+            },
+            &copies,
+        )?;
+        let pane_host = bundle::copy_of(cf::pane_host()?, &copies)?;
+        let (mut daemon, start_line) = start_daemon(&config, &cf, &env)?;
+        let (mut host, host_output) = start_host(&pane_host, &env)?;
         let shared = route(&mut daemon, &mut host, host_output)?;
 
         // The rig owns its home from here on: it goes with it.
@@ -101,6 +111,7 @@ impl Rig {
             shared,
             daemon,
             host,
+            cf,
             stranger,
             forget: config.stand_in_records.map(Forget::new),
             masker: config.masker,
@@ -118,14 +129,14 @@ impl Rig {
 
 /// The daemon under test, started and held to being the native one: its handle
 /// line read, and its start line in its log, which says what runtime it is.
-fn start_daemon(config: &Config, env: &[(String, String)]) -> Result<(Daemon, StartLine)> {
+fn start_daemon(
+    config: &Config,
+    cf: &Path,
+    env: &[(String, String)],
+) -> Result<(Daemon, StartLine)> {
     let mut daemon = match &config.daemon {
         Some(program) => Daemon::run(program, [] as [&str; 0], env.iter().cloned())?,
-        None => Daemon::run(
-            cf::binary()?,
-            ["ui", "--json", "--no-open"],
-            env.iter().cloned(),
-        )?,
+        None => Daemon::run(cf, ["ui", "--json", "--no-open"], env.iter().cloned())?,
     };
     let log = Path::new(var(env, "CONSENSFLOW_HOME")).join("daemon.log");
     let handle = daemon.handle(READY).map_err(|failed| {
@@ -156,8 +167,11 @@ fn start_daemon(config: &Config, env: &[(String, String)]) -> Result<(Daemon, St
 
 /// The pane host, started: its handle line read, and what it goes on to say
 /// kept for the routers.
-fn start_host(env: &[(String, String)]) -> Result<(Spawned, BufReader<ChildStdout>)> {
-    let mut host = Run::new(cf::pane_host()?)
+fn start_host(
+    pane_host: &Path,
+    env: &[(String, String)],
+) -> Result<(Spawned, BufReader<ChildStdout>)> {
+    let mut host = Run::new(pane_host)
         .vars(env.iter().map(|(name, value)| (name, value)))
         .finding_programs()
         .cwd(checkout::root())

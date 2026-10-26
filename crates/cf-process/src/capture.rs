@@ -167,7 +167,7 @@ async fn captured(
         Hold::Whole => lead_whole(&mut command),
     }
     start_in_job(&mut command);
-    let mut child = command.spawn().map_err(|failed| {
+    let mut child = crate::spawning::one_at_a_time(|| command.spawn()).map_err(|failed| {
         CaptureFailed::unstarted(format!(
             "spawn {} {}",
             run.program.to_string_lossy(),

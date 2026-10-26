@@ -21,6 +21,7 @@ mod memory;
 mod owned;
 mod runnable;
 mod search;
+mod spawning;
 #[cfg(unix)]
 mod table;
 mod terminate;

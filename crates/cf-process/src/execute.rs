@@ -194,6 +194,10 @@ mod tests {
             .block_on(execute(run, None, env, limits, |_| {}))
     }
 
+    /// How many programs the case of the closed stream is given to find one that dies of it.
+    #[cfg(unix)]
+    const TRIES: usize = 10;
+
     const ROOMY: Limits = Limits {
         timeout: Duration::ZERO,
         max_buffer: 1024 * 1024,
@@ -255,15 +259,33 @@ mod tests {
     fn a_program_out_of_time_that_writes_once_asked_dies_of_its_closed_stream() {
         // Probed on Node v26.8.1: the streams are closed before the program is
         // asked to end, so the trap's `echo` meets a closed pipe (SIGPIPE).
+        //
+        // The pipe is closed when the program meets it, or it is not: a process that another
+        // thread has forked and not yet started holds every descriptor this one has, the
+        // read end among them, until it starts, and a loaded machine keeps one there for
+        // tens of milliseconds (T-581: a Python child's write to a pipe its parent had
+        // closed succeeded in 2 of 100 tries at a load of 110, with no code of ours in it,
+        // and this case failed in 3 of 300 runs of the crate's tests). A program that dies of
+        // the closed stream says the streams were closed before it was asked, and no other
+        // program can be taken for it; one that does not says nothing. So the case is given
+        // tries, and needs one program that died. A capture that closes its streams after the
+        // ask is never one that does (a plant).
         let run = shell("trap 'echo bye; exit 0' TERM; echo hi; while true; do sleep 0.05; done");
         let limits = Limits {
             timeout: Duration::from_millis(300),
             max_buffer: 1024,
         };
-        let failed = run_now(&run, &system_env(), limits).unwrap_err();
-        assert!(failed.killed);
-        assert_eq!(failed.code, None);
-        assert_eq!(failed.stdout, "hi\n");
+        let mut answers = Vec::new();
+        for _ in 0..TRIES {
+            match run_now(&run, &system_env(), limits) {
+                Err(failed) if failed.killed && failed.code.is_none() => {
+                    assert_eq!(failed.stdout, "hi\n");
+                    return;
+                }
+                other => answers.push(other),
+            }
+        }
+        panic!("no program of {TRIES} died of its closed stream: {answers:?}");
     }
 
     #[cfg(unix)]

@@ -37,7 +37,7 @@ pub struct Owned {
 /// see [`Owned::refusal`].
 pub fn start_owned(command: &mut Command) -> io::Result<Owned> {
     job::start_suspended(command);
-    let mut child = command.spawn()?;
+    let mut child = crate::spawning::one_at_a_time(|| command.spawn())?;
     match Job::sealed(&child) {
         Ok(job) => Ok(Owned { child, job }),
         Err(why) => {

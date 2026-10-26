@@ -69,7 +69,7 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
         command.current_dir(cwd);
     }
     crate::job::start_in_job(&mut command);
-    let mut process = command.spawn().map_err(|failed| {
+    let mut process = crate::spawning::one_at_a_time(|| command.spawn()).map_err(|failed| {
         format!(
             "spawn {} {}",
             run.program.to_string_lossy(),
@@ -242,8 +242,10 @@ impl Ender {
 
     /// Forces the child to end, and the group it leads with it, if it is
     /// still there, and waits for nothing (on Windows its job is ended, and a program
-    /// with none has `taskkill` started and let go): this is the end of a process on
-    /// its way out.
+    /// with none has `taskkill` started and let go) but, on Unix, for what the group
+    /// had started as the signal went round: it is forced again for as long as a
+    /// process of it runs, a moment (500 ms at most, a millisecond or so where nothing
+    /// was starting). This is the end of a process on its way out.
     pub fn force(&self) {
         let Some(live) = self.live.upgrade() else {
             return;
