@@ -9,18 +9,24 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cf_base::js;
-use cf_harness::contract::{Admission, Held, HostError, Input, Pane, PaneHost, Readiness, Work};
-use cf_ledger::{is_told, GivenUp, HandOver, MessageView, NewNote, ProjectView, TaskView};
+use cf_harness::contract::{
+    Admission, Held, HostError, Input, Observed, Pane, PaneHost, Readiness, Work,
+};
+use cf_harness::records::Role;
+use cf_ledger::{
+    is_told, GivenUp, HandOver, MessageView, NewNote, ParticipantView, ProjectView, TaskView,
+};
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
 use crate::arrival::ENTER_AGAIN_QUIET_MS;
-use crate::delivery_text::{is_paste_of, marker_of};
+use crate::delivery_text::{delivery_text, is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::Prelude;
 use crate::runtime::returning;
 use crate::seams::EngineError;
+use crate::shown::{after_words, words_key, Paste, Shown};
 
 /// The one message on its way into a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +82,16 @@ pub(crate) struct DeliveryPart {
     /// ([`Dispatcher::owed`]). Each launch says it anew, and none that opened a
     /// window leaves it as it was.
     pub(crate) prelude: Option<Prelude>,
+    /// The failed turn whose note is settled: the message the window had last
+    /// been given, and to whom the failure was told or found told
+    /// ([`Dispatcher::untold_failure`]). The ledger says the same after a restart.
+    pub(crate) failure_settled: Option<(i64, String)>,
+    /// What the failure last told of the window said ([`Why::key`]), while no
+    /// turn of it has ended with an answer since: the same is not told again, once
+    /// an outage however many turns it fails (the chief's decision of 2026-10-22,
+    /// T-245). Known limit, kept on purpose (the chief, T-274): this is the
+    /// record's alone, so after a restart the same outage may be told once more.
+    pub(crate) failure_told: Option<String>,
     /// A paste whose Enter was withheld (`arrival`), which the window's input box
     /// may hold: nothing is pasted into that window until the host has taken the
     /// keys that empty it ([`Dispatcher::clear_box`]), unless the window's record
@@ -683,6 +699,225 @@ impl Dispatcher {
         taken
     }
 
+    /// A member's turn that failed while its task was not working (waiting on an
+    /// answer, paused, done): whoever gave the task is told why, once, and the
+    /// task stays as it is. Only a turn since the task's last message was pasted
+    /// into the window is the task's, found as turn-end finds it
+    /// ([`Dispatcher::delivered_at`]); nothing is said where the window was given
+    /// no task.
+    pub(crate) async fn tell_failed_turn(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Rc<Record>,
+        observed: &Observed,
+    ) -> Result<(), EngineError> {
+        let Some(thread) = self.seams.ledger.borrow().last_task(participant.id)? else {
+            return Ok(());
+        };
+        if self
+            .delivered_at(participant.id, &thread, observed.items())?
+            .is_none()
+        {
+            return Ok(());
+        }
+        let requester = &thread.task.requester;
+        let Some(given) = self.untold_failure(project, participant, record, requester)? else {
+            return Ok(());
+        };
+        let why = self.why_it_failed(participant, record, observed).await?;
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        if self.same_outage(record, &why.key) {
+            self.settle_told(record, given, requester, &why.key);
+            return Ok(());
+        }
+        // As the task is once the window was looked at.
+        let task = self
+            .seams
+            .ledger
+            .borrow()
+            .task(project.id, thread.task.number)?;
+        let Some(now) = task else {
+            return Ok(());
+        };
+        let number = now.task.number;
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: requester.clone(),
+                task: Some(number),
+                body: format!(
+                    "A turn of T-{number}'s window failed while T-{number} was {}, as it stays: {}.",
+                    now.task.state, why.said
+                ),
+            },
+        )?;
+        // Settled once written: a note the ledger refused is told at the next look.
+        self.settle_told(record, given, requester, &why.key);
+        self.changed();
+        Ok(())
+    }
+
+    /// The chief's turn that failed: the human is told why, once, on the board.
+    /// Nothing else of the chief's changes.
+    pub(crate) async fn tell_chief_failed(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Rc<Record>,
+        observed: &Observed,
+    ) -> Result<(), EngineError> {
+        let Some(given) = self.untold_failure(project, participant, record, "human")? else {
+            return Ok(());
+        };
+        let why = self.why_it_failed(participant, record, observed).await?;
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        if self.same_outage(record, &why.key) {
+            self.settle_told(record, given, "human", &why.key);
+            return Ok(());
+        }
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: format!("The chief's turn failed: {}.", why.said),
+            },
+        )?;
+        // Settled once written: a note the ledger refused is told at the next look.
+        self.settle_told(record, given, "human", &why.key);
+        self.changed();
+        Ok(())
+    }
+
+    /// The message the window was last given, where its failed turn is still to be
+    /// told `recipient`; none where it is told. A failed turn stays the window's
+    /// last word until its next message arrives (a message still on its way is
+    /// not given yet), look after look, and is told once: the record keeps which
+    /// message's turn is settled, and after a restart the ledger says so, by a
+    /// note to the recipient since that message that says the harness reported a
+    /// failure, as each such note and a task's failure does. Both are read by id,
+    /// whatever the number of messages since. One nobody can be told of counts as
+    /// told.
+    fn untold_failure(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        recipient: &str,
+    ) -> Result<Option<i64>, EngineError> {
+        let Some(to) = project.participants.iter().find(|p| p.handle == recipient) else {
+            return Ok(None);
+        };
+        let given = self
+            .seams
+            .ledger
+            .borrow()
+            .last_given(participant.id)?
+            .unwrap_or(0);
+        let settled = (given, recipient.to_owned());
+        if record.delivery.borrow().failure_settled.as_ref() == Some(&settled) {
+            return Ok(None);
+        }
+        let said = format!("@{}'s harness reported a failure", participant.handle);
+        let told = self.seams.ledger.borrow().note_since(to.id, given, &said)?;
+        if told.is_some() {
+            record.delivery.borrow_mut().failure_settled = Some(settled);
+            return Ok(None);
+        }
+        Ok(Some(given))
+    }
+
+    /// Whether a failed turn of the window says what the failure last told of it
+    /// said ([`Why::key`]), with no turn of it answered since: the same outage, its
+    /// wake-ups failing as the first did, which is not told again.
+    fn same_outage(&self, record: &Record, key: &str) -> bool {
+        record.delivery.borrow().failure_told.as_deref() == Some(key)
+    }
+
+    /// The failed turn of the window, after the message `given`, settled as told
+    /// `recipient`, and what it said kept as the outage's.
+    fn settle_told(&self, record: &Record, given: i64, recipient: &str, key: &str) {
+        let mut part = record.delivery.borrow_mut();
+        part.failure_settled = Some((given, recipient.to_owned()));
+        part.failure_told = Some(key.to_owned());
+    }
+
+    /// A look whose turn ended with the window's answer: the failure last told of
+    /// it is over, and the same words are news again.
+    pub(crate) fn answered_again(&self, record: &Record, observed: &Observed) {
+        // Its last word, what the harness put after the reply itself aside.
+        let answered = observed.settled
+            && !observed.failed
+            && observed
+                .last_word()
+                .is_some_and(|item| item.role == Role::Assistant && item.complete);
+        if answered {
+            record.delivery.borrow_mut().failure_told = None;
+        }
+    }
+
+    /// Why a member's turn failed, as its note says it: in its harness's own
+    /// words where its record has them, and otherwise in the last lines its
+    /// window shows, which is where a harness that says nothing in its record
+    /// says why (a crash, a model it does not know), or that it could not be read.
+    /// Both are held to a quote's bounds ([`after_words`], [`Shown::after`]). The
+    /// lines ConsensFlow typed into the window itself, its last pastes as the
+    /// screen shows them ([`Shown::without_pastes`]), are no reason of its own,
+    /// and are neither quoted nor compared.
+    pub(crate) async fn why_it_failed(
+        &self,
+        participant: &ParticipantView,
+        record: &Record,
+        observed: &Observed,
+    ) -> Result<Why, EngineError> {
+        let failed = format!("@{}'s harness reported a failure", participant.handle);
+        // Words with nothing of a word in them ("…") say nothing: the screen may.
+        if let Some(words) = observed.failure() {
+            if let Some(said) = after_words(&failed, words) {
+                return Ok(Why {
+                    said,
+                    key: words_key(words),
+                });
+            }
+        }
+        let pastes: Vec<Paste> = self
+            .seams
+            .ledger
+            .borrow()
+            .last_pastes(participant.id, PASTES_ON_SCREEN)?
+            .into_iter()
+            .map(|begun| Paste {
+                id: begun.message.id,
+                text: delivery_text(&begun.message, &begun.carried),
+            })
+            .collect();
+        let pane = record.window.borrow().pane.clone();
+        let shown = match pane {
+            Some(pane) => self.look_at(&pane).await,
+            None => Shown::default(),
+        };
+        // A host that refused the look, or answered it late, said nothing of the
+        // screen: the note says so, not the bare words the field had.
+        if !shown.is_known() {
+            return Ok(Why {
+                said: format!("{failed}; its screen could not be read"),
+                key: String::new(),
+            });
+        }
+        let shown = shown.without_pastes(&pastes);
+        Ok(Why {
+            said: shown.after(&failed),
+            key: shown.outage_key(),
+        })
+    }
+
     /// What a window was to receive goes back to its queue with its attempt:
     /// the window went before it had the chance to land, or was handed nothing of
     /// it, its project closed first, and it waits for the Resume. One withdrawn
@@ -870,6 +1105,19 @@ impl Dispatcher {
         Ok(())
     }
 }
+
+/// Why a window's turn failed: the words its note says, and what the failure
+/// said for telling one outage from the next ([`words_key`], [`Shown::outage_key`]),
+/// which is no other failure for a number that differs.
+pub(crate) struct Why {
+    pub(crate) said: String,
+    pub(crate) key: String,
+}
+
+/// How many of the messages last pasted into a window are read for what
+/// ConsensFlow typed into it: a key reads the last six lines with a word, which
+/// hold no more pastes than that.
+const PASTES_ON_SCREEN: i64 = 5;
 
 /// What `message` is to the human: its kind, who wrote it, and its task
 /// (`an answer from @chief on T-1`).

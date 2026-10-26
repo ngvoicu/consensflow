@@ -1,0 +1,1029 @@
+# Every failure note names its reason (dip-agentos, 2026-10-17 to 19, ConsensFlow
+# 3.0.4: each failure said only "the harness reported a failure", and neither the
+# chief nor the human could tell a crash from a refusal from a bad model name; row 4
+# of `issues/field-reports-2026-10-19-dip-agentos.md` in consensflow-sme). Each
+# harness's record keeps the words its failed turn ended with
+# (`crates/cf-harness/src/*/record*`, `Record::failure`), and the engine's note
+# quotes them, held to a quote's bounds, or else the window's last screen lines
+# (`crates/cf-engine/src/deliveries.rs`, `why_it_failed`; `shown.rs`,
+# `after_words`), where turn-end's `collect` fails the task
+# (`crates/cf-engine/src/turn_end.rs`, since the merge with turn-end, T-531). The
+# engine's cases are
+# `crates/cf-engine/tests/dispatcher/failure_reasons.rs`; the rig's case, whose
+# stand-in Codex fails a turn in Codex's shape, is
+# `crates/cf-e2e/tests/regressions/a_failure_said_no_reason.rs`, and its run builds
+# the native `cf` from the sources as they are planted.
+#
+# Every name holds `failure reason`, so `cargo xtask plants daemon "failure reason"`
+# runs them all.
+
+[run]
+failure-reason-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "failure_reasons"]
+failure-reason-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "told_once"]
+failure-reason-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::"]
+failure-reason-ask = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "testing::ask"]
+failure-reason-live-suite = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_screen"]
+failure-reason-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+failure-reason-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
+failure-reason-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
+failure-reason-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
+failure-reason-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record"]
+failure-reason-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_failure_said_no_reason::"], builds = true }
+
+[[plant]]
+name = "failure reason: a failed Codex turn's words are dropped, and the task fails saying only that the harness reported a failure (the field's)"
+meant = "a_codex_worker_whose_turn_failed_fails_its_task_with_what_codex_said"
+runs = ["failure-reason-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+            let because = self
+                .why_it_failed(participant, record, observed)
+                .await?
+                .said;
+'''
+replace = '''
+            let because = format!("@{}'s harness reported a failure", participant.handle);
+'''
+
+[[plant]]
+name = "failure reason: the note leaves out what the harness said"
+meant = "a_failed_turn_says_what_its_harness_said_of_it"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+            if let Some(said) = after_words(&failed, words) {
+                return Ok(Why {
+                    said,
+'''
+replace = '''
+            if after_words(&failed, words).is_some() {
+                return Ok(Why {
+                    said: failed,
+'''
+
+[[plant]]
+name = "failure reason: a look finds no failure's words in the record"
+meant = "a_failed_turn_says_what_its_harness_said_of_it"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''
+            Some(Reading::Known(record)) if self.failed => record.failure.as_deref(),
+'''
+replace = '''
+            Some(Reading::Known(_)) if self.failed => None,
+'''
+
+[[plant]]
+name = "failure reason: a record that says nothing of why leaves the window's screen unasked"
+meant = "a_failed_turn_whose_record_says_nothing_says_what_its_window_shows_last"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+            Some(pane) => self.look_at(&pane).await,
+'''
+replace = '''
+            Some(_) => Shown::default(),
+'''
+
+[[plant]]
+name = "failure reason: a task cancelled while its window is looked at is failed after"
+meant = "a_task_cancelled_while_its_window_is_looked_at_is_not_failed_after"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+            if still && !self.forgotten(record) {
+'''
+replace = '''
+            if !self.forgotten(record) {
+'''
+
+[[plant]]
+name = "failure reason: the harness's words are not held to a quote's bounds"
+meant = "the_harness_words_are_held_to_a_quotes_bounds_from_their_first_line"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+    Quote::of(&lines, Keep::First).map(|quote| format!("{because}{}", quote.after("; it said")))
+'''
+replace = '''
+    Quote::of(&lines, Keep::First).map(|_| format!("{because}; it said: \"{words}\""))
+'''
+
+[[plant]]
+name = "failure reason: Claude's refused turn keeps none of the API's words"
+meant = "a_refused_turn_keeps_the_words_the_api_refused_it_in_and_the_next_turn_drops_them"
+runs = ["failure-reason-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+            self.failure = Some(record.text.clone());
+'''
+replace = '''
+            self.failure = Some(String::new());
+'''
+
+[[plant]]
+name = "failure reason: Codex's failed turn keeps none of its error's words"
+meant = "a_failed_turn_keeps_the_words_of_its_error_and_the_next_turn_drops_them"
+runs = ["failure-reason-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+                        said: Self::error_words(error),
+'''
+replace = '''
+                        said: None,
+'''
+
+[[plant]]
+name = "failure reason: Codex's error written as text alone is no words of it"
+meant = "a_failed_turn_keeps_the_words_of_its_error_and_the_next_turn_drops_them"
+runs = ["failure-reason-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+            Some(Value::String(said)) => said,
+'''
+replace = '''
+            Some(Value::String(_)) => return None,
+'''
+
+[[plant]]
+name = "failure reason: Pi's failed step keeps none of its words"
+meant = "a_failed_step_keeps_pis_words_for_it_and_the_next_message_drops_them"
+runs = ["failure-reason-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '''
+        record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "failure reason: Pi's placeholder for no words is taken for its words"
+meant = "a_failed_step_keeps_pis_words_for_it_and_the_next_message_drops_them"
+runs = ["failure-reason-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '''
+                let said = !matches!(field("errorMessage"), None | Some(Value::Null));
+                self.failure = said.then(|| failure.clone());
+'''
+replace = '''
+                let said = true;
+                self.failure = said.then(|| failure.clone());
+'''
+
+[[plant]]
+name = "failure reason: the next message keeps Pi's last failure's words"
+meant = "a_failed_step_keeps_pis_words_for_it_and_the_next_message_drops_them"
+runs = ["failure-reason-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '''
+                self.open_tools.clear();
+                self.failed = false;
+                self.failure = None;
+'''
+replace = '''
+                self.open_tools.clear();
+                self.failed = false;
+'''
+
+[[plant]]
+name = "failure reason: OpenCode's failed reply keeps none of its error's words"
+meant = "a_failed_reply_keeps_the_words_of_its_error"
+runs = ["failure-reason-opencode"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/record/answer.rs"
+find = '''
+            record.failure = error_words(error);
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "failure reason: Devin's turn that ended in an error keeps none of its words"
+meant = "a_turn_that_ended_in_an_error_keeps_the_words_its_end_said"
+runs = ["failure-reason-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = '''
+    record.failure = outcome
+        .filter(|_| failed)
+        .and_then(|outcome| outcome.error.clone());
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "failure reason: Devin's cancelled turn is said to have failed for its words"
+meant = "a_turn_that_ended_in_an_error_keeps_the_words_its_end_said"
+runs = ["failure-reason-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = '''
+        .filter(|_| failed)
+'''
+replace = '''
+'''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''
+                    .filter(|said| cause == Cause::Error && !said.trim().is_empty())
+'''
+replace = '''
+                    .filter(|said| !said.trim().is_empty())
+'''
+
+[[plant]]
+name = "failure reason: the quote leaves its lines unmasked"
+meant = "a_token_in_the_harness_words_is_masked"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+            let hidden = mask(line);
+'''
+replace = '''
+            let hidden = mask::Masked {
+                text: line.clone(),
+                count: 0,
+            };
+'''
+
+[[plant]]
+name = "failure reason: an email address is no secret of the masker's"
+meant = "an_email_address_in_the_harness_words_is_masked"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''
+            r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b",
+'''
+replace = '''
+            r"\A\z[email]",
+'''
+
+[[plant]]
+name = "failure reason: a screen the host would not show leaves the bare note"
+meant = "a_screen_the_host_would_not_show_is_said_to_be_unread"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if !shown.is_known() {
+'''
+replace = '''
+        if false {
+'''
+
+[[plant]]
+name = "failure reason: the harness's words keep their last lines, not their headline"
+meant = "the_harness_words_are_held_to_a_quotes_bounds_from_their_first_line"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+            Keep::First => lines.iter().take(QUOTE_LINES).collect(),
+'''
+replace = '''
+            Keep::First => lines.iter().rev().take(QUOTE_LINES).collect(),
+'''
+
+[[plant]]
+name = "failure reason: a screen's chrome takes the place of its error in the quote"
+meant = "the_screens_chrome_is_no_line_of_its_quote"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+            .filter(|line| line.chars().any(char::is_alphanumeric))
+'''
+replace = '''
+            .filter(|line| !line.trim().is_empty())
+'''
+
+[[plant]]
+name = "failure reason: a task released to the board while its window is looked at is failed after"
+meant = "a_task_released_to_the_board_while_its_window_is_looked_at_is_not_failed_after"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+            if still && !self.forgotten(record) {
+'''
+replace = '''
+            if !self.forgotten(record) {
+'''
+
+[[plant]]
+name = "failure reason: a turn that fails while its task waits says nothing"
+meant = "a_turn_that_fails_while_its_task_waits_tells_whoever_gave_it_once_and_the_task_still_waits"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+            if observed.failed {
+                self.tell_failed_turn(project, participant, record, observed)
+                    .await?;
+            }
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "failure reason: a turn that fails while its task waits is told at every look"
+meant = "a_turn_that_fails_while_its_task_waits_tells_whoever_gave_it_once_and_the_task_still_waits"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        let Some(given) = self.untold_failure(project, participant, record, requester)? else {
+            return Ok(());
+        };
+'''
+replace = '''
+        let given = 0;
+'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        record.delivery.borrow().failure_told.as_deref() == Some(key)
+'''
+replace = '''
+        false
+'''
+
+[[plant]]
+name = "failure reason: a chief's failed turn says nothing"
+meant = "a_chiefs_failed_turn_tells_the_human_once"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        } else if observed.failed && !self.cut_short(&observed) {
+'''
+replace = '''
+        } else if false {
+'''
+
+[[plant]]
+name = "failure reason: a chief's failed turn is told at every look"
+meant = "a_chiefs_failed_turn_tells_the_human_once"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        let Some(given) = self.untold_failure(project, participant, record, "human")? else {
+            return Ok(());
+        };
+'''
+replace = '''
+        let given = 0;
+'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        record.delivery.borrow().failure_told.as_deref() == Some(key)
+'''
+replace = '''
+        false
+'''
+
+[[plant]]
+name = "failure reason: OpenCode's failed reply quotes its whole error, response and all"
+meant = "a_failed_reply_keeps_the_words_of_its_error"
+runs = ["failure-reason-opencode"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/record/answer.rs"
+find = '''
+            record.failure = error_words(error);
+'''
+replace = '''
+            record.failure = Some(failure);
+'''
+
+[[plant]]
+name = "failure reason: a message still on its way into the window counts as given"
+meant = "a_message_on_its_way_to_the_chief_does_not_make_its_failed_turn_news_again"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        "SELECT MAX(id) FROM message WHERE recipient_id = ? AND state IN ('delivered', 'read')",
+'''
+replace = '''
+        "SELECT MAX(id) FROM message WHERE recipient_id = ? AND state IN ('delivering', 'delivered', 'read')",
+'''
+
+[[plant]]
+name = "failure reason: the message the window was last given is looked for among its 50 newest"
+meant = "a_chief_with_many_messages_waiting_has_its_new_failure_told"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        "SELECT MAX(id) FROM message WHERE recipient_id = ? AND state IN ('delivered', 'read')",
+'''
+replace = '''
+        "SELECT MAX(id) FROM (SELECT id, state FROM message WHERE recipient_id = ? AND state != 'gated' ORDER BY id DESC LIMIT 50) WHERE state IN ('delivered', 'read')",
+'''
+
+[[plant]]
+name = "failure reason: a told note is looked for among the recipient's 50 newest"
+meant = "after_a_restart_a_failure_told_is_found_in_the_ledger"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        "SELECT MAX(id) FROM message WHERE recipient_id = ? AND id > ? AND kind = 'note'
+'''
+replace = '''
+        "SELECT MAX(id) FROM (SELECT * FROM message WHERE recipient_id = ? AND state != 'gated' ORDER BY id DESC LIMIT 50) WHERE id > ? AND kind = 'note'
+'''
+
+[[plant]]
+name = "failure reason: after a restart the ledger is not asked whether a failure was told"
+meant = "after_a_restart_a_failure_told_is_found_in_the_ledger"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if told.is_some() {
+'''
+replace = '''
+        if false {
+'''
+
+[[plant]]
+name = "failure reason: the record does not remember which failed turn is settled, and the screen is looked at every pass"
+meant = "an_outage_that_says_nothing_in_its_record_looks_at_the_screen_once_a_turn"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if record.delivery.borrow().failure_settled.as_ref() == Some(&settled) {
+'''
+replace = '''
+        if false {
+'''
+
+[[plant]]
+name = "failure reason: an outage is told at every turn it fails"
+meant = "an_outage_is_told_once_however_many_turns_of_the_chief_it_fails"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        record.delivery.borrow().failure_told.as_deref() == Some(key)
+'''
+replace = '''
+        false
+'''
+
+[[plant]]
+name = "failure reason: an answered turn does not end the outage"
+meant = "the_same_failure_after_an_answered_turn_is_told_again"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if answered {
+'''
+replace = '''
+        if false {
+'''
+
+[[plant]]
+name = "failure reason: a chief's turn refused for quota is told the human as a failure"
+meant = "a_chiefs_turn_refused_for_quota_is_the_quotas_to_say_not_a_failure"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        } else if observed.failed && !self.cut_short(&observed) {
+'''
+replace = '''
+        } else if observed.failed {
+'''
+
+[[plant]]
+name = "failure reason: a member forgotten while its window is looked at still tells its failed turn"
+meant = "a_member_removed_while_its_window_is_looked_at_tells_nothing_of_its_failed_turn"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        let why = self.why_it_failed(participant, record, observed).await?;
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        if self.same_outage(record, &why.key) {
+            self.settle_told(record, given, requester, &why.key);
+'''
+replace = '''
+        let why = self.why_it_failed(participant, record, observed).await?;
+        if self.same_outage(record, &why.key) {
+            self.settle_told(record, given, requester, &why.key);
+'''
+
+[[plant]]
+name = "failure reason: words with no letter or digit give the bare note and leave the screen unasked"
+meant = "harness_words_with_nothing_of_a_word_leave_the_reason_to_the_screen"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+    Quote::of(&lines, Keep::First).map(|quote| format!("{because}{}", quote.after("; it said")))
+'''
+replace = '''
+    Some(Quote::of(&lines, Keep::First).map_or_else(
+        || because.to_owned(),
+        |quote| format!("{because}{}", quote.after("; it said")),
+    ))
+'''
+
+[[plant]]
+name = "failure reason: the screen's countdown makes every wake-up's failure a new outage"
+meant = "an_outage_told_from_the_screen_is_one_whatever_was_pasted_and_however_long_its_retry"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+                r"(?i)\b\d+(?:\.\d+)?\s?(?:ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)\b",
+'''
+replace = '''
+                r"(?i)\bnever-a-duration\b",
+'''
+
+[[plant]]
+name = "failure reason: what ConsensFlow pasted into the window is quoted and compared as its reason"
+meant = "the_lines_consensflow_typed_into_the_window_are_no_reason_and_are_not_quoted"
+runs = ["failure-reason-engine", "failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        let shown = shown.without_pastes(&pastes);
+'''
+replace = '''
+        let _ = &pastes;
+'''
+
+[[plant]]
+name = "failure reason: an answered turn whose record ends in the harness's own message ends no outage"
+meant = "an_answered_turn_ends_the_outage_whatever_the_harness_put_after_the_reply"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+                .last_word()
+'''
+replace = '''
+                .items()
+                .last()
+'''
+
+[[plant]]
+name = "failure reason: a failure is settled as told before its note is written"
+meant = "a_failure_whose_note_the_ledger_refused_is_told_at_the_next_look"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if self.same_outage(record, &why.key) {
+            self.settle_told(record, given, "human", &why.key);
+            return Ok(());
+        }
+'''
+replace = '''
+        if self.same_outage(record, &why.key) {
+            self.settle_told(record, given, "human", &why.key);
+            return Ok(());
+        }
+        self.settle_told(record, given, "human", &why.key);
+'''
+
+[[plant]]
+name = "failure reason: a screen line that only holds a paste's header starts a paste"
+meant = "a_line_that_only_holds_a_header_is_the_windows"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/ours.rs"
+find = '''
+        .strip_prefix(HEADER_START)?
+'''
+replace = '''
+        .split_once(HEADER_START)?
+        .1
+'''
+
+[[plant]]
+name = "failure reason: a line that repeats what was pasted is taken for the paste's after its run ended"
+meant = "a_message_that_quotes_the_windows_error_is_no_part_of_the_error_on_its_screen"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/ours.rs"
+find = '''
+            if !words.is_empty() {
+                run = None;
+            }
+            Owner::Window
+'''
+replace = '''
+            if !words.is_empty() {
+                run = None;
+            }
+            if !words.is_empty() && pasted.iter().any(|(_, text)| text.contains(&words)) {
+                return Owner::Pasted;
+            }
+            Owner::Window
+'''
+
+[[plant]]
+name = "failure reason: the pasted words are read from the window's newest messages in any state"
+meant = "what_the_chiefs_screen_shows_of_its_paste_is_known_however_many_messages_wait_behind_it"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+         AND m.state IN ('delivering', 'delivered', 'read') AND m.carried_by IS NULL
+'''
+replace = '''
+         AND m.state != 'gated' AND m.carried_by IS NULL
+'''
+
+[[plant]]
+name = "failure reason: every number in the words makes the same failure"
+meant = "a_model_named_one_digit_apart_is_another_failure"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+        (pattern(r"[A-Za-z0-9]{16,}"), "#id"),
+'''
+replace = '''
+        (pattern(r"\d+"), "#id"),
+'''
+
+[[plant]]
+name = "failure reason: a request's id makes every turn of an outage another failure"
+meant = "a_request_id_that_differs_each_turn_is_the_same_failure"
+runs = ["failure-reason-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+        (pattern(r"[A-Za-z0-9]{16,}"), "#id"),
+'''
+replace = '''
+        (pattern(r"[A-Za-z0-9]{160,}"), "#id"),
+'''
+
+[[plant]]
+name = "failure reason: a screen of nothing but ConsensFlow's pastes is said to be empty"
+meant = "a_screen_of_nothing_but_what_consensflow_pasted_showed_nothing_of_its_own"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+            None if self.pasted => said.push_str("; its screen showed nothing of its own"),
+'''
+replace = '''
+            None if false => said.push_str("; its screen showed nothing of its own"),
+'''
+
+[[plant]]
+name = "failure reason: a paste's text leaves out the rows it carried, and their labels are quoted as the window's"
+meant = "the_rows_a_paste_carried_are_part_of_it_on_screen_and_the_error_after_them_is_the_windows"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+                text: delivery_text(&begun.message, &begun.carried),
+'''
+replace = '''
+                text: delivery_text(&begun.message, &[]),
+'''
+
+[[plant]]
+name = "failure reason: a paste whose header scrolled off is the window's"
+meant = "long_wake_ups_whose_headers_scrolled_off_are_one_outage"
+runs = ["failure-reason-told", "failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/ours.rs"
+find = '''
+                run = pasted.first().map(|(_, newest)| (0, newest.as_str()));
+'''
+replace = '''
+                run = None;
+'''
+
+[[plant]]
+name = "failure reason: a line of a paste that looks like a header ends its run"
+meant = "a_line_of_the_run_that_looks_like_a_header_is_the_runs"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/ours.rs"
+find = '''
+            if let Some((at, rest)) = run.and_then(|(at, rest)| Some((at, after(rest, &words)?))) {
+'''
+replace = '''
+            if let Some((at, rest)) = run
+                .and_then(|(at, rest)| Some((at, after(rest, &words)?)))
+                .filter(|_| starts_with_header(unframed).is_none())
+            {
+'''
+
+[[plant]]
+name = "failure reason: the rows a paste carried are left out while it is on its way"
+meant = "the_rows_a_paste_carried_are_part_of_it_while_it_is_still_on_its_way"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+                 AND m.state IN ('queued', 'delivering', 'delivered', 'read') AND m.carried_by = ?
+'''
+replace = '''
+                 AND m.state IN ('delivering', 'delivered', 'read') AND m.carried_by = ?
+'''
+
+[[plant]]
+name = "failure reason: a model's id joined by - folds as an id"
+meant = "a_models_id_is_its_own_and_another_model_is_another_failure"
+runs = ["failure-reason-told", "failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+        (pattern(r"[A-Za-z0-9]{16,}"), "#id"),
+'''
+replace = '''
+        (pattern(r"[A-Za-z0-9_-]{16,}"), "#id"),
+'''
+
+[[plant]]
+name = "failure reason: a box drawn in ASCII keeps its right edge on each line"
+meant = "a_box_drawn_in_ascii_is_its_frame"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/ours.rs"
+find = '''
+        Some(edge) if edge.ends_with(char::is_whitespace) => edge.trim_end_matches(framed),
+'''
+replace = '''
+        Some(edge) if false => edge.trim_end_matches(framed),
+'''
+
+[[plant]]
+name = "failure reason: a screen's reason is read from its whole tail, older pastes' errors and all"
+meant = "an_outage_whose_errors_pile_up_on_the_screen_is_told_once"
+runs = ["failure-reason-told", "failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+                let kept = owners[at] == Owner::Window && since.is_none_or(|end| at > end);
+'''
+replace = '''
+                let kept = owners[at] == Owner::Window && since.is_none_or(|_| true);
+'''
+
+[[plant]]
+name = "failure reason: a placeholder keeps the run of the paste it stands for"
+meant = "a_placeholder_ends_the_run_it_stands_for"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/ours.rs"
+find = '''
+                // A placeholder stands for a paste whose words are not on the screen.
+                run = None;
+                return Owner::Pasted;
+'''
+replace = '''
+                return Owner::Pasted;
+'''
+
+[[plant]]
+name = "failure reason: a footer's money counter makes every turn another failure"
+meant = "a_footers_counters_are_folded_and_keep_one_failure_one"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+        (pattern(r"\$\d+(?:\.\d+)?"), "#money"),
+'''
+replace = '''
+        (pattern(r"\$never"), "#money"),
+'''
+
+[[plant]]
+name = "failure reason: engine-ask says every line of a screen is the window's"
+meant = "a_screen_is_told_line_by_line_whose_it_is"
+runs = ["failure-reason-ask"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/testing/ask.rs"
+find = '''
+    Ok(json!(ours(&lines, &pastes)))
+'''
+replace = '''
+    let _ = (&lines, &pastes, ours);
+    Ok(json!(vec![false; lines.len()]))
+'''
+
+[[plant]]
+name = "failure reason: the live suite takes a brief line read as the window's for right"
+meant = "a_screen_is_read_right_where_the_brief_is_consensflows_and_what_follows_the_windows"
+runs = ["failure-reason-live-suite"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_screen.rs"
+find = '''
+        .find(|at| !ours.get(**at).copied().unwrap_or(false))
+'''
+replace = '''
+        .find(|at| !ours.get(**at).copied().unwrap_or(true) && false)
+'''
+
+[[plant]]
+name = "failure reason: the live suite's copy of Codex's login is readable by others"
+meant = "a_copy_of_a_login_is_readable_by_its_owner_alone"
+runs = ["failure-reason-live-suite"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_screen.rs"
+find = '''
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+'''
+replace = '''
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o644);
+'''
+
+[[plant]]
+name = "failure reason: engine-ask takes every message of the thread for what was pasted"
+meant = "what_the_window_was_given_is_its_own_messages_not_the_threads_others"
+runs = ["failure-reason-ask"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/testing/ask.rs"
+find = '''
+        .filter(|message| message.get("recipient").and_then(Value::as_str) == Some(recipient))
+'''
+replace = '''
+        .filter(|_| !recipient.is_empty())
+'''
+
+[[plant]]
+name = "failure reason: a count that ends a model's id, or a list of codes, folds"
+meant = "a_model_whose_id_ends_in_a_count_is_another_failure"
+runs = ["failure-reason-told", "failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+                r"\b(\d{1,3}(?:,\d{3})+)\s+(?:tokens?|chars?|characters|words?|lines?|bytes?)\b|(?:^|[^\w-])(\d+(?:\.\d+)?[kKM])\b",
+'''
+replace = '''
+                r"\b\d{1,3}(?:,\d{3})+\b|\b\d+(?:\.\d+)?[kKM]\b",
+'''
+
+# Where a failure meets turn-end (T-531): a failed turn is its task's failure, with why,
+# whatever its turn left running, and a held task's woken turn that fails is one too.
+
+[[plant]]
+name = "failure reason: a failed turn that left a job running holds its task, and is no failure"
+meant = "a_failed_turn_that_left_a_job_running_fails_its_task_with_its_reason_and_holds_nothing"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        if observed.failed {
+            // A failed turn holds its task for nothing it left (T-532's P3-3).'''
+replace = '''
+        if observed.failed && observed.pending().total() == 0 {
+            // A failed turn holds its task for nothing it left (T-532's P3-3).'''
+
+[[plant]]
+name = "failure reason: a held task's woken turn that fails is failed in the field's bare words"
+meant = "a_held_tasks_turn_its_job_woke_that_fails_fails_the_task_with_its_reason_once"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+            let because = self
+                .why_it_failed(participant, record, observed)
+                .await?
+                .said;'''
+replace = '''
+            let because = format!("@{}'s harness reported a failure", participant.handle);'''
+
+[[plant]]
+name = "failure reason: a quotation of the task's latest header is taken for its paste, and a failed turn there told as the task's"
+meant = "a_turn_that_fails_while_its_task_waits_is_no_turn_of_the_task_where_only_a_quotation_holds_its_header"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if self
+            .delivered_at(participant.id, &thread, observed.items())?
+            .is_none()
+        {
+            return Ok(());
+        }'''
+replace = '''
+        let latest = self
+            .seams
+            .ledger
+            .borrow()
+            .last_pasted(participant.id, thread.task.id)?;
+        let Some(latest) = latest else {
+            return Ok(());
+        };
+        let marker = marker_of(latest.id);
+        if !observed
+            .items()
+            .iter()
+            .any(|item| item.text.contains(&marker))
+        {
+            return Ok(());
+        }'''
+
+[[plant]]
+name = "failure reason: a failed turn leaves its task's hold in the record until the next pass"
+meant = "a_held_tasks_woken_turn_that_fails_holds_it_no_more_in_the_pass_that_fails_it"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+            // A failed turn holds its task for nothing it left (T-532's P3-3).
+            record.held.borrow_mut().reset();'''
+replace = '''
+            // A failed turn holds its task for nothing it left (T-532's P3-3).'''

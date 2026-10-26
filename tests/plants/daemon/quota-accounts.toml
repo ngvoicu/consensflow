@@ -1,0 +1,384 @@
+# Results stayed queued after a quota pause (the field report of 2026-10-22, 3.0.5, T-254): the
+# chief ran on the account its members ran on and ran out with them, so ConsensFlow marked it out
+# until the reset two days on. A `/login` brought the members back, their windows answering again,
+# but a chief at rest takes no turn of its own, so it stayed out and every result sent to it stayed
+# queued, and the board told the human nothing of it.
+#
+# The rules: where a harness logs every window into one account (`Adapter::one_account`, Claude
+# Code's), a turn of any window that gets through is news for every other participant out on that
+# harness, the chief among them, marked out before it (`crates/cf-engine/src/scheduler.rs`,
+# `back_on_its_account`, called in `dispatcher.rs`'s step), and the human's Try again now on any of
+# them brings back all (`back_from_quota`). One account is not one quota (Calliope's review, T-287):
+# a member back from its reset brings back none out until a later one, and a window that was never
+# out brings one back once for each reset. A window out of quota with a message waiting for it is
+# said to the human once for each mark, naming what waits (`tell_what_waits`, called in
+# `while_out`). The engine's tests are `crates/cf-engine/tests/dispatcher/quota_accounts.rs`; the
+# case is `crates/cf-e2e/tests/regressions/results_stay_queued_after_a_quota_pause.rs`, whose
+# stand-in chief and worker share an account that runs out (`CF_TEST_QUOTA_SPENT`).
+#
+# The case builds the native `cf` from the sources as they are planted, so its plants say `builds`.
+# Every name holds `quota-accounts`, so `npm run plants:daemon -- "quota-accounts"` runs them all.
+
+[run]
+quota-accounts-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "quota_accounts::"]
+quota-accounts-words = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "scheduler::tests"]
+quota-accounts-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "results_stay_queued_after_a_quota_pause::"]
+
+[[plant]]
+name = "quota-accounts: a window's turn that gets through brings back only its own member, and the chief at rest is never handed its worker's result"
+meant = "a_chief_out_of_quota_with_its_worker_is_handed_the_result_once_the_workers_window_answers_on_the_new_account"
+runs = ["quota-accounts-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+            self.back_on_its_account(project.id, &owner, &news)?;
+'''
+replace = "\n"
+
+[[plant]]
+name = "quota-accounts: a window's turn that gets through brings back only its own member"
+meant = "a_chief_out_on_its_members_account_is_back_once_a_window_of_the_member_gets_a_turn_through_and_is_given_what_waited"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+            self.back_on_its_account(project.id, &owner, &news)?;
+'''
+replace = "\n"
+
+[[plant]]
+name = "quota-accounts: only the turn that brings its own member back is news for the others"
+meant = "a_chief_out_alone_is_back_once_a_turn_of_a_window_on_its_account_gets_through"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        if !out {
+            let news = News::Turn {
+'''
+replace = '''
+        if returned.is_some() {
+            let news = News::Turn {
+'''
+
+[[plant]]
+name = "quota-accounts: the human's Try again now brings back only the one it was pressed on"
+meant = "a_chief_out_on_its_members_account_is_back_once_the_human_says_the_member_is_back"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        self.back_on_its_account(project, &member, &News::Human)?;
+'''
+replace = "\n"
+
+[[plant]]
+name = "quota-accounts: the human's Try again now on the chief leaves its members out"
+meant = "a_members_held_task_goes_on_once_the_human_says_the_chief_is_back"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''                News::Human => true,'''
+replace = '''                News::Human => other.role == "chief",'''
+
+[[plant]]
+name = "quota-accounts: news of an account brings back the others on its harness whether or not its windows share one account"
+meant = "a_chief_stays_out_when_its_harness_may_log_windows_into_several_accounts"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''            .is_some_and(|adapter| adapter.one_account());'''
+replace = '''            .is_some();'''
+
+[[plant]]
+name = "quota-accounts: news of an account brings back those out on any harness"
+meant = "a_chief_stays_out_when_the_member_that_came_back_runs_on_another_harness"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                || other.harness.as_deref() != Some(harness)
+'''
+replace = "\n"
+
+[[plant]]
+name = "quota-accounts: a member's turn that got through before another was marked out brings it back"
+meant = "a_chief_marked_out_after_the_turn_that_got_through_stays_out"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''                        self.answered_since(&other, observed) && self.tried_anew(other.id, &until)
+'''
+replace = '''                        self.tried_anew(other.id, &until)
+'''
+
+[[plant]]
+name = "quota-accounts: a teammate's turn that got through before another was marked out brings it back"
+meant = "a_chief_stays_out_when_a_teammates_turn_that_got_through_before_its_refusal_is_read_after_it"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''                } => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),'''
+replace = '''                } => self.tried_anew(other.id, &until),'''
+
+[[plant]]
+name = "quota-accounts: a member back from its reset brings back one out until a later reset"
+meant = "a_member_back_from_its_reset_brings_back_no_chief_out_until_a_later_one"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''                    if later_limit(&until, returned) {'''
+replace = '''                    if later_limit(&until, returned) && returned.is_empty() {'''
+
+[[plant]]
+name = "quota-accounts: a later reset a member's return left out is brought back by the member's next turn"
+meant = "a_member_back_from_its_reset_brings_back_no_chief_out_until_a_later_one"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''                        if self.tried_anew(other.id, &until) {
+'''
+replace = '''                        if until.is_empty() {
+'''
+
+[[plant]]
+name = "quota-accounts: a teammate's turn brings back one refused again with the same reset"
+meant = "a_chief_refused_again_with_the_same_reset_is_not_brought_back_by_a_teammates_turn_again"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''                } => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),'''
+replace = '''                } => self.answered_since(&other, observed) && !until.is_empty(),'''
+
+[[plant]]
+name = "quota-accounts: Claude Code is taken for a harness whose windows may be on several accounts, and the chief at rest is never handed its worker's result"
+meant = "a_chief_out_of_quota_with_its_worker_is_handed_the_result_once_the_human_says_the_worker_is_back"
+runs = ["quota-accounts-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''
+    fn one_account(&self) -> bool {
+        true
+    }
+'''
+replace = '''
+    fn one_account(&self) -> bool {
+        false
+    }
+'''
+
+[[plant]]
+name = "quota-accounts: what waits for a window out of quota is never said to the human"
+meant = "the_human_is_told_once_for_each_mark_what_waits_for_a_window_out_of_quota"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        self.tell_what_waits(project, participant, record, owner)?;
+'''
+replace = "\n"
+
+[[plant]]
+name = "quota-accounts: what waits for a window out of quota is said to the human at every look"
+meant = "the_human_is_told_once_for_each_mark_what_waits_for_a_window_out_of_quota"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''        if !self.scheduler.out_noted.borrow_mut().insert(mark) {'''
+replace = '''        if !self.scheduler.out_noted.borrow_mut().insert(mark) && participant.id < 0 {'''
+
+[[plant]]
+name = "quota-accounts: what waits for a window out of quota is said to the human once ever, not once for each mark"
+meant = "the_human_is_told_once_for_each_mark_what_waits_for_a_window_out_of_quota"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''        let mark = (participant.id, owner.out_since.clone().unwrap_or_default());'''
+replace = '''        let mark = (participant.id, String::new());'''
+
+[[plant]]
+name = "quota-accounts: a window out of quota with nothing waiting for it is said to the human"
+meant = "the_human_is_told_once_for_each_mark_what_waits_for_a_window_out_of_quota"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''        let Some(waiting) = waiting else {
+            return Ok(());
+        };'''
+replace = '''        let waiting = waiting;'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''                    waiting.id,
+                    what_it_is(&waiting.kind, waiting.task_number),
+'''
+replace = '''                    waiting.as_ref().map_or(0, |waiting| waiting.id),
+                    waiting.as_ref().map_or_else(String::new, |waiting| what_it_is(&waiting.kind, waiting.task_number)),
+'''
+
+[[plant]]
+name = "quota-accounts: the human is told the number of what waits and not what it is"
+meant = "the_human_is_told_once_for_each_mark_what_waits_for_a_window_out_of_quota"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''        ("task", Some(number)) => format!("the words of T-{number}"),
+'''
+replace = ""
+
+[[plant]]
+name = "quota-accounts: what a window opened while out carries as its first message is never said to the human"
+meant = "the_human_is_told_what_waits_for_a_member_out_of_quota_whose_closed_window_opens_with_it"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "            None => carried.map_or(Ok(None), |id| self.seams.ledger.borrow().message(id))?,"
+replace = "            None => carried.and(None),"
+
+[[plant]]
+name = "quota-accounts: a reset a few minutes later is taken for a limit of its own, and the chief at rest is never handed its worker's result"
+meant = "a_chief_whose_reset_is_within_the_hour_of_its_members_is_back_with_it"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "        .is_some_and(|(until, returned)| until - returned > SAME_LIMIT_MS)"
+replace = "        .is_some_and(|(until, returned)| until > returned)"
+
+[[plant]]
+name = "quota-accounts: a chief a member's return left out for a later limit is not said to the human"
+meant = "a_member_back_from_its_reset_brings_back_no_chief_out_until_a_later_one"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                            self.tell_still_out(project, &other, owner, &until)?;
+'''
+replace = "\n"
+
+[[plant]]
+name = "quota-accounts: a member's own return brings one back without remembering its limit"
+meant = "a_chief_brought_back_by_its_members_return_and_refused_again_with_the_same_reset_stays_out"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                        self.answered_since(&other, observed) && self.tried_anew(other.id, &until)
+'''
+replace = '''
+                        self.answered_since(&other, observed)
+'''
+
+[[plant]]
+name = "quota-accounts: a limit is remembered by its exact reset, and one that names none is brought back at every teammate's turn"
+meant = "a_chief_refused_again_with_no_reset_named_within_the_hour_is_not_brought_back_by_a_teammates_turn_again"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "        .is_some_and(|(one, other)| (one - other).abs() <= SAME_LIMIT_MS)"
+replace = "        .is_some_and(|(one, other)| one == other)"
+
+[[plant]]
+name = "quota-accounts: the human is told of \"a answer\""
+meant = "what_waits_is_told_by_its_kind_and_task_with_the_article_it_takes"
+runs = ["quota-accounts-words"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''        "an"
+'''
+replace = '''        "a"
+'''
+
+# Where these rules meet turn-end's (T-530's merge of 3.0.6-alpha.3): a refusal is no result, what a
+# held task tells a chief out of quota waits and is said to the human, and a refused turn ends its
+# task's hold.
+
+# The refusal is kept from the result rule twice: the refused task is held, so its resume's
+# words are pasted before any answer is read (mark_back makes the hold due), and a task still
+# at work when its window reads a refusal goes on (cut_short) before turn_end::collect. The
+# plant takes both away, so a refusal reaches collect.
+[[plant]]
+name = "quota-accounts: a member brought back by a teammate's turn takes the refusal its window still reads for its turn's answer"
+meant = "a_member_brought_back_by_the_chiefs_turn_goes_on_with_its_task_and_its_refusal_is_no_result"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            if self.cut_short(&observed) {"
+replace = "            if false && self.cut_short(&observed) {"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            self.seams.ledger.borrow_mut().hold_task(
+                project.id,
+                task.number,
+                until,
+                "out of quota",
+            )?;
+            if refused_at.is_none() {'''
+replace = '''
+            if refused_at.is_none() {'''
+
+[[plant]]
+name = "quota-accounts: a window out of quota is marked told before anything waits for it, so a held task's note to it is never said"
+meant = "what_a_held_task_says_to_a_chief_out_of_quota_and_its_result_wait_and_the_human_hears_it_once"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        let Some(waiting) = waiting else {
+            return Ok(());
+        };
+        let mark = (participant.id, owner.out_since.clone().unwrap_or_default());
+        if !self.scheduler.out_noted.borrow_mut().insert(mark) {
+'''
+replace = '''
+        let mark = (participant.id, owner.out_since.clone().unwrap_or_default());
+        let fresh = self.scheduler.out_noted.borrow_mut().insert(mark);
+        let Some(waiting) = waiting else {
+            return Ok(());
+        };
+        if !fresh {
+'''
+
+[[plant]]
+name = "quota-accounts: a refused turn leaves its task held for the job of an earlier turn"
+meant = "a_held_task_whose_wake_up_is_refused_for_quota_is_held_for_its_job_no_more"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        record.held.borrow_mut().reset();
+        let reported = record.quota.borrow().reported.clone();
+'''
+replace = '''
+        let reported = record.quota.borrow().reported.clone();
+'''

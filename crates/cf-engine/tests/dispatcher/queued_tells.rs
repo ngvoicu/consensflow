@@ -547,17 +547,21 @@ fn words_told_to_the_window_of_a_task_whose_member_the_human_removes_are_said_to
 fn words_still_on_their_way_when_the_harness_fails_the_task_wait_for_its_reopen() {
     let context = Context::new();
     let (tiers, session, told) = told_on_its_way(&context);
-    context.adapter.with("zeus", |agent| agent.failed = true);
+    context.adapter.with("zeus", |agent| {
+        agent.failed = true;
+        agent.failure = Some("The model is busy, try another.".to_owned());
+    });
     context.adapter.answer("zeus", "Parser, half done");
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "failed");
     // Kept for the reopen, as words a failed delivery leaves are (the chief's
-    // decision on Calliope's P3-4 of T-446); one note says why, which words wait
-    // and how to reopen it (her P3 of T-437: the words came in a note of their own).
+    // decision on Calliope's P3-4 of T-446); one note says why, in its harness's
+    // words (failure reasons, T-29), which words wait and how to reopen it (her
+    // P3 of T-437: the words came in a note of their own).
     assert_eq!(context.message(told).state, "queued");
     assert_eq!(
         tiers.notes("chief"),
-        [format!("T-1 failed: @{session}'s harness reported a failure; the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\"")]
+        [format!("T-1 failed: @{session}'s harness reported a failure; it said: \"The model is busy, try another.\"; the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\"")]
     );
 }
 

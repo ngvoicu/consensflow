@@ -60,6 +60,11 @@
 //!   window whose participant `CF_TEST_QUOTA_OUT` names, for as long as the
 //!   file `CF_TEST_QUOTA_FILE` names is there when it is set (taking it away is
 //!   the human logging the harness into another account).
+//! - Every message is refused so, whatever it says, by a window of a participant
+//!   `CF_TEST_QUOTA_SPENT` names (a comma between names), for as long as that
+//!   file is there: an account whose quota is spent refuses each turn of every
+//!   window logged into it, the chief's too. A turn that works first (`SLEEP`) is
+//!   refused when it asks again, after its work.
 //! - A line `ASK <questions JSON>` asks through Claude's question tool: the
 //!   PreToolUse hook of the settings file this window was launched with runs on
 //!   a synthetic AskUserQuestion event, and the turn answers with what the hook
@@ -248,6 +253,9 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static EXACT: OnceLock<Regex> = OnceLock::new();
     static RESULTS: OnceLock<Regex> = OnceLock::new();
 
+    if spent(window) {
+        return Ok(Reply::Refused);
+    }
     let accepts = accepting(
         own_var("CF_TEST_ACCEPT_RESULTS").as_deref(),
         &window.participant,
@@ -460,6 +468,18 @@ fn refused(text: &str, window: &Window, quota_out: &Regex) -> bool {
         && !refusing.is_empty()
         && refused
         && is_session_of(&window.participant, &refusing)
+}
+
+/// Whether the provider refuses this window whatever it is given: the window is
+/// a session of a participant `CF_TEST_QUOTA_SPENT` names, and the account it
+/// shares with them is spent (`CF_TEST_QUOTA_FILE` is there).
+fn spent(window: &Window) -> bool {
+    let sharing = own_var("CF_TEST_QUOTA_SPENT").unwrap_or_default();
+    let spent = own_var("CF_TEST_QUOTA_FILE").is_some_and(|account| Path::new(&account).exists());
+    spent
+        && sharing
+            .split(',')
+            .any(|name| !name.is_empty() && is_session_of(&window.participant, name))
 }
 
 /// Whether `participant` is the member `member`, or a session of it

@@ -1,8 +1,8 @@
 //! What the chief is told of a task that waits, end to end through the real pane
 //! host (`npm run test:integration`), as the chief's report of 2026-10-08 had it
-//! on a daemon of Node's: fake agents in real PTYs, a worker whose provider
-//! refuses it, and a chief in the middle of a turn, so that what ConsensFlow
-//! writes it waits behind the turn.
+//! on a daemon of Node's: fake agents in real PTYs, a worker the human takes a
+//! task from or whose provider refuses it, and a chief in the middle of a turn,
+//! so that what ConsensFlow writes it waits behind the turn.
 //! - m-1668: "T-357 was taken back from @ullr … waits for another standard
 //!   worker" reached the chief after another worker had taken T-357 and
 //!   started.
@@ -112,7 +112,7 @@ fn worker_tier(project: &Project) -> Result<String> {
 #[test]
 fn the_note_that_a_task_was_taken_back_is_withdrawn_when_another_worker_takes_it_before_the_chief_is_given_the_note(
 ) -> Outcome {
-    let rig = Rig::start(config().var("CF_TEST_QUOTA_OUT", "worker"))?;
+    let rig = Rig::start(config())?;
     write_staff(&rig)?;
     let p = Project::open_with_staff(
         &rig,
@@ -122,13 +122,21 @@ fn the_note_that_a_task_was_taken_back_is_withdrawn_when_another_worker_takes_it
     )?;
     let session = chief_session(&rig, &p)?;
     let taken_back = Regex::new(r"^T-1 was taken back from ")?;
-    // The first worker sleeps six seconds on its brief and is then refused; the
-    // chief's next turn is far longer than that.
+    // The first worker works on its brief while the chief is in a turn far
+    // longer, and the human gives the task back to the board.
     rig.tell(
         p.id(),
-        &format!("DISPATCH --tier {} SLEEP 6 {REFUSED}", worker_tier(&p)?),
+        &format!(
+            "DISPATCH --tier {} SLEEP 30 Reply with exactly: WORKER_OK",
+            worker_tier(&p)?
+        ),
     )?;
     rig.tell(p.id(), "SLEEP 40 Reply with exactly: CHIEF_BUSY")?;
+    rig.wait_for("the first worker to take T-1", secs(60), || {
+        Ok(p.task(1)?["state"] == "working")
+    })?;
+    let reassigned = rig.page("task.reassign", json!({ "project": p.id(), "task": 1 }))?;
+    assert_eq!(reassigned["ok"], true, "{reassigned}");
 
     rig.wait_for("the note that T-1 was taken back", secs(60), || {
         Ok(notes(&p, &taken_back)?.len() == 1)
@@ -136,10 +144,8 @@ fn the_note_that_a_task_was_taken_back_is_withdrawn_when_another_worker_takes_it
     let taken = notes(&p, &taken_back)?[0].clone();
     let body = taken["body"].as_str().unwrap_or_default();
     assert!(
-        Regex::new(
-            r"^T-1 was taken back from @worker-[a-z]+-[a-z]+ \(ran out of quota after starting\) and waits for another \w+ worker\.$"
-        )?
-        .is_match(body),
+        Regex::new(r"^T-1 was taken back from @worker-[a-z]+-[a-z]+ \(.+\) and waits for another \w+ worker\.$")?
+            .is_match(body),
         "{body}"
     );
     // The second worker takes the task while the chief is still in its turn.

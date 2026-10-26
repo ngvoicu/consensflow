@@ -8,19 +8,22 @@
 //! | `op` | the question | the answer |
 //! |---|---|---|
 //! | `cut_note` | `message` (its id), `tasks` (the number of the task a member had at work or waiting, one; none for the chief) | the note that tells a window the human's Resume brings back that its turn was cut, as the window is given it: its header, and the engine's words; an error for several tasks, as a window that held several comes back for none |
+//! | `ours` | `lines` (a screen's last lines), `recipient` (the window's handle), `messages` (messages as the board gives them, each its `id`, `kind`, `sender`, `recipient`, `taskNumber` and `body`: those to `recipient` are what was pasted into the window) | for each line, whether it is ConsensFlow's, by the rule a failed turn's note reads the screen by (`shown::ours`) |
 
 use cf_proto::ledger::MessageView;
 use serde_json::{json, Value};
 
 use crate::delivery_text::delivery_text;
 use crate::resume::Coming;
+use crate::shown::{ours, Paste};
 
 /// The answer to `question`, or why it cannot be answered.
 pub fn answer(question: &Value) -> Result<Value, String> {
     match question.get("op").and_then(Value::as_str) {
         Some("cut_note") => cut_note(question),
+        Some("ours") => ours_of(question),
         other => Err(format!(
-            "the question asks for {}, which is not cut_note",
+            "the question asks for {}, which is neither cut_note nor ours",
             other.unwrap_or("nothing")
         )),
     }
@@ -77,6 +80,70 @@ fn cut_note(question: &Value) -> Result<Value, String> {
     Ok(json!(delivery_text(&note, &[])))
 }
 
+/// Which of a screen's `lines` are ConsensFlow's, of the `messages` pasted into
+/// its window: each as the window was given it, the newest first. Only messages to
+/// the window's `recipient` went into it, as the engine reads what was pasted
+/// (`last_pastes`): a task's thread holds its worker's result too.
+fn ours_of(question: &Value) -> Result<Value, String> {
+    let recipient = question
+        .get("recipient")
+        .and_then(Value::as_str)
+        .ok_or("the question names no recipient")?;
+    let lines: Vec<String> = question
+        .get("lines")
+        .and_then(Value::as_array)
+        .ok_or("the question gives no lines")?
+        .iter()
+        .map(|line| line.as_str().unwrap_or_default().to_owned())
+        .collect();
+    let mut messages: Vec<MessageView> = question
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or("the question gives no messages")?
+        .iter()
+        .filter(|message| message.get("recipient").and_then(Value::as_str) == Some(recipient))
+        .map(pasted)
+        .collect::<Result<_, _>>()?;
+    messages.sort_by_key(|message| std::cmp::Reverse(message.id));
+    let pastes: Vec<Paste> = messages
+        .iter()
+        .map(|message| Paste {
+            id: message.id,
+            text: delivery_text(message, &[]),
+        })
+        .collect();
+    Ok(json!(ours(&lines, &pastes)))
+}
+
+/// A message as the board gives it, with what its paste reads by.
+fn pasted(message: &Value) -> Result<MessageView, String> {
+    let text = |name: &str| message.get(name).and_then(Value::as_str).map(str::to_owned);
+    Ok(MessageView {
+        id: message
+            .get("id")
+            .and_then(Value::as_i64)
+            .ok_or("a message has no id")?,
+        project_id: 0,
+        recipient: String::new(),
+        recipient_id: 0,
+        recipient_role: String::new(),
+        sender: text("sender"),
+        kind: text("kind").ok_or("a message has no kind")?,
+        task_number: message.get("taskNumber").and_then(Value::as_i64),
+        reply_to: message.get("replyTo").and_then(Value::as_i64),
+        body: text("body").unwrap_or_default(),
+        state: "delivered".to_owned(),
+        attempts: 0,
+        reason: None,
+        receipt: Value::Null,
+        questions: Value::Null,
+        choices: Value::Null,
+        urgent: false,
+        created_at: String::new(),
+        delivered_at: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,5 +164,40 @@ mod tests {
         );
         assert!(answer(&json!({ "op": "cut_note" })).is_err());
         assert!(answer(&json!({ "op": "else" })).is_err());
+    }
+
+    #[test]
+    fn a_screen_is_told_line_by_line_whose_it_is() {
+        let lines = json!([
+            "[ConsensFlow m-4 · T-1 · task from @chief]",
+            "Write the parser",
+            "Error: provider unreachable"
+        ]);
+        let messages = json!([{
+            "id": 4, "kind": "task", "sender": "chief", "recipient": "zeus", "taskNumber": 1,
+            "body": "Write the parser"
+        }]);
+        let said = answer(
+            &json!({ "op": "ours", "recipient": "zeus", "lines": lines, "messages": messages }),
+        )
+        .unwrap();
+        assert_eq!(said, json!([true, true, false]));
+    }
+
+    #[test]
+    fn what_the_window_was_given_is_its_own_messages_not_the_threads_others() {
+        // The task's thread holds the worker's result too, to the chief, newer than
+        // its brief: it went into no window of the worker's (Calliope's re-check T-305).
+        let messages = json!([
+            { "id": 4, "kind": "task", "sender": "chief", "recipient": "zeus", "taskNumber": 1, "body": "Write the parser" },
+            { "id": 5, "kind": "result", "sender": "zeus", "recipient": "chief", "taskNumber": 1, "body": "Done" }
+        ]);
+        let question = json!({
+            "op": "ours",
+            "recipient": "zeus",
+            "lines": ["Write the parser", "Done"],
+            "messages": messages
+        });
+        assert_eq!(answer(&question).unwrap(), json!([true, false]));
     }
 }

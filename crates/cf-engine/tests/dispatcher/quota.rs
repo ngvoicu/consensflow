@@ -1,6 +1,7 @@
-//! The dispatcher watches quota: a member that runs out gives its work back
-//! or holds it, an old refusal in the record is history, a delivery in
-//! flight is queued again, and a member low on quota takes nothing new.
+//! The dispatcher watches quota: a member that runs out holds its work with
+//! its window (`quota_waits`), an old refusal in the record is history, a
+//! delivery in flight is queued again, and a member low on quota takes
+//! nothing new.
 
 use cf_engine::testing::Context;
 use cf_engine::ActivityState;
@@ -11,51 +12,6 @@ use crate::fixtures::{assert_match, exhausted, low, now, placed, soon, Tiers};
 use crate::traces::held_to;
 
 const SUITES: &[&str] = &["the dispatcher watches quota"];
-
-#[test]
-fn takes_a_task_back_from_a_member_that_ran_out_and_gives_it_to_another_telling_the_requester() {
-    let context = Context::new();
-    let tiers = Tiers::new(&context, &["zeus", "diana"]);
-    tiers.open();
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(tiers.task(1).task.state, "working");
-    let refused = context.host.last("zeus").unwrap().pane;
-    context
-        .adapter
-        .quota("zeus", Some(exhausted(None, Some(&soon(&context, 2)))));
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(
-        placed(&tiers.task(1).task),
-        ("queued", Some("diana-brisk-birch"))
-    );
-    assert_match(
-        &tiers.task(1).task.body,
-        r"Reassigned from @zeus-amber-pine \(ran out of quota after starting\); check the working tree",
-    );
-    assert_eq!(
-        tiers.notes("chief"),
-        ["T-1 was taken back from @zeus-amber-pine (ran out of quota after starting) and waits for another standard worker."]
-    );
-    assert_eq!(tiers.out_until("zeus"), Some(soon(&context, 2)));
-    assert!(
-        tiers.participant("zeus-amber-pine").is_some(),
-        "the session that ran out stays for the human; the member is out until its reset"
-    );
-    // A harness that waits out its limit (OpenCode) would take the task up
-    // again at the reset, beside the member that has it now.
-    assert_eq!(
-        context.host.killed(),
-        [refused],
-        "the refused session's window closes with its work"
-    );
-    held_to(
-        context.close(),
-        SUITES,
-        "takes a task back from a member that ran out and gives it to another, telling the requester",
-    );
-}
 
 #[test]
 fn keeps_a_member_out_only_until_its_reset_though_its_harness_still_shows_the_old_refusal() {
@@ -74,24 +30,24 @@ fn keeps_a_member_out_only_until_its_reset_though_its_harness_still_shows_the_ol
     context.adapter.with("zeus", |agent| agent.settled = true);
     context.pass().unwrap();
     context.pass().unwrap();
-    assert_match(&tiers.assignee(1), "^diana-");
-    context.adapter.answer("diana", "done");
-    context.pass().unwrap();
+    assert_eq!(
+        placed(&tiers.task(1).task),
+        ("paused", Some("zeus-amber-pine")),
+        "held with its window, though diana is free"
+    );
 
     context.advance(2 * 3_600_000);
-    tiers.open_body("Lexer");
     context.pass().unwrap();
-    assert_match(&tiers.assignee(2), "^zeus-");
     context.pass().unwrap();
     assert_eq!(
-        tiers.task(2).task.state,
+        tiers.task(1).task.state,
         "working",
         "and zeus receives again"
     );
     assert_eq!(
         context
             .dispatcher
-            .activity(tiers.id(&tiers.assignee(2)))
+            .activity(tiers.id(&tiers.assignee(1)))
             .state,
         ActivityState::Working
     );
@@ -101,7 +57,7 @@ fn keeps_a_member_out_only_until_its_reset_though_its_harness_still_shows_the_ol
         Some(exhausted(Some(&now(&context)), Some(&soon(&context, 1)))),
     );
     context.pass().unwrap();
-    assert_eq!(tiers.task(2).task.state, "open", "a fresh refusal counts");
+    assert_eq!(tiers.task(1).task.state, "paused", "a fresh refusal counts");
     assert_eq!(tiers.out_until("zeus"), Some(soon(&context, 1)));
     held_to(
         context.close(),
@@ -167,17 +123,12 @@ fn queues_a_delivery_in_flight_at_the_refusal_again_and_keeps_a_coordinators_own
             tiers.task(1).task.assignee,
             state_of(answer.id)
         ),
-        ("open".to_owned(), None, "cancelled".to_owned()),
-        "the task goes back to the board and the answer in flight goes with it"
-    );
-    // Not held to Node's recording: what was in flight goes with the task, in
-    // the brief of the window that takes it next, once.
-    assert!(
-        tiers.task(1).task.body.contains(
-            "Kept from before, never delivered to @zeus-amber-pine:\n\n(answer m-3 from @chief to m-2 of @zeus-amber-pine: Which?)\nThis one"
+        (
+            "paused".to_owned(),
+            Some("zeus-amber-pine".to_owned()),
+            "queued".to_owned()
         ),
-        "{}",
-        tiers.task(1).task.body
+        "the task waits with its window, and the answer in flight with it"
     );
 
     // A pass runs every window at once, so the note may reach the chief on
@@ -264,9 +215,17 @@ fn gives_no_new_work_to_a_member_low_on_quota_keeps_one_out_for_an_hour_when_its
     context.adapter.quota("zeus", Some(exhausted(None, None)));
     context.pass().unwrap();
     assert_eq!(
-        (tiers.task(4).task.state, tiers.out_until("zeus")),
-        ("open".to_owned(), Some(soon(&context, 1))),
-        "out of quota mid-task: the work goes back, zeus is out for an hour"
+        (
+            tiers.task(4).task.state,
+            tiers.task(4).task.held_until,
+            tiers.out_until("zeus")
+        ),
+        (
+            "paused".to_owned(),
+            Some(soon(&context, 1)),
+            Some(soon(&context, 1))
+        ),
+        "out of quota mid-task: the work waits with zeus, out for an hour"
     );
     held_to(
         context.close(),

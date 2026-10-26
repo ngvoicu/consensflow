@@ -90,6 +90,17 @@ pub trait Adapter {
         false
     }
 
+    /// Whether every window of this harness is logged into the one account, so
+    /// that a window whose turn gets through after a refusal for quota says the
+    /// quota is back for every other window of it: a login in one is a login in
+    /// all, and a spent quota is spent for all. Not, where nobody has looked: Pi
+    /// and OpenCode log into a provider for each model, so two of their windows
+    /// may be on two accounts, and Codex and Devin have not been probed for a
+    /// login changed under a window that is open.
+    fn one_account(&self) -> bool {
+        false
+    }
+
     /// Whether a window's first message goes in once the window is up, through
     /// the harness's own server, which asks [`PaneHost::admits`] then
     /// ([`Window::started`]): OpenCode's. Every other harness's goes in with the
@@ -511,6 +522,21 @@ impl Observed {
         }
     }
 
+    /// Why the look's turn failed, in its harness's own words where its record
+    /// has them: none where the turn did not fail, or its record says no more.
+    pub fn failure(&self) -> Option<&str> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) if self.failed => record.failure.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// The conversation's last word ([`last_word`]): none where its record says
+    /// nothing, or could not be read.
+    pub fn last_word(&self) -> Option<&Item> {
+        last_word(self.items())
+    }
+
     /// What the conversation's turn ended and left running: the window takes
     /// input between turns, and its agent is woken as each ends.
     pub fn pending(&self) -> Pending {
@@ -612,12 +638,14 @@ pub trait Records {
 /// Whether the last word of `record` (what the harness put in it itself aside)
 /// is the agent's reply: what a turn at rest ends in.
 fn ends_in_a_reply(record: &Record) -> bool {
-    record
-        .items
-        .iter()
-        .rev()
-        .find(|item| item.role != Role::Custom)
-        .is_some_and(|item| item.role == Role::Assistant)
+    last_word(&record.items).is_some_and(|item| item.role == Role::Assistant)
+}
+
+/// The last word of a conversation's `items`: its last item but what the harness
+/// put in it itself (Devin's system and custom messages, Pi's extensions' messages,
+/// a hook's context), which can come after a reply.
+fn last_word(items: &[Item]) -> Option<&Item> {
+    items.iter().rev().find(|item| item.role != Role::Custom)
 }
 
 #[cfg(test)]

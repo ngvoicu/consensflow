@@ -117,6 +117,8 @@ struct Session {
     /// How the last assistant step ended, if it ended.
     terminal: Option<Terminal>,
     failed: bool,
+    /// Why the latest turn failed, where Pi said (`errorMessage`).
+    failure: Option<String>,
     quota: Option<Arc<Quota>>,
     records: usize,
     keys: Keys,
@@ -148,6 +150,7 @@ impl Session {
             turn_open: false,
             terminal: None,
             failed: false,
+            failure: None,
             quota: None,
             records: 0,
             keys: Keys::default(),
@@ -197,6 +200,7 @@ impl Session {
                 }
                 self.open_tools.clear();
                 self.failed = false;
+                self.failure = None;
                 self.push(id, Role::User, text, true, at);
                 self.turn_open = true;
                 self.terminal = None;
@@ -245,6 +249,7 @@ impl Session {
         match stop {
             Some("stop") => {
                 self.failed = false;
+                self.failure = None;
                 self.terminal = Some(Terminal {
                     how: End::Stopped,
                     id,
@@ -252,6 +257,7 @@ impl Session {
             }
             Some("aborted") => {
                 self.failed = false;
+                self.failure = None;
                 self.terminal = Some(Terminal {
                     how: End::Aborted,
                     id,
@@ -266,6 +272,8 @@ impl Session {
                         .map_err(Stop::Failed)?
                         .into_owned(),
                 };
+                let said = !matches!(field("errorMessage"), None | Some(Value::Null));
+                self.failure = said.then(|| failure.clone());
                 if refused_for_quota(&failure) {
                     let at_ms = js::to_number(field("timestamp")).map_err(Stop::Failed)?;
                     let quota =
@@ -323,6 +331,7 @@ impl Session {
         record.items = self.items.clone();
         record.in_flight = in_flight;
         record.failed = self.failed;
+        record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
         record.quota = self.quota.clone();
         record.settlement = if native_settled || can_settle {
             Settlement::Settled

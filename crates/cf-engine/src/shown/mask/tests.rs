@@ -11,7 +11,7 @@ fn hidden(text: &str) -> String {
 
 #[test]
 fn every_pattern_of_the_masker_builds() {
-    assert_eq!(RULES.len(), 8);
+    assert_eq!(RULES.len(), 9);
 }
 
 #[test]
@@ -26,6 +26,14 @@ fn the_user_and_password_of_a_url_are_hidden_and_the_host_is_not() {
         hidden("see https://github.com/x/y and ssh://git@host/repo"),
         "see https://github.com/x/y and ssh://git@host/repo"
     );
+}
+
+#[test]
+fn an_email_address_is_hidden_whole_and_a_host_with_no_domain_is_not() {
+    let masked = mask("Your account ci.bot+team@example.co.uk has no seats left.");
+    assert_eq!(masked.text, "Your account [masked] has no seats left.");
+    assert_eq!(masked.count, 1);
+    assert_eq!(hidden("git@host:x/y and @zeus"), "git@host:x/y and @zeus");
 }
 
 #[test]

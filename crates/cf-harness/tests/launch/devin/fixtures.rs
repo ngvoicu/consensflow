@@ -356,6 +356,7 @@ pub(super) fn settled(session: &str) -> Record {
         in_flight: false,
         asking: false,
         failed: false,
+        failure: None,
         quota: None,
         settlement: Settlement::Settled,
         pending: Default::default(),

@@ -10,7 +10,9 @@
 //! The latest turn decides. It is in flight while it has started and not
 //! ended, or holds a tool call or a subagent open. It is settled once it
 //! ended: cancelled or failed, or complete with a final answer the rollout
-//! holds, as `task_complete` names it.
+//! holds, as `task_complete` names it. A turn whose error is Codex's usage limit
+//! (`usage_limit_exceeded`) failed for quota: it says the quota while it is the
+//! latest, whatever the rate limits said last.
 //!
 //! The rollout's ids key the reader's maps as they keyed Node's (see
 //! [`Key`]), so a record that says something odd is read as Node read it.
@@ -30,7 +32,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cf_base::env::Env;
-use cf_base::js;
+use cf_base::{js, time};
 use serde_json::Value;
 
 use self::fields::{content_text, field, is_whole, or_empty};
@@ -38,7 +40,7 @@ use self::images::output_text;
 use self::inputs::{Inputs, Telling};
 use super::paths::transcript;
 use super::quota::codex_quota;
-use crate::shared::quota::Quota;
+use crate::shared::quota::{Level, Quota};
 use crate::shared::record::cache::Look;
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
@@ -74,6 +76,11 @@ fn handed_out(item: &Item) -> Item {
         },
     }
 }
+
+/// The `codex_error_info` of a turn Codex ended for a limit: its usage limit
+/// (as Codex 0.163 names a plan or balance that has no quota too), or a rate
+/// limit it gave up retrying. The chief's rule (T-95): wait on any limit.
+const LIMITS: [&str; 2] = ["usage_limit_exceeded", "rate_limit_exceeded"];
 
 /// What a rollout said so far.
 struct Rollout {
@@ -128,8 +135,12 @@ enum End {
     /// `task_complete`, and the final answer it names (`last_agent_message`,
     /// none when it names none).
     Complete(Option<Value>),
-    /// `task_complete` with an error.
-    Failed,
+    /// `task_complete` with an error: the refusal it is when the error is
+    /// Codex's usage limit, and the error's words (`message`) where it has any.
+    Failed {
+        refusal: Option<Arc<Quota>>,
+        said: Option<String>,
+    },
     /// `turn_aborted`.
     Cancelled,
 }
@@ -253,6 +264,7 @@ impl Rollout {
                     field(payload, "rate_limits").filter(|limits| js::truthy(Some(limits)))
                 {
                     self.quota = Some(Arc::new(codex_quota(limits).map_err(Stop::Failed)?));
+                    self.name_the_reset();
                 }
             }
             Some("task_started") => {
@@ -262,8 +274,12 @@ impl Rollout {
             }
             Some("task_complete") => {
                 self.latest_turn = named.clone();
-                let end = if js::truthy(field(payload, "error")) {
-                    End::Failed
+                let error = field(payload, "error");
+                let end = if js::truthy(error) {
+                    End::Failed {
+                        refusal: self.refusal(error, &at),
+                        said: Self::error_words(error),
+                    }
                 } else {
                     End::Complete(field(payload, "last_agent_message").cloned())
                 };
@@ -280,6 +296,59 @@ impl Rollout {
             _ => {}
         }
         Ok(())
+    }
+
+    /// The words of a turn's `error`: its `message`, or the error itself where
+    /// it is text. None where it says nothing.
+    fn error_words(error: Option<&Value>) -> Option<String> {
+        let said = match error {
+            Some(Value::String(said)) => said,
+            _ => field(error, "message").and_then(Value::as_str)?,
+        };
+        (!said.trim().is_empty()).then(|| said.to_owned())
+    }
+
+    /// The refusal a turn's `error` is, where it is one of Codex's limits: at the
+    /// time of its record, until the reset the rate limits named, where that
+    /// comes after it (`reset_after`).
+    fn refusal(&self, error: Option<&Value>, at: &Value) -> Option<Arc<Quota>> {
+        let info = field(error, "codex_error_info").and_then(Value::as_str);
+        if !info.is_some_and(|info| LIMITS.contains(&info)) {
+            return None;
+        }
+        let at = at.as_str().and_then(time::parse);
+        Some(Arc::new(Quota::Exhausted {
+            at: at.map(time::iso),
+            resets_at: reset_after(self.quota.as_deref(), at),
+        }))
+    }
+
+    /// Rate limits Codex reports after the turn its limit cut name the reset its
+    /// refusal named none of: the latest turn's refusal takes it, where it comes
+    /// after the refusal.
+    fn name_the_reset(&mut self) {
+        let latest = self.latest_turn.clone();
+        let Some(Turn {
+            end:
+                Some(End::Failed {
+                    refusal: Some(refusal),
+                    ..
+                }),
+            ..
+        }) = self.turns.get_mut(&latest)
+        else {
+            return;
+        };
+        if refusal.resets_at().is_some() {
+            return;
+        }
+        let at = refusal.at().and_then(time::parse);
+        if let Some(resets_at) = reset_after(self.quota.as_deref(), at) {
+            *refusal = Arc::new(Quota::Exhausted {
+                at: at.map(time::iso),
+                resets_at: Some(resets_at),
+            });
+        }
     }
 
     /// The turn a turn's own event names: one that names none fails the
@@ -466,6 +535,23 @@ impl Rollout {
     }
 }
 
+/// The reset the rate limits `quota` names, where that window is spent (low or
+/// exhausted, past 95 percent) and it comes after `at` (ms). Codex names its
+/// fullest window in every snapshot, a weekly one days from its reset and mostly
+/// unspent on this Mac's account: a limit it is not is no wait of a week, and
+/// takes the hour a refusal that names no reset waits (T-96).
+fn reset_after(quota: Option<&Quota>, at: Option<i64>) -> Option<String> {
+    quota
+        .filter(|quota| quota.level() != Level::Ok)
+        .and_then(Quota::resets_at)
+        .filter(|reset| {
+            time::parse(reset)
+                .zip(at)
+                .is_some_and(|(reset, at)| reset > at)
+        })
+        .map(str::to_owned)
+}
+
 impl Parser for Rollout {
     fn visit(&mut self, record: Value, index: usize) -> Result<(), Stop> {
         self.records += 1;
@@ -514,8 +600,20 @@ impl Answer for Rollout {
             .map(|kept| handed_out(&kept.item))
             .collect();
         record.in_flight = in_flight;
-        record.failed = matches!(end, Some((_, End::Failed)));
-        record.quota = self.quota.clone();
+        record.failed = matches!(end, Some((_, End::Failed { .. })));
+        if let Some((_, End::Failed { said, .. })) = end {
+            record.failure.clone_from(said);
+        }
+        record.quota = match end {
+            Some((
+                _,
+                End::Failed {
+                    refusal: Some(refusal),
+                    ..
+                },
+            )) => Some(Arc::clone(refusal)),
+            _ => self.quota.clone(),
+        };
         record.settlement = match end {
             _ if in_flight => Settlement::InFlight,
             // A task_complete whose final answer cannot be matched proves nothing.

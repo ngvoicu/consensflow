@@ -383,6 +383,81 @@ fn a_time_of_a_column_the_store_has_not_is_left_out_as_json_leaves_it() {
 }
 
 #[test]
+fn anthropics_400_for_spent_extra_usage_is_a_refusal_for_quota_that_names_no_reset() {
+    // Anthropic's spent extra usage is a 400 that says so: a refusal for quota
+    // that names no reset (the words of Pi's sessions on this Mac; T-88).
+    let staged = Staged::new();
+    staged.conversation(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 1_790_000_000_000_i64 },
+        "finish": "stop",
+        "error": {
+            "name": "APIError",
+            "data": {
+                "message": "You're out of extra usage. Add more at claude.ai/settings/usage and keep going.",
+                "statusCode": 400,
+            },
+        },
+    }));
+    assert_eq!(
+        read_once(&staged),
+        format!(
+            r#"{{"items":{},"inFlight":false,"asking":false,"failed":true,"quota":{{"state":"exhausted","at":"2026-09-21T14:13:20.000Z","resetsAt":null}},"settlement":"settled"}}"#,
+            conversation_items(false, 1_790_000_000_000)
+        )
+    );
+}
+
+#[test]
+fn a_failed_reply_keeps_the_words_of_its_error() {
+    let failure_of = |reply: &Value| {
+        let staged = Staged::new();
+        staged.conversation(reply);
+        match &*look(&mut staged.reader()) {
+            Reading::Known(record) => (record.failed, record.failure.clone()),
+            Reading::Unknown(reason) => panic!("unknown: {reason}"),
+        }
+    };
+    let said = failure_of(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 9 },
+        "error": { "name": "ProviderModelNotFoundError", "data": { "message": "Model not found: nonesuch/gpt-0" } },
+    }));
+    assert_eq!(
+        said,
+        (true, Some("Model not found: nonesuch/gpt-0".to_owned()))
+    );
+    // No message: what it is, its name and its response's status, and never the
+    // response's body or headers an SDK's error keeps beside them.
+    let named = failure_of(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 9 },
+        "error": {
+            "name": "APIError",
+            "data": {
+                "statusCode": 500,
+                "isRetryable": false,
+                "responseBody": "{\"error\":{\"message\":\"upstream body\"}}",
+                "responseHeaders": { "set-cookie": "session=abc123def456", "x-request-id": "req_1" },
+            },
+        },
+    }));
+    assert_eq!(named, (true, Some("APIError (status 500)".to_owned())));
+    let bare = failure_of(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 9 },
+        "error": { "name": "UnknownError" },
+    }));
+    assert_eq!(bare, (true, Some("UnknownError".to_owned())));
+    let fine = failure_of(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 9 },
+        "finish": "stop",
+    }));
+    assert_eq!(fine, (false, None));
+}
+
+#[test]
 fn the_summary_a_compaction_writes_is_marked_so_and_the_answer_before_it_is_not() {
     // OpenCode 1.19.3 writes a compaction's summary as an assistant's message of its own,
     // `summary: true`, its mode and agent `compaction`, which stops as any reply does

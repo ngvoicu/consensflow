@@ -351,3 +351,28 @@ fn text_is_the_text_blocks_a_line_each_and_a_user_of_white_space_is_no_turn() {
         assert_eq!(!stage.at(0).items.is_empty(), is_a_turn, "{text:?}");
     }
 }
+
+#[test]
+fn a_failed_step_keeps_pis_words_for_it_and_the_next_message_drops_them() {
+    let failed = || failing("a1", &json!("Model gpt-0-nonesuch not found"), &json!(0));
+    let mut stage = Stage::with(&[header(), user("u1", "go"), failed()]);
+    let record = stage.at(0);
+    assert!(record.failed);
+    assert_eq!(
+        record.failure.as_deref(),
+        Some("Model gpt-0-nonesuch not found")
+    );
+    // `provider error` is Node's word for none: Pi said nothing, so neither does the record.
+    let mut silent = Stage::with(&[
+        header(),
+        message(
+            "a1",
+            json!({ "role": "assistant", "stopReason": "error", "content": [] }),
+        ),
+    ]);
+    let record = silent.at(0);
+    assert!(record.failed);
+    assert_eq!(record.failure, None);
+    stage.write(&[header(), user("u1", "go"), failed(), user("u2", "again")]);
+    assert_eq!(stage.at(0).failure, None);
+}

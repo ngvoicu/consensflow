@@ -69,18 +69,20 @@ enum Outcome {
 /// the 23 that name `RESULT_ACCEPTED`, `RESULT_SENT_BACK` or
 /// `DECIDED_BEFORE_PASTED`, which the withdrawal of a decided task's result
 /// moved: Node leaves it queued, and its dispatcher pastes it after the
-/// decision it asked for; and the 7 that name `TAKEN_BEFORE_GIVEN`,
-/// `LEFT_THE_PAUSE`, `WAIT_NOTE_TAKEN` or `GOES_ON`, which the notes of a
-/// task's wait moved: Node leaves one queued when another member takes the
-/// task or it is taken back, and tells its requester nothing when a hold ends;
-/// and the 4 that name `UNREACHED` or say `reached`, which the transcript of a
-/// task that reached no window moved: Node gave it the whole copy of the window
-/// its brief waited for; and the 4 that name `WAITED_FOR`, which the refusal of
-/// a cancel moved: Node cancels a task that open tasks wait for, and they stay
-/// blocked for good; and the one that names `FOLLOW_UP_BEHIND_WORK`, which the
-/// follow-up queued behind a window's work moved: Node refuses it; and the one
-/// that names `REMOVAL_CANCELS_WAITING`, which the removal's cancel of the tasks
-/// waiting for a member moved.
+/// decision it asked for; and the 5 that name `TAKEN_BEFORE_GIVEN`,
+/// `LEFT_THE_PAUSE` or `WAIT_NOTE_TAKEN`, which the notes of a task's wait
+/// moved: Node leaves one queued when another member takes the task or it is
+/// taken back (a hold's end tells the requester nothing here either, as Node's
+/// did: it is told the task goes on once a turn of its window gets through,
+/// T-96, which no recording reaches); and the 4 that name `UNREACHED` or say
+/// `reached`, which the transcript of a task that reached no window moved: Node
+/// gave it the whole copy of the window its brief waited for; and the 4 that
+/// name `WAITED_FOR`, which the refusal of a cancel moved: Node cancels a task
+/// that open tasks wait for, and they stay blocked for good; and the one that
+/// names `FOLLOW_UP_BEHIND_WORK`, which the follow-up queued behind a window's
+/// work moved: Node refuses it; and the one that names
+/// `REMOVAL_CANCELS_WAITING`, which the removal's cancel of the tasks waiting
+/// for a member moved.
 /// Departed traces that Node's suite recorded only off Windows: the test
 /// that wrote `home-copies-004` was skipped there, as Windows holds an open
 /// ledger's files. Elsewhere each must be there.
@@ -97,8 +99,6 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-dispatcher-058", 78, LEFT_THE_PAUSE),
     ("core-dispatcher-060", 236, WAIT_NOTE_TAKEN),
     ("core-dispatcher-065", 147, KEPT_IN_BRIEF),
-    ("core-dispatcher-067", 129, GOES_ON),
-    ("core-dispatcher-071", 157, GOES_ON),
     ("core-dispatcher-074", 294, "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn (`task`), where Node leaves it queued"),
     ("core-dispatcher-081", 91, DECIDED_BEFORE_PASTED),
     ("core-dispatcher-089", 95, DECIDED_BEFORE_PASTED),
@@ -209,9 +209,6 @@ const TAKEN_BEFORE_GIVEN: &str =
 /// A release leaves the wait a task was in: what its requester was told of it goes.
 const LEFT_THE_PAUSE: &str =
     "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`cancelled`, with the reason `T-1 was taken back`), where Node leaves it `queued`";
-/// A requester who was given the note that a task is held is told when it goes on.
-const GOES_ON: &str =
-    "the daemon resumes T-1, and its requester, who was given the note that T-1 waits, is told it goes on (`T-1 goes on: its account has quota again.`), a note more and the clock read for it, where Node tells it nothing";
 /// The door's poll is a write now, `claim_answer`; `answerTo`, its read, went.
 const DOOR_READ: &str =
     "the door's read `answerTo` is gone: a poll claims the answer with `claim_answer`";

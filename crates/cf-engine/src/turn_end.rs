@@ -54,6 +54,7 @@
 //! what an earlier one left, and no later task is given an earlier task's words.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_base::{js, time};
@@ -218,14 +219,16 @@ pub(crate) enum Watching {
 impl Dispatcher {
     /// A worker's turn, looked at: whether it is over with an answer to its task's latest
     /// message, and what that comes to ([`Turn`]). A turn that failed is its task's
-    /// failure, whatever it left running; one that ended with its answer and nothing
+    /// failure, whatever it left running, with why ([`Dispatcher::why_it_failed`]); one
+    /// that failed while its task was not working is told whoever gave the task, once
+    /// ([`Dispatcher::tell_failed_turn`]). One that ended with its answer and nothing
     /// pending is its result, recorded now, before anything else is asked of anyone: what
     /// follows (a close, its note) can no longer lose it.
-    pub(crate) fn collect(
+    pub(crate) async fn collect(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
-        record: &Record,
+        record: &Rc<Record>,
         observed: &Observed,
         watching: Watching,
     ) -> Result<Turn, EngineError> {
@@ -236,6 +239,10 @@ impl Dispatcher {
             .active_task(participant.id, false)?;
         let Some(thread) = task.filter(|thread| thread.task.state == "working") else {
             record.held.borrow_mut().drop_hold();
+            if observed.failed {
+                self.tell_failed_turn(project, participant, record, observed)
+                    .await?;
+            }
             self.tell_paused_answer(project, participant, observed, watching)?;
             return Ok(Turn::Open);
         };
@@ -244,8 +251,22 @@ impl Dispatcher {
             return Ok(Turn::Open);
         };
         if observed.failed {
-            let because = format!("@{}'s harness reported a failure", participant.handle);
-            self.fail_task(project, &thread.task, &because)?;
+            // A failed turn holds its task for nothing it left (T-532's P3-3).
+            record.held.borrow_mut().reset();
+            let because = self
+                .why_it_failed(participant, record, observed)
+                .await?
+                .said;
+            // The task may have moved on while the window was looked at.
+            let still = self
+                .seams
+                .ledger
+                .borrow()
+                .active_task(participant.id, false)?
+                .is_some_and(|now| now.task.id == thread.task.id && now.task.state == "working");
+            if still && !self.forgotten(record) {
+                self.fail_task(project, &thread.task, &because)?;
+            }
             return Ok(Turn::Open);
         }
         if !observed.settled {

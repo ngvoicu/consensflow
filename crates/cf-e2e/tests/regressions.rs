@@ -40,6 +40,8 @@ mod a_command_that_never_exits_held_a_workers_result;
 mod a_compact_typed_into_an_idle_chief_held_a_workers_result;
 #[path = "regressions/a_compaction_written_beside_an_answer_tore_its_line.rs"]
 mod a_compaction_written_beside_an_answer_tore_its_line;
+#[path = "regressions/a_failure_said_no_reason.rs"]
+mod a_failure_said_no_reason;
 #[path = "regressions/a_final_answer_written_in_a_tells_turn_reached_nobody.rs"]
 mod a_final_answer_written_in_a_tells_turn_reached_nobody;
 #[path = "regressions/a_follow_up_after_a_restart_lost_its_windows_conversation.rs"]
@@ -52,6 +54,8 @@ mod a_job_that_still_ran_was_taken_for_ended;
 mod a_paste_devin_held_pasted_again_after_a_switch_and_a_restart;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
 mod a_pause_a_hung_worker_ignored_stranded_its_task;
+#[path = "regressions/a_quota_wait_ended_failed.rs"]
+mod a_quota_wait_ended_failed;
 #[path = "regressions/a_result_delivered_twice_to_a_devin_chief.rs"]
 mod a_result_delivered_twice_to_a_devin_chief;
 #[path = "regressions/a_result_pasted_again_after_its_window_went.rs"]
@@ -72,6 +76,8 @@ mod a_trust_question_after_git_init_stopped_every_launch;
 mod a_worker_that_waited_on_its_run_with_monitor_lost_it;
 #[path = "regressions/a_workers_still_going_was_given_as_its_result.rs"]
 mod a_workers_still_going_was_given_as_its_result;
+#[path = "regressions/claude_continues_by_itself_after_its_limit.rs"]
+mod claude_continues_by_itself_after_its_limit;
 // The stand-in's status line is a `bash`.
 #[cfg(unix)]
 #[path = "regressions/claude_status_line_taken_for_background_work.rs"]
@@ -101,6 +107,8 @@ mod idle_compaction_read_as_a_cut_turn;
 mod mcp_servers_held_a_workers_result;
 #[path = "regressions/opencode_updated_itself_to_2.rs"]
 mod opencode_updated_itself_to_2;
+#[path = "regressions/results_stay_queued_after_a_quota_pause.rs"]
+mod results_stay_queued_after_a_quota_pause;
 #[path = "regressions/results_that_began_with_the_workers_progress.rs"]
 mod results_that_began_with_the_workers_progress;
 #[path = "regressions/resume_of_a_chief_with_no_turn.rs"]

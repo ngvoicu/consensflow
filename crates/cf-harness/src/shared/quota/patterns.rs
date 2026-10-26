@@ -33,6 +33,10 @@ pub(super) static AT: LazyLock<Regex> = LazyLock::new(|| {
 pub(super) static REFUSED: LazyLock<Regex> =
     LazyLock::new(|| compile(r"^(?:[^(:\n]*\()?([0-9]{3})(?-u:\b)"));
 
+/// `/out of extra usage/i`: Anthropic's refusal of a subscription whose extra
+/// usage is spent, which it sends as a 400 (Pi's sessions, 2026-10).
+pub(super) static SPENT: LazyLock<Regex> = LazyLock::new(|| compile(r"(?i-u:out of extra usage)"));
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -42,5 +46,6 @@ mod tests {
         for pattern in [&SPAN, &UNIT, &AT, &REFUSED] {
             assert!(pattern.captures_len() > 1, "{}", pattern.as_str());
         }
+        assert!(SPENT.is_match("You're OUT of extra usage."));
     }
 }

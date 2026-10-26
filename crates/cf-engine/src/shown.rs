@@ -31,15 +31,23 @@
 //! that opens on its conversation opens beside it, which the words warn of.
 
 pub(crate) mod mask;
+mod ours;
 mod secret;
 #[cfg(test)]
 mod tests;
 
+use std::sync::LazyLock;
+
 use cf_ledger::MAY_STILL_RUN;
 use cf_proto::panes::{BackgroundProcess, PaneExit, SnapshotTail};
+use regex::Regex;
 use serde_json::Value;
 
 use mask::mask;
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use ours::ours;
+pub(crate) use ours::Paste;
+use ours::{owners, Owner};
 use secret::names_a_secret;
 
 /// The most lines of a screen a note quotes: the last ones.
@@ -65,6 +73,8 @@ pub struct Shown {
     /// The window's program, where the host could not prove it gone (0 where its
     /// number was not known): it may still run.
     survivor: Option<u32>,
+    /// Lines of the screen were ConsensFlow's own and are left out ([`Shown::without_pastes`]).
+    pasted: bool,
 }
 
 impl Shown {
@@ -76,6 +86,7 @@ impl Shown {
             tail: exit.tail,
             background: exit.background,
             survivor: exit.survivor,
+            pasted: false,
         }
     }
 
@@ -110,6 +121,51 @@ impl Shown {
             tail,
             ..Self::default()
         }
+    }
+
+    /// The window's screen without what ConsensFlow itself typed into it, of
+    /// the `pastes` it typed ([`owners`]): those lines are no reason of the window's.
+    /// Where the newest paste's run is in view, only the window's lines after it
+    /// are kept: they are what the window printed since the message its failed
+    /// turn was on.
+    ///
+    /// Known limits (Calliope's re-check T-305):
+    /// - P3-3: a newest paste the window shows as a placeholder has no run, so the
+    ///   whole tail is read, older errors and all (no harness showed one after
+    ///   sending, T-298);
+    /// - P3-5: a window line that begins with the newest paste's header (a model
+    ///   echoing it at a line's start) becomes the cut, and hides what is above it;
+    /// - P3-1, filed as its own task: a paste still on its way (the harness queued
+    ///   it in the failing turn) is the newest and becomes the cut; the cut is to be
+    ///   bounded by the newest paste the window was given;
+    /// - P3-2, filed as its own task: the pastes are ordered by id, which is not the
+    ///   order a member's window took them in (a task's brief waits while the window
+    ///   holds a task, and a later note goes first).
+    pub(crate) fn without_pastes(mut self, pastes: &[Paste]) -> Self {
+        if let Some(tail) = self.tail.as_mut() {
+            let owners = owners(tail, pastes);
+            // What the window printed since the newest paste, where its run is in
+            // view: older pastes and the failures told of before it are not this
+            // turn's (Calliope's re-check T-300; the chief's decision, T-304).
+            let since = owners.iter().rposition(|owner| *owner == Owner::Paste(0));
+            let before = tail.len();
+            let mut at = 0;
+            tail.retain(|_| {
+                let kept = owners[at] == Owner::Window && since.is_none_or(|end| at > end);
+                at += 1;
+                kept
+            });
+            self.pasted = tail.len() < before;
+        }
+        self
+    }
+
+    /// What the screen says of a failure, to tell one outage from the next
+    /// ([`outage_key`]): its last lines with a word in them.
+    pub(crate) fn outage_key(&self) -> String {
+        self.tail
+            .as_deref()
+            .map_or_else(String::new, |tail| outage_key(tail, Keep::Last))
     }
 
     /// The last lines of the screen the host sent: none where it sent none.
@@ -160,15 +216,10 @@ impl Shown {
             said.push_str("; its last screen lines named a secret, so they are left out");
             return said;
         }
-        match Quote::of(tail) {
+        match Quote::of(tail, Keep::Last) {
+            None if self.pasted => said.push_str("; its screen showed nothing of its own"),
             None => said.push_str("; its screen was empty"),
-            Some(quote) => {
-                said.push_str(&format!("; its screen ended with: \"{}\"", quote.text));
-                if quote.masked > 0 {
-                    let (count, strings) = (quote.masked, plural(quote.masked));
-                    said.push_str(&format!(" ({count} key- or token-like {strings} masked)"));
-                }
-            }
+            Some(quote) => said.push_str(&quote.after("; its screen ended with")),
         }
         said
     }
@@ -187,6 +238,134 @@ impl Shown {
     }
 }
 
+/// `because`, and after it what a harness said of it in its own record (an
+/// API's error, a provider's message): `@zeus's harness reported a failure; it
+/// said: "Selected model is at capacity."`. Its words are held to a quote's
+/// bounds, from their first line, which is an error's headline: they go to the
+/// board, the chief's window and the log. What looks like a key, a token or an
+/// email address is masked in them, and they are quoted whatever secret they
+/// name: an API's or an SDK's error names the key it lacks ("No API key found")
+/// and never holds one in prose, and the login class is the failure whose fix
+/// the note must say (the chief's decision of 2026-10-21, T-135). A screen can
+/// echo anything, and keeps the stricter rule ([`Shown::after_with`]). None where
+/// no line of the words has a letter or a digit.
+pub(crate) fn after_words(because: &str, words: &str) -> Option<String> {
+    let lines: Vec<String> = words.lines().map(str::to_owned).collect();
+    Quote::of(&lines, Keep::First).map(|quote| format!("{because}{}", quote.after("; it said")))
+}
+
+/// What a harness's `words` say of a failure, to tell one outage from the next
+/// ([`outage_key`]): their first lines with a word in them.
+pub(crate) fn words_key(words: &str) -> String {
+    let lines: Vec<String> = words.lines().map(str::to_owned).collect();
+    outage_key(&lines, Keep::First)
+}
+
+/// The lines a quote of `lines` would keep, their blanks made one and what
+/// changes by itself within one outage folded ([`folded`]).
+fn outage_key(lines: &[String], keep: Keep) -> String {
+    let lines: Vec<String> = lines
+        .iter()
+        .filter(|line| line.chars().any(char::is_alphanumeric))
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    let chosen: Vec<&str> = match keep {
+        Keep::Last => lines
+            .iter()
+            .rev()
+            .take(QUOTE_LINES)
+            .rev()
+            .map(String::as_str)
+            .collect(),
+        Keep::First => lines.iter().take(QUOTE_LINES).map(String::as_str).collect(),
+    };
+    folded(&chosen.join("\n"))
+}
+
+/// What changes by itself from one turn of an outage to the next, each with
+/// what it is folded to: a UUID, an id-like token (a run of 16 letters and
+/// digits or more with no separator, a digit among them: a request's id, a
+/// completion's), a clock time, and a duration (a number joined to a unit of
+/// time: a retry-after, a countdown). Every other number is the failure's own:
+/// `gpt-5` is not `gpt-6`, a 500 is not a 502, and a model's id, its parts
+/// joined by `-` (`claude-sonnet-5-5`, a dated one, `gpt-5-codex-high`), or a
+/// code's joined by `_` (`ERR_HTTP2_GOAWAY_SESSION`) is no id (the chief's
+/// decisions of 2026-10-22, T-286 and T-298).
+///
+/// A footer's counters, which a harness redraws each turn, fold too: a share
+/// (`12%` of a context left), an amount of money (`$0.03`), and a count written
+/// short or with thousands (`1.2k`, `12,345` tokens), but no count that ends a
+/// model's id (`gpt-4-32k`, `o3-mini-2k`) and no list of numbers (`500,502,503`):
+/// a thousands count only before a count's unit, a short one only where no `-`
+/// joins it to what comes before. Claude Code, Codex, Pi and
+/// OpenCode each draw some of them below the conversation; the probe of T-298
+/// recorded counts of the brief's lines only, so which line holds which is not
+/// shown there.
+///
+/// Known limit (Calliope's re-check T-300, P3-R6): a UUID joined to a word by
+/// `_` (`session_123e4567-…`) is not folded, as no word boundary holds between
+/// `_` and its first digit.
+static CHANGING: LazyLock<[(Regex, &str); 7]> = LazyLock::new(|| {
+    [
+        (
+            pattern(
+                r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
+            ),
+            "#id",
+        ),
+        (pattern(r"[A-Za-z0-9]{16,}"), "#id"),
+        (pattern(r"\$\d+(?:\.\d+)?"), "#money"),
+        (pattern(r"\b\d+(?:\.\d+)?%"), "#share"),
+        (
+            pattern(
+                r"\b(\d{1,3}(?:,\d{3})+)\s+(?:tokens?|chars?|characters|words?|lines?|bytes?)\b|(?:^|[^\w-])(\d+(?:\.\d+)?[kKM])\b",
+            ),
+            "#count",
+        ),
+        (pattern(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"), "#time"),
+        (
+            pattern(
+                r"(?i)\b\d+(?:\.\d+)?\s?(?:ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)\b",
+            ),
+            "#duration",
+        ),
+    ]
+});
+
+/// The patterns are constants of this file, and a test folds with each.
+#[allow(clippy::expect_used)]
+fn pattern(source: &str) -> Regex {
+    Regex::new(source).expect("a pattern of the outage key")
+}
+
+/// `text` with what changes by itself within one outage folded.
+fn folded(text: &str) -> String {
+    let mut text = text.to_owned();
+    for (at, (changing, to)) in CHANGING.iter().enumerate() {
+        text = changing
+            .replace_all(&text, |found: &regex::Captures<'_>| {
+                let whole = found.get(0).map_or("", |whole| whole.as_str());
+                // An id is one only with a digit in it: a long word is a word.
+                if at == 1 && !whole.chars().any(|c| c.is_ascii_digit()) {
+                    return whole.to_owned();
+                }
+                // A pattern that names what changes in a group of its own folds that
+                // alone, and keeps what it was told apart by.
+                let start = found.get(0).map_or(0, |whole| whole.start());
+                match (1..found.len()).find_map(|group| found.get(group)) {
+                    Some(part) => format!(
+                        "{}{to}{}",
+                        &whole[..part.start() - start],
+                        &whole[part.end() - start..]
+                    ),
+                    None => (*to).to_owned(),
+                }
+            })
+            .into_owned();
+    }
+    text
+}
+
 fn plural(count: usize) -> &'static str {
     if count == 1 {
         "string"
@@ -195,7 +374,8 @@ fn plural(count: usize) -> &'static str {
     }
 }
 
-/// The words of a screen's last lines, held to the quote's bounds.
+/// The words of a screen's last lines, or a harness's first, held to the
+/// quote's bounds.
 struct Quote {
     text: String,
     /// How many secrets were hidden in the lines that were kept.
@@ -203,26 +383,41 @@ struct Quote {
 }
 
 impl Quote {
-    /// The quote of `tail`: none where no line has a word in it. The last
-    /// lines come first: each has its blanks made one, its secrets hidden and
-    /// its quotation marks made apostrophes (a quote is not to end where the
-    /// screen's text says it does), and they are kept while they fit.
-    fn of(tail: &[String]) -> Option<Self> {
-        let lines: Vec<String> = tail
+    /// The quote after `label`, and how many strings it hid.
+    fn after(&self, label: &str) -> String {
+        let mut said = format!("{label}: \"{}\"", self.text);
+        if self.masked > 0 {
+            let (count, strings) = (self.masked, plural(self.masked));
+            said.push_str(&format!(" ({count} key- or token-like {strings} masked)"));
+        }
+        said
+    }
+
+    /// The quote of `lines`: none where no line has a word in it. A line of no
+    /// letter or digit is a screen's chrome (a box's edge, a footer's rule) and
+    /// is no line of it. The lines `keep` says come first, the last of a screen
+    /// or the first of a harness's words: each has its blanks made one, its
+    /// secrets hidden and its quotation marks made apostrophes (a quote is not to
+    /// end where the text says it does), and they are kept while they fit.
+    fn of(lines: &[String], keep: Keep) -> Option<Self> {
+        let lines: Vec<String> = lines
             .iter()
+            .filter(|line| line.chars().any(char::is_alphanumeric))
             .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
-            .filter(|line| !line.is_empty())
             .collect();
-        let last = &lines[lines.len().saturating_sub(QUOTE_LINES)..];
+        let chosen: Vec<&String> = match keep {
+            Keep::Last => lines.iter().rev().take(QUOTE_LINES).collect(),
+            Keep::First => lines.iter().take(QUOTE_LINES).collect(),
+        };
         let mut kept: Vec<String> = Vec::new();
         let (mut masked, mut used) = (0, 0);
-        for line in last.iter().rev() {
+        for line in chosen {
             let hidden = mask(line);
             let text = hidden.text.replace('"', "'");
             let between = if kept.is_empty() { 0 } else { BETWEEN.len() };
             let length = text.chars().count();
             if used + between + length > QUOTE_CHARS {
-                // Only the last line may be cut; an older one that does not fit is left out.
+                // Only the line kept first may be cut; one after it that does not fit is left out.
                 if kept.is_empty() {
                     kept.push(cut(&text, QUOTE_CHARS));
                     masked += hidden.count;
@@ -233,12 +428,22 @@ impl Quote {
             masked += hidden.count;
             kept.push(text);
         }
-        kept.reverse();
+        if keep == Keep::Last {
+            kept.reverse();
+        }
         (!kept.is_empty()).then(|| Self {
             text: kept.join(BETWEEN),
             masked,
         })
     }
+}
+
+/// Which lines a quote keeps when not all fit: a screen's last, where it said
+/// what it said last; a harness's first, where an error says what it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Keep {
+    First,
+    Last,
 }
 
 /// The first characters of `text` that, with the mark that says it was cut,

@@ -207,3 +207,19 @@ runs = ["ledger-replay"]
 file = "crates/cf-ledger/tests/replay.rs"
 find = '("core-dispatcher-042", 72, '
 replace = '("core-dispatcher-042", 73, '
+
+# 3.0.6-alpha.3's integration B (T-664): failure-reasons' `go_on_in_window` (a task held for quota whose
+# window went on by itself) leaves its wait with tell-then-done's `Afterwards::MovesOn`, so a kept answer of
+# its window is said in the words of a task that moved on, as a resume's is.
+
+[[plant]]
+name = "pause notes: a held task whose window went on by itself keeps its window's answer as if still paused"
+meant = "a_held_tasks_window_that_goes_on_by_itself_keeps_its_answer_in_words_true_of_a_task_that_moved_on"
+runs = ["pause-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''                    "its window went on by itself",
+                    Afterwards::MovesOn,'''
+replace = '''                    "its window went on by itself",
+                    Afterwards::StaysPaused,'''

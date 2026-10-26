@@ -21,6 +21,7 @@ use super::jobs::Watch;
 use super::patterns::OUTPUT;
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
+use crate::shared::quota::spent_extra_usage;
 use crate::shared::record::reading::Source;
 
 /// What Claude Code says, in a message of its own, as it closes the turn it
@@ -91,7 +92,8 @@ pub(super) struct Assistant {
     pub(super) closes_a_cut_turn: bool,
     /// The API refused the request (`isApiErrorMessage`).
     pub(super) refused: bool,
-    /// A refusal for quota: a status of 429, or the error `rate_limit`.
+    /// A refusal for quota: a status of 429, the error `rate_limit`, or words
+    /// that say the account's extra usage is spent.
     pub(super) rate_limited: bool,
 }
 
@@ -309,6 +311,8 @@ fn assistant(record: &Value, session: &str) -> Projected {
     let status = record.get("apiErrorStatus").and_then(Value::as_f64);
     let text = claude_text(content);
     let refused = record.get("isApiErrorMessage") == Some(&Value::Bool(true));
+    // Anthropic's spent extra usage is a 400 (`invalid_request`), its words the refusal.
+    let spent = spent_extra_usage(&text);
     // Claude Code writes it with the next message of a turn it was cut in
     // (T-442's record, 2.1.296; `quit-before-a-word-resumed.jsonl`), and still
     // does in 2.1.305, the newest seen (2026-10-21). A refusal for quota may
@@ -329,7 +333,8 @@ fn assistant(record: &Value, session: &str) -> Projected {
         closes_a_cut_turn,
         refused,
         rate_limited: status == Some(429.0)
-            || record.get("error").and_then(Value::as_str) == Some("rate_limit"),
+            || record.get("error").and_then(Value::as_str) == Some("rate_limit")
+            || spent,
     }))
 }
 

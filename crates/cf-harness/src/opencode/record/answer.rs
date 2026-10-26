@@ -15,7 +15,7 @@ use jiff::tz::TimeZone;
 use serde_json::Value;
 
 use super::read::{optional, property, Read, Stored};
-use crate::shared::quota::{exhausted_quota, quota_status};
+use crate::shared::quota::{exhausted_quota, quota_status, refused_for_quota};
 use crate::shared::record::key::{Key, Keys};
 use crate::shared::record::reading::{visible_text, Item, Record, Role, Settlement};
 use crate::shared::record::sort::sort;
@@ -89,6 +89,7 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
             Some("user") => {
                 open_tools.clear();
                 record.failed = false;
+                record.failure = None;
                 if !js::trim(&text).is_empty() {
                     items.push(Placed {
                         item: item(row, Role::User, text, true, at)?,
@@ -103,6 +104,7 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
             _ => continue,
         }
         record.failed = false;
+        record.failure = None;
         for (part_row, part) in parts {
             if part.get("type").and_then(Value::as_str) != Some("tool") {
                 continue;
@@ -164,10 +166,13 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
                 Some(said) => js::string(Some(said))?.into_owned(),
                 None => visible_text(error),
             };
-            if quota_status(js::to_number(optional(data, "statusCode"))?) {
+            if quota_status(js::to_number(optional(data, "statusCode"))?)
+                || refused_for_quota(&failure)
+            {
                 let at_ms = js::to_number(completed_at)?;
                 record.quota = Some(Arc::new(exhausted_quota(&failure, at_ms, local)?));
             }
+            record.failure = error_words(error);
         }
         closed = closes_turn;
         turn_open = !closes_turn;
@@ -321,5 +326,37 @@ fn ordering(order: Ordering) -> f64 {
         Ordering::Less => -1.0,
         Ordering::Equal => 0.0,
         Ordering::Greater => 1.0,
+    }
+}
+
+/// The words of a failed reply's `error`, as its note says them: its message,
+/// else what it is (its name, and the status of the response it came of). Never
+/// the rest of the error: an SDK's error keeps the response's body and headers
+/// beside them, which are no reason and can say too much.
+fn error_words(error: Option<&Value>) -> Option<String> {
+    let text = |value: Option<&Value>| {
+        value
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|said| !said.is_empty())
+            .map(str::to_owned)
+    };
+    let data = optional(error, "data");
+    if let Some(message) =
+        text(optional(data, "message")).or_else(|| text(optional(error, "message")))
+    {
+        return Some(message);
+    }
+    let status = optional(data, "statusCode")
+        .filter(|status| status.is_number() || status.is_string())
+        .map(|status| match status {
+            Value::String(status) => status.clone(),
+            other => other.to_string(),
+        });
+    match (text(optional(error, "name")), status) {
+        (Some(name), Some(status)) => Some(format!("{name} (status {status})")),
+        (Some(name), None) => Some(name),
+        (None, Some(status)) => Some(format!("status {status}")),
+        (None, None) => None,
     }
 }

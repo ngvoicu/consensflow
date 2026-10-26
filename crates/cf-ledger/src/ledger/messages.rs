@@ -16,6 +16,8 @@ impl Ledger {
 
     /// A note from a participant, or from ConsensFlow itself.
     pub fn note(&mut self, project_id: i64, note: &NewNote) -> Result<MessageView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("note", None)?;
         messages::note(&mut self.store, project_id, note)
     }
 
@@ -231,6 +233,29 @@ impl Ledger {
         task_id: i64,
     ) -> Result<Option<MessageView>, LedgerError> {
         messages::last_pasted(&self.store, participant_id, task_id)
+    }
+
+    /// The id of the newest message a participant's window was given and its
+    /// record showed (`delivered` or `read`).
+    pub fn last_given(&self, participant_id: i64) -> Result<Option<i64>, LedgerError> {
+        messages::last_given(&self.store, participant_id)
+    }
+
+    /// The `limit` messages last pasted into a participant's window, newest first,
+    /// each with the rows its paste carried.
+    pub fn last_pastes(&self, participant_id: i64, limit: i64) -> Result<Vec<Begun>, LedgerError> {
+        messages::last_pastes(&self.store, participant_id, limit)
+    }
+
+    /// The id of the newest note the engine wrote `recipient_id` after the
+    /// message `after` whose words hold `words`.
+    pub fn note_since(
+        &self,
+        recipient_id: i64,
+        after: i64,
+        words: &str,
+    ) -> Result<Option<i64>, LedgerError> {
+        messages::note_since(&self.store, recipient_id, after, words)
     }
 
     /// The receipt of a delivered message is forgotten, as Node's ledger left one

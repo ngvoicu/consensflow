@@ -396,6 +396,14 @@ impl World {
             .expect("resumed by the daemon")
     }
 
+    /// The window of the task the daemon resumed got a turn through: its
+    /// requester, told it waits, is told it goes on.
+    pub fn went_on(&mut self, number: i64) {
+        self.ledger
+            .tell_it_goes_on(self.project, number)
+            .expect("told it goes on");
+    }
+
     pub fn message(&self, id: i64) -> MessageView {
         self.ledger
             .message(id)

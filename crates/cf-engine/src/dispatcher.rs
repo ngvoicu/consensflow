@@ -42,7 +42,7 @@ use crate::chief_switch::SwitchTo;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
-use crate::scheduler::SchedulerState;
+use crate::scheduler::{News, SchedulerState};
 use crate::seams::{EngineError, Seams};
 use crate::shown::Shown;
 use crate::stalls::StallsState;
@@ -419,6 +419,7 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .mark_back(member.id, "by @human")?;
+        self.back_on_its_account(project, &member, &News::Human)?;
         self.changed();
         Ok(back)
     }
@@ -1125,18 +1126,29 @@ impl Dispatcher {
         self.record_quota(record, &owner, observed.quota.clone());
         if self.refused_here(record, &owner) {
             return self
-                .out_of_quota(project, participant, record, &owner)
+                .out_of_quota(project, participant, record, &owner, &observed)
                 .await;
         }
         let mut out = self.is_out(&owner);
+        let mut returned = None;
         // A window that got a turn through after its member was marked out says the quota is back.
         if out && self.answered_since(&owner, &observed) {
             self.seams
                 .ledger
                 .borrow_mut()
                 .mark_back(owner.id, &format!("@{} answered again", participant.handle))?;
+            returned.clone_from(&owner.out_until);
             self.changed();
             out = false;
+        }
+        // A turn that got through is its account's news: whoever else is out on it is back.
+        if !out {
+            let news = News::Turn {
+                record,
+                observed: &observed,
+                returned,
+            };
+            self.back_on_its_account(project.id, &owner, &news)?;
         }
         if out {
             return self
@@ -1155,11 +1167,17 @@ impl Dispatcher {
         if record.window.borrow().retiring {
             return Ok(());
         }
+        // A turn that ended with the window's answer ends the outage its last failure told of.
+        self.answered_again(record, &observed);
         if participant.role != "chief" {
             returning(self.settle_stop(project, participant, record, &observed, starting)).await?;
             if self.forgotten(record) {
                 return Ok(());
             }
+            // A held task's window that went on with it by itself: its task goes on.
+            self.went_on_by_itself(project, participant, &observed)?;
+            // A task the daemon resumed whose turn got through: its requester hears it goes on.
+            self.tell_it_went_on(project, participant, record, &observed)?;
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
             if self.cut_short(&observed) {
                 self.go_on(project, participant)?;
@@ -1168,11 +1186,16 @@ impl Dispatcher {
                 // left work running that wakes its agent: then the task goes on. Nothing the
                 // turn left is ended; the window closes below if it is free (`turn_end`).
                 let watching = self.watch_monitors(participant, record, &observed).await;
-                self.collect(project, participant, record, &observed, watching)?;
+                self.collect(project, participant, record, &observed, watching)
+                    .await?;
             }
             if self.close_if_free(record).await? {
                 return Ok(());
             }
+        } else if observed.failed && !self.cut_short(&observed) {
+            // A refusal for quota is the quota's to say; any other failure is the human's to hear.
+            self.tell_chief_failed(project, participant, record, &observed)
+                .await?;
         }
         let free = record.delivery.borrow().delivering.is_none()
             && observed.settled
@@ -1247,6 +1270,14 @@ impl Dispatcher {
             record,
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
         )?;
+        // A refusal of its own, dated before its member was marked out, holds the
+        // window's work as the first did, with no note of its own.
+        if participant.role != "chief" && self.refused_unhandled(record) {
+            self.handled(record);
+            self.hold_work(project, participant, owner, &until, None)?;
+            self.changed();
+        }
+        self.tell_what_waits(project, participant, record, owner)?;
         // The time a launch waits while its member is out is no slowness of its
         // window: the role it was to say first is told when the quota is back.
         if let Some(prelude) = record.delivery.borrow_mut().prelude.as_mut() {
@@ -1311,16 +1342,21 @@ impl Dispatcher {
     }
 
     /// A window whose harness just refused it: its member is out until the
-    /// reset; what the window was receiving is queued again, its work goes
-    /// back to the board or waits with it.
+    /// reset; what the window was receiving arrived if its record shows it
+    /// (the refusal answered it), else it is queued again with its attempt,
+    /// and its work waits with it.
     async fn out_of_quota(
         self: &Rc<Self>,
         project: &ProjectView,
         participant: &ParticipantView,
         record: &Rc<Record>,
         owner: &ParticipantView,
+        observed: &Observed,
     ) -> Result<(), EngineError> {
         self.handled(record);
+        // A refused turn leaves nothing running that wakes its agent: its task waits for
+        // the quota now, not for a job of an earlier turn (`turn_end`).
+        record.held.borrow_mut().reset();
         let reported = record.quota.borrow().reported.clone();
         let reset = self.reset_of(reported.as_deref());
         let marked = self
@@ -1333,11 +1369,13 @@ impl Dispatcher {
             record,
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
         )?;
+        self.confirm_arrival(record, observed)?;
         let delivering = record.delivery.borrow_mut().delivering.take();
         if let Some(delivering) = delivering {
-            self.settle_failure(delivering, "the harness ran out of quota", true)?;
+            self.give_back(delivering.message, "the harness ran out of quota")?;
         }
-        self.hold_or_release(project, participant, owner, &until)?;
+        let refused_at = self.refused_at(reported.as_deref());
+        self.hold_work(project, participant, owner, &until, Some(refused_at))?;
         if participant.role != "chief" {
             self.close_if_free(record).await?;
         }

@@ -150,6 +150,72 @@ pub(crate) fn last_pasted(
     .next())
 }
 
+/// The newest message a participant's window was given and its record showed
+/// (`delivered`, or `read` since): none where it was given none. One still on
+/// its way (`delivering`) is not given yet.
+pub(crate) fn last_given(store: &Store, participant_id: i64) -> Result<Option<i64>, LedgerError> {
+    Ok(store.db.query_row(
+        "SELECT MAX(id) FROM message WHERE recipient_id = ? AND state IN ('delivered', 'read')",
+        [participant_id],
+        |row| row.get(0),
+    )?)
+}
+
+/// The `limit` messages last pasted into a participant's window, newest first,
+/// each with the rows its paste carried: what its screen can show of
+/// ConsensFlow's own. A message on its way is pasted already (its record may
+/// show it later); one still queued is not. Known limit (P3-2 of Calliope's
+/// re-check T-305, filed as its own task): newest by id, which is not the order a
+/// member's window took them in. The rows a paste carried stay
+/// `queued` while it is on its way (`begin_delivery` moves the carrier alone),
+/// and were typed with it all the same.
+pub(crate) fn last_pastes(
+    store: &Store,
+    participant_id: i64,
+    limit: i64,
+) -> Result<Vec<Begun>, LedgerError> {
+    let pasted = messages(
+        store,
+        &format!(
+            "{MESSAGE_SELECT} WHERE m.recipient_id = ?
+         AND m.state IN ('delivering', 'delivered', 'read') AND m.carried_by IS NULL
+       ORDER BY m.id DESC LIMIT ?"
+        ),
+        params![participant_id, limit],
+    )?;
+    pasted
+        .into_iter()
+        .map(|message| {
+            let carried = messages(
+                store,
+                &format!(
+                    "{MESSAGE_SELECT} WHERE m.recipient_id = ?
+                 AND m.state IN ('queued', 'delivering', 'delivered', 'read') AND m.carried_by = ?
+               ORDER BY m.id"
+                ),
+                params![participant_id, message.id],
+            )?;
+            Ok(Begun { message, carried })
+        })
+        .collect()
+}
+
+/// The newest note the engine wrote a participant after the message `after`
+/// whose words hold `words`, of whatever state.
+pub(crate) fn note_since(
+    store: &Store,
+    recipient_id: i64,
+    after: i64,
+    words: &str,
+) -> Result<Option<i64>, LedgerError> {
+    Ok(store.db.query_row(
+        "SELECT MAX(id) FROM message WHERE recipient_id = ? AND id > ? AND kind = 'note'
+       AND sender_id IS NULL AND instr(body, ?) > 0",
+        params![recipient_id, after, words],
+        |row| row.get(0),
+    )?)
+}
+
 /// The first task message a participant's window received about a task that
 /// was pasted on its own (the brief, most often), with what its paste
 /// carried. A window that starts afresh on the task begins from it.

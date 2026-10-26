@@ -162,7 +162,8 @@ struct Transcript {
     terminal: Option<Terminal>,
     /// The native id of the message the latest assistant record belongs to.
     active_assistant: Option<Arc<str>>,
-    failed: bool,
+    /// The latest turn failed: the API refused it, in these words.
+    failure: Option<String>,
     quota: Option<Arc<Quota>>,
     /// The records visited.
     count: usize,
@@ -233,7 +234,7 @@ impl Transcript {
             candidate: None,
             terminal: None,
             active_assistant: None,
-            failed: false,
+            failure: None,
             quota: None,
             count: 0,
             ancestry: Ancestry::default(),
@@ -369,7 +370,8 @@ impl Answer for Transcript {
         let mut record = Record::new();
         record.items = self.items.sorted()?;
         record.in_flight = settlement == Settlement::InFlight;
-        record.failed = self.failed;
+        record.failed = self.failure.is_some();
+        record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
         record.quota = self.quota.clone();
         record.settlement = settlement;
         // The jobs are those Claude Code has said no end of, whenever the record is

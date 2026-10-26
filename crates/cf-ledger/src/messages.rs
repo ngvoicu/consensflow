@@ -51,8 +51,9 @@ pub use delivery::GivenUp;
 pub(crate) use delivery::{
     admit, begin_delivery, cancel_message, confirm_delivery, confirm_delivery_telling,
     confirm_sent_by_hand, delivery_begun_ms, fail_delivery, first_received, give_up_delivery,
-    given_back_because, handed_over, in_flight, last_pasted, next_delivery, next_delivery_of,
-    paste_into, pasted_into, received_of, retry_delivery, with_work,
+    given_back_because, handed_over, in_flight, last_given, last_pasted, last_pastes,
+    next_delivery, next_delivery_of, note_since, paste_into, pasted_into, received_of,
+    retry_delivery, with_work,
 };
 pub use delivery::{HandOver, WITHDRAWN_AFTER_HANDED};
 pub(crate) use gate::{approve_message, decline_message, mark_read};

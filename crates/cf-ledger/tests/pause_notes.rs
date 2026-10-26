@@ -454,6 +454,41 @@ fn a_resume_keeps_the_answer_of_a_paused_tasks_window_in_words_true_of_a_task_th
 }
 
 #[test]
+fn a_held_tasks_window_that_goes_on_by_itself_keeps_its_answer_in_words_true_of_a_task_that_moved_on(
+) {
+    // 3.0.6-alpha.3's integration B (T-664): failure-reasons' `go_on_in_window` meets
+    // tell-then-done's kept answers. A task held for its member's quota whose window went
+    // on by itself leaves its wait and goes on, as a resumed one does.
+    let mut world = world();
+    world
+        .ledger
+        .hold_task(
+            world.project,
+            1,
+            "2026-10-26T12:00:00.000Z",
+            "@zeus is out of quota",
+        )
+        .expect("held");
+    let kept = world
+        .ledger
+        .note_paused_answer(world.project, 1, "zeus", 5, "Parser done")
+        .expect("the ledger")
+        .expect("a note");
+    assert_eq!(kept.body, paused_answer("Parser done"));
+
+    let task = world
+        .ledger
+        .go_on_in_window(world.project, 1)
+        .expect("it went on");
+    assert_eq!(task.state, "queued");
+    let kept = world.message(kept.id);
+    assert_eq!(
+        (kept.state.as_str(), kept.body),
+        ("queued", moved_answer("Parser done"))
+    );
+}
+
+#[test]
 fn finishing_a_paused_task_withdraws_what_its_requester_was_told_of_the_pause_and_the_answer_not_yet_given(
 ) {
     let mut world = world();

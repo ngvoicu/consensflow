@@ -20,7 +20,14 @@
 //!
 //! What a turn does is what the stand-in agent's does: the `SLEEP <seconds>` line of
 //! its message is how long it works, `Reply with exactly: X` is its answer, and
-//! anything else is acknowledged. The thread is the same in every run unless
+//! anything else is acknowledged. A message that says `QUOTA-OUT` is refused for
+//! the usage limit, as the stand-in agent's is (`CF_TEST_QUOTA_OUT` names the
+//! member whose sessions are refused, while `CF_TEST_QUOTA_FILE`, when it is set,
+//! is there): the turn works as long as it says and ends as Codex 0.163 ends one
+//! its limit cut, with `usage_limit_exceeded` and no answer. One that says
+//! `MODEL-BUSY` works as long as it says and fails as a real rollout's turn did when
+//! its model was at capacity: `server_overloaded`, with the error's words and no
+//! answer. The thread is the same in every run unless
 //! `CF_TEST_CODEX_THREADS` says `unique`, which a window the daemon opens needs
 //! (two of them in one `CODEX_HOME` would share a rollout). The servers Codex opens
 //! with its window are `CF_TEST_CODEX_SERVERS` of them, and the first starts
@@ -248,6 +255,38 @@ impl Agent {
         }
         let (work, said) = what_it_says(text);
         thread::sleep(work.saturating_sub(began.elapsed()));
+        if refused(text) {
+            self.write(
+                "event_msg",
+                json!({
+                    "type": "task_complete",
+                    "turn_id": turn,
+                    "last_agent_message": null,
+                    "error": {
+                        "message": "You've hit your usage limit. Try again later.",
+                        "codex_error_info": "usage_limit_exceeded",
+                    },
+                    "completed_at": jiff::Timestamp::now().as_second(),
+                }),
+            );
+            return;
+        }
+        if text.contains("MODEL-BUSY") {
+            self.write(
+                "event_msg",
+                json!({
+                    "type": "task_complete",
+                    "turn_id": turn,
+                    "last_agent_message": null,
+                    "error": {
+                        "message": "The stand-in model is busy. Pick another model.",
+                        "codex_error_info": "server_overloaded",
+                    },
+                    "completed_at": jiff::Timestamp::now().as_second(),
+                }),
+            );
+            return;
+        }
         self.write(
             "event_msg",
             json!({
@@ -303,6 +342,20 @@ impl Agent {
             .open(&path)
             .and_then(|mut file| file.write_all(line.as_bytes()));
     }
+}
+
+/// Whether the usage limit refuses this window the message `text`: it says
+/// `QUOTA-OUT`, the window is a session of the member `CF_TEST_QUOTA_OUT` names,
+/// and the account is the refused one (`CF_TEST_QUOTA_FILE`, when it is set, is
+/// still there).
+fn refused(text: &str) -> bool {
+    let member = own_var("CF_TEST_QUOTA_OUT").unwrap_or_default();
+    let participant = own_var("CONSENSFLOW_PARTICIPANT").unwrap_or_default();
+    let account = own_var("CF_TEST_QUOTA_FILE").is_none_or(|file| Path::new(&file).exists());
+    text.contains("QUOTA-OUT")
+        && !member.is_empty()
+        && account
+        && (participant == member || participant.starts_with(&format!("{member}-")))
 }
 
 /// The id of an item of the model's, as Codex numbers them.

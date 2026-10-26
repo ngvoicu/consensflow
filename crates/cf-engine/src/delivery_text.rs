@@ -129,7 +129,7 @@ fn label(row: &MessageView) -> String {
 }
 
 /// Where every message's header begins, whatever the message is.
-const HEADER_START: &str = "[ConsensFlow m-";
+pub(crate) const HEADER_START: &str = "[ConsensFlow m-";
 
 /// The start of a message's header, as a window's record shows it once the
 /// message arrived. The space after the id keeps m-1 from matching m-12; what

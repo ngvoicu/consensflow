@@ -62,6 +62,8 @@ pub struct FakeAgent {
     /// The harness holds the delivery in a turn it is in still (`Window::held`).
     pub held: bool,
     pub failed: bool,
+    /// Why the turn failed, in the harness's words, where its record says.
+    pub failure: Option<String>,
     /// The conversation the window shows, when the human switched it.
     pub shows: Option<String>,
     /// Each conversation's record, once the window switched away from it.
@@ -177,6 +179,10 @@ pub struct FakeAdapter {
     /// conversation began with (`adapter.keeps_first_instructions`, which no
     /// trace of Node's has): not, as an adapter that says no more.
     pub keeps_first_instructions: Cell<bool>,
+    /// Whether every window of its harness is logged into the one account
+    /// (`adapter.one_account`, which no trace of Node's has): not, as an
+    /// adapter that says no more.
+    pub one_account: Cell<bool>,
     /// Whether its windows are asked whether they are ready before they have
     /// drawn their screens too, as Devin's are: not, as an adapter that says no more.
     pub ready_while_drawing: Cell<bool>,
@@ -268,6 +274,7 @@ impl FakeAdapter {
             }),
             servers: Cell::new(Servers::Unknown),
             keeps_first_instructions: Cell::new(false),
+            one_account: Cell::new(false),
             ready_while_drawing: Cell::new(false),
             prepare_holds: Holds::default(),
             observe_holds: Holds::default(),
@@ -508,6 +515,35 @@ impl FakeAdapter {
         });
     }
 
+    /// The window begins a turn of its own, with words nobody pasted (Claude
+    /// Code's meta prompt once its limit resets, or what the human typed into
+    /// it), dated `at`: in it still.
+    pub fn begins_its_own_turn(&self, handle: &str, prompt: &str, at: &str) {
+        let mut said = self.item(Role::User, prompt);
+        said.at = Some(json!(at));
+        self.with(handle, |agent| {
+            agent.items.push(said);
+            agent.settled = false;
+            agent.pending = Pending::default();
+            agent.failed = false;
+            agent.took_back = false;
+        });
+    }
+
+    /// The window's own turn gets through and ends with `text`, dated `at`: as a
+    /// harness reads a turn that got through, the refusal before it is no longer
+    /// its last word.
+    pub fn ends_its_own_turn(&self, handle: &str, text: &str, at: &str) {
+        let mut item = self.item(Role::Assistant, text);
+        item.at = Some(json!(at));
+        self.with(handle, |agent| {
+            agent.items.push(item);
+            agent.settled = true;
+            agent.failed = false;
+            agent.quota = None;
+        });
+    }
+
     /// A turn gets through: the record writes the agent's words, with their time.
     pub fn writes(&self, handle: &str, text: &str, at: &str) {
         let mut item = self.item(Role::Assistant, text);
@@ -621,6 +657,7 @@ impl FakeAdapter {
                 agent.monitors.clear();
                 // A message that arrives starts a turn: the one before it ended as it did.
                 agent.failed = false;
+                agent.failure = None;
                 agent.took_back = false;
                 agent.at_prompt = false;
             }
@@ -700,6 +737,7 @@ impl Asked {
             took: false,
             held: false,
             failed: false,
+            failure: None,
             shows: None,
             records: HashMap::new(),
             records_settled: HashMap::new(),
@@ -845,6 +883,12 @@ impl Adapter for Asked {
     /// traces.
     fn keeps_first_instructions(&self) -> bool {
         self.fake.keeps_first_instructions.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces.
+    fn one_account(&self) -> bool {
+        self.fake.one_account.get()
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the

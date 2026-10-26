@@ -324,3 +324,40 @@ fn a_second_stream_in_a_turn_starts_its_reply_anew() {
     );
     assert_eq!(read_once(&staged), settled_done());
 }
+
+#[test]
+fn a_turn_that_ended_in_an_error_keeps_the_words_its_end_said() {
+    let failure_of = |end: Value| {
+        let staged = Staged::new();
+        staged.chain(&[
+            user("u-1", Some(json!("request-1"))),
+            reply("a-1", json!("Looking")),
+        ]);
+        staged.wire(
+            "launch-1",
+            &[chunk(Some(json!("Looking")), "stream-1"), end],
+        );
+        match &*look(&mut staged.reader()) {
+            Reading::Known(record) => (record.failed, record.failure.clone()),
+            Reading::Unknown(reason) => panic!("unknown: {reason}"),
+        }
+    };
+    let ended = |cause: &str, said: Option<&str>| {
+        let mut end =
+            json!({ "sessionId": SESSION, "turnClientMessageId": "request-1", "cause": cause });
+        if let Some(said) = said {
+            end["errorMessage"] = json!(said);
+        }
+        end
+    };
+    assert_eq!(
+        failure_of(ended("error", Some("The agent crashed: no such model"))),
+        (true, Some("The agent crashed: no such model".to_owned()))
+    );
+    // An error's end with no words says none; any other end is no failure.
+    assert_eq!(failure_of(ended("error", None)), (true, None));
+    assert_eq!(
+        failure_of(ended("cancelled", Some("Stopped by the user"))),
+        (false, None)
+    );
+}
