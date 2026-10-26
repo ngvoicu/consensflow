@@ -21,6 +21,8 @@
 failure-reason-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "failure_reasons"]
 failure-reason-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "told_once"]
 failure-reason-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::"]
+# The dispatcher's budget for an operation's future (`dispatcher/tests.rs`).
+engine-future-sizes = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "dispatcher::tests::an_operations_work_is_small"]
 failure-reason-ask = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "testing::ask"]
 failure-reason-live-suite = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_screen"]
 failure-reason-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
@@ -1027,3 +1029,17 @@ find = '''
             record.held.borrow_mut().reset();'''
 replace = '''
             // A failed turn holds its task for nothing it left (T-532's P3-3).'''
+
+# 3.0.6-alpha.3's integration B (T-664): failure-reasons and the branches before it took the chief's
+# switch past its future's 8 KiB budget (8200 bytes); its one big step is boxed, as the dispatcher's
+# others are.
+
+[[plant]]
+name = "failure reasons: the chief's switch holds its big step inline, past its future's budget"
+meant = "an_operations_work_is_small_where_it_is_made_its_steps_and_holds_on_the_heap"
+runs = ["engine-future-sizes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            Box::pin(this.perform_switch(&found, &chief, &held, to)).await?;"
+replace = "            this.perform_switch(&found, &chief, &held, to).await?;"

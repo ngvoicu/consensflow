@@ -1321,7 +1321,9 @@ impl Dispatcher {
             if open && !this.is_out(&chief) && (when == SwitchWhen::Turn || note) {
                 return this.after_turn(project, &held, to, note);
             }
-            this.perform_switch(&found, &chief, &held, to).await?;
+            // On the heap, as the dispatcher's other big steps are: inline it took the
+            // switch's future past its budget (3.0.6-alpha.3's integration B, T-664).
+            Box::pin(this.perform_switch(&found, &chief, &held, to)).await?;
             // One deleted while the old window was looked at or closed stopped the switch there.
             if this.forgotten(&held) {
                 return Err(EngineError::said(
