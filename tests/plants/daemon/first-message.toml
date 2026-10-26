@@ -186,8 +186,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "self.now() - began > ASKS_WITHIN_MS && !owes_first(record)"
-replace = "self.now() - began > ASKS_WITHIN_MS"
+find = "} else if owes_first(record) {"
+replace = "} else if owes_first(record) && self.now() - began <= ASKS_WITHIN_MS {"
 
 [[plant]]
 name = "first message: a window owed it that shows neither the question nor its prompt spends no launch time"
@@ -279,3 +279,36 @@ find = """
 replace = """
         if first_on_its_way(record) && false {
             return Err(refused("""
+
+# A chief owed its handoff with no bound (T-629): after 2 minutes with no prompt seen, the
+# human hears once; nothing is given up or pasted blind.
+
+[[plant]]
+name = "first message: a chief whose window shows no prompt never has the human told"
+meant = "a_chief_whose_window_shows_no_prompt_for_two_minutes_has_the_human_told_once_and_its_handoff_waits"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                            self.tell_no_prompt(project, record)?;"
+replace = "                            let _ = (project, record);"
+
+[[plant]]
+name = "first message: the human is told of a chief's window before 2 minutes with no prompt"
+meant = "a_chief_whose_window_shows_its_prompt_within_two_minutes_has_the_human_told_nothing"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "&& !told_no_prompt && waited > NO_PROMPT_MS {"
+replace = "&& !told_no_prompt && waited >= 0 {"
+
+[[plant]]
+name = "first message: the human is told of a chief's window with no prompt at every look"
+meant = "a_chief_whose_window_shows_no_prompt_for_two_minutes_has_the_human_told_once_and_its_handoff_waits"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                            told_no_prompt = true;\n"
+replace = ""

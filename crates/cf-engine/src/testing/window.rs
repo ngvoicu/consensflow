@@ -15,7 +15,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Admission, Held, Observed, Pane, PaneHost, Readiness, Waiting, Window, Work, NOT_ADMITTED,
+    Admission, Held, Observed, Pane, PaneHost, Readiness, Trusts, Waiting, Window, Work,
+    NOT_ADMITTED,
 };
 use cf_harness::records::{Item, Reading, Record, Role, Settlement};
 use serde_json::{json, Value};
@@ -23,6 +24,13 @@ use serde_json::{json, Value};
 use super::adapter::{FakeAdapter, FakeAgent, Taking};
 use super::holds::Wrapped;
 use crate::runtime::next_turn;
+
+/// A line of the screen of a fake window that asks whether to trust its folder
+/// ([`FakeAdapter::trusts`]): Enter answers it yes.
+pub const FAKE_QUESTION: &str = "Do you trust the files in this folder?";
+
+/// A line of the screen of a fake window at its prompt.
+pub const FAKE_PROMPT: &str = "❯ ready for input";
 
 pub(super) struct FakeWindow {
     seam: String,
@@ -33,6 +41,8 @@ pub(super) struct FakeWindow {
     /// The first message it takes once it is up, where its adapter's windows
     /// seed it so (`FakeAdapter::seeds`), not with the launch.
     first: Option<String>,
+    /// What a yes to its question about trusting its folder trusts, where it asks.
+    trusts: Option<Trusts>,
 }
 
 impl FakeWindow {
@@ -42,6 +52,7 @@ impl FakeWindow {
         session: String,
         fake: Rc<FakeAdapter>,
         first: Option<String>,
+        trusts: Option<Trusts>,
     ) -> Self {
         Self {
             seam,
@@ -50,6 +61,7 @@ impl FakeWindow {
             pid: Cell::new(None),
             fake,
             first,
+            trusts,
         }
     }
 
@@ -268,6 +280,24 @@ impl Window for FakeWindow {
             wrapped.after().await;
             Ok(observed)
         })
+    }
+
+    /// Not written down: the JavaScript fake never asked.
+    fn trusts(&self) -> Option<&Trusts> {
+        self.trusts.as_ref()
+    }
+
+    /// Enter, where the screen asks ([`FAKE_QUESTION`]).
+    fn toward_trust(&self, screen: &[String]) -> Option<&'static [u8]> {
+        screen
+            .iter()
+            .any(|line| line.contains(FAKE_QUESTION))
+            .then_some(b"\r".as_slice())
+    }
+
+    /// Where the screen shows [`FAKE_PROMPT`].
+    fn shows_prompt(&self, screen: &[String]) -> bool {
+        screen.iter().any(|line| line.contains(FAKE_PROMPT))
     }
 
     /// Not written down: the JavaScript fake was never asked.

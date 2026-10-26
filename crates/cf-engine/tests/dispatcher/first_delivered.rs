@@ -9,12 +9,14 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use cf_engine::delivery_text::marker_of;
-use cf_engine::testing::Context;
-use cf_harness::contract::{FirstMessage, Held, Readiness};
+use cf_engine::testing::{Context, FAKE_PROMPT};
+use cf_engine::SwitchWhen;
+use cf_harness::contract::{FirstMessage, Held, Readiness, Trusts};
 use cf_harness::records::{End, Monitor, Notice, Pending, Role, Source};
 use cf_proto::trace::{Traced, WindowEvent};
 use serde_json::json;
 
+use crate::chiefs::{handoffs_of, to};
 use crate::withheld_enter::times_handed;
 
 const SEAM: &str = "adapter:claude-code";
@@ -533,5 +535,114 @@ fn a_first_message_handed_over_whose_project_closes_before_its_record_shows_it_i
         "once more, after the Resume"
     );
     assert_eq!(context.task(project, 1).task.state, "working");
+    context.close();
+}
+
+/// The note the human is given about a chief's window that shows no prompt.
+const NO_PROMPT: &str =
+    "The chief's window has shown no prompt for 2 minutes; its handoff is waiting. Look at its terminal.";
+
+/// A project whose Claude chief has spoken, switched to another Claude chief whose
+/// window may ask whether to trust its folder and shows `screen`: its handoff.
+fn switched_to_a_chief_showing(context: &Context, screen: &str) -> (i64, i64) {
+    let project = context.with_staff(&["zeus"]).id;
+    passes(context, 1);
+    context.adapter.answer("chief", "Hello");
+    passes(context, 1);
+    *context.adapter.trusts.borrow_mut() = Some(Trusts {
+        folder: "/work/app".to_owned(),
+        inside: true,
+    });
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 5000, "tail": [screen] }));
+    context
+        .switch_chief(project, to("claude-code", "apollo"), SwitchWhen::Now, false)
+        .unwrap();
+    context.settle();
+    let handoff = handoffs_of(context, project).remove(0).id;
+    (project, handoff)
+}
+
+/// The notes the human was given that say a chief's window shows no prompt.
+fn no_prompt_notes(context: &Context, project: i64) -> usize {
+    let human = context.id(project, "human");
+    context
+        .inbox(human)
+        .iter()
+        .filter(|message| message.body.contains("shown no prompt"))
+        .count()
+}
+
+/// `seconds` of the engine's time, a step every ten seconds, and a look at the window's
+/// screen at each (the trust watch's sleep, which only the test ends).
+fn wait(context: &Context, seconds: i64) {
+    for _ in 0..seconds / 10 {
+        context.advance(10_000);
+        context.timers.fire_next();
+        context.settle();
+        passes(context, 1);
+    }
+}
+
+#[test]
+fn a_chief_whose_window_shows_no_prompt_for_two_minutes_has_the_human_told_once_and_its_handoff_waits(
+) {
+    // T-629: since a window owed its first message is watched until its prompt (T-523),
+    // a chief's launch, which is never given up, waits for good on a prompt its reader
+    // does not know. It is not given up and nothing is pasted blind: the human hears once.
+    let context = delivered();
+    let (project, handoff) = switched_to_a_chief_showing(&context, "Claude Code is starting");
+    wait(&context, 110);
+    assert_eq!(
+        no_prompt_notes(&context, project),
+        0,
+        "not before 2 minutes"
+    );
+    wait(&context, 20);
+    assert_eq!(
+        no_prompt_notes(&context, project),
+        1,
+        "told after 2 minutes"
+    );
+    let human = context.id(project, "human");
+    assert!(
+        context
+            .inbox(human)
+            .iter()
+            .any(|message| message.body == NO_PROMPT),
+        "{:?}",
+        context.inbox(human)
+    );
+    wait(&context, 300);
+    assert_eq!(no_prompt_notes(&context, project), 1, "and once");
+    assert_eq!(
+        times_handed(&context, SEAM, handoff),
+        0,
+        "nothing pasted blind"
+    );
+    assert_eq!(context.message(handoff).state, "delivering", "it waits");
+    // Its prompt comes: the handoff goes in.
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 5000, "tail": [FAKE_PROMPT] }));
+    wait(&context, 10);
+    passes(&context, 2);
+    assert_eq!(times_handed(&context, SEAM, handoff), 1);
+    assert_eq!(no_prompt_notes(&context, project), 1);
+    context.close();
+}
+
+#[test]
+fn a_chief_whose_window_shows_its_prompt_within_two_minutes_has_the_human_told_nothing() {
+    let context = delivered();
+    let (project, handoff) = switched_to_a_chief_showing(&context, "Claude Code is starting");
+    wait(&context, 60);
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 5000, "tail": [FAKE_PROMPT] }));
+    wait(&context, 240);
+    assert_eq!(times_handed(&context, SEAM, handoff), 1, "handed once up");
+    assert_eq!(no_prompt_notes(&context, project), 0);
     context.close();
 }

@@ -23,7 +23,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, FirstMessage, Input, Interrupt, Launch, Prepared, Readiness, Skill,
+    Adapter, Admission, FirstMessage, Input, Interrupt, Launch, Prepared, Readiness, Skill, Trusts,
     Waiting, Window, Work,
 };
 use cf_harness::records::{Item, Monitor, Pending, Quota, Role};
@@ -189,6 +189,11 @@ pub struct FakeAdapter {
     /// delivered once they are up as any later message is, as Claude Code's, Pi's
     /// and Codex's are.
     pub first: Cell<FirstMessage>,
+    /// What a yes to its windows' question about trusting their folder trusts, where
+    /// they ask one ([`Window::trusts`]), the windows opened from now on: their screen
+    /// asks it while the host's last lines hold [`super::FAKE_QUESTION`], and is at its
+    /// prompt while they hold [`super::FAKE_PROMPT`].
+    pub trusts: RefCell<Option<Trusts>>,
     /// Where its harness has the Specmint variant installed, when the test says
     /// it has: the `SKILL.md` it answers. Without, the copy ConsensFlow would
     /// keep for it, which is the same for every launch.
@@ -266,6 +271,7 @@ impl FakeAdapter {
             ready_holds: Holds::default(),
             deliver_holds: Holds::default(),
             first: Cell::new(FirstMessage::Opened),
+            trusts: RefCell::new(None),
             specmint_installed: RefCell::new(None),
             specmint_asked: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
@@ -681,6 +687,7 @@ impl Asked {
             native.clone(),
             Rc::clone(fake),
             seeded,
+            fake.trusts.borrow().clone(),
         ));
         Box::pin(async move {
             // A test's own `prepare` is an async function that returns the

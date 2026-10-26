@@ -45,6 +45,7 @@ use cf_proto::panes::{SnapshotRequest, TAIL_LINES};
 use serde_json::{json, Value};
 
 use crate::dispatcher::Dispatcher;
+use crate::handoff::is_handoff;
 use crate::record::Record;
 use crate::runtime::returning;
 use crate::seams::EngineError;
@@ -56,6 +57,10 @@ const LOOK: Duration = Duration::from_millis(500);
 /// How long a window that never held still, its record empty, is watched for the
 /// question: a harness asks it as it starts, before anything else is drawn.
 pub(crate) const ASKS_WITHIN_MS: i64 = 30_000;
+
+/// How long a chief's window owed its first message may show neither the question nor
+/// its prompt before the human is told, once (T-629).
+const NO_PROMPT_MS: i64 = 120_000;
 
 /// How many looks a screen the last key went into may stay as it was before the key
 /// is pressed again: the window did not take it.
@@ -187,6 +192,8 @@ impl Dispatcher {
         let mut pressed_on: Option<(Vec<String>, u32)> = None;
         // How many looks in a row found the question gone with no prompt on the screen.
         let mut gone = 0;
+        // Whether the human was told that a chief's window shows no prompt.
+        let mut told_no_prompt = false;
         let at_prompt = loop {
             if !self.shows(record, pane) {
                 return Ok(());
@@ -259,7 +266,17 @@ impl Dispatcher {
                         if gone >= GONE_LOOKS {
                             break false;
                         }
-                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {
+                    } else if owes_first(record) {
+                        // A chief's launch is never given up, and nothing is pasted blind
+                        // into a window that may still ask: one whose prompt the reader
+                        // never finds (a harness that draws it otherwise since an update)
+                        // would hold its first message for good, so the human hears once.
+                        let waited = self.now() - began;
+                        if participant.role == "chief" && !told_no_prompt && waited > NO_PROMPT_MS {
+                            told_no_prompt = true;
+                            self.tell_no_prompt(project, record)?;
+                        }
+                    } else if self.now() - began > ASKS_WITHIN_MS {
                         break false;
                     }
                 }
@@ -334,6 +351,40 @@ impl Dispatcher {
         returning(self.seams.host.request("pane.input", body))
             .await
             .is_ok_and(|answer| answer.get("ok") == Some(&Value::Bool(true)))
+    }
+
+    /// The note to the human that the chief's window, owed its first message, has shown
+    /// no prompt for [`NO_PROMPT_MS`]: the message waits, and the window is theirs to look
+    /// at (T-629).
+    fn tell_no_prompt(&self, project: &ProjectView, record: &Record) -> Result<(), EngineError> {
+        let owed = record
+            .delivery
+            .borrow()
+            .delivering
+            .as_ref()
+            .map(|delivering| delivering.message);
+        let message = match owed {
+            Some(id) => self.seams.ledger.borrow().message(id)?,
+            None => None,
+        };
+        let what = if message.as_ref().is_some_and(is_handoff) {
+            "its handoff"
+        } else {
+            "the message for it"
+        };
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: format!(
+                    "The chief's window has shown no prompt for 2 minutes; {what} is waiting. Look at its terminal."
+                ),
+            },
+        )?;
+        self.changed();
+        Ok(())
     }
 
     /// A note to the human about `folder`, the first time the project's windows
