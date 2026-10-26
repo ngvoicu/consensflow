@@ -678,6 +678,24 @@ impl Dispatcher {
             }
             Readiness::Unfit(reason) => return self.give_up_unfit(record, &message, &reason).await,
         }
+        // A question its harness asks as it starts, drawn since the watch let the window go
+        // (a dialog that comes late, or one after another): its Enter would answer it, so
+        // nothing goes in and the watch takes it up again (`trust`).
+        if self.asks_before_its_first_message(record, &pane).await? {
+            return self.held_once(
+                record,
+                first.message,
+                "the window is not ready for its first message: it asks a question first",
+            );
+        }
+        if self.forgotten(record)
+            || record.window.borrow().pane.as_ref() != Some(&pane)
+            || self
+                .owed_first(record)
+                .is_none_or(|(owed, _)| owed.message != first.message)
+        {
+            return Ok(());
+        }
         record.delivery.borrow_mut().unsent = false;
         // The rest the window was seen at came before the turn this message begins, as
         // every monitor of that turn will (`deliver`).

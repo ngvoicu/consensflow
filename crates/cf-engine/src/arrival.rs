@@ -206,13 +206,14 @@ impl Dispatcher {
             return Ok(());
         };
         if delivering.launch {
-            // A first message waits as long as its window asks whether to trust its
-            // folder, and has its whole time once it is past that (`trust`). One still
-            // owed to a window that has neither asked nor shown its prompt spends its
-            // time meanwhile: a window that shows neither is never ready for it.
+            // A first message waits as long as its window asks one of the questions its
+            // harness asks as it starts (its folder's trust, its folder's grants, the
+            // project's new MCP servers), and has its whole time once it is past them
+            // (`trust`). One still owed to a window that has neither asked nor shown its
+            // prompt spends its time meanwhile: a window that shows neither is never ready
+            // for it.
             let trust = record.window.borrow().trust;
-            if trust == Trusting::Asked || (trust == Trusting::Looking && delivering.owed.is_none())
-            {
+            if trust.asks() || (trust == Trusting::Looking && delivering.owed.is_none()) {
                 return Ok(());
             }
             let waited = self.now() - delivering.since;

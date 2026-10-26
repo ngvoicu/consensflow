@@ -24,6 +24,7 @@ mod path;
 mod tests;
 mod wrapper;
 
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -308,9 +309,62 @@ const REPORTS: &str = "app/src-tauri/target/live-reports";
 /// draws their screens, and the user's name, which a harness may ask the system's
 /// keychain by; on Windows they also have the machine's own folders for settings and
 /// programs ([`WINDOWS`]).
+///
+/// Either config is seeded first with the trust a person's own has for the run's folders
+/// ([`seed_claude_trust`]).
 pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
-    let config = rig_keeping_claude_in(installs, stand_in, super::option("claude-config"));
+    let claude_config = super::option("claude-config");
+    let home = own_var("HOME").or_else(|| own_var("USERPROFILE"));
+    if let (Some(config), Some(home)) = (&claude_config, &home) {
+        if installs
+            .iter()
+            .any(|install| install.harness == Harness::Claude)
+        {
+            if let Err(failed) = seed_claude_trust(Path::new(config), Path::new(home)) {
+                panic!("the run's Claude config {config} could not be seeded: {failed}");
+            }
+        }
+    }
+    let config = rig_keeping_claude_in(installs, stand_in, claude_config);
     keeping_pi_in(config, installs, super::option("pi-agent-dir"))
+}
+
+/// The folder below `home` that a run's live folders are made in ([`live_folder_in`]).
+fn live_root(home: &Path) -> PathBuf {
+    home.join(".consensflow-candidate").join("live")
+}
+
+/// Seeds the Claude config folder `config`, the run's own (the kit's copy of the login,
+/// [`super::login::Login`], or one the run was given, `--claude-config`), with what
+/// a person's own config holds of the folders a run's windows open in: they are below
+/// a folder the person said yes to (the owner's `~/.claude.json` keeps
+/// `projects["<home>"].hasTrustDialogAccepted`, T-629), so Claude Code asks in a new
+/// repository there and not in a plain folder. A config made fresh trusts nothing, and
+/// asked even in a plain folder (`live folder-trust`'s fresh case, T-523). Its
+/// `.claude.json` is given the live folders' root as trusted, merged into what it holds.
+/// The owner's own is never written: `home` itself, and a folder inside `home`'s
+/// `.claude`, are refused.
+pub fn seed_claude_trust(config: &Path, home: &Path) -> Result {
+    let real = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let (config, owners) = (real(config), real(&home.join(".claude")));
+    if config == real(home) || config.starts_with(&owners) {
+        return Err(Error::Daemon(format!(
+            "{} is the owner's own Claude config, which a run never writes",
+            config.display()
+        )));
+    }
+    let file = config.join(".claude.json");
+    let mut held: serde_json::Value = files::read_string(&file)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !held["projects"].is_object() {
+        held["projects"] = serde_json::json!({});
+    }
+    let root = live_root(home).to_string_lossy().into_owned();
+    held["projects"][&root]["hasTrustDialogAccepted"] = serde_json::Value::Bool(true);
+    files::write(&file, held.to_string())
 }
 
 /// `config`, whose Pi windows keep their login, settings and sessions in `agent_dir`
@@ -556,7 +610,7 @@ pub fn live_folder(name: &str) -> Result<PathBuf> {
 /// [`live_folder`] under the home `home`: the home a rig gives its windows, which
 /// is the machine's where the windows run the machine's harnesses.
 pub fn live_folder_in(home: &Path, name: &str) -> Result<PathBuf> {
-    let folder = home.join(".consensflow-candidate").join("live").join(name);
+    let folder = live_root(home).join(name);
     files::make_dir(&folder)?;
     Ok(folder)
 }
