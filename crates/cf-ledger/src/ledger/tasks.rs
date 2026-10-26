@@ -127,6 +127,17 @@ impl Ledger {
         tasks::stop_of(&self.store, participant_id)
     }
 
+    /// Who asked the stop `seq` of task `number`: the chief or the human whose
+    /// pause counted it, none where ConsensFlow asked it.
+    pub fn stop_asked_by(
+        &self,
+        project_id: i64,
+        number: i64,
+        seq: i64,
+    ) -> Result<Option<String>, LedgerError> {
+        tasks::stop_asked_by(&self.store, project_id, number, seq)
+    }
+
     /// The task a participant's window is on as far as what it sends goes: the
     /// one it holds, else its paused one. A member session holds one task at
     /// a time (`require_free`): this is it.

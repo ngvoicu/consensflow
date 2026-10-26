@@ -29,7 +29,8 @@ cf inside a ConsensFlow window: the board's commands.
   cf task accept|cancel T-3         move a task you asked for
   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
   cf task edit T-3 "…"              replace the brief of a task no window has yet (open, queued, or paused)
-  cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait
+  cf task pause T-3                 stop a worker's task: the agent stops and its window waits;
+                                    what it left running in the background runs on
   cf task resume T-3 "…"            go on with it: the same window, with your words
   cf task finish T-3                take what a working task's worker said last as its result;
                                     what its turn left running is not ended

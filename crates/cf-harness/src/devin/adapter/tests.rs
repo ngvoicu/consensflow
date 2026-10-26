@@ -179,7 +179,7 @@ fn a_window_that_has_named_no_conversation_says_nothing_of_one_to_look_at() {
         Observed {
             reading: None,
             settled: false,
-            over: false,
+            over: Over::No,
             waiting: None,
             failed: false,
             quota: None,

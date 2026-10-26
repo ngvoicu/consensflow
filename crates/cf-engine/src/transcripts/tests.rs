@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use cf_harness::contract::Observed;
+use cf_harness::contract::{Observed, Over};
 use cf_harness::records::{Item, Reading, Record, Role, Settlement};
 use cf_ledger::{
     HistoryAsk, HistoryEntry, HistoryFrom, NewProject, ParticipantView, HISTORY_SCAN_BYTES,
@@ -75,7 +75,7 @@ fn look(items: Vec<Item>) -> Observed {
             monitors: Vec::new(),
         }))),
         settled: true,
-        over: false,
+        over: Over::No,
         waiting: None,
         failed: false,
         quota: None,

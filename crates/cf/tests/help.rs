@@ -128,7 +128,10 @@ const BOARD: [(&[&str], &str); 19] = [
     ),
     (
         &["task", "pause"],
-        "  cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait\n",
+        concat!(
+            "  cf task pause T-3                 stop a worker's task: the agent stops and its window waits;\n",
+            "                                    what it left running in the background runs on\n",
+        ),
     ),
     (
         &["task", "resume"],

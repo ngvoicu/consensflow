@@ -560,3 +560,42 @@ fn a_stop_paid_for_one_task_never_hides_a_later_stop_of_the_task_the_window_goes
         .expect("the human pauses it");
     assert_eq!(stop_of(&w, &session), Some((c, 1)));
 }
+
+#[test]
+fn each_stop_says_who_asked_it_and_one_consensflow_asked_says_nobody() {
+    // A close of a window that ignored a stop is told to whoever asked the stop as
+    // well as to whoever gave the task (the chief's call on T-644).
+    let mut w = world();
+    let task = w.open("Parser").task.number;
+    let moved = w.assign(task, "zeus");
+    w.deliver(moved.message.expect("its brief").id);
+    w.ledger
+        .pause_task(w.project, task, Some("chief"), None)
+        .expect("the chief's pause");
+    w.ledger
+        .resume_task(w.project, task, Some("chief"), "On")
+        .expect("resumed");
+    w.ledger
+        .pause_task(w.project, task, Some("human"), None)
+        .expect("the human's pause");
+    w.ledger
+        .resume_task(w.project, task, Some("human"), "On")
+        .expect("resumed");
+    w.ledger
+        .hold_task(w.project, task, "2030-01-01T00:00:00.000Z", "out of quota")
+        .expect("held");
+    let asked = |seq| {
+        w.ledger
+            .stop_asked_by(w.project, task, seq)
+            .expect("the ledger read")
+    };
+    assert_eq!(
+        [asked(1), asked(2), asked(3), asked(4)],
+        [
+            Some("chief".to_owned()),
+            Some("human".to_owned()),
+            None,
+            None
+        ]
+    );
+}

@@ -442,6 +442,26 @@ pub enum Readiness {
     Unfit(String),
 }
 
+/// Whether the turn a window was last in is over by its harness's own record,
+/// though its live status kept the look from reading it settled
+/// ([`Observed::over`]): nothing in it is then left for an interrupt to stop. Claude
+/// says it is busy for as long as a background agent runs, and a turn an interrupt or
+/// a refusal ended writes no count of them (T-604, 2026-10-25); and it says busy a
+/// moment before the message of a turn it begins is in its record, when the turn
+/// before still reads over (Calliope on T-551, T-644). So the record's word counts
+/// once it has stood a moment.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Over {
+    /// The record says no more than the look did.
+    #[default]
+    No,
+    /// The record says the turn is over, and has not said so long enough to count:
+    /// neither at rest nor at work yet.
+    Pending,
+    /// The record has said so a moment: the turn is over.
+    Held,
+}
+
 /// Why a delivery waits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Held {
@@ -490,13 +510,10 @@ pub struct Observed {
     /// None where the window has not named a conversation to read yet.
     pub reading: Option<Arc<Reading>>,
     pub settled: bool,
-    /// The turn the window was last in is over by its harness's own record,
-    /// though its live status kept the look from reading it `settled`: nothing
-    /// in it is left for an interrupt to stop. Claude says it is busy for as long
-    /// as a background agent runs, and a turn an interrupt or a refusal ended
-    /// writes no count of them (T-604, 2026-10-25). A harness whose `settled` is
-    /// its record's word says no.
-    pub over: bool,
+    /// Whether the turn the window was last in is over by its harness's own
+    /// record, though its live status kept the look from reading it `settled`
+    /// ([`Over`]). A harness whose `settled` is its record's word says no.
+    pub over: Over,
     pub waiting: Option<Waiting>,
     pub failed: bool,
     pub quota: Option<Arc<Quota>>,

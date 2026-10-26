@@ -44,7 +44,7 @@ use cf_proto::specs::Variant;
 use super::channel::{send, Channel, Session, Shown, Target};
 use super::{launch, paths, role};
 use crate::contract::{
-    Adapter, Admission, Agent, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
+    Adapter, Admission, Agent, Held, Launch, Observed, Over, Pane, PaneHost, Prepared, Readiness,
     Records, Skill, Window, Work,
 };
 use crate::detect::executable;
@@ -400,7 +400,7 @@ impl Window for CodexWindow {
                 return Ok(Observed {
                     reading: None,
                     settled: false,
-                    over: false,
+                    over: Over::No,
                     waiting: None,
                     failed: false,
                     quota: None,

@@ -69,7 +69,7 @@ use super::record;
 use super::wire::selected_session;
 use super::wire_log::{Said, WireLog, PROMPT_GAP_MS};
 use crate::contract::{
-    Adapter, Admission, Held, Input, Interrupt, Launch, Observed, Pane, PaneHost, Prepared,
+    Adapter, Admission, Held, Input, Interrupt, Launch, Observed, Over, Pane, PaneHost, Prepared,
     Readiness, Records, Skill, Window, Work,
 };
 use crate::detect::executable;
@@ -582,7 +582,7 @@ impl Window for DevinWindow {
                 return Ok(Observed {
                     reading: None,
                     settled: false,
-                    over: false,
+                    over: Over::No,
                     waiting: None,
                     failed: false,
                     quota: None,

@@ -360,6 +360,29 @@ pub(crate) fn stop_of(store: &Store, participant_id: i64) -> Result<Option<Stop>
         .optional()?)
 }
 
+/// Who asked the stop `seq` of task `number`: the pause that counted it, by the
+/// chief or the human (its `by`), as its move to paused was logged; none where
+/// ConsensFlow asked it (a hold, a closed window) or no move says so.
+pub(crate) fn stop_asked_by(
+    store: &Store,
+    project_id: i64,
+    number: i64,
+    seq: i64,
+) -> Result<Option<String>, LedgerError> {
+    let by: Option<Option<String>> = store
+        .db
+        .query_row(
+            "SELECT json_extract(data, '$.by') FROM event
+             WHERE project_id = ?1 AND kind = 'task.state' AND json_valid(data)
+               AND json_extract(data, '$.task') = ?2 AND json_extract(data, '$.stop') = ?3
+             ORDER BY id DESC LIMIT 1",
+            params![project_id, number, seq],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(by.flatten())
+}
+
 /// The task a participant's window is on as far as a question or a note it
 /// sends goes: the one it holds (queued, working or waiting), else the paused
 /// one. A question asked in a window that the pause has not yet stopped is
