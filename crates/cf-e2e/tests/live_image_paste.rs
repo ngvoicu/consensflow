@@ -9,9 +9,17 @@
 //! then began with `[Image #4]` and not with the message's header, and the paste was never
 //! confirmed: pasted again twice, then failed, the chief having had each result three times.
 //!
-//! Two tests:
+//! And since T-763 (2026-10-26) the other way a TUI rewrites a paste into a shape the proof must
+//! know: Claude Code, given a long paste in pieces when the machine is loaded, wraps each piece
+//! and leaves the last bare after the last closing tag. The same runs are made on Devin, to find
+//! out whether its TUI converts an image path or splits a long paste; Codex, Pi and OpenCode take
+//! their messages through a channel and are never pasted into.
+//!
+//! Five tests:
 //!
 //! - **`claude_records_each_shape_of_a_paste_that_names_images_in_a_way_the_engine_takes_for_it`**
+//!   (and **`devin_records_each_shape…`**, which holds Devin to the engine taking an item of its
+//!   record for the paste, and to making no attachment of any path: its TUI made none, 2026-10-26)
 //!   is the probe. Each shape of a paste (one, two and three image paths, at the start, in
 //!   the middle and on their own lines, a path to a file that is no image, one to an image that
 //!   is not there) goes into one Claude window the way the daemon pastes (`pane.write_paste`,
@@ -29,10 +37,23 @@
 //!   field's shape (`daemon`): a real Claude as the chief of a project on the native daemon, the
 //!   stand-in as the designer, whose result starts with the paths of two pictures it saved. The
 //!   result is pasted once, confirmed, and in the chief's record once, with its pictures.
+//!   **`…_to_a_devin_chief_once`** is the same with a Devin chief.
+//! - **`a_long_result_is_delivered_to_a_claude_chief_once`** is T-763's second shape (`daemon`):
+//!   the stand-in's result is a report of 12,000 characters, which is to be pasted once and
+//!   confirmed on the first attempt. Run it under load (`python3 tools/under-load.py --burners 28
+//!   …` of `wt/load-timing-flakes`) as the field was: there Claude Code was given the paste in
+//!   pieces, each wrapped, and the last left bare after the last closing tag (load 37 to 59 and
+//!   passes of the daemon of 28 to 60 s). The run says how many pieces, and how many characters
+//!   are bare, of the item the chief's record holds, and does not hold it to any: on 2026-10-26
+//!   it was one piece in seven runs at 28 and 56 burners (load 40 to 113), and stopping and
+//!   starting the pane host to starve its writes did not bring the pieces about either, so the
+//!   loose tail is proved by the field's own items (`delivery_text::tests`, `paste_shapes`), and
+//!   this run by the delivery staying confirmed on the first attempt under load.
 //!
 //! ```text
-//! cargo xtask live image-paste                      both
+//! cargo xtask live image-paste                      all five
 //! cargo xtask live image-paste -- --list            lists them
+//! cargo xtask live image-paste -- long              the long result alone, as the filter picks it
 //! cargo xtask live image-paste --keep               leaves the daemon run's home and project
 //! ```
 
@@ -156,9 +177,12 @@ fn ask(sum: (u32, u32)) -> String {
 /// it does not is the answer changing, and says so in the shape's check.
 const WINDOWS_CONVERTS: bool = true;
 
-/// How many attachments Claude Code makes of the paths of `shape` on this machine.
-fn expected(shape: &Shape) -> usize {
-    if cfg!(windows) && !WINDOWS_CONVERTS {
+/// How many attachments `harness` makes of the paths of `shape` on this machine: Claude Code's
+/// are the shape's; Devin's TUI made none of any shape (the run of 2026-10-26, T-763, Devin
+/// 3000.11.205: each path stayed in the words), and a run that finds it does is the answer
+/// changing.
+fn expected(shape: &Shape, harness: Harness) -> usize {
+    if harness != Harness::Claude || (cfg!(windows) && !WINDOWS_CONVERTS) {
         0
     } else {
         shape.images
@@ -234,6 +258,10 @@ fn shown(record: &Value) -> String {
 /// The user records of the window's transcript from the `from`th line on, as
 /// Claude wrote them.
 fn user_records(window: &Window, from: usize) -> (usize, Vec<String>) {
+    // Claude's transcript is the only record read here as the harness wrote it.
+    if window.harness() != Harness::Claude {
+        return (from, Vec::new());
+    }
     let Some(session) = window.session() else {
         return (from, Vec::new());
     };
@@ -310,7 +338,7 @@ fn checks_of(rig: &Rig, install: &Installed, log: &Log) -> Result<Vec<Check>> {
             .find(|item| is_paste_of(&item.text, at))
             .or(items.first());
         let attached = message.map_or(0, |item| placeholders(&item.text));
-        let wanted = expected(shape);
+        let wanted = expected(shape, install.harness());
         log.block(
             &format!("{name}: {}", shape.name),
             &format!(
@@ -338,7 +366,12 @@ fn checks_of(rig: &Rig, install: &Installed, log: &Log) -> Result<Vec<Check>> {
     }
     let folder = window.workspace().to_path_buf();
     window.kill();
-    checks.push(launch_check(rig, install, log, &folder)?);
+    // What a launch's first message is, an argument of the program, is Claude Code's: Devin's
+    // seeded window records no user item of it within the time given (the run of T-763, Devin
+    // 3000.11.205), a question of its first message and none of its images.
+    if install.harness() == Harness::Claude {
+        checks.push(launch_check(rig, install, log, &folder)?);
+    }
     Ok(checks)
 }
 
@@ -403,13 +436,11 @@ fn cut_text(text: &str) -> String {
     live::cut(text, 200)
 }
 
-#[test]
-#[ignore = "opt-in: spends the machine's quota on a window of Claude Code; cargo xtask live image-paste (npm run live:image-paste)"]
-fn claude_records_each_shape_of_a_paste_that_names_images_in_a_way_the_engine_takes_for_it(
-) -> Result {
-    let log = Log::begin("live image paste")?;
+/// The shapes sent to one window of `harness`, and what its record made of each.
+fn probe(harness: Harness) -> Result {
+    let log = Log::begin(&format!("live image paste ({})", harness.name()))?;
     ask::prepare()?;
-    let installs = vec![log.found(Harness::Claude)?];
+    let installs = vec![log.found(harness)?];
     let rig = Rig::start(live::rig(&installs, FAKE_AGENT))?;
     let mut checks = Vec::new();
     for install in &installs {
@@ -419,17 +450,48 @@ fn claude_records_each_shape_of_a_paste_that_names_images_in_a_way_the_engine_ta
     report::conclude(&log, "what the record made of each shape", &checks)
 }
 
-#[test]
-#[ignore = "opt-in: spends the machine's quota on a chief of Claude Code; cargo xtask live image-paste (npm run live:image-paste)"]
-fn a_result_that_starts_with_an_image_path_is_delivered_to_a_claude_chief_once() -> Result {
-    let log = Log::begin("live image paste (daemon)")?;
+/// A real `harness` as the chief of a project on the native daemon, sent the `case` result.
+fn delivered_to(harness: Harness, case: daemon::Case) -> Result {
+    let log = Log::begin(&format!("live image paste (daemon, {})", harness.name()))?;
     ask::prepare()?;
-    let checks = daemon::run(&log)?;
+    let checks = daemon::run(&log, harness, case)?;
     report::conclude(
         &log,
         "what the board and the chief's record made of the result",
         &checks,
     )
+}
+
+#[test]
+#[ignore = "opt-in: spends the machine's quota on a window of Claude Code; cargo xtask live image-paste (npm run live:image-paste)"]
+fn claude_records_each_shape_of_a_paste_that_names_images_in_a_way_the_engine_takes_for_it(
+) -> Result {
+    probe(Harness::Claude)
+}
+
+#[test]
+#[ignore = "opt-in: spends the machine's quota on a window of Devin; cargo xtask live image-paste (npm run live:image-paste)"]
+fn devin_records_each_shape_of_a_paste_that_names_images_in_a_way_the_engine_takes_for_it() -> Result
+{
+    probe(Harness::Devin)
+}
+
+#[test]
+#[ignore = "opt-in: spends the machine's quota on a chief of Claude Code; cargo xtask live image-paste (npm run live:image-paste)"]
+fn a_result_that_starts_with_an_image_path_is_delivered_to_a_claude_chief_once() -> Result {
+    delivered_to(Harness::Claude, daemon::Case::Images)
+}
+
+#[test]
+#[ignore = "opt-in: spends the machine's quota on a chief of Devin; cargo xtask live image-paste (npm run live:image-paste)"]
+fn a_result_that_starts_with_an_image_path_is_delivered_to_a_devin_chief_once() -> Result {
+    delivered_to(Harness::Devin, daemon::Case::Images)
+}
+
+#[test]
+#[ignore = "opt-in: spends the machine's quota on a chief of Claude Code; cargo xtask live image-paste (npm run live:image-paste)"]
+fn a_long_result_is_delivered_to_a_claude_chief_once() -> Result {
+    delivered_to(Harness::Claude, daemon::Case::Long)
 }
 
 #[cfg(test)]
@@ -499,13 +561,17 @@ mod tests {
             "the counts the Mac showed"
         );
         assert_eq!(
-            expected(&SHAPES[2]),
+            expected(&SHAPES[2], Harness::Claude),
             if cfg!(windows) && !WINDOWS_CONVERTS {
                 0
             } else {
                 3
             }
         );
+        // Devin's TUI makes no attachment of any shape.
+        assert!(SHAPES
+            .iter()
+            .all(|shape| expected(shape, Harness::Devin) == 0));
     }
 
     #[test]

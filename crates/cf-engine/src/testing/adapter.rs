@@ -245,6 +245,11 @@ pub struct FakeAdapter {
     /// in (`<pasted_content id="…">`), and a launch's first message as it was
     /// given: not, as the fake of Node's suite, which recorded both as given.
     pub wraps_pastes: Cell<bool>,
+    /// Its windows' record holds a paste as Claude Code records one that reached it in
+    /// pieces, under load (the field bug of 2026-10-25, T-763): each whole piece of a
+    /// thousand characters in the wrapper, and the last, shorter piece bare after the last
+    /// closing tag. A paste of fewer than a piece is recorded as it was given.
+    pub splits_pastes: Cell<bool>,
     /// Its windows' record holds a paste whose lines are paths of images as Claude Code
     /// 2.1.308 keeps one (the field bug T-215): a `[Image #N]` for each at the head of
     /// the message, those lines gone, and the sources as an item of their own after it.
@@ -330,6 +335,7 @@ impl FakeAdapter {
             record_holds: Holds::default(),
             cut_holds: Holds::default(),
             wraps_pastes: Cell::new(false),
+            splits_pastes: Cell::new(false),
             attaches_images: Cell::new(false),
             forgets_first_messages: Cell::new(false),
             resumes_records: Cell::new(false),
@@ -737,7 +743,9 @@ impl FakeAdapter {
                 };
             }
             if agent.arrive {
-                let recorded = if self.wraps_pastes.get() {
+                let recorded = if self.splits_pastes.get() {
+                    in_pieces(text)
+                } else if self.wraps_pastes.get() {
                     format!(
                         "\n\n<pasted_content id=\"b118\">\n{text}\n</pasted_content id=\"b118\">\n"
                     )
@@ -768,6 +776,38 @@ impl FakeAdapter {
             }
         })
     }
+}
+
+/// What a window that records a paste it was given in pieces holds of `paste`
+/// (`splits_pastes`): Claude Code 2.1.30x under load, the field's items. Each piece of
+/// `PIECE` characters is in the wrapper (`\n\n<pasted_content id="…">`, the piece, and the
+/// tag closed on a line of its own), three line breaks between two, and the last piece,
+/// under a piece, bare after a blank line. A paste of fewer than a piece is recorded as
+/// it was given.
+fn in_pieces(paste: &str) -> String {
+    const PIECE: usize = 1_000;
+    let characters: Vec<char> = paste.chars().collect();
+    let whole = characters.len() / PIECE;
+    if whole == 0 {
+        return paste.to_owned();
+    }
+    let wrapped: Vec<String> = characters
+        .chunks(PIECE)
+        .take(whole)
+        .map(|piece| {
+            format!(
+                "<pasted_content id=\"b118\">\n{}\n</pasted_content id=\"b118\">",
+                piece.iter().collect::<String>()
+            )
+        })
+        .collect();
+    let bare: String = characters[whole * PIECE..].iter().collect();
+    let tail = if bare.is_empty() {
+        "\n".to_owned()
+    } else {
+        format!("\n\n{bare}")
+    };
+    format!("\n\n{}{tail}", wrapped.join("\n\n\n"))
 }
 
 /// What a window that attaches images records of `paste` (`attaches_images`): the words
