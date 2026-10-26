@@ -998,7 +998,7 @@ replace = '    answer["grants"] = json!(false);'
 
 [[plant]]
 name = "folder trust: the live suite has no case of grants whose yes would trust a repository outside the project (T-354, T-381)"
-meant = "claude_must_ask_where_nobody_answered_above_and_in_a_repository_nobody_answered_and_no_harness_ever_elsewhere"
+meant = "claude_must_ask_in_a_repository_nobody_answered_and_of_grants_and_servers_and_no_harness_ever_elsewhere"
 runs = ["folder-trust-live-cases"]
 
 [[plant.edit]]
@@ -1377,7 +1377,7 @@ replace = '''
 
 [[plant]]
 name = "folder trust: the live suite has no case of two servers (T-383)"
-meant = "claude_must_ask_where_nobody_answered_above_and_in_a_repository_nobody_answered_and_no_harness_ever_elsewhere"
+meant = "claude_must_ask_in_a_repository_nobody_answered_and_of_grants_and_servers_and_no_harness_ever_elsewhere"
 runs = ["folder-trust-live-cases"]
 
 [[plant.edit]]

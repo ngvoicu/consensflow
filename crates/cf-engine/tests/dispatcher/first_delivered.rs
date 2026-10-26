@@ -753,7 +753,8 @@ fn a_question_that_comes_after_half_a_minute_holds_a_workers_first_message_until
     // its first message is not let go at 30 s for having asked nothing.
     let context = delivered();
     let (project, brief) = briefed_showing(&context, "Claude Code is starting");
-    wait(&context, 40);
+    // Past 30 s by more than a look of the watch, each step ending one sleep of its own.
+    wait(&context, 90);
     assert_eq!(times_handed(&context, SEAM, brief), 0, "not let go at 30 s");
     context
         .host
