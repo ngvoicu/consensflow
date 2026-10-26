@@ -42,6 +42,9 @@ pub(super) struct Wires {
     logs: HashMap<String, Log>,
     /// How each request's turn ended, by the request.
     outcomes: HashMap<String, Outcome>,
+    /// How each turn ended, by the model's request it ended in (Devin's own request id),
+    /// where the wire names one ([`Active::native`]).
+    natives: HashMap<String, Outcome>,
 }
 
 /// One launch's log: where the last look stopped, and what it said so far.
@@ -67,16 +70,19 @@ struct Said {
     mine: bool,
 }
 
-/// A reply being streamed: its stream, its text so far, and the request it
-/// answers once the log names it.
+/// A reply being streamed: its stream, its text so far, the request it
+/// answers once the log names it, and the model's request the turn ends in, once the
+/// log names that (`turnRequestId`, beside the request as the turn ends: what the
+/// stored reply holds as its `metadata.request_id`).
 struct Active {
     id: String,
     text: String,
     request: Option<String>,
+    native: Option<String>,
 }
 
 /// How a request's turn ended, with the reply it streamed.
-#[derive(PartialEq)]
+#[derive(Clone, PartialEq)]
 pub(super) struct Outcome {
     pub(super) text: String,
     pub(super) cause: Cause,
@@ -114,12 +120,15 @@ impl Wires {
                 let kept = self.logs.remove(launch);
                 let was_kept = kept.is_some();
                 let mut log = kept.unwrap_or_default();
-                let outcomes = &mut self.outcomes;
+                let ended = &mut Ended {
+                    outcomes: &mut self.outcomes,
+                    natives: &mut self.natives,
+                };
                 let looked = read_on(
                     Path::new(&file),
                     log.seen.as_ref(),
                     now_ms,
-                    &mut |event, _| log.said.visit(&event, session, outcomes),
+                    &mut |event, _| log.said.visit(&event, session, ended),
                     Some(only.as_bytes()),
                 );
                 match looked {
@@ -161,6 +170,7 @@ impl Wires {
             }
             self.logs.clear();
             self.outcomes.clear();
+            self.natives.clear();
         }
     }
 
@@ -200,17 +210,46 @@ impl Wires {
             _ => None,
         }
     }
+
+    /// How the turn that ended in the model's request `native` ended, if a log said so,
+    /// naming that request both as the turn ended and in the end's statistics.
+    pub(super) fn native_outcome(&self, native: &Key) -> Option<&Outcome> {
+        match native {
+            Key::Text(native) => self.natives.get(&**native),
+            _ => None,
+        }
+    }
+}
+
+/// Where a log's ends of turns go: by the request, and by the model's request.
+struct Ended<'a> {
+    outcomes: &'a mut HashMap<String, Outcome>,
+    natives: &'a mut HashMap<String, Outcome>,
+}
+
+/// `outcome` as how the turn of `key` ended in `outcomes`: a log that says another of
+/// the same turn fails the look.
+fn record(
+    outcomes: &mut HashMap<String, Outcome>,
+    key: &str,
+    outcome: &Outcome,
+) -> Result<(), Stop> {
+    if outcomes
+        .get(key)
+        .is_some_and(|previous| previous != outcome)
+    {
+        return Err(Stop::Failed(
+            "conflicting Devin completion evidence".to_owned(),
+        ));
+    }
+    outcomes.insert(key.to_owned(), outcome.clone());
+    Ok(())
 }
 
 impl Said {
     /// A record of the log (`visitWire`): what it says of the session's
     /// turn. A line that names the session is never JSON's `null`.
-    fn visit(
-        &mut self,
-        event: &Value,
-        session: &str,
-        outcomes: &mut HashMap<String, Outcome>,
-    ) -> Result<(), Stop> {
+    fn visit(&mut self, event: &Value, session: &str, ended: &mut Ended<'_>) -> Result<(), Stop> {
         if event.get("sessionId").and_then(Value::as_str) != Some(session) {
             return Ok(());
         }
@@ -241,6 +280,7 @@ impl Said {
                     id: id.clone(),
                     text: String::new(),
                     request: None,
+                    native: None,
                 }),
             };
             let piece = js::string(content.and_then(|content| content.get("text")))
@@ -251,6 +291,10 @@ impl Said {
             (&mut self.active, event.get("turnClientMessageId"))
         {
             active.request = Some(request.clone());
+            active.native = match event.get("turnRequestId") {
+                Some(Value::String(native)) => Some(native.clone()),
+                _ => None,
+            };
         }
         let cause = match event.get("cause").and_then(Value::as_str) {
             Some("complete") => Cause::Complete,
@@ -260,24 +304,30 @@ impl Said {
             _ => return Ok(()),
         };
         if let Some(active) = &self.active {
+            let outcome = Outcome {
+                text: active.text.clone(),
+                cause,
+            };
             if let Some(request) = active
                 .request
                 .as_ref()
                 .filter(|request| !request.is_empty())
             {
-                let outcome = Outcome {
-                    text: active.text.clone(),
-                    cause,
-                };
-                if outcomes
-                    .get(request)
-                    .is_some_and(|previous| *previous != outcome)
+                record(ended.outcomes, request, &outcome)?;
+                // The model's request, where the end names the same one in its
+                // statistics: a compaction can leave a stored reply no other way back to
+                // the turn it ended (T-652).
+                let stated = event
+                    .get("stats")
+                    .and_then(|stats| stats.get("requestId"))
+                    .and_then(Value::as_str);
+                if let Some(native) = active
+                    .native
+                    .as_deref()
+                    .filter(|native| !native.is_empty() && stated == Some(native))
                 {
-                    return Err(Stop::Failed(
-                        "conflicting Devin completion evidence".to_owned(),
-                    ));
+                    record(ended.natives, native, &outcome)?;
                 }
-                outcomes.insert(request.clone(), outcome);
             }
         }
         self.active = None;

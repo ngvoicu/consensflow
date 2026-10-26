@@ -135,6 +135,15 @@ impl Wire {
         self.record(json!({ "turnClientMessageId": client, "cause": cause }))
     }
 
+    /// The turn that answers `client` ended in the model's request `request`, as Devin
+    /// 3000.11 says it (`wire-b09accf0.jsonl` of T-652, lines 46275-46276): a record that
+    /// names the turn's message and its request (`turnRequestId`), then the cause, with
+    /// the request again in its statistics.
+    pub fn ended_in(&mut self, cause: &str, client: &str, request: &str) -> io::Result<()> {
+        self.record(json!({ "turnClientMessageId": client, "turnRequestId": request }))?;
+        self.record(json!({ "cause": cause, "stats": { "requestId": request } }))
+    }
+
     /// The agent begins a call of its shell tool that runs `command`: its turn is at work.
     pub fn called(&mut self, command: &str, client: &str) -> io::Result<()> {
         self.record(json!({
@@ -221,6 +230,21 @@ mod tests {
         // The end, with the request it answers.
         assert_eq!(records[4]["cause"], "complete");
         assert_eq!(records[4]["turnClientMessageId"], "client-1");
+    }
+
+    #[test]
+    fn a_turn_ended_in_a_model_request_names_it_as_devin_3000_11_does() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("wire.jsonl");
+        let mut wire = Wire::open(&path, "calm-river").unwrap();
+        wire.ended_in("complete", "client-1", "request-9").unwrap();
+        let records = records(&path);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["turnClientMessageId"], "client-1");
+        assert_eq!(records[0]["turnRequestId"], "request-9");
+        assert_eq!(records[1]["cause"], "complete");
+        assert_eq!(records[1]["stats"]["requestId"], "request-9");
+        assert!(records[1].get("turnClientMessageId").is_none());
     }
 
     #[test]

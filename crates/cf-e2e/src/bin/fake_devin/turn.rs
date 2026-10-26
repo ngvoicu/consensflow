@@ -22,7 +22,13 @@
 //! (`fake_devin.rs`): it waits, and is written to the store when its turn begins.
 //!
 //! A line `FILE <name> <words>` is a turn whose tool makes the file `name` once it
-//! has worked, and does what the words say. Every call of a tool is asked of the
+//! has worked, and does what the words say. A line `CF <words> :: <text>` is a turn
+//! whose shell tool runs `cf` with those words and the text as one last word, as an
+//! agent runs it (`CF ask :: Which colour?` puts its question to the chief), and
+//! answers with what it printed; and a line `COMPACT <words>` is a turn that Devin's
+//! async compactor compacts before its answer (`Store::compact`), whose answer is
+//! stored and ended as Devin 3000.11 does it: in a request of its own, with no
+//! `finish_reason`, the wire naming that request as the turn ends (T-652). Every call of a tool is asked of the
 //! window's permission mode first (`permission`, `calls`): a message that is
 //! `/bypass` switches the window to full permission and makes no turn, or makes the
 //! turn of the prompt after it. A message that says to go on where the turn stopped
@@ -35,6 +41,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use cf_e2e::pattern;
+use cf_e2e::process::Run;
 use regex::Regex;
 
 use crate::calls::Said;
@@ -92,6 +99,10 @@ pub struct Plan {
     pub background: Option<u64>,
     /// The file its tool makes once it has worked, if it makes one.
     pub file: Option<String>,
+    /// The words its shell tool runs `cf` with once it has worked, if it runs it.
+    pub cf: Option<Vec<String>>,
+    /// Devin's compactor compacts it before its answer.
+    pub compact: bool,
     /// How it ends the window's program once it has worked, instead of answering.
     pub crash: Option<Crash>,
     /// What it answers.
@@ -119,6 +130,8 @@ pub fn plan_of(text: &str, pace: Pace) -> Plan {
     static SLEEP: OnceLock<Regex> = OnceLock::new();
     static BACKGROUND: OnceLock<Regex> = OnceLock::new();
     static FILE: OnceLock<Regex> = OnceLock::new();
+    static COMPACT: OnceLock<Regex> = OnceLock::new();
+    static CF: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
     let seconds = |count: &str| Duration::from_secs(count.parse().unwrap_or(0));
     let (first_word, words) = match pattern::once(&THINK, r"(?m)^THINK (\d+) (.+)$").captures(text)
@@ -139,6 +152,13 @@ pub fn plan_of(text: &str, pace: Pace) -> Plan {
         Some(made) => (Some(made[1].to_owned()), made[2].to_owned()),
         None => (None, words),
     };
+    let (compact, words) = match pattern::once(&COMPACT, r"(?m)^COMPACT (.+)$").captures(&words) {
+        Some(compacted) => (true, compacted[1].to_owned()),
+        None => (false, words),
+    };
+    let cf = pattern::once(&CF, r"(?m)^CF (.+)$")
+        .captures(&words)
+        .map(|verb| cf_words(&verb[1]));
     let answer = match pattern::once(&EXACT, r"Reply with exactly: (\S+)").captures(&words) {
         Some(exact) => exact[1].to_owned(),
         None => format!("noted: {}", words.split('\n').next().unwrap_or_default()),
@@ -148,8 +168,41 @@ pub fn plan_of(text: &str, pace: Pace) -> Plan {
         work,
         background,
         file,
+        cf,
+        compact,
         crash: crash::of(&words),
         answer,
+    }
+}
+
+/// The words of a line `CF <words> :: <text>` after `CF`: each word, and the text, spaces
+/// and all, as one last word, as the other stand-in reads its own.
+fn cf_words(line: &str) -> Vec<String> {
+    let mut parts = line.split(" :: ");
+    let mut words: Vec<String> = parts
+        .next()
+        .unwrap_or_default()
+        .split(' ')
+        .map(str::to_owned)
+        .collect();
+    let said: Vec<&str> = parts.collect();
+    if !said.is_empty() {
+        words.push(said.join(" :: "));
+    }
+    words
+}
+
+/// `cf` as an agent runs it: the one first on the window's `PATH`, with the window's own
+/// environment. What it printed and said, trimmed.
+fn run_cf(words: &[String]) -> String {
+    match Run::new("cf")
+        .args(words)
+        .inheriting_env()
+        .unlimited()
+        .run()
+    {
+        Ok(ran) => ran.output().trim().to_owned(),
+        Err(failed) => failed.to_string(),
     }
 }
 
@@ -354,6 +407,24 @@ impl<W: Write> Window<W> {
                 Call::Cancelled => stopped = true,
             }
         }
+        // Once it has worked, the shell tool that runs `cf`, its answer what it printed.
+        let mut answer = plan.answer.clone();
+        if let (false, Some(words)) = (stopped, &plan.cf) {
+            let command = format!("cf {}", words.join(" "));
+            let mut call = self.next_call(&client);
+            match call.ask(&command, prompt_file)? {
+                Call::Runs => {
+                    call.wire.called(&command, &client).map_err(said)?;
+                    let output = run_cf(words);
+                    // Each step of a turn is a request of the model's of its own.
+                    let step = format!("{}-request", call.call);
+                    call.store.ran(&call.call, &command, &step, &output)?;
+                    answer = format!("ran cf: {output}");
+                }
+                Call::Skipped => {}
+                Call::Cancelled => stopped = true,
+            }
+        }
         if let Some(crash) = plan.crash.as_ref().filter(|_| !stopped) {
             // Its last words, a line of their own, and the program is gone.
             let _ = self.say(&format!("{}\n", crash.words));
@@ -369,16 +440,24 @@ impl<W: Write> Window<W> {
             self.wire.ended("cancelled", &client).map_err(said)?;
             return self.say("Interrupted\n").map_err(said);
         }
-        self.wire
-            .said(&plan.answer, &stream, &client)
-            .map_err(said)?;
-        self.store.assistant(&plan.answer, true)?;
-        self.wire.ended("complete", &client).map_err(said)?;
+        self.wire.said(&answer, &stream, &client).map_err(said)?;
+        if plan.compact {
+            // The compactor ran while the turn worked: the answer goes on from its chain.
+            self.store.compact()?;
+            let request = format!("{client}-request-final");
+            self.store.answered(&answer, &request)?;
+            self.wire
+                .ended_in("complete", &client, &request)
+                .map_err(said)?;
+        } else {
+            self.store.assistant(&answer, true)?;
+            self.wire.ended("complete", &client).map_err(said)?;
+        }
         // The turn is over, and the command goes on saying what it prints.
         if let Some(left) = left {
             left.go_on_reporting(self.wire.another().map_err(said)?);
         }
-        self.say(&format!("{}\n", plan.answer)).map_err(said)
+        self.say(&format!("{answer}\n")).map_err(said)
     }
 }
 

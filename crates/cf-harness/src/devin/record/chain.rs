@@ -27,8 +27,12 @@ pub(super) struct Chain {
 pub(super) struct Entry {
     pub(super) item: Item,
     /// The request it answers: the last user message's client id, else that
-    /// message's own; null before any.
+    /// message's own; null before any, as after a compaction that left no user's
+    /// message on the chain.
     pub(super) request: Key,
+    /// The model's request an assistant's message is of (`metadata.request_id`): null
+    /// for any other, or where it names none.
+    pub(super) native: Key,
     /// Devin stored it as its turn's end (`finish_reason: "stop"`).
     pub(super) stopped: bool,
 }
@@ -89,6 +93,11 @@ impl Chain {
                     compaction: false,
                 },
                 request: request.clone(),
+                native: if role == Role::Assistant {
+                    keys.of(metadata("request_id"))
+                } else {
+                    Key::Null
+                },
                 stopped: metadata("finish_reason").and_then(Value::as_str) == Some("stop"),
             });
         }

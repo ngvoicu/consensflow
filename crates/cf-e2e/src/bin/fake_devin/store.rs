@@ -138,14 +138,82 @@ impl Store {
         self.append(json!({ "role": "assistant", "content": text, "metadata": metadata }))
     }
 
-    /// A message as the node the main chain goes on in.
+    /// The assistant's step that calls the tool `call` to run `command`, in the model's
+    /// request `request` (Devin's `metadata.request_id`, a request of its own for each
+    /// step), and what the call came back with.
+    pub fn ran(
+        &mut self,
+        call: &str,
+        command: &str,
+        request: &str,
+        output: &str,
+    ) -> Result<(), String> {
+        self.append(json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{ "id": call, "name": "exec", "arguments": { "command": command } }],
+            "metadata": { "request_id": request, "finish_reason": null },
+        }))?;
+        self.append(json!({
+            "role": "tool",
+            "content": output,
+            "tool_call_id": call,
+            "metadata": {},
+        }))
+    }
+
+    /// The assistant's message `text` that ends its turn as Devin 3000.11 stores one: in
+    /// the model's request `request`, with no `finish_reason` (none of the 574 replies of
+    /// T-652's store has one), so only the wire's end of that request proves it whole.
+    pub fn answered(&mut self, text: &str, request: &str) -> Result<(), String> {
+        self.append(json!({
+            "role": "assistant",
+            "content": text,
+            "metadata": { "request_id": request, "finish_reason": null },
+        }))
+    }
+
+    /// Devin's async compactor, in the middle of a turn: a system message that sums up
+    /// the conversation begins a chain of its own (no parent), the turn's steps so far are
+    /// copied below it, each a new node with the id Devin gave its message, and the main
+    /// chain goes on from the copies. The user's message the turn answers is in none of
+    /// it: it stays in the store, outside the main chain (T-652's store: the compactor's
+    /// node 1159, `kept_turns` 81, a main chain of 190 messages none of them a user's).
+    pub fn compact(&mut self) -> Result<(), String> {
+        let messages = messages_of(&self.db, &self.session)?;
+        let turn = messages
+            .iter()
+            .rposition(|message| message["role"] == "user")
+            .map_or(0, |at| at + 1);
+        let kept = &messages[turn..];
+        self.head = None;
+        self.append(json!({
+            "role": "system",
+            "content": "The conversation so far, summed up.",
+            "metadata": {
+                "extensions": {
+                    "chisel/conversation_history": { "messages": [] },
+                    "devin-rs/summary": { "source": "async_file_compactor", "kept_turns": kept.len() },
+                },
+            },
+        }))?;
+        for message in kept.iter().cloned() {
+            self.append(message)?;
+        }
+        Ok(())
+    }
+
+    /// A message as the node the main chain goes on in: a new one, or a copy that
+    /// keeps the id Devin gave the message.
     fn append(&mut self, mut message: Value) -> Result<(), String> {
         self.cut = None;
         let at = jiff::Timestamp::now().to_string();
         self.count += 1;
         let node = format!("{}-node-{}", self.session, self.count);
-        message["message_id"] = json!(format!("{}-message-{}", self.session, self.count));
-        message["metadata"]["created_at"] = json!(at);
+        if message.get("message_id").is_none() {
+            message["message_id"] = json!(format!("{}-message-{}", self.session, self.count));
+            message["metadata"]["created_at"] = json!(at);
+        }
         let transaction = self.db.transaction().map_err(said)?;
         transaction
             .execute(
@@ -252,6 +320,49 @@ mod tests {
         assert_eq!(assistant["role"], "assistant");
         assert_eq!(assistant["metadata"]["finish_reason"], "stop");
         assert_eq!(assistant["message_id"], "calm-river-message-2");
+    }
+
+    #[test]
+    fn a_compaction_begins_a_chain_of_its_own_with_the_turns_steps_copied_and_the_users_message_left_out(
+    ) {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("sessions.db");
+        let mut store = Store::open(&file, "calm-river").unwrap();
+        store.user("before", "client-1").unwrap();
+        store.assistant("earlier", true).unwrap();
+        store.user("ask", "client-2").unwrap();
+        store
+            .ran("call-1", "cf ask x", "client-2-request-1", "asked")
+            .unwrap();
+        store.compact().unwrap();
+        store.answered("ASKED", "client-2-request-final").unwrap();
+        let (head, nodes) = read(&file, "calm-river");
+        let node = |id: &str| nodes.iter().find(|node| node.0 == id).unwrap();
+        // The main chain, from its head up: the answer, the copied step and its tool's
+        // answer, the summary, which has no parent.
+        let mut chain = Vec::new();
+        let mut at = head;
+        while let Some(id) = at {
+            let (_, parent, message) = node(&id);
+            chain.push(message.clone());
+            at = parent.clone();
+        }
+        chain.reverse();
+        let roles: Vec<&str> = chain.iter().map(|m| m["role"].as_str().unwrap()).collect();
+        assert_eq!(roles, ["system", "assistant", "tool", "assistant"]);
+        assert_eq!(
+            chain[0]["metadata"]["extensions"]["devin-rs/summary"]["source"],
+            "async_file_compactor"
+        );
+        // The copies keep the ids Devin gave the messages.
+        assert_eq!(chain[1]["message_id"], nodes[3].2["message_id"]);
+        assert_eq!(chain[2]["message_id"], nodes[4].2["message_id"]);
+        assert_eq!(chain[1]["metadata"]["request_id"], "client-2-request-1");
+        let answer = &chain[3];
+        assert_eq!(answer["content"], "ASKED");
+        assert_eq!(answer["metadata"]["request_id"], "client-2-request-final");
+        assert!(answer["metadata"]["finish_reason"].is_null());
+        assert_eq!(nodes.len(), 9, "the user's messages stay in the store");
     }
 
     #[test]
