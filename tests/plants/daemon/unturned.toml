@@ -131,7 +131,7 @@ find = '''        let conversation = if participant.role == "chief" {
             )? {
                 return Ok(None);
             }
-            self.kept_apart(project, participant, record, found, before.as_ref(), first)?
+            self.kept_apart(project, participant, found, before.as_ref(), first)?
         };'''
 replace = ''''''
 
@@ -151,8 +151,8 @@ find = '''            if self.launch_over(
             )? {
                 return Ok(None);
             }
-            self.kept_apart(project, participant, record, found, before.as_ref(), first)?'''
-replace = '''            self.kept_apart(project, participant, record, found, before.as_ref(), first)?'''
+            self.kept_apart(project, participant, found, before.as_ref(), first)?'''
+replace = '''            self.kept_apart(project, participant, found, before.as_ref(), first)?'''
 
 [[plant]]
 name = "resume unturned: the conversation a member's launch looked into is not the one its window goes on with"
@@ -163,10 +163,10 @@ runs = ["engine-resume"]
 file = "crates/cf-engine/src/windows.rs"
 find = '''                return Ok(None);
             }
-            self.kept_apart(project, participant, record, found, before.as_ref(), first)?'''
+            self.kept_apart(project, participant, found, before.as_ref(), first)?'''
 replace = '''                return Ok(None);
             }
-            self.kept_apart(project, participant, record, found.filter(|_| false), before.as_ref(), first)?'''
+            self.kept_apart(project, participant, found.filter(|_| false), before.as_ref(), first)?'''
 
 # --- each harness's own answer ---
 

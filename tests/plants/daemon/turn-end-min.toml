@@ -817,17 +817,9 @@ replace = '''
             return Ok(Some(conversation));
         }'''
 
-[[plant]]
-name = "turn-end-min ownership: a session the human deleted forgets how its window ended"
-meant = "brings_a_deleted_session_back_when_a_follow_up_comes_with_after_its_window_opens_on_its_own_conversation_and_a_busy_session_still_refuses"
-runs = ["tem-engine-deleted"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '''
-                    record.window.borrow_mut().last_exit =
-                        self.left_exits.borrow_mut().remove(&participant);'''
-replace = '                    let _ = self.left_exits.borrow_mut().remove(&participant);'
+# A session the human deleted keeps how its window ended: since T-541 the ledger keeps it on the
+# session's conversation, and the plant that made the record forget it is `exit-proof.toml`'s
+# "a deleted session's window ... is not kept".
 
 [[plant]]
 name = "turn-end-min: a window that closes keeps what its task was held for"

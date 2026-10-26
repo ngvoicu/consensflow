@@ -1,0 +1,235 @@
+# The host's proof that a window's program is gone, kept across a restart (T-541; T-530's
+# follow-up went to a new conversation after the board's restart, m-3891). Another task goes on
+# in a session's conversation only where the host proved the program of the last window on it
+# gone (`crates/cf-engine/src/ownership.rs`). The ledger keeps that word on the conversation
+# (`program_gone`, migration 0024; `crates/cf-ledger/src/conversations.rs`), written as the
+# host proves the window's exit (`crates/cf-engine/src/dispatcher.rs`, `exited` and
+# `heard_exit`), set back before a window opens on it (`crates/cf-engine/src/windows.rs`) or the
+# human switches a window to it, and read by `kept_apart` and the next launch's
+# `previous_gone`. A window open when the daemon stopped is no proof: the window's quit ends it
+# after the daemon has gone and tells no one (`cf_panes::headless::reap_all`). The case on the
+# rig is `crates/cf-e2e/tests/regressions/a_follow_up_after_a_restart_lost_its_windows_conversation.rs`,
+# which builds the native `cf` from the sources as planted, so its plant says `builds`.
+#
+# Every name holds `exit proof`, so `npm run plants:daemon -- "exit proof"` runs them all.
+
+[run]
+# The engine's tests of the proof across a restart, on the fake windows.
+ep-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "exit_proof::"]
+# The engine's tests of what a window opened again is told of the program before it.
+ep-engine-windows = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "windows::"]
+# The ledger's tests of the column.
+ep-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "program_gone::"]
+# The field's shape on the rig: the daemon killed and started again on the same home.
+ep-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_follow_up_after_a_restart_lost_its_windows_conversation::"]
+# What the players of Node's recordings hold apart of what only this ledger writes.
+ep-ledger-testing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::program_gone"]
+
+[[plant]]
+name = "exit proof: another task reads no proof of the window before after a restart, as T-530 met"
+meant = "a_follow_up_goes_on_in_its_sessions_conversation_after_a_restart_where_the_window_before_closed_proven_gone"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = "        let gone = self.seams.ledger.borrow().program_gone(conversation.id)?;"
+replace = "        let gone = self.seams.ledger.borrow().program_gone(conversation.id)? && false;"
+
+[[plant]]
+name = "exit proof rig: a follow-up added after the app's restart goes to a new conversation, as T-530 did"
+meant = "a_follow_up_added_after_the_apps_restart_goes_on_in_the_conversation_of_the_window_that_did_its_task"
+runs = ["ep-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.keep_proof(record.id, conversation, gone, Some(&record))?;"
+replace = "            self.keep_proof(record.id, conversation, gone && false, Some(&record))?;"
+
+[[plant]]
+name = "exit proof: a window's exit proven gone is not kept on its conversation"
+meant = "a_follow_up_goes_on_in_its_sessions_conversation_after_a_restart_where_the_window_before_closed_proven_gone"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.keep_proof(record.id, conversation, gone, Some(&record))?;"
+replace = "            self.keep_proof(record.id, conversation, gone && false, Some(&record))?;"
+
+[[plant]]
+name = "exit proof: a window whose program the host could not end is kept as proven gone"
+meant = "a_follow_up_goes_to_a_new_conversation_after_a_restart_where_the_window_before_closed_with_its_program_alive"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        if let (Some(gone), Some(conversation)) = (shown.gone(), conversation) {"
+replace = "        if let (Some(gone), Some(conversation)) = (shown.gone().map(|_| true), conversation) {"
+
+[[plant]]
+name = "exit proof: a window that opens on the conversation leaves the proof of the one before"
+meant = "a_window_open_when_the_daemon_stopped_is_no_proof_though_the_window_before_it_was_proven_gone"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            self.seams.ledger.borrow_mut().set_program_gone(id, false)?;"
+replace = "            let _ = id;"
+
+[[plant]]
+name = "exit proof: the host's late word on a closed window proves the one open since gone"
+meant = "a_late_word_that_a_closed_windows_program_is_gone_proves_nothing_of_the_window_open_since"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        if !windowed {"
+replace = "        if !windowed || true {"
+
+[[plant]]
+name = "exit proof: the host's word on a window the engine closed itself is not kept"
+meant = "the_hosts_word_on_a_window_the_engine_closed_itself_is_what_its_next_launch_is_told"
+runs = ["ep-engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+                .set_program_gone(conversation, gone)?;'''
+replace = '''
+                .set_program_gone(conversation, false)?;'''
+
+[[plant]]
+name = "exit proof: the host's late word on a deleted session's window is not kept"
+meant = "the_hosts_late_word_on_a_deleted_sessions_window_is_kept_for_the_follow_up_that_brings_it_back"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            .filter(|(_, (last, _))| last == pane)\n"
+replace = "            .filter(|(_, (last, _))| last == pane && false)\n"
+
+[[plant]]
+name = "exit proof: an open the host refused takes the proof of the window before with it"
+meant = "an_open_the_host_refused_keeps_the_proof_of_the_window_before"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "                if let Some(id) = resumed_on.filter(|_| proven) {"
+replace = "                if let Some(id) = resumed_on.filter(|_| proven && false) {"
+
+[[plant]]
+name = "exit proof: a window opened again is told the program before it is gone where it may run"
+meant = "a_window_opened_again_is_told_the_program_before_it_is_gone_only_where_the_host_proved_it"
+runs = ["ep-engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            None => false,\n        };\n        let launch = Launch {"
+replace = "            None => false,\n        } || true;\n        let launch = Launch {"
+
+[[plant]]
+name = "exit proof: the proof is written on every conversation of the participant"
+meant = "the_proof_is_kept_on_the_conversation_named_and_taken_back_before_a_window_opens_on_it"
+runs = ["ep-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations.rs"
+find = '"UPDATE conversation SET program_gone = ? WHERE id = ?",'
+replace = '"UPDATE conversation SET program_gone = ? WHERE participant_id = (SELECT participant_id FROM conversation WHERE id = ?)",'
+
+[[plant]]
+name = "exit proof: a conversation the human switches a window back to keeps the proof of the window before"
+meant = "a_conversation_the_human_switches_a_window_back_to_keeps_no_proof_of_the_window_before"
+runs = ["ep-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations.rs"
+find = '"UPDATE conversation SET ended_at = NULL, program_gone = 0 WHERE id = ?",'
+replace = '"UPDATE conversation SET ended_at = NULL WHERE id = ?",'
+
+[[plant]]
+name = "exit proof: the migration proves every conversation a ledger before it had gone"
+meant = "a_ledger_from_before_the_column_proves_no_program_gone"
+runs = ["ep-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0024.sql"
+find = "program_gone INTEGER NOT NULL DEFAULT 0 CONSTRAINT"
+replace = "program_gone INTEGER NOT NULL DEFAULT 1 CONSTRAINT"
+
+[[plant]]
+name = "exit proof: the players of Node's recordings compare the column Node never had"
+meant = "takes_the_program_gone_column_and_its_values_out_of_the_conversation_table_and_nothing_else"
+runs = ["ep-ledger-testing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = "        .chain(program_gone::COLUMNS)\n"
+replace = ""
+
+# Calliope's review of 0181cd9a (T-573): the proof is kept on the conversation the window
+# wrote to (`WindowPart::conversation`, from the open and the human's switch), and not where
+# another window of the participant has opened since (`Dispatcher::keep_proof`).
+
+[[plant]]
+name = "exit proof: the exit of a deleted session's window is kept on the conversation its participant has now, whatever window is open"
+meant = "the_exit_of_a_deleted_sessions_window_proves_nothing_of_the_window_that_brought_it_back"
+runs = ["ep-engine"]
+
+# 0181cd9a's write, which neither keyed the proof by the window's conversation nor looked
+# for another window: the guard alone, or the keying alone, holds the test.
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.keep_proof(record.id, conversation, gone, Some(&record))?;"
+replace = """            if let Some(now) = self.seams.ledger.borrow().current_conversation(record.id)? {
+                self.seams.ledger.borrow_mut().set_program_gone(now.id, gone)?;
+            }"""
+
+[[plant]]
+name = "exit proof: a window forgotten as it opened keeps its end on the conversation before"
+meant = "a_window_forgotten_as_it_opened_on_a_new_conversation_proves_nothing_of_the_one_before"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "                part.conversation = resumed_on;"
+replace = """                part.conversation = self
+                    .seams
+                    .ledger
+                    .borrow()
+                    .current_conversation(participant.id)?
+                    .map(|now| now.id);"""
+
+[[plant]]
+name = "exit proof: a window keeps no conversation of its own"
+meant = "a_follow_up_goes_on_in_its_sessions_conversation_after_a_restart_where_the_window_before_closed_proven_gone"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            part.conversation = conversation_id;"
+replace = "            part.conversation = None;"
+
+[[plant]]
+name = "exit proof: a window the human switched keeps its end on the conversation it opened on"
+meant = "the_end_of_a_window_the_human_switched_is_kept_on_the_conversation_it_switched_to"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/transcripts.rs"
+find = "        record.window.borrow_mut().conversation = Some(followed.id);"
+replace = "        let _ = followed;"
+
+[[plant]]
+name = "exit proof: a deleted session brought back forgets the pane of its last window"
+meant = "the_hosts_word_after_a_deleted_session_is_brought_back_and_before_its_window_opens_is_kept"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = """
+                    record.window.borrow_mut().last_exit =
+                        self.left_exits.borrow_mut().remove(&participant);"""
+replace = """
+                    let _ = self.left_exits.borrow_mut().remove(&participant);"""

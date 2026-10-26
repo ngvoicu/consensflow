@@ -25,8 +25,8 @@ lost-queue-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", 
 lost-queue-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_stuck_working_after_its_window_was_resumed::"]
 
 # Round 4 (Astra's review of round 2): the length is taken only where the pane host proved the
-# window's program gone (`Launch::previous_gone`, from the engine's record of the last exit), and the
-# old turn's answer is no candidate past the relaunch.
+# window's program gone (`Launch::previous_gone`, from the proof the ledger keeps on the conversation,
+# `exit-proof.toml`), and the old turn's answer is no candidate past the relaunch.
 
 [[plant]]
 name = "lost-queue: the adapter takes the length though the program before may still run"
@@ -65,8 +65,8 @@ runs = ["lost-queue-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "            self.heard_exit(pane, &shown);\n"
-replace = ""
+find = "            return self.heard_exit(pane, &shown);"
+replace = "            return Ok(());"
 
 [[plant]]
 name = "lost-queue: no launch is told its window before was gone, and the answer to a reopen of a window that closed at rest with a notification queued is never the result"
@@ -76,8 +76,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "            .is_some_and(|(_, gone)| *gone == Some(true));"
-replace = "            .is_some_and(|_| false);"
+find = "            Some(conversation) => self.seams.ledger.borrow().program_gone(conversation.id)?,"
+replace = "            Some(_) => false,"
 
 [[plant]]
 name = "lost-queue: the old turn's answer stays the candidate past the relaunch"

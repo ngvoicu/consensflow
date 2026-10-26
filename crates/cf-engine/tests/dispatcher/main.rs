@@ -43,6 +43,7 @@ mod closing;
 mod decided_results;
 mod deleted_sessions;
 mod deliveries;
+mod exit_proof;
 mod exit_unsettled;
 mod final_answer;
 mod fixtures;
