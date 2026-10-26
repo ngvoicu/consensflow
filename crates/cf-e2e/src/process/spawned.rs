@@ -7,6 +7,7 @@
 
 use std::io::{BufReader, Read, Write};
 use std::process::{Child, ChildStdout, ExitStatus};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
@@ -51,6 +52,9 @@ pub struct Spawned {
     input: Option<Sink>,
     output: Option<BufReader<ChildStdout>>,
     errors: Arc<Mutex<String>>,
+    /// Whether its error output has been read to its end: no one holds it open any more, and
+    /// all it said is in `errors`.
+    errors_ended: Arc<AtomicBool>,
 }
 
 impl Spawned {
@@ -78,8 +82,10 @@ impl Spawned {
             sink.send(bytes);
         }
         let errors = Arc::new(Mutex::new(String::new()));
+        let errors_ended = Arc::new(AtomicBool::new(child.stderr.is_none()));
         if let Some(mut pipe) = child.stderr.take() {
             let said = Arc::clone(&errors);
+            let ended = Arc::clone(&errors_ended);
             thread::spawn(move || {
                 let mut chunk = [0_u8; 4096];
                 while let Ok(read) = pipe.read(&mut chunk) {
@@ -90,6 +96,7 @@ impl Spawned {
                         .unwrap_or_else(PoisonError::into_inner)
                         .push_str(&String::from_utf8_lossy(&chunk[..read]));
                 }
+                ended.store(true, Ordering::SeqCst);
             });
         }
         let output = child.stdout.take().map(BufReader::new);
@@ -99,6 +106,7 @@ impl Spawned {
             input,
             output,
             errors,
+            errors_ended,
         }
     }
 
@@ -138,6 +146,23 @@ impl Spawned {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+
+    /// Everything it said on its error output, once that has been read to its end, waited
+    /// for up to `within`: none if something holds it open still then (a program it left
+    /// running). A program that has ended has not said what is still on its way to this
+    /// side: [`Spawned::errors`] is what has been read so far, and a read on another thread
+    /// that has not run yet leaves it short (T-643: `cat >&2`'s "queued twice" read as
+    /// "queued " or nothing right after its end, on a loaded machine).
+    pub fn errors_to_the_end(&self, within: Duration) -> Option<String> {
+        let until = Instant::now() + within;
+        while !self.errors_ended.load(Ordering::SeqCst) {
+            if Instant::now() >= until {
+                return None;
+            }
+            thread::sleep(POLL);
+        }
+        Some(self.errors())
     }
 
     /// Whether it has ended.

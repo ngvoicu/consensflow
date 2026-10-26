@@ -174,16 +174,21 @@ os._exit(5)
     let pieces = read_all(output(&table, &key, reader, gone));
     let seen = until_the_end(&pieces, Duration::from_secs(15));
     let _ = std::fs::remove_file(&asked);
-    // The helper is the test's to end, where its number was read; else it ends by itself.
+    // The helper is a detached job: it left its session and lost its parent, and holds the
+    // terminal. It is the test's own, so the guard of the test's signals is told so
+    // (`register`) and the close of the pane may end it, as it ends what a window leaves
+    // running. The test does not end it first: a helper the test had sent SIGKILL was still
+    // dying when the close came for it, on a loaded machine (T-643: 4 of 588 runs at a load
+    // of 130 to 190), and the guard, which knew nothing of it, stopped the close's SIGTERM
+    // and the test with it. Here the close finds it running every time.
     let said = seen.clone().unwrap_or_default();
-    if let Some(helper) = said
+    let helper = said
         .split("HELPER ")
         .nth(1)
         .and_then(|rest| rest.split_whitespace().next())
-        .and_then(|number| number.parse::<i32>().ok())
-    {
-        // SAFETY: signal 9 to the helper this test's program started, by its number.
-        unsafe { libc::kill(helper, 9) };
+        .and_then(|number| number.parse::<i32>().ok());
+    if let Some(helper) = helper {
+        crate::process_tree::guard::register(helper);
     }
     let seen = seen.expect("the output's end");
     assert!(
@@ -191,6 +196,22 @@ os._exit(5)
         "its last words were dropped: {seen:?}"
     );
     table.kill(&key).expect("close the pane");
+    // The helper is ended with the pane, or by the test: it is not left for its twenty seconds.
+    if let Some(helper) = helper {
+        let until = Instant::now() + Duration::from_secs(30);
+        while process_exists(helper) && Instant::now() < until {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let left = process_exists(helper);
+        if left {
+            // SAFETY: signal 9 to the helper this test's program started, by its number.
+            unsafe { libc::kill(helper, 9) };
+        }
+        assert!(
+            !left,
+            "the pane's close left the helper of its program running"
+        );
+    }
 }
 
 /// A program that outlived its output is ended, and gone, before the daemon is told the

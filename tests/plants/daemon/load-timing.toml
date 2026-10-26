@@ -28,6 +28,9 @@ lt-terminate = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "term
 lt-sweep = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "group::tests::a_sweep_goes_on"]
 lt-spawning = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "spawning::"]
 lt-closed = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "execute::tests::a_program_out_of_time_that_writes_once_asked"]
+lt-held = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "stalls::held::tests::a_job_is_stopped_under_its_program"]
+lt-output-end = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "output_end::tests::what_a_program_says_after_an_end_of_its_output"]
+lt-errors-end = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell::the_error_output_of_a_program_that_has_ended"]
 lt-gone = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "testing::a_process_that_has_ended"]
 lt-liveness = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "contract::liveness::wakes_streamed"]
 lt-pty = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::tests::input_remains_responsive_while_output_waits_for_ack"]
@@ -285,3 +288,54 @@ replace = '''    if program.exists() {
     }
     files::make_dir(folder)?;
     let name = program'''
+
+# --- T-643: five more tests of the same kind ---
+#
+# - cf-evals `a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart`: its wait went on
+#   once two processes were listed, and took the look of a job that had not read the terminal yet (`R`, `S`,
+#   `U`), or of a program not yet waiting (`Rs+`); it waits for the job to be `T` under a program in `S`.
+# - cf-panes `what_a_program_says_after_an_end_of_its_output_and_before_it_is_seen_gone_is_read`: the test sent
+#   SIGKILL to the helper its program leaves, which was still dying when the close of the pane came for it, and
+#   the guard of the test's signals, which knew nothing of the helper, stopped the close's SIGTERM. The test
+#   registers the helper with the guard and lets the close end it.
+# - cf-e2e `a_spawned_programs_input_is_ended_after_everything_queued_is_written`: what the case read of the
+#   error output right after the program's end was what the thread that reads it had read so far; it waits for
+#   the stream's end (`Spawned::errors_to_the_end`).
+# - cf-panes `input_remains_responsive_while_output_waits_for_ack` is T-581's (the gates of T-610 failed it at
+#   the 10 s it had: "blocked input write resumes after output acks: Timeout").
+
+[[plant]]
+name = "load timing: a job is taken for stopped under its program once two processes are listed"
+meant = "a_job_is_stopped_under_its_program_only_when_the_states_say_so_not_when_it_is_listed"
+runs = ["lt-held"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls/held/tests.rs"
+find = '''    matches!(
+        taken.processes.as_deref(),
+        Ok([program, job]) if state_in(program).starts_with('S') && state_in(job).starts_with('T')
+    )'''
+replace = '''    taken.processes.as_ref().is_ok_and(|lines| lines.len() == 2)'''
+
+[[plant]]
+name = "load timing: the helper a program leaves is not told to the guard of the test's signals"
+meant = "what_a_program_says_after_an_end_of_its_output_and_before_it_is_seen_gone_is_read"
+runs = ["lt-output-end"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end/tests.rs"
+find = "        crate::process_tree::guard::register(helper);"
+replace = "        let _ = helper;"
+
+[[plant]]
+name = "load timing: the error output of a program that has ended is complete as soon as it has ended"
+meant = "the_error_output_of_a_program_that_has_ended_is_complete_only_once_it_is_read_to_its_end"
+runs = ["lt-errors-end"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/spawned.rs"
+find = "        while !self.errors_ended.load(Ordering::SeqCst) {"
+replace = "        while false && !self.errors_ended.load(Ordering::SeqCst) {"

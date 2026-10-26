@@ -205,6 +205,65 @@ fn window(program: &str, args: &[&str]) -> Window {
     }
 }
 
+/// Whether `taken` shows a program that waits for its job and the job stopped under it: two
+/// lines, the program's in a sleep and the job's `T`. A job that is listed has not read the
+/// terminal yet when it runs (`R`) or sleeps before its read (`S`, `U`), and is stopped by the
+/// terminal only once it has: a look taken before then is of a job that is no stopped one
+/// (T-643: the program's `Rs+` and the job's `R`, `S`, `U` and `RN` in 4 of 192 runs at a load
+/// of 130 to 190, each taken by a wait that went on once two processes were listed).
+#[cfg(unix)]
+fn stopped_under_its_program(taken: &Taken) -> bool {
+    matches!(
+        taken.processes.as_deref(),
+        Ok([program, job]) if state_in(program).starts_with('S') && state_in(job).starts_with('T')
+    )
+}
+
+#[cfg(unix)]
+fn taken_with(states: [&str; 2]) -> Taken {
+    Taken {
+        processes: Ok(vec![
+            format!(
+                "5513 5389 {} - ttys048 /bin/sh -c set -m; cat & wait",
+                states[0]
+            ),
+            format!("5535 5513 {} - ttys048 cat", states[1]),
+        ]),
+        unread: Ok(0),
+        sample: None,
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_job_is_stopped_under_its_program_only_when_the_states_say_so_not_when_it_is_listed() {
+    // Listed, and not stopped: the job has not read the terminal yet.
+    for job in ["R", "RN", "S", "U", "Ss", "R+"] {
+        assert!(
+            !stopped_under_its_program(&taken_with(["SNs+", job])),
+            "a job in {job} is not stopped"
+        );
+    }
+    // The program not yet waiting for it.
+    for program in ["Rs+", "R", "U"] {
+        assert!(
+            !stopped_under_its_program(&taken_with([program, "T"])),
+            "a program in {program} is not yet waiting"
+        );
+    }
+    for (program, job) in [("SNs+", "T"), ("Ss+", "TN"), ("S+", "T+")] {
+        assert!(
+            stopped_under_its_program(&taken_with([program, job])),
+            "{program} over {job}"
+        );
+    }
+    // One line, three, or none asked.
+    let mut one = taken_with(["SNs+", "T"]);
+    one.processes = one.processes.map(|lines| lines[..1].to_vec());
+    assert!(!stopped_under_its_program(&one));
+    assert!(!stopped_under_its_program(&Taken::none("no ps")));
+}
+
 #[cfg(unix)]
 #[test]
 #[allow(clippy::too_many_lines)]
@@ -241,10 +300,11 @@ fn a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart() {
         let rested = system.take(&listed, resting, &[], "idle-1-found");
         let taken = system.take(&listed, stopping, &[], "stopped-1-found");
         // Waited for on all that is asserted after: the writer asleep with bytes unread, the
-        // job stopped, and each Node's main thread where the assertions want it.
+        // job stopped under its program, and each Node's main thread where the assertions
+        // want it.
         let waits = state_in(&line_of(&held, writing)).starts_with('S')
             && (!cfg!(target_os = "macos") || held.unread.as_ref().is_ok_and(|bytes| *bytes > 0));
-        let stopped = taken.processes.as_ref().unwrap().len() == 2;
+        let stopped = stopped_under_its_program(&taken);
         if (waits && stopped && settled(&held, &rested)) || std::time::Instant::now() > deadline {
             break (held, rested, taken);
         }

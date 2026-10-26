@@ -261,7 +261,40 @@ mod shell {
         program.end_input();
         let status = program.wait(Duration::from_secs(10)).unwrap();
         assert_eq!(status.and_then(|status| status.code()), Some(0));
-        assert_eq!(program.errors(), "queued twice");
+        // What it wrote is read on a thread of its own, which has not run yet when the
+        // program has ended: it is waited for to the end of the stream.
+        assert_eq!(
+            program
+                .errors_to_the_end(Duration::from_secs(30))
+                .as_deref(),
+            Some("queued twice")
+        );
+    }
+
+    #[test]
+    fn the_error_output_of_a_program_that_has_ended_is_complete_only_once_it_is_read_to_its_end() {
+        // The program ends at once, and what it left running says its last words once it is
+        // told to: what the case has of its error output when it has ended is short, and is
+        // complete when the stream is.
+        let folder = tempfile::tempdir().unwrap();
+        let go = folder.path().join("go");
+        let mut program = sh(&format!(
+            "(while [ ! -e '{}' ]; do sleep 0.01; done; printf late >&2) & printf early >&2",
+            go.display()
+        ))
+        .spawn()
+        .unwrap();
+        let status = program.wait(Duration::from_secs(10)).unwrap();
+        assert_eq!(status.and_then(|status| status.code()), Some(0));
+        assert_eq!(program.errors_to_the_end(Duration::from_millis(100)), None);
+        assert!(!program.errors().contains("late"), "{:?}", program.errors());
+        std::fs::write(&go, "").unwrap();
+        assert_eq!(
+            program
+                .errors_to_the_end(Duration::from_secs(30))
+                .as_deref(),
+            Some("earlylate")
+        );
     }
 
     #[test]
