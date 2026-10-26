@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use cf_engine::testing::{Context, Gate};
 use cf_engine::SwitchWhen;
-use cf_harness::contract::{Admission, Readiness};
+use cf_harness::contract::{Admission, FirstMessage, Readiness};
 use cf_harness::records::Role;
 use cf_ledger::{continuation, LedgerError, MessageView, NewNote};
 use serde_json::json;
@@ -27,6 +27,13 @@ use crate::fixtures::{given, native_of};
 use crate::resume::{at_work, cut_notes, opened, quit_and_start};
 
 /// The words a pause says of a window's program the Close could not end.
+/// The three ways a window takes its first message ([`FirstMessage`]).
+const MODES: [FirstMessage; 3] = [
+    FirstMessage::Opened,
+    FirstMessage::Started,
+    FirstMessage::Delivered,
+];
+
 const SURVIVOR: &str =
     "@zeus-amber-pine's window closed, but its program (process 4242) could not be ended and may still run";
 
@@ -61,11 +68,13 @@ fn chief_at_rest(context: &Context) -> i64 {
 #[test]
 fn a_chief_launch_prepared_while_the_project_closes_opens_no_window_and_its_handoff_goes_in_once_after_the_resume(
 ) {
-    // A first message on the command line, and one the window takes once it is up
-    // (OpenCode's), which no hand-over as the pane is asked for keeps out.
-    for seeds in [false, true] {
+    // A first message the window reads as it opens, one it takes once it is up
+    // (OpenCode's), which no hand-over as the pane is asked for keeps out, and one
+    // it is delivered once up (Claude Code's, Pi's, Codex's).
+    for first in MODES {
+        let seeds = format!("{first:?}");
         let context = with_codex();
-        context.codex.seeds.set(seeds);
+        context.codex.first.set(first);
         let project = chief_at_rest(&context);
         // The new chief's window waits in its preparation while the human closes the project.
         let preparing = context.codex.prepare_holds.hold(|_| true);
@@ -105,7 +114,7 @@ fn a_chief_launch_prepared_while_the_project_closes_opens_no_window_and_its_hand
 fn a_first_message_a_window_takes_once_it_is_up_is_not_given_when_the_project_closes_first_and_goes_in_once_after_the_resume(
 ) {
     let context = with_codex();
-    context.codex.seeds.set(true);
+    context.codex.first.set(FirstMessage::Started);
     let project = chief_at_rest(&context);
     let starting = context.codex.start_holds.hold(|_| true);
     context
@@ -137,16 +146,19 @@ fn a_first_message_a_window_takes_once_it_is_up_is_not_given_when_the_project_cl
 }
 
 /// Sol's review of 2026-10-16, round 7: a reader of a closed project reads only
-/// what its window was handed, and a launch's first message is handed with the
-/// command line the window opens with, as its pane is asked for and not before
-/// (the ledger marks it so, `admit`). One the window takes once it is up
-/// (OpenCode's) is handed as it is posted, and not as its pane is asked for.
+/// what its window was handed, and a launch's first message its window reads as it
+/// opens is handed as its pane is asked for and not before (the ledger marks it so,
+/// `admit`). One the window takes once it is up (OpenCode's) is handed as it is
+/// posted, and one it is delivered once up (Claude Code's, Pi's, Codex's) as the
+/// step delivers it, neither as its pane is asked for.
 #[test]
 fn a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_it_is_posted_once_the_window_is_up(
 ) {
-    for seeds in [false, true] {
+    for first in MODES {
+        let seeds = format!("{first:?}");
+        let opened = first == FirstMessage::Opened;
         let context = Context::new();
-        context.adapter.seeds.set(seeds);
+        context.adapter.first.set(first);
         let project = context.with_staff(&["zeus"]).id;
         let preparing = context.adapter.prepare_holds.hold(|_| true);
         let opening = context.host.open_holds.hold(|_| true);
@@ -171,14 +183,19 @@ fn a_launch_s_first_message_is_handed_over_as_its_pane_is_asked_for_or_as_it_is_
 
         preparing.open();
         context.settle();
-        assert_eq!(handed(), !seeds, "seeds {seeds}: as its pane is asked for");
+        assert_eq!(handed(), opened, "seeds {seeds}: as its pane is asked for");
 
         opening.open();
         context.settle();
-        assert_eq!(handed(), !seeds, "seeds {seeds}: once its pane is open");
+        assert_eq!(handed(), opened, "seeds {seeds}: once its pane is open");
 
         starting.open();
         context.settle();
+        if first == FirstMessage::Delivered {
+            assert!(!handed(), "seeds {seeds}: not before a step delivers it");
+            context.pass().unwrap();
+            context.settle();
+        }
         assert!(
             handed() || context.message(brief).state == "delivered",
             "seeds {seeds}: once it is posted"
@@ -769,7 +786,7 @@ fn a_task_taken_back_while_the_resume_s_launch_is_prepared_carries_no_continuati
 fn a_continuation_a_window_takes_once_it_is_up_is_not_posted_when_its_task_is_paused_while_it_comes_up(
 ) {
     let context = Context::new();
-    context.adapter.seeds.set(true);
+    context.adapter.first.set(FirstMessage::Started);
     let tiers = at_work(&context);
     let project = tiers.project.id;
     let zeus = tiers.id("zeus-amber-pine");

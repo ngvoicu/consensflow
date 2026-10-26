@@ -34,7 +34,9 @@
 //! The watch ends once the window is past the question: its harness's prompt on its
 //! screen, or its record grown since it opened (a window
 //! opened again on its conversation has that conversation in its record from the
-//! first look); a window that never asked is let go after [`ASKS_WITHIN_MS`]. A look
+//! first look); a window that never asked is let go after [`ASKS_WITHIN_MS`], but for one
+//! still owed its launch's first message, which only its prompt lets go, within its
+//! launch's time. A look
 //! the host shows no screen for says nothing either way: a window that asked is held
 //! until one does, and the human is told once that lasts [`UNREAD_MS`]. A question
 //! whose choice the reader cannot place is pressed nothing, and the human is told of
@@ -190,6 +192,21 @@ fn dialog(question: Question) -> u8 {
     }
 }
 
+/// Whether `record`'s launch still owes its window its first message, handed over
+/// once the window is past the question ([`Dispatcher::hand_first`]): its Enter would
+/// answer a question drawn late, under load, with the choice the question opens on,
+/// "No, exit" (Calliope's review of T-432, T-520). Such a window is watched until its
+/// prompt shows, within its launch's time (`arrival`), never let go for having asked
+/// nothing yet.
+fn owes_first(record: &Record) -> bool {
+    record
+        .delivery
+        .borrow()
+        .delivering
+        .as_ref()
+        .is_some_and(|delivering| delivering.owed.is_some())
+}
+
 /// What one look at the window found.
 enum Seen {
     /// The question, the key toward a yes where its choice could be placed, and the
@@ -300,7 +317,8 @@ impl Dispatcher {
     /// record's. A window is past it once its harness's prompt is on its screen, or
     /// its record has grown since it opened (a window opened again on its
     /// conversation has the whole conversation in its record from the first look),
-    /// or, where it never asked, once [`ASKS_WITHIN_MS`] passed.
+    /// or, where it never asked and is owed no first message, once [`ASKS_WITHIN_MS`]
+    /// passed.
     async fn trust_until_past(
         self: &Rc<Self>,
         record: &Rc<Record>,
@@ -552,7 +570,7 @@ impl Dispatcher {
                             )?;
                             self.changed();
                         }
-                    } else if self.now() - began > ASKS_WITHIN_MS {
+                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {
                         break (false, false);
                     }
                 }

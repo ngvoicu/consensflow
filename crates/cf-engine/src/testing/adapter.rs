@@ -23,8 +23,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, Input, Interrupt, Launch, Prepared, Readiness, Skill, Trusts, Waiting,
-    Window, Work,
+    Adapter, Admission, FirstMessage, Input, Interrupt, Launch, Prepared, Readiness, Skill, Trusts,
+    Waiting, Window, Work,
 };
 use cf_harness::records::{Item, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
@@ -213,10 +213,12 @@ pub struct FakeAdapter {
     pub ready_holds: Holds,
     /// Deliveries the test holds.
     pub deliver_holds: Holds,
-    /// Its windows take their first message once they are up, as OpenCode's do
-    /// through its server, and only if the host admits it then: not with the
-    /// launch, as a message on a command line goes in.
-    pub seeds: Cell<bool>,
+    /// How its windows take their first message: as they open, as Devin's does
+    /// from its file (as the fake of Node's suite took it); posted once they are up,
+    /// as OpenCode's through its server, only if the host admits it then; or
+    /// delivered once they are up as any later message is, as Claude Code's, Pi's
+    /// and Codex's are.
+    pub first: Cell<FirstMessage>,
     /// Where its harness has the Specmint variant installed, when the test says
     /// it has: the `SKILL.md` it answers. Without, the copy ConsensFlow would
     /// keep for it, which is the same for every launch.
@@ -322,7 +324,7 @@ impl FakeAdapter {
             start_holds: Holds::default(),
             ready_holds: Holds::default(),
             deliver_holds: Holds::default(),
-            seeds: Cell::new(false),
+            first: Cell::new(FirstMessage::Opened),
             specmint_installed: RefCell::new(None),
             specmint_asked: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
@@ -895,7 +897,7 @@ impl Asked {
         };
         let seeded = launch
             .message
-            .filter(|_| fake.seeds.get())
+            .filter(|_| fake.first.get() == FirstMessage::Started)
             .map(str::to_owned);
         if let Some(message) = launch
             .message
@@ -1032,10 +1034,9 @@ impl Adapter for Asked {
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the
-    /// traces. The fake posts its first message once up where the test says it
-    /// seeds, as OpenCode does.
-    fn first_message_once_up(&self) -> bool {
-        self.fake.seeds.get()
+    /// traces. As the test says its windows take it ([`FakeAdapter::first`]).
+    fn first_message(&self) -> FirstMessage {
+        self.fake.first.get()
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the

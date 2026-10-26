@@ -1278,8 +1278,11 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '        record.held.borrow_mut().rests.pasted();'
-replace = ''
+find = '''
+        self.mark_turn(record, &pane).await;
+        record.held.borrow_mut().rests.pasted();'''
+replace = '''
+        self.mark_turn(record, &pane).await;'''
 
 [[plant]]
 name = "turn-end-min engine: a window idle after its result takes a rest at every pass"

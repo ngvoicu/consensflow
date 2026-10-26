@@ -42,15 +42,13 @@ fn a_window_opened_again_reads_its_own_turn_at_rest_though_the_closed_process_ha
         queued_line(SESSION, 4),
     ];
     home.transcript(SESSION, &lines);
-    let request = Request {
-        message: Some(REOPENED.to_owned()),
-        ..Request::resumed(SESSION)
-    };
-    let window = window(&home.adapter(), &request);
+    // Opened with nothing on its command line: the engine pastes the reopen once the
+    // window is up (T-432).
+    let window = window(&home.adapter(), &Request::resumed(SESSION));
     home.status(SESSION, &json!({ "status": "busy" }), me());
     assert!(!at_rest(&window), "busy");
 
-    // The new process takes the message it was given and answers it.
+    // The new process takes the message it was pasted and answers it.
     lines.extend([
         user_line(SESSION, 5, REOPENED),
         answer_line(SESSION, 6, "Done again"),

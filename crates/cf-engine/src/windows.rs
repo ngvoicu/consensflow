@@ -9,7 +9,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use cf_harness::contract::{Input, Interrupt, Launch, LaunchId, Observed, Pane, Window};
+use cf_harness::contract::{
+    FirstMessage, Input, Interrupt, Launch, LaunchId, Observed, Pane, Window,
+};
 use cf_harness::seams::Time;
 use cf_ledger::{
     Begun, ConversationView, HandOver, MessageView, NewNote, ParticipantView, ProjectView, Stop,
@@ -349,6 +351,17 @@ fn assign(env: &mut Vec<(String, String)>, key: &str, value: &str) {
     }
 }
 
+/// A launch's first message as its window is to be given it: one delivered once
+/// the window is up is owed, with its text and the rows its paste was begun with,
+/// which an Enter pressed once more for it sends with it (`arrival`).
+fn owe(mut delivering: Delivering, planned: &Planned) -> Delivering {
+    if let Some(text) = &planned.owed {
+        delivering.owed = Some(text.clone());
+        delivering.carried.clone_from(&planned.carried);
+    }
+    delivering
+}
+
 /// What a launch was prepared with: the window, the keys that interrupt it,
 /// how it takes what it is handed, how its harness keeps its own processes and which harness it is, how its pane
 /// opens, the conversation it goes on with if there is one, and the stop its task
@@ -368,9 +381,11 @@ struct Planned {
     stop: Option<Stop>,
     /// The rows the first message's paste was begun with.
     carried: Vec<i64>,
-    /// The first message goes in once the window is up, not on its command line
-    /// ([`Adapter::first_message_once_up`]).
-    first_once_up: bool,
+    /// How the window is given its first message ([`Adapter::first_message`]).
+    first: FirstMessage,
+    /// The first message's text, where the window is delivered it once it is up
+    /// ([`FirstMessage::Delivered`]): it goes on the launch's [`Delivering`] as owed.
+    owed: Option<String>,
     /// What goes into the window before anything else of its queue once it is up,
     /// in this order ([`Compared::prelude`]).
     prelude: Option<Prelude>,
@@ -549,6 +564,9 @@ impl Dispatcher {
             entered_again: false,
             carried: Vec::new(),
             session: None,
+            // Owed once the plan says the window is delivered it (`owe`).
+            owed: None,
+            late: false,
         });
         // A turn begins with the first message: what the record lost so far is not its.
         if let Some(first) = first.as_ref() {
@@ -597,11 +615,13 @@ impl Dispatcher {
         // message the launch was for went back to its queue: the window opens with
         // no first message, and that one goes after the note that says the role.
         let prelude = planned.prelude.clone();
-        let delivering = delivering.filter(|_| {
-            prelude
-                .as_ref()
-                .is_none_or(|prelude| prelude.displaced.is_none())
-        });
+        let delivering = delivering
+            .filter(|_| {
+                prelude
+                    .as_ref()
+                    .is_none_or(|prelude| prelude.displaced.is_none())
+            })
+            .map(|delivering| owe(delivering, &planned));
         if self.launch_over(
             record,
             participant,
@@ -759,7 +779,7 @@ impl Dispatcher {
         let posted = delivering
             .as_ref()
             .map(|first| first.message)
-            .filter(|_| planned.first_once_up);
+            .filter(|_| planned.first == FirstMessage::Started);
         {
             let mut delivery = record.delivery.borrow_mut();
             delivery.delivering = delivering;
@@ -975,6 +995,10 @@ impl Dispatcher {
             .as_ref()
             .map(|begun| self.launch_text(begun, resume))
             .transpose()?;
+        // What the window is given as it opens or posts once up; a window delivered
+        // its first message is given none on its way (`FirstMessage`).
+        let first_message = adapter.first_message();
+        let delivered = first_message == FirstMessage::Delivered;
         // A chief whose project has specs on is told where its Specmint skill
         // is, and its window is given the skill there.
         let RoleText {
@@ -998,7 +1022,7 @@ impl Dispatcher {
             directory: &project.directory,
             resume,
             previous_gone,
-            message: text.as_deref(),
+            message: text.as_deref().filter(|_| !delivered),
             agent: saved.as_ref().map(SavedAgent::agent),
             instructions: &instructions,
             specs: specs.as_ref().map(ChiefSpecs::launch),
@@ -1032,26 +1056,27 @@ impl Dispatcher {
                 .flat_map(|begun| &begun.carried)
                 .map(|row| row.id)
                 .collect(),
-            first_once_up: adapter.first_message_once_up(),
+            first: first_message,
+            owed: text.filter(|_| delivered),
             prelude,
             first_instructions: adapter.keeps_first_instructions().then_some(instructions),
             owner,
         }))
     }
 
-    /// Whether a launch's first message, which goes in on the command line its
-    /// window opens with, is handed over now, as its pane is asked for: as the
-    /// ledger admits it, which marks it handed (the project is open, and nothing of
-    /// its paste was withdrawn since it was begun). One it turns away goes back to
+    /// Whether a launch's first message, which its window reads as it opens
+    /// ([`FirstMessage::Opened`]), is handed over now, as its pane is asked for: as
+    /// the ledger admits it, which marks it handed (the project is open, and nothing
+    /// of its paste was withdrawn since it was begun). One it turns away goes back to
     /// its queue, unless it was withdrawn itself, and the launch is over. A launch
-    /// with no first message on its command line hands nothing over now: one that
-    /// goes in once the window is up is admitted as it is posted.
+    /// whose window takes it once up hands nothing over now: it is admitted as it is
+    /// posted ([`FirstMessage::Started`]) or delivered ([`FirstMessage::Delivered`]).
     fn handed_on_open(
         &self,
         delivering: Option<&Delivering>,
         planned: &Planned,
     ) -> Result<bool, EngineError> {
-        let Some(first) = delivering.filter(|_| !planned.first_once_up) else {
+        let Some(first) = delivering.filter(|_| planned.first == FirstMessage::Opened) else {
             return Ok(true);
         };
         let handed = self

@@ -44,7 +44,7 @@ use std::rc::Rc;
 use cf_base::refusal::Refusal;
 use cf_ledger::{ParticipantView, TaskThread, TaskView};
 
-use super::{leftovers, lost_in_turn, with_leftovers, with_lost, words_of};
+use super::{first_on_its_way, leftovers, lost_in_turn, with_leftovers, with_lost, words_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
@@ -171,6 +171,15 @@ impl Dispatcher {
             })?;
         // The task may have moved while the window was read.
         let (thread, _, _) = self.finishable(project, number)?;
+        if first_on_its_way(record) {
+            return Err(refused(
+                "first-message-on-its-way",
+                format!(
+                    "cannot finish T-{number}: @{}'s window has not shown its first message yet, and its answer to it is the result; finish it once it has answered it, or cancel it",
+                    participant.handle
+                ),
+            ));
+        }
         let none = || {
             refused(
                 "no-answer",

@@ -716,7 +716,8 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     fs::create_dir_all(&made)
         .map_err(|error| Error::Daemon(format!("{}: {error}", made.display())))?;
     let server = Server::write_leaving_group(&made, &python)?;
-    // The first message is on the window's command line, as a worker's task is.
+    // The first message goes in as the window opens, its first turn under way from the
+    // first look (`Open::seed`).
     let mut open = Open::new(&rig, &claude, FOLDER, FOLDER)
         .claude_alone_with_hooks(hooks())
         .mcp_config(server.config())

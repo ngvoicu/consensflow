@@ -14,7 +14,7 @@ use cf_e2e::rig::{write_staff, Project, Rig};
 use regex::Regex;
 use serde_json::{json, Value};
 
-use crate::{after, config, rig, secs, Outcome};
+use crate::{after, config, first_told, on_command_line, rig, secs, session_of, Outcome};
 
 /// Whether the lane's `pane` is there and null: the window is closed. A lane
 /// that is not there, or has no `pane`, is not.
@@ -156,13 +156,15 @@ fn a_test_is_a_task_the_chief_puts_on_the_board_a_tester_of_its_tier_takes_it_in
         argv.iter().any(|word| word == "bypassPermissions"),
         "{argv:?}"
     );
-    // ...and the brief the chief wrote, as the message it was launched with.
-    let brief = argv.last().and_then(Value::as_str).unwrap_or_default();
+    // ...and the brief the chief wrote, as the first message it was given once up, on no
+    // word of its command line (T-432).
+    assert!(!on_command_line(&window, "TESTS_OK"), "{argv:?}");
+    let brief = first_told(&rig, &session_of(&window));
     assert!(
         Regex::new(
             r"^\[ConsensFlow m-\d+ · T-1 · task from @chief\]\nSLEEP 3 Reply with exactly: TESTS_OK$"
         )?
-        .is_match(brief),
+        .is_match(&brief),
         "{brief:?}"
     );
 

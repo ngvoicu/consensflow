@@ -58,13 +58,22 @@ pub(crate) struct Delivering {
     /// Enter was pressed once more for it.
     pub(crate) entered_again: bool,
     /// The rows its paste was begun with, which an Enter pressed once more for it
-    /// sends with it (`arrival`). None for a launch's first message, which is
-    /// never pressed for.
+    /// sends with it (`arrival`). None for a launch's first message that went in
+    /// as its window opened, which is never pressed for.
     pub(crate) carried: Vec<i64>,
     /// The conversation it was pasted into (its harness's session), where it was
     /// pasted into an open window's: one the human switched the window away from
     /// before its record showed it says what came of it (`arrival`).
     pub(crate) session: Option<String>,
+    /// A launch's first message not handed over yet, and the text it goes in as:
+    /// its window is delivered it once it is past any question of trusting its
+    /// folder and has drawn ([`FirstMessage::Delivered`], [`Dispatcher::hand_first`]).
+    /// None once handed, and for every other message.
+    pub(crate) owed: Option<String>,
+    /// A launch's first message that was handed over once its window was up, by
+    /// the window's own deliver: pressed Enter for once more as any paste is
+    /// (`arrival`), where one its window read as it opened never is.
+    pub(crate) late: bool,
 }
 
 /// The reads of a window that came to nothing while a message was on its way
@@ -598,6 +607,152 @@ impl Dispatcher {
         Ok(())
     }
 
+    /// Hands a launch's first message to its window once the window is up
+    /// ([`FirstMessage::Delivered`]): the step asks it of a window past any question
+    /// of trusting its folder, drawn and at rest, its project open. It goes in as
+    /// every later message does, by the window's own `deliver` (Claude Code's paste,
+    /// Pi's inbox, Codex's broker), as the ledger admits it at that moment
+    /// ([`Admitting::handing`]), and is watched for from then as a launch's first
+    /// message is, its time counted from the hand-over (`arrival`). A window not
+    /// ready for it yet is asked again at the next step, and says why to the trace
+    /// once; one that never will be is given up as a launch that did not come up
+    /// ([`Dispatcher::give_up_unfit`]); one that refused it is asked again at the
+    /// next step, within the launch's time. Turned away (its project closed, or what
+    /// its paste held withdrawn), it goes back to its queue and the window is given
+    /// nothing, as a first message posted once up is.
+    pub(crate) async fn hand_first(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+    ) -> Result<(), EngineError> {
+        let Some((first, text)) = self.owed_first(record) else {
+            return Ok(());
+        };
+        let host: &dyn PaneHost = &*self.seams.host;
+        let (Some(window), Some(pane)) = self.window_of(record) else {
+            return Ok(());
+        };
+        let ready = window
+            .ready(host, &pane)
+            .await
+            .map_err(|error| EngineError::said("not-ready", error))?;
+        // Forgotten, closed, handed or given up while the window got ready: nothing.
+        if self.forgotten(record)
+            || record.window.borrow().pane.as_ref() != Some(&pane)
+            || self
+                .owed_first(record)
+                .is_none_or(|(owed, _)| owed.message != first.message)
+        {
+            return Ok(());
+        }
+        let Some(message) = self.seams.ledger.borrow().message(first.message)? else {
+            return Ok(());
+        };
+        match ready {
+            Readiness::Ready => self.came_up(record),
+            Readiness::Held(held) => {
+                let unsent = held == Held::Unsent;
+                {
+                    let mut part = record.delivery.borrow_mut();
+                    part.unsent = unsent;
+                    // What the human typed is theirs to send: the launch's time is not
+                    // spent while it waits for them, as it is not while the window asks
+                    // whether to trust its folder (`trust`), and the box holds their
+                    // words now, so it is no longer known empty (`deliver`).
+                    if unsent {
+                        part.emptied = None;
+                        let now = self.now();
+                        if let Some(delivering) = part
+                            .delivering
+                            .as_mut()
+                            .filter(|delivering| delivering.message == first.message)
+                        {
+                            delivering.since = now;
+                        }
+                    }
+                }
+                let reason = format!(
+                    "the window is not ready for its first message: {}",
+                    held.sentence()
+                );
+                return self.held_once(record, first.message, &reason);
+            }
+            Readiness::Unfit(reason) => return self.give_up_unfit(record, &message, &reason).await,
+        }
+        record.delivery.borrow_mut().unsent = false;
+        // The rest the window was seen at came before the turn this message begins, as
+        // every monitor of that turn will (`deliver`).
+        record.held.borrow_mut().rests.pasted();
+        // The conversation the window shows as it is handed over, which the paste goes into:
+        // the ledger keeps it, as `deliver` does, for a start that finds it on its way still.
+        let conversation = self.seams.ledger.borrow().current_conversation(record.id)?;
+        if let Some(conversation) = &conversation {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .paste_into(first.message, conversation.id)?;
+        }
+        let session = conversation.and_then(|conversation| conversation.native_session);
+        let admitting =
+            Admitting::new(self, message.project_id).handing(first.message, first.carried.clone());
+        let handed = returning(window.deliver(&admitting, &pane, &text)).await;
+        let outcome = match handed {
+            Ok(admission) => admission,
+            // An adapter that failed never handed it over, and its error must show.
+            Err(error) => Admission::Refused {
+                reason: format!("the delivery failed: {error}"),
+            },
+        };
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        // Turned away before the hand-over: nothing went in, and the message waits
+        // for the Resume, or goes again without what was withdrawn of its paste. One
+        // withdrawn itself stays so.
+        if let Some(failed) = admitting.turned_away() {
+            let mut part = record.delivery.borrow_mut();
+            if part
+                .delivering
+                .as_ref()
+                .is_some_and(|delivering| delivering.message == first.message)
+            {
+                part.delivering = None;
+            }
+            drop(part);
+            self.give_back(first.message, admitting.because())?;
+            return failed.map_or(Ok(()), Err);
+        }
+        if let Admission::Refused { reason } = &outcome {
+            let reason = format!("its window refused its first message: {reason}");
+            return self.held_once(record, first.message, &reason);
+        }
+        record.delivery.borrow_mut().held = None;
+        let now = self.now();
+        if let Some(delivering) = record
+            .delivery
+            .borrow_mut()
+            .delivering
+            .as_mut()
+            .filter(|delivering| delivering.message == first.message)
+        {
+            delivering.owed = None;
+            delivering.late = true;
+            delivering.since = now;
+            delivering.session = session;
+            // The harness's own queue took it (a peer inbox, a broker): it shows when
+            // the harness gets to it, and sending it again would only make a duplicate.
+            delivering.queued = matches!(outcome, Admission::Admitted { queued: true });
+        }
+        self.changed();
+        Ok(())
+    }
+
+    /// The launch's first message the window is owed, and the text it goes in as.
+    fn owed_first(&self, record: &Record) -> Option<(Delivering, String)> {
+        let delivering = record.delivery.borrow().delivering.clone()?;
+        let text = delivering.owed.clone()?;
+        Some((delivering, text))
+    }
+
     /// What one more Enter for `message`, the paste on its way into `record`'s
     /// window, does after the look at its screen: the Enter sends it, so it goes
     /// only as the paste's hand-over went, as the ledger admits it now, with the
@@ -669,6 +824,8 @@ impl Dispatcher {
             entered_again: false,
             carried,
             session: None,
+            owed: None,
+            late: false,
         }
     }
 

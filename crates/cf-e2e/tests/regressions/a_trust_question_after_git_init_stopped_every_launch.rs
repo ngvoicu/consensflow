@@ -495,6 +495,74 @@ fn a_worker_whose_first_frame_holds_still_before_the_question_is_still_answered(
 }
 
 #[test]
+fn a_worker_whose_question_comes_after_half_a_minute_is_answered_before_its_brief_goes_in(
+) -> Outcome {
+    // Calliope's review of T-432 (T-520): the watch let a window that had asked nothing
+    // in 30 s go, and a Claude Code under load that drew its question later took its
+    // brief's Enter on "No, exit". This one says idle from its start and holds its first
+    // frame still for 34 s before the question; its launch has 90 s.
+    let rig = Rig::start(
+        config()
+            .var("CF_TEST_TRUST", "worker")
+            .var("CF_TEST_TRUST_IDLE_FIRST", "1")
+            .var("CF_TEST_TRUST_FIRST_FRAME_MS", "34000")
+            .var("CONSENSFLOW_LAUNCH_TIMEOUT_MS", "90000"),
+    )?;
+    git_init(rig.workspace())?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    a_task(&rig, &project, &tier, 1, "LATE_QUESTION_DONE")?;
+    assert_eq!(
+        keys_given(&rig),
+        ["down", "enter"],
+        "only the engine's keys"
+    );
+    assert_eq!(notes_of(&project, rig.workspace())?.len(), 1);
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_worker_that_never_draws_its_prompt_fails_in_its_launch_s_time() -> Outcome {
+    // Owed its brief, a window is watched for its prompt past the 30 s one that asks
+    // nothing is given; one that never draws it still fails in its launch's time, 15 s
+    // here, and does not wait for good. Its first frame holds still for ten minutes.
+    let rig = Rig::start(
+        config()
+            .var("CF_TEST_TRUST", "worker")
+            .var("CF_TEST_TRUST_FIRST_FRAME_MS", "600000")
+            .var("CONSENSFLOW_LAUNCH_TIMEOUT_MS", "15000"),
+    )?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    rig.tell(
+        project.id(),
+        &format!("DISPATCH --tier {tier} Reply with exactly: NEVER_DONE"),
+    )?;
+    rig.wait_for("T-1 to fail", secs(60), || {
+        Ok(project.task(1)?["state"] == "failed")
+    })?;
+    let told = project
+        .inbox("chief")?
+        .iter()
+        .filter_map(|message| message["body"].as_str())
+        .any(|body| {
+            body.contains("T-1 failed") && body.contains("never ready for its first message")
+        });
+    assert!(told, "the chief hears why: {:?}", project.inbox("chief")?);
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
 fn a_question_slow_to_redraw_is_given_one_key_at_a_time() -> Outcome {
     // It takes longer to move its cursor than a screen takes to read as drawn.
     let rig = Rig::start(asking().var("CF_TEST_TRUST_REDRAW_MS", "2500"))?;

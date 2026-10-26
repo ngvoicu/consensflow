@@ -11,7 +11,7 @@ use cf_e2e::{files, Error};
 use regex::Regex;
 use serde_json::{json, Value};
 
-use crate::{after, config, rig, secs, session_of, Outcome};
+use crate::{after, config, first_told, on_command_line, rig, secs, session_of, Outcome};
 
 /// The tier the member `added` was given, as a word the chief's brief names.
 fn tier(added: &Value) -> &str {
@@ -53,12 +53,15 @@ fn a_chief_hands_a_task_to_a_worker_through_the_board_and_the_result_lands_in_it
         .find(|frame| frame["id"] == worker_id.as_str())
         .unwrap_or(Value::Null);
     let argv = worker_frame["argv"].as_array().cloned().unwrap_or_default();
-    let brief = argv.last().and_then(Value::as_str).unwrap_or_default();
+    // The brief is on no word of the window's command line: the window is given it once
+    // up, the first message of its conversation (T-432).
+    assert!(!on_command_line(&worker_frame, "WORKER_OK"), "{argv:?}");
+    let brief = first_told(&rig, &session_of(&worker_frame));
     assert!(
         Regex::new(
             r"^\[ConsensFlow m-\d+ · T-1 · task from @chief\]\nReply with exactly: WORKER_OK$"
         )?
-        .is_match(brief),
+        .is_match(&brief),
         "{brief:?}"
     );
     assert!(
