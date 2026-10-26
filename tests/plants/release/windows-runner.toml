@@ -52,7 +52,7 @@
 
 [run]
 xtask-lib-windows = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "windows::"]
-xtask-windows-cli = ["cargo", "test", "--offline", "-p", "xtask", "--test", "windows"]
+xtask-test-windows = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "windows"]
 
 # What the copy keeps.
 
@@ -1355,7 +1355,7 @@ replace = "            Machine::at(host),"
 [[plant]]
 name = "windows runner: --host zeewin2 sends the tree while poker-lab holds the laptop"
 meant = "a_run_on_zeewin2_while_poker_lab_holds_it_ends_with_75_having_sent_nothing_by_either_name"
-runs = ["xtask-windows-cli"]
+runs = ["xtask-test-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/options.rs"
@@ -1365,7 +1365,7 @@ replace = "            Machine::at(host),"
 [[plant]]
 name = "windows runner: a refused run ends with 1"
 meant = "a_run_on_zeewin2_while_poker_lab_holds_it_ends_with_75_having_sent_nothing_by_either_name"
-runs = ["xtask-windows-cli"]
+runs = ["xtask-test-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows.rs"
