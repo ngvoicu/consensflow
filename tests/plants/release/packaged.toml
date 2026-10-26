@@ -868,7 +868,7 @@ requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
 [[plant.edit]]
 file = "crates/cf-e2e/tests/smoke/hidden.rs"
 find = "    thread::sleep(HIDDEN_FOR);\n"
-replace = "    thread::sleep(HIDDEN_FOR);\n    hide(app.pid(), false);\n"
+replace = "    thread::sleep(HIDDEN_FOR);\n    let _ = hide(app.pid(), false);\n"
 
 [[plant]]
 name = "packaged smoke, the hidden case: whether the app is hidden is asked once"
