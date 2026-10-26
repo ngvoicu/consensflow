@@ -95,7 +95,15 @@ fn names_an_effort_wherever_its_harness_has_one_or_is_a_listed_exception() {
         "audhumla", // Nemotron 3 Ultra free on OpenCode Zen
         // Devin's SWE-1.6 (2026-10-02): Devin lists it with no levels.
         "hapi",
-        "khnum",
+        // The rest of what Devin lists with no levels (2026-10-25): Adaptive,
+        // GLM 5.2, SWE-1.7, Opus 4.6, Sonnet 4.6, Kimi K2.6 and K2.7.
+        "amunet",
+        "kebechet",
+        "imhotep",
+        "ankhesenamun",
+        "sekhemkhet",
+        "huni",
+        "radjedef",
         // MiMo V2.6 Pro (2026-09-30): reasoning on or off, no level in any catalog.
         "selene", // on pi
         "idun",   // on opencode

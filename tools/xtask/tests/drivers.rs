@@ -408,6 +408,7 @@ fn smoke_runs_the_smoke_test_from_the_root_asking_for_its_ignored_case_and_the_a
                 "smoke",
                 "--",
                 "--ignored",
+                "--test-threads=1",
                 "--nocapture"
             ]
             .map(arg_line)

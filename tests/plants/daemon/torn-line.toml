@@ -333,8 +333,10 @@ runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = "            lost_in_turn(record, &observed, Some(delivered)),\n"
-replace = "            lost_in_turn(record, &observed, Some(delivered)).filter(|_| false),\n"
+find = '''            lost_in_turn(record, &observed, delivered),
+'''
+replace = '''            lost_in_turn(record, &observed, delivered).filter(|_| false),
+'''
 
 [[plant]]
 name = "torn line: a finished task's turn is counted from the start of its record"
@@ -343,8 +345,10 @@ runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = "            lost_in_turn(record, &observed, Some(delivered)),\n"
-replace = "            lost_in_turn(record, &observed, Some(0)),\n"
+find = '''            lost_in_turn(record, &observed, delivered),
+'''
+replace = '''            lost_in_turn(record, &observed, Some(0)),
+'''
 
 [[plant]]
 name = "torn line: a finished task's result says its lost line after ConsensFlow's word on the leftovers"
@@ -353,25 +357,23 @@ runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = """
-        let words = with_lost(
+find = '''        let words = with_lost(
             words_of(&run),
             &participant.handle,
-            lost_in_turn(record, &observed, Some(delivered)),
+            lost_in_turn(record, &observed, delivered),
         );
         let body = with_leftovers(
             words,
             &leftovers(&participant.handle, pending, Some(by), observed.settled),
-        );"""
-replace = """
-        let body = with_lost(
+        );'''
+replace = '''        let body = with_lost(
             with_leftovers(
                 words_of(&run),
                 &leftovers(&participant.handle, pending, Some(by), observed.settled),
             ),
             &participant.handle,
-            lost_in_turn(record, &observed, Some(delivered)),
-        );"""
+            lost_in_turn(record, &observed, delivered),
+        );'''
 
 [[plant]]
 name = "torn line: a held turn's result its job's end brings forgets the line the turn lost"

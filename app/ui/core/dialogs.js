@@ -31,12 +31,23 @@ const TIER_LABEL = {
 }
 /** The harnesses in the order agents of one tier are listed. */
 const HARNESS_ORDER = ['claude', 'codex', 'opencode', 'pi', 'devin']
+/**
+ * The efforts in the order agents of one harness are listed, the hardest
+ * thinking first: Codex's ultra above max, and the levels below low (Pi's
+ * off the last) before an agent that names none.
+ */
+const EFFORT_ORDER = ['ultra', 'max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'off']
 const TIERS = Object.keys(TIER_LABEL)
 const rank = (list, value) => (list.includes(value) ? list.indexOf(value) : list.length)
 /** A staff reads by role, in the order the picker offers them, then by tier, the most critical first, then by name. */
 const byRoleAndTier = (a, b) =>
   rank(ROLES, a.role) - rank(ROLES, b.role) ||
   rank(TIERS, a.tier) - rank(TIERS, b.tier) ||
+  a.name.localeCompare(b.name)
+/** The agents of one tier as a pick list has them: harness by harness, by effort, then by name. */
+const byHarnessAndEffort = (a, b) =>
+  rank(HARNESS_ORDER, a.harness) - rank(HARNESS_ORDER, b.harness) ||
+  rank(EFFORT_ORDER, a.effort) - rank(EFFORT_ORDER, b.effort) ||
   a.name.localeCompare(b.name)
 /**
  * "claude-sonnet-5 · claude · high · standard": what an agent runs and the
@@ -52,6 +63,29 @@ const runsLabel = (agent, tier = agent.profile?.workTier) =>
  * cannot import.
  */
 const fits = (agent, role) => (role === 'designer') === (agent.designer === true)
+
+/**
+ * A pick list's groups: one for each work tier, the most critical first, each
+ * holding its agents in `byHarnessAndEffort` order, an option for each that
+ * `option` makes.
+ */
+function tierGroups(agents, option) {
+  const groups = new Map()
+  for (const agent of agents) {
+    const tier = agent.profile?.workTier
+    if (!groups.has(tier)) groups.set(tier, [])
+    groups.get(tier).push(agent)
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => rank(TIERS, a) - rank(TIERS, b))
+    .map(([tier, agents]) => {
+      const group = element('optgroup')
+      group.label =
+        tier in TIER_LABEL ? `T${TIERS.indexOf(tier) + 1} · ${TIER_LABEL[tier]}` : 'Tier unknown'
+      for (const agent of agents.sort(byHarnessAndEffort)) group.append(option(agent))
+      return group
+    })
+}
 
 /** Why a role's pick list is empty: no agent saved, no image agent here, or each that fits holds it. */
 function emptyHint(role, saved, fitting) {
@@ -85,34 +119,13 @@ function rolePicker(savedAgents, roleSelect, agentSelect, hint, holding, onRefil
     const fitting = savedAgents().filter((agent) => !agent.hidden && fits(agent, role))
     const choices = fitting.filter((agent) => !holding(agent.name, role))
     // Every agent, the catalog's and the human's own, by the work it is for:
-    // the most critical tier first, then harness by harness, by name.
-    const groups = new Map()
-    for (const agent of choices) {
-      const tier = agent.profile?.workTier
-      if (!groups.has(tier)) groups.set(tier, [])
-      groups.get(tier).push(agent)
-    }
+    // the most critical tier first, then harness by harness, by effort, by name.
     agentSelect.replaceChildren(
-      ...[...groups.entries()]
-        .sort(([a], [b]) => rank(TIERS, a) - rank(TIERS, b))
-        .map(([tier, agents]) => {
-          const group = element('optgroup')
-          group.label =
-            tier in TIER_LABEL
-              ? `T${TIERS.indexOf(tier) + 1} · ${TIER_LABEL[tier]}`
-              : 'Tier unknown'
-          agents.sort(
-            (a, b) =>
-              rank(HARNESS_ORDER, a.harness) - rank(HARNESS_ORDER, b.harness) ||
-              a.name.localeCompare(b.name),
-          )
-          for (const agent of agents) {
-            const option = element('option', null, `${agent.name} · ${runsLabel(agent, null)}`)
-            option.value = agent.name
-            group.append(option)
-          }
-          return group
-        }),
+      ...tierGroups(choices, (agent) => {
+        const option = element('option', null, `${agent.name} · ${runsLabel(agent, null)}`)
+        option.value = agent.name
+        return option
+      }),
     )
     if (choices.some((agent) => agent.name === chosen)) agentSelect.value = chosen
     agentSelect.disabled = choices.length === 0
@@ -173,8 +186,8 @@ const NO_HARNESS = 'No harness is installed here: install one from Agents, Harne
 
 /**
  * Fills a chief's pick list: the saved agents a chief may run on (no image
- * agent), harness by harness for each harness a chief runs in that is
- * installed here, by name, after an empty choice that asks for one. A chief
+ * agent) on a harness a chief runs in that is installed here, grouped as the
+ * staff's pick list is (`tierGroups`), after an empty choice that asks for one. A chief
  * runs on an agent the human picks, never on a harness's own default; the
  * agent it runs on now (`current`) is no switch. With no harness installed
  * here it refuses, and says where to get one.
@@ -186,19 +199,14 @@ function fillChiefs(select, agents, missing, current = null) {
   if (installed.length === 0) throw new Error(NO_HARNESS)
   const ask = new Option('Pick an agent', '')
   ask.disabled = true
-  const groups = installed.flatMap(([kind, label]) => {
-    const runsHere = agents
-      .filter((agent) => !agent.hidden && agent.harness === harnessOf(kind) && fits(agent, 'chief'))
-      .sort((a, b) => a.name.localeCompare(b.name))
-    if (runsHere.length === 0) return []
-    const group = element('optgroup')
-    group.label = label
-    for (const agent of runsHere) {
-      const option = new Option(`${agent.name} · ${runsLabel(agent, null)}`, agent.name)
-      option.disabled = agent.name === current
-      group.append(option)
-    }
-    return [group]
+  const harnesses = installed.map(([kind]) => harnessOf(kind))
+  const runsHere = agents.filter(
+    (agent) => !agent.hidden && harnesses.includes(agent.harness) && fits(agent, 'chief'),
+  )
+  const groups = tierGroups(runsHere, (agent) => {
+    const option = new Option(`${agent.name} · ${runsLabel(agent, null)}`, agent.name)
+    option.disabled = agent.name === current
+    return option
   })
   select.replaceChildren(ask, ...groups)
   select.value = ''
@@ -406,8 +414,8 @@ export class SwitchChiefDialog {
   #project = null
 
   /**
-   * `page.selected()` is the project the human has chosen now, and
-   * `page.onSwitch()` is told once the daemon took the switch. `page.daemon`
+   * `page.selected()` is the project the human has chosen now, `page.board()`
+   * its board, and `page.onSwitch()` is told once the daemon took the switch. `page.daemon`
    * asks the daemon, `page.act` runs a change and redraws the page.
    */
   constructor(dialog, page) {
@@ -442,6 +450,15 @@ export class SwitchChiefDialog {
     const form = this.#form
     // A chief from before chiefs were agents runs on its harness's default: every agent is a switch.
     fillChiefs(form.elements.chief, agents, missing, chief.agent)
+    // A chief whose agent is gone says so above the agents it may go on with.
+    const lane = this.#page.board()?.lanes.find((each) => each.participant.id === chief.id)
+    const gone = this.#dialog.querySelector('.chief-gone')
+    gone.textContent = !lane?.agentMissing
+      ? ''
+      : lane.agentRetired
+        ? `The chief runs on ${chief.agent}, which left the catalog: ${lane.agentRetired}. Pick another agent.`
+        : `The chief runs on ${chief.agent}, which is no longer among your agents: pick another agent.`
+    gone.hidden = gone.textContent === ''
     // Each switch starts from the gentle one: the chief finishes its turn, unasked.
     form.elements.when.value = 'turn'
     form.elements.note.checked = false
@@ -646,9 +663,14 @@ export class ProjectSettingsDialog {
     const name = `@${member.handle}`
     // What the member runs, from its agent; the tier is the staff's own, which follows the agent.
     const saved = page.agents().find((agent) => agent.name === member.agent)
+    const retired = this.#board.lanes.find(
+      (lane) => lane.participant.id === member.id,
+    )?.agentRetired
     const runs = saved
       ? runsLabel(saved, member.tier)
-      : `no agent named ${member.agent} any more: define one under Agents, or remove it`
+      : retired
+        ? `${member.agent} left the catalog: ${retired}. Remove it and add another agent`
+        : `no agent named ${member.agent} any more: define one under Agents, or remove it`
     if (this.#removing === member.handle) {
       const row = element('tr')
       row.dataset.handle = member.handle

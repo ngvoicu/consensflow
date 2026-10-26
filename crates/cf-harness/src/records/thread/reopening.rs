@@ -27,6 +27,9 @@ impl Reopening {
     /// The reader `open` opens for the conversation, which `open` opens again
     /// after a look panics; or, for a conversation `open` cannot read, its
     /// reading, which a cache never keeps.
+    // Its error is only ever `Reading::Unknown` or `Reading::Missing`, a reason string, never a
+    // record (3.0.6-alpha.3's integration B, T-664; the openers are to return the reason itself).
+    #[allow(clippy::result_large_err)]
     pub(super) fn open(
         open: Open,
         harness: Harness,

@@ -582,6 +582,38 @@ fn a_run_that_could_not_be_sent_brings_nothing_back_and_asks_nothing() {
     assert!(rig.log().is_empty(), "{:?}", rig.log());
 }
 
+#[test]
+fn a_run_the_machine_was_refused_asks_nothing_of_it_after_the_refusal() {
+    // poker-lab holds zeewin2: the run is refused, and the machine is not asked for its reports
+    // either (that was an ssh to the laptop after being told to leave it alone, T-610).
+    let rig = Rig::with_tree().runs_ending_with(0);
+    rig.program(
+        "ssh",
+        r#"for word; do host=$last; last=$word; done; printf 'ssh\t%s\n' "$host" >> "$CF_LOG"; echo held"#,
+    );
+    rig.lists(&[("long/run.md", 6)]);
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let ended = run_keeping(
+        &rig.context,
+        &Machine::named("zeewin2").unwrap(),
+        &Options {
+            machine: Machine::named("zeewin2"),
+            ..rig.options()
+        },
+        &mut Console {
+            out: &mut out,
+            err: &mut err,
+        },
+        &Interrupt::default(),
+    );
+    assert!(ended.is_ok(), "{ended:?}");
+    assert!(String::from_utf8(out)
+        .unwrap()
+        .contains("is busy: poker-lab's job holds it"));
+    assert_eq!(rig.log(), ["ssh\tzeelin"]);
+    assert_eq!(String::from_utf8(err).unwrap(), "");
+}
+
 /// A worker's runs go from its tree, and the tree goes with its task: what lived only there would
 /// go with it. The reports come into the main checkout's folder, the parent of the repository's
 /// common git folder, which the tree's own `evals/reports` is not (T-194, P3-3).

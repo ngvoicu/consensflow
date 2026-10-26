@@ -5,13 +5,15 @@
 //! reach it. A task a window was
 //! given is not edited: the window has the old words, and says what it did
 //! with them; what the chief has to add is told to it, or the task is
-//! reopened once it has a result.
+//! reopened once it has a result. A task still open is told too (`tell_open`):
+//! its words are added to the brief.
 
 use cf_proto::ledger::TaskView;
 use rusqlite::params;
 use serde_json::json;
 
-use super::{delivery_body, require_on_board, task_by_id, task_row_by_id};
+use super::own_steps::is_own_step;
+use super::{delivery_body, require_on_board, require_task_state, task_by_id, task_row_by_id};
 use crate::model::{self, title_of, LedgerError, MAX_BODY};
 use crate::store::Store;
 use crate::views::TaskRow;
@@ -79,6 +81,60 @@ pub(crate) fn edit_task(
     })
 }
 
+/// `from` tells open task `number` `words`: no window has it, nor is one bound to take it
+/// (it waits on the board for what it needs, or for a member, whom the daemon picks when
+/// it goes), so there is no one to keep a message for, and a message is addressed to a
+/// participant. The words wait where the board puts what is said to a task with no window
+/// (a resume's `Resumed:`, the words kept for a window that ended, `Kept from before`): in
+/// its brief, after the brief, under a label of who said them. Whichever window takes the
+/// task is given them once, with the brief, in the order they were told; nothing is
+/// paused, queued or waited for. The title stays the brief's first line. The words are in
+/// the log (`task.told`). A later `edit` replaces the brief whole, the words with it.
+///
+/// Refused for a task in any other state (`invalid-transition`: a queued task keeps the
+/// words for its window, one a window has is paused for them, and `cf tell` chooses by
+/// the state it reads), for the chief's own step (`own-work`: its brief is the chief's to
+/// change), and for words that are none or would outgrow a brief (`invalid-text`).
+pub(crate) fn tell_open(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    from: &str,
+    words: &str,
+) -> Result<TaskView, LedgerError> {
+    model::require_text(words, "body", MAX_BODY)?;
+    store.write(|store| {
+        store.participant_by_handle(project_id, from)?;
+        let task = store.task_row(project_id, number)?;
+        require_task_state(&task, &["open"], "tell the window of")?;
+        if is_own_step(store, &task)? {
+            return Err(LedgerError::refused_with(
+                "own-work",
+                format!(
+                    "T-{number} is the chief's own step: its brief is yours to change: cf task edit T-{number} \"…\""
+                ),
+                409,
+            ));
+        }
+        let told = format!(
+            "{}\n\nTold by @{from} before a window had it: {words}",
+            task.body
+        );
+        model::require_text(&told, "body", MAX_BODY)?;
+        let at = store.at();
+        store.db.execute(
+            "UPDATE task SET body = ?, updated_at = ? WHERE id = ?",
+            params![told, at, task.id],
+        )?;
+        store.log(
+            project_id,
+            "task.told",
+            json!({ "task": number, "by": from, "words": words }),
+        )?;
+        task_by_id(store, task.id)
+    })
+}
+
 /// Whether the task's brief may still be replaced: it waits for a window (open,
 /// queued, or paused before any had it), and no task message of it began to
 /// reach one. The refusal says what to do instead, by where the task is.
@@ -110,11 +166,12 @@ fn require_not_given(store: &Store, task: &TaskRow) -> Result<(), LedgerError> {
     if begun {
         // A queued task's window, coming up, keeps what it is told for after its
         // brief (`tell_queued`, B3): it is told now. One taken back to the board is
-        // told as soon as it is queued for its next window.
+        // told now too (`tell_open`): its words are added to the brief its next window
+        // is given.
         let instead = match task.state.as_str() {
             "paused" | "queued" => tell,
             _ => format!(
-                "tell its next window once the task is queued for it: cf tell T-{number} \"…\""
+                "tell it now, and the window that takes it has your words in its brief: cf tell T-{number} \"…\""
             ),
         };
         return Err(given(store, task, instead)?);

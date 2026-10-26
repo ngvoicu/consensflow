@@ -162,13 +162,19 @@ fn the_app_s_specs_are_no_choice_about_the_roster_and_are_refused_by_name_leavin
 }
 
 #[test]
-fn claude_and_openai_models_are_hidden_on_pi_and_opencode_when_the_human_keeps_to_their_own() {
+fn claude_and_openai_models_are_hidden_on_pi_opencode_and_devin_when_the_human_keeps_to_their_own()
+{
     for (kind, model) in [
         ("pi", "openrouter/anthropic/claude-fable-5.1"),
         ("pi", "openai-codex/gpt-6-astra"),
         ("pi", "openai-codex/gpt-6.1-sol"),
         ("opencode", "openrouter/anthropic/claude-fable-5.1"),
         ("opencode", "openrouter/openai/gpt-6-astra"),
+        // Devin reaches them too (the owner, 2026-10-25).
+        ("devin", "claude-fable-5-1"),
+        ("devin", "claude-opus-5-5"),
+        ("devin", "gpt-6-astra"),
+        ("devin", "gpt-6-1-sol"),
     ] {
         let view = view(kind, model);
         assert!(hides(ON, &view), "{kind} {model}");
@@ -181,20 +187,49 @@ fn nothing_is_hidden_on_the_harnesses_that_run_those_models_themselves() {
     for (kind, model) in [
         ("claude-code", "claude-fable-5-1"),
         ("codex", "gpt-6-astra"),
-        ("devin", "claude-fable-5-1"),
     ] {
         assert!(!hides(ON, &view(kind, model)), "{kind} {model}");
     }
 }
 
 #[test]
-fn other_makers_models_are_never_hidden_on_pi_or_opencode() {
+fn other_makers_models_are_never_hidden_on_pi_opencode_or_devin() {
     for (kind, model) in [
         ("pi", "openrouter/moonshotai/kimi-k3"),
         ("opencode", "opencode/muse-spark-1.3-contributor-free"),
+        ("devin", "swe-2"),
+        ("devin", "swe-1-6"),
+        ("devin", "gemini-4-argon"),
     ] {
         assert!(!hides(ON, &view(kind, model)), "{kind} {model}");
     }
+}
+
+/// Of Devin's agents, the box hides exactly the Claude and OpenAI ones: every
+/// family Devin names "Claude …" or "GPT…" in its list, and none other.
+#[test]
+fn on_devin_the_box_hides_every_claude_and_openai_agent_and_nothing_else() {
+    let catalog = Catalog::bundled().unwrap();
+    let devin = catalog
+        .groups()
+        .iter()
+        .find(|group| group.harness == crate::Harness::Devin)
+        .unwrap();
+    let mut hidden = 0;
+    for entry in &devin.entries {
+        let row = format!(
+            r#"{{"id":"{}","kind":"devin","model":"{}"}}"#,
+            entry.name, entry.model
+        );
+        let view = catalog
+            .view(&AgentRow::from_value(serde_json::from_str(&row).unwrap()).unwrap())
+            .unwrap();
+        let label = entry.profile.model_label.as_str();
+        let theirs = label.starts_with("Claude ") || label.starts_with("GPT-");
+        assert_eq!(hides(ON, &view), theirs, "{} ({label})", entry.name);
+        hidden += usize::from(theirs);
+    }
+    assert!(hidden > 0 && hidden < devin.entries.len());
 }
 
 #[test]

@@ -180,9 +180,19 @@ fn a_suite_of_xtask_s_is_the_cargo_test_it_runs_under_nextest_in_its_folder_with
     if cfg!(target_os = "macos") {
         let (words, cwd, vars) =
             under_nextest_for(&["cargo", "xtask", "smoke", "--app", "a.app"], &context);
+        // Its cases one at a time, as nextest is told it: the smoke's own threads.
         assert_eq!(
             words,
-            ["-p", "cf-e2e", "--test", "smoke", "--", "--ignored"]
+            [
+                "-p",
+                "cf-e2e",
+                "--test",
+                "smoke",
+                "--test-threads",
+                "1",
+                "--",
+                "--ignored"
+            ]
         );
         assert_eq!(cwd, Path::new("/checkout"));
         let app = Path::new("/checkout").join("a.app");
@@ -703,6 +713,36 @@ fn each_option_of_cargo_test_is_given_to_nextest_as_it_names_what_cargo_means_or
     ] {
         assert_eq!(given(cargo).unwrap(), nextest, "{cargo:?}");
     }
+    // libtest's threads, after the `--`, are nextest's own option before it: nextest takes
+    // no `--test-threads` there, and the packaged smoke's cases run one at a time.
+    for (cargo, nextest) in [
+        (
+            &["--", "--ignored", "--test-threads=1"][..],
+            &["--test-threads", "1", "--", "--ignored"][..],
+        ),
+        (
+            &[
+                "--test",
+                "smoke",
+                "--",
+                "--test-threads",
+                "2",
+                "--skip",
+                "b",
+            ],
+            &[
+                "--test",
+                "smoke",
+                "--test-threads",
+                "2",
+                "--",
+                "--skip",
+                "b",
+            ],
+        ),
+    ] {
+        assert_eq!(given(cargo).unwrap(), nextest, "{cargo:?}");
+    }
     // Refused, and why.
     for (cargo, why) in [
         (&["--doc"][..], "cargo test --doc: nextest runs no doctest"),
@@ -729,6 +769,10 @@ fn each_option_of_cargo_test_is_given_to_nextest_as_it_names_what_cargo_means_or
         (
             &["-p", "--lib"],
             "cargo test -p: --package is given no value",
+        ),
+        (
+            &["--", "--test-threads"],
+            "cargo test -- --test-threads: --test-threads is given no value",
         ),
     ] {
         assert_eq!(given(cargo).unwrap_err(), why, "{cargo:?}");

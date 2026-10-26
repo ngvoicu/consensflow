@@ -19,6 +19,11 @@ mod daemon;
 mod daemon_command;
 mod file_drop;
 mod launcher;
+#[cfg(windows)]
+mod page_crash;
+// Only the Windows app loads a failed page again; tested everywhere.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod page_reloads;
 // Only the Windows app reads a runtime from its own exe; tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod portable;
@@ -460,16 +465,26 @@ pub fn run() {
         updates::setup(app)?;
         // The product name, so a candidate's window never reads as the live app's.
         let title = app.package_info().name.clone();
+        // The page runs on while its window is hidden, minimised or behind a locked
+        // screen: it acknowledges the windows' output, and the pane host stops reading a
+        // window that is owed too much of it, its agent waiting on its terminal. WebKit's
+        // own policy throttles a page not shown to a turn every second or so (T-454).
+        // Only macOS has the setting; elsewhere it does nothing.
         let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
             .title(title)
             .inner_size(1280.0, 820.0)
             .min_inner_size(720.0, 520.0)
-            .maximized(true);
+            .maximized(true)
+            .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
         if let Some(config) = selftest::config() {
             window = window.initialization_script(selftest::initialization_script(&config));
             selftest::watch_for_quit(app.handle().clone());
         }
-        window.build()?;
+        let window = window.build()?;
+        #[cfg(windows)]
+        page_crash::load_again_when_it_fails(&window);
+        #[cfg(not(windows))]
+        let _ = window;
         Ok(())
     })
     .build(context)

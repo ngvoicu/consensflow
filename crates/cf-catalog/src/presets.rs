@@ -32,13 +32,28 @@ pub struct Preset {
     pub designer: bool,
 }
 
-/// What `data/presets.json` holds: the presets in the order it lists them, and
-/// each model's label by its key.
+/// A ready-made agent the catalog no longer carries, because its harness no
+/// longer offers its model: what a saved staff or chief that names it is told.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Retired {
+    /// The name it had, which a project's staff or chief may still name.
+    pub name: String,
+    /// The one-line headline it had (`Devin SWE-1.6 Slow`).
+    pub label: String,
+    /// Why it went, in words for the human (`Devin no longer offers SWE-1.6 Slow`).
+    pub why: String,
+}
+
+/// What `data/presets.json` holds: the presets in the order it lists them,
+/// each model's label by its key, and the agents it no longer carries.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct Data {
     pub(crate) presets: Vec<Preset>,
     pub(crate) model_labels: BTreeMap<String, String>,
+    #[serde(default)]
+    pub(crate) retired: Vec<Retired>,
 }
 
 /// The data built into this binary.
@@ -53,7 +68,7 @@ mod tests {
     #[test]
     fn the_bundled_data_reads_with_every_preset_whole() {
         let data = bundled().unwrap();
-        assert_eq!(data.presets.len(), 121);
+        assert_eq!(data.presets.len(), 251);
         assert_eq!(
             data.model_labels.get("gpt-6-astra").map(String::as_str),
             Some("GPT-6 Astra")

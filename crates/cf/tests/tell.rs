@@ -1,7 +1,8 @@
 //! `cf tell` to a task still queued, its window not up yet: the board keeps the
 //! words for the window, and `cf` says so, and that nothing is paused (the field
-//! report of 2026-10-15, where the board refused it). A cancel that took told
-//! words with it says which. The commands are run as a window runs them, against
+//! report of 2026-10-15, where the board refused it); and to a task still open,
+//! no window taking it yet, whose brief takes the words (T-534). A cancel that took
+//! told words with it says which. The commands are run as a window runs them, against
 //! an API that writes down what it is asked.
 
 // The tests' own helpers: a failure in one is the test's.
@@ -73,6 +74,23 @@ fn a_tell_to_a_queued_task_says_the_words_wait_for_its_window_and_nothing_is_pau
             "/api/tasks/3/tell".to_owned(),
             Some(json!({ "body": "Use the v2 grammar" }))
         )]
+    );
+}
+
+#[test]
+fn a_tell_to_an_open_task_says_the_words_are_added_to_its_brief_for_whichever_window_takes_it() {
+    // An open task has no message to put the words in, no window being its own yet: the
+    // board answers with the task alone.
+    let open = json!({
+        "number": 3, "state": "open", "assignee": null, "requester": "chief",
+        "title": "Parser", "blockedBy": [2], "pool": "worker", "tier": "standard",
+    });
+    let api = scripted(vec![reply(200, json!({ "task": open }))]);
+    let (code, printed) = window(&api, &["tell", "T-3", "Use the v2 grammar"]);
+    assert_eq!(code, Some(0));
+    assert_eq!(
+        printed,
+        "T-3 is open: no window has it yet, so your words are added to its brief and go, once, to whichever window takes it. Nothing is paused, and nothing waits for an answer.\nSent: 18 characters, ending \"Use the v2 grammar\".\n"
     );
 }
 

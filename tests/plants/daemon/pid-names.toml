@@ -1,0 +1,27 @@
+# A step's record names a run's live processes (`$PID`, `$OTHER`) where it holds
+# one: the key `pid`, and only there. The launch scenarios' `written` once named
+# any number equal to a live process's id, so a run whose own id was 250 wrote
+# Codex's and Devin's poll timers `"$PID"` where Node's records have `250` —
+# the "23 differ" flake of T-361's gate (T-529). The plant takes the `pid` check
+# off, and a number is a process's name nowhere any key but `pid` says so.
+
+[run]
+# The test of which numbers `written` names a live process.
+launch-scenarios-pid = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "scenarios::a_number_is_named_a_live_process_only_under_pid"]
+
+[[plant]]
+name = "pid names: a number equal to a live process's id is named it under any key"
+meant = "a_number_is_named_a_live_process_only_under_pid"
+runs = ["launch-scenarios-pid"]
+
+[[plant.edit]]
+file = "crates/cf-harness/tests/launch/scenarios.rs"
+find = '''
+                // A process id stands under `pid`, and only there: a timer of
+                // 250 ms is no process, whatever process id this run happens
+                // to have.
+                if key != Some("pid") {
+                    return value.clone();
+                }
+'''
+replace = ""

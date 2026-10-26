@@ -141,20 +141,24 @@ impl Window<'_> {
         *self.session.borrow_mut() = Some(session.to_owned());
     }
 
-    /// Everything it printed so far, as the text on its screen.
+    /// What it printed so far, as the text on its screen ([`Rig::screen`]: the last 8
+    /// MiB or so of it).
     pub fn screen(&self) -> String {
         self.rig.screen(&self.id)
     }
 
-    /// How much it printed so far, in characters of [`Window::screen`]: a mark to
-    /// ask what it printed after ([`Window::screen_after`]).
+    /// How much it printed so far, in characters of its screen, those the rig let go
+    /// of among them: a mark to ask what it printed after ([`Window::screen_after`]).
     pub fn mark(&self) -> usize {
-        self.screen().chars().count()
+        let (screen, dropped) = self.rig.screen_and_dropped(&self.id);
+        dropped + screen.chars().count()
     }
 
-    /// What it printed after the mark `mark`.
+    /// What it printed after the mark `mark`: all the rig keeps of it, where the rig
+    /// let go of the place.
     pub fn screen_after(&self, mark: usize) -> String {
-        after(&self.screen(), mark)
+        let (screen, dropped) = self.rig.screen_and_dropped(&self.id);
+        after(&screen, mark.saturating_sub(dropped))
     }
 
     /// The end of its screen, as a line ([`last_lines`]): what a report says of a
