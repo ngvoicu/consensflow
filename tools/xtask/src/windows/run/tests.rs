@@ -139,6 +139,7 @@ impl Rig {
                 "test".into(),
                 "integration".into(),
             ],
+            wait: 0,
         }
     }
 
@@ -255,6 +256,7 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
             command: &command,
             env: &env,
             node: r"C:\Program Files\nodejs",
+            limits: None,
         })
     );
 
@@ -292,6 +294,7 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
             command: &command,
             env: &env,
             node: r"C:\Program Files\nodejs",
+            limits: None,
         })
     );
     assert!(
@@ -402,6 +405,7 @@ fn a_run_on_zeewin2_goes_through_its_own_ssh_server_as_zeewins_does_with_ci_s_no
         command: &command,
         env: &env,
         node: r"$env:USERPROFILE\cf-tools\node",
+        limits: None,
     };
     assert_eq!(script_of(encoded), remote_script(&script));
     let there = tempfile::tempdir().unwrap();
@@ -1060,4 +1064,155 @@ fn a_run_told_another_tree_whose_end_there_the_machine_could_not_be_asked_for_sa
     );
     // Said once, in the error, and not again on the error stream.
     assert_eq!(err, "");
+}
+
+/// The laptop with a poker-lab job that holds it while the file `poker` is in the machine's
+/// profile folder, and a disk with 614 GiB.
+fn laptop_with_a_job_while_poker_is_there() -> String {
+    let run = machine(0);
+    format!(
+        r#"for word; do host=$last; last=$word; done
+printf '%s\n' "$*" >> "$CF_LOG.words"
+case "$host" in
+  zeelin)
+    printf 'ssh\t%s\t%s\n' "$host" "$last" >> "$CF_LOG"
+    if [ -e "$CF_HOME/poker" ]; then echo held; else echo free; fi
+    exit 0 ;;
+esac
+script=$(printf '%s' "${{last##* }}" | base64 -d 2>/dev/null | iconv -f UTF-16LE -t UTF-8 2>/dev/null)
+case "$script" in *PSDrive*) printf 'ssh\t%s\t%s\n' "$host" "$last" >> "$CF_LOG"; echo "free 614"; exit 0 ;; esac
+set -- "$host" "$last"
+{run}"#
+    )
+}
+
+impl Rig {
+    /// The run waits for its turn in the queue folder `queues`, looking every 50 ms.
+    fn waits_in(&mut self, queues: &std::path::Path) {
+        let vars: Vec<(OsString, OsString)> = self
+            .context
+            .env
+            .iter()
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .chain([
+                ("CF_WINDOWS_QUEUES".into(), queues.as_os_str().to_owned()),
+                ("CF_WINDOWS_LOOK_MS".into(), "50".into()),
+            ])
+            .collect();
+        self.context.env = Env::from_vars(vars);
+    }
+}
+
+#[test]
+fn a_run_for_a_busy_zeewin2_waits_for_its_turn_and_goes_when_it_is_free_saying_where_it_stands() {
+    let queues = tempfile::tempdir().unwrap();
+    let mut rig = Rig::new();
+    rig.waits_in(queues.path());
+    rig.program("scp", SENDS);
+    rig.program("ssh", &laptop_with_a_job_while_poker_is_there());
+    let poker = rig.bin.path().join("home").join("poker");
+    fs::write(&poker, "").unwrap();
+    let zeewin2 = Machine::named("zeewin2").unwrap();
+    let mut options = rig.options();
+    options.wait = 1;
+    let (ended, out, err) = std::thread::scope(|scope| {
+        let run = scope.spawn(|| {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let ended = run(
+                &rig.context,
+                &zeewin2,
+                &options,
+                &mut Console {
+                    out: &mut out,
+                    err: &mut err,
+                },
+                &Interrupt::default(),
+            );
+            (
+                ended,
+                String::from_utf8(out).unwrap(),
+                String::from_utf8(err).unwrap(),
+            )
+        });
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        fs::remove_file(&poker).unwrap();
+        run.join().unwrap()
+    });
+    assert_eq!(ended.unwrap(), Outcome::Exited(0), "{err}");
+    assert!(
+        err.contains("windows: waiting for zeewin2, 0 s of up to 1 min: zeewin2 is busy: poker-lab's job holds it"),
+        "{err}"
+    );
+    assert!(!out.contains("busy"), "nothing is refused: {out}");
+    let log = rig.log();
+    assert_eq!(
+        log.iter().filter(|line| line.starts_with("scp")).count(),
+        1,
+        "the tree is sent once, when the job has gone: {log:?}"
+    );
+    assert!(asked(&log, "zeelin").len() > 1, "{log:?}");
+    // The run's place in the queue went with it.
+    assert_eq!(
+        fs::read_dir(queues.path().join("zeewin2")).unwrap().count(),
+        0
+    );
+}
+
+/// An scp that keeps what it is sent and notes whose run sent it, in the order they come.
+const NOTES_ITS_SENDER: &str = r#"printf 'scp\t%s\t%s\n' "$1" "$3" >> "$CF_LOG"; echo "$CF_LOG" >> "$CF_HOME/order"; cp "$2" "$CF_TARBALL""#;
+
+#[test]
+fn runs_for_one_busy_machine_from_two_trees_go_in_the_order_they_came() {
+    let home = tempfile::tempdir().unwrap();
+    let queues = tempfile::tempdir().unwrap();
+    let (mut a, mut b) = (Rig::on(Some(home.path())), Rig::on(Some(home.path())));
+    for rig in [&mut a, &mut b] {
+        rig.waits_in(queues.path());
+        rig.program("scp", NOTES_ITS_SENDER);
+        rig.program("ssh", &laptop_with_a_job_while_poker_is_there());
+    }
+    let poker = home.path().join("poker");
+    fs::write(&poker, "").unwrap();
+    let zeewin2 = Machine::named("zeewin2").unwrap();
+    let go = |rig: &Rig| {
+        let mut options = rig.options();
+        options.wait = 1;
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let ended = run(
+            &rig.context,
+            &zeewin2,
+            &options,
+            &mut Console {
+                out: &mut out,
+                err: &mut err,
+            },
+            &Interrupt::default(),
+        );
+        (ended, String::from_utf8(err).unwrap())
+    };
+    let (from_a, from_b) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| go(&a));
+        // The second comes when the first is waiting, and looks at the machine ten times as often.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let second = scope.spawn(|| go(&b));
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        fs::remove_file(&poker).unwrap();
+        (first.join().unwrap(), second.join().unwrap())
+    });
+    assert_eq!(from_a.0.unwrap(), Outcome::Exited(0), "{}", from_a.1);
+    assert_eq!(from_b.0.unwrap(), Outcome::Exited(0), "{}", from_b.1);
+    let order: Vec<String> = fs::read_to_string(home.path().join("order"))
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    let mine = |rig: &Rig| rig.bin.path().join("log").display().to_string();
+    assert_eq!(order, [mine(&a), mine(&b)], "the older run went first");
+    assert!(
+        from_b
+            .1
+            .contains("2nd in the queue for zeewin2; the run ahead is "),
+        "the younger said whom it waited for: {}",
+        from_b.1
+    );
 }

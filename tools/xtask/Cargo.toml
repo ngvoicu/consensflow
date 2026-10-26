@@ -36,6 +36,8 @@ cf-release.workspace = true
 cf-publish.workspace = true
 sha2.workspace = true
 zip.workspace = true
+# The Windows runner's tarball is compressed here, where `gzip` is not on every machine's PATH.
+flate2.workspace = true
 # The runner of the Windows machine: the PowerShell script that ssh hands it is
 # the base64 of its UTF-16 (`-EncodedCommand`).
 base64.workspace = true

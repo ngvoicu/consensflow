@@ -120,6 +120,60 @@ fn what_a_run_printed_is_never_read_for_a_test_that_failed_whoever_ran_it() {
     }
 }
 
+/// A run that left no report to read is told, to whoever runs it without the plant, by how it
+/// ended and the end of what it wrote (T-627: a nextest that ended with 102 in two seconds).
+#[test]
+fn a_run_that_left_no_report_is_told_by_how_it_ended_and_the_end_of_what_it_said() {
+    let said = "error: failed to download `alloc-no-stdlib v2.0.4`\n\nCaused by:\n  attempting to make an \
+                HTTP request, but --offline was specified\n";
+    let told = ran_by(&CARGO, Some(102), said, unread())
+        .unread()
+        .unwrap_or_default();
+    assert!(
+        told.starts_with(
+            "no report of its tests could be read: /run/junit.xml could not be read: "
+        ),
+        "{told}"
+    );
+    assert!(
+        told.contains("; it ended with 102, saying (its last lines): error: failed to download"),
+        "{told}"
+    );
+    assert!(
+        told.contains("attempting to make an HTTP request, but --offline was specified"),
+        "{told}"
+    );
+    // Nothing said, and a signal.
+    let silent = ran_by(&CARGO, None, "", unread())
+        .unread()
+        .unwrap_or_default();
+    assert!(
+        silent.ends_with("; a signal ended it, saying nothing"),
+        "{silent}"
+    );
+    // A great deal said: the end of it.
+    let long: String = (0..500).map(|n| format!("line {n}\n")).collect();
+    let told = ran_by(&CARGO, Some(1), &long, unread())
+        .unread()
+        .unwrap_or_default();
+    assert!(
+        told.contains("line 499") && !told.contains("line 100"),
+        "{told}"
+    );
+    // A report that was read is none of it, and a build that failed says why already.
+    assert_eq!(
+        ran_by(&CARGO, Some(0), "", read(results(&[]))).unread(),
+        None
+    );
+    let unbuilt = Some(Err(
+        "cargo build did not succeed, and no test was run".to_owned()
+    ));
+    assert_eq!(
+        ran_by(&CARGO, Some(101), "boom\n", unbuilt).unread().as_deref(),
+        Some("no report of its tests could be read: cargo build did not succeed, and no test was run")
+    );
+}
+
 #[test]
 fn a_run_whose_reporter_wrote_no_report_it_could_read_catches_nothing_whatever_its_status() {
     for command in [&CARGO[..], &XTASK, &NODE, &PAGE] {

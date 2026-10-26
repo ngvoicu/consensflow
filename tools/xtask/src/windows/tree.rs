@@ -18,6 +18,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use sha2::{Digest, Sha256};
 
 use super::script::{sweep_script, RUN, SWEEP, SYNCED, TREE};
@@ -118,9 +120,15 @@ const NO_COMMIT: &str = "none";
 /// the copy what the list does not name ([`sweep_script`]) and the `run` script into
 /// `tree.tgz` in `scratch`, and answers where it is.
 ///
-/// The list, the identity, the sweep and the run script are files of the checkout while
-/// `tar` reads them, for it names its files from the checkout's root; they are taken
-/// away when the tarball is made, or when that fails.
+/// The four of them are written in a folder of `scratch`, the run's own, and never in the
+/// checkout: runs of one tree to the two machines (or two runs to one) pack the same
+/// checkout at once, and files of its root were each other's to write over and to take away
+/// (T-664, 2026-10-26: a run was sent another run's script, and one upload failed on a name
+/// that was gone). `tar` packs the tree from the checkout's root and then appends the four
+/// from their folder, in two steps because no one `tar` line reads two folders the same on
+/// the systems the runner runs on (bsdtar reads a list of names from the last folder named);
+/// the archive is compressed here, which `gzip` would do where it is on the PATH, and it is
+/// not on zeewin's.
 pub fn pack(
     context: &Context,
     files: &[String],
@@ -129,31 +137,46 @@ pub fn pack(
     scratch: &Path,
 ) -> Result<PathBuf, Error> {
     let names = scratch.join("files");
+    let state = scratch.join("state");
+    let archive = scratch.join(ARCHIVE);
     let tarball = scratch.join("tree.tgz");
-    let named: Vec<&str> = files
-        .iter()
-        .map(String::as_str)
-        .chain([SYNCED, TREE, SWEEP, RUN])
-        .collect();
-    fs::write(&names, named.join("\0")).map_err(Error::files("write", &names))?;
-    let tar = tar(context, scratch, &names);
-    let made = {
-        let _list = Listed::write(&context.root, files, identity, run)?;
-        process::capture(&tar, &context.env)
-    }?;
-    if made.code != 0 {
-        return Err(Error::step(&tar, made.code, &made.stderr));
+    fs::create_dir_all(&state).map_err(Error::files("make", &state))?;
+    let mut list = files.join("\n");
+    list.push('\n');
+    let held = [
+        (SYNCED, list),
+        (TREE, format!("{identity}\n")),
+        (SWEEP, sweep_script()),
+        (RUN, run.to_owned()),
+    ];
+    for (name, text) in &held {
+        let path = state.join(name);
+        fs::write(&path, text).map_err(Error::files("write", &path))?;
     }
+    fs::write(&names, files.join("\0")).map_err(Error::files("write", &names))?;
+    for step in [
+        tar(context, scratch, &names),
+        append(&state, held.iter().map(|(name, _)| *name)),
+    ] {
+        let made = process::capture(&step, &context.env)?;
+        if made.code != 0 {
+            return Err(Error::step(&step, made.code, &made.stderr));
+        }
+    }
+    gzip(&archive, &tarball)?;
     Ok(tarball)
 }
 
+/// The archive `tar` makes in the scratch folder, before it is compressed.
+const ARCHIVE: &str = "tree.tar";
+
 /// The `tar` that packs the names `names` holds (a file of them, each ended by a
-/// NUL), from the checkout's root, into `tree.tgz` in `scratch`. It runs in
+/// NUL), from the checkout's root, into `tree.tar` in `scratch`. It runs in
 /// `scratch` and names the archive by its bare name: the GNU tar Git for Windows
 /// puts first on a PATH takes an archive named `C:\…` for a host to reach.
 fn tar(context: &Context, scratch: &Path, names: &Path) -> Invocation {
     Invocation::new("tar", scratch)
-        .args(["czf", "tree.tgz", "-C"])
+        .args(["cf", ARCHIVE, "-C"])
         .arg(&context.root)
         .args(["--null", "-T"])
         .arg(names)
@@ -161,36 +184,31 @@ fn tar(context: &Context, scratch: &Path, names: &Path) -> Invocation {
         .var("COPYFILE_DISABLE", "1")
 }
 
-/// The list of what goes over, the identity, the sweep and the run script, as files of the
-/// checkout: taken away when it is dropped.
-struct Listed(Vec<PathBuf>);
-
-impl Listed {
-    fn write(root: &Path, files: &[String], identity: &str, run: &str) -> Result<Self, Error> {
-        let mut listed = Self(Vec::new());
-        let mut list = files.join("\n");
-        list.push('\n');
-        for (name, text) in [
-            (SYNCED, list),
-            (TREE, format!("{identity}\n")),
-            (SWEEP, sweep_script()),
-            (RUN, run.to_owned()),
-        ] {
-            let path = root.join(name);
-            fs::write(&path, text).map_err(Error::files("write", &path))?;
-            listed.0.push(path);
-        }
-        Ok(listed)
-    }
+/// The `tar` that appends the files `held` to the archive, run in the folder `state` that holds
+/// them and naming the archive, beside it, as `../tree.tar`: the folder is never an option's value,
+/// which a GNU tar (Git for Windows's, first on the PATH of GitHub's runners) reads for its
+/// backslash escapes and takes a drive letter in for a host. The folder of a run begins with the
+/// run's name, which can begin with a digit (`\0000b009`, a NUL to it: the case of the lock).
+fn append<'a>(state: &Path, held: impl Iterator<Item = &'a str>) -> Invocation {
+    Invocation::new("tar", state)
+        .args(["rf", "../tree.tar"])
+        .args(held)
+        .var("COPYFILE_DISABLE", "1")
 }
 
-impl Drop for Listed {
-    fn drop(&mut self) {
-        for path in &self.0 {
-            // Gone already, or not to be taken away: nothing more to be done about it.
-            let _ = fs::remove_file(path);
-        }
-    }
+/// `archive` compressed as `tarball`, as `tar czf` writes one, and `archive` taken away.
+fn gzip(archive: &Path, tarball: &Path) -> Result<(), Error> {
+    let compress = |cause| Error::Files {
+        what: "compress",
+        path: archive.to_path_buf(),
+        cause,
+    };
+    let mut from = fs::File::open(archive).map_err(compress)?;
+    let to = fs::File::create(tarball).map_err(compress)?;
+    let mut to = GzEncoder::new(to, Compression::default());
+    io::copy(&mut from, &mut to).map_err(compress)?;
+    to.finish().map_err(compress)?;
+    fs::remove_file(archive).map_err(compress)
 }
 
 #[cfg(test)]

@@ -212,3 +212,13 @@ runs = ["xtask-sidecar"]
 file = "tools/xtask/src/sidecar/conpty.rs"
 find = ".map(|dir| context.root.join(dir))"
 replace = ".map(PathBuf::from)"
+
+[[plant]]
+name = "sidecar: a console host file that already holds the package's bytes is written over"
+meant = "leaves_the_files_that_already_hold_the_packages_bytes_so_one_in_use_is_no_refusal"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/conpty.rs"
+find = "if fs::read(&path).is_ok_and(|held| held == contents) {"
+replace = "if false {"

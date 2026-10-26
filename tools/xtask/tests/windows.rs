@@ -169,12 +169,12 @@ fn the_commands_refuse_the_words_they_do_not_take_and_start_nothing() {
         (
             vec!["windows"],
             "xtask: windows takes the command to run there after a --: cargo xtask windows \
-             [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--env NAME=VALUE] -- <command>\n",
+             [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--wait MINUTES] [--env NAME=VALUE] -- <command>\n",
         ),
         (
             vec!["windows", "--host", "zeewin"],
             "xtask: windows takes the command to run there after a --: cargo xtask windows \
-             [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--env NAME=VALUE] -- <command>\n",
+             [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--wait MINUTES] [--env NAME=VALUE] -- <command>\n",
         ),
         (
             vec!["windows", "--host", "zeewin", "--nope", "--", "x"],
@@ -192,7 +192,7 @@ fn the_commands_refuse_the_words_they_do_not_take_and_start_nothing() {
             vec!["windows-matrix", "--host", "zeewin"],
             "xtask: windows-matrix takes a --scenario <name> and a --pair <chief>:<staff> (each \
              as many times as there are): cargo xtask windows-matrix [--machine zeewin2|zeewin | \
-             --host <ssh host>] [--env NAME=VALUE] --scenario <name>... --pair <chief>:<staff>...\n",
+             --host <ssh host>] [--wait MINUTES] [--env NAME=VALUE] --scenario <name>... --pair <chief>:<staff>...\n",
         ),
         (
             vec![
@@ -384,7 +384,9 @@ fn a_run_on_zeewin2_while_poker_lab_holds_it_ends_with_75_having_sent_nothing_by
             fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
         }
         let tree = tree(&[("keep.txt", "kept")]);
-        let mut words = vec!["windows"];
+        // Told not to wait, as a person who wants the answer at once is: a run that waits for
+        // its turn (an hour, unless told) is the unit tests' (`windows::queue`, `windows::run`).
+        let mut words = vec!["windows", "--wait", "0"];
         words.extend(on_zeewin2);
         words.extend(["--", "cargo", "test"]);
         let ran = on(&tree, fakes.path(), &[], &words);
@@ -646,9 +648,13 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
     );
     let tree = tree(&[("keep.txt", "kept")]);
     let manifest = tree.path().join("tools").join("xtask");
+    // Its own queue: a run that joined the one every runner on the machine shares would wait
+    // behind the real runs there (a plants run saw this case take two minutes, T-701).
+    let queues = tempfile::tempdir().unwrap();
     let mut xtask = common::command(env!("CARGO_BIN_EXE_xtask"))
         .current_dir(tree.path())
         .env("PATH", path_with(fakes.path()))
+        .env("CF_WINDOWS_QUEUES", queues.path())
         .env("CARGO_MANIFEST_DIR", manifest)
         .env("CF_LOG", &log)
         .env("CF_FIRST", &first)

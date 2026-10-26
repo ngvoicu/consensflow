@@ -199,6 +199,7 @@ impl Rig {
             inside: ".".into(),
             env: Vec::new(),
             command: vec!["cargo".into(), "xtask".into(), "live".into(), "long".into()],
+            wait: 0,
         }
     }
 

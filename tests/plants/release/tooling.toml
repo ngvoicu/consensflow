@@ -1017,12 +1017,10 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver/confirm.rs"
-find = '''        Ok(Execution::Ended(Ran {
-            report: Some(Err(why)),
-            ..
-        })) => Err(format!("no report of its tests could be read: {why}")),
+find = '''            Some(said) => Err(said),
 '''
-replace = ""
+replace = '''            Some(_) => Ok(()),
+'''
 
 [[plant]]
 name = "tooling: a report of nextest's cut short is read as far as it goes"
@@ -3317,3 +3315,23 @@ platforms = ["windows"]
 file = "crates/cf-process/src/job.rs"
 find = "            Err(why) => Self::refused(why),"
 replace = "            Err(_) => Self::unheld(),"
+
+[[plant]]
+name = "tooling: a plant told nothing of how a nextest that wrote no report ended"
+meant = "a_run_that_left_no_report_is_told_by_how_it_ended_and_the_end_of_what_it_said"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "            format!(\"{said}; {}\", self.ended())"
+replace = "            said"
+
+[[plant]]
+name = "tooling: a build that failed is told by how the run ended as well"
+meant = "a_run_that_left_no_report_is_told_by_how_it_ended_and_the_end_of_what_it_said"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "        Some(if why.ends_with(NONE_RAN) {"
+replace = "        Some(if false {"
