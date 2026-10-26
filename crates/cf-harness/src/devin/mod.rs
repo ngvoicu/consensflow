@@ -17,7 +17,9 @@ mod wire_log;
 pub(crate) use adapter::{window_on, wire_readiness};
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use install::added_hooks;
-pub(crate) use install::{minimum_version, native_config, supported_version};
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use install::native_config;
+pub(crate) use install::{minimum_version, supported_version};
 
 pub use adapter::DevinAdapter;
 pub use question_hook::question_hook;
