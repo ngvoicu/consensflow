@@ -39,12 +39,12 @@ fn a_codex_chief_whose_first_turn_end_was_never_heard_is_given_its_next_result_o
     for (number, words) in [(1, "FIRST_OK"), (2, "SECOND_OK")] {
         let ran = rig.cf_in_window(
             &chief,
-            &[
-                "task",
-                "add",
-                "--tier",
-                &tier,
-                &format!("Reply with exactly: {words}"),
+            [
+                "task".to_owned(),
+                "add".to_owned(),
+                "--tier".to_owned(),
+                tier.clone(),
+                format!("Reply with exactly: {words}"),
             ],
         )?;
         assert_eq!(ran.code, Some(0), "{ran}");
