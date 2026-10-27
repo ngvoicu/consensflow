@@ -316,7 +316,7 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "install/install.ps1"
-find = "        if ($named.Groups[1].Value -cne $fileName) {"
+find = "        if (-not [string]::Equals($named.Groups[1].Value, $fileName, [StringComparison]::Ordinal)) {"
 replace = "        if ($false) {"
 
 [[plant]]
@@ -360,8 +360,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "install/install.ps1"
-find = "        if ($got -cne $expected) { Stop-CfInstall"
-replace = "        if ($false) { Stop-CfInstall"
+find = "            if (-not [string]::Equals($got, $expected, [StringComparison]::Ordinal)) {"
+replace = "            if ($false) {"
 
 [[plant]]
 name = "installers: install.ps1 takes any hash SHA256SUMS lists"
@@ -371,8 +371,9 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "install/install.ps1"
-find = '''($fields[1] -ceq $installer -or $fields[1] -ceq "*$installer")'''
-replace = '''($true)'''
+find = '''            if ($fields.Count -eq 2 -and ([string]::Equals($fields[1], $name, [StringComparison]::Ordinal) -or
+                    [string]::Equals($fields[1], "*$name", [StringComparison]::Ordinal))) { $found += $fields[0] }'''
+replace = '''            if ($fields.Count -eq 2) { $found += $fields[0] }'''
 
 [[plant]]
 name = "installers: install.ps1 installs on a PC that is not x64"

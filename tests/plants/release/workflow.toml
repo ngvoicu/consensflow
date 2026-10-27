@@ -28,6 +28,8 @@ replace = "group: ${{ github.ref_type == 'tag' && 'release' ||"
 name = "workflow: a hand run is failed by what a tag would be refused for, before the build"
 meant = "asks_the_old_feeds_before_the_build_a_tag_is_refused_a_hand_run_is_told_what_a_tag_would_be"
 runs = ["workflow"]
+# Its test runs the steps under bash or parses them with ruby, which the Windows machines lack.
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
@@ -40,6 +42,8 @@ replace = "app/src-tauri/target/release/cf-publish feeds prerequisites"
 name = "workflow: a hand run is failed by the plan of the feeds"
 meant = "plans_the_feeds_from_the_archive_a_tag_is_refused_for_a_release_before_the_bridge_a_hand_run_is_told"
 runs = ["workflow"]
+# Its test runs the steps under bash or parses them with ruby, which the Windows machines lack.
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
@@ -145,6 +149,8 @@ replace = "PUBLISHER_SHA256: ${{ needs.mac.outputs.sha256 }}"
 name = "workflow: the publisher is run without its hash being checked"
 meant = "runs_the_publisher_only_once_it_is_the_binary_the_job_that_built_it_reported"
 runs = ["workflow"]
+# Its test runs the steps under bash or parses them with ruby, which the Windows machines lack.
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
@@ -155,6 +161,8 @@ replace = "if false; then"
 name = "workflow: the publisher that was downloaded is not made to run"
 meant = "runs_the_publisher_only_once_it_is_the_binary_the_job_that_built_it_reported"
 runs = ["workflow"]
+# Its test runs the steps under bash or parses them with ruby, which the Windows machines lack.
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
@@ -267,6 +275,8 @@ replace = '''
 name = "workflow: the step that publishes is given no repository"
 meant = "publishes_the_bridge_and_moves_its_feeds_and_the_step_after_it_finds_them_right"
 runs = ["workflow"]
+# Its test runs the steps under bash or parses them with ruby, which the Windows machines lack.
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
@@ -310,6 +320,8 @@ replace = '''
 name = "workflow: the publisher is given the tag without its v"
 meant = "publishes_the_bridge_and_moves_its_feeds_and_the_step_after_it_finds_them_right"
 runs = ["workflow"]
+# Its test runs the steps under bash or parses them with ruby, which the Windows machines lack.
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
@@ -320,6 +332,8 @@ replace = '--dir . --tag "${GITHUB_REF_NAME#v}" \'
 name = "workflow: a step of the publisher job is not shell: a bracket is left open"
 meant = "every_workflow_is_valid_yaml_with_jobs_that_have_steps_or_call_a_workflow"
 runs = ["workflow"]
+# Its test runs the steps under bash or parses them with ruby, which the Windows machines lack.
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
@@ -330,6 +344,8 @@ replace = "needs: [mac, windows, gate, publisher, sign"
 name = "workflow: the check of the hash has no end"
 meant = "all_parse_as_bash_bash_n"
 runs = ["workflow"]
+# Its test runs the steps under bash or parses them with ruby, which the Windows machines lack.
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
