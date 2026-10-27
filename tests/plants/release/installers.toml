@@ -707,6 +707,7 @@ replace = '''        if false; then'''
 name = "installers: install.sh orders a release before its own pre-releases"
 meant = "install.sh orders versions as SemVer does"
 runs = [["node", "--test", "--test-name-pattern", "orders versions", "tests/install-sh.test.mjs"]]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "install/install.sh"

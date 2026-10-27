@@ -245,7 +245,9 @@ async function waitFor(check, what) {
   assert.fail(`${what} did not happen in 10 s`)
 }
 
-test('install.sh orders versions as SemVer does', () => {
+test('install.sh orders versions as SemVer does', {
+  skip: process.platform === 'win32' && 'there is no sh on Windows',
+}, () => {
   const lines = readFileSync(INSTALL_SH, 'utf8').split('\n')
   const from = lines.indexOf('# version order: begin')
   const to = lines.indexOf('# version order: end')
