@@ -43,13 +43,14 @@
 //! finished is never called working for good so, as Claude Code's jobs of a process that
 //! is gone are retired at a relaunch.
 //!
-//! Seen live (Muse 1.4.13, T-705's contributor run): a background command, a monitor and
-//! a child, each through to its end, and each queued and drained into the run that
-//! started it (its agent waited on it). Not seen live, so read as the rules above say
-//! until a recording shows it (T-789's result names each): work that outlives its turn
-//! and the run that wakes for it, a child whose result comes after its parent's
-//! `terminal`, a backgrounded task stopped (`work_stop`, `bash_input`), work open when
-//! the process ended, and goals.
+//! Seen live (Muse 1.4.13): a background command, a monitor and a child, each through to
+//! its end and drained into the run that started it, its agent waiting on it (T-705's
+//! contributor run); and a command that outlived its turn, its end queued, then the run
+//! it woke started, then the end drained into it (T-789's live case on
+//! `muse-spark-1.3`, `tests/fixtures/muse/live/background-outlives-turn.jsonl`). Not seen
+//! live, so read as the rules above say until a recording shows it (T-789's result names
+//! each): a monitor or a child that outlives its turn, a backgrounded task stopped
+//! (`work_stop`, `bash_input`), work open when the process ended, and goals.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

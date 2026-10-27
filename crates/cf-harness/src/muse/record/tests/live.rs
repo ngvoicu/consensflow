@@ -159,3 +159,67 @@ fn a_tools_results_are_its_items_the_turn_open_until_each_is_answered() {
         "a call unanswered"
     );
 }
+
+/// The log of the live case `live_muse_background` (T-789, `muse-spark-1.3` at
+/// `minimal`, contributor mode off): a command that outlived its turn, and the run that
+/// woke for its end.
+const OUTLIVED: &str =
+    include_str!("../../../../tests/fixtures/muse/live/background-outlives-turn.jsonl");
+
+/// What a fresh reader reads of that log up to the record of `sequence`, that one too.
+fn outlived_through(sequence: u64) -> Record {
+    let text: String = OUTLIVED
+        .lines()
+        .filter(|line| {
+            let record: Value = serde_json::from_str(line).unwrap();
+            record["sequence"].as_u64().unwrap_or(0) <= sequence
+        })
+        .map(|line| format!("{line}\n"))
+        .collect();
+    known(&fresh_reading(&session_of(OUTLIVED), &text)).clone()
+}
+
+#[test]
+fn a_command_that_outlived_its_turn_held_it_until_the_run_it_woke_took_its_end() {
+    // The turn's answer (80) and its end (86): settled, the command running.
+    let ended = outlived_through(86);
+    assert_eq!(ended.settlement, Settlement::Settled);
+    assert_eq!(ended.pending.jobs, 1);
+    // Its end queued (90), its task over (92): its agent not told yet.
+    for sequence in [90, 92, 94] {
+        let record = outlived_through(sequence);
+        assert_eq!(record.settlement, Settlement::Settled, "{sequence}");
+        assert_eq!(record.pending.jobs, 1, "{sequence}");
+    }
+    // Muse starts the run it wakes (95) before it drains the end into it (107).
+    let woken = outlived_through(95);
+    assert_eq!(woken.settlement, Settlement::InFlight);
+    assert_eq!(woken.pending.jobs, 1);
+    assert_eq!(outlived_through(107).pending.jobs, 0);
+    // The woken run answers and ends: nothing left.
+    let done = outlived_through(126);
+    assert_eq!(done.settlement, Settlement::Settled);
+    assert_eq!(done.pending, Pending::default());
+    assert_eq!(
+        done.items
+            .iter()
+            .filter(|item| item.role == Role::Assistant)
+            .count(),
+        2,
+        "STARTED, then the woken run's answer"
+    );
+}
+
+#[test]
+fn the_outlived_log_reads_the_same_read_on_a_record_at_a_time_as_read_fresh() {
+    let session = session_of(OUTLIVED);
+    let stage = Stage::new(&session);
+    let mut reading_on = stage.reader();
+    let mut text = String::new();
+    for line in OUTLIVED.lines() {
+        text.push_str(line);
+        text.push('\n');
+        stage.append(line);
+        assert_eq!(look(&mut reading_on), fresh_reading(&session, &text));
+    }
+}

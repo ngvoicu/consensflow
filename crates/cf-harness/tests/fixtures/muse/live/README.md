@@ -33,3 +33,13 @@ What it holds, by record kind (sequence numbers are the log's own):
 In each, the background work ends inside the turn that started it, because the agent
 waited on it (`bash_input`, `subagent_wait`). Work that outlives its turn is the live
 case `crates/cf-e2e/tests/live_muse_background.rs`.
+
+`background-outlives-turn.jsonl` is the log of the live case
+`crates/cf-e2e/tests/live_muse_background.rs` (T-789, 2026-10-27 07:38): Muse
+1.4.13-R6996.1 on `muse-spark-1.3` at `minimal`, contributor mode off, `--yolo`, in a
+throwaway home, scrubbed by `cargo xtask scrub-muse-session`. The model started a
+40-second command in the background (55, its task's output `background_running` at
+65), answered and ended its turn (80, 86). The command's end was queued (90) and its
+task completed (92); Muse started the run it wakes (95, no message of the user's) and
+then drained the end into it (107); that run answered (119) and ended (125), and the
+window quit (126).
