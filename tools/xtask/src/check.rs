@@ -4,7 +4,7 @@
 //! own.
 //!
 //! The steps are rustfmt; clippy for the workspace, for the app and for
-//! Windows; the tests of the workspace, of xtask and of the app; the plants of
+//! Windows (the workspace's, then the app's); the tests of the workspace, of xtask and of the app; the plants of
 //! every family, each checked to still apply to the sources (`cargo xtask
 //! plants <family> --check`); then the linter, the build of the native `cf` (the
 //! `bin/cf` the page's Playwright suite runs, `npm run test:ui`, which is no part
@@ -120,6 +120,12 @@ fn steps(
     ];
     if !windows {
         steps.push(clippy_windows::lint(context, &[], archiver));
+        // The app for Windows too, its tests included: CI's Windows checks lint it there, and
+        // the workspace's lint above leaves it out (an unused import in a Windows-only test of
+        // the app reached main so, 3.0.6-alpha.3's integration B, T-836). Through
+        // `cargo xtask`, as `build-cf` is below: the lint of the app wants the stand-in
+        // resource compiler that command puts on its PATH.
+        steps.push(at("cargo", &["xtask", "clippy-windows", "app"]));
     }
     steps.extend([
         at(
@@ -232,6 +238,7 @@ mod tests {
                 "cargo clippy --offline --target x86_64-pc-windows-msvc --all-targets \
                  --workspace --exclude app -- -D warnings"
                     .to_string(),
+                "cargo xtask clippy-windows app".to_string(),
                 "cargo test --workspace --exclude app --exclude xtask".to_string(),
                 format!("cargo test --package xtask --target-dir {own_target}"),
                 "cargo test --offline --".to_string(),
@@ -252,6 +259,7 @@ mod tests {
                 root.clone(),
                 root.clone(),
                 app.clone(),
+                root.clone(),
                 root.clone(),
                 root.clone(),
                 root.clone(),
@@ -276,6 +284,7 @@ mod tests {
                     "CC_x86_64_pc_windows_msvc".to_string(),
                     "AR_x86_64_pc_windows_msvc".to_string()
                 ],
+                vec![],
                 vec![],
                 vec![],
                 vec!["TAURI_CONFIG".to_string()],
@@ -309,7 +318,8 @@ mod tests {
         let steps = steps(&context, &archiver, false, &families());
         assert_eq!(steps[3], clippy_windows::lint(&context, &[], &archiver));
         assert_eq!(steps[2], app::clippy(&context, &[]));
-        assert_eq!(steps[6], app::test(&context, &[]));
+        assert_eq!(steps[4].display(), "cargo xtask clippy-windows app");
+        assert_eq!(steps[7], app::test(&context, &[]));
     }
 
     #[test]
@@ -318,9 +328,9 @@ mod tests {
         let steps = steps(&context, Path::new("xtask"), true, &families());
         let lines: Vec<_> = steps.iter().map(Invocation::display).collect();
         assert_eq!(lines.len(), 12);
-        assert!(lines
-            .iter()
-            .all(|line| !line.contains("x86_64-pc-windows-msvc")));
+        assert!(lines.iter().all(
+            |line| !line.contains("x86_64-pc-windows-msvc") && !line.contains("clippy-windows")
+        ));
         // Everything else is where it was.
         assert_eq!(
             lines[..3],
