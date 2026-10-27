@@ -295,7 +295,7 @@ fn a_folder_a_killed_run_left_is_taken_away_and_a_folder_of_a_run_that_is_there_
     let no_process = make(format!("{PREFIX}not-a-number-1"));
     let file = parent.path().join(format!("{PREFIX}{gone}-file"));
     std::fs::write(&file, "").unwrap();
-    sweep(parent.path());
+    sweep(parent.path(), PREFIX);
     assert!(
         !left.exists(),
         "the folder of a run that is gone is taken away"
@@ -566,6 +566,42 @@ fn a_copy_that_was_refreshed_or_lost_fails_with_a_warning_that_the_machines_logi
     std::fs::remove_file(&credentials).unwrap();
     let said = login.finish().unwrap_err().to_string();
     assert!(said.contains("gone or no longer holds a login"), "{said}");
+}
+
+#[test]
+fn the_login_the_machine_keeps_changed_while_the_run_went_on_is_said_and_the_mcp_tokens_beside_it_are_not_held_to_it(
+) {
+    let person = Person::new();
+    let parent = tempfile::tempdir().unwrap();
+    let text = machine_text(hours(5));
+    let login = login(&text, person.home.path(), parent.path());
+    login.folder_at(at(NOW)).unwrap();
+    let machine = person.home.path().join("machine-login.json");
+    // The person's MCP servers refresh their own tokens in the same item, all day.
+    std::fs::write(&machine, text.replace(MCP, "mcp-token-REFRESHED")).unwrap();
+    assert!(login.finish().is_ok());
+    // Their own Claude Code refreshed the login (or the run's rotated it): not as it was.
+    std::fs::write(&machine, text.replace(ACCESS, "sk-ant-oat01-ROTATED")).unwrap();
+    let said = login.finish().unwrap_err().to_string();
+    assert!(
+        said.contains(&format!(
+            "the owner's Claude login in {} is not as it was",
+            machine.display()
+        )),
+        "{said}"
+    );
+    assert!(
+        said.contains("or the owner's own Claude Code did"),
+        "{said}"
+    );
+    assert!(!said.contains("ROTATED") && !said_anywhere(&said), "{said}");
+    // The login gone from where the machine keeps it is a change too.
+    std::fs::remove_file(&machine).unwrap();
+    assert!(login
+        .finish()
+        .unwrap_err()
+        .to_string()
+        .contains("is not as it was"));
 }
 
 #[test]

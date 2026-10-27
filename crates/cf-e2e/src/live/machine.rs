@@ -2,16 +2,19 @@
 //! OpenCode, Pi, Devin and Codex), found as a shell finds them with the home
 //! each reads its login from, and the rig whose windows run them.
 //!
-//! A window reads its login where it is, as it does for the person it belongs to
-//! (and writes its own sessions there, as it does for them), but for Claude Code's:
-//! a Claude Code window runs on a config folder of the run's own, which holds a copy
-//! of the machine's login and is removed with the run ([`login`]), so that nothing of
-//! the run is written in the person's `~/.claude`; a run given a Claude config folder
-//! of its own (`--claude-config`) has its windows keep their config there instead: its
-//! caller made it and copied the login into it. What a window is given of the
-//! machine is what [`rig`] says: the variables the harness reads its login by, the
-//! folders it and Node are in, a locale that draws its screen, and the user's name,
-//! which a harness may ask the system's keychain by.
+//! A window never reads its login where the person keeps it, or writes its sessions
+//! there (T-724, after T-696: a live run on Pi refreshed the person's own login). Each
+//! harness found has a home of the run's own, which holds a copy of the machine's login
+//! and is removed with the run: Claude Code's is a config folder ([`login`]), Codex's,
+//! Pi's and Devin's are made by [`isolation`], and the rig sets their variables last,
+//! over its own and the case's. A run given a Claude config folder of its own
+//! (`--claude-config`) has its windows keep their config there instead: its caller made
+//! it and copied the login into it. (OpenCode, which a later change takes out of
+//! ConsensFlow, still reads the person's.) What a window is given of the machine is what
+//! [`rig`] says: the person's home, for the project folders below it, and the variables
+//! the harness reads its login by where it has no home of its own, the folders it and
+//! Node are in, a locale that draws its screen, and the user's name, which a harness
+//! may ask the system's keychain by.
 //!
 //! Claude Code has two programs of ours in front of it: [`isolated_claude`] adds
 //! the flags that shut the human's MCP servers and browser out, and
@@ -28,9 +31,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::isolation::Isolation;
 use super::login::Login;
 use crate::process::{own_var, Run};
-use crate::rig::{ClaudeConfig, Config};
+use crate::rig::{ClaudeConfig, Config, HarnessHome};
 use crate::{checkout, files, Error, Result};
 
 pub use path::{command, working_command};
@@ -103,7 +107,7 @@ impl Harness {
     }
 
     /// What to do about a machine that has no login for it.
-    const fn log_in(self) -> &'static str {
+    pub(super) const fn log_in(self) -> &'static str {
         match self {
             Self::Claude => "log in by running `claude` once",
             Self::OpenCode => "log in by running `opencode` once",
@@ -132,6 +136,9 @@ pub struct Installed {
     /// The config folder its windows run on, where they are not on the person's own
     /// ([`Installed::claude_config`]).
     claude_config: Option<Arc<dyn ClaudeConfig>>,
+    /// The home of the run's own its windows run on in place of the person's, with a copy
+    /// of the login ([`Installed::isolation`]).
+    isolation: Option<Arc<Isolation>>,
 }
 
 impl Installed {
@@ -143,6 +150,7 @@ impl Installed {
             home: home.into(),
             node: None,
             claude_config: None,
+            isolation: None,
         }
     }
 
@@ -164,6 +172,28 @@ impl Installed {
     /// The config folder its windows run on, if it is not the person's own.
     pub fn claude_config(&self) -> Option<&Arc<dyn ClaudeConfig>> {
         self.claude_config.as_ref()
+    }
+
+    /// This harness, whose windows run on `isolation`, a home of the run's own with a copy of
+    /// the person's login, and none of the person's variables for it ([`isolation`](super::isolation)).
+    #[must_use]
+    pub fn with_isolation(mut self, isolation: Arc<Isolation>) -> Self {
+        self.isolation = Some(isolation);
+        self
+    }
+
+    /// The home of the run's own its windows run on, if they are not on the person's.
+    pub fn isolation(&self) -> Option<&Arc<Isolation>> {
+        self.isolation.as_ref()
+    }
+
+    /// This harness, whose windows are given no home of the run's own: for a case that is
+    /// its own home, whose rig is given a `HOME` with the harness's folder in it, made for the
+    /// case, and none of the person's is read or written. The case says why it is its own.
+    #[must_use]
+    pub fn on_own_home(mut self) -> Self {
+        self.isolation = None;
+        self
     }
 
     /// Which harness it is.
@@ -224,6 +254,19 @@ impl Installed {
     /// is on this machine.
     fn login(&self, machine: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
         let home = self.home.to_string_lossy().into_owned();
+        // A harness on a home of the run's own finds its login and config by the variables of
+        // that home, which the rig sets last ([`Installed::isolation`]): the person's home is
+        // given it all the same, as the place its project folders are (`~/.consensflow-candidate/
+        // live/…`), and for nothing it reads its login by. (Not a home of the rig's: Devin's
+        // window, opened in a folder below one, which macOS spells through the `/var` link of its
+        // temporary folder, shows no answer, 2026-10-27.)
+        if self.isolation.is_some() {
+            let mut vars = vec![("HOME".to_owned(), home.clone())];
+            if cfg!(windows) {
+                vars.push(("USERPROFILE".to_owned(), home));
+            }
+            return vars;
+        }
         if self.harness == Harness::Codex {
             return vec![("CODEX_HOME".to_owned(), home)];
         }
@@ -354,6 +397,9 @@ fn rig_keeping_claude_in(
         for (name, value) in install.login(&machine) {
             config = config.var(&name, value);
         }
+        if let Some(isolation) = install.isolation() {
+            config = config.isolated(Arc::clone(isolation) as Arc<dyn HarnessHome>);
+        }
         if install.harness == Harness::Claude {
             // A folder the run was given wins: its caller made it and copied the login
             // into it. Otherwise the kit's own copy of the login, where it has one.
@@ -416,16 +462,28 @@ pub fn installed(harness: Harness) -> Result<Installed> {
     if !has_login(&places) {
         return Err(no_login(harness, &places));
     }
-    let mut installed = Installed::at(harness, command, home);
-    // Claude Code's windows run on a login of the run's own, copied from the machine's.
-    if let Some(login) = Login::of_machine().filter(|_| harness == Harness::Claude) {
-        installed = installed.with_claude_config(Arc::new(login));
-    }
+    let installed = with_homes(Installed::at(harness, command, home))?;
     // A machine with no Node has a harness that needs none (a native one).
     Ok(match command_folder("node") {
         Some(node) => installed.with_node(node),
         None => installed,
     })
+}
+
+/// `installed`, whose windows run on a home of the run's own: Claude Code's on a config
+/// folder with a login copied from the machine's, the others' (Codex, Pi, Devin) on a home
+/// with a copy of the login and none of the person's other files, and the person's setup
+/// checked when the run is over. Every harness found goes through here, so that no live
+/// case has to make one, or can forget to.
+fn with_homes(mut installed: Installed) -> Result<Installed> {
+    let harness = installed.harness;
+    if let Some(login) = Login::of_machine().filter(|_| harness == Harness::Claude) {
+        installed = installed.with_claude_config(Arc::new(login));
+    }
+    if let Some(isolation) = Isolation::of_machine(harness, installed.home())? {
+        installed = installed.with_isolation(Arc::new(isolation));
+    }
+    Ok(installed)
 }
 
 /// The machine's Codex: [`installed`] for the harness the image designer runs on.

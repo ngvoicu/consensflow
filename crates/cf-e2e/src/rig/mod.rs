@@ -25,6 +25,7 @@
 //! that finds it ended by something else when it ends fails: the pane host ends a
 //! window's own and nothing of the machine's.
 
+mod homes;
 mod install;
 mod jobs;
 mod launch;
@@ -52,6 +53,7 @@ use crate::outcome::{self, Verdict};
 use crate::process::{Ran, Run, Sink, Spawned};
 use crate::{cf, checkout, files, wire, Error, Result};
 
+pub use homes::HarnessHome;
 pub use jobs::Job;
 pub use names::project_name;
 pub use project::{write_staff, Project};
@@ -59,6 +61,7 @@ pub use route::Pasted;
 
 pub(crate) use observe::events_of;
 
+use homes::Homes;
 use route::Shared;
 use stranger::Stranger;
 
@@ -95,6 +98,7 @@ pub struct Config {
     existing_root: Option<PathBuf>,
     daemon: Option<PathBuf>,
     claude_config: Option<Arc<dyn ClaudeConfig>>,
+    isolated: Vec<Arc<dyn HarnessHome>>,
     codex: Option<PathBuf>,
     devin: Option<PathBuf>,
     /// The stand-in `opencode`: of an OpenCode 1.x, or of one that is 2.
@@ -164,6 +168,7 @@ impl Config {
             existing_root: None,
             daemon: None,
             claude_config: None,
+            isolated: Vec::new(),
             codex: None,
             devin: None,
             opencode: None,
@@ -364,6 +369,17 @@ impl Config {
         self.claude_config = Some(claude_config);
         self
     }
+
+    /// With the windows of a real harness running on `home`, a folder of the run's own
+    /// that holds a copy of the owner's login, in place of the owner's ([`HarnessHome`]):
+    /// its variables are set over everything else the rig sets and over every
+    /// [`Config::var`], so a case that clears the environment still carries them, and the
+    /// rig asks it what the run came to when it ends.
+    #[must_use]
+    pub fn isolated(mut self, home: Arc<dyn HarnessHome>) -> Self {
+        self.isolated.push(home);
+        self
+    }
 }
 
 /// A Claude Code config folder that a rig's windows (and its daemon, which reads
@@ -425,11 +441,10 @@ pub struct Rig {
     host: Spawned,
     /// A process none of the windows' is, which nothing may have ended when they are.
     stranger: Stranger,
-    /// The Claude config folder the windows run on, where a case gave one
-    /// ([`Config::claude_config`]), and whether it has been asked what the run came
-    /// to ([`ClaudeConfig::finish`]).
-    claude_config: Option<Arc<dyn ClaudeConfig>>,
-    claude_config_finished: bool,
+    /// The homes of real harnesses the windows run on, where a case gave any: its Claude
+    /// config folder ([`Config::claude_config`]) and the harnesses' ([`Config::isolated`]),
+    /// and whether they have been asked what the run came to ([`HarnessHome::finish`]).
+    homes: Homes,
     /// What it passes what it says of itself through ([`Config::masked_by`]).
     masker: Option<Masker>,
     /// Where its report is kept, where it is not beside its home ([`Config::reports_in`]).
@@ -829,27 +844,19 @@ impl Rig {
                 "fake harness process remains after bridge shutdown: {left}"
             )));
         }
-        // Every window is gone: nothing writes in the Claude config folder any more.
-        self.finish_claude_config()
+        // Every window is gone: nothing writes in the harnesses' homes any more.
+        self.finish_homes()
     }
 
-    /// Asks the Claude config folder the windows ran on what the run came to
-    /// ([`ClaudeConfig::finish`]), once: the answer to the case that ends the rig.
-    fn finish_claude_config(&mut self) -> Result {
-        match &self.claude_config {
-            Some(claude_config) if !self.claude_config_finished => {
-                self.claude_config_finished = true;
-                // The home is kept: what Claude Code kept of the run goes in it, where it
-                // has always been (the folder holds a login, and goes with the run).
-                let kept = if self.keep_root {
-                    claude_config.keep_records(&self.root.join("home").join(".claude"))
-                } else {
-                    Ok(())
-                };
-                claude_config.finish().and(kept)
-            }
-            _ => Ok(()),
-        }
+    /// Asks the homes of real harnesses the windows ran on what the run came to
+    /// ([`HarnessHome::finish`]), once: the answer to the case that ends the rig.
+    fn finish_homes(&mut self) -> Result {
+        // The home is kept: what Claude Code kept of the run goes in it, where it has
+        // always been (the folder holds a login, and goes with the run).
+        let kept = self
+            .keep_root
+            .then(|| self.root.join("home").join(".claude"));
+        self.homes.finish(kept.as_deref())
     }
 }
 
@@ -893,8 +900,8 @@ impl Drop for Rig {
         self.daemon.kill();
         self.host.kill();
         // A rig that did not end by being closed (a case that failed) is still asked
-        // what the run did in the person's setup, which the folder says loudly.
-        let _ = self.finish_claude_config();
+        // what the run did in the person's setup, which the homes say loudly.
+        let _ = self.finish_homes();
         if !self.keep_root {
             let _ = std::fs::remove_dir_all(&self.root);
         }

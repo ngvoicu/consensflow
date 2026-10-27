@@ -299,7 +299,9 @@ fn checks_of(case: &Case, bare: &Value, member: &Value) -> Vec<Check> {
 fn a_pi_members_window_has_everything_bare_pi_has_in_the_same_folder() -> Result {
     let log = Log::begin("live pi-parity")?;
     ask::prepare()?;
-    let install = log.found(Harness::Pi)?;
+    // The case is its own home: its windows' HOME holds the Pi folder it made, and none of the
+    // owner's is read or written, so the kit's home (`PI_CODING_AGENT_DIR`) is none of its.
+    let install = log.found(Harness::Pi)?.on_own_home();
     let users = tempfile::Builder::new()
         .prefix("cf-pi-parity-")
         .tempdir()

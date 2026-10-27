@@ -17,6 +17,10 @@
 //!   the config folder its windows run on, with a copy of the machine's login,
 //!   removed with the run, and the check that the run left the person's own
 //!   setup as it was (see **Claude Code and the person's `~/.claude`**, below).
+//! - [`isolation`] is the same for Codex, Pi and Devin: the home each one's windows run on
+//!   (`CODEX_HOME`, `PI_CODING_AGENT_DIR`, the XDG folders), with a copy of the login and
+//!   nothing else of the person's, set by the rig over everything it and a case set, and
+//!   the check that the run left the person's own files as they were.
 //! - [`agents`] says which model each harness runs on in a live test, and what
 //!   its roster row is.
 //! - [`window`] opens a real harness's window as the app opens one, trusts its
@@ -35,8 +39,7 @@
 //! - [`tree`] says what a worker's turn left running: the processes its window's
 //!   tree started in it, as the pane host lists them.
 //! - [`human`] plays the human at a project whose chief is a real harness (the
-//!   page's calls, and the keys typed into the chief's window), and [`cleanup`]
-//!   takes away what Pi kept of a run's folder.
+//!   page's calls, and the keys typed into the chief's window).
 //! - [`wire`] says Devin's wire log in runs of what its records are, and how it ends.
 //! - [`report`] says what each check of a run came to, and ends the run with
 //!   them ([`report::conclude`]).
@@ -82,9 +85,9 @@ pub mod agents;
 pub mod ask;
 pub mod calls;
 pub mod claude;
-pub mod cleanup;
 pub mod codex;
 pub mod human;
+pub mod isolation;
 pub mod login;
 pub mod machine;
 pub mod mcp_server;
@@ -108,7 +111,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use crate::process::{own_var, Run};
-use crate::rig::Rig;
+use crate::rig::{HarnessHome, Rig};
 use crate::{files, Error, Result};
 
 pub use machine::{
@@ -370,12 +373,16 @@ fn said_version(found: Result<Installed>) -> String {
 /// says it is, and where its login is read from (Claude Code's, where its windows run
 /// on a config folder of the run's own: where it is copied from).
 fn found_line(install: &Installed, version: &str) -> String {
-    let login = match install.claude_config() {
-        Some(config) => format!(
+    let login = match (install.claude_config(), install.isolation()) {
+        (Some(config), _) => format!(
             "its login is copied from {} into a config folder of the run's own",
             config.described()
         ),
-        None => format!("its login is read from {}", install.home().display()),
+        (None, Some(isolation)) => format!(
+            "its login is copied from {} into a home of the run's own",
+            isolation.described()
+        ),
+        (None, None) => format!("its login is read from {}", install.home().display()),
     };
     format!(
         "{} is {} ({version}); {login}",

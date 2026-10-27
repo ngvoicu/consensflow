@@ -5,8 +5,9 @@
 //!   ConsensFlow's supervisor, with a broker between them, where a terminal runs its local
 //!   TUI: what the human's `CODEX_HOME` gives it must reach the member all the same. The
 //!   run's Codex home is its own, a copy of the machine's login and nothing else of the
-//!   owner's ([`CodexHome`], which says if Codex refreshed the login), holding an MCP server
-//!   of the run's (one tool, which answers a word), a skill and an `AGENTS.md`; the
+//!   owner's (the kit's, [`cf_e2e::live::isolation`], which fails the run if Codex refreshed
+//!   the login), holding an MCP server of the run's (one tool, which answers a word), a skill
+//!   and an `AGENTS.md`; the
 //!   project's `AGENTS.md` says a word of its own. The worker calls the tool, names its
 //!   skills and says the words its instructions give it: its answer must hold the tool's
 //!   word, the skill and both words. (Probed by hand on Codex 0.164.0 against a terminal:
@@ -15,8 +16,8 @@
 //! - **Devin's own setup.** Devin runs a member on a copy of the human's `config.json` made
 //!   for the launch (`--config`), with ConsensFlow's hooks added: what Devin finds beside
 //!   the config (its skills and MCP servers) must still be found. On macOS and Linux the
-//!   run's config folder is its own (`XDG_CONFIG_HOME`), holding a copy of the machine's
-//!   `config.json` (readable by its owner alone), an MCP server of the run's and a skill;
+//!   run's config folder is its own (the kit's `XDG_CONFIG_HOME`), holding a copy of the
+//!   machine's `config.json` (readable by its owner alone), an MCP server of the run's and a skill;
 //!   on Windows, where Devin keeps its config with its login and sessions, the server is
 //!   the project's (`.devin/mcp_config.json`). The project has a skill of its own and its
 //!   `AGENTS.md` a word. The worker calls the tool, names its skills and says the word.
@@ -36,10 +37,8 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use cf_e2e::live::ask;
-use cf_e2e::live::codex::CodexHome;
 use cf_e2e::live::members::{self, find, is_over, last_result, LongCommand, Members, Plan};
-use cf_e2e::live::{self, installed, last_lines, text, Harness, Log};
-use cf_e2e::process::own_var;
+use cf_e2e::live::{self, last_lines, text, Harness, Log};
 use cf_e2e::{files, Error, Result};
 use tempfile::TempDir;
 
@@ -117,7 +116,6 @@ const DOUBLE_PRESS: Duration = Duration::from_millis(150);
 struct Case {
     plan: Plan,
     words: Vec<(&'static str, &'static str)>,
-    codex_home: Option<CodexHome>,
     _folders: Vec<TempDir>,
 }
 
@@ -168,55 +166,35 @@ fn quoted(text: &Path) -> String {
     serde_json::Value::from(text.to_string_lossy().into_owned()).to_string()
 }
 
-/// `file`, made with the folders it is in, holding `text`, readable by its owner alone: a
-/// copy of a config that may hold a token.
-fn write_private(file: &Path, text: &str) -> Result {
-    let failed = |action: &'static str| {
-        move |source| Error::File {
-            action,
-            path: file.to_path_buf(),
-            source,
-        }
-    };
-    if let Some(parent) = file.parent() {
-        std::fs::create_dir_all(parent).map_err(failed("make the folder of"))?;
-    }
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut made = options.open(file).map_err(failed("make"))?;
-    std::io::Write::write_all(&mut made, text.as_bytes()).map_err(failed("write"))
-}
-
 /// Codex's check: a Codex home of the run's own, holding a copy of the machine's login,
 /// the run's MCP server, a skill and an `AGENTS.md`.
 fn codex_case(log: &Log) -> Result<Case> {
-    let home = CodexHome::copying_login_of(&installed(Harness::Codex)?)?;
     let (server, program) = server_folder()?;
-    home.write(
-        "config.toml",
-        &format!(
-            "[mcp_servers.cf-parity]\ncommand = \"node\"\nargs = [{}]\n",
-            quoted(&program)
-        ),
-    )?;
-    home.write(
-        &format!("skills/{GLOBAL_SKILL}/SKILL.md"),
-        &skill(GLOBAL_SKILL),
-    )?;
-    home.write(
-        "AGENTS.md",
-        &format!("The human's global parity word is {GLOBAL_WORD}.\n"),
-    )?;
-    log.say(format!(
-        "Codex runs on a home of the run's own, {}, holding a copy of the machine's login",
-        home.path().display()
-    ));
+    log.say("Codex runs on a home of the run's own, holding a copy of the machine's login");
     let plan = Plan::new("parity-codex", members::stand_in_chief())
         .told(PARITY_BRIEF)
         .with(members::member(Harness::Codex))
-        .with_var("CODEX_HOME", home.path().to_string_lossy());
+        .with_home_file(
+            Harness::Codex,
+            "CODEX_HOME",
+            "config.toml",
+            format!(
+                "[mcp_servers.cf-parity]\ncommand = \"node\"\nargs = [{}]\n",
+                quoted(&program)
+            ),
+        )
+        .with_home_file(
+            Harness::Codex,
+            "CODEX_HOME",
+            &format!("skills/{GLOBAL_SKILL}/SKILL.md"),
+            skill(GLOBAL_SKILL),
+        )
+        .with_home_file(
+            Harness::Codex,
+            "CODEX_HOME",
+            "AGENTS.md",
+            format!("The human's global parity word is {GLOBAL_WORD}.\n"),
+        );
     Ok(Case {
         plan,
         words: vec![
@@ -225,7 +203,6 @@ fn codex_case(log: &Log) -> Result<Case> {
             (GLOBAL_WORD, "the AGENTS.md of its home"),
             (PROJECT_WORD, "the project's AGENTS.md"),
         ],
-        codex_home: Some(home),
         _folders: vec![server],
     })
 }
@@ -251,41 +228,31 @@ fn devin_case() -> Result<Case> {
         (PROJECT_SKILL, "the project's skill"),
         (PROJECT_WORD, "the project's AGENTS.md"),
     ];
-    let mut folders = vec![server];
     if cfg!(windows) {
         plan = plan.with_file(".devin/mcp_config.json", servers);
     } else {
-        let config = folder("cf-parity-devin-config-")?;
-        let devin = config.path().join("devin");
-        // The machine's own settings (its organisation among them), copied, never written.
-        let machine = machine_config_folder()?.join("devin").join("config.json");
-        let settings = std::fs::read_to_string(&machine).unwrap_or_else(|_| "{}".to_owned());
-        write_private(&devin.join("config.json"), &settings)?;
-        files::write(&devin.join("mcp_config.json"), &servers)?;
-        files::write(
-            &devin.join("skills").join(GLOBAL_SKILL).join("SKILL.md"),
-            skill(GLOBAL_SKILL),
-        )?;
-        plan = plan.with_var("XDG_CONFIG_HOME", config.path().to_string_lossy());
+        // The run's own config folder (the kit's `XDG_CONFIG_HOME`) already holds a copy of the
+        // machine's settings (its organisation among them), never written back.
+        plan = plan
+            .with_home_file(
+                Harness::Devin,
+                "XDG_CONFIG_HOME",
+                "devin/mcp_config.json",
+                servers,
+            )
+            .with_home_file(
+                Harness::Devin,
+                "XDG_CONFIG_HOME",
+                &format!("devin/skills/{GLOBAL_SKILL}/SKILL.md"),
+                skill(GLOBAL_SKILL),
+            );
         words.push((GLOBAL_SKILL, "the skill of its config folder"));
-        folders.push(config);
     }
     Ok(Case {
         plan,
         words,
-        codex_home: None,
-        _folders: folders,
+        _folders: vec![server],
     })
-}
-
-/// The machine's config folder: `XDG_CONFIG_HOME`, else `.config` in the home.
-fn machine_config_folder() -> Result<PathBuf> {
-    if let Some(folder) = own_var("XDG_CONFIG_HOME").filter(|folder| !folder.is_empty()) {
-        return Ok(PathBuf::from(folder));
-    }
-    own_var("HOME")
-        .map(|home| PathBuf::from(home).join(".config"))
-        .ok_or_else(|| Error::Daemon("this run has no home to find Devin's config in".to_owned()))
 }
 
 /// The worker's answer to [`SETUP_TASK`], once its task is over.
@@ -480,15 +447,9 @@ fn check(harness: Harness, log: &Log) -> Result {
     let typed = said
         .is_ok()
         .then(|| typed_then_interrupted(&members, harness, log));
+    // The kit's homes are asked what the run came to when the rig ends: Codex refreshing the
+    // login it was given a copy of, or a file of the machine's own touched, fails the close.
     let closed = members.close();
-    if let Some(home) = &case.codex_home {
-        if home.rotated() {
-            log.say(
-                "!!! Codex refreshed the login it was given a copy of: the machine's own Codex login \
-                 may be stale; run `codex login status` in a terminal",
-            );
-        }
-    }
     let said = said?;
     closed?;
     log.block("the worker's answer", &said);

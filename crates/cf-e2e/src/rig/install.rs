@@ -30,15 +30,16 @@ pub(super) fn tool_folder(root: &Path) -> PathBuf {
 /// What the daemon, the pane host and so every window is given, and nothing
 /// else of the machine's: a home of its own, a `PATH` that finds the stand-in
 /// `claude` first, the rig's own folder of programs for the system's, and the
-/// stand-in's settings. `config`'s variables come last, but for the ones it
-/// unsets, which are not there at all. The Claude config folder is the rig's own,
-/// in its home, unless the case has one of its own: `claude_config`
-/// ([`Config::claude_config`]).
+/// stand-in's settings. `config`'s variables come next, but for the ones it
+/// unsets, which are not there at all. The variables of the homes the case runs
+/// real harnesses on (`homes`: [`Config::claude_config`], [`Config::isolated`]) come
+/// last and win over all of them: the Claude config folder is the rig's own, in its
+/// home, unless the case has one of its own.
 pub(super) fn environment(
     root: &Path,
     fake_bin: &Path,
     config: &Config,
-    claude_config: Option<&Path>,
+    homes: &[(String, String)],
 ) -> Vec<(String, String)> {
     let text = |path: &Path| path.to_string_lossy().into_owned();
     let home = root.join("home");
@@ -52,10 +53,7 @@ pub(super) fn environment(
             "CONSENSFLOW_BIN_DIR".to_owned(),
             text(&root.join("consensflow").join("bin")),
         ),
-        (
-            "CLAUDE_CONFIG_DIR".to_owned(),
-            text(&claude_config.map_or_else(|| home.join(".claude"), Path::to_path_buf)),
-        ),
+        ("CLAUDE_CONFIG_DIR".to_owned(), text(&home.join(".claude"))),
         ("CODEX_HOME".to_owned(), text(&home.join(".codex"))),
         ("XDG_CONFIG_HOME".to_owned(), text(&home.join(".config"))),
         ("PATH".to_owned(), path(fake_bin, config)),
@@ -111,6 +109,11 @@ pub(super) fn environment(
     env.push(("TERM".to_owned(), "xterm-256color".to_owned()));
     env.extend(config.vars.iter().cloned());
     env.retain(|(name, _)| !config.unset.contains(name));
+    // A harness's home of the run's own is where its windows run, whatever else was set.
+    for (name, value) in homes {
+        env.retain(|(held, _)| held != name);
+        env.push((name.clone(), value.clone()));
+    }
     env
 }
 
@@ -248,7 +251,7 @@ mod tests {
                 .to_string_lossy()
                 .into_owned()
         };
-        let env = environment(root, &root.join("fake-bin"), &config(), None);
+        let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         let get = |name: &str| var(&env, name);
         assert_eq!(get("HOME"), at(&["home"]));
         assert_eq!(get("CONSENSFLOW_HOME"), at(&["consensflow"]));
@@ -270,11 +273,50 @@ mod tests {
     }
 
     #[test]
+    fn the_variables_of_a_harness_home_are_the_last_word_over_the_cases_own_and_over_what_it_unsets(
+    ) {
+        // A rig clears the environment and sets its own; a case sets more, and may unset. The
+        // owner's Pi folder, reached by a variable the case set (or by none: Pi reads
+        // `~/.pi/agent` when nothing names its folder), is what a live run rotated (T-696).
+        let root = Path::new("root");
+        let given = config()
+            .var("CODEX_HOME", "/owner/.codex")
+            .var("PI_CODING_AGENT_DIR", "/owner/.pi/agent")
+            .var("XDG_DATA_HOME", "/owner/.local/share")
+            .unset("PI_CODING_AGENT_DIR");
+        let homes = [
+            ("CODEX_HOME".to_owned(), "/run/codex".to_owned()),
+            ("PI_CODING_AGENT_DIR".to_owned(), "/run/pi/agent".to_owned()),
+            ("XDG_DATA_HOME".to_owned(), "/run/data".to_owned()),
+        ];
+        let env = environment(root, &root.join("fake-bin"), &given, &homes);
+        for (name, value) in &homes {
+            assert_eq!(var(&env, name), value, "{name}");
+            // Once, and not the owner's beside it.
+            assert_eq!(
+                env.iter().filter(|(held, _)| held == name).count(),
+                1,
+                "{name}"
+            );
+        }
+        // What no home names is as it was: the rig's own home and the case's variables.
+        assert_eq!(var(&env, "HOME"), root.join("home").to_string_lossy());
+        assert_eq!(var(&env, "CF_TEST_QUOTA_OUT"), "worker");
+        // A rig with no home of a harness's own has the rig's own folders for them.
+        let none = environment(root, &root.join("fake-bin"), &config(), &[]);
+        assert_eq!(
+            var(&none, "CODEX_HOME"),
+            root.join("home").join(".codex").to_string_lossy()
+        );
+        assert_eq!(var(&none, "PI_CODING_AGENT_DIR"), "");
+    }
+
+    #[test]
     fn the_programs_of_a_rig_are_told_the_temp_folder_of_the_test_that_runs_it() {
         // Whatever they write there (a socket's folder, a harness's scratch files) is in the
         // folder a plant run gave its test, with the homes and the reports, and goes with it.
         let root = Path::new("root");
-        let env = environment(root, &root.join("fake-bin"), &config(), None);
+        let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         let temp = std::env::temp_dir().to_string_lossy().into_owned();
         let names: &[&str] = if cfg!(windows) {
             &["TEMP", "TMP"]
@@ -289,7 +331,7 @@ mod tests {
             root,
             &root.join("fake-bin"),
             &config().var(names[0], "/mine"),
-            None,
+            &[],
         );
         assert_eq!(var(&own, names[0]), "/mine");
     }
@@ -302,12 +344,12 @@ mod tests {
         let added = config()
             .also_on_path("/real/codex")
             .also_on_path("/real/node");
-        let env = environment(root, &fake_bin, &added, None);
+        let env = environment(root, &fake_bin, &added, &[]);
         let folders: Vec<&str> = var(&env, "PATH").split(delimiter).collect();
         assert_eq!(folders[0], fake_bin.to_string_lossy());
         assert_eq!(folders[1..3], ["/real/codex", "/real/node"]);
         // What follows is what a rig that adds none ends with.
-        let plain = environment(root, &fake_bin, &config(), None);
+        let plain = environment(root, &fake_bin, &config(), &[]);
         let plain: Vec<&str> = var(&plain, "PATH").split(delimiter).collect();
         assert_eq!(plain.len(), folders.len() - 2);
         assert_eq!(folders[3..], plain[1..]);
@@ -323,7 +365,7 @@ mod tests {
         let added = config()
             .also_on_path("/real/devin")
             .first_on_path("/stand-in/cf");
-        let env = environment(root, &fake_bin, &added, None);
+        let env = environment(root, &fake_bin, &added, &[]);
         let folders: Vec<&str> = var(&env, "PATH").split(delimiter).collect();
         assert_eq!(folders[0], fake_bin.to_string_lossy());
         assert_eq!(folders[1..3], ["/stand-in/cf", "/real/devin"]);
@@ -356,7 +398,7 @@ mod tests {
         use crate::process::Run;
 
         let root = Path::new("root");
-        let env = environment(root, &root.join("fake-bin"), &config(), None);
+        let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         let comspec = var(&env, "ComSpec");
         assert!(!comspec.is_empty(), "the rig passes ComSpec on Windows");
         let ran = Run::new(comspec)
@@ -381,21 +423,21 @@ mod tests {
     fn a_variable_a_case_names_beats_the_one_the_rig_sets() {
         let root = Path::new("root");
         let config = config().var("TERM", "dumb");
-        let env = environment(root, &root.join("fake-bin"), &config, None);
+        let env = environment(root, &root.join("fake-bin"), &config, &[]);
         assert_eq!(var(&env, "TERM"), "dumb");
     }
 
     #[test]
     fn a_variable_a_case_unsets_is_not_in_the_environment_whoever_set_it() {
         let root = Path::new("root");
-        let plain = environment(root, &root.join("fake-bin"), &config(), None);
+        let plain = environment(root, &root.join("fake-bin"), &config(), &[]);
         assert!(plain.iter().any(|(name, _)| name == "CLAUDE_CONFIG_DIR"));
         // The rig's own, and one the case set: both go, and nothing else with them.
         let config = config()
             .var("CF_TEST_ONE", "1")
             .unset("CLAUDE_CONFIG_DIR")
             .unset("CF_TEST_ONE");
-        let env = environment(root, &root.join("fake-bin"), &config, None);
+        let env = environment(root, &root.join("fake-bin"), &config, &[]);
         assert!(!env
             .iter()
             .any(|(name, _)| name == "CLAUDE_CONFIG_DIR" || name == "CF_TEST_ONE"));
@@ -421,10 +463,10 @@ mod tests {
         }
         // Claude's is still there, and the environment names the one and the other.
         assert!(fake_bin.join(stand_in::program_name("claude")).is_file());
-        let env = environment(root.path(), &fake_bin, &config().devin(devin), None);
+        let env = environment(root.path(), &fake_bin, &config().devin(devin), &[]);
         assert_eq!(var(&env, "CF_TEST_DEVIN"), "/the/stand-in-devin");
         assert_eq!(var(&env, "CF_TEST_HARNESS"), "/the/stand-in");
-        let plain = environment(root.path(), &fake_bin, &config(), None);
+        let plain = environment(root.path(), &fake_bin, &config(), &[]);
         assert!(!plain.iter().any(|(name, _)| name == "CF_TEST_DEVIN"));
     }
 
@@ -444,7 +486,7 @@ mod tests {
         } else {
             assert_eq!(script, "#!/bin/sh\nexec \"$CF_TEST_OPENCODE\" \"$@\"\n");
         }
-        let env = environment(root.path(), &fake_bin, &given, None);
+        let env = environment(root.path(), &fake_bin, &given, &[]);
         assert_eq!(var(&env, "CF_TEST_OPENCODE"), "/the/stand-in-opencode-2");
         assert_eq!(
             var(&env, "CF_TEST_OPENCODE_LOG"),
@@ -454,7 +496,7 @@ mod tests {
         let bare = tempfile::tempdir().unwrap();
         let fake_bin = write_fake_install(bare.path(), &config()).unwrap();
         assert!(!fake_bin.join(stand_in::program_name("opencode")).exists());
-        let plain = environment(bare.path(), &fake_bin, &config(), None);
+        let plain = environment(bare.path(), &fake_bin, &config(), &[]);
         assert!(!plain
             .iter()
             .any(|(name, _)| name.starts_with("CF_TEST_OPENCODE")));
@@ -500,7 +542,7 @@ mod tests {
     fn a_rig_given_a_stand_in_codex_has_it_on_its_path_and_its_windows_go_as_the_daemons_do() {
         let config = config().codex("/the/fake-codex");
         let root = Path::new("root");
-        let env = environment(root, &root.join("fake-bin"), &config, None);
+        let env = environment(root, &root.join("fake-bin"), &config, &[]);
         assert_eq!(var(&env, "CF_TEST_CODEX"), "/the/fake-codex");
         assert_eq!(
             var(&env, "CF_TEST_CODEX_LOG"),
@@ -513,11 +555,11 @@ mod tests {
             root,
             &root.join("fake-bin"),
             &config.var("CF_TEST_CODEX_TUI", "x"),
-            None,
+            &[],
         );
         assert_eq!(var(&env, "CF_TEST_CODEX_TUI"), "x");
         // And none of it where the rig has no stand-in Codex.
-        let plain = environment(root, &root.join("fake-bin"), &self::config(), None);
+        let plain = environment(root, &root.join("fake-bin"), &self::config(), &[]);
         assert!(!plain
             .iter()
             .any(|(name, _)| name.starts_with("CF_TEST_CODEX")));
@@ -546,7 +588,7 @@ mod tests {
     #[test]
     fn the_path_is_the_stand_ins_folder_then_the_systems_own_and_no_package_managers() {
         let root = Path::new("root");
-        let env = environment(root, &root.join("fake-bin"), &config(), None);
+        let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         assert_eq!(
             var(&env, "PATH"),
             format!("{}:/usr/bin:/bin", root.join("fake-bin").display())
@@ -557,7 +599,7 @@ mod tests {
     fn every_rig_names_a_folder_of_its_own_for_the_systems_programs() {
         let root = Path::new("root");
         for config in [config(), config().as_the_finder_starts_it()] {
-            let env = environment(root, &root.join("fake-bin"), &config, None);
+            let env = environment(root, &root.join("fake-bin"), &config, &[]);
             assert_eq!(
                 var(&env, "CONSENSFLOW_TOOL_FOLDERS"),
                 root.join("system-bin").to_string_lossy()
@@ -575,7 +617,7 @@ mod tests {
             .devin("/the/fake-devin")
             .as_the_finder_starts_it();
         let fake_bin = write_fake_install(root.path(), &given).unwrap();
-        let env = environment(root.path(), &fake_bin, &given, None);
+        let env = environment(root.path(), &fake_bin, &given, &[]);
         assert_eq!(var(&env, "PATH"), "/usr/bin:/bin:/usr/sbin:/sbin");
         let own = root.path().join("home").join(".local").join("bin");
         assert!(own.join("claude").is_file() && own.join("devin").is_file());
@@ -597,7 +639,7 @@ mod tests {
             root.path(),
             &fake_bin,
             &given.also_on_path("/real/node"),
-            None,
+            &[],
         );
         assert_eq!(
             var(&env, "PATH"),

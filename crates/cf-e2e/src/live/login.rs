@@ -40,7 +40,8 @@
 //! items it had. Nothing refreshes it by hand, here or anywhere.
 //!
 //! **What the run is held to** ([`ClaudeConfig::finish`], when its rig ends): the
-//! person's `~/.claude/settings.json` is as it was; `~/.claude.json` has no project
+//! person's login (the Keychain item's `claudeAiOauth`, never its other tokens) is as it
+//! was; `~/.claude/settings.json` is as it was; `~/.claude.json` has no project
 //! of the run's folders that it did not have; `~/.claude/history.jsonl` has no
 //! prompt typed in one; `~/.claude/projects` has no conversation of one. (Not the
 //! whole of `~/.claude.json`: the person's own Claude Code sessions write the rest
@@ -222,7 +223,7 @@ fn oauth(text: &str, now: i64, left: Duration) -> Result<Value> {
 }
 
 /// A span as hours and minutes: `1 h 12 min`, `45 min`.
-fn span(span: Duration) -> String {
+pub(super) fn span(span: Duration) -> String {
     let minutes = span.as_secs() / 60;
     match (minutes / 60, minutes % 60) {
         (0, minutes) => format!("{minutes} min"),
@@ -290,7 +291,7 @@ fn is_run_name(name: &str) -> bool {
 }
 
 /// The hash of `bytes`, as hexadecimal.
-fn digest(bytes: &[u8]) -> String {
+pub(super) fn digest(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -485,7 +486,7 @@ impl Login {
             return Ok(made.folder.path().to_path_buf());
         }
         let oauth = oauth(&self.source.read()?, now, self.left)?;
-        sweep(&self.parent);
+        sweep(&self.parent, PREFIX);
         let folder = tempfile::Builder::new()
             .prefix(&format!("{PREFIX}{}-", std::process::id()))
             .tempdir_in(&self.parent)
@@ -511,7 +512,7 @@ impl Login {
 
 /// Makes the folder `path` the user's alone (mode 700): a temporary folder is made with the
 /// permissions the user's umask leaves, which let others in.
-fn private_folder(path: &Path) -> Result {
+pub(super) fn private_folder(path: &Path) -> Result {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -524,7 +525,7 @@ fn private_folder(path: &Path) -> Result {
 }
 
 /// Makes `path` hold `text`, readable by the user alone (mode 600).
-fn write_private(path: &Path, text: &str) -> Result {
+pub(super) fn write_private(path: &Path, text: &str) -> Result {
     private(path, text).map_err(Error::file("write", path))
 }
 
@@ -580,17 +581,17 @@ fn copy_tree(from: &Path, to: &Path) -> Result {
     Ok(())
 }
 
-/// Takes away the folders of runs that were killed before they could (`PREFIX`, the id of
+/// Takes away the folders of runs that were killed before they could (`prefix`, the id of
 /// the process, and a random word), in `parent`: a folder whose process is gone is nobody's,
 /// and holds a login. A process that is there keeps its own.
-fn sweep(parent: &Path) {
+pub(super) fn sweep(parent: &Path, prefix: &str) {
     let Ok(entries) = fs::read_dir(parent) else {
         return;
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let owner = name
-            .strip_prefix(PREFIX)
+            .strip_prefix(prefix)
             .and_then(|rest| rest.split('-').next())
             .and_then(|id| id.parse::<u32>().ok());
         let is_folder = entry.file_type().is_ok_and(|kind| kind.is_dir());
@@ -609,6 +610,26 @@ impl fmt::Debug for Login {
             .field("source", &self.source)
             .field("folder", &made.as_ref().map(|made| made.folder.path()))
             .finish_non_exhaustive()
+    }
+}
+
+impl Login {
+    /// Whether the login this machine keeps is no longer the one that was copied (the same item
+    /// holds the person's MCP servers' tokens, which their own servers refresh all day: only
+    /// the login is held to it): the run's, or their own Claude Code's refresh in between.
+    fn owner_login_changed(&self, copied: &Value) -> Option<String> {
+        let now = self
+            .source
+            .read()
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .and_then(|login| login.get("claudeAiOauth").cloned());
+        (now.as_ref() != Some(copied)).then(|| {
+            format!(
+                "the owner's Claude login in {} is not as it was",
+                self.source.described()
+            )
+        })
     }
 }
 
@@ -634,12 +655,22 @@ impl ClaudeConfig for Login {
         let Some(made) = made.as_ref() else {
             return Ok(());
         };
-        let touched = self.owner.changes_since(&made.owner);
+        let mut touched = self.owner.changes_since(&made.owner);
+        touched.extend(self.owner_login_changed(&made.oauth));
         let mut refreshed: Vec<String> = made.refreshed().into_iter().collect();
         if let (Some(before), Some(now)) = (&made.services, keychain_services()) {
             refreshed.extend(gained(before, &now));
         }
         if touched.is_empty() && refreshed.is_empty() {
+            // What was checked, with a hash that says nothing of what the files hold.
+            let hash = |text: &str| digest(text.as_bytes())[..12].to_owned();
+            let _ = writeln!(
+                io::stderr(),
+                "the owner's Claude setup is as it was: login in {} {}, ~/.claude/settings.json {}; the copy of the login in the run's folder is as it was copied",
+                self.source.described(),
+                hash(&made.oauth.to_string()),
+                made.owner.settings.as_deref().map_or("none".to_owned(), |hash| hash[..12].to_owned())
+            );
             return Ok(());
         }
         let said = said(&touched, &refreshed);

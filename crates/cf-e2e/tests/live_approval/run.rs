@@ -7,8 +7,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use cf_e2e::live::{self, cleanup, cut, warnings, Harness, Installed, Log};
-use cf_e2e::process::own_var;
+use cf_e2e::live::{self, cut, warnings, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::Result;
 
@@ -221,7 +220,6 @@ pub fn project(planned: &Planned, machine: &Machine, log: &Log) -> Done {
         rows: Vec::new(),
         findings: Vec::new(),
     };
-    let mut folder = None;
     match open(planned, machine, &rig, &log) {
         Err(why) => {
             log.say(format!("setup FAILED: {why}"));
@@ -229,7 +227,6 @@ pub fn project(planned: &Planned, machine: &Machine, log: &Log) -> Done {
                 .push(setup(Outcome::Failed(why.to_string()), since(started)));
         }
         Ok((made, project)) => {
-            folder = Some(made.clone());
             let ctx = Ctx::new(&rig, project, planned, &made, &log);
             match ctx.human.waits_for_the_chief() {
                 Err(why) => {
@@ -252,11 +249,6 @@ pub fn project(planned: &Planned, machine: &Machine, log: &Log) -> Done {
             done.findings = ctx.findings.take();
         }
     }
-    // The paths the harnesses know the folder by are asked while it is there.
-    let known = match (folder.as_deref(), live::keep_requested()) {
-        (Some(folder), false) => cleanup::paths(folder),
-        _ => Vec::new(),
-    };
     if let Err(why) = rig.close() {
         log.say(format!("closing the rig: {why}"));
         done.rows.push(Row {
@@ -266,26 +258,5 @@ pub fn project(planned: &Planned, machine: &Machine, log: &Log) -> Done {
             seconds: 0,
         });
     }
-    forget(&known, &log);
     done
-}
-
-/// Has Pi forget what it kept of a project's folder, now that its windows are gone: its
-/// sessions, in its own folder. (Claude Code's are in the config folder of the run, which
-/// goes with it, and so are the trust the run asked of it and the prompts the human typed.)
-fn forget(known: &[String], log: &Log) {
-    let Some(home) = own_var("HOME").map(PathBuf::from) else {
-        return;
-    };
-    let removed = cleanup::remove(&cleanup::records(&home, known));
-    if !removed.is_empty() {
-        log.say(format!(
-            "removed what Pi kept of the folder: {}",
-            removed
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
 }

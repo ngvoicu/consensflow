@@ -39,19 +39,16 @@
 //! is ever taken in a picker (no Enter there): `/model` with a choice saves the
 //! owner's settings.
 //!
-//! Isolation. Claude Code runs on a throwaway `CLAUDE_CONFIG_DIR` (mode 700) that
-//! holds a copy of the owner's login, the `claudeAiOauth` of the Keychain item of the
-//! user's account (`security find-generic-password -a "$USER"`; the item with no
-//! account is a stale one), never printed, refused where its token ends within two
-//! hours, and a `.claude.json` that says onboarding is done (else Claude opens on its
-//! theme dialog). The copy is compared afterwards (a refresh is said, as a failure),
-//! and the folder deleted on every way out. The owner's `~/.claude/settings.json` must
-//! hash the same after the run, and `history.jsonl`, `projects/` and `.claude.json`'s
-//! projects gain nothing that names the run's folder (`.claude.json` changes by
-//! itself, and is not hashed). Claude's windows are shut out of MCP servers and the
-//! browser (`--strict-mcp-config --no-chrome`).
-//! Codex runs on a throwaway `CODEX_HOME` holding a copy of `auth.json` only,
-//! compared the same way, with every MCP server switched off.
+//! Isolation. Every harness runs on a home of the run's own, which the kit makes for
+//! its windows and checks when the rig ends ([`cf_e2e::live::login`] for Claude Code,
+//! [`cf_e2e::live::isolation`] for the others): Claude Code on a throwaway
+//! `CLAUDE_CONFIG_DIR` holding the owner's login from the Keychain (refused where its
+//! token ends within two hours); Codex on a `CODEX_HOME` holding `auth.json` only; Pi and
+//! Devin on the folders they keep their logins in. A copy that was refreshed, or a file
+//! of the owner's that changed (Claude's `settings.json`, `history.jsonl`, `projects/`,
+//! `.claude.json`'s projects; Codex's `config.toml`; Pi's and Devin's settings and
+//! sessions), fails the run, naming the file. Claude's windows are shut out of MCP servers
+//! and the browser (`--strict-mcp-config --no-chrome`), and Codex's of every MCP server.
 //!
 //! ```text
 //! cargo xtask live escape-unsent                      every harness, Claude last
@@ -64,21 +61,17 @@
 //! there, the throwaway folder is the user's own in the temporary folder, as Windows
 //! gives it, with no mode of its own.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
 use cf_e2e::live::{self, agents, ask, codex, Harness, Installed, Log};
-use cf_e2e::process::Run;
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result};
 use regex::Regex;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
-use tempfile::TempDir;
 
 /// The stand-in for Claude, which the rig puts first on the `PATH` of its windows:
 /// no window of this test runs it, but a rig has one.
@@ -122,10 +115,6 @@ const DRAW_WAIT: Duration = Duration::from_secs(5);
 
 /// The lines of the screen as drawn the run reads: the whole of a 40-row window.
 const BOTTOM: usize = 40;
-
-/// The least time the Claude login copied must have before it ends: the run, and
-/// the margin the owner's own Claude needs to have refreshed it first.
-const LOGIN_LEFT: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// The word the delivery asks for: one no screen shows by itself, with no digits a
 /// model may write another way (`4,218`).
@@ -485,192 +474,10 @@ fn delivered(window: &Window, left: &Read) -> Result<Check> {
     })
 }
 
-/// A throwaway config folder holding a copy of a login, readable by its owner
-/// alone: removed with the value, however the run ends. `file` is the login's name
-/// in it.
-struct Throwaway {
-    folder: TempDir,
-    file: &'static str,
-    copy: Vec<u8>,
-}
-
-impl Throwaway {
-    /// A folder (mode 700) holding `login` as `file` (mode 600).
-    fn holding(file: &'static str, login: Vec<u8>) -> Result<Self> {
-        let failed = |what: &str, cause: std::io::Error| Error::Daemon(format!("{what}: {cause}"));
-        let folder = TempDir::new().map_err(|cause| failed("a throwaway folder", cause))?;
-        owners_alone(folder.path(), 0o700).map_err(|cause| failed("a throwaway folder", cause))?;
-        let path = folder.path().join(file);
-        fs::write(&path, &login).map_err(|cause| failed("the login's copy", cause))?;
-        owners_alone(&path, 0o600).map_err(|cause| failed("the login's copy", cause))?;
-        Ok(Self {
-            folder,
-            file,
-            copy: login,
-        })
-    }
-
-    /// The folder, `name` written in it as `text` too.
-    fn with(self, name: &str, text: &str) -> Result<Self> {
-        fs::write(self.folder.path().join(name), text)
-            .map_err(|cause| Error::Daemon(format!("{name} in the throwaway folder: {cause}")))?;
-        Ok(self)
-    }
-
-    fn path(&self) -> &Path {
-        self.folder.path()
-    }
-
-    /// Whether the login is as it was copied: a harness that refreshed it has left
-    /// the owner's own copy behind.
-    fn check(&self, who: &str) -> Check {
-        let now = fs::read(self.folder.path().join(self.file)).unwrap_or_default();
-        Check::new(
-            who,
-            "the login copied is as it was",
-            now == self.copy,
-            if now == self.copy {
-                "unchanged".to_owned()
-            } else {
-                "REFRESHED during the run: the owner's own login may now be stale".to_owned()
-            },
-        )
-    }
-}
-
-/// `path` given the mode `mode`, its owner's alone, on Unix; on Windows a folder in
-/// the user's temporary folder is the user's already.
-#[cfg(unix)]
-fn owners_alone(path: &Path, mode: u32) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(mode))
-}
-
-#[cfg(not(unix))]
-fn owners_alone(_path: &Path, _mode: u32) -> std::io::Result<()> {
-    Ok(())
-}
-
-/// The owner's Claude login, from the Keychain item of the user's account (the item
-/// with no account is a stale one), as a config folder's `.credentials.json` takes
-/// it: its `claudeAiOauth` alone, none of its servers' logins. Refused where its
-/// token ends within [`LOGIN_LEFT`]: the owner's own Claude refreshes it first.
-fn claude_login() -> Result<Vec<u8>> {
-    let user = cf_e2e::process::own_var("USER")
-        .ok_or_else(|| Error::Daemon("USER is not set: no Keychain account to read".to_owned()))?;
-    let ran = Run::new("/usr/bin/security")
-        .args([
-            "find-generic-password",
-            "-s",
-            "Claude Code-credentials",
-            "-a",
-            &user,
-            "-w",
-        ])
-        .limit(Duration::from_secs(120))
-        .run()?;
-    if ran.code != Some(0) {
-        return Err(Error::Daemon(format!(
-            "the Keychain gave no Claude login (exit {:?})",
-            ran.code
-        )));
-    }
-    let read: Value = serde_json::from_str(ran.stdout.trim())
-        .map_err(|_| Error::Daemon("the Claude login in the Keychain is no JSON".to_owned()))?;
-    let oauth = &read["claudeAiOauth"];
-    let left =
-        oauth["expiresAt"].as_i64().unwrap_or_default() - jiff::Timestamp::now().as_millisecond();
-    let least = i64::try_from(LOGIN_LEFT.as_millis()).unwrap_or(i64::MAX);
-    if left < least {
-        return Err(Error::Daemon(format!(
-            "the Claude login's token ends in {} min, under {} min: let the owner's Claude refresh it first",
-            left / 60_000,
-            least / 60_000
-        )));
-    }
-    serde_json::to_vec(&json!({ "claudeAiOauth": oauth }))
-        .map_err(|failed| Error::Daemon(format!("the login's copy: {failed}")))
-}
-
-/// What the owner's Claude files say: `settings.json` by its hash, and how much of
-/// `history.jsonl`, `projects/` and `.claude.json`'s projects names the run's folder.
-/// `.claude.json` changes by itself, so it is not hashed.
-fn owners_claude(home: &Path) -> Vec<(String, String)> {
-    let hash = |file: PathBuf| {
-        fs::read(&file).map_or_else(
-            |_| "none".to_owned(),
-            |bytes| format!("{:x}", Sha256::digest(bytes)),
-        )
-    };
-    let history = fs::read_to_string(home.join(".claude/history.jsonl")).map_or(0, |text| {
-        text.lines().filter(|line| line.contains(FOLDER)).count()
-    });
-    let projects = fs::read_dir(home.join(".claude/projects")).map_or(0, |entries| {
-        entries
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_name().to_string_lossy().contains(FOLDER))
-            .count()
-    });
-    let record: Value = fs::read_to_string(home.join(".claude.json"))
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default();
-    let entries = record["projects"].as_object().map_or(0, |projects| {
-        projects
-            .keys()
-            .filter(|folder| folder.contains(FOLDER))
-            .count()
-    });
-    vec![
-        (
-            "~/.claude/settings.json".to_owned(),
-            hash(home.join(".claude/settings.json")),
-        ),
-        (
-            "~/.claude/history.jsonl lines of the run".to_owned(),
-            history.to_string(),
-        ),
-        (
-            "~/.claude/projects of the run".to_owned(),
-            projects.to_string(),
-        ),
-        (
-            "~/.claude.json projects of the run".to_owned(),
-            entries.to_string(),
-        ),
-    ]
-}
-
-/// Whether the owner's Claude files are as `before`.
-fn owners_unchanged(home: &Path, before: &[(String, String)]) -> Check {
-    let after = owners_claude(home);
-    let changed: Vec<&str> = before
-        .iter()
-        .zip(&after)
-        .filter(|(was, is)| was != is)
-        .map(|(was, _)| was.0.as_str())
-        .collect();
-    Check::new(
-        "claude",
-        "the owner's Claude files",
-        changed.is_empty(),
-        if changed.is_empty() {
-            "unchanged".to_owned()
-        } else {
-            format!("changed: {}", changed.join(", "))
-        },
-    )
-}
-
 /// Codex's TUI, opened bare in a folder of its own on its cheap model, its MCP
-/// servers off, on the throwaway `codex_home`; its question about trusting the
-/// folder answered with Enter (a yes kept in the throwaway folder).
-fn open_codex<'r>(
-    rig: &'r Rig,
-    install: &Installed,
-    codex_home: &Path,
-    log: &Log,
-) -> Result<Pane<'r>> {
+/// servers off, on the run's own Codex home (the rig's `CODEX_HOME`); its question about
+/// trusting the folder answered with Enter (a yes kept in that home).
+fn open_codex<'r>(rig: &'r Rig, install: &Installed, log: &Log) -> Result<Pane<'r>> {
     let home = PathBuf::from(rig.var("HOME").unwrap_or_default());
     let workspace = live::machine::live_folder_in(&home, &format!("{FOLDER}/codex"))?;
     let agent = agents::agent(Harness::Codex);
@@ -691,7 +498,7 @@ fn open_codex<'r>(
         "pane.open",
         json!({
             "id": id, "generation": 1, "cwd": workspace, "argv": argv,
-            "env": { "CODEX_HOME": codex_home }, "dropEnv": [],
+            "env": {}, "dropEnv": [],
             "size": { "rows": 40, "cols": 120 },
         }),
     )?;
@@ -719,17 +526,12 @@ fn open_codex<'r>(
 }
 
 /// The steps of one window of `install`'s, and what they came to.
-fn probe(
-    rig: &Rig,
-    install: &Installed,
-    codex_home: Option<&Path>,
-    log: &Log,
-) -> Result<Vec<Check>> {
+fn probe(rig: &Rig, install: &Installed, log: &Log) -> Result<Vec<Check>> {
     let harness = install.harness();
     let name = harness.name();
-    let pane = match codex_home {
-        Some(codex_home) => open_codex(rig, install, codex_home, log)?,
-        None => {
+    let pane = match harness {
+        Harness::Codex => open_codex(rig, install, log)?,
+        _ => {
             let window = Open::new(
                 rig,
                 install,
@@ -798,39 +600,18 @@ fn keys_left_in_a_dialog_with_escape_hold_no_delivery_to_a_window_whose_box_is_e
         .iter()
         .map(|harness| log.found(*harness))
         .collect::<Result<_>>()?;
-    let home = live::machine::home()?;
     let claude = harnesses.contains(&Harness::Claude);
     if claude && !cfg!(target_os = "macos") {
         return Err(Error::Daemon(
             "Claude Code runs live here on macOS alone: its login is the Keychain's".to_owned(),
         ));
     }
-    let owners_before = claude.then(|| owners_claude(&home));
-    let claude_config = claude
-        .then(|| {
-            Throwaway::holding(".credentials.json", claude_login()?)?
-                .with(".claude.json", r#"{"hasCompletedOnboarding":true}"#)
-        })
-        .transpose()?;
-    let codex_home = harnesses
-        .contains(&Harness::Codex)
-        .then(|| {
-            let auth = fs::read(home.join(".codex/auth.json"))
-                .map_err(|failed| Error::Daemon(format!("Codex's auth.json: {failed}")))?;
-            Throwaway::holding("auth.json", auth)
-        })
-        .transpose()?;
-    let config = match &claude_config {
-        Some(folder) => live::rig_with_claude_config(&installs, FAKE_AGENT, folder.path()),
-        None => live::rig(&installs, FAKE_AGENT),
-    };
-    let rig = Rig::start(config)?;
+    // Every harness runs on a home of the run's own, with a copy of the owner's login and
+    // nothing else of theirs, which the kit makes and checks when the rig ends.
+    let rig = Rig::start(live::rig(&installs, FAKE_AGENT))?;
     let mut checks = Vec::new();
     for install in &installs {
-        let codex = (install.harness() == Harness::Codex)
-            .then(|| codex_home.as_ref().map(Throwaway::path))
-            .flatten();
-        match probe(&rig, install, codex, &log) {
+        match probe(&rig, install, &log) {
             Ok(found) => checks.extend(found),
             Err(failed) => checks.push(Check::failed(
                 install.harness().name(),
@@ -840,14 +621,10 @@ fn keys_left_in_a_dialog_with_escape_hold_no_delivery_to_a_window_whose_box_is_e
         }
     }
     rig.close()?;
-    if let Some(folder) = &claude_config {
-        checks.push(folder.check("claude"));
-    }
-    if let Some(folder) = &codex_home {
-        checks.push(folder.check("codex"));
-    }
-    if let Some(before) = &owners_before {
-        checks.push(owners_unchanged(&home, before));
-    }
+    checks.push(Check::passed(
+        "owner",
+        "the owner's setup and the logins copied",
+        "as they were when the rig ended (the kit's check)".to_owned(),
+    ));
     report::conclude(&log, "what each window came to", &checks)
 }

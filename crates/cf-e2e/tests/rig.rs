@@ -89,6 +89,9 @@ mod decided_result;
 mod described;
 #[path = "rig/devin_bypass_first.rs"]
 mod devin_bypass_first;
+#[cfg(unix)]
+#[path = "rig/harness_homes.rs"]
+mod harness_homes;
 #[path = "rig/help.rs"]
 mod help;
 #[path = "rig/homes.rs"]

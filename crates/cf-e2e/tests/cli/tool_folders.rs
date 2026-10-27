@@ -78,7 +78,7 @@ fn text(file: &str) -> String {
 /// The code of a source, where a variable is set: up to its own tests (its first
 /// `#[cfg(test)]`), without its comments, and without the whitespace rustfmt and
 /// Prettier lay an entry out across lines with.
-fn code(text: &str) -> String {
+pub(crate) fn code(text: &str) -> String {
     let own = text.split("#[cfg(test)]").next().unwrap_or_default();
     own.lines()
         .filter(|line| {
