@@ -66,6 +66,14 @@ file = "crates/cf-engine/src/arrival.rs"
 find = "        if !self.read_once_more(record, delivering.message).await? {"
 replace = "        if false && !self.read_once_more(record, delivering.message).await? {"
 
+# Since 3.0.7 the pacing's settle (CMT-03) holds this shape on its own: a Devin window read
+# at rest in the first seconds of a turn is not rested the settle. It goes with the rest,
+# so the regression still proves the shape is caught (T-794: without it, MISSED).
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "        if rest_ms < settle {"
+replace = "        if rest_ms < 0 {"
+
 [[plant]]
 name = "notes twice: the engine counts the arrival window from the hand-over, its turns or none"
 meant = "waits_for_the_record_of_a_message_while_its_window_is_in_a_turn_and_pastes_it_once"
