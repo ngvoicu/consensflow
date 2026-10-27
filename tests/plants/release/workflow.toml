@@ -114,8 +114,8 @@ runs = ["workflow"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
-find = "needs: [mac, windows, gate, publisher]"
-replace = "needs: [mac, windows, gate]"
+find = "needs: [mac, windows, gate, publisher, sign]"
+replace = "needs: [mac, windows, gate, sign]"
 
 [[plant]]
 name = "workflow: the publisher is downloaded into the folder of the release"
@@ -321,8 +321,8 @@ runs = ["workflow"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
-find = "needs: [mac, windows, gate, publisher]"
-replace = "needs: [mac, windows, gate, publisher"
+find = "needs: [mac, windows, gate, publisher, sign]"
+replace = "needs: [mac, windows, gate, publisher, sign"
 
 [[plant]]
 name = "workflow: the check of the hash has no end"
@@ -332,9 +332,11 @@ runs = ["workflow"]
 [[plant.edit]]
 file = ".github/workflows/release.yml"
 find = '''
+            echo "the publisher downloaded hashes to $got, and the job that built it says ${PUBLISHER_SHA256:-nothing}" >&2
             exit 1
           fi
 '''
 replace = '''
+            echo "the publisher downloaded hashes to $got, and the job that built it says ${PUBLISHER_SHA256:-nothing}" >&2
             exit 1
 '''

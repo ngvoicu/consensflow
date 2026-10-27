@@ -3,7 +3,9 @@
 //! without the feed it reads.
 //!
 //! `dir` holds what the workflow's jobs built (the files of
-//! [`ReleaseAssets`](crate::assets::ReleaseAssets)) and notes.txt; `base` is
+//! [`ReleaseAssets`](crate::assets::ReleaseAssets)), notes.txt, and the
+//! SHA256SUMS of those files with its signature, which the signing job made
+//! ([`sums`](crate::sums)); `base` is
 //! where GitHub serves a release's files
 //! (`https://github.com/<owner>/<repo>/releases/download`). It runs only for the
 //! push of a version tag (`cli` holds that guard): a hand run publishes
@@ -12,7 +14,8 @@
 //! 1. the rule ([`rule`](crate::rule)): a release before the bridge is refused,
 //!    a bridge whose archive lacks what the old apps check for is refused, and a
 //!    later release is refused until the old feeds serve the bridge with its
-//!    files. Nothing has been moved when it refuses;
+//!    files. So is a release whose SHA256SUMS is not signed, or not the one its
+//!    files say. Nothing has been moved when it refuses;
 //! 2. the versioned release, whose files are never replaced. None yet: a draft
 //!    is made, filled, and published only when every file is there at its size.
 //!    A draft left by a run that died is emptied and filled again, being
@@ -46,12 +49,12 @@ use serde_json::{Map, Value};
 
 use crate::assets::{missing_for_old_apps, name_of, on_disk, ReleaseAssets};
 use crate::checks::{asset_problems, check_prerequisites, FEEDS_BEFORE};
-use crate::digest::sha256_hex;
 use crate::failure::Failure;
 use crate::gh::{Gh, ReleaseState, Runner};
 use crate::manifest::Manifest;
 use crate::read::{Patience, Reader};
 use crate::rule::plan_feeds;
+use crate::sums::{signed_sums, SIGNATURE, SUMS};
 use crate::version::Version;
 
 /// What a feed serves, and what a release is replaced by.
@@ -292,6 +295,7 @@ pub fn publish_release(publication: &Publication, means: &Means) -> Result<Publi
             return Err(Failure::new(format!("missing {path}")));
         }
     }
+    signed_sums(dir, &version)?;
     let missing = missing_for_old_apps(&(means.members)(&on_disk(dir, &assets.archive))?);
     let feeds = plan_feeds(&version, &missing, manifest)?;
     let problems = check_prerequisites(&version, base, manifest, patience);
@@ -306,15 +310,6 @@ pub fn publish_release(publication: &Publication, means: &Means) -> Result<Publi
         fs::read(on_disk(dir, path))
             .map_err(|cause| Failure::new(format!("could not read {path}: {cause}")))
     };
-    let mut sums = String::new();
-    for path in paths {
-        sums.push_str(&format!(
-            "{}  {}\n",
-            sha256_hex(&read(path)?),
-            name_of(path)
-        ));
-    }
-    write(dir, "SHA256SUMS", sums.as_bytes())?;
     let notes = read("notes.txt")?;
     write(
         dir,
@@ -330,7 +325,7 @@ pub fn publish_release(publication: &Publication, means: &Means) -> Result<Publi
         version: &version,
     };
     let mut files = paths.to_vec();
-    files.push("SHA256SUMS");
+    files.extend([SUMS, SIGNATURE]);
     let mut reads = Reader::new(patience);
     let versioned = release_versioned(&run, tag, &files, "body.md")?;
     let wrong = asset_problems(dir, &version, base, &mut reads)?;

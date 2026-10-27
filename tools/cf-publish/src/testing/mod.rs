@@ -22,7 +22,7 @@ use crate::version::Version;
 
 pub use built::{
     archive_name, archive_of, built_files, download, folder_of, installer_name, latest_json,
-    portable_name, published_assets, with_archive_url, Files, TempDir,
+    portable_name, published_assets, signed, with_archive_url, Files, TempDir,
 };
 pub use sim::{Call, Github, Handle, Served, Snapshot, Spec};
 

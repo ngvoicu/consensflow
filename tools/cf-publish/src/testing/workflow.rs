@@ -59,6 +59,12 @@ pub mod release {
     pub const BUILD_PUBLISHER: &str = "Build cf-publish, and say what it hashes to";
     /// Where the publish job runs the publisher from.
     pub const PUBLISHER: &str = "$RUNNER_TEMP/publisher/cf-publish";
+    /// The sign job's step that writes SHA256SUMS and the copy of it that is signed.
+    pub const SUMS: &str = "The sums of the release, and the copy that is signed";
+    /// The sign job's step that holds the update key.
+    pub const SIGN: &str = "Sign the sums";
+    /// The sign job's step that checks the signature as the installers do.
+    pub const SIGNATURE: &str = "The installers take the signature";
     /// Where GitHub serves a release's files, in the steps' words.
     pub const DOWNLOADS: &str = "https://github.com/$GITHUB_REPOSITORY/releases/download";
 }

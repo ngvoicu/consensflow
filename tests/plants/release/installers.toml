@@ -1,0 +1,546 @@
+# Plants in the one-line installers (install/install.sh, install/install.ps1)
+# and in what a release gives them: each check a script makes before it
+# installs, its own Ed25519 and BLAKE2b, how it installs, and the signed
+# SHA256SUMS the release workflow makes (`sign`) and the publisher publishes
+# (tools/cf-publish/src/sums.rs). The Mac's script is tried on macOS, Windows'
+# on Windows. install.ps1's refusal of Linux has no plant: it is tried only where
+# PowerShell 7 runs on Linux, and no machine runs the plants there; the
+# Installers workflow's Linux job runs its test.
+
+[run]
+# The Mac's script against a scripted feed, a test at a time (its DMGs are made first).
+sh = ["node", "--test", "tests/install-sh.test.mjs"]
+# Both scripts' signature checks on RFC 8032's and RFC 7693's vectors and Tauri's signatures.
+verifiers = ["node", "--test", "tests/install-verifiers.test.mjs"]
+# Windows' script against a scripted feed, in Windows PowerShell and PowerShell 7.
+ps1 = ["node", "--test", "tests/install-ps1.test.mjs"]
+# The publisher's signed SHA256SUMS: what it publishes, what it checks after, and `cf-publish sums`.
+signed-sums = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "publish_release", "--test", "feeds_check", "--test", "sums_cli"]
+# The sign job of the release workflow: its text, and its steps run as written.
+sign-job = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "release_sign", "--test", "release_publish"]
+
+# --- install.sh: the signature of SHA256SUMS ---
+
+[[plant]]
+name = "installers: install.sh installs whatever its signature check says"
+meant = "a flipped bit in the signature is refused"
+runs = [["node", "--test", "--test-name-pattern", "the signature of SHA256SUMS", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '    if [ "$checked" != ok ]; then'
+replace = '    if false; then'
+
+[[plant]]
+name = "installers: install.sh does not check the trusted comment's signature"
+meant = "the installers' signature check › install.sh's, in macOS's JavaScript (osascript) › tauri signer's signatures hold, and each changed one is refused, saying why"
+runs = ["verifiers"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = "  if (commentBytes === null || !ed25519Verify(publicKey, concat([signature.subarray(10), commentBytes]), global)) {"
+replace = "  if (commentBytes === null) {"
+
+[[plant]]
+name = "installers: install.sh takes a signature of SHA256SUMS for another release"
+meant = "a SHA256SUMS signed for another release is refused"
+runs = [["node", "--test", "--test-name-pattern", "signed for another release", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = "  if (named === null || named[1] !== fileName) {"
+replace = "  if (named === null) {"
+
+[[plant]]
+name = "installers: install.sh takes minisign's legacy signature of the file itself"
+meant = "minisign's legacy signature of the file itself (Ed) is refused"
+runs = [["node", "--test", "--test-name-pattern", "legacy signature", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = "  if (signature[0] !== 0x45 || signature[1] !== 0x44) {"
+replace = "  if (signature[0] !== 0x45) {"
+
+[[plant]]
+name = "installers: install.sh's Ed25519 takes S at or above L"
+meant = "the installers' signature check › install.sh's, in macOS's JavaScript (osascript) › RFC 8032's Ed25519 vectors hold, and none changed by a bit, or with S + L, does"
+runs = ["verifiers"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = "  if (s >= L) return false;"
+replace = "  if (s >= L * 2n) return false;"
+
+[[plant]]
+name = "installers: install.sh's BLAKE2b counts the last block as a full one"
+meant = "the installers' signature check › install.sh's, in macOS's JavaScript (osascript) › BLAKE2b-512 gives RFC 7693's answer and OpenSSL's at every length around a block"
+runs = ["verifiers"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = "    const counter = BigInt(last ? bytes.length : (block + 1) * 128);"
+replace = "    const counter = BigInt((block + 1) * 128);"
+
+[[plant]]
+name = "installers: install.sh pins another key than the app's updater holds"
+meant = "both scripts hold the update key the app's updater holds"
+runs = ["verifiers"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = "    key=RWTirTrEjU6epgN2c8yV2aIfRHzcCHVBi9zddieRVM5SahwhDFJlFd7Q"
+replace = "    key=RWRPmCBQoLNH2fnQLtxqzTFHfjHLBXRHXraFlB+nQwP5vZM8zs0l2LBw"
+
+[[plant]]
+name = "installers: install.sh goes on without a signed SHA256SUMS"
+meant = "a release with no signed SHA256SUMS: those before 3.0.7-alpha.1"
+runs = [["node", "--test", "--test-name-pattern", "no signed SHA256SUMS", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    fetch "$release/SHA256SUMS.sig" "$tmp/SHA256SUMS.sig" ||'''
+replace = '''    fetch "$release/SHA256SUMS.sig" "$tmp/SHA256SUMS.sig" || true ||'''
+
+# --- install.sh: the DMG and the app ---
+
+[[plant]]
+name = "installers: install.sh does not hold the DMG to its SHA-256"
+meant = "a DMG with one byte changed is refused by its SHA-256"
+runs = [["node", "--test", "--test-name-pattern", "one byte changed", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '    [ "$got" = "$expected" ] || refuse'
+replace = '    true || refuse'
+
+[[plant]]
+name = "installers: install.sh takes the first hash SHA256SUMS lists, whatever its file"
+meant = "a SHA256SUMS that lists no DMG for the release is refused"
+runs = [["node", "--test", "--test-name-pattern", "lists no DMG", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    expected=$(awk -v name="$dmg" 'NF == 2 && ($2 == name || $2 == "*" name) { print $1 }' "$tmp/SHA256SUMS")'''
+replace = '''    expected=$(awk 'NF == 2 { print $1; exit }' "$tmp/SHA256SUMS")'''
+
+[[plant]]
+name = "installers: install.sh installs an app of another version than the release"
+meant = "an app of another version than the release is refused"
+runs = [["node", "--test", "--test-name-pattern", "another version than the release", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    [ "$shown" = "$version" ] || refuse'''
+replace = '''    true || refuse'''
+
+[[plant]]
+name = "installers: install.sh does not ask codesign whether the app's signature holds"
+meant = "an app whose code signature does not hold is refused (codesign --verify --deep --strict)"
+runs = [["node", "--test", "--test-name-pattern", "code signature does not hold", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    codesign --verify --deep --strict "$app" 2>"$tmp/codesign.txt" ||'''
+replace = '''    true 2>"$tmp/codesign.txt" ||'''
+
+[[plant]]
+name = "installers: install.sh takes an app signed by anyone"
+meant = "an app not signed by ConsensFlow's Developer ID is refused (team 3K53U2H749)"
+runs = [["node", "--test", "--test-name-pattern", "Developer ID is refused", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    codesign --verify -R="$requirement" "$app" 2>"$tmp/codesign.txt" ||'''
+replace = '''    codesign --verify "$app" 2>"$tmp/codesign.txt" ||'''
+
+[[plant]]
+name = "installers: install.sh installs an app Gatekeeper refuses"
+meant = "an app Gatekeeper does not accept as notarized is refused (spctl --assess)"
+runs = [["node", "--test", "--test-name-pattern", "Gatekeeper does not accept", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    assessed=$("$spctl" --assess --type execute -vv "$app" 2>&1) ||'''
+replace = '''    assessed="source=Notarized Developer ID" ||'''
+
+[[plant]]
+name = "installers: install.sh takes Gatekeeper's yes without notarization"
+meant = "Gatekeeper's yes without notarization is refused"
+runs = [["node", "--test", "--test-name-pattern", "without notarization", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        *"source=Notarized Developer ID"*) ;;'''
+replace = '''        *"source="*) ;;'''
+
+# --- install.sh: where and how it installs ---
+
+[[plant]]
+name = "installers: install.sh says nothing of Linux"
+meant = "Linux, in plain words"
+runs = [["node", "--test", "--test-name-pattern", "Linux, in plain words", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        Linux) refuse "ConsensFlow is made for macOS and Windows only; there is no Linux build." ;;
+'''
+replace = ""
+
+[[plant]]
+name = "installers: install.sh installs on an Intel Mac"
+meant = "an Intel Mac"
+runs = [["node", "--test", "--test-name-pattern", "an Intel Mac", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" != 1 ]; then'''
+replace = '''    if false; then'''
+
+[[plant]]
+name = "installers: install.sh stops an open ConsensFlow that does not quit"
+meant = "that stays open is never stopped, and nothing is installed"
+runs = [["node", "--test", "--test-name-pattern", "never stopped", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''            refuse "ConsensFlow at $1 is still open after ${quit_wait}s. Quit it (ConsensFlow > Quit ConsensFlow) and run this again."'''
+replace = '''            kill -KILL $(processes_of "$1") 2>/dev/null || true'''
+
+[[plant]]
+name = "installers: install.sh asks the ConsensFlow it runs inside to quit"
+meant = "that the install runs inside is not asked to quit: the install is refused"
+runs = [["node", "--test", "--test-name-pattern", "runs inside", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        if printf '%s\n' "$running" | grep -qx "$pid"; then'''
+replace = '''        if false; then'''
+
+[[plant]]
+name = "installers: install.sh leaves its folder behind"
+meant = "the stable feed's release, by default"
+runs = [["node", "--test", "--test-name-pattern", "by default", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    if [ -n "${tmp:-}" ] && [ -d "$tmp" ]; then
+        rm -rf "$tmp"'''
+replace = '''    if false; then
+        rm -rf "$tmp"'''
+
+[[plant]]
+name = "installers: install.sh tries a folder that is not the user's"
+meant = "a folder it cannot write to is refused, and sudo is never used"
+runs = [["node", "--test", "--test-name-pattern", "cannot write to", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    [ -w "$dir" ] || refuse'''
+replace = '''    true || refuse'''
+
+[[plant]]
+name = "installers: install.sh leaves the old app beside the new one"
+meant = "an installed ConsensFlow is upgraded where it is"
+runs = [["node", "--test", "--test-name-pattern", "upgraded where it is", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    if [ -n "$previous" ]; then
+        rm -rf "$previous"
+        previous=""
+    fi'''
+replace = '''    previous=""'''
+
+[[plant]]
+name = "installers: install.sh's --alpha reads the stable feed"
+meant = "the alpha feed's release with --alpha, and with CONSENSFLOW_CHANNEL=alpha"
+runs = [["node", "--test", "--test-name-pattern", "with --alpha", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''            --alpha) channel=alpha ;;'''
+replace = '''            --alpha) channel=stable ;;'''
+
+# --- install.ps1 ---
+
+[[plant]]
+name = "installers: install.ps1 installs whatever its signature check says"
+meant = "install.ps1 in Windows PowerShell › on Windows › a flipped bit in the signature is refused"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        if ($problem) { Stop-CfInstall"
+replace = "        if ($false) { Stop-CfInstall"
+
+[[plant]]
+name = "installers: install.ps1 does not check the trusted comment's signature"
+meant = "the installers' signature check › install.ps1's, in Windows PowerShell › tauri signer's signatures hold, and each changed one is refused, saying why"
+runs = ["verifiers"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        if (-not (Test-CfEd25519 $publicKey (CfJoin $edSignature $latin1.GetBytes($comment)) ([byte[]]$global))) {"
+replace = "        if ($false) {"
+
+[[plant]]
+name = "installers: install.ps1 takes a signature of SHA256SUMS for another release"
+meant = "install.ps1 in Windows PowerShell › on Windows › a SHA256SUMS signed for another release is refused"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        if ($named.Groups[1].Value -cne $fileName) {"
+replace = "        if ($false) {"
+
+[[plant]]
+name = "installers: install.ps1's Ed25519 takes S at or above L"
+meant = "the installers' signature check › install.ps1's, in Windows PowerShell › RFC 8032's Ed25519 vectors hold, and none changed by a bit, or with S + L, does"
+runs = ["verifiers"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        if ($s -ge $CfL) { return $false }"
+replace = "        if ($s -ge $BI::Multiply($CfL, $CfTwo)) { return $false }"
+
+[[plant]]
+name = "installers: install.ps1's BLAKE2b counts the last block as a full one"
+meant = "the installers' signature check › install.ps1's, in Windows PowerShell › BLAKE2b-512 gives RFC 7693's answer and OpenSSL's at every length around a block"
+runs = ["verifiers"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "            $counter = if ($last) { [uint64]$bytes.Length } else { [uint64](($block + 1) * 128) }"
+replace = "            $counter = [uint64](($block + 1) * 128)"
+
+[[plant]]
+name = "installers: install.ps1 goes on without a signed SHA256SUMS"
+meant = "install.ps1 in Windows PowerShell › on Windows › a release with no signed SHA256SUMS, as before 3.0.7-alpha.1, is refused"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''        try { Get-CfDownload "$release/SHA256SUMS.sig" "$sums.sig" } catch {'''
+replace = '''        try { Get-CfDownload "$release/SHA256SUMS.sig" "$sums.sig" } catch { } ; if ($false) {'''
+
+[[plant]]
+name = "installers: install.ps1 does not hold the installer to its SHA-256"
+meant = "install.ps1 in Windows PowerShell › on Windows › an installer with one byte changed is refused by its SHA-256"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        if ($got -cne $expected) { Stop-CfInstall"
+replace = "        if ($false) { Stop-CfInstall"
+
+[[plant]]
+name = "installers: install.ps1 takes any hash SHA256SUMS lists"
+meant = "install.ps1 in Windows PowerShell › on Windows › a SHA256SUMS that lists no installer for the release is refused"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''($fields[1] -ceq $installer -or $fields[1] -ceq "*$installer")'''
+replace = '''($true)'''
+
+[[plant]]
+name = "installers: install.ps1 installs on a PC that is not x64"
+meant = "install.ps1 in Windows PowerShell › on Windows › a PC that is not x64 is refused"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "    if ($arch -ne 'AMD64') {"
+replace = "    if ($false) {"
+
+[[plant]]
+name = "installers: install.ps1 stops an open ConsensFlow that does not close"
+meant = "install.ps1 in Windows PowerShell › on Windows › that stays open is never stopped, and nothing is installed"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''                Stop-CfInstall "ConsensFlow in $dir is still open after $($quitWait)s. Close it and run this again."'''
+replace = '''                Get-CfOpen $dir | Stop-Process -Force'''
+
+[[plant]]
+name = "installers: install.ps1 asks the ConsensFlow it runs inside to close"
+meant = "install.ps1 in Windows PowerShell › on Windows › that the install runs inside is not asked to close: the install is refused"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "            if ($ids -contains $at) {"
+replace = "            if ($false) {"
+
+[[plant]]
+name = "installers: install.ps1 leaves its folder behind"
+meant = "install.ps1 in Windows PowerShell › on Windows › a release with no signed SHA256SUMS, as before 3.0.7-alpha.1, is refused"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue"
+replace = "        $null = $tmp"
+
+# --- the signed SHA256SUMS of a release ---
+
+[[plant]]
+name = "installers: the publisher publishes a release whose SHA256SUMS is not signed"
+meant = "is_refused_without_the_signature_or_the_sums_it_signs_before_anything_is_asked"
+runs = ["signed-sums"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/sums.rs"
+find = "    if signature.is_empty() {"
+replace = "    if signature.is_empty() && false {"
+
+[[plant]]
+name = "installers: the publisher publishes sums that are not the ones signed"
+meant = "is_refused_when_what_was_signed_is_not_what_the_files_built_say"
+runs = ["signed-sums"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/sums.rs"
+find = "    if signed != computed.as_bytes() {"
+replace = "    if signed.is_empty() {"
+
+[[plant]]
+name = "installers: the publisher leaves the signature out of the release"
+meant = "publishes_the_sums_that_were_signed_and_their_signature_as_they_are"
+runs = ["signed-sums"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/publish.rs"
+find = "    files.extend([SUMS, SIGNATURE]);"
+replace = "    files.extend([SUMS]);"
+
+[[plant]]
+name = "installers: the check after publishing does not read the signature back"
+meant = "finds_a_file_of_the_release_that_does_not_download_as_the_one_built_whichever_it_is"
+runs = ["signed-sums"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "    for path in assets.all().into_iter().chain([SUMS, SIGNATURE]) {"
+replace = "    for path in assets.all().into_iter().chain([SUMS]) {"
+
+[[plant]]
+name = "installers: the copy that is signed is named for no release"
+meant = "writes_the_sums_and_the_copy_that_is_signed_and_names_it"
+runs = ["signed-sums"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/sums.rs"
+find = '''    format!("ConsensFlow_{version}_SHA256SUMS")'''
+replace = '''    format!("ConsensFlow_SHA256SUMS")'''
+
+[[plant]]
+name = "installers: the sign job's token can write"
+meant = "holds_the_update_key_in_the_one_step_that_signs_and_can_write_nothing"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''    needs: [mac, windows, publisher]
+    runs-on: macos-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read'''
+replace = '''    needs: [mac, windows, publisher]
+    runs-on: macos-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: write'''
+
+[[plant]]
+name = "installers: the sign job runs the install scripts of every package with the key in reach"
+meant = "holds_the_update_key_in_the_one_step_that_signs_and_can_write_nothing"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = "      - run: npm ci --prefix app --ignore-scripts"
+replace = "      - run: npm ci --prefix app"
+
+[[plant]]
+name = "installers: the sign job signs SHA256SUMS under its own name, which names no release"
+meant = "sign_the_sums_under_the_releases_name_and_refuse_a_signature_by_a_key_not_pinned"
+runs = ["sign-job"]
+# Its steps run as written under bash, which Windows does not give the test.
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          "$GITHUB_WORKSPACE/app/node_modules/.bin/tauri" signer sign "$SIGNED"'''
+replace = '''          "$GITHUB_WORKSPACE/app/node_modules/.bin/tauri" signer sign SHA256SUMS
+          cp SHA256SUMS.sig "$SIGNED.sig"'''
+
+[[plant]]
+name = "installers: the sign job runs a publisher whose hash it did not check"
+meant = "sign_the_sums_under_the_releases_name_and_refuse_a_signature_by_a_key_not_pinned"
+runs = ["sign-job"]
+# Its steps run as written under bash, which Windows does not give the test.
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          if [ -z "$BUILT_SHA256" ] || [ "$got" != "$BUILT_SHA256" ]; then'''
+replace = '''          if false; then'''
+
+[[plant]]
+name = "installers: the publish job does not wait for the signature"
+meant = "signs_the_sums_the_publisher_writes_checks_them_and_hands_them_on"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = "    needs: [mac, windows, gate, publisher, sign]"
+replace = "    needs: [mac, windows, gate, publisher]"
+
+[[plant]]
+name = "installers: the release workflow's check takes a signature by any key"
+meant = "the release workflow's check takes no signature by another key than the one the installers pin"
+runs = ["verifiers"]
+
+[[plant.edit]]
+file = "install/check-signature.mjs"
+find = "if (problem !== null) refuse(`as Node checks it: ${problem}`)"
+replace = "if (problem !== null && false) refuse(`as Node checks it: ${problem}`)"

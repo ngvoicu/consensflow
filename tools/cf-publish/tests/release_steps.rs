@@ -22,7 +22,8 @@ mod the_publish_job_run_as_written {
     use cf_publish::testing::workflow::{bash, expand};
     use cf_publish::testing::worlds::feed;
     use cf_publish::testing::{
-        archive_of, built_files, folder_of, gh_dir, latest_json, Github, Ran, TempDir, OLD_LAYOUT,
+        archive_of, built_files, folder_of, gh_dir, latest_json, signed, Github, Ran, TempDir,
+        OLD_LAYOUT,
     };
 
     use super::*;
@@ -49,7 +50,7 @@ mod the_publish_job_run_as_written {
     fn built(github: &Github, release: &str) -> Built {
         let files = built_files(github.base(), release);
         let archive = format!("ConsensFlow_{release}_aarch64.app.tar.gz");
-        let files = files.with(&archive, archive_of(&OLD_LAYOUT));
+        let files = signed(files.with(&archive, archive_of(&OLD_LAYOUT)));
         Built {
             release: release.to_string(),
             latest: files.text("latest.json"),

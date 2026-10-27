@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use super::{
-    built_files, folder_of, latest_json, published_assets, quick, rule, v, Files, Github, Spec,
-    TempDir, BRIDGE, OLDER, OLD_LAYOUT,
+    built_files, folder_of, latest_json, published_assets, quick, rule, signed, v, Files, Github,
+    Spec, TempDir, BRIDGE, OLDER, OLD_LAYOUT,
 };
 use crate::checks::{check_feeds, FEEDS_BEFORE};
 use crate::failure::Failure;
@@ -73,7 +73,7 @@ pub fn after_publishing_with(version: &str, edit: impl FnOnce(Files) -> Files) -
     let Crossed { github, files } = crossed();
     let mut built = files;
     if version != BRIDGE {
-        built = edit(built_files(github.base(), version));
+        built = signed(edit(built_files(github.base(), version)));
         github.release(
             &format!("v{version}"),
             Spec::new().assets(published_assets(&built).iter()),

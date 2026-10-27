@@ -7,6 +7,10 @@
 #
 # (upstream: the GitHub remote; origin is the NAS mirror, which runs nothing.)
 #
+# The release's SHA256SUMS is signed with the same update key in a job of its
+# own (`sign`), for the one-line installers of install/, which hold a download
+# to it; the publisher publishes no release whose sums are not signed.
+#
 # The tag names the source version (package.json, Cargo.toml and
 # tauri.conf.json agree; prepare-update checks all three). Its message becomes
 # the notes; a tag without one gets the commits since the previous release.
@@ -243,11 +247,99 @@ jobs:
           path: app/src-tauri/target/release/cf-publish
           if-no-files-found: error
 
+  # The signature the one-line installers (install/install.sh and install.ps1)
+  # check a release by: a download through curl or PowerShell skips Gatekeeper
+  # and SmartScreen, and the Windows files carry no Authenticode signature. The
+  # release's SHA256SUMS, as the publisher writes it (`cf-publish sums`, the
+  # binary the publisher job built, checked against its hash), is signed with the
+  # update key, the one the Mac job signs the update bundle with, under a name
+  # that says the release (ConsensFlow_<version>_SHA256SUMS), which the
+  # signature's trusted comment carries and the installers hold it to. The key is
+  # in the one step that signs; the job's token can write nothing. The signature
+  # is checked as the installers check it before it leaves the job, and the
+  # publish job publishes only the SHA256SUMS it signed (tools/cf-publish/src/sums.rs).
+  # A hand run signs too, and publishes nothing: that is the trial of the step.
+  sign:
+    needs: [mac, windows, publisher]
+    runs-on: macos-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      # Tauri's signer as the lockfile names it, and no install script of any package.
+      - run: npm ci --prefix app --ignore-scripts
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ConsensFlow-*
+          path: ${{ runner.temp }}/dist
+          merge-multiple: true
+      # The publisher, for its `sums`, checked against the publisher job's hash as the publish job checks it.
+      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool
+      - name: The publisher is the binary that was built
+        env:
+          BUILT_SHA256: ${{ needs.publisher.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          tool="$RUNNER_TEMP/sums-tool/cf-publish"
+          got=$(shasum -a 256 "$tool" | cut -d' ' -f1)
+          if [ -z "$BUILT_SHA256" ] || [ "$got" != "$BUILT_SHA256" ]; then
+            echo "the publisher downloaded hashes to $got, and the job that built it says ${BUILT_SHA256:-nothing}" >&2
+            exit 1
+          fi
+          chmod +x "$tool"
+      - name: The sums of the release, and the copy that is signed
+        id: sums
+        working-directory: ${{ runner.temp }}/dist
+        run: |
+          set -euo pipefail
+          version=$(node -p "require(process.env.GITHUB_WORKSPACE + '/package.json').version")
+          signed=$("$RUNNER_TEMP/sums-tool/cf-publish" sums --dir . --version "$version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "signed=$signed" >> "$GITHUB_OUTPUT"
+      - name: Sign the sums
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+          SIGNED: ${{ steps.sums.outputs.signed }}
+        working-directory: ${{ runner.temp }}/dist
+        run: |
+          set -euo pipefail
+          "$GITHUB_WORKSPACE/app/node_modules/.bin/tauri" signer sign "$SIGNED"
+      # As Node's crypto checks it, and as install.sh's own check does.
+      - name: The installers take the signature
+        env:
+          VERSION: ${{ steps.sums.outputs.version }}
+          SIGNED: ${{ steps.sums.outputs.signed }}
+        working-directory: ${{ runner.temp }}/dist
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/signature"
+          cp SHA256SUMS "$RUNNER_TEMP/signature/SHA256SUMS"
+          cp "$SIGNED.sig" "$RUNNER_TEMP/signature/SHA256SUMS.sig"
+          node "$GITHUB_WORKSPACE/install/check-signature.mjs" --dir "$RUNNER_TEMP/signature" --version "$VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ConsensFlow-signature
+          path: ${{ runner.temp }}/signature/
+          if-no-files-found: error
+
   publish:
     # Only the push of a tag publishes. A hand run is a workflow_dispatch, and
     # is on a tag whenever someone picks one to run it on.
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [mac, windows, gate, publisher]
+    needs: [mac, windows, gate, publisher, sign]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -260,6 +352,7 @@ jobs:
     # the files. The token reaches the two steps that run the binary, and no other.
     steps:
       # The files the Mac and Windows jobs built.
+      # (With them, the sign job's SHA256SUMS and its signature: ConsensFlow-signature.)
       - uses: actions/download-artifact@v8
         with:
           pattern: ConsensFlow-*

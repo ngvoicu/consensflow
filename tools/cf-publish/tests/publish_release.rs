@@ -93,7 +93,11 @@ mod publishing_the_bridge {
         );
         let filled = world.github.trace()[publishing - 1].after[&tag].clone();
         assert!(filled.draft, "the release was a draft until then");
-        assert_eq!(filled.assets.len(), 7, "with all its files");
+        assert_eq!(
+            filled.assets.len(),
+            8,
+            "with all its files, SHA256SUMS and its signature"
+        );
     }
 
     #[test]
@@ -206,6 +210,54 @@ mod publishing_the_bridge {
                 format!("missing {path}")
             );
             assert_eq!(world.github.calls(), Vec::<Vec<String>>::new());
+        }
+    }
+}
+
+mod publishing_only_a_signed_sha256sums {
+    use super::*;
+
+    #[test]
+    fn is_refused_without_the_signature_or_the_sums_it_signs_before_anything_is_asked() {
+        for name in ["SHA256SUMS.sig", "SHA256SUMS"] {
+            let world = before(LATER);
+            fs::remove_file(world.dir.path().join(name)).unwrap();
+            let refused = world.publish().unwrap_err().to_string();
+            assert!(refused.starts_with(&format!("missing {name}")), "{refused}");
+            assert_eq!(world.github.calls(), Vec::<Vec<String>>::new(), "{name}");
+        }
+    }
+
+    #[test]
+    fn is_refused_when_what_was_signed_is_not_what_the_files_built_say() {
+        let world = before(LATER);
+        let installer = world
+            .dir
+            .path()
+            .join(format!("nsis/ConsensFlow_{LATER}_x64-setup.exe"));
+        fs::write(
+            installer,
+            "an installer built again after the sums were signed",
+        )
+        .unwrap();
+        assert_eq!(
+            world.publish().unwrap_err().to_string(),
+            "the SHA256SUMS that was signed does not list the files built here"
+        );
+        assert_eq!(world.github.calls(), Vec::<Vec<String>>::new());
+    }
+
+    #[test]
+    fn publishes_the_sums_that_were_signed_and_their_signature_as_they_are() {
+        let world = before(LATER);
+        world.publish().unwrap();
+        let tag = format!("v{LATER}");
+        for name in ["SHA256SUMS", "SHA256SUMS.sig"] {
+            assert_eq!(
+                world.github.asset_text(&tag, name),
+                fs::read_to_string(world.dir.path().join(name)).unwrap(),
+                "{name}"
+            );
         }
     }
 }

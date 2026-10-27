@@ -23,7 +23,7 @@
 
 run_limit_minutes = 10
 rebuild = ["cargo", "xtask", "build-cf", "--offline"]
-tables = ["feeds", "publish", "workflow", "portable", "agents", "updater", "updater-product", "tooling", "sidecar", "drivers", "update", "sign-mac", "packaged", "wiring", "live-models", "live-windows", "windows-runner", "release-commands", "ci-times"]
+tables = ["feeds", "publish", "workflow", "installers", "portable", "agents", "updater", "updater-product", "tooling", "sidecar", "drivers", "update", "sign-mac", "packaged", "wiring", "live-models", "live-windows", "windows-runner", "release-commands", "ci-times"]
 
 [run]
 # The proof of the agents screens against the native daemon, built from the sources as they are.

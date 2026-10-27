@@ -1,0 +1,70 @@
+# The one-line installers (install/install.sh, install/install.ps1) where the
+# gate does not run them: on Linux, which they refuse, and against a real
+# release on macOS and Windows. Their tests on a scripted feed, and their
+# signature check against RFC 8032's and RFC 7693's vectors, run in the gate's
+# `npm run check` on macOS and Windows (tests/install-*.test.mjs), in Windows
+# PowerShell and PowerShell 7 alike.
+#
+# The real-release job reads the alpha feed on GitHub and installs what it names
+# (install/real-install.mjs, npm run install:real): from GitHub with the
+# published script where the release has a signed SHA256SUMS (3.0.7-alpha.1 and
+# later), else from a mirror of the release's own files on the runner, signed
+# for the run. A copy with one byte changed is refused first, and the release
+# before it is installed, opened, and upgraded in place once it quits when asked.
+# It runs after every release, and on a change to the installers.
+name: Installers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - install/**
+      - tests/install-*.test.mjs
+      - tests/fixtures/install/**
+      - .github/workflows/installers.yml
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      # On Linux both refuse in plain words, under sh and under PowerShell 7, and
+      # the signature check runs in PowerShell 7 here too.
+      - run: node --test tests/install-sh.test.mjs tests/install-ps1.test.mjs tests/install-verifiers.test.mjs
+
+  real-release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - name: Install the alpha feed's release, after the one before it, opened
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node install/real-install.mjs --channel alpha --upgrade
+      - name: Install it again in PowerShell 7
+        if: runner.os == 'Windows'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node install/real-install.mjs --channel alpha --shell pwsh

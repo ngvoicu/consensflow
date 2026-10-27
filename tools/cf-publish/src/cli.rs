@@ -7,6 +7,9 @@
 //!     says whether the old feeds serve the bridge, which a later release needs
 //! cf-publish feeds check --dir <dir> --version <v> --base <url>
 //!     says whether, once published, the files and the feeds serve what the rule says
+//! cf-publish sums --dir <dist> --version <v>
+//!     writes the SHA256SUMS of the release built in <dist>, and the copy of it the
+//!     signing job signs, whose name it prints
 //! cf-publish publish --dir <dist> --tag v<version> --base <url> [--repo <owner>/<repo>]
 //!     publishes the release built in <dist>, and moves its feeds
 //! ```
@@ -19,7 +22,8 @@
 //! (`GITHUB_EVENT_NAME`, `GITHUB_REF_TYPE` and `GITHUB_REF_NAME`).
 //!
 //! Every failure ends the run with status 1 and one line on stderr, prefixed by
-//! the command (`feeds: ` or `publish: `); a refusal of the rule is that too.
+//! the command (`feeds: `, `sums: ` or `publish: `); a refusal of the rule is
+//! that too.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,6 +39,7 @@ use crate::manifest::Manifest;
 use crate::publish::{publish_release, Means, Publication};
 use crate::read::Patience;
 use crate::rule::{plan_feeds, role_of, Role};
+use crate::sums::write_sums;
 use crate::version::Version;
 
 /// What the workflow's run says about itself, read once by `main`: `publish`
@@ -255,6 +260,18 @@ fn feeds(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Result<u8
     }
 }
 
+/// `cf-publish sums …`: the SHA256SUMS of the release built in `--dir`, and the
+/// copy of it that is signed ([`write_sums`]).
+fn sums(args: &[String], out: &mut dyn Write) -> Result<u8, Failure> {
+    let options = Options::parse(args, &["dir", "version"], &[])?;
+    let (Some(dir), Some(version)) = (options.get("dir"), options.get("version")) else {
+        return Err(Failure::new("sums needs --dir and --version"));
+    };
+    let signed = write_sums(Path::new(dir), &Version::parse(version)?)?;
+    writeln!(out, "{signed}")?;
+    Ok(0)
+}
+
 /// `cf-publish publish …`: the release built in `--dir`, for the push of the
 /// version tag `--tag` and no other run.
 fn publish(args: &[String], env: &Environment, out: &mut dyn Write) -> Result<u8, Failure> {
@@ -326,11 +343,12 @@ fn publish(args: &[String], env: &Environment, out: &mut dyn Write) -> Result<u8
 pub fn run(args: &[String], env: &Environment, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
     let (who, result) = match args.first().map(String::as_str) {
         Some("feeds") => ("feeds", feeds(&args[1..], out, err)),
+        Some("sums") => ("sums", sums(&args[1..], out)),
         Some("publish") => ("publish", publish(&args[1..], env, out)),
         _ => (
             "cf-publish",
             Err(Failure::new(
-                "usage: cf-publish feeds plan|prerequisites|check, or publish",
+                "usage: cf-publish feeds plan|prerequisites|check, sums, or publish",
             )),
         ),
     };
