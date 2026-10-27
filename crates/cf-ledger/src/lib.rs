@@ -57,8 +57,8 @@ pub use conversations::{
 pub use ledger::Watcher;
 pub use ledger::{open_ledger, Event, Ledger, Options};
 pub use messages::{
-    continuation, continuation_tasks, is_told, waiting_for_the_reopen, GivenUp, HandOver, NewNote,
-    NewQuestion, Read, MAY_STILL_RUN, WITHDRAWN_AFTER_HANDED,
+    continuation, continuation_in, continuation_tasks, cut_turn, is_told, waiting_for_the_reopen,
+    GivenUp, HandOver, NewNote, NewQuestion, Read, MAY_STILL_RUN, WITHDRAWN_AFTER_HANDED,
 };
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;

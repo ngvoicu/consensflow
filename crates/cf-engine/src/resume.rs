@@ -27,11 +27,22 @@
 //! A window whose turn the quit or the Close cut is told so, once: the harness's
 //! record of its conversation, read before its window opens, has a turn with no
 //! end, and a note from ConsensFlow is the first thing the window is given, with
-//! what waits for it after. A window at rest when the app quit is given no note. Where
-//! the record cannot tell (Devin's, with no window open), a member with a task
+//! what waits for it after. The note names the turn: when the message that began it
+//! came and its first words, where the record holds them, so that a window can tell
+//! whether that turn was one it had left (T-814). A window at rest when the app quit
+//! is given no note, and nor is one whose turn had ended with only background work
+//! running (its harness's jobs, and its notices of them: background work is rest).
+//! Where the record cannot tell (Devin's, with no window open), a member with a task
 //! in hand is told all the same: a member whose cut turn goes untold reads at
 //! rest with its task at work for good, and one told that was at rest only looks
 //! again.
+//!
+//! The note says the window's state at that Resume, so it holds only for it: one an
+//! earlier Resume wrote, whose window never came to be given it (the project closed
+//! again first), is judged again from the record at the next, and withdrawn unless
+//! the record still says it word for word. Before, such a note was given days late
+//! (sites, 2026-10-23: a note written at a Resume the human closed again a second
+//! later waited, queued, for the next Resume).
 //!
 //! A Resume that comes while the start still settles what was on its way waits
 //! for it ([`ResumeState`]): what the settle confirms moves a task to work, which
@@ -46,9 +57,10 @@ use std::future::{poll_fn, Future};
 use std::rc::Rc;
 use std::task::{Poll, Waker};
 
+use cf_harness::contract::{Opening, TurnLeft};
 use cf_ledger::{
-    continuation, continuation_tasks, ConversationView, MessageView, NewNote, ParticipantView,
-    ProjectView, Stop,
+    continuation, continuation_in, continuation_tasks, cut_turn, ConversationView, MessageView,
+    NewNote, ParticipantView, ProjectView, Stop, RESUME_WORDS,
 };
 
 use crate::dispatcher::Dispatcher;
@@ -136,27 +148,32 @@ pub(crate) enum Coming {
     Member { task: i64, paid: Option<Stop> },
 }
 
+/// How the chief's note that its turn was cut begins, in this build's words and in
+/// those of the builds before it, which said no more.
+const CHIEF_CUT: &str = "ConsensFlow stopped in the middle of your turn, which was cut";
+
 impl Coming {
-    /// What the window is told when its turn was cut. A member is told what it
-    /// was working on, in a continuation (the ledger's words, which go with any
-    /// move of the task). Each came back by the human's Resume, not by a quit alone
-    /// (a Close cuts a turn too), so the words say only that ConsensFlow stopped.
-    pub(crate) fn words(&self) -> String {
-        match self {
-            Coming::Chief => {
-                "ConsensFlow stopped in the middle of your turn, which was cut. Go on where you stopped."
-                    .to_owned()
-            }
-            Coming::Member { task, .. } => continuation(*task),
+    /// What the window is told when its turn was cut: the turn, where its record
+    /// shows the message that began it (`opening`). A member is told what it was
+    /// working on, in a continuation (the ledger's words, which go with any move of
+    /// the task). Each came back by the human's Resume, not by a quit alone (a Close
+    /// cuts a turn too), so the words say only that ConsensFlow stopped.
+    pub(crate) fn words(&self, opening: Option<&Opening>) -> String {
+        let turn = opening.map(|opening| cut_turn(opening.at.as_deref(), &opening.words));
+        match (self, turn) {
+            (Coming::Chief, None) => format!("{CHIEF_CUT}. {RESUME_WORDS}"),
+            (Coming::Chief, Some(turn)) => format!("{CHIEF_CUT}: {turn}. {RESUME_WORDS}"),
+            (Coming::Member { task, .. }, None) => continuation(*task),
+            (Coming::Member { task, .. }, Some(turn)) => continuation_in(*task, &turn),
         }
     }
 
-    /// Whether `body` is the note that tells the window its turn was cut: these
-    /// words, or a member's as 3.0.5 and the builds before it wrote them, which a
-    /// ledger may still hold queued for a window that never came.
+    /// Whether `body` is a note that tells the window its turn was cut, in the words
+    /// of this build or of one before it, which a ledger may still hold queued for a
+    /// window that never came: a member's names its one task.
     fn told_in(&self, body: &str) -> bool {
         match self {
-            Coming::Chief => body == self.words(),
+            Coming::Chief => body.starts_with(CHIEF_CUT),
             Coming::Member { task, .. } => continuation_tasks(body) == Some(vec![*task]),
         }
     }
@@ -352,44 +369,62 @@ impl Dispatcher {
     }
 
     /// The note that tells a window its turn was cut, when it was, to be its
-    /// first message: the one that waits for it already if the app quit again
-    /// before it came (so it is told once), else one written now. None when its
-    /// turn was not cut: its conversation's record, read with no window open,
-    /// ends at rest, or cannot tell and the window is the chief's; and none for a
-    /// chief that is given its handoff again, which tells it where things stand.
-    /// None too, and nothing written, where the work it was to come back for
-    /// stopped while the record was read ([`Dispatcher::still_coming`]).
+    /// first message: written now from its record, or the one an earlier Resume left
+    /// waiting where the record says it still, word for word (so it is told once).
+    /// None when its turn was not cut: its conversation's record, read with no window
+    /// open, ends at rest (with only background work running, or none), or cannot
+    /// tell and the window is the chief's; and none for a chief that is given its
+    /// handoff again, which tells it where things stand. None too, and nothing
+    /// written, where the work it was to come back for stopped while the record was
+    /// read ([`Dispatcher::still_coming`]). What an earlier Resume left waiting and
+    /// the record no longer says is withdrawn: it said the window's state then.
     pub(crate) async fn cut_note(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
         coming: &Coming,
     ) -> Result<Option<MessageView>, EngineError> {
-        let words = coming.words();
-        let waiting = self.seams.ledger.borrow().pending(participant.id)?;
-        if waiting
+        let handed_again = self
+            .seams
+            .ledger
+            .borrow()
+            .pending(participant.id)?
             .iter()
-            .any(|message| is_handoff(message) && message.state == "queued")
-        {
+            .any(|message| is_handoff(message) && message.state == "queued");
+        if handed_again {
             return Ok(None);
         }
-        let told = waiting.into_iter().find(|message| {
-            message.sender.is_none()
-                && message.kind == "note"
-                && message.state == "queued"
-                && coming.told_in(&message.body)
-        });
-        if told.is_some() {
-            return Ok(told);
-        }
-        let cut = match self.turn_cut(participant.id).await? {
-            Some(cut) => cut,
-            None => matches!(coming, Coming::Member { .. }),
+        let words = match self.turn_cut(participant.id).await? {
+            Some(TurnLeft::Cut(opening)) => Some(coming.words(opening.as_ref())),
+            Some(TurnLeft::AtRest) => None,
+            None => matches!(coming, Coming::Member { .. }).then(|| coming.words(None)),
         };
-        if !cut || !self.still_coming(participant, coming)? {
+        if !self.still_coming(participant, coming)? {
             return Ok(None);
         }
-        let note = self.seams.ledger.borrow_mut().note(
+        let mut ledger = self.seams.ledger.borrow_mut();
+        let told: Vec<MessageView> = ledger
+            .pending(participant.id)?
+            .into_iter()
+            .filter(|message| {
+                message.sender.is_none()
+                    && message.kind == "note"
+                    && message.state == "queued"
+                    && coming.told_in(&message.body)
+            })
+            .collect();
+        let mut kept = None;
+        for message in told {
+            if kept.is_none() && words.as_deref() == Some(message.body.as_str()) {
+                kept = Some(message);
+            } else {
+                ledger.withdraw_note(&message, "the Resume read the window's record again")?;
+            }
+        }
+        let Some(words) = words.filter(|_| kept.is_none()) else {
+            return Ok(kept);
+        };
+        let note = ledger.note(
             project.id,
             &NewNote {
                 from: None,

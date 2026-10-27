@@ -14,6 +14,18 @@ impl Ledger {
         self.store.message(id)
     }
 
+    /// Withdraws `message` where it is a note of ConsensFlow's own that is still
+    /// queued, with `reason`: whether it was. What a Resume wrote of a window's
+    /// state then, and its window never came to be given, is judged again at the next
+    /// Resume, and withdrawn where it no longer holds (T-814).
+    pub fn withdraw_note(
+        &mut self,
+        message: &MessageView,
+        reason: &str,
+    ) -> Result<bool, LedgerError> {
+        messages::withdraw_queued_note(&mut self.store, message, reason)
+    }
+
     /// A note from a participant, or from ConsensFlow itself.
     pub fn note(&mut self, project_id: i64, note: &NewNote) -> Result<MessageView, LedgerError> {
         #[cfg(feature = "test-support")]

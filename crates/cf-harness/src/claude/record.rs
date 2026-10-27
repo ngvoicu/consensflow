@@ -347,6 +347,17 @@ impl Transcript {
             && self.hooks.is_empty()
     }
 
+    /// Whether what holds the turn open is Claude Code's notifications alone, queued
+    /// or taken after the turn ended: no turn is open, no call, no stop hook to come,
+    /// and no message of anyone's waits.
+    fn held_by_notices(&self) -> bool {
+        self.terminal.is_some()
+            && !self.turn_open
+            && self.open_tools.is_empty()
+            && self.hooks.is_empty()
+            && self.queues.only_notices()
+    }
+
     /// Whether the turn is settled, in flight, or unknown, in that order of
     /// what the transcript proves: settled when it ended, natively or at a
     /// boundary record, with nothing open.
@@ -446,6 +457,7 @@ impl Answer for Transcript {
         };
         record.monitors = self.jobs.monitors();
         record.lines.put_back = self.put_back && settlement == Settlement::Settled;
+        record.lines.held_by_notices = settlement == Settlement::InFlight && self.held_by_notices();
         Ok(record)
     }
 }

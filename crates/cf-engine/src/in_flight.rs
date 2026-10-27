@@ -27,6 +27,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
+use cf_harness::contract::TurnLeft;
 use cf_harness::records::{Options, Reading, Role};
 use cf_ledger::MessageView;
 use cf_proto::agents::Harness;
@@ -332,9 +333,9 @@ impl Dispatcher {
 
     /// Whether a participant's harness's record of its current conversation,
     /// read with no window open, ends in a turn with no end (the one the app's
-    /// quit cut, or a Close), and none where it cannot tell: the record cannot,
-    /// or there is none to read.
-    pub(crate) async fn turn_cut(&self, participant: i64) -> Result<Option<bool>, EngineError> {
+    /// quit cut, or a Close), with the message that began it, or at rest; and none
+    /// where it cannot tell: the record cannot, or there is none to read.
+    pub(crate) async fn turn_cut(&self, participant: i64) -> Result<Option<TurnLeft>, EngineError> {
         let Some((harness, session)) = self.readable(participant)? else {
             return Ok(None);
         };
