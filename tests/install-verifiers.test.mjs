@@ -781,6 +781,16 @@ describe("the installers' signature check", () => {
         })
       })
 
+      // The scripts check the equation RFC 8032 5.1.7 allows in place of the cofactored one,
+      // encode([S]B - [k]A) = R, and nothing in them rejects a small-order or mixed-order point.
+      // So this holds them to that equation, degenerate acceptances included: the fixture's first,
+      // third and fifth cases (A and R the identity, S = 0; A of order 4, R the identity, S = 0,
+      // k a multiple of 4; A of mixed order, k a multiple of 4) are ACCEPTED, as the equation says.
+      // That is harmless only because the key the scripts trust is pinned, with order L and no small
+      // order, which the next test also asserts: no signature under it has a torsion component to
+      // play with. A change that rejects small-order points (or a point of mixed order) flips those
+      // three cases on purpose, and is made here with them (their `expect`s in
+      // fixtures/install/ed25519-torsion.json, made by make-fixtures.mjs), never by surprise.
       test('small-order and mixed-order points are answered as RFC 8032 5.1.7 says, without the cofactor', (t) => {
         if (answers.torsion === null) return t.skip("OpenSSL's policy, not the equation")
         assert.equal(answers.torsion.length, input.torsion.length)
