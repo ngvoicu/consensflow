@@ -1,4 +1,4 @@
-// What install/real-install.mjs refuses before it reads anything: run outside CI on a machine that
+// What install/real-install.mjs refuses before it reads anything: run outside GitHub Actions on a machine that
 // has a ConsensFlow in use, it would replace that one, and with --upgrade or --downgrade open it
 // and then end it (a Mac's processes are asked to stop; Windows' are stopped, the daemon too). A Mac
 // must name the folder it installs into, and Windows the installed ConsensFlow it replaces (--dir,
@@ -49,9 +49,9 @@ after(() => {
 
 /**
  * Runs the script with `args`. `windows` is the uninstall entry a faked Windows lists
- * (`{ version, folder }`, or null for none), `ci` whether CI is set; not given, the machine's own.
+ * (`{ version, folder }`, or null for none), `ci` whether CI=true is set, `actions` whether GITHUB_ACTIONS is; not given, the machine's own.
  */
-function realInstall(args, { windows, ci = false } = {}) {
+function realInstall(args, { windows, ci = false, actions = false } = {}) {
   rmSync(fetched, { force: true })
   const bin = path.join(work, 'bin')
   mkdirSync(bin, { recursive: true })
@@ -64,6 +64,7 @@ function realInstall(args, { windows, ci = false } = {}) {
     PATH: `${bin}:${process.env.PATH}`,
     HOME: work,
     ...(ci ? { CI: 'true' } : {}),
+    ...(actions ? { GITHUB_ACTIONS: 'true', CI: 'true' } : {}),
   }
   const imports = [...(windows === undefined ? [] : ['windows.mjs']), 'fetch.mjs']
   const ran = spawnSync(
@@ -82,7 +83,7 @@ function realInstall(args, { windows, ci = false } = {}) {
 
 const installed = { version: '3.0.7-alpha.9', folder: FOLDER }
 
-describe('on Windows, outside CI', {
+describe('on Windows, outside GitHub Actions', {
   skip: process.platform === 'win32' && 'it fakes Windows',
 }, () => {
   test('an installed ConsensFlow is not replaced, and nothing is read, unless the run names it', () => {
@@ -131,13 +132,22 @@ describe('on Windows, outside CI', {
     assert.equal(ran.asked.length, 1, ran.out)
   })
 
-  test('in CI the runner is the run own, and nothing is asked of it', () => {
-    const ran = realInstall(['--upgrade'], { windows: installed, ci: true })
+  test("on GitHub's runner, which is the run's own, nothing is asked of it", () => {
+    const ran = realInstall(['--upgrade'], { windows: installed, actions: true })
     assert.equal(ran.asked.length, 1, ran.out)
+  })
+
+  test('CI=true, which many tools and developers set, is not a runner of GitHub: the guard holds', () => {
+    const ran = realInstall(['--downgrade'], { windows: installed, ci: true })
+    assert.equal(ran.status, 1, ran.out)
+    assert.match(ran.out, /is installed in C:\\Users\\dev\\AppData\\Local\\ConsensFlow/)
+    assert.deepEqual(ran.asked, [])
   })
 })
 
-describe('on a Mac, outside CI', { skip: process.platform !== 'darwin' && 'it is a Mac' }, () => {
+describe('on a Mac, outside GitHub Actions', {
+  skip: process.platform !== 'darwin' && 'it is a Mac',
+}, () => {
   test('the folder to install into is named, and --upgrade and --downgrade run with --no-open', () => {
     const none = realInstall([])
     assert.equal(none.status, 1, none.out)
@@ -151,5 +161,10 @@ describe('on a Mac, outside CI', { skip: process.platform !== 'darwin' && 'it is
     }
     const named = realInstall(['--dir', path.join(work, 'apps'), '--upgrade', '--no-open'])
     assert.equal(named.asked.length, 1, named.out)
+    // CI=true is no GitHub runner: the folder is still to be named.
+    const ci = realInstall([], { ci: true })
+    assert.equal(ci.status, 1, ci.out)
+    assert.match(ci.out, /name the folder to install into with --dir/)
+    assert.deepEqual(ci.asked, [])
   })
 })

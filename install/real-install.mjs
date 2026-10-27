@@ -25,15 +25,16 @@
 // --no-open); the run then ends with the feed's release installed again, an
 // upgrade.
 //
-// On a Mac the app goes to DIR (--dir), which a run outside CI must name: the
+// On a Mac the app goes to DIR (--dir), which a run outside GitHub Actions must name: the
 // ConsensFlow in /Applications is never touched by it. On Windows the per-user
 // installer puts it where it puts it, over a ConsensFlow already installed for
-// the user (the one its uninstall entry names): a run outside CI refuses where
+// the user (the one its uninstall entry names): a run outside GitHub Actions refuses where
 // there is one, unless --dir names the folder it is installed in, which says
-// that this run may replace it. Outside CI --upgrade and --downgrade run with
+// that this run may replace it. Outside GitHub Actions --upgrade and --downgrade run with
 // --no-open on both: a ConsensFlow in use is never joined by another, nor ended
 // (a Mac's is asked to stop, a Windows one's processes are stopped, the daemon
-// too).
+// too). GitHub Actions is told by GITHUB_ACTIONS, which only its runners set: CI
+// is set by a great many tools, and by developers for their own.
 
 import { Buffer } from 'node:buffer'
 import { spawn, spawnSync } from 'node:child_process'
@@ -297,23 +298,23 @@ async function mirror(versions, key, tamper) {
 }
 
 if (!['alpha', 'stable'].includes(options.channel)) fail('--channel is alpha or stable')
-if (!process.env.CI) {
+if (!process.env.GITHUB_ACTIONS) {
   if (mac && !options.dir)
     fail(
-      'on a Mac outside CI, name the folder to install into with --dir (the ConsensFlow in /Applications is never touched)',
+      'on a Mac outside GitHub Actions, name the folder to install into with --dir (the ConsensFlow in /Applications is never touched)',
     )
   // The installer puts ConsensFlow over the one Windows lists, and a run that opens and ends it
   // (--downgrade) stops its processes by their path, the daemon too.
   const listed = mac ? null : windowsEntry()
   if (listed && !(options.dir && sameFolder(options.dir, listed.where)))
     fail(
-      `on Windows outside CI, ConsensFlow ${listed.version} is installed in ${listed.where}, and this run would replace it: if that is a ConsensFlow to replace (a test machine's), name its folder with --dir "${listed.where}"`,
+      `on Windows outside GitHub Actions, ConsensFlow ${listed.version} is installed in ${listed.where}, and this run would replace it: if that is a ConsensFlow to replace (a test machine's), name its folder with --dir "${listed.where}"`,
     )
   // A second ConsensFlow opened on a machine in use would start a second daemon on its home, and
   // the one opened here is ended by its path.
   if ((options.upgrade || options.downgrade) && !options['no-open'])
     fail(
-      'outside CI, --upgrade and --downgrade run with --no-open: the ConsensFlow in use is never joined by another, nor ended',
+      'outside GitHub Actions, --upgrade and --downgrade run with --no-open: the ConsensFlow in use is never joined by another, nor ended',
     )
 }
 const dir = mac ? path.resolve(options.dir ?? '/Applications') : null
