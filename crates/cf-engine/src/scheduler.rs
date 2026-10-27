@@ -418,7 +418,7 @@ impl Dispatcher {
         {
             return false;
         }
-        if same_refusal(handled.as_ref(), &quota) {
+        if same_refusal(handled.as_ref(), &quota) || self.older_than_the_window(record, &quota) {
             return false;
         }
         match (
@@ -447,7 +447,18 @@ impl Dispatcher {
             .resets_at()
             .and_then(time::parse)
             .is_some_and(|reset| reset <= self.now());
-        !passed && !same_refusal(handled.as_ref(), &quota)
+        !passed
+            && !same_refusal(handled.as_ref(), &quota)
+            && !self.older_than_the_window(record, &quota)
+    }
+
+    /// Whether `quota` holds a member for no time (an account only its human cures, a model its
+    /// harness moved) and is dated before the window of `record` opened: the human's Resume and
+    /// Try again now came after it, so it holds nothing. The reading keeps it all the same: it is
+    /// how the engine knows the last turn that failed was the refusal's and not the task's
+    /// (`cut_short`), which a window reopened on the conversation reads as it was left (T-841).
+    fn older_than_the_window(&self, record: &Record, quota: &Quota) -> bool {
+        quota.held_for_the_human() && self.before_open(record, quota.at())
     }
 
     /// Marks the refusal a window shows as acted on, so the window acts on it once.
@@ -627,23 +638,6 @@ impl Dispatcher {
         opened
             .zip(at.and_then(time::parse))
             .is_some_and(|(opened, at)| at < opened)
-    }
-
-    /// `observed`, but for a refusal held for no time that is older than the window: a
-    /// move of the model or a refusal of the account a Resume read from its transcript is
-    /// history, and holds nothing (T-816). A window with no open time reads as it is.
-    pub(crate) fn since_open(&self, record: &Record, observed: Observed) -> Observed {
-        let stale = observed.quota.as_deref().is_some_and(|quota| {
-            quota.held_for_the_human() && self.before_open(record, quota.at())
-        });
-        if stale {
-            Observed {
-                quota: None,
-                ..observed
-            }
-        } else {
-            observed
-        }
     }
 
     /// News that an account has quota again brings back the others out on it.

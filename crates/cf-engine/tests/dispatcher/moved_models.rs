@@ -366,3 +366,119 @@ fn a_task_that_waits_for_a_free_member_is_told_the_model_moved_not_a_billing_ref
     );
     assert!(!waits[0].contains("billing"), "{}", waits[0]);
 }
+
+/// zeus at work on T-1, its window refused with `held`, dated a minute after it began, and
+/// the task held; then its window goes (a Close, an exit; a daemon restart ends every window
+/// the same way), the human presses Try again now, and the window comes back on its
+/// conversation: its record reads what the one before it ended in (T-841's P1-A).
+fn reopened_after_try_again(
+    context: &Context,
+    held: impl Fn(String) -> Quota,
+    failed: bool,
+) -> (Tiers<'_>, String) {
+    context.adapter.resumes_records.set(true);
+    context.adapter.rereads_failures.set(true);
+    let tiers = Tiers::new(context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let zeus = tiers.assignee(1);
+    context.advance(60_000);
+    if failed {
+        context.adapter.refuse(&zeus, held(now(context)));
+    } else {
+        context.adapter.quota(&zeus, Some(held(now(context))));
+    }
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert!(tiers.out_until("zeus").is_some());
+    context.advance(60_000);
+    context.exit("zeus");
+    context.pass().unwrap();
+    context.advance(60_000);
+    context.back_from_quota(tiers.project.id, "zeus").unwrap();
+    // The words that resume it go into the reopened window; its turn begins, and the record it
+    // reads is a turn that got through, not the refusal's (the fake does not write it by itself).
+    for _ in 0..12 {
+        context.pass().unwrap();
+        if given(context, &zeus)
+            .iter()
+            .any(|said| said.contains("Resumed:"))
+        {
+            break;
+        }
+    }
+    context.adapter.with(&zeus, |agent| {
+        agent.failed = false;
+        agent.quota = None;
+    });
+    context.advance(1_000);
+    context.adapter.writes(&zeus, "Going on.", &now(context));
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    (tiers, zeus)
+}
+
+/// The words that resumed T-1 and the notes that say it failed, to be counted.
+fn went_on(context: &Context, tiers: &Tiers<'_>, zeus: &str) {
+    assert_eq!(
+        placed(&tiers.task(1).task),
+        ("working", Some(zeus)),
+        "the task goes on, it is not failed by the refusal that held it"
+    );
+    let resumed = given(context, zeus)
+        .iter()
+        .filter(|said| said.contains("Resumed:"))
+        .count();
+    assert_eq!(resumed, 1, "{:?}", given(context, zeus));
+    assert_eq!(
+        tiers.out_until("zeus"),
+        None,
+        "not held again by the old record"
+    );
+    assert!(
+        tiers
+            .notes("chief")
+            .iter()
+            .all(|note| !note.contains("failed")),
+        "{:?}",
+        tiers.notes("chief")
+    );
+}
+
+#[test]
+fn a_task_held_for_an_account_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_refusal()
+{
+    let context = Context::new();
+    let (tiers, zeus) = reopened_after_try_again(
+        &context,
+        |at| Quota::Unavailable {
+            at: Some(at),
+            because: BECAUSE.to_owned(),
+        },
+        true,
+    );
+    went_on(&context, &tiers, &zeus);
+}
+
+#[test]
+fn a_task_held_for_a_moved_model_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_failed_turn(
+) {
+    // Muse's shape: the 402 fails the turn, and the reconfigure follows it.
+    let context = Context::new();
+    let (tiers, zeus) = reopened_after_try_again(&context, |at| fell_back(&at).as_quota(), true);
+    went_on(&context, &tiers, &zeus);
+}
+
+#[test]
+fn a_task_held_for_a_moved_model_goes_on_at_try_again_when_its_window_was_reopened_on_the_old_move()
+{
+    // Claude's `fallback` and Codex's reroute: no failed turn, the window rests on the move.
+    let context = Context::new();
+    let (tiers, zeus) = reopened_after_try_again(&context, |at| fell_back(&at).as_quota(), false);
+    went_on(&context, &tiers, &zeus);
+}
+
+const BECAUSE: &str = "its billing was refused";

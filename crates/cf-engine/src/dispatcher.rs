@@ -1119,9 +1119,6 @@ impl Dispatcher {
                 return Ok(());
             }
         };
-        // A refusal held for no time that the record dates before this window opened is
-        // history: a Resume brings back the transcript of a window that was held (T-816).
-        let observed = self.since_open(record, observed);
         record.delivery.borrow_mut().lost = observed.lost().len();
         // Quota belongs to the member: a session that runs out takes its member out.
         let owner = self.member_of(project, participant);

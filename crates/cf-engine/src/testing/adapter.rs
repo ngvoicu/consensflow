@@ -268,6 +268,11 @@ pub struct FakeAdapter {
     /// The readings of the windows opened from now on say the record each item
     /// is of: every harness's but Devin's, whose items are its store's.
     pub says_places: Cell<bool>,
+    /// A window opened again on a conversation reads what the one before it ended in, as a
+    /// harness's record keeps it: the failure of its last turn and the quota it said (a
+    /// refusal stays in the record a Resume reads, T-841). Nothing of either, as Node's
+    /// suite, where each window began clean.
+    pub rereads_failures: Cell<bool>,
 }
 
 impl FakeAdapter {
@@ -338,6 +343,7 @@ impl FakeAdapter {
             resumes_records: Cell::new(false),
             trusts: RefCell::new(None),
             says_places: Cell::new(true),
+            rereads_failures: Cell::new(false),
         })
     }
 
@@ -728,6 +734,17 @@ impl FakeAdapter {
             .unwrap_or_default()
     }
 
+    /// What the last window on `session` ended in: its failure, with its words, and the quota
+    /// it said.
+    fn failure_of(&self, session: &str) -> Option<(bool, Option<String>, Option<Arc<Quota>>)> {
+        self.agents
+            .borrow()
+            .iter()
+            .rev()
+            .find(|agent| agent.native == session)
+            .map(|agent| (agent.failed, agent.failure.clone(), agent.quota.clone()))
+    }
+
     pub(super) fn record_of(&self, session: &str) -> Option<(Vec<Item>, bool)> {
         let agents = self.agents.borrow();
         agents
@@ -876,6 +893,11 @@ impl Asked {
             .resume
             .map(|session| fake.lost_of(session))
             .unwrap_or_default();
+        let (failed, failure, quota) = launch
+            .resume
+            .filter(|_| fake.rereads_failures.get())
+            .and_then(|session| fake.failure_of(session))
+            .unwrap_or((false, None, None));
         let mut agent = FakeAgent {
             launch: id.clone(),
             handle: launch.handle.to_owned(),
@@ -887,15 +909,15 @@ impl Asked {
             lost,
             says_places: fake.says_places.get(),
             waiting: None,
-            quota: None,
+            quota,
             model_drift: None,
             admit: true,
             arrive: true,
             queued: false,
             took: false,
             held: false,
-            failed: false,
-            failure: None,
+            failed,
+            failure,
             shows: None,
             records: HashMap::new(),
             records_settled: HashMap::new(),
