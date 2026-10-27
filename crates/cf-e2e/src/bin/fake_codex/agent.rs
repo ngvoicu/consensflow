@@ -45,6 +45,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -56,6 +57,18 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::servers::Plugins;
+
+/// Says the turn `turn` completed once it is over, however it ends, as Codex does.
+struct Completed<'a> {
+    agent: &'a Agent,
+    turn: &'a str,
+}
+
+impl Drop for Completed<'_> {
+    fn drop(&mut self) {
+        self.agent.notify("turn/completed", self.turn);
+    }
+}
 
 /// The thread a run has, and the TUI sees, unless it is told to have one of its own.
 pub const THREAD: &str = "01a09094-938f-7fd1-a2d3-315cf92b4559";
@@ -85,6 +98,10 @@ pub struct Agent {
     begun: AtomicBool,
     /// The records the rollout holds, to number the next.
     records: AtomicU64,
+    /// The connections that hear what Codex says of its thread unasked: a turn's start
+    /// and its end (`turn/started`, `turn/completed`), which the broker keeps the thread's
+    /// idle by.
+    listeners: Mutex<Vec<Sender<Value>>>,
 }
 
 /// What `lock` holds, whether or not a thread that held it panicked.
@@ -136,6 +153,7 @@ impl Agent {
             turns: Mutex::new(()),
             begun: AtomicBool::new(false),
             records: AtomicU64::new(0),
+            listeners: Mutex::new(Vec::new()),
         }
     }
 
@@ -174,6 +192,23 @@ impl Agent {
     pub fn take(self: &Arc<Self>, text: &str) {
         let (agent, text) = (Arc::clone(self), text.to_owned());
         thread::spawn(move || agent.turn(&text));
+    }
+
+    /// A connection hears, from now on, what Codex says of the thread unasked.
+    pub fn listen(&self) -> Receiver<Value> {
+        let (said, heard) = mpsc::channel();
+        held(&self.listeners).push(said);
+        heard
+    }
+
+    /// Tells every connection that listens `method` of the thread, as Codex notifies;
+    /// one that has gone is told no more.
+    fn notify(&self, method: &str, turn: &str) {
+        let notice = json!({
+            "method": method,
+            "params": { "threadId": self.thread(), "turn": { "id": turn } },
+        });
+        held(&self.listeners).retain(|listener| listener.send(notice.clone()).is_ok());
     }
 
     /// Whether this server holds its thread, which it takes where no other server that
@@ -235,6 +270,11 @@ impl Agent {
         let thread = self.thread();
         let began = Instant::now();
         let turn = uuid::Uuid::new_v4().to_string();
+        self.notify("turn/started", &turn);
+        let _completed = Completed {
+            agent: self,
+            turn: &turn,
+        };
         let (message, answer) = (item_id(), item_id());
         self.write(
             "event_msg",

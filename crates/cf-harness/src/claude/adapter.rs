@@ -578,11 +578,17 @@ impl Window for ClaudeWindow {
         })
     }
 
+    /// The box as the next paste meets it: one its own hand-over empties first (the
+    /// message an interrupt of ours put back, a `/compact` the human's cancel left, which
+    /// [`ClaudeWindow::ready`] found there) holds nothing the paste would go in behind.
     fn input_box<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
     ) -> Work<'a, Option<InputBox>> {
+        if self.restored.get() || self.clear_first.get() {
+            return Box::pin(async { Some(InputBox::Empty) });
+        }
         Box::pin(input_box::on_screen(host, pane, Harness::Claude))
     }
 

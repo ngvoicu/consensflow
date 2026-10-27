@@ -22,6 +22,8 @@ pacing-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "lau
 pacing-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "pi::"]
 # The pane host's count of the human's keys.
 pacing-panes = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter"]
+# A Claude chief whose cancelled compact left `/compact` in its box (the regression's).
+pacing-compact = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "--", "a_claude_chief_whose_compact_the_human_cancelled_is_at_rest_and_is_handed_its_workers_result_alone"]
 
 [[plant]]
 name = "pacing reader: a message Claude takes into a turn under way is no item, and its arrival never shows"
@@ -327,3 +329,13 @@ runs = ["pacing-kit"]
 file = "crates/cf-engine/src/arrival.rs"
 find = "            .is_some_and(|quiet| (quiet as f64) < ENTER_AGAIN_QUIET_MS);"
 replace = "            .is_some_and(|quiet| (quiet as f64) < 0.0);"
+
+[[plant]]
+name = "pacing gate: Claude's box its own hand-over empties first holds words for the fresh look"
+meant = "a_claude_chief_whose_compact_the_human_cancelled_is_at_rest_and_is_handed_its_workers_result_alone"
+runs = ["pacing-compact"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "        if self.restored.get() || self.clear_first.get() {"
+replace = "        if false {"

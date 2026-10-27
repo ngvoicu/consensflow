@@ -304,6 +304,7 @@ fn opens_codex_as_its_server_on_a_private_socket_and_its_tui_through_the_broker_
             "revision": 1,
             "empty": true,
             "available": true,
+            "idle": true,
         })
     );
     assert!(
