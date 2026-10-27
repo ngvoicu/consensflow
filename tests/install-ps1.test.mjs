@@ -671,7 +671,7 @@ for (const [label, shell] of shells) {
               `consensflow-install.${dead + 1}.${hex}`,
               `consensflow-install.${dead + 2}.${hex}`,
             ].sort(),
-            "only a dead run's folder and the pid that is another program's are gone, and this run's own",
+            `only a dead run's folder and the pid that is another program's are gone, and this run's own: ${ran.out}`,
           )
           assert.equal(readFileSync(path.join(elsewhere, 'keep'), 'utf8'), 'mine')
           assert.ok(!existsSync(gone) && !existsSync(unrelated))

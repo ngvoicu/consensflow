@@ -501,11 +501,28 @@ remove everything.
         [bool]($line -and $line.CommandLine -and $line.CommandLine -like '*install.ps1*')
     }
 
+    # Deletes the folder $path and what is in it, a link inside it as a link: a junction or a
+    # symbolic link is removed and its target is left, never entered (Directory.Delete with
+    # recursion is not trusted with one, nor Remove-Item -Recurse in Windows PowerShell).
+    function Remove-CfFolder([string]$path) {
+        foreach ($entry in ([IO.DirectoryInfo]$path).GetFileSystemInfos()) {
+            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                if ($entry -is [IO.DirectoryInfo]) { [IO.Directory]::Delete($entry.FullName) } else { [IO.File]::Delete($entry.FullName) }
+            } elseif ($entry -is [IO.DirectoryInfo]) {
+                Remove-CfFolder $entry.FullName
+            } else {
+                $entry.Attributes = [IO.FileAttributes]::Normal
+                [IO.File]::Delete($entry.FullName)
+            }
+        }
+        [IO.Directory]::Delete($path)
+    }
+
     # Takes away what a run that was killed (no `finally` runs) left in the user's own
     # temporary folder: its folder, consensflow-install.<pid>.<12 hex>, of a pid no install
     # runs as (a process that has it is an install only if Test-CfInstallGoesOn says it may
     # be). Only a real folder, never a link; the folder is deleted without following a link
-    # inside it; this run's own folder ($own) is never one; every one is said in full.
+    # inside it (Remove-CfFolder); this run's own folder ($own) is never one; every one is said in full.
     function Remove-CfStaleRuns([string]$own) {
         foreach ($item in Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Force -ErrorAction SilentlyContinue) {
             if ($item.Name -cnotmatch '\Aconsensflow-install\.([1-9][0-9]{0,9})\.[0-9a-f]{12}\z') { continue }
@@ -522,7 +539,7 @@ remove everything.
                 continue
             }
             try {
-                [IO.Directory]::Delete($path, $true)
+                Remove-CfFolder $path
                 Write-Host "consensflow: removed $path, the folder an earlier install worked in (no install runs as process $pidOf)."
             } catch {
                 Write-Host "consensflow: could not remove ${path}: $($_.Exception.Message)"
