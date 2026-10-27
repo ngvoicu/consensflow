@@ -134,8 +134,19 @@ fn a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_it
         .unwrap();
     let folder = home
         .path()
-        .join(format!("consensflow/integrations/muse/{LAUNCH}"));
-    let role = folder.join("role/.claude/skills/consensflow-worker/SKILL.md");
+        .join("consensflow")
+        .join("integrations")
+        .join("muse")
+        .join(LAUNCH);
+    let role = [
+        "role",
+        ".claude",
+        "skills",
+        "consensflow-worker",
+        "SKILL.md",
+    ]
+    .iter()
+    .fold(folder.clone(), |path, part| path.join(part));
     assert!(command.contains(" hook muse-session "), "{command}");
     assert!(
         command.contains(&format!("'{}'", role.display())),
