@@ -640,8 +640,8 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/paths.rs"
-find = '''                && payload["record"]["pid"].as_u64() == Some(u64::from(pid))'''
-replace = '''                && payload["record"]["pid"].as_u64().is_some()'''
+find = '''        .find(|(_, head)| head.pid == Some(u64::from(pid)))'''
+replace = '''        .find(|(_, head)| head.pid.is_some())'''
 
 # The window's session: none older than its launch, whatever its pid.
 [[plant]]
@@ -651,8 +651,8 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/paths.rs"
-find = '''                    let begun = begun_ms(&name).is_some_and(|ms| ms >= launched_ms - SKEW_MS);'''
-replace = '''                    let begun = begun_ms(&name).is_some_and(|ms| ms >= launched_ms.min(0) - SKEW_MS);'''
+find = '''                    if begun_ms(&name).is_some_and(|ms| ms >= launched_ms - SKEW_MS) {'''
+replace = '''                    if begun_ms(&name).is_some_and(|ms| ms >= launched_ms.min(0) - SKEW_MS) {'''
 
 # The window's session: one its process opened after its hook spoke is the one it shows.
 [[plant]]
