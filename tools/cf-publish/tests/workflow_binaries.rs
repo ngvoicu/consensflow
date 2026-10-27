@@ -73,13 +73,64 @@ fn job_key(job: &str, key: &str) -> Option<String> {
         .map(plain)
 }
 
-/// The shell a job's `defaults: run:` gives its steps.
-fn default_shell(job: &str) -> Option<String> {
-    let mut lines = job.lines().skip_while(|line| *line != "    defaults:");
-    lines.next()?;
+/// How many spaces a line is indented by.
+fn indent(line: &str) -> usize {
+    line.len() - line.trim_start().len()
+}
+
+/// The lines under the key `key:` that stands `at` spaces in `text`, up to the first line indented
+/// no more than it; none where it has no such key. Comments and blank lines are left out.
+fn under(text: &str, at: usize, key: &str) -> Vec<String> {
+    let live = live(text);
+    let mut lines = live
+        .lines()
+        .skip_while(|line| indent(line) != at || plain(line) != format!("{key}:"));
+    if lines.next().is_none() {
+        return Vec::new();
+    }
     lines
-        .take_while(|line| line.starts_with("     "))
-        .find_map(|line| line.trim().strip_prefix("shell:").map(plain))
+        .take_while(|line| line.trim().is_empty() || indent(line) > at)
+        .filter(|line| !line.trim().is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The value of a `name: value` line, as YAML reads it: without a comment after it, or quotes.
+fn scalar_of(line: &str) -> Option<(String, String)> {
+    let (name, value) = line.trim().split_once(':')?;
+    let value = plain(value);
+    Some((
+        name.trim().to_string(),
+        value.trim_matches(['"', '\'']).to_string(),
+    ))
+}
+
+/// The `env:` of the job, or of the workflow where `at` is 0: its variables, in order.
+fn env_of(text: &str, at: usize) -> Vec<(String, String)> {
+    under(text, at, "env")
+        .iter()
+        .filter(|line| indent(line) == at + 2)
+        .filter_map(|line| scalar_of(line))
+        .collect()
+}
+
+/// The shell and the working directory `defaults: run:` of the job, or of the workflow where `at`
+/// is 0, gives its steps.
+fn defaults_of(text: &str, at: usize) -> (Option<String>, Option<String>) {
+    let defaults = under(text, at, "defaults").join("\n");
+    let run = under(&defaults, at + 2, "run");
+    let find = |key: &str| {
+        run.iter()
+            .filter(|line| indent(line) == at + 4)
+            .filter_map(|line| scalar_of(line))
+            .find_map(|(name, value)| (name == key).then_some(value))
+    };
+    (find("shell"), find("working-directory"))
+}
+
+/// The part of a workflow's text before its jobs: its own `env:` and `defaults:`.
+fn before_the_jobs(text: &str) -> &str {
+    text.split("\njobs:").next().unwrap_or(text)
 }
 
 /// What a step's `with:` gives `key`.
@@ -103,7 +154,8 @@ struct Download {
 #[derive(Clone, Copy, PartialEq)]
 enum Shell {
     Bash,
-    Windows,
+    Pwsh,
+    Cmd,
 }
 
 /// A step's script, with what it runs in.
@@ -148,6 +200,9 @@ fn parse(file: &str, text: &str) -> Parsed {
         unread: Vec::new(),
     };
     let (mut uploads, mut runners) = (0, 0);
+    let before = before_the_jobs(text);
+    let (top_shell, top_directory) = defaults_of(before, 0);
+    let top_env = env_of(before, 0);
     for name in job_names(text) {
         let body = job(text, &name);
         if let Some(called) = job_key(&body, "uses") {
@@ -157,7 +212,8 @@ fn parse(file: &str, text: &str) -> Parsed {
             continue;
         }
         let runs_on = job_key(&body, "runs-on");
-        let default_shell = default_shell(&body);
+        let (job_shell, job_directory) = defaults_of(&body, 4);
+        let job_env = env_of(&body, 4);
         runners += usize::from(runs_on.is_some());
         let system = runs_on
             .as_deref()
@@ -182,7 +238,7 @@ fn parse(file: &str, text: &str) -> Parsed {
                     (Some(artifact), Some(path)) if with(&step, "pattern").is_none() => {
                         job.downloads.push(Download {
                             artifact,
-                            folder: spelled(&expressions(&path)),
+                            folder: spelled(&from_the_workspace(&expressions(&path))),
                         });
                     }
                     _ => parsed.unread.push(format!(
@@ -190,16 +246,33 @@ fn parse(file: &str, text: &str) -> Parsed {
                     )),
                 }
             } else if step.runs() {
-                let shell = step.field("shell").map(|shell| plain(&shell));
-                let windows = match shell.or_else(|| default_shell.clone()).as_deref() {
-                    Some(shell) => ["pwsh", "powershell", "cmd"].contains(&shell),
-                    None => system == Some("windows"),
+                let shell = step
+                    .field("shell")
+                    .map(|shell| plain(&shell))
+                    .or_else(|| job_shell.clone())
+                    .or_else(|| top_shell.clone());
+                let shell = match shell
+                    .as_deref()
+                    .and_then(|shell| shell.split_whitespace().next())
+                {
+                    Some("bash" | "sh") => Shell::Bash,
+                    Some("pwsh" | "powershell") => Shell::Pwsh,
+                    Some("cmd") => Shell::Cmd,
+                    _ if system == Some("windows") => Shell::Pwsh,
+                    _ => Shell::Bash,
                 };
+                let mut env = top_env.clone();
+                env.extend(job_env.iter().cloned());
+                env.extend(step.env());
                 job.scripts.push(Script {
                     text: step.script(),
-                    shell: if windows { Shell::Windows } else { Shell::Bash },
-                    directory: step.field("working-directory").map(|dir| plain(&dir)),
-                    env: step.env(),
+                    shell,
+                    directory: step
+                        .field("working-directory")
+                        .map(|dir| plain(&dir))
+                        .or_else(|| job_directory.clone())
+                        .or_else(|| top_directory.clone()),
+                    env,
                 });
             }
         }
@@ -303,6 +376,15 @@ fn expressions(text: &str) -> String {
     out
 }
 
+/// A path as download-artifact reads it: one that is not from a root is the workspace's.
+fn from_the_workspace(path: &str) -> String {
+    if absolute(path.trim()) {
+        path.to_string()
+    } else {
+        format!("$GITHUB_WORKSPACE/{path}")
+    }
+}
+
 /// `word` with each variable it names that is bound replaced by its value.
 fn expand(word: &str, bindings: &BTreeMap<String, String>) -> String {
     let mut out = String::new();
@@ -355,10 +437,18 @@ fn absolute(path: &str) -> bool {
     path.starts_with(['$', '/', '~']) || path.as_bytes().get(1) == Some(&b':')
 }
 
-/// The statements of a script, each as its words with their quotes taken off: split at a line's
-/// end, `;`, `&`, `&&`, `|`, `||`, a parenthesis and a backtick, outside quotes; the comments left
-/// out, and PowerShell's `&` that starts a statement (the call operator) with them.
-fn statements(script: &str, shell: Shell) -> Vec<Vec<String>> {
+/// One statement of a script: its words, their quotes taken off, and whether the one before it
+/// was piped into it.
+struct Statement {
+    words: Vec<String>,
+    piped: bool,
+}
+
+/// The statements of a script, split at a line's end, `;`, `&`, `&&`, `|`, `||`, a parenthesis and
+/// a backtick, outside quotes; the comments left out, and PowerShell's `&` that starts a statement
+/// (the call operator) with them. Quotes are as the shell reads them: cmd has no single quote, and
+/// only bash takes a backslash for an escape.
+fn statements(script: &str, shell: Shell) -> Vec<Statement> {
     let bash = shell == Shell::Bash;
     let text = if bash {
         script.replace("\\\n", " ")
@@ -366,10 +456,11 @@ fn statements(script: &str, shell: Shell) -> Vec<Vec<String>> {
         script.replace("`\n", " ")
     };
     let chars: Vec<char> = text.chars().collect();
-    let mut out: Vec<Vec<String>> = Vec::new();
+    let mut out: Vec<Statement> = Vec::new();
     let mut words: Vec<String> = Vec::new();
     let mut word = String::new();
     let mut started = false;
+    let mut piped = false;
     let mut quote: Option<char> = None;
     let mut at = 0;
     while at < chars.len() {
@@ -389,7 +480,11 @@ fn statements(script: &str, shell: Shell) -> Vec<Vec<String>> {
             }
         } else {
             match c {
-                '\'' | '"' => {
+                '"' => {
+                    quote = Some(c);
+                    started = true;
+                }
+                '\'' if shell != Shell::Cmd => {
                     quote = Some(c);
                     started = true;
                 }
@@ -398,7 +493,7 @@ fn statements(script: &str, shell: Shell) -> Vec<Vec<String>> {
                     word.push(chars[at]);
                     started = true;
                 }
-                '#' if !started => {
+                '#' if !started && shell != Shell::Cmd => {
                     while at + 1 < chars.len() && chars[at + 1] != '\n' {
                         at += 1;
                     }
@@ -411,8 +506,20 @@ fn statements(script: &str, shell: Shell) -> Vec<Vec<String>> {
                     let call = c == '&'
                         && words.is_empty()
                         && chars.get(at + 1).is_some_and(|next| next.is_whitespace());
-                    if !matches!(c, ' ' | '\t' | '\r') && !call && !words.is_empty() {
-                        out.push(std::mem::take(&mut words));
+                    if !matches!(c, ' ' | '\t' | '\r') && !call {
+                        // A single `|` pipes into the next statement; `||` does not.
+                        let pipe = c == '|'
+                            && chars.get(at + 1) != Some(&'|')
+                            && (at == 0 || chars[at - 1] != '|');
+                        if !words.is_empty() {
+                            out.push(Statement {
+                                words: std::mem::take(&mut words),
+                                piped,
+                            });
+                            piped = pipe;
+                        } else if c != '\n' {
+                            piped = pipe;
+                        }
                     }
                 }
                 _ => {
@@ -427,8 +534,31 @@ fn statements(script: &str, shell: Shell) -> Vec<Vec<String>> {
         words.push(word);
     }
     if !words.is_empty() {
-        out.push(words);
+        out.push(Statement { words, piped });
     }
+    out
+}
+
+/// `text` of a cmd script with its `%NAME%` as the variables bash names: `$NAME`.
+fn cmd_variables(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after.find('%') {
+            Some(end) if end > 0 && after[..end].chars().all(is_name) => {
+                out.push('$');
+                out.push_str(&after[..end]);
+                rest = &after[end + 1..];
+            }
+            _ => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
     out
 }
 
@@ -456,6 +586,57 @@ const RUNS_AN_ARGUMENT: [&str; 7] = [
 
 /// Programs that change the folder the next lines work in.
 const CHANGES_FOLDER: [&str; 5] = ["cd", "pushd", "chdir", "set-location", "sl"];
+
+/// Programs that only read or move what they are given, which is no run of it: what `xargs` and
+/// `find -exec` start with one of these is not run.
+const READS: [&str; 40] = [
+    "shasum",
+    "sha256sum",
+    "sha1sum",
+    "md5",
+    "md5sum",
+    "cat",
+    "cp",
+    "mv",
+    "ls",
+    "rm",
+    "echo",
+    "printf",
+    "grep",
+    "egrep",
+    "wc",
+    "stat",
+    "file",
+    "head",
+    "tail",
+    "tar",
+    "zip",
+    "unzip",
+    "du",
+    "test",
+    "true",
+    "touch",
+    "mkdir",
+    "rmdir",
+    "dir",
+    "type",
+    "copy",
+    "xcopy",
+    "move",
+    "del",
+    "certutil",
+    "findstr",
+    "get-filehash",
+    "copy-item",
+    "get-childitem",
+    "remove-item",
+];
+
+/// `xargs` options that are given a value of their own.
+const XARGS_TAKES: [&str; 9] = ["-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a", "-J"];
+
+/// The extensions of what cmd runs by a bare name, from the folder it is in.
+const CMD_EXTENSIONS: [&str; 4] = [".exe", ".bat", ".cmd", ".com"];
 
 /// `name=value` as bash assigns it.
 fn assignment(word: &str) -> Option<(&str, &str)> {
@@ -490,31 +671,87 @@ fn is_mode(word: &str) -> bool {
     word.starts_with('-') || word.chars().all(|c| "ugoa+-=rwxXst,01234567".contains(c))
 }
 
-/// The downloads (by their place in `downloads`) whose files the script makes run.
-fn runs_of(script: &Script, downloads: &[Download]) -> BTreeSet<usize> {
-    let mut bindings: BTreeMap<String, String> = BTreeMap::new();
-    for (name, value) in &script.env {
-        let value = spelled(&expand(&expressions(value), &bindings));
-        bindings.insert(name.clone(), value);
-    }
-    let mut cwd: Option<String> = Some(script.directory.as_deref().map_or_else(
-        || "$GITHUB_WORKSPACE".to_string(),
-        |dir| spelled(&expand(&expressions(dir), &bindings)),
-    ));
-    let mut found = BTreeSet::new();
-    let at = |path: &str, cwd: &Option<String>| {
+/// The name of a program as the rule knows it: its last part, in lower case, without `.exe`.
+fn program_of(command: &str) -> String {
+    let lowered = command.replace('\\', "/").to_lowercase();
+    let last = lowered.rsplit('/').next().unwrap_or(&lowered);
+    last.strip_suffix(".exe").unwrap_or(last).to_string()
+}
+
+/// Where a script is read: the variables it has bound, the folder it is in, the downloads whose
+/// files it runs, and the downloads the earlier statements of the pipeline it is in name.
+struct Walk<'a> {
+    downloads: &'a [Download],
+    bindings: BTreeMap<String, String>,
+    cwd: Option<String>,
+    found: BTreeSet<usize>,
+    named: BTreeSet<usize>,
+}
+
+impl Walk<'_> {
+    /// `path` from the root: a path from a root as it is, any other from the folder the script is in.
+    fn at(&self, path: &str) -> Option<String> {
         if absolute(path) {
             Some(spelled(path))
         } else {
-            cwd.as_ref().map(|cwd| spelled(&format!("{cwd}/{path}")))
+            self.cwd
+                .as_ref()
+                .map(|cwd| spelled(&format!("{cwd}/{path}")))
         }
-    };
-    for raw in statements(&expressions(&script.text), script.shell) {
-        if let Some((name, value)) = powershell_assignment(&raw, &bindings) {
-            bindings.insert(name, value);
-            continue;
+    }
+
+    /// The downloads `path` is in the folder of, or in a folder of.
+    fn inside_of(&self, path: &str) -> BTreeSet<usize> {
+        let Some(path) = self.at(path) else {
+            return BTreeSet::new();
+        };
+        (0..self.downloads.len())
+            .filter(|index| inside(&path, &self.downloads[*index].folder))
+            .collect()
+    }
+
+    /// A file at `path` is run.
+    fn hit(&mut self, path: &str) {
+        let found = self.inside_of(path);
+        self.found.extend(found);
+    }
+
+    /// A script's text, as the shell reads it.
+    fn text(&mut self, text: &str, shell: Shell) {
+        let text = if shell == Shell::Cmd {
+            cmd_variables(text)
+        } else {
+            text.to_string()
+        };
+        for statement in statements(&expressions(&text), shell) {
+            if !statement.piped {
+                self.named.clear();
+            }
+            self.statement(statement.words, shell);
         }
-        let words: Vec<String> = raw.iter().map(|word| expand(word, &bindings)).collect();
+    }
+
+    /// One statement.
+    fn statement(&mut self, raw: Vec<String>, shell: Shell) {
+        if let Some((name, value)) = powershell_assignment(&raw, &self.bindings) {
+            self.bindings.insert(name, value);
+            return;
+        }
+        if shell == Shell::Cmd
+            && raw
+                .first()
+                .is_some_and(|set| set.eq_ignore_ascii_case("set"))
+        {
+            if let Some((name, value)) = raw.get(1).and_then(|word| word.split_once('=')) {
+                let value = spelled(&expand(value, &self.bindings));
+                self.bindings.insert(name.to_string(), value);
+            }
+            return;
+        }
+        let words: Vec<String> = raw
+            .iter()
+            .map(|word| expand(word, &self.bindings))
+            .collect();
         let mut start = 0;
         let mut wrapped = false;
         while start < words.len() {
@@ -522,54 +759,174 @@ fn runs_of(script: &Script, downloads: &[Download]) -> BTreeSet<usize> {
             if BEFORE_A_COMMAND.contains(&word) {
                 wrapped = true;
             } else if let Some((name, value)) = assignment(word) {
-                bindings.insert(name.to_string(), spelled(value));
+                self.bindings.insert(name.to_string(), spelled(value));
             } else if !(wrapped && word.starts_with('-')) {
                 break;
             }
             start += 1;
         }
-        let Some(command) = words.get(start) else {
-            continue;
-        };
-        let args = &words[start + 1..];
-        let lowered = command.to_lowercase();
-        let program = lowered.rsplit('/').next().unwrap_or(&lowered);
-        let mut hit = |path: &str| {
-            if let Some(path) = at(path, &cwd) {
-                for (index, download) in downloads.iter().enumerate() {
-                    if inside(&path, &download.folder) {
-                        found.insert(index);
-                    }
+        if let Some(command) = words.get(start) {
+            self.command(command, &words[start + 1..], shell);
+        }
+        // What this statement names is what the statements piped from it are given.
+        let path_like = |word: &String| word.contains(['/', '\\']) || word.starts_with(['$', '.']);
+        let mut named: BTreeSet<usize> = words
+            .iter()
+            .filter(|word| path_like(word))
+            .flat_map(|word| self.inside_of(word))
+            .collect();
+        let program = words.get(start).map(|command| program_of(command));
+        if ["ls", "find", "dir", "tree"].contains(&program.as_deref().unwrap_or(""))
+            && !words[start..].iter().any(path_like)
+        {
+            named.extend(self.cwd.iter().flat_map(|cwd| self.inside_of(cwd)));
+        }
+        self.named.extend(named);
+    }
+
+    /// A command and its arguments.
+    fn command(&mut self, command: &str, args: &[String], shell: Shell) {
+        let program = program_of(command);
+        let program = program.as_str();
+        if NO_COMMAND.contains(&program) {
+            return;
+        }
+        match program {
+            "eval" => self.text(&args.join(" "), shell),
+            "sh" | "bash" | "dash" | "zsh" | "ksh" => {
+                let flag = args.iter().position(|arg| {
+                    arg.starts_with('-') && !arg.starts_with("--") && arg.contains('c')
+                });
+                if let Some(script) = flag.and_then(|at| args.get(at + 1)) {
+                    self.text(script, Shell::Bash);
                 }
             }
-        };
-        if NO_COMMAND.contains(&program) {
-            continue;
-        } else if CHANGES_FOLDER.contains(&program) {
-            cwd = args.first().and_then(|dir| {
-                let dir = spelled(dir);
-                let unknown = dir.contains('$')
-                    && !dir.starts_with("$RUNNER_TEMP")
-                    && !dir.starts_with("$GITHUB_WORKSPACE");
-                if unknown {
-                    None
-                } else {
-                    at(&dir, &cwd)
+            "pwsh" | "powershell" => {
+                let flag = args
+                    .iter()
+                    .position(|arg| ["-c", "-command"].contains(&arg.to_lowercase().as_str()));
+                if let Some(at) = flag {
+                    self.text(&args[at + 1..].join(" "), Shell::Pwsh);
                 }
-            });
-        } else if program == "chmod" {
-            args.iter()
+            }
+            "cmd" => {
+                let flag = args.iter().position(|arg| {
+                    ["/c", "/k", "//c", "//k"].contains(&arg.to_lowercase().as_str())
+                });
+                if let Some(at) = flag {
+                    self.text(&args[at + 1..].join(" "), Shell::Cmd);
+                }
+            }
+            "xargs" => self.xargs(args, shell),
+            "find" => self.find(args, shell),
+            "chmod" => args
+                .iter()
                 .filter(|arg| !is_mode(arg))
-                .for_each(|arg| hit(arg));
-        } else if RUNS_AN_ARGUMENT.contains(&program) {
-            args.iter()
-                .filter(|arg| !arg.starts_with('-'))
-                .for_each(|arg| hit(arg));
-        } else if command.contains(['/', '\\']) || command.starts_with('$') {
-            hit(command);
+                .for_each(|arg| self.hit(arg)),
+            program if CHANGES_FOLDER.contains(&program) => {
+                let dir = args.iter().find(|arg| !arg.eq_ignore_ascii_case("/d"));
+                self.cwd = dir.and_then(|dir| {
+                    let dir = spelled(dir);
+                    let unknown = dir.contains('$')
+                        && !dir.starts_with("$RUNNER_TEMP")
+                        && !dir.starts_with("$GITHUB_WORKSPACE");
+                    if unknown {
+                        None
+                    } else {
+                        self.at(&dir)
+                    }
+                });
+            }
+            program if RUNS_AN_ARGUMENT.contains(&program) => args
+                .iter()
+                .filter(|arg| !arg.is_empty() && !arg.starts_with('-'))
+                .filter(|arg| shell != Shell::Cmd || !arg.starts_with('/'))
+                .for_each(|arg| self.hit(arg)),
+            _ => {
+                let bare = shell == Shell::Cmd
+                    && CMD_EXTENSIONS
+                        .iter()
+                        .any(|extension| command.to_lowercase().ends_with(extension));
+                if command.contains(['/', '\\']) || command.starts_with('$') || bare {
+                    self.hit(command);
+                }
+            }
         }
     }
-    found
+
+    /// `xargs [options] command args`: the command is run, with what the pipeline gave it (the
+    /// folders its earlier statements name) among its arguments, unless it only reads.
+    fn xargs(&mut self, args: &[String], shell: Shell) {
+        let mut at = 0;
+        while at < args.len() && args[at].starts_with('-') {
+            at += if XARGS_TAKES.contains(&args[at].as_str()) {
+                2
+            } else {
+                1
+            };
+        }
+        let Some(command) = args.get(at) else {
+            return;
+        };
+        let given = self.named.clone();
+        self.statement(args[at..].to_vec(), shell);
+        if !READS.contains(&program_of(command).as_str()) {
+            self.found.extend(given);
+        }
+    }
+
+    /// `find roots … -exec command … ;`: the command is run, for each file the roots hold, unless
+    /// it only reads.
+    fn find(&mut self, args: &[String], shell: Shell) {
+        let roots: Vec<&String> = args
+            .iter()
+            .take_while(|arg| !arg.starts_with('-') && !["(", "!", ","].contains(&arg.as_str()))
+            .collect();
+        let mut held: BTreeSet<usize> =
+            roots.iter().flat_map(|root| self.inside_of(root)).collect();
+        if roots.is_empty() {
+            held.extend(self.cwd.iter().flat_map(|cwd| self.inside_of(cwd)));
+        }
+        let mut at = 0;
+        while at < args.len() {
+            if ["-exec", "-execdir", "-ok", "-okdir"].contains(&args[at].as_str()) {
+                let end = args[at + 1..]
+                    .iter()
+                    .position(|arg| arg == ";" || arg == "+")
+                    .map_or(args.len(), |end| at + 1 + end);
+                if let Some(command) = args.get(at + 1).filter(|_| end > at + 1) {
+                    self.statement(args[at + 1..end].to_vec(), shell);
+                    if !READS.contains(&program_of(command).as_str()) {
+                        self.found.extend(held.iter().copied());
+                    }
+                }
+                at = end;
+            }
+            at += 1;
+        }
+    }
+}
+
+/// The downloads (by their place in `downloads`) whose files the script makes run.
+fn runs_of(script: &Script, downloads: &[Download]) -> BTreeSet<usize> {
+    let mut walk = Walk {
+        downloads,
+        bindings: BTreeMap::new(),
+        cwd: None,
+        found: BTreeSet::new(),
+        named: BTreeSet::new(),
+    };
+    for (name, value) in &script.env {
+        let value = value.trim_matches(['"', '\'']);
+        let value = spelled(&expand(&expressions(value), &walk.bindings));
+        walk.bindings.insert(name.clone(), value);
+    }
+    walk.cwd = Some(script.directory.as_deref().map_or_else(
+        || "$GITHUB_WORKSPACE".to_string(),
+        |dir| spelled(&expand(&expressions(dir), &walk.bindings)),
+    ));
+    walk.text(&script.text, script.shell);
+    walk.found
 }
 
 // --- the rule ------------------------------------------------------------------------------
@@ -677,7 +1034,7 @@ fn the_rule_reads_the_systems_and_the_artifacts_it_is_about() {
     assert!(windows
         .scripts
         .iter()
-        .any(|script| script.shell == Shell::Windows));
+        .any(|script| script.shell == Shell::Pwsh));
     let sign = find("release.yml", "sign");
     let downloads: Vec<&str> = sign
         .downloads
@@ -742,7 +1099,7 @@ fn a_script_runs_a_downloaded_file_when_it_makes_it_executable_or_starts_it() {
         "Set-Location $env:RUNNER_TEMP\\x\n.\\cf.exe --version",
         "\"%RUNNER_TEMP%\\x\\cf.exe\"",
     ] {
-        assert!(runs_x(script, Shell::Windows), "{script}");
+        assert!(runs_x(script, Shell::Pwsh), "{script}");
     }
 }
 
@@ -772,7 +1129,7 @@ fn a_script_that_only_reads_a_downloaded_folder_runs_nothing() {
         "Get-FileHash \"$env:RUNNER_TEMP\\x\\cf.exe\"",
         "Write-Host \"$env:RUNNER_TEMP\\x\\cf.exe\"",
     ] {
-        assert!(!runs_x(script, Shell::Windows), "{script}");
+        assert!(!runs_x(script, Shell::Pwsh), "{script}");
     }
 }
 
@@ -781,8 +1138,14 @@ fn a_script_that_only_reads_a_downloaded_folder_runs_nothing() {
 /// A workflow of a job that builds `tool` on Linux, and one, `use`, on `runs_on` with `steps`
 /// (at six spaces) whose header line ends with `header`, as a fixture needs.
 fn fixture(runs_on: &str, header: &str, steps: &str) -> Workflows {
+    configured("", runs_on, header, "", steps)
+}
+
+/// The same, with `top` (a workflow's own `env:` or `defaults:`) before its jobs and `job` (the
+/// `use` job's own, at four spaces) before its steps.
+fn configured(top: &str, runs_on: &str, header: &str, job: &str, steps: &str) -> Workflows {
     let text = format!(
-        "name: Fixture\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: cargo build --release\n      - uses: actions/upload-artifact@v7\n        with:\n          name: tool\n          path: target/release/tool\n\n  use:{header}\n    runs-on: {runs_on}\n    needs: build\n    steps:\n{steps}"
+        "name: Fixture\non: push\n{top}jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: cargo build --release\n      - uses: actions/upload-artifact@v7\n        with:\n          name: tool\n          path: target/release/tool\n\n  use:{header}\n    runs-on: {runs_on}\n{job}    needs: build\n    steps:\n{steps}"
     );
     BTreeMap::from([("fixture.yml".to_string(), text)])
 }
@@ -987,6 +1350,244 @@ fn a_run_written_as_a_quoted_yaml_value_is_read_as_its_script() {
         let quoted = fixture("macos-latest", "", &format!("{}{run}", download(TEMP_TOOL)));
         assert_caught(&quoted, LINUX_TOOL_ON_MAC);
     }
+}
+
+// --- what the rule once did not read (T-831 P3-4, T-840) --------------------------------------
+
+#[test]
+fn a_relative_path_of_a_download_is_the_workspace_s() {
+    for (path, script) in [
+        ("tools", "chmod +x tools/tool"),
+        ("tools/", "chmod +x ./tools/tool"),
+        ("./tools", "\"$GITHUB_WORKSPACE/tools/tool\" --version"),
+        ("tools", "cd tools && ./tool"),
+        ("tools", "chmod +x \"${{ github.workspace }}/tools/tool\""),
+    ] {
+        assert_caught(
+            &running("macos-latest", path, "bash", script),
+            LINUX_TOOL_ON_MAC,
+        );
+    }
+    let other = check(&running(
+        "macos-latest",
+        "tools",
+        "bash",
+        "chmod +x other/tool\nchmod +x tools2/tool",
+    ));
+    assert_eq!(other.runs, 0, "{:?}", other.problems);
+}
+
+#[test]
+fn an_env_of_the_job_is_an_env_of_its_steps() {
+    let steps = format!("{}      - run: chmod +x \"$TOOL\"\n", download(TEMP_TOOL));
+    let job = configured(
+        "",
+        "macos-latest",
+        "",
+        "    env:\n      TOOL: ${{ runner.temp }}/tool/tool\n",
+        &steps,
+    );
+    assert_caught(&job, LINUX_TOOL_ON_MAC);
+    let workflow = configured(
+        "env:\n  TOOL: ${{ runner.temp }}/tool/tool\n",
+        "macos-latest",
+        "",
+        "",
+        &steps,
+    );
+    assert_caught(&workflow, LINUX_TOOL_ON_MAC);
+}
+
+#[test]
+fn a_working_directory_of_the_job_s_defaults_is_its_steps() {
+    let steps = format!("{}      - run: ./tool --version\n", download(TEMP_TOOL));
+    let job = configured(
+        "",
+        "macos-latest",
+        "",
+        "    defaults:\n      run:\n        working-directory: ${{ runner.temp }}/tool\n",
+        &steps,
+    );
+    assert_caught(&job, LINUX_TOOL_ON_MAC);
+    let workflow = configured(
+        "defaults:\n  run:\n    working-directory: ${{ runner.temp }}/tool\n",
+        "macos-latest",
+        "",
+        "",
+        &steps,
+    );
+    assert_caught(&workflow, LINUX_TOOL_ON_MAC);
+}
+
+#[test]
+fn a_shell_of_the_defaults_is_the_shell_of_its_steps() {
+    // Under cmd a bare program is run from the folder the script is in, which no other shell does.
+    let steps = format!(
+        "{}      - run: |\n          cd /d %RUNNER_TEMP%\\tool\n          tool.exe --version\n",
+        download(TEMP_TOOL)
+    );
+    let job = configured(
+        "",
+        "windows-latest",
+        "",
+        "    defaults:\n      run:\n        shell: cmd\n",
+        &steps,
+    );
+    assert_caught(&job, LINUX_TOOL_ON_WINDOWS);
+    let workflow = configured(
+        "defaults:\n  run:\n    shell: cmd\n",
+        "windows-latest",
+        "",
+        "",
+        &steps,
+    );
+    assert_caught(&workflow, LINUX_TOOL_ON_WINDOWS);
+    // A step's own shell is first, and where none is given PowerShell reads `tool.exe` as a
+    // command of its PATH, which runs nothing of the folder.
+    let own = format!(
+        "{}      - shell: pwsh\n        run: |\n          Set-Location $env:RUNNER_TEMP\\tool\n          tool.exe --version\n",
+        download(TEMP_TOOL)
+    );
+    let pwsh = configured(
+        "defaults:\n  run:\n    shell: cmd\n",
+        "windows-latest",
+        "",
+        "",
+        &own,
+    );
+    assert_eq!(check(&pwsh).runs, 0, "{:?}", check(&pwsh).problems);
+}
+
+#[test]
+fn a_key_a_step_begins_with_is_read_as_any_other() {
+    for first in [
+        "      - working-directory: ${{ runner.temp }}/tool\n        run: ./tool --version\n",
+        "      - env:\n          TOOL: ${{ runner.temp }}/tool/tool\n        run: chmod +x \"$TOOL\"\n",
+        "      - shell: bash\n        run: chmod +x \"$RUNNER_TEMP/tool/tool\"\n",
+    ] {
+        let steps = format!("{}{first}", download(TEMP_TOOL));
+        assert_caught(
+            &configured(
+                "defaults:\n  run:\n    shell: cmd\n",
+                "macos-latest",
+                "",
+                "",
+                &steps,
+            ),
+            LINUX_TOOL_ON_MAC,
+        );
+    }
+}
+
+#[test]
+fn eval_and_a_shell_given_a_string_run_what_the_string_does() {
+    for script in [
+        "eval \"$RUNNER_TEMP/tool/tool --version\"",
+        "eval chmod +x \"$RUNNER_TEMP/tool/tool\"",
+        "sh -c '\"$RUNNER_TEMP/tool/tool\" --version'",
+        "bash -ec 'chmod +x \"$RUNNER_TEMP/tool/tool\"'",
+        "x=\"$RUNNER_TEMP/tool/tool\"; eval \"$x\"",
+    ] {
+        assert_caught(
+            &running("macos-latest", TEMP_TOOL, "bash", script),
+            LINUX_TOOL_ON_MAC,
+        );
+    }
+    let pwsh = "powershell -NoProfile -Command \"& '$env:RUNNER_TEMP\\tool\\tool.exe' --version\"";
+    assert_caught(
+        &running("windows-latest", TEMP_TOOL, "pwsh", pwsh),
+        LINUX_TOOL_ON_WINDOWS,
+    );
+}
+
+#[test]
+fn xargs_runs_what_it_is_given() {
+    for script in [
+        "find \"$RUNNER_TEMP/tool\" -type f | xargs chmod +x",
+        "ls \"$RUNNER_TEMP/tool\" | xargs -I{} chmod 755 \"$RUNNER_TEMP/tool/{}\"",
+        "printf '%s\\n' a b | xargs -n 1 \"$RUNNER_TEMP/tool/tool\"",
+        "echo \"$RUNNER_TEMP/tool/tool\" | xargs -n1 sh -c 'chmod +x \"$0\"'",
+        "find \"$RUNNER_TEMP/tool\" -type f -print0 | xargs -0 chmod u+x",
+    ] {
+        assert_caught(
+            &running("macos-latest", TEMP_TOOL, "bash", script),
+            LINUX_TOOL_ON_MAC,
+        );
+    }
+    let read = check(&running(
+        "macos-latest",
+        TEMP_TOOL,
+        "bash",
+        "find \"$RUNNER_TEMP/tool\" -type f | xargs shasum -a 256\nfind \"$RUNNER_TEMP/tool\" -type f | xargs ls -l",
+    ));
+    assert_eq!(read.runs, 0, "{:?}", read.problems);
+}
+
+#[test]
+fn find_exec_runs_what_it_is_given() {
+    for script in [
+        "find \"$RUNNER_TEMP/tool\" -type f -exec chmod +x {} +",
+        "find \"$RUNNER_TEMP/tool\" -name tool -exec {} --version \\;",
+        "find \"$RUNNER_TEMP/tool\" -name tool -execdir ./tool --version \\;",
+        "cd \"$RUNNER_TEMP/tool\" && find . -type f -exec chmod 755 {} \\;",
+    ] {
+        assert_caught(
+            &running("macos-latest", TEMP_TOOL, "bash", script),
+            LINUX_TOOL_ON_MAC,
+        );
+    }
+    let read = check(&running(
+        "macos-latest",
+        TEMP_TOOL,
+        "bash",
+        "find \"$RUNNER_TEMP/tool\" -type f -exec shasum -a 256 {} +\nfind \"$RUNNER_TEMP/tool\" -type f -exec ls -l {} \\;",
+    ));
+    assert_eq!(read.runs, 0, "{:?}", read.problems);
+}
+
+#[test]
+fn cmd_c_runs_what_it_is_given() {
+    for (shell, script) in [
+        ("bash", "cmd /c \"$RUNNER_TEMP/tool/tool.exe\" --version"),
+        (
+            "bash",
+            "cmd.exe //c \"$RUNNER_TEMP\\\\tool\\\\tool.exe --version\"",
+        ),
+        (
+            "pwsh",
+            "cmd /c \"$env:RUNNER_TEMP\\tool\\tool.exe --version\"",
+        ),
+        ("pwsh", "cmd /d /s /c \"%RUNNER_TEMP%\\tool\\tool.exe\""),
+        ("cmd", "cmd /c %RUNNER_TEMP%\\tool\\tool.exe"),
+    ] {
+        assert_caught(
+            &running("windows-latest", TEMP_TOOL, shell, script),
+            LINUX_TOOL_ON_WINDOWS,
+        );
+    }
+}
+
+#[test]
+fn under_cmd_a_bare_program_of_the_folder_one_is_in_is_run() {
+    for script in [
+        "cd /d %RUNNER_TEMP%\\tool\ntool.exe --version",
+        "cd /d \"%RUNNER_TEMP%\\tool\" && tool.exe",
+        "pushd %RUNNER_TEMP%\\tool\ncall tool.exe",
+        "set \"TOOLS=%RUNNER_TEMP%\\tool\"\ncd /d %TOOLS%\nstart \"\" /wait tool.exe",
+        "%RUNNER_TEMP%\\tool\\tool.exe --version",
+    ] {
+        assert_caught(
+            &running("windows-latest", TEMP_TOOL, "cmd", script),
+            LINUX_TOOL_ON_WINDOWS,
+        );
+    }
+    let reads = check(&running(
+        "windows-latest",
+        TEMP_TOOL,
+        "cmd",
+        "cd /d %RUNNER_TEMP%\\tool\ndir\ncopy tool.exe ..\\dist\\\necho tool.exe\ncertutil -hashfile tool.exe SHA256\ndel old.exe",
+    ));
+    assert_eq!(reads.runs, 0, "{:?}", reads.problems);
 }
 
 // --- and what it leaves alone, and what it says it cannot read -------------------------------

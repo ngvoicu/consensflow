@@ -343,14 +343,21 @@ impl StepText {
     /// The value of its key `key` (`working-directory`), as written.
     pub fn field(&self, key: &str) -> Option<String> {
         let prefix = format!("        {key}: ");
-        self.lines
-            .iter()
-            .find_map(|line| line.strip_prefix(&prefix).map(str::to_string))
+        let first = format!("      - {key}: ");
+        self.lines.iter().find_map(|line| {
+            line.strip_prefix(&prefix)
+                .or_else(|| line.strip_prefix(&first))
+                .map(str::to_string)
+        })
     }
 
     /// The variables of its `env:`, as written.
     pub fn env(&self) -> Vec<(String, String)> {
-        let Some(at) = self.lines.iter().position(|line| line == "        env:") else {
+        let Some(at) = self
+            .lines
+            .iter()
+            .position(|line| line == "        env:" || line == "      - env:")
+        else {
             return Vec::new();
         };
         self.lines[at + 1..]
