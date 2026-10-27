@@ -10,8 +10,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use cf_publish::testing::workflow::release::{
-    ARTIFACTS, HASH, MAC_LISTING, PUBLISH, SIGN, SIGNATURE, SIGNED, SIGNED_FILES, SUMS,
-    WINDOWS_LISTING,
+    ARTIFACTS, HASH, PUBLISH, SIGN, SIGNATURE, SIGNED, SIGNED_FILES, SUMS,
 };
 use cf_publish::testing::workflow::{job, read, step};
 
@@ -233,6 +232,7 @@ mod its_steps_as_written {
     use std::path::{Path, PathBuf};
 
     use cf_publish::digest::sha256_hex;
+    use cf_publish::testing::workflow::release::{MAC_LISTING, WINDOWS_LISTING};
     use cf_publish::testing::workflow::{bash, job, read, step};
     use cf_publish::testing::{built_files, folder_of, published_assets, Ran, TempDir};
 
