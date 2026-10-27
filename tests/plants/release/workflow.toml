@@ -90,11 +90,11 @@ runs = ["workflow"]
 file = ".github/workflows/release.yml"
 find = '''
     steps:
-      # The files the Mac and Windows jobs built.'''
+      # The files the Mac and Windows jobs built, each into a folder of its own, and'''
 replace = '''
     steps:
       - uses: actions/checkout@v7
-      # The files the Mac and Windows jobs built.'''
+      # The files the Mac and Windows jobs built, each into a folder of its own, and'''
 
 [[plant]]
 name = "workflow: Node is set up in the publish job"
@@ -105,11 +105,11 @@ runs = ["workflow"]
 file = ".github/workflows/release.yml"
 find = '''
     steps:
-      # The files the Mac and Windows jobs built.'''
+      # The files the Mac and Windows jobs built, each into a folder of its own, and'''
 replace = '''
     steps:
       - uses: actions/setup-node@v7
-      # The files the Mac and Windows jobs built.'''
+      # The files the Mac and Windows jobs built, each into a folder of its own, and'''
 
 [[plant]]
 name = "workflow: the publish job does not wait for the publisher"
@@ -179,11 +179,15 @@ runs = ["workflow"]
 [[plant.edit]]
 file = ".github/workflows/release.yml"
 find = '''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     outputs:
       sha256:'''
 replace = '''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     outputs:
@@ -212,10 +216,14 @@ runs = ["workflow"]
 file = ".github/workflows/release.yml"
 find = '''
           cargo build --release --locked -p cf-publish
-          sha256='''
+          sha256=$(shasum -a 256 app/src-tauri/target/release/cf-publish | cut -d' ' -f1)
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "cf-publish hashes to'''
 replace = '''
           cargo build --release -p cf-publish
-          sha256='''
+          sha256=$(shasum -a 256 app/src-tauri/target/release/cf-publish | cut -d' ' -f1)
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "cf-publish hashes to'''
 
 [[plant]]
 name = "workflow: the token is the publish job again"

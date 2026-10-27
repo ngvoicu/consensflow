@@ -158,8 +158,10 @@ quit_open_app() {
 
 # Takes away what this run left half done: the mounted DMG, the copy that was
 # going in, a new app put in place and not yet confirmed, and the app it was
-# replacing, put back; then the run's own folder. So a refusal at any step
-# leaves the folder as it found it.
+# replacing, put back where nothing is; then the run's own folder. So a refusal
+# at any step leaves the folder as it found it. Once the new app is confirmed,
+# what is left of the old one (a Ctrl-C while it was deleted) is deleted, never
+# moved: moved into the new app's place it would land inside its bundle.
 cleanup() {
     if [ -n "${mounted:-}" ]; then
         hdiutil detach -quiet "$mounted" >/dev/null 2>&1 || hdiutil detach -quiet -force "$mounted" >/dev/null 2>&1 || true
@@ -171,7 +173,11 @@ cleanup() {
         rm -rf "$dest"
     fi
     if [ -n "${previous:-}" ] && [ -e "$previous" ]; then
-        mv "$previous" "$dest"
+        if [ ! -e "$dest" ]; then
+            mv "$previous" "$dest"
+        elif [ -z "${placed:-}" ]; then
+            rm -rf "$previous"
+        fi
     fi
     if [ -n "${tmp:-}" ] && [ -d "$tmp" ]; then
         rm -rf "$tmp"
@@ -316,6 +322,11 @@ main() {
     [ "$got" = "$expected" ] || refuse "$dmg was changed: its SHA-256 is $got, and the signed SHA256SUMS says $expected."
     say "$dmg has the SHA-256 the signed SHA256SUMS lists"
 
+    # The DMG is mounted by its path in this run's own folder once its hash held: a
+    # writer running as this user could swap it in between. The checks of the app
+    # in it, and of the copy that goes in, bound what could get in that way to
+    # another notarized ConsensFlow of this version under ConsensFlow's team;
+    # checking again narrows such a race, it does not exclude it.
     mkdir "$tmp/volume"
     hdiutil attach -nobrowse -readonly -noautoopen -quiet -mountpoint "$tmp/volume" "$tmp/$dmg" </dev/null >/dev/null ||
         refuse "could not open $dmg."
@@ -335,15 +346,19 @@ main() {
     if [ -n "$(processes_of "$dest")" ]; then
         refuse "ConsensFlow at $dest was opened again while the install waited. Quit it and run this again."
     fi
+    # The copy is checked whole again now, after the wait for the open app, as near
+    # its move as a shell gets; and the app put in place is checked whole once
+    # more while the one it replaces can still be put back. Each narrows what a
+    # writer in this folder could change in between; none excludes it.
+    check_app "$stage" "the copy of the app made in $dir"
     if [ -e "$dest" ]; then
         previous="$dir/.ConsensFlow.app.previous.$$"
         mv "$dest" "$previous" || { previous=""; refuse "could not move the installed ConsensFlow aside in $dir."; }
     fi
+    placed=1
     mv "$stage" "$dest" || refuse "could not put the new ConsensFlow in $dir."
     stage=""
-    placed=1
-    installed=$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$dest/Contents/Info.plist" 2>/dev/null || true)
-    [ "$installed" = "$version" ] || refuse "$dest says version '$installed' after the install, not $version; the app that was there is put back."
+    check_app "$dest" "the app put in $dir"
     placed=""
     if [ -n "$previous" ]; then
         rm -rf "$previous"

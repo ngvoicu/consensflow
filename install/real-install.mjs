@@ -1,7 +1,7 @@
 // The installers against a real release, as the CI's installers job runs them
 // on macOS and Windows (npm run install:real):
 //
-//   node install/real-install.mjs [--channel alpha|stable] [--dir DIR] [--shell powershell|pwsh] [--upgrade] [--no-open]
+//   node install/real-install.mjs [--channel alpha|stable] [--dir DIR] [--shell powershell|pwsh] [--upgrade] [--downgrade] [--no-open]
 //
 // It reads the channel's feed on GitHub, and installs the release it names:
 //
@@ -18,7 +18,12 @@
 // is installed first (from the mirror), opened (unless --no-open), and the
 // install of the new one must ask it to quit and upgrade it where it is. Each
 // install is then held to the version: the app's own (Info.plist, Windows'
-// uninstall entry) and the `cf` inside it.
+// uninstall entry) and the `cf` inside it. With --downgrade, the feed's release
+// is installed (from the mirror), a feed naming the release before it must be
+// refused for it (an installed ConsensFlow newer than the release is kept), and
+// that release named with --version must go in in its place and open (unless
+// --no-open); the run then ends with the feed's release installed again, an
+// upgrade.
 //
 // On a Mac the app goes to DIR (--dir), which a run outside CI must name: the
 // ConsensFlow in /Applications is never touched by it. On Windows the per-user
@@ -52,6 +57,7 @@ const { values: options } = parseArgs({
     dir: { type: 'string' },
     shell: { type: 'string', default: 'powershell' },
     upgrade: { type: 'boolean', default: false },
+    downgrade: { type: 'boolean', default: false },
     'no-open': { type: 'boolean', default: false },
   },
 })
@@ -240,6 +246,25 @@ async function openApp(dir) {
   fail('the installed app did not open within two minutes')
 }
 
+/** Ends the processes of the app this run installed and opened: the run's own, by their path. */
+function closeApp(dir) {
+  const where = installed(dir)?.where
+  if (!where) return
+  if (mac) {
+    for (const line of running(dir)) process.kill(Number(line.trim().split(/\s+/)[0]), 'SIGTERM')
+  } else {
+    spawnSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-Command',
+        `Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith('${where}\\', 'OrdinalIgnoreCase') } | Stop-Process -Force`,
+      ],
+      { encoding: 'utf8' },
+    )
+  }
+}
+
 /** A mirror on this machine of the releases `versions`, signed by `key`, with the feed naming the last. */
 async function mirror(versions, key, tamper) {
   const files = {}
@@ -260,7 +285,7 @@ if (mac && !process.env.CI) {
       'on a Mac outside CI, name the folder to install into with --dir (the ConsensFlow in /Applications is never touched)',
     )
   // A second ConsensFlow opened on a Mac in use would start a second daemon on its home.
-  if (options.upgrade && !options['no-open'])
+  if ((options.upgrade || options.downgrade) && !options['no-open'])
     fail(
       'on a Mac outside CI, --upgrade runs with --no-open: the ConsensFlow in use is never joined by another',
     )
@@ -340,6 +365,52 @@ try {
       )
     } finally {
       await local.close()
+    }
+  }
+
+  if (options.downgrade) {
+    const previous = await previousOf(version)
+    // The feed's release in, then a feed that names the release before it.
+    const newer = await mirror([version], key, false)
+    try {
+      const first = await runScript(copy, {
+        ...installEnv,
+        CONSENSFLOW_RELEASES_URL: `${newer.url}/releases`,
+        CONSENSFLOW_VERSION: version,
+      })
+      if (first.status !== 0) fail(`the install of ${version} failed`)
+      expectInstalled(dir, version)
+    } finally {
+      await newer.close()
+    }
+    const older = await mirror([version, previous], key, false)
+    try {
+      const kept = await runScript(copy, {
+        ...installEnv,
+        CONSENSFLOW_RELEASES_URL: `${older.url}/releases`,
+        CONSENSFLOW_CHANNEL: options.channel,
+        CONSENSFLOW_VERSION: '',
+      })
+      if (kept.status === 0 || !/is installed( in .*)?, newer than/.test(kept.out))
+        fail(`a feed naming ${previous} was not refused with ${version} installed`)
+      expectInstalled(dir, version)
+      say(`a feed naming ${previous} was refused: ${version}, newer, is kept`)
+      const back = await runScript(copy, {
+        ...installEnv,
+        CONSENSFLOW_RELEASES_URL: `${older.url}/releases`,
+        CONSENSFLOW_VERSION: previous,
+      })
+      if (back.status !== 0) fail(`the install of ${previous} named with --version failed`)
+      expectInstalled(dir, previous)
+      if (!options['no-open']) {
+        await openApp(dir)
+        closeApp(dir)
+      }
+      say(
+        `${version} was taken back to ${previous}, named with --version${options['no-open'] ? '' : ', and it opens'}`,
+      )
+    } finally {
+      await older.close()
     }
   }
 

@@ -20,23 +20,27 @@ if (process.env.NAME === undefined) {
   process.stdout.write(Buffer.concat([Buffer.from("Ed"), id, raw]).toString("base64"));
 } else {
   const bytes = require("fs").readFileSync(0);
-  const signature = crypto.sign(null, crypto.createHash("blake2b512").update(bytes).digest(), key);
+  // minisign's legacy kind ("Ed") signs the file itself; the prehashed kind ("ED") its BLAKE2b-512.
+  const legacy = process.env.LEGACY === "1";
+  const signature = crypto.sign(null, legacy ? bytes : crypto.createHash("blake2b512").update(bytes).digest(), key);
   const comment = `timestamp:1793000000\tfile:${process.env.NAME}`;
   const global = crypto.sign(null, Buffer.concat([signature, Buffer.from(comment, "latin1")]), key);
-  const text = ["untrusted comment: signature from the tests' key", Buffer.concat([Buffer.from("ED"), id, signature]).toString("base64"), `trusted comment: ${comment}`, global.toString("base64"), ""].join("\n");
+  const text = ["untrusted comment: signature from the tests' key", Buffer.concat([Buffer.from(legacy ? "Ed" : "ED"), id, signature]).toString("base64"), `trusted comment: ${comment}`, global.toString("base64"), ""].join("\n");
   process.stdout.write(Buffer.from(text, "latin1").toString("base64"));
 }
 "#;
 
-/// Runs the signer with `name` (None: the key line) over `bytes`.
+/// Runs the signer with `name` (None: the key line) over `bytes`, in minisign's
+/// legacy kind where `legacy`.
 #[allow(clippy::disallowed_methods)] // The test starts what signs for it.
-fn node(name: Option<&str>, bytes: &[u8]) -> String {
+fn node(name: Option<&str>, bytes: &[u8], legacy: bool) -> String {
     let mut command = Command::new("node");
     command
         .args(["-e", SIGNER])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .env_remove("NAME");
+        .env_remove("NAME")
+        .env("LEGACY", if legacy { "1" } else { "0" });
     if let Some(name) = name {
         command.env("NAME", name);
     }
@@ -55,7 +59,14 @@ fn node(name: Option<&str>, bytes: &[u8]) -> String {
 /// The tests' key, as a minisign key line.
 pub fn test_key() -> &'static str {
     static KEY: OnceLock<String> = OnceLock::new();
-    KEY.get_or_init(|| node(None, b""))
+    KEY.get_or_init(|| node(None, b"", false))
+}
+
+/// A signature of `bytes` under `name` by the tests' key in minisign's legacy
+/// kind (`Ed`: the file itself signed, not its BLAKE2b-512), which a publisher
+/// that allowed it would take; well formed, and refused.
+pub fn sign_legacy(bytes: &[u8], name: &str) -> String {
+    node(Some(name), bytes, true)
 }
 
 /// The signatures made so far, by what was signed and its name.
@@ -70,7 +81,7 @@ pub fn sign(bytes: &[u8], name: &str) -> String {
     if let Some(sig) = made.lock().expect("the signatures made").get(&at) {
         return sig.clone();
     }
-    let sig = node(Some(name), bytes);
+    let sig = node(Some(name), bytes, false);
     made.lock()
         .expect("the signatures made")
         .insert(at, sig.clone());

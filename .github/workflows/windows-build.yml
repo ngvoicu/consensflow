@@ -148,3 +148,6 @@ jobs:
           name: ConsensFlow-windows
           path: ${{ runner.temp }}/windows-artifact/
           if-no-files-found: error
+          # Every file the listing holds, a hidden one too (upload-artifact leaves those out
+          # unless told): the release's sign job holds the download to that listing.
+          include-hidden-files: true

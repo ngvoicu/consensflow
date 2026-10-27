@@ -478,13 +478,13 @@ runs = ["sign-job"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
-find = '''    needs: [mac, windows, publisher]
+find = '''    needs: [mac, windows, publisher-macos]
     runs-on: macos-latest
     timeout-minutes: 30
     environment: release
     permissions:
       contents: read'''
-replace = '''    needs: [mac, windows, publisher]
+replace = '''    needs: [mac, windows, publisher-macos]
     runs-on: macos-latest
     timeout-minutes: 30
     environment: release
@@ -557,8 +557,10 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
-find = '''            if [ -z "$want" ] || [ "$listing" != "$want" ]; then'''
-replace = '''            if false; then'''
+find = '''            if [ -z "$want" ] || [ "$listing" != "$want" ]; then
+              echo "the $job job's files downloaded hash to $listing, and the job that built them says ${want:-nothing}" >&2'''
+replace = '''            if false; then
+              echo "the $job job's files downloaded hash to $listing, and the job that built them says ${want:-nothing}" >&2'''
 
 [[plant]]
 name = "installers: the publish job publishes sums or a signature the sign job did not make"
@@ -579,9 +581,15 @@ runs = ["sign-job"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
-find = '''          name: ConsensFlow-mac
+find = '''      - run: npm ci --prefix app --ignore-scripts
+      - uses: actions/download-artifact@v8
+        with:
+          name: ConsensFlow-mac
           path: ${{ runner.temp }}/built/mac'''
-replace = '''          pattern: ConsensFlow-*
+replace = '''      - run: npm ci --prefix app --ignore-scripts
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ConsensFlow-*
           path: ${{ runner.temp }}/dist
           merge-multiple: true'''
 
@@ -764,16 +772,16 @@ find = '''  return found.length === 1 && /^[0-9a-f]{64}$/.test(found[0]) ? found
 replace = '''  return found.length >= 1 && /^[0-9a-f]{64}$/.test(found[0]) ? found[0] : null;'''
 
 [[plant]]
-name = "installers: install.sh does not check the copy that goes in"
-meant = "the copy that goes in is checked again: one swapped once the DMG was checked is refused"
-runs = [["node", "--test", "--test-name-pattern", "checked again", "tests/install-sh.test.mjs"]]
+name = "installers: install.sh does not check the copy that goes in before it asks the open app to quit"
+meant = "an open ConsensFlow is asked to quit only once the copy that goes in has passed its checks"
+runs = [["node", "--test", "--test-name-pattern", "asked to quit only once", "tests/install-sh.test.mjs"]]
 platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
 find = '''    check_app "$stage" "the copy of the app made in $dir"
-'''
-replace = ""
+    say "the app is ConsensFlow's'''
+replace = '''    say "the app is ConsensFlow's'''
 
 [[plant]]
 name = "installers: install.sh asks an open ConsensFlow to quit before the copy that goes in is checked"
@@ -1031,6 +1039,179 @@ runs = ["sign-job"]
 [[plant.edit]]
 file = ".github/workflows/release.yml"
 find = """          cargo build --release --locked -p cf-publish
-          sha256="""
+          sha256=$(shasum -a 256 app/src-tauri/target/release/cf-publish | cut -d' ' -f1)
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "cf-publish hashes to"""
 replace = """          cargo build --release --locked -p cf-publish --features test-support
-          sha256="""
+          sha256=$(shasum -a 256 app/src-tauri/target/release/cf-publish | cut -d' ' -f1)
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "cf-publish hashes to"""
+
+# --- round 3 (T-817, T-818) ---
+
+[[plant]]
+name = "installers: the sign job runs the publisher built on Linux"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = [["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "workflow_binaries"]]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: cf-publish-macos
+          path: ${{ runner.temp }}/sums-tool'''
+replace = '''          name: cf-publish
+          path: ${{ runner.temp }}/sums-tool'''
+
+[[plant]]
+name = "installers: the macOS publisher is built on Linux"
+meant = "a_job_runs_a_downloaded_binary_only_on_the_system_the_job_that_built_it_ran_on"
+runs = [["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "workflow_binaries"]]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''  publisher-macos:
+    runs-on: macos-latest'''
+replace = '''  publisher-macos:
+    runs-on: ubuntu-latest'''
+
+[[plant]]
+name = "installers: the publish job publishes files the build jobs did not list"
+meant = "the_files_signed_are_the_ones_the_jobs_listed_and_publish_takes_only_what_was_signed"
+runs = ["sign-job"]
+# Its steps run as written under bash, which Windows does not give the test.
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''            if [ -z "$want" ] || [ "$listing" != "$want" ]; then
+              echo "the $job job's files downloaded hash to $listing, and the job that built them says ${want:-nothing}: nothing is published" >&2'''
+replace = '''            if false; then
+              echo "the $job job's files downloaded hash to $listing, and the job that built them says ${want:-nothing}: nothing is published" >&2'''
+
+[[plant]]
+name = "installers: the publish job downloads the release's files merged, held to nothing"
+meant = "has_the_publish_job_hold_every_built_file_to_its_jobs_listing_before_it_publishes"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''      # the sign job's SHA256SUMS and its signature into the folder published from.
+      - uses: actions/download-artifact@v8
+        with:
+          name: ConsensFlow-mac
+          path: ${{ runner.temp }}/built/mac'''
+replace = '''      # the sign job's SHA256SUMS and its signature into the folder published from.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ConsensFlow-*
+          path: ${{ runner.temp }}/dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: ConsensFlow-mac
+          path: ${{ runner.temp }}/built/mac'''
+
+[[plant]]
+name = "installers: the Mac job uploads its files without the hidden ones its listing counts"
+meant = "has_the_publish_job_hold_every_built_file_to_its_jobs_listing_before_it_publishes"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          # those out unless told, and the sign job would refuse a listing it cannot match.
+          include-hidden-files: true'''
+replace = '''          # those out unless told, and the sign job would refuse a listing it cannot match.'''
+
+[[plant]]
+name = "installers: the publisher takes minisign's legacy kind"
+meant = "is_refused_for_a_signature_the_installers_would_refuse_before_anything_is_asked"
+runs = ["signed-sums"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/sums.rs"
+find = "    key.verify(bytes, &signature, false)"
+replace = "    key.verify(bytes, &signature, true)"
+
+[[plant]]
+name = "installers: a release build of cf-publish takes the key CF_PUBLISH_TEST_KEY names"
+meant = "the_release_build_refuses_a_release_signed_by_the_key_the_environment_names"
+runs = [["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "release_build"]]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/cli.rs"
+find = '''    #[cfg(feature = "test-support")]
+    if let Some(key) = &env.test_key {'''
+replace = '''    if let Some(key) = &env.test_key {'''
+
+[[plant]]
+name = "installers: install.sh does not check the copy again once the open app has quit"
+meant = "a copy changed while the install waited for the open app to quit is refused before it is moved"
+runs = [["node", "--test", "--test-name-pattern", "changed while the install waited", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    # writer in this folder could change in between; none excludes it.
+    check_app "$stage" "the copy of the app made in $dir"
+'''
+replace = '''    # writer in this folder could change in between; none excludes it.
+'''
+
+[[plant]]
+name = "installers: install.sh reads only the version of the app it put in place"
+meant = "an app changed once it is in place is refused, and the one it replaced put back whole"
+runs = [["node", "--test", "--test-name-pattern", "changed once it is in place", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    check_app "$dest" "the app put in $dir"'''
+replace = '''    installed=$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$dest/Contents/Info.plist" 2>/dev/null || true)
+    [ "$installed" = "$version" ] || refuse "the app put in $dir is version '$installed', not $version."'''
+
+[[plant]]
+name = "installers: install.sh's cleanup moves what is left of the old app into the new one"
+meant = "a Ctrl-C while the old app is deleted leaves the new one whole, and the old one gone"
+runs = [["node", "--test", "--test-name-pattern", "Ctrl-C", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        if [ ! -e "$dest" ]; then
+            mv "$previous" "$dest"
+        elif [ -z "${placed:-}" ]; then
+            rm -rf "$previous"
+        fi'''
+replace = '''        mv "$previous" "$dest"'''
+
+[[plant]]
+name = "installers: install.sh's Ed25519 takes the cofactored equation"
+meant = "the installers' signature check › install.sh's, in macOS's JavaScript (osascript) › small-order and mixed-order points are answered as RFC 8032 5.1.7 says, without the cofactor"
+runs = ["verifiers"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''  const expected = encode(add(multiply(s, BASE), negate(multiply(k, a))));
+  return equal(expected, r);'''
+replace = '''  const expected = encode(multiply(8n, add(multiply(s, BASE), negate(multiply(k, a)))));
+  return equal(expected, encode(multiply(8n, decode(r))));'''
+
+[[plant]]
+name = "installers: the macOS publisher job holds the write permission"
+meant = "builds_the_publisher_where_no_secret_is"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      sha256:'''
+replace = '''    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    outputs:
+      sha256:'''

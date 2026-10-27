@@ -817,15 +817,78 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       assertKept(
         upgrade,
         await install(upgrade, ['--version', '3.0.7'], { env: env(upgrade) }),
-        /says version '9\.9\.9' after the install, not 3\.0\.7; the app that was there is put back/,
+        /the app put in .* is version '9\.9\.9', not 3\.0\.7/,
         '3.0.7-alpha.1',
       )
       const fresh = freshCase(replacements)
       assertRefused(
         fresh,
         await install(fresh, ['--version', '3.0.7'], { env: env(fresh) }),
-        /says version '9\.9\.9' after the install/,
+        /the app put in .* is version '9\.9\.9'/,
       )
+    })
+
+    test('a copy changed while the install waited for the open app to quit is refused before it is moved', async () => {
+      const at = freshCase()
+      const app = applet(at.apps, false)
+      // The quit is asked through osascript: the copy is changed right then, after its first check.
+      const PATH = standIns(at, {
+        osascript: `case "$3" in -e) for f in "${at.apps}"/.ConsensFlow.app.installing.*/Contents/MacOS/app; do echo changed >> "$f"; done ;; esac\nexec /usr/bin/osascript "$@"`,
+      })
+      run('open', ['-g', '-j', app])
+      await waitFor(() => processesOf(app).length > 0, 'the applet starting')
+      try {
+        const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
+        assert.equal(ran.status, 1, ran.out)
+        assert.match(ran.out, /asking it to quit/)
+        assert.match(ran.out, /the code signature of the copy of the app made in .* does not hold/)
+        assert.match(ran.out, /nothing was installed/)
+        assert.deepEqual(readdirSync(at.apps), ['ConsensFlow.app'], 'no copy is left beside it')
+        assert.notEqual(installedVersion(at), '3.0.7', 'the applet is still the app there')
+        assert.deepEqual(readdirSync(at.tmp), [])
+      } finally {
+        for (const pid of processesOf(app)) process.kill(pid, 'SIGKILL')
+      }
+    })
+
+    test('an app changed once it is in place is refused, and the one it replaced put back whole', async () => {
+      const changing = path.join(work, 'plistbuddy-changing')
+      // The first read of the installed app's version once the old one is aside: the swap is done.
+      writeFileSync(
+        changing,
+        '#!/bin/sh\nif [ "$3" = "$APPS/ConsensFlow.app/Contents/Info.plist" ] && ls -d "$APPS"/.ConsensFlow.app.previous.* >/dev/null 2>&1; then echo changed >> "$APPS/ConsensFlow.app/Contents/MacOS/app"; fi\nexec /usr/libexec/PlistBuddy "$@"\n',
+        { mode: 0o755 },
+      )
+      const at = freshCase([
+        [REQUIREMENT, AD_HOC],
+        [SPCTL, `spctl=${path.join(work, 'spctl')}`],
+        ['plistbuddy=/usr/libexec/PlistBuddy', `plistbuddy=${changing}`],
+      ])
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      assertKept(
+        at,
+        await install(at, ['--version', '3.0.7'], { env: { APPS: at.apps } }),
+        /the code signature of the app put in .* does not hold/,
+        '3.0.7-alpha.1',
+      )
+      run('codesign', ['--verify', '--deep', '--strict', path.join(at.apps, 'ConsensFlow.app')])
+    })
+
+    test('a Ctrl-C while the old app is deleted leaves the new one whole, and the old one gone', async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      const mark = path.join(at.dir, 'interrupted')
+      // An rm that, deleting the old app, takes part of it and then signals the install's shell.
+      const PATH = standIns(at, {
+        rm: `case "$*" in *.ConsensFlow.app.previous.*)\nif [ ! -e "${mark}" ]; then : > "${mark}"; /bin/rm -rf "$2/Contents/Info.plist"; kill -INT $PPID; exit 1; fi ;;\nesac\nexec /bin/rm "$@"`,
+      })
+      const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
+      assert.ok(existsSync(mark), 'the old app was being deleted when the signal came')
+      assert.notEqual(ran.status, 0, ran.out)
+      assert.equal(installedVersion(at), '3.0.7')
+      assert.deepEqual(readdirSync(at.apps), ['ConsensFlow.app'], 'nothing of the old app is left')
+      run('codesign', ['--verify', '--deep', '--strict', path.join(at.apps, 'ConsensFlow.app')])
+      assert.deepEqual(readdirSync(at.tmp), [])
     })
   })
 

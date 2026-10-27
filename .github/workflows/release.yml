@@ -211,6 +211,9 @@ jobs:
           name: ConsensFlow-mac
           path: ${{ runner.temp }}/release/
           if-no-files-found: error
+          # Every file the listing above holds, a hidden one too: upload-artifact leaves
+          # those out unless told, and the sign job would refuse a listing it cannot match.
+          include-hidden-files: true
 
   windows:
     uses: ./.github/workflows/windows-build.yml
@@ -261,6 +264,36 @@ jobs:
           path: app/src-tauri/target/release/cf-publish
           if-no-files-found: error
 
+  # The same publisher built for macOS, where the sign job runs it (`cf-publish
+  # sums`): a binary built on Linux does not run on a Mac. Built as the publisher
+  # job builds it, where there is no token and no secret, its SHA-256 this job's
+  # output, which the sign job checks the binary it downloads against.
+  publisher-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustup update stable --no-self-update && rustup default stable
+      - name: Build cf-publish for macOS, and say what it hashes to
+        id: build
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p cf-publish
+          sha256=$(shasum -a 256 app/src-tauri/target/release/cf-publish | cut -d' ' -f1)
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "cf-publish for macOS hashes to $sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cf-publish-macos
+          path: app/src-tauri/target/release/cf-publish
+          if-no-files-found: error
+
   # The signature the one-line installers (install/install.sh and install.ps1)
   # check a release by: a download through curl or PowerShell skips Gatekeeper
   # and SmartScreen, and the Windows files carry no Authenticode signature. The
@@ -282,7 +315,7 @@ jobs:
   # nothing signed: that is the trial of the steps, and nothing signed by it
   # leaves the runner.
   sign:
-    needs: [mac, windows, publisher]
+    needs: [mac, windows, publisher-macos]
     runs-on: macos-latest
     timeout-minutes: 30
     environment: release
@@ -329,14 +362,14 @@ jobs:
           mkdir "$RUNNER_TEMP/dist"
           cp -R "$RUNNER_TEMP/built/mac/." "$RUNNER_TEMP/dist/"
           cp -R "$RUNNER_TEMP/built/windows/." "$RUNNER_TEMP/dist/"
-      # The publisher, for its `sums`, checked against the publisher job's hash as the publish job checks it.
+      # The publisher built for macOS, for its `sums`, checked against its job's hash as the publish job checks its own.
       - uses: actions/download-artifact@v8
         with:
-          name: cf-publish
+          name: cf-publish-macos
           path: ${{ runner.temp }}/sums-tool
       - name: The publisher is the binary that was built
         env:
-          BUILT_SHA256: ${{ needs.publisher.outputs.sha256 }}
+          BUILT_SHA256: ${{ needs.publisher-macos.outputs.sha256 }}
         run: |
           set -euo pipefail
           tool="$RUNNER_TEMP/sums-tool/cf-publish"
@@ -390,6 +423,7 @@ jobs:
         with:
           name: ConsensFlow-signature
           path: ${{ runner.temp }}/signature/
+          include-hidden-files: true
           if-no-files-found: error
 
   publish:
@@ -408,13 +442,39 @@ jobs:
     # and shasum; the only action is GitHub's own download-artifact, which fetches
     # the files. The token reaches the two steps that run the binary, and no other.
     steps:
-      # The files the Mac and Windows jobs built.
-      # (With them, the sign job's SHA256SUMS and its signature: ConsensFlow-signature.)
+      # The files the Mac and Windows jobs built, each into a folder of its own, and
+      # the sign job's SHA256SUMS and its signature into the folder published from.
       - uses: actions/download-artifact@v8
         with:
-          pattern: ConsensFlow-*
+          name: ConsensFlow-mac
+          path: ${{ runner.temp }}/built/mac
+      - uses: actions/download-artifact@v8
+        with:
+          name: ConsensFlow-windows
+          path: ${{ runner.temp }}/built/windows
+      - uses: actions/download-artifact@v8
+        with:
+          name: ConsensFlow-signature
           path: ${{ runner.temp }}/dist
-          merge-multiple: true
+      # Every file of each job as it listed it (the notes, which SHA256SUMS does not
+      # list, among them), then the folder published from.
+      - name: The files are the ones the Mac and Windows jobs built, to be published
+        env:
+          MAC_LISTING: ${{ needs.mac.outputs.listing }}
+          WINDOWS_LISTING: ${{ needs.windows.outputs.listing }}
+        run: |
+          set -euo pipefail
+          for job in mac windows; do
+            out="$RUNNER_TEMP/built/$job"
+            listing=$(cd "$out" && find . -type f | LC_ALL=C sort | while IFS= read -r file; do shasum -b -a 256 "$file"; done | shasum -a 256 | cut -d' ' -f1)
+            if [ "$job" = mac ]; then want="$MAC_LISTING"; else want="$WINDOWS_LISTING"; fi
+            if [ -z "$want" ] || [ "$listing" != "$want" ]; then
+              echo "the $job job's files downloaded hash to $listing, and the job that built them says ${want:-nothing}: nothing is published" >&2
+              exit 1
+            fi
+          done
+          cp -R "$RUNNER_TEMP/built/mac/." "$RUNNER_TEMP/dist/"
+          cp -R "$RUNNER_TEMP/built/windows/." "$RUNNER_TEMP/dist/"
       # The publisher, in a folder of its own: it is not one of the release's files.
       - uses: actions/download-artifact@v8
         with:

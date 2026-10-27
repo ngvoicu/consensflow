@@ -10,7 +10,9 @@
 # published script where the release has a signed SHA256SUMS (3.0.7-alpha.1 and
 # later), else from a mirror of the release's own files on the runner, signed
 # for the run. A copy with one byte changed is refused first, and the release
-# before it is installed, opened, and upgraded in place once it quits when asked.
+# before it is installed, opened, and upgraded in place once it quits when asked;
+# then a feed naming the release before it is refused, and that release named
+# with --version goes in and opens.
 # It runs after a Release run that a tag's push started and that succeeded (not
 # after a hand run, which publishes nothing, nor after a failed one), on a
 # change to the installers, and by hand.
@@ -66,6 +68,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node install/real-install.mjs --channel alpha --upgrade
+      - name: Take it back to the release before it, named with --version, which opens
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node install/real-install.mjs --channel alpha --downgrade
       - name: Install it again in PowerShell 7
         if: runner.os == 'Windows'
         env:

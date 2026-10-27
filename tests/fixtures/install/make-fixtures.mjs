@@ -20,6 +20,9 @@
 //   checked through Node's crypto before it is written;
 // - sha512.json: SHA-512 at every length 0 to 300 and some larger, as Node's
 //   crypto answers;
+// - ed25519-torsion.json: signatures with small-order and mixed-order points in
+//   A and in R, and what RFC 8032 5.1.7's equation (encode([S]B - [k]A) = R,
+//   no cofactor) answers for each, by a reference made here with BigInt;
 // - powershell-parser-cases.json: Astraeus's crypto audit's cases (T-806): a
 //   NUL after the signature's last line feed, and a signed file name with a NUL
 //   or a soft hyphen after it, which a culture comparison takes as equal.
@@ -275,7 +278,150 @@ if (only.length === 0) {
   tauriSigned()
   await releaseSignature()
 }
+// A reference of Ed25519's group for the torsion cases, as RFC 8032 5.1 writes it (extended
+// coordinates), made here apart from the scripts' own.
+const L = 2n ** 252n + 27742317777372353535851937790883648493n
+const D = (((-121665n * power(121666n, P - 2n)) % P) + P) % P
+const mod = (a) => ((a % P) + P) % P
+const I = power(2n, (P - 1n) / 4n)
+function addPoints([x1, y1, z1, t1], [x2, y2, z2, t2]) {
+  const a = mod((y1 - x1) * (y2 - x2))
+  const b = mod((y1 + x1) * (y2 + x2))
+  const c = mod(2n * D * t1 * t2)
+  const d = mod(2n * z1 * z2)
+  const [e, f, g, h] = [b - a, d - c, d + c, b + a]
+  return [mod(e * f), mod(g * h), mod(f * g), mod(e * h)]
+}
+function times(n, point) {
+  let result = [0n, 1n, 1n, 0n]
+  let p = point
+  for (let k = n; k > 0n; k >>= 1n) {
+    if (k & 1n) result = addPoints(result, p)
+    p = addPoints(p, p)
+  }
+  return result
+}
+function encodePoint([x, y, z]) {
+  const zi = power(z, P - 2n)
+  const ax = mod(x * zi)
+  return encoding(mod(y * zi), ax & 1n)
+}
+function pointOf(y, odd) {
+  const x2 = mod((y * y - 1n) * power(mod(D * y * y + 1n), P - 2n))
+  let x = power(x2, (P + 3n) / 8n)
+  if (mod(x * x - x2) !== 0n) x = mod(x * I)
+  if ((x & 1n) !== (odd ? 1n : 0n)) x = mod(P - x)
+  return [x, y, 1n, mod(x * y)]
+}
+const littleEndian = (hex) => {
+  const bytes = Buffer.from(hex, 'hex')
+  let v = 0n
+  for (let i = bytes.length - 1; i >= 0; i--) v = (v << 8n) | BigInt(bytes[i])
+  return v
+}
+const scalarHex = (n) => encoding(n, false)
+const challenge = (r, a, m) =>
+  littleEndian(
+    crypto
+      .createHash('sha512')
+      .update(Buffer.concat([Buffer.from(r, 'hex'), Buffer.from(a, 'hex'), m]))
+      .digest()
+      .toString('hex'),
+  ) % L
+// RFC 8032 5.1.7's check, with no cofactor, as the scripts make it.
+function verifies(a, r, sHex, m) {
+  const s = littleEndian(sHex)
+  if (s >= L) return false
+  const k = challenge(r, a, m)
+  const A = pointOf(littleEndian(a) & ((1n << 255n) - 1n), littleEndian(a) >> 255n === 1n)
+  // -[k]A as [k]A negated: [L - k]A would be it only for a point of order L.
+  const kA = times(k, A)
+  const negKA = [mod(-kA[0]), kA[1], kA[2], mod(-kA[3])]
+  return encodePoint(addPoints(times(s, B), negKA)) === r
+}
+const B = pointOf(mod(4n * power(5n, P - 2n)), false)
+
+function torsion() {
+  const identity = encoding(1n, false)
+  const T = pointOf(0n, false) // a point of order 4: (sqrt(-1), 0)
+  const t = encodePoint(T)
+  // A fixed key a, a fixed nonce r: P = aB, R = rB.
+  const a =
+    littleEndian(
+      crypto
+        .createHash('sha512')
+        .update('consensflow installers: torsion key')
+        .digest()
+        .subarray(0, 32)
+        .toString('hex'),
+    ) % L
+  const r =
+    littleEndian(
+      crypto
+        .createHash('sha512')
+        .update('consensflow installers: torsion nonce')
+        .digest()
+        .subarray(0, 32)
+        .toString('hex'),
+    ) % L
+  const honest = times(a, B)
+  const mixed = encodePoint(addPoints(honest, T))
+  const R = encodePoint(times(r, B))
+  /** A message, `M <i>`, the first whose challenge k with `a` and `r` is (or is not) a multiple of 4. */
+  const message = (rHex, aHex, multiple) => {
+    for (let i = 0; ; i++) {
+      const m = Buffer.from(`M ${i}`)
+      if ((challenge(rHex, aHex, m) % 4n === 0n) === multiple) return m
+    }
+  }
+  const cases = []
+  const add = (name, aHex, rHex, s, m) =>
+    cases.push({
+      name,
+      public: aHex,
+      message: m.toString('hex'),
+      signature: rHex + scalarHex(s),
+      expect: verifies(aHex, rHex, scalarHex(s), m),
+    })
+  add('A and R the identity, S = 0', identity, identity, 0n, Buffer.from('any message'))
+  add('A and R the identity, S = 1', identity, identity, 1n, Buffer.from('any message'))
+  const m4 = message(identity, t, true)
+  add('A of order 4, R the identity, S = 0, k a multiple of 4', t, identity, 0n, m4)
+  add(
+    'A of order 4, R the identity, S = 0, k no multiple of 4',
+    t,
+    identity,
+    0n,
+    message(identity, t, false),
+  )
+  // A of mixed order (aB + T), signed as for aB: S = r + k a, with k over A = aB + T.
+  for (const multiple of [true, false]) {
+    const m = message(R, mixed, multiple)
+    const k = challenge(R, mixed, m)
+    add(
+      `A of mixed order, k ${multiple ? 'a multiple of 4' : 'no multiple of 4'}`,
+      mixed,
+      R,
+      (r + k * a) % L,
+      m,
+    )
+  }
+  // R of mixed order (rB + T) with an honest A: the equation without the cofactor refuses it.
+  const mixedR = encodePoint(addPoints(times(r, B), T))
+  const honestA = encodePoint(honest)
+  const m = Buffer.from('mixed R')
+  add('R of mixed order, A honest', honestA, mixedR, (r + challenge(mixedR, honestA, m) * a) % L, m)
+  // And the honest signature itself, which holds.
+  add('R and A honest', honestA, R, (r + challenge(R, honestA, m) * a) % L, m)
+  return {
+    source:
+      "make-fixtures.mjs: RFC 8032 5.1.7's equation without the cofactor, by a BigInt reference",
+    cases,
+  }
+}
+
 if (only.length === 0 || only.includes('edges')) {
+  writeFileSync(path.join(here, 'ed25519-torsion.json'), `${JSON.stringify(torsion(), null, 2)}\n`)
   writeFileSync(path.join(here, 'ed25519-edges.json'), `${JSON.stringify(edges(), null, 2)}\n`)
   writeFileSync(path.join(here, 'sha512.json'), `${JSON.stringify(sha512(), null, 2)}\n`)
 }

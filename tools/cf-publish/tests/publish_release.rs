@@ -10,7 +10,7 @@
 
 use std::fs;
 
-use cf_publish::testing::signing::sign;
+use cf_publish::testing::signing::{sign, sign_legacy};
 use cf_publish::testing::worlds::{before, before_with, did, gap, mentioning, releasing};
 use cf_publish::testing::{latest_json, published_assets, Served, BRIDGE, LATER, OLDER};
 
@@ -290,6 +290,19 @@ mod publishing_only_a_signed_sha256sums {
             );
             assert_eq!(world.github.calls(), Vec::<Vec<String>>::new(), "{name}");
         }
+        // minisign's legacy kind, correctly signed by the key for this release: the installers
+        // take only the prehashed kind, and so does the publisher (allow_legacy is false).
+        let world = before(LATER);
+        let legacy = sign_legacy(&sums_of(&world), &format!("ConsensFlow_{LATER}_SHA256SUMS"));
+        fs::write(world.dir.path().join("SHA256SUMS.sig"), legacy).unwrap();
+        let said = world.publish().unwrap_err().to_string();
+        assert!(
+            said.starts_with(
+                "SHA256SUMS.sig does not hold: it does not sign SHA256SUMS under the update key"
+            ),
+            "{said}"
+        );
+        assert_eq!(world.github.calls(), Vec::<Vec<String>>::new());
         // CRLF line ends, which the installers refuse.
         let world = before(LATER);
         let sig = fs::read_to_string(world.dir.path().join("SHA256SUMS.sig")).unwrap();

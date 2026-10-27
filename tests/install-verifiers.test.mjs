@@ -326,6 +326,7 @@ function battery() {
     { ...rfc, name: 'a byte short', signature: rfc.signature.slice(0, 126), expect: false },
     { ...rfc, name: 'a byte long', signature: `${rfc.signature}00`, expect: false },
     { ...rfc, name: 'a key a byte short', public: rfc.public.slice(0, 62), expect: false },
+    { ...rfc, name: 'a key a byte long', public: `${rfc.public}00`, expect: false },
   )
   for (const vector of fileEdges.boundaries) {
     edges.push({ ...vector, expect: true })
@@ -483,6 +484,7 @@ function battery() {
     edges,
     blake2b,
     sha512: JSON.parse(fixture('sha512.json')).vectors,
+    torsion: JSON.parse(fixture('ed25519-torsion.json')).cases,
     points: fileEdges.points,
     words,
     listed,
@@ -516,6 +518,7 @@ function run(argv) {
   return JSON.stringify({
     ed25519: input.ed25519.map((v) => ed25519Verify(fromHex(v.public), fromHex(v.message), fromHex(v.signature))),
     edges: input.edges.map((v) => ed25519Verify(fromHex(v.public), fromHex(v.message), fromHex(v.signature))),
+    torsion: input.torsion.map((v) => ed25519Verify(fromHex(v.public), fromHex(v.message), fromHex(v.signature))),
     blake2b: input.blake2b.map((v) => hex(blake2b512(fromHex(v.message)))),
     sha512: input.sha512.map((v) => hex(sha512(fromHex(v.message)))),
     points: input.points.map((v) => decode(fromHex(v.point)) !== null),
@@ -541,6 +544,7 @@ const PS_HARNESS = `
     $battery = Get-Content -Raw -LiteralPath $args[0] | ConvertFrom-Json
     $ed = @(foreach ($v in $battery.ed25519) { [bool](Test-CfEd25519 (FromHex $v.public) (FromHex $v.message) (FromHex $v.signature)) })
     $edges = @(foreach ($v in $battery.edges) { [bool](Test-CfEd25519 (FromHex $v.public) (FromHex $v.message) (FromHex $v.signature)) })
+    $torsion = @(foreach ($v in $battery.torsion) { [bool](Test-CfEd25519 (FromHex $v.public) (FromHex $v.message) (FromHex $v.signature)) })
     $blake = @(foreach ($v in $battery.blake2b) { ToHex (Get-CfBlake2b512 (FromHex $v.message)) })
     $sha = [System.Security.Cryptography.SHA512]::Create()
     $sha512 = @(foreach ($v in $battery.sha512) { ToHex $sha.ComputeHash((FromHex $v.message)) })
@@ -558,7 +562,7 @@ const PS_HARNESS = `
     }
     $mini = @(foreach ($v in $battery.minisign) { $said = Test-CfMinisign $v.key $v.sig (FromHex $v.file) $v.fileName; if ($null -eq $said) { 'null' } else { $said } })
     $env = @(foreach ($v in $battery.envelopes) { $said = Test-CfMinisign $v.key $v.sig (FromHex $v.file) $v.fileName; if ($null -eq $said) { 'null' } else { $said } })
-    [pscustomobject]@{ ed25519 = $ed; edges = $edges; blake2b = $blake; sha512 = $sha512; points = $points; words = $words; listed = $listed; pinned = $pinned; minisign = $mini; envelopes = $env } | ConvertTo-Json -Compress -Depth 4
+    [pscustomobject]@{ ed25519 = $ed; edges = $edges; torsion = $torsion; blake2b = $blake; sha512 = $sha512; points = $points; words = $words; listed = $listed; pinned = $pinned; minisign = $mini; envelopes = $env } | ConvertTo-Json -Compress -Depth 4
 } @args
 `
 
@@ -586,6 +590,9 @@ const engines = [
           type: 'spki',
         })
       const verify = (v) => {
+        // An Ed25519 key is 32 bytes: the DER this wraps it in names that length, and OpenSSL's
+        // parser would take the 32 and leave a byte more unread.
+        if (v.public.length !== 64) return false
         try {
           return crypto.verify(
             null,
@@ -611,6 +618,9 @@ const engines = [
         // OpenSSL has no point arithmetic to ask: what decodes, and the order of the key, are
         // the scripts' own questions.
         points: null,
+        // Whether OpenSSL takes a small-order key is its own policy, not RFC 8032's equation:
+        // the scripts' answers are held to the equation.
+        torsion: null,
         pinned: null,
         words: input.words.map(([op, a, b]) =>
           (op === 'add'
@@ -768,6 +778,14 @@ describe("the installers' signature check", () => {
         input.listed.forEach((check, at) => {
           const said = answers.listed[at] === 'null' ? null : answers.listed[at]
           assert.equal(said, check.expect, check.name)
+        })
+      })
+
+      test('small-order and mixed-order points are answered as RFC 8032 5.1.7 says, without the cofactor', (t) => {
+        if (answers.torsion === null) return t.skip("OpenSSL's policy, not the equation")
+        assert.equal(answers.torsion.length, input.torsion.length)
+        input.torsion.forEach((vector, at) => {
+          assert.equal(answers.torsion[at], vector.expect, vector.name)
         })
       })
 

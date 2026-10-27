@@ -10,7 +10,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use cf_publish::testing::workflow::release::{
-    ARTIFACTS, HASH, PUBLISH, SIGN, SIGNATURE, SIGNED, SIGNED_FILES, SUMS,
+    ARTIFACTS, HASH, PUBLISH, PUBLISH_ARTIFACTS, SIGN, SIGNATURE, SIGNED, SIGNED_FILES, SUMS,
 };
 use cf_publish::testing::workflow::{job, read, step};
 
@@ -101,8 +101,8 @@ mod its_text {
             "the publish job does not wait for the signature: {needs}"
         );
         assert!(
-            publish.contains("pattern: ConsensFlow-*"),
-            "it downloads the signature with the files"
+            publish.contains("          name: ConsensFlow-signature\n"),
+            "it downloads the signature by name"
         );
     }
 }
@@ -182,6 +182,60 @@ mod what_it_signs_is_what_was_built {
     }
 
     #[test]
+    fn has_the_publish_job_hold_every_built_file_to_its_jobs_listing_before_it_publishes() {
+        let text = read("release.yml");
+        let publish = job(&text, "publish");
+        let at = |name: &str| {
+            publish
+                .find(&format!("- name: {name}"))
+                .unwrap_or_else(|| panic!("no step {name}"))
+        };
+        assert!(
+            at(PUBLISH_ARTIFACTS) < at(SIGNED_FILES) && at(SIGNED_FILES) < at(PUBLISH),
+            "the files held to their listings before anything is published"
+        );
+        assert!(
+            publish.find("name: ConsensFlow-mac\n").unwrap() < at(PUBLISH_ARTIFACTS)
+                && publish.find("name: ConsensFlow-windows\n").unwrap() < at(PUBLISH_ARTIFACTS)
+        );
+        let env = step(&publish, PUBLISH_ARTIFACTS).env();
+        for (name, value) in [
+            ("MAC_LISTING", "${{ needs.mac.outputs.listing }}"),
+            ("WINDOWS_LISTING", "${{ needs.windows.outputs.listing }}"),
+        ] {
+            assert!(
+                env.contains(&(name.to_string(), value.to_string())),
+                "{env:?}"
+            );
+        }
+        // The same command as the jobs that listed the files.
+        let listing = |text: &str| {
+            text.lines()
+                .find(|line| line.contains("listing=$("))
+                .map(|line| line.trim().to_string())
+                .unwrap()
+        };
+        assert_eq!(listing(&publish), listing(&job(&text, "sign")));
+        // Every upload a listing holds carries the hidden files the listing counts.
+        let windows = read("windows-build.yml");
+        for (body, artifact) in [
+            (job(&text, "mac"), "ConsensFlow-mac"),
+            (job(&windows, "windows"), "ConsensFlow-windows"),
+            (job(&text, "sign"), "ConsensFlow-signature"),
+        ] {
+            let upload = body
+                .split("uses: actions/upload-artifact@")
+                .find(|part| part.contains(&format!("name: {artifact}\n")))
+                .unwrap_or_else(|| panic!("no upload of {artifact}"));
+            let upload: String = upload.lines().take(8).collect::<Vec<_>>().join("\n");
+            assert!(
+                upload.contains("include-hidden-files: true"),
+                "{artifact}: {upload}"
+            );
+        }
+    }
+
+    #[test]
     fn has_the_publish_job_hold_the_sums_and_the_signature_to_the_sign_jobs_outputs_before_it_publishes(
     ) {
         let publish = job(&read("release.yml"), "publish");
@@ -232,7 +286,7 @@ mod its_steps_as_written {
     use std::path::{Path, PathBuf};
 
     use cf_publish::digest::sha256_hex;
-    use cf_publish::testing::workflow::release::{MAC_LISTING, WINDOWS_LISTING};
+    use cf_publish::testing::workflow::release::{MAC_LISTING, PUBLISH_ARTIFACTS, WINDOWS_LISTING};
     use cf_publish::testing::workflow::{bash, job, read, step};
     use cf_publish::testing::{built_files, folder_of, published_assets, Ran, TempDir};
 
@@ -294,6 +348,7 @@ mod its_steps_as_written {
                 "archive",
             ),
             ("latest.json".to_string(), "{}"),
+            ("notes.txt".to_string(), "the notes"),
         ] {
             fs::write(mac.path().join("release").join(name), data).unwrap();
         }
@@ -341,8 +396,8 @@ mod its_steps_as_written {
         assert_eq!(mac_listing.len(), 64);
         assert_eq!(windows_listing.len(), 64);
 
-        // The sign job, given what each job uploaded: as built, then with a file replaced.
-        let sign_job = |replace: Option<&str>| {
+        // What each job uploaded, as a job of the run downloads it, with `replace` replaced.
+        let lay_out = |replace: Option<&str>| {
             let runner = TempDir::new("sign");
             let built = runner.path().join("built");
             fs::create_dir_all(built.join("mac")).unwrap();
@@ -366,6 +421,11 @@ mod its_steps_as_written {
             if let Some(path) = replace {
                 fs::write(built.join(path), "replaced by another job of the run").unwrap();
             }
+            runner
+        };
+        // The sign job, given what each job uploaded: as built, then with a file replaced.
+        let sign_job = |replace: Option<&str>| {
+            let runner = lay_out(replace);
             let ran = run(
                 ARTIFACTS,
                 runner.path(),
@@ -409,6 +469,50 @@ mod its_steps_as_written {
             assert!(
                 !runner.path().join("dist").exists(),
                 "nothing is laid out to be signed"
+            );
+        }
+
+        // The publish job's check of the same downloads, the notes among them, before it publishes:
+        // the folder published from holds the signature already.
+        let publish_job = |replace: Option<&str>| {
+            let runner = lay_out(replace);
+            fs::create_dir(runner.path().join("dist")).unwrap();
+            fs::write(runner.path().join("dist/SHA256SUMS"), "the sums\n").unwrap();
+            let ran = run_in(
+                "release.yml",
+                "publish",
+                PUBLISH_ARTIFACTS,
+                runner.path(),
+                &[
+                    ("RUNNER_TEMP", runner.path().to_str().unwrap()),
+                    ("MAC_LISTING", &mac_listing),
+                    ("WINDOWS_LISTING", &windows_listing),
+                ],
+            );
+            (ran, runner)
+        };
+        let (ran, runner) = publish_job(None);
+        assert_eq!(ran.status, 0, "{}", ran.said());
+        assert!(runner.path().join("dist/notes.txt").is_file());
+        assert!(runner.path().join("dist/SHA256SUMS").is_file());
+        for (replaced, job_name) in [
+            ("mac/notes.txt".to_string(), "mac"),
+            (
+                format!("windows/portable/ConsensFlow_{RELEASE}_x64-portable.exe"),
+                "windows",
+            ),
+        ] {
+            let (ran, runner) = publish_job(Some(&replaced));
+            assert_eq!(ran.status, 1, "{replaced}: {}", ran.said());
+            assert!(
+                ran.stderr
+                    .contains(&format!("the {job_name} job's files downloaded hash to")),
+                "{replaced}: {}",
+                ran.said()
+            );
+            assert!(
+                !runner.path().join("dist/notes.txt").exists(),
+                "nothing laid out to publish"
             );
         }
 

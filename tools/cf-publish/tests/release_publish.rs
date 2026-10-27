@@ -84,10 +84,21 @@ mod who_may_publish {
                 "the publish job does not wait for {job}: {needs}"
             );
         }
-        // The release's files and the publisher, downloaded into folders of their own.
+        // The release's files, the signature and the publisher, each downloaded by name into a
+        // folder of its own: none merged unchecked.
+        for name in [
+            "ConsensFlow-mac",
+            "ConsensFlow-windows",
+            "ConsensFlow-signature",
+        ] {
+            assert!(
+                publish.contains(&format!("          name: {name}\n")),
+                "the release's {name} by name"
+            );
+        }
         assert!(
-            publish.contains("pattern: ConsensFlow-*"),
-            "the release's files by name"
+            !publish.contains("pattern: "),
+            "a download by pattern, held to nothing"
         );
         assert!(
             publish.contains("          name: cf-publish\n"),
@@ -147,8 +158,8 @@ mod who_may_publish {
             .collect();
         assert_eq!(
             builds.len(),
-            2,
-            "the Mac job's and the publisher job's: {builds:?}"
+            3,
+            "the Mac job's and the two publisher jobs': {builds:?}"
         );
         for line in builds {
             assert!(
@@ -162,54 +173,68 @@ mod who_may_publish {
 
     #[test]
     fn builds_the_publisher_where_no_secret_is() {
-        let publisher = job(&read("release.yml"), "publisher");
-        assert!(
-            publisher.contains("    permissions:\n      contents: read\n"),
-            "the publisher job reads the tree and nothing more"
-        );
-        for word in [
-            "secrets.",
-            "GH_TOKEN",
-            "github.token",
-            "environment:",
-            "contents: write",
-            "id-token",
+        // The publisher the publish job runs (Linux), and the one the sign job runs (macOS).
+        for (name, building_step, artifact) in [
+            ("publisher", BUILD_PUBLISHER, "cf-publish"),
+            (
+                "publisher-macos",
+                "Build cf-publish for macOS, and say what it hashes to",
+                "cf-publish-macos",
+            ),
         ] {
-            assert!(!publisher.contains(word), "the publisher job holds {word}");
-        }
-        for line in publisher.lines().filter(|line| line.contains("uses:")) {
+            let publisher = job(&read("release.yml"), name);
             assert!(
-                line.contains("uses: actions/"),
-                "a third-party action builds what runs under the token: {line}"
+                publisher.contains("    permissions:\n      contents: read\n"),
+                "{name} reads the tree and nothing more"
+            );
+            for word in [
+                "secrets.",
+                "GH_TOKEN",
+                "github.token",
+                "environment:",
+                "contents: write",
+                "id-token",
+            ] {
+                assert!(!publisher.contains(word), "{name} holds {word}");
+            }
+            for line in publisher.lines().filter(|line| line.contains("uses:")) {
+                assert!(
+                    line.contains("uses: actions/"),
+                    "a third-party action builds what runs under the token: {line}"
+                );
+            }
+            let checkout = publisher
+                .split("- uses: actions/checkout")
+                .nth(1)
+                .expect("a checkout");
+            assert!(
+                checkout
+                    .lines()
+                    .take(4)
+                    .any(|line| line.trim() == "persist-credentials: false"),
+                "the checkout leaves no credential behind"
+            );
+            let building = step(&publisher, building_step);
+            assert!(building
+                .script()
+                .contains("cargo build --release --locked -p cf-publish"));
+            assert!(building
+                .script()
+                .contains("shasum -a 256 app/src-tauri/target/release/cf-publish"));
+            assert!(building.script().contains("\"$GITHUB_OUTPUT\""));
+            assert_eq!(building.field("id").as_deref(), Some("build"));
+            assert!(publisher.contains("      sha256: ${{ steps.build.outputs.sha256 }}\n"));
+            assert!(publisher.contains(&format!("          name: {artifact}\n")));
+            assert!(publisher.contains("          path: app/src-tauri/target/release/cf-publish\n"));
+            assert!(
+                !publisher.contains("\n    if:"),
+                "{name} runs on a hand run too: that is the trial of its build, its hash and its upload"
             );
         }
-        let checkout = publisher
-            .split("- uses: actions/checkout")
-            .nth(1)
-            .expect("a checkout");
-        assert!(
-            checkout
-                .lines()
-                .take(4)
-                .any(|line| line.trim() == "persist-credentials: false"),
-            "the checkout leaves no credential behind"
-        );
-        let building = step(&publisher, BUILD_PUBLISHER);
-        assert!(building
-            .script()
-            .contains("cargo build --release --locked -p cf-publish"));
-        assert!(building
-            .script()
-            .contains("shasum -a 256 app/src-tauri/target/release/cf-publish"));
-        assert!(building.script().contains("\"$GITHUB_OUTPUT\""));
-        assert_eq!(building.field("id").as_deref(), Some("build"));
-        assert!(publisher.contains("      sha256: ${{ steps.build.outputs.sha256 }}\n"));
-        assert!(publisher.contains("          name: cf-publish\n"));
-        assert!(publisher.contains("          path: app/src-tauri/target/release/cf-publish\n"));
-        assert!(
-            !publisher.contains("\n    if:"),
-            "it runs on a hand run too: that is the trial of its build, its hash and its upload"
-        );
+        // The sign job runs the macOS one, held to that job's hash.
+        let sign = job(&read("release.yml"), "sign");
+        assert!(sign.contains("          name: cf-publish-macos\n"));
+        assert!(sign.contains("BUILT_SHA256: ${{ needs.publisher-macos.outputs.sha256 }}"));
     }
 
     #[test]

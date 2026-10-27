@@ -69,6 +69,9 @@ pub mod release {
     pub const WINDOWS_LISTING: &str = "The files people download, and what they hash to";
     /// The sign job's step that holds the files it downloaded to the build jobs' listings.
     pub const ARTIFACTS: &str = "The files are the ones the Mac and Windows jobs built";
+    /// The publish job's step that holds the files it downloaded to the build jobs' listings.
+    pub const PUBLISH_ARTIFACTS: &str =
+        "The files are the ones the Mac and Windows jobs built, to be published";
     /// The sign job's step that says what it signed hashes to.
     pub const SIGNED: &str = "What was signed hashes to";
     /// The publish job's step that holds SHA256SUMS and its signature to the sign job's outputs.
