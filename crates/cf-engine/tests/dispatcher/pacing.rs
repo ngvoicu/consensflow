@@ -604,3 +604,64 @@ fn a_window_whose_harness_says_at_work_past_a_settle_of_its_turn_read_over_is_as
     context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), [note.id]);
 }
+
+/// T-842's P3: the fresh look before the paste asks the harness's live word again: a
+/// window its harness says went to work between the gate's look and the paste is given
+/// nothing.
+#[test]
+fn a_fresh_look_that_finds_the_harness_says_at_work_hands_nothing_over() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    let note = context.note(project, "zeus", "chief", "One");
+    context.pass().unwrap();
+    context.advance(SETTLE);
+    let adapter = Rc::downgrade(&context.adapter);
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        if let Some(adapter) = adapter.upgrade() {
+            adapter.with("chief", |agent| agent.at_work = true);
+        }
+        Ok(Readiness::Ready)
+    }));
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
+    assert_eq!(context.message(note.id).attempts, 0, "no attempt is spent");
+    let chief = context.id(project, "chief");
+    assert_eq!(
+        context.dispatcher.held_back(chief).map(|held| held.reason),
+        Some("its harness says it is at work".to_owned())
+    );
+}
+
+/// T-842's P3: a member's question goes ahead of an urgent row in the queue, and an
+/// urgent row goes at the window's first rest: the head of a queue an urgent row waits in
+/// goes at its first rest too, so the urgent row waits for no settle.
+#[test]
+fn the_head_of_a_queue_an_urgent_row_waits_in_goes_at_the_first_rest() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    context.give(project, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let asked = context.ask(project, "zeus", "chief", 1, "Which format?");
+    let urgent = context
+        .ledger
+        .borrow_mut()
+        .ask(
+            project,
+            &cf_ledger::NewQuestion {
+                from: Some("zeus".to_owned()),
+                to: "chief".to_owned(),
+                body: Some("Stop: the grammar changed".to_owned()),
+                task: Some(1),
+                urgent: true,
+                ..cf_ledger::NewQuestion::default()
+            },
+        )
+        .unwrap();
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), [asked.id], "no settle waited");
+    context.adapter.answer("chief", "JSON.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), [asked.id, urgent.id]);
+}
