@@ -139,7 +139,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
-        shard: ['1/3', '2/3', '3/3']
+        shard: ['1/6', '2/6', '3/6', '4/6', '5/6', '6/6']
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -173,9 +173,18 @@ jobs:
       # the slower. A shard has a third, 800 to 1,070 s, and the build. 30 is the
       # smaller of the two limits, which no shard comes near; the runs of the
       # shards set it (`cargo xtask ci-times --step "test:daemons"`).
+      # Six since 3.0.6-alpha.3's integration B (T-836): it doubled the cases' time, and
+      # in its first run on main (40568487001) each of three shards took about 40 s to
+      # build, 50 to 60 s for the daemon's cases, 400 to 620 s for the rig's and 1,090 s
+      # to more than 1,150 s for the regressions', so every macOS shard and one Windows
+      # shard hit the 30 minutes. A sixth of that is about 15 to 17 minutes, half the
+      # limit. Each shard says its time against the limit after each test file, and warns
+      # on the run past ci-times' share of it (CF_TEST_SHARD_LIMIT_MINUTES, which is the
+      # step's timeout-minutes: suites.rs's test holds them equal).
       - run: npm run test:daemons
         env:
           CF_TEST_SHARD: ${{ matrix.shard }}
+          CF_TEST_SHARD_LIMIT_MINUTES: 30
         timeout-minutes: 30
 
       # A rig case that fails keeps a report of what its windows showed beside
