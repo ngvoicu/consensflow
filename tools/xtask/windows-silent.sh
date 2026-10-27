@@ -68,7 +68,8 @@ for pid in "$out"/state/nc.*; do kill -9 "${pid##*/nc.}" 2>/dev/null; done
 case "$(tail -1 "$poll")" in
   *"lock=HELD"*)
     (cd "$T/$tree" && cargo xtask windows --machine "$machine" --wait 0 -- cmd /c "echo second run ran") > "$second" 2>&1
-    echo "$(date +%T) the second run ended with $?: $(grep -m1 -E 'second run ran|busy|still going' "$second")" >> "$times" ;;
+    status=$?
+    echo "$(date +%T) the second run ended with $status: $(grep -m1 -E 'second run ran|busy|still going' "$second")" >> "$times" ;;
   *) echo "$(date +%T) the machine was not held by the time the first run's Mac side had ended: no second run" >> "$times" ;;
 esac
 # Until the machine is clear, at most a quarter of an hour.

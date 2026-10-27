@@ -1468,7 +1468,7 @@ fn every_connection_a_run_makes_ends_when_the_peer_goes_silent() {
 fn the_ssh_that_ends_a_run_there_ends_when_the_peer_goes_silent_too() {
     let rig = Rig::new();
     rig.program("scp", KEEPS);
-    rig.program("ssh", &another_tree(0));
+    rig.program("ssh", &goes_silent(0));
     let (ended, ..) = run_it(&rig, &Interrupt::default());
     assert!(ended.is_err());
     // The probe, the tree, the run, and the machine asked to end it.
@@ -1478,6 +1478,11 @@ fn the_ssh_that_ends_a_run_there_ends_when_the_peer_goes_silent_too() {
         calls[3].starts_with(&format!("ssh {RUN_BOUNDS} zeewin ")),
         "{calls:?}"
     );
+}
+
+/// How many tickets the rig's queue holds for `machine`: none once a run is over, however it ended.
+fn tickets(rig: &Rig, machine: &str) -> usize {
+    fs::read_dir(rig.bin.path().join("queues").join(machine)).map_or(0, Iterator::count)
 }
 
 /// An ssh whose peer went silent: it says a word, and then what ssh says when it gives a silent
@@ -1513,6 +1518,42 @@ fn a_run_whose_connection_went_silent_says_so_and_asks_the_machine_to_end_the_ru
     assert_eq!(log.len(), 3, "{log:?}");
     let ends: Vec<&str> = log[2].split('\t').collect();
     assert_eq!(decoded(ends[2]), stop_script(DEFAULT_DIR, &id_in(&log)));
+}
+
+#[test]
+fn a_run_whose_connection_went_silent_lets_go_of_its_place_in_the_queue() {
+    let rig = Rig::new();
+    rig.program("scp", KEEPS);
+    // The run's ssh counts the tickets the queue holds while the run goes on there.
+    rig.program(
+        "ssh",
+        &format!(
+            r#"if [ ! -e "$CF_FIRST" ]; then ls "$CF_WINDOWS_QUEUES/zeewin" | wc -l | tr -d ' ' >> "$CF_LOG.tickets"; fi
+{}"#,
+            goes_silent(0)
+        ),
+    );
+    // Told to wait, as a person who does not say otherwise is: a run takes its place in the
+    // queue of the machine, and keeps it while it goes on there.
+    let options = Options {
+        wait: 1,
+        ..rig.options()
+    };
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let ended = run(
+        &rig.context,
+        &Machine::at("zeewin"),
+        &options,
+        &mut Console {
+            out: &mut out,
+            err: &mut err,
+        },
+        &Interrupt::default(),
+    );
+    assert!(matches!(ended, Err(Error::Silent(_))), "{ended:?}");
+    let held = fs::read_to_string(rig.bin.path().join("log.tickets")).unwrap();
+    assert_eq!(held.trim(), "1", "the run held no place while it went on");
+    assert_eq!(tickets(&rig, "zeewin"), 0, "and let go of it when it ended");
 }
 
 #[test]

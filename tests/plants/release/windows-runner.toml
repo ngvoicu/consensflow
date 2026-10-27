@@ -2213,3 +2213,24 @@ runs = ["xtask-lib-windows"]
 file = "tools/xtask/src/windows/machine.rs"
 find = "            if reach::went_silent(&answer.stderr) {"
 replace = "            if reach::went_silent(&answer.stdout) {"
+
+[[plant]]
+name = "windows runner: a run whose connection went silent keeps its place in the queue"
+meant = "a_run_whose_connection_went_silent_lets_go_of_its_place_in_the_queue"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run.rs"
+find = "    let _turn = match waited {"
+replace = "    let _turn = std::mem::ManuallyDrop::new(match waited {"
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run.rs"
+find = '''            turn
+        }
+    };
+    let scratch'''
+replace = '''            turn
+        }
+    });
+    let scratch'''
