@@ -30,7 +30,7 @@ use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-use cf_e2e::live::{ask, machine};
+use cf_e2e::live::{ask, machine, Log};
 use cf_e2e::process::own_var;
 use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
@@ -107,6 +107,8 @@ fn env(scratch: &Path) -> Value {
 #[test]
 #[ignore = "opt-in: reads Muse's model list and usage, no model turn; cargo xtask live muse-reads (npm run live:muse-reads)"]
 fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() -> Result {
+    // No window runs here, and no model: a `--models` would be read by nothing.
+    let _log = Log::own_agents("live muse-reads", "it reads what Muse says of itself")?;
     ask::prepare()?;
     let home = machine::home()?;
     let config = home.join(".config/muse");

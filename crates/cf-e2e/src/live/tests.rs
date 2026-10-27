@@ -113,8 +113,10 @@ fn no_live_test_sets_or_clears_the_config_folder_of_its_claude_code() {
 
 /// The live tests whose windows run agents of their own, not the models of
 /// [`agents`]: the catalog's agents named (`live_agent.rs`), and the catalog's
-/// image designer (`live_designer.rs`).
-const OWN_AGENTS: [&str; 2] = ["live_agent.rs", "live_designer.rs"];
+/// image designer (`live_designer.rs`); and the one that runs no window and no model at
+/// all, which reads what Muse says of its models and its allowance (`live_muse_reads.rs`):
+/// a `--models` would be read by nothing there too.
+const OWN_AGENTS: [&str; 3] = ["live_agent.rs", "live_designer.rs", "live_muse_reads.rs"];
 
 /// A run that does not begin with `Log::begin` takes a `--models` that no window
 /// could be asked for as far as its first window, and says nowhere what its
