@@ -441,21 +441,94 @@ struct Made {
     services: Option<BTreeSet<String>>,
 }
 
+/// The fields of a login that a refresh changes: the tokens, and when the access token ends. A
+/// refresh cannot leave all three as they were, so a login whose three are as they were copied
+/// was not refreshed, whatever else Claude Code wrote beside them.
+const TOKENS: [&str; 3] = ["accessToken", "refreshToken", "expiresAt"];
+
+/// What a run's Claude Code left of the copy of the login in its folder, judged by the names of
+/// the fields that differ (never their values).
+#[derive(Debug, PartialEq, Eq)]
+enum Copy {
+    /// The login as it was copied.
+    Kept,
+    /// Claude Code wrote other fields of the login (`subscriptionType`, `rateLimitTier`: what it
+    /// learns of the account) and left its tokens as they were: the machine's login is not stale.
+    Rewritten(Vec<String>),
+    /// A token was changed: Claude Code refreshed the copy, and the refresh token the machine keeps
+    /// may be used up. The names of the fields that differ; none where the login itself is gone.
+    Refreshed(Vec<String>),
+    /// The folder's `.credentials.json` is gone or holds no JSON.
+    Lost,
+}
+
+impl Copy {
+    /// What `now`, the folder's `.credentials.json` as it is (none where it is gone or no JSON), is
+    /// of the login `copied`.
+    fn of(copied: &Value, now: Option<&Value>) -> Self {
+        let Some(now) = now else {
+            return Self::Lost;
+        };
+        let Some(now) = now.get("claudeAiOauth").and_then(Value::as_object) else {
+            return Self::Refreshed(Vec::new());
+        };
+        let Some(copied) = copied.as_object() else {
+            return Self::Refreshed(Vec::new());
+        };
+        let mut names: Vec<&String> = copied.keys().chain(now.keys()).collect();
+        names.sort();
+        names.dedup();
+        let (tokens, others): (Vec<String>, Vec<String>) = names
+            .into_iter()
+            .filter(|name| copied.get(*name) != now.get(*name))
+            .cloned()
+            .partition(|name| TOKENS.contains(&name.as_str()));
+        match (tokens.is_empty(), others.is_empty()) {
+            (false, _) => Self::Refreshed(tokens.into_iter().chain(others).collect()),
+            (true, false) => Self::Rewritten(others),
+            (true, true) => Self::Kept,
+        }
+    }
+}
+
 impl Made {
-    /// Whether the folder's `.credentials.json` is as it was copied, and if not, how.
-    fn refreshed(&self) -> Option<String> {
+    /// What the folder's `.credentials.json` is of the login that was copied.
+    fn copy(&self) -> Copy {
         let now = fs::read_to_string(self.folder.path().join(".credentials.json"))
             .ok()
             .and_then(|text| serde_json::from_str::<Value>(&text).ok());
-        match now {
-            Some(now) if now["claudeAiOauth"] == self.oauth => None,
-            Some(_) => Some(
+        Copy::of(&self.oauth, now.as_ref())
+    }
+
+    /// Whether the copy was refreshed or lost, in words: the hazard `finish` fails the run for.
+    fn refreshed(&self) -> Option<String> {
+        match self.copy() {
+            Copy::Kept | Copy::Rewritten(_) => None,
+            Copy::Refreshed(fields) if fields.is_empty() => Some(
                 "the run's Claude Code wrote a different login in the folder's .credentials.json"
                     .to_owned(),
             ),
-            None => {
+            Copy::Refreshed(fields) => Some(format!(
+                "the run's Claude Code wrote a different login in the folder's .credentials.json \
+                 (it changed {})",
+                fields.join(", ")
+            )),
+            Copy::Lost => {
                 Some("the folder's .credentials.json is gone or no longer holds a login".to_owned())
             }
+        }
+    }
+
+    /// What Claude Code wrote of the login besides its tokens, if it did, in words: no failure,
+    /// but a thing for whoever reads the output to know the copy is not byte for byte.
+    fn rewritten(&self) -> Option<String> {
+        match self.copy() {
+            Copy::Rewritten(fields) => Some(format!(
+                "the run's Claude Code wrote {} of the login in the folder's .credentials.json and \
+                 left its tokens as they were copied: the machine's login was not refreshed",
+                fields.join(", ")
+            )),
+            _ => None,
         }
     }
 }
@@ -661,6 +734,9 @@ impl ClaudeConfig for Login {
             return Ok(());
         };
         let touched = self.owner.changes_since(&made.owner);
+        if let Some(note) = made.rewritten() {
+            let _ = writeln!(io::stderr(), "note: {note}");
+        }
         let mut refreshed: Vec<String> = made.refreshed().into_iter().collect();
         if let (Some(before), Some(now)) = (&made.services, keychain_services()) {
             refreshed.extend(gained(before, &now));

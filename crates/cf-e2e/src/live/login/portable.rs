@@ -85,3 +85,109 @@ fn what_a_run_on_windows_left_in_the_owners_setup_is_found_out_by_the_folders_wr
     .unwrap();
     assert!(owner.changes_since(&before).is_empty());
 }
+
+/// A login as the machine keeps it: the tokens a refresh changes, and what Claude Code learns of the
+/// account besides them.
+fn login(access: &str, refresh: &str, expires: i64) -> Value {
+    json!({
+        "accessToken": access, "refreshToken": refresh, "expiresAt": expires,
+        "scopes": ["user:inference"], "subscriptionType": "max",
+    })
+}
+
+fn wrapped(oauth: &Value) -> Value {
+    json!({ "claudeAiOauth": oauth })
+}
+
+#[test]
+fn what_a_run_left_of_the_copy_is_told_by_the_names_of_the_fields_that_differ() {
+    let copied = login("ACCESS-1", "REFRESH-1", 1_800_000_000_000);
+    let of = |now: &Value| Copy::of(&copied, Some(&wrapped(now)));
+    assert_eq!(of(&copied), Copy::Kept);
+    // Claude Code learns the account's plan and its limit tier and writes them beside the tokens:
+    // a login whose tokens are as copied was not refreshed.
+    let mut learned = copied.clone();
+    learned["rateLimitTier"] = json!("default_claude_max_5x");
+    learned["subscriptionType"] = json!("pro");
+    assert_eq!(
+        of(&learned),
+        Copy::Rewritten(vec![
+            "rateLimitTier".to_owned(),
+            "subscriptionType".to_owned()
+        ])
+    );
+    // A refresh: a new access token, when it ends, and a new refresh token.
+    let refreshed = login("ACCESS-2", "REFRESH-2", 1_800_000_999_000);
+    assert_eq!(
+        of(&refreshed),
+        Copy::Refreshed(vec![
+            "accessToken".to_owned(),
+            "expiresAt".to_owned(),
+            "refreshToken".to_owned()
+        ])
+    );
+    // One token is enough, and what else was written is named after the tokens.
+    let mut one = copied.clone();
+    one["expiresAt"] = json!(1_800_000_999_000_i64);
+    one["rateLimitTier"] = json!("x");
+    assert_eq!(
+        of(&one),
+        Copy::Refreshed(vec!["expiresAt".to_owned(), "rateLimitTier".to_owned()])
+    );
+    // A token taken out is a change of it.
+    let mut gone = copied.clone();
+    gone.as_object_mut().unwrap().remove("refreshToken");
+    assert_eq!(of(&gone), Copy::Refreshed(vec!["refreshToken".to_owned()]));
+    // A file with no login in it, and one that is gone.
+    assert_eq!(
+        Copy::of(&copied, Some(&json!({ "mcpOAuth": {} }))),
+        Copy::Refreshed(Vec::new())
+    );
+    assert_eq!(Copy::of(&copied, None), Copy::Lost);
+}
+
+#[test]
+fn a_copy_only_rewritten_beside_its_tokens_is_no_failure_and_a_refreshed_one_names_its_fields_and_no_value(
+) {
+    let home = tempfile::tempdir().unwrap();
+    let owner = Owner {
+        home: home.path().to_path_buf(),
+    };
+    let copied = login("ACCESS-SECRET-1", "REFRESH-SECRET-1", 1_800_000_000_000);
+    let made = Made {
+        folder: tempfile::tempdir().unwrap(),
+        oauth: copied.clone(),
+        owner: owner.look(),
+        services: None,
+    };
+    let write = |now: &Value| {
+        std::fs::write(
+            made.folder.path().join(".credentials.json"),
+            wrapped(now).to_string(),
+        )
+        .unwrap();
+    };
+    write(&copied);
+    assert_eq!((made.refreshed(), made.rewritten()), (None, None));
+    let mut learned = copied.clone();
+    learned["rateLimitTier"] = json!("default_claude_max_5x");
+    write(&learned);
+    assert_eq!(made.refreshed(), None);
+    let note = made.rewritten().unwrap();
+    assert!(note.contains("rateLimitTier"), "{note}");
+    assert!(note.contains("not refreshed"), "{note}");
+    write(&login(
+        "ACCESS-SECRET-2",
+        "REFRESH-SECRET-2",
+        1_800_000_999_000,
+    ));
+    let said = made.refreshed().unwrap();
+    assert!(
+        said.contains("it changed accessToken, expiresAt, refreshToken"),
+        "{said}"
+    );
+    assert_eq!(made.rewritten(), None);
+    for text in [said, note] {
+        assert!(!text.contains("SECRET"), "{text}");
+    }
+}

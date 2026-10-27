@@ -113,3 +113,36 @@ runs = ["live-stand-in"]
 file = "crates/cf-e2e/src/stand_in.rs"
 find = '''    if is_cmd {'''
 replace = '''    if false && is_cmd {'''
+
+# The copy of the login is judged by the fields that differ: a run's Claude Code on Windows wrote
+# the file again (zeewin2, 2026-10-27), and a refresh is a change of the tokens, never of what
+# Claude Code learns of the account beside them.
+[[plant]]
+name = "windows live: a copy rewritten beside its tokens is taken for a refresh"
+meant = "what_a_run_left_of_the_copy_is_told_by_the_names_of_the_fields_that_differ"
+runs = ["live-login"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            (true, false) => Self::Rewritten(others),'''
+replace = '''            (true, false) => Self::Refreshed(others),'''
+
+[[plant]]
+name = "windows live: a refreshed copy is taken for a rewritten one"
+meant = "what_a_run_left_of_the_copy_is_told_by_the_names_of_the_fields_that_differ"
+runs = ["live-login"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            (false, _) => Self::Refreshed(tokens.into_iter().chain(others).collect()),'''
+replace = '''            (false, _) => Self::Rewritten(tokens.into_iter().chain(others).collect()),'''
+
+[[plant]]
+name = "windows live: when the access token ends is not a token of the login"
+meant = "what_a_run_left_of_the_copy_is_told_by_the_names_of_the_fields_that_differ"
+runs = ["live-login"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''const TOKENS: [&str; 3] = ["accessToken", "refreshToken", "expiresAt"];'''
+replace = '''const TOKENS: [&str; 3] = ["accessToken", "refreshToken", "refreshToken"];'''
