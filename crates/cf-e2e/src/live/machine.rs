@@ -365,14 +365,26 @@ pub fn seed_claude_trust(config: &Path, home: &Path) -> Result {
     if !held["projects"].is_object() {
         held["projects"] = serde_json::json!({});
     }
-    // Claude Code on Windows keeps a project by its folder with either separator
-    // (T-540's parity case writes both); the other systems have the one.
-    let root = live_root(home).to_string_lossy().into_owned();
-    let slashed = root.replace('\\', "/");
-    for key in [slashed, root] {
-        held["projects"][&key]["hasTrustDialogAccepted"] = serde_json::Value::Bool(true);
-    }
+    let root = claude_project_key(&live_root(home).to_string_lossy());
+    held["projects"][&root]["hasTrustDialogAccepted"] = serde_json::Value::Bool(true);
     files::write(&file, held.to_string())
+}
+
+/// A folder as Claude Code keeps it in the record of its projects (the keys of `projects` in
+/// its `.claude.json`): on Windows with `/` where the system writes `\` (its own
+/// `normalizePathForConfigKey`, read in 2.1.312; on zeewin and zeewin2 a suite that looked for
+/// a yes under the system's separator found none), as the system writes it elsewhere.
+pub fn claude_project_key(folder: &str) -> String {
+    project_key(folder, cfg!(windows))
+}
+
+/// [`claude_project_key`] for a system that is Windows (`windows`) or is not.
+fn project_key(folder: &str, windows: bool) -> String {
+    if windows {
+        folder.replace('\\', "/")
+    } else {
+        folder.to_owned()
+    }
 }
 
 /// `config`, whose Pi windows keep their login, settings and sessions in `agent_dir`

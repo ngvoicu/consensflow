@@ -354,10 +354,11 @@ fn said_yes_once(record: &Path, directory: &Path) -> Result {
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_else(|| json!({}));
-    let folder = fs::canonicalize(directory)
-        .unwrap_or_else(|_| directory.to_path_buf())
-        .to_string_lossy()
-        .into_owned();
+    let folder = live::claude_project_key(
+        &fs::canonicalize(directory)
+            .unwrap_or_else(|_| directory.to_path_buf())
+            .to_string_lossy(),
+    );
     if !held["projects"].is_object() {
         held["projects"] = json!({});
     }
@@ -489,8 +490,10 @@ fn claude_config(rig: &Rig, install: &Installed) -> PathBuf {
 }
 
 /// The folders Claude Code keeps a yes for in its own record of them (`record`, its
-/// `.claude.json`), read and never written: below `under` alone.
+/// `.claude.json`), read and never written: below `under` alone, each as Claude Code
+/// writes it ([`live::claude_project_key`]: on Windows with `/` for `\`).
 fn claude_trusted(record: &Path, under: &str) -> Vec<String> {
+    let under = live::claude_project_key(under);
     let record: serde_json::Value = fs::read_to_string(record)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
@@ -501,7 +504,7 @@ fn claude_trusted(record: &Path, under: &str) -> Vec<String> {
             projects
                 .iter()
                 .filter(|(folder, entry)| {
-                    folder.starts_with(under) && entry["hasTrustDialogAccepted"] == true
+                    folder.starts_with(&under) && entry["hasTrustDialogAccepted"] == true
                 })
                 .map(|(folder, _)| folder.clone())
                 .collect()
@@ -766,7 +769,7 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
         // A window whose folder is trusted from above asks only of the servers: no yes of
         // its folder was said, and none is kept.
         kept_where_said = if asked_the_folder {
-            kept == [folder.clone()]
+            kept == [live::claude_project_key(&folder)]
         } else {
             kept.is_empty()
         };

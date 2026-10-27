@@ -95,14 +95,14 @@ find = '''        Some(Self::File(home?.join(".claude").join(".credentials.json"
 replace = '''        Some(Self::File(home?.join(".claude.json")))'''
 
 [[plant]]
-name = "windows live: the live root is trusted by the Windows separator alone"
-meant = "a_windows_home_is_trusted_by_each_separator_claude_code_may_look_a_folder_up_by"
+name = "windows live: the key Claude Code keeps a Windows folder by has the system's separator"
+meant = "claude_code_keeps_a_folder_on_windows_with_forward_slashes_and_elsewhere_as_it_is"
 runs = ["live-trust"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = '''    for key in [slashed, root] {'''
-replace = '''    for key in [root] {'''
+find = '''        folder.replace('\\', "/")'''
+replace = '''        folder.to_owned()'''
 
 [[plant]]
 name = "windows live: a stand-in that is a cmd of the run's own is named by a shim of itself"
