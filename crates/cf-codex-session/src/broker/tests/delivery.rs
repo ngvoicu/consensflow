@@ -714,6 +714,43 @@ fn the_session_view_says_whether_codex_last_said_the_shown_thread_is_idle() {
     });
 }
 
+/// A `turn/completed` the broker never heard leaves the thread busy in its word for good
+/// (T-842's P2): asked to refresh, the broker asks Codex the thread's status
+/// (`thread/read`) where it last heard it busy, and learns what Codex says; where it heard
+/// it idle, it asks nothing.
+#[test]
+fn a_refresh_asks_codex_again_of_a_thread_last_heard_busy_and_learns_its_word() {
+    run(async {
+        let f = Fixture::start().await;
+        let tui = f.connect().await;
+        f.start_thread(&tui, 1, json!({ "id": A, "status": { "type": "idle" } }))
+            .await;
+        let (first, _) = tokio::join!(
+            f.deliver(A, json!({})),
+            f.respond("turn/start", json!({ "turn": { "id": "turn-1" } })),
+        );
+        assert_eq!(first, admitted());
+        // Codex's turn/completed is lost: the broker still says busy.
+        assert_eq!(f.read().await["idle"], false);
+        let (session, asked) = tokio::join!(
+            f.read_refreshed(),
+            f.respond(
+                "thread/read",
+                json!({ "thread": { "id": A, "status": { "type": "idle" }, "turns": [] } })
+            ),
+        );
+        assert_eq!(asked["params"]["threadId"], A);
+        assert_eq!(asked["params"]["includeTurns"], false);
+        assert_eq!(
+            session["idle"], true,
+            "Codex says idle: the broker learns it"
+        );
+        assert_eq!(f.read().await["idle"], true);
+        // Heard idle: a refresh asks nothing, and says what it heard.
+        assert_eq!(f.read_refreshed().await["idle"], true);
+    });
+}
+
 #[test]
 fn a_request_that_never_finishes_its_headers_or_its_body_is_ended_after_five_seconds() {
     run(async {

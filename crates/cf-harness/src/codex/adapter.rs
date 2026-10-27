@@ -407,6 +407,19 @@ impl Window for CodexWindow {
         self.at_work.get()
     }
 
+    fn recheck(&self) -> Work<'_, ()> {
+        Box::pin(async move {
+            let shown = self
+                .channel
+                .shown_refreshed(&*self.time, &*self.loopback)
+                .await;
+            // A broker that does not answer leaves the word as it was.
+            if let Some(shown) = shown {
+                self.at_work.set(shown.idle == Some(false));
+            }
+        })
+    }
+
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
         Box::pin(async move {
             let thread = self.thread.borrow().clone();

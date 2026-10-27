@@ -327,6 +327,7 @@ fn serve<S: Read + Write + Timed>(
                 hand_over(agent, &request);
                 result(id, json!({ "turn": { "id": "turn-1" } }))
             }
+            Some("thread/read") => result(id, json!({ "thread": agent.read() })),
             Some("thread/queue/add") => {
                 hand_over(agent, &request);
                 result(id, json!({ "queuedMessage": { "id": "queue-1" } }))

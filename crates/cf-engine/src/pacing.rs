@@ -216,6 +216,37 @@ impl Dispatcher {
         });
     }
 
+    /// Asks the window's harness its live word again where it has said the window is at
+    /// work while the window's record has read its turn over for a whole settle (T-842's
+    /// P2: a `turn/completed` Codex's broker never heard held the window at work for
+    /// good). No clock decides: the harness's answer is the word from then on. Asked at
+    /// most once a settle; never with no settle.
+    pub(crate) async fn recheck_if_due(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        observed: &Observed,
+        idle: bool,
+    ) {
+        let settle = self.seams.limits.settle_ms;
+        let window = record.window.borrow().window.clone();
+        let Some(window) = window.filter(|window| window.at_work() && idle && read(observed))
+        else {
+            record.delivery.borrow_mut().at_work_since = None;
+            return;
+        };
+        let now = self.now();
+        let since = *record
+            .delivery
+            .borrow_mut()
+            .at_work_since
+            .get_or_insert(now);
+        if settle == 0 || now - since < settle {
+            return;
+        }
+        record.delivery.borrow_mut().at_work_since = Some(now);
+        returning(window.recheck()).await;
+    }
+
     /// The rest of a window is over: a look at it failed, or it refused a message for
     /// being at work.
     pub(crate) fn rest_ends(&self, record: &Record) {

@@ -1344,6 +1344,10 @@ impl Dispatcher {
             && observed.waiting.is_none();
         let idle = free && !drawing;
         self.note_rest(record, &observed, idle, looked);
+        self.recheck_if_due(record, &observed, idle).await;
+        if self.forgotten(record) {
+            return Ok(());
+        }
         if record.pending_switch.borrow().is_some() {
             return self
                 .await_switch(project, participant, record, &observed, idle)

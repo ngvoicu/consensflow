@@ -124,7 +124,22 @@ impl Channel {
     /// answer was a refusal, was no JSON, was another launch's, or named a
     /// thread that is no id.
     pub async fn shown(&self, time: &dyn Time, loopback: &dyn Loopback) -> Option<Shown> {
-        let request = self.request("/session", None)?;
+        self.shown_at("/session", time, loopback).await
+    }
+
+    /// [`Channel::shown`], the broker asking Codex again first where it last heard the
+    /// thread busy (`GET /session?refresh`).
+    pub async fn shown_refreshed(&self, time: &dyn Time, loopback: &dyn Loopback) -> Option<Shown> {
+        self.shown_at("/session?refresh", time, loopback).await
+    }
+
+    async fn shown_at(
+        &self,
+        route: &str,
+        time: &dyn Time,
+        loopback: &dyn Loopback,
+    ) -> Option<Shown> {
+        let request = self.request(route, None)?;
         let attempt = arm(time, SESSION_TIMEOUT_MS);
         let mut reply = attempt.bound(loopback.send(request)).await?.ok()?;
         let status = reply.status();

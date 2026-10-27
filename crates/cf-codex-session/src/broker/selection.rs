@@ -160,6 +160,16 @@ impl Selection {
             .and_then(|thread| self.idle.get(thread).copied())
     }
 
+    /// Learns `thread`'s status from what Codex answered a read of it (`thread/read`'s
+    /// `thread`), where the window still shows it: busy or idle as Codex says.
+    pub(crate) fn learn(&mut self, thread: &str, read: Option<&Value>) {
+        if self.session_id() == Some(thread)
+            && read.is_some_and(|read| read.get("status").is_some())
+        {
+            self.idle.insert(thread.to_string(), status_is_idle(read));
+        }
+    }
+
     /// Whether a delivery would be taken now. `control_open` is whether the
     /// broker's connection to Codex is open.
     pub(crate) fn available(&self, control_open: bool) -> bool {

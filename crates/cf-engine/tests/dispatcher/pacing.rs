@@ -543,3 +543,51 @@ fn a_window_whose_record_cannot_be_read_says_so_on_its_lane_and_in_its_held_mess
     let held = context.dispatcher.held_back(chief).expect("held");
     assert_eq!((held.message, held.reason.as_str()), (note.id, said));
 }
+
+/// T-842's P2: Codex's broker missed a `turn/completed`, and said the thread at work for
+/// good while its rollout read the turn over; nothing went in, ever. Once the record has
+/// read the turn over for a settle while the harness says at work, the harness is asked
+/// again (no clock decides: Codex's own answer does), and what it says then stands.
+#[test]
+fn a_window_whose_harness_says_at_work_past_a_settle_of_its_turn_read_over_is_asked_again() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    context.adapter.with("chief", |agent| {
+        agent.at_work = true;
+        agent.at_work_after_recheck = Some(true);
+    });
+    let note = context.note(project, "zeus", "chief", "One");
+    context.pass().unwrap();
+    context.advance(SETTLE - 1);
+    context.pass().unwrap();
+    assert_eq!(
+        context.adapter.agent("chief").rechecked,
+        0,
+        "not before a settle"
+    );
+    context.advance(1);
+    context.pass().unwrap();
+    assert_eq!(context.adapter.agent("chief").rechecked, 1);
+    context.pass().unwrap();
+    assert_eq!(
+        context.adapter.agent("chief").rechecked,
+        1,
+        "once a settle, not once a look"
+    );
+    assert_eq!(
+        pasted(&context, "chief"),
+        Vec::<i64>::new(),
+        "it says at work still"
+    );
+    // The notice was lost: asked again, the harness says idle.
+    context
+        .adapter
+        .with("chief", |agent| agent.at_work_after_recheck = Some(false));
+    context.advance(SETTLE);
+    context.pass().unwrap();
+    assert_eq!(context.adapter.agent("chief").rechecked, 2);
+    context.pass().unwrap();
+    context.advance(SETTLE);
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), [note.id]);
+}

@@ -328,6 +328,17 @@ impl Window for FakeWindow {
     }
 
     /// Not written down: the JavaScript fake was never asked.
+    fn recheck(&self) -> Work<'_, ()> {
+        self.fake.of_launch(&self.launch, |agent| {
+            agent.rechecked += 1;
+            if let Some(at_work) = agent.at_work_after_recheck {
+                agent.at_work = at_work;
+            }
+        });
+        Box::pin(async {})
+    }
+
+    /// Not written down: the JavaScript fake was never asked.
     fn input_box<'a>(
         &'a self,
         _host: &'a dyn PaneHost,

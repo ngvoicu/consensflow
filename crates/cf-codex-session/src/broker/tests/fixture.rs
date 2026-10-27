@@ -671,10 +671,20 @@ impl Fixture {
 
     /// `GET /session`.
     pub(crate) async fn read(&self) -> Value {
+        self.read_at("/session").await
+    }
+
+    /// `GET /session?refresh`: the broker asks Codex again where it last heard the
+    /// shown thread busy.
+    pub(crate) async fn read_refreshed(&self) -> Value {
+        self.read_at("/session?refresh").await
+    }
+
+    async fn read_at(&self, target: &str) -> Value {
         http(
             self.address(),
             "GET",
-            "/session",
+            target,
             &[("authorization", &format!("Bearer {TOKEN}"))],
             b"",
         )

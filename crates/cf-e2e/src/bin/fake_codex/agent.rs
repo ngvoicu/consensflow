@@ -34,7 +34,10 @@
 //! its limit cut, with `usage_limit_exceeded` and no answer. One that says
 //! `MODEL-BUSY` works as long as it says and fails as a real rollout's turn did when
 //! its model was at capacity: `server_overloaded`, with the error's words and no
-//! answer. The thread is the same in every run unless
+//! answer. The server tells every connection a turn's start and its end
+//! (`turn/started`, `turn/completed`), as Codex does, but for the first
+//! `CF_TEST_CODEX_DROP_COMPLETED` ends, which it leaves unsaid, as a notice lost; a read
+//! of the thread (`thread/read`) says whether a turn runs. The thread is the same in every run unless
 //! `CF_TEST_CODEX_THREADS` says `unique`, which a window the daemon opens needs
 //! (two of them in one `CODEX_HOME` would share a rollout). The servers Codex opens
 //! with its window are `CF_TEST_CODEX_SERVERS` of them, and the first starts
@@ -66,6 +69,16 @@ struct Completed<'a> {
 
 impl Drop for Completed<'_> {
     fn drop(&mut self) {
+        self.agent.running.store(false, Ordering::Relaxed);
+        let unsaid = &self.agent.unsaid;
+        if unsaid
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+                left.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return;
+        }
         self.agent.notify("turn/completed", self.turn);
     }
 }
@@ -102,6 +115,11 @@ pub struct Agent {
     /// and its end (`turn/started`, `turn/completed`), which the broker keeps the thread's
     /// idle by.
     listeners: Mutex<Vec<Sender<Value>>>,
+    /// How many turn ends are still to go unsaid (`CF_TEST_CODEX_DROP_COMPLETED`): a
+    /// `turn/completed` the broker never hears, as one lost.
+    unsaid: AtomicU64,
+    /// Whether a turn runs now, which a read of the thread says (`thread/read`).
+    running: AtomicBool,
 }
 
 /// What `lock` holds, whether or not a thread that held it panicked.
@@ -154,6 +172,12 @@ impl Agent {
             begun: AtomicBool::new(false),
             records: AtomicU64::new(0),
             listeners: Mutex::new(Vec::new()),
+            unsaid: AtomicU64::new(
+                own_var("CF_TEST_CODEX_DROP_COMPLETED")
+                    .and_then(|text| text.parse().ok())
+                    .unwrap_or(0),
+            ),
+            running: AtomicBool::new(false),
         }
     }
 
@@ -199,6 +223,17 @@ impl Agent {
         let (said, heard) = mpsc::channel();
         held(&self.listeners).push(said);
         heard
+    }
+
+    /// The thread as a read of it says it (`thread/read`'s `thread`): its id, and
+    /// whether a turn runs.
+    pub fn read(&self) -> Value {
+        let status = if self.running.load(Ordering::Relaxed) {
+            json!({ "type": "active", "activeFlags": [] })
+        } else {
+            json!({ "type": "idle" })
+        };
+        json!({ "id": self.thread(), "status": status, "turns": [] })
     }
 
     /// Tells every connection that listens `method` of the thread, as Codex notifies;
@@ -270,6 +305,7 @@ impl Agent {
         let thread = self.thread();
         let began = Instant::now();
         let turn = uuid::Uuid::new_v4().to_string();
+        self.running.store(true, Ordering::Relaxed);
         self.notify("turn/started", &turn);
         let _completed = Completed {
             agent: self,

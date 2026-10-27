@@ -121,6 +121,10 @@ pub(crate) struct DeliveryPart {
     /// Why the window has no rest that a message could go in on, where a look said:
     /// its record could not be read, or its harness says it is at work (`pacing`).
     pub(crate) unrest: Option<String>,
+    /// Since when the window's record has read its turn over while its harness said it
+    /// is at work, on the engine's clock: a settle of it asks the harness again
+    /// (`Dispatcher::recheck_if_due`).
+    pub(crate) at_work_since: Option<i64>,
     /// What goes into the window before anything else of its queue, in this
     /// order and while it waits and may go: a launch that is to say a role
     /// first puts the replacement here, and the message it displaced after it

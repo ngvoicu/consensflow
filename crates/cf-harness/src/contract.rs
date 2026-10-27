@@ -477,6 +477,14 @@ pub trait Window {
     fn at_work(&self) -> bool {
         false
     }
+    /// The harness is asked its live word again, where [`Window::at_work`] said the
+    /// window is at work while its record has read the turn over for the settle: a
+    /// notice the harness's word missed leaves it at work for good otherwise (Codex's
+    /// broker and a lost `turn/completed`, T-842's P2). A harness with no such word asks
+    /// nothing.
+    fn recheck(&self) -> Work<'_, ()> {
+        Box::pin(async {})
+    }
     /// What the window's input box holds on its screen now, where its harness takes a
     /// message pasted into that box (Claude Code, Devin): a paste whose Enter did not take
     /// still sits there (3.0.7 chief-meeting, CMT-24). None where the screen shows no box
