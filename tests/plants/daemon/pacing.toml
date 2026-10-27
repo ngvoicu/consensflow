@@ -1,0 +1,72 @@
+# Paced delivery (3.0.7, `chief-meeting`): a board message goes into a window once, and its
+# arrival is proven from the harness's own record. A message Claude Code takes into a turn
+# under way is the user's item of its record, which begins no turn (CMT-02): a human's alone,
+# in the main conversation, its words a text or blocks. One plant takes one rule out; a test
+# of it fails.
+
+[run]
+# The Claude reader's own tests: what each record says of a turn.
+pacing-claude-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+
+[[plant]]
+name = "pacing reader: a message Claude takes into a turn under way is no item, and its arrival never shows"
+meant = "a_message_claude_code_takes_into_a_turn_under_way_is_the_user_s_item_in_its_place"
+runs = ["pacing-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = ".or_else(|| absorbed(record, session))"
+replace = ".or_else(|| absorbed(record, session).filter(|_| false))"
+
+[[plant]]
+name = "pacing reader: a message brought into a turn is the user's whoever it is from"
+meant = "what_another_session_or_claude_code_itself_brings_into_a_turn_is_no_user_s_item"
+runs = ["pacing-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''
+        && says(field(attachment, "commandMode"), "prompt")
+        && says(field(field(attachment, "origin"), "kind"), "human");'''
+replace = '''
+        && says(field(attachment, "commandMode"), "prompt");'''
+
+[[plant]]
+name = "pacing reader: a message taken into a turn ends the turn it went into"
+meant = "the_message_taken_in_begins_no_turn_and_ends_none"
+runs = ["pacing-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        self.items.push(id, Role::User, &message.text, at, seq);
+    }'''
+replace = '''
+        self.items.push(id, Role::User, &message.text, at, seq);
+        self.ended_natively();
+    }'''
+
+[[plant]]
+name = "pacing reader: the line keeps a message's text alone, and a message with pictures says nothing"
+meant = "a_message_with_pictures_is_its_words_as_a_user_s_message_with_pictures_is"
+runs = ["pacing-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/keep.rs"
+find = '''
+    ("prompt", &Keep::Items(&BLOCK)),'''
+replace = '''
+    ("prompt", &Keep::Scalar),'''
+
+[[plant]]
+name = "pacing reader: the line drops whose a message brought into a turn is"
+meant = "each_field_replay_reads_of_a_record_changes_the_reading"
+runs = ["pacing-claude-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/keep.rs"
+find = '''
+    ("origin", &ORIGIN),
+    ("prompt", &Keep::Items(&BLOCK)),'''
+replace = '''
+    ("prompt", &Keep::Items(&BLOCK)),'''

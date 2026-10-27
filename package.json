@@ -71,6 +71,7 @@
     "live:task-working": "cargo xtask live task-working",
     "live:harnesses": "cargo xtask live harnesses",
     "live:pi-parity": "cargo xtask live pi-parity",
+    "live:absorbed": "cargo xtask live absorbed",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },
