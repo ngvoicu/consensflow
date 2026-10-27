@@ -133,6 +133,9 @@ pub struct Publication<'a> {
     pub manifest: &'a Manifest,
     /// How long the reads of the files and feeds wait for GitHub to catch up.
     pub patience: Patience,
+    /// The minisign key line SHA256SUMS must be signed by: the update key
+    /// ([`update_key`](crate::sums::update_key)), a test's own in the tests.
+    pub key: &'a str,
 }
 
 /// What a publication is done through, so that the tests stand in for them.
@@ -279,6 +282,7 @@ pub fn publish_release(publication: &Publication, means: &Means) -> Result<Publi
         repo,
         manifest,
         patience,
+        key,
     } = *publication;
     if !tag
         .strip_prefix('v')
@@ -295,7 +299,7 @@ pub fn publish_release(publication: &Publication, means: &Means) -> Result<Publi
             return Err(Failure::new(format!("missing {path}")));
         }
     }
-    signed_sums(dir, &version)?;
+    signed_sums(dir, &version, key)?;
     let missing = missing_for_old_apps(&(means.members)(&on_disk(dir, &assets.archive))?);
     let feeds = plan_feeds(&version, &missing, manifest)?;
     let problems = check_prerequisites(&version, base, manifest, patience);

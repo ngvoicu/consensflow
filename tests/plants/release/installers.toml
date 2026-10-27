@@ -29,8 +29,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '    if [ "$checked" != ok ]; then'
-replace = '    if false; then'
+find = '''        0:*) refuse "the signature of $version's SHA256SUMS does not hold: ${checked#refused: }" ;;'''
+replace = '''        0:*) expected=$(awk -v name="$dmg" 'NF == 2 && ($2 == name || $2 == "*" name) { print $1 }' "$tmp/SHA256SUMS") ;;'''
 
 [[plant]]
 name = "installers: install.sh does not check the trusted comment's signature"
@@ -130,8 +130,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    expected=$(awk -v name="$dmg" 'NF == 2 && ($2 == name || $2 == "*" name) { print $1 }' "$tmp/SHA256SUMS")'''
-replace = '''    expected=$(awk 'NF == 2 { print $1; exit }' "$tmp/SHA256SUMS")'''
+find = '''    if (fields.length === 2 && (fields[1] === name || fields[1] === `*${name}`)) found.push(fields[0]);'''
+replace = '''    if (fields.length === 2) found.push(fields[0]);'''
 
 [[plant]]
 name = "installers: install.sh installs an app of another version than the release"
@@ -152,7 +152,7 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    codesign --verify --deep --strict "$app" 2>"$tmp/codesign.txt" ||'''
+find = '''    codesign --verify --deep --strict "$1" 2>"$tmp/codesign.txt" ||'''
 replace = '''    true 2>"$tmp/codesign.txt" ||'''
 
 [[plant]]
@@ -163,8 +163,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    codesign --verify -R="$requirement" "$app" 2>"$tmp/codesign.txt" ||'''
-replace = '''    codesign --verify "$app" 2>"$tmp/codesign.txt" ||'''
+find = '''    codesign --verify -R="$requirement" "$1" 2>"$tmp/codesign.txt" ||'''
+replace = '''    codesign --verify "$1" 2>"$tmp/codesign.txt" ||'''
 
 [[plant]]
 name = "installers: install.sh installs an app Gatekeeper refuses"
@@ -174,7 +174,7 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    assessed=$("$spctl" --assess --type execute -vv "$app" 2>&1) ||'''
+find = '''    assessed=$("$spctl" --assess --type execute -vv "$1" 2>&1) ||'''
 replace = '''    assessed="source=Notarized Developer ID" ||'''
 
 [[plant]]
@@ -544,3 +544,479 @@ runs = ["verifiers"]
 file = "install/check-signature.mjs"
 find = "if (problem !== null) refuse(`as Node checks it: ${problem}`)"
 replace = "if (problem !== null && false) refuse(`as Node checks it: ${problem}`)"
+
+# --- round 2 (T-805, T-806): what is signed is what was built ---
+
+[[plant]]
+name = "installers: the sign job signs files the build jobs did not list"
+meant = "the_files_signed_are_the_ones_the_jobs_listed_and_publish_takes_only_what_was_signed"
+runs = ["sign-job"]
+# Its steps run as written under bash, which Windows does not give the test.
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''            if [ -z "$want" ] || [ "$listing" != "$want" ]; then'''
+replace = '''            if false; then'''
+
+[[plant]]
+name = "installers: the publish job publishes sums or a signature the sign job did not make"
+meant = "the_files_signed_are_the_ones_the_jobs_listed_and_publish_takes_only_what_was_signed"
+runs = ["sign-job"]
+# Its steps run as written under bash, which Windows does not give the test.
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''            if [ -z "$want" ] || [ "$got" != "$want" ]; then'''
+replace = '''            if false; then'''
+
+[[plant]]
+name = "installers: the sign job signs a merged download no job's listing is checked against"
+meant = "holds_the_downloads_to_the_build_jobs_outputs_before_the_sums_and_hands_on_only_on_a_tag"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          name: ConsensFlow-mac
+          path: ${{ runner.temp }}/built/mac'''
+replace = '''          pattern: ConsensFlow-*
+          path: ${{ runner.temp }}/dist
+          merge-multiple: true'''
+
+[[plant]]
+name = "installers: a hand run uploads what it signed"
+meant = "holds_the_downloads_to_the_build_jobs_outputs_before_the_sums_and_hands_on_only_on_a_tag"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''      - if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7'''
+replace = '''      - uses: actions/upload-artifact@v7'''
+
+[[plant]]
+name = "installers: the sign job does not say what it signed"
+meant = "holds_the_downloads_to_the_build_jobs_outputs_before_the_sums_and_hands_on_only_on_a_tag"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''      sums: ${{ steps.signed.outputs.sums }}
+'''
+replace = ""
+
+[[plant]]
+name = "installers: the Windows build gives the release no listing of its files"
+meant = "holds_the_downloads_to_the_build_jobs_outputs_before_the_sums_and_hands_on_only_on_a_tag"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = '''        value: ${{ jobs.windows.outputs.listing }}'''
+replace = '''        value: ""'''
+
+[[plant]]
+name = "installers: the Mac job lists its files in another way than the sign job"
+meant = "holds_the_downloads_to_the_build_jobs_outputs_before_the_sums_and_hands_on_only_on_a_tag"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          out="$RUNNER_TEMP/release"
+          listing=$(cd "$out" && find . -type f | LC_ALL=C sort | while IFS= read -r file; do shasum -b -a 256 "$file"; done | shasum -a 256 | cut -d' ' -f1)'''
+replace = '''          out="$RUNNER_TEMP/release"
+          listing=$(cd "$out" && find . -type f | LC_ALL=C sort | while IFS= read -r file; do shasum -a 256 "$file"; done | shasum -a 256 | cut -d' ' -f1)'''
+
+[[plant]]
+name = "installers: the publisher takes any signature of SHA256SUMS"
+meant = "is_refused_for_a_signature_the_installers_would_refuse_before_anything_is_asked"
+runs = ["signed-sums"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/sums.rs"
+find = "    check_signature(key, &signature, &signed, &signed_name(version))"
+replace = "    Ok::<(), String>(())"
+
+[[plant]]
+name = "installers: the publisher takes a signature for another file"
+meant = "is_refused_for_a_signature_the_installers_would_refuse_before_anything_is_asked"
+runs = ["signed-sums"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/sums.rs"
+find = "        Some(file) if file == name => Ok(()),"
+replace = "        Some(_) => Ok(()),"
+
+[[plant]]
+name = "installers: the publisher takes a signature with CRLF line ends, which the installers refuse"
+meant = "is_refused_for_a_signature_the_installers_would_refuse_before_anything_is_asked"
+runs = ["signed-sums"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/sums.rs"
+find = """        || lines.iter().any(|line| line.contains('\\r'))
+"""
+replace = ""
+
+[[plant]]
+name = "installers: the publisher checks under another key than the update key"
+meant = "checks_the_signature_under_the_update_key_the_installers_pin"
+runs = ["signed-sums"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/sums.rs"
+find = "        .nth(1)"
+replace = "        .nth(0)"
+
+[[plant]]
+name = "installers: the real install runs after any Release run"
+meant = "installs_a_real_release_only_after_a_tags_release_run_that_succeeded"
+runs = ["sign-job"]
+
+[[plant.edit]]
+file = ".github/workflows/installers.yml"
+find = "    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')\n"
+replace = ""
+
+[[plant]]
+name = "installers: the release workflow's check of install.sh's verifier ignores its exit"
+meant = "the installers' signature check › the release workflow's check of install.sh's verifier takes its word only from a clean exit"
+runs = ["verifiers"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/kit.mjs"
+find = "    if (ran.status !== 0 || ran.signal)"
+replace = "    if (ran.signal)"
+
+# --- round 2: install.sh ---
+
+[[plant]]
+name = "installers: install.sh replaces a newer installed ConsensFlow with the feed's release"
+meant = "is kept, and nothing is downloaded but the feed"
+runs = [["node", "--test", "--test-name-pattern", "newer than the release", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        if [ -n "$current" ] && newer_than "$current" "$version"; then'''
+replace = '''        if false; then'''
+
+[[plant]]
+name = "installers: install.sh orders a release before its own pre-releases"
+meant = "install.sh orders versions as SemVer does"
+runs = [["node", "--test", "--test-name-pattern", "orders versions", "tests/install-sh.test.mjs"]]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''            if (xp == "") return 1'''
+replace = '''            if (xp == "") return -1'''
+
+[[plant]]
+name = "installers: install.sh does not take --version as asked for"
+meant = "goes back to the release --version names"
+runs = [["node", "--test", "--test-name-pattern", "newer than the release", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''                version="$2"
+                named="$2"'''
+replace = '''                version="$2"'''
+
+[[plant]]
+name = "installers: install.sh takes the check's word from a check that ended badly"
+meant = "the check's word is taken only from a clean exit"
+runs = [["node", "--test", "--test-name-pattern", "clean exit", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    if checked=$(osascript -l JavaScript "$tmp/verify.js" "$key" "$(cat "$tmp/SHA256SUMS.sig")" \
+        "$(od -An -tx1 -v "$tmp/SHA256SUMS" | tr -d ' \n')" "$signed" "$dmg" 2>&1 </dev/null); then'''
+replace = '''    if checked=$(osascript -l JavaScript "$tmp/verify.js" "$key" "$(cat "$tmp/SHA256SUMS.sig")" \
+        "$(od -An -tx1 -v "$tmp/SHA256SUMS" | tr -d ' \n')" "$signed" "$dmg" 2>&1 </dev/null) || true; then
+        [ "$checked" = ok ] && checked="ok $(awk -v name="$dmg" 'NF == 2 && $2 == name { print $1 }' "$tmp/SHA256SUMS")"'''
+
+[[plant]]
+name = "installers: install.sh reads the DMG's hash from SHA256SUMS again, after its signature was checked"
+meant = "the hash of the DMG comes from the bytes of SHA256SUMS whose signature was checked"
+runs = [["node", "--test", "--test-name-pattern", "bytes of SHA256SUMS", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        "0:ok "*) expected=${checked#ok } ;;'''
+replace = '''        "0:ok "*) expected=$(awk -v name="$dmg" 'NF == 2 && ($2 == name || $2 == "*" name) { print $1 }' "$tmp/SHA256SUMS") ;;'''
+
+[[plant]]
+name = "installers: install.sh's check takes the first of two lines that name the DMG"
+meant = "the installers' signature check › install.sh's, in macOS's JavaScript (osascript) › the hash of a file is read from the one line that names it exactly"
+runs = ["verifiers"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''  return found.length === 1 && /^[0-9a-f]{64}$/.test(found[0]) ? found[0] : null;'''
+replace = '''  return found.length >= 1 && /^[0-9a-f]{64}$/.test(found[0]) ? found[0] : null;'''
+
+[[plant]]
+name = "installers: install.sh does not check the copy that goes in"
+meant = "the copy that goes in is checked again: one swapped once the DMG was checked is refused"
+runs = [["node", "--test", "--test-name-pattern", "checked again", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    check_app "$stage" "the copy of the app made in $dir"
+'''
+replace = ""
+
+[[plant]]
+name = "installers: install.sh asks an open ConsensFlow to quit before the copy that goes in is checked"
+meant = "an open ConsensFlow is asked to quit only once the copy that goes in has passed its checks"
+runs = [["node", "--test", "--test-name-pattern", "asked to quit only once", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    stage="$dir/.ConsensFlow.app.installing.$$"'''
+replace = '''    quit_open_app "$dest"
+    stage="$dir/.ConsensFlow.app.installing.$$"'''
+
+[[plant]]
+name = "installers: install.sh swaps under a ConsensFlow opened again while it waited"
+meant = "an app opened again between the quit and the swap is refused, and the installed one kept"
+runs = [["node", "--test", "--test-name-pattern", "opened again", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    if [ -n "$(processes_of "$dest")" ]; then'''
+replace = '''    if false; then'''
+
+[[plant]]
+name = "installers: install.sh deletes the old app before the new one says its version"
+meant = "the old app is deleted only once the new one says its version, and is put back when it does not"
+runs = [["node", "--test", "--test-name-pattern", "deleted only once", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    placed=1
+'''
+replace = '''    placed=1
+    if [ -n "$previous" ]; then rm -rf "$previous"; previous=""; fi
+'''
+
+[[plant]]
+name = "installers: install.sh leaves a new app it did not confirm in place"
+meant = "the old app is deleted only once the new one says its version, and is put back when it does not"
+runs = [["node", "--test", "--test-name-pattern", "deleted only once", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    if [ -n "${placed:-}" ] && [ -e "$dest" ]; then'''
+replace = '''    if false; then'''
+
+[[plant]]
+name = "installers: install.sh follows a redirect to any scheme"
+meant = "the official download follows a redirect to https only"
+runs = [["node", "--test", "--test-name-pattern", "redirect to https", "tests/install-sh.test.mjs"]]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = "--proto '=https' --proto-redir '=https' --tlsv1.2"
+replace = "--proto '=https' --tlsv1.2"
+
+[[plant]]
+name = "installers: install.sh's Ed25519 decodes a y at or above p"
+meant = "the installers' signature check › install.sh's, in macOS's JavaScript (osascript) › an encoding decodes as RFC 8032 5.1.3 says: no y at or above p, no x = 0 with its sign bit, no point off the curve"
+runs = ["verifiers"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = "  if (y >= P) return null;"
+replace = "  if (y >= 2n ** 255n) return null;"
+
+[[plant]]
+name = "installers: install.sh's Ed25519 decodes x = 0 with its sign bit"
+meant = "the installers' signature check › install.sh's, in macOS's JavaScript (osascript) › an encoding decodes as RFC 8032 5.1.3 says: no y at or above p, no x = 0 with its sign bit, no point off the curve"
+runs = ["verifiers"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = "  if (x === 0n && sign === 1n) return null;"
+replace = ""
+
+[[plant]]
+name = "installers: install.sh's SHA-512 pads a message as if it had a byte less"
+meant = "the installers' signature check › install.sh's, in macOS's JavaScript (osascript) › SHA-512 gives OpenSSL's answer at every length 0 to 300 and around its blocks"
+runs = ["verifiers"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = "  const padded = new Uint8Array(Math.ceil((bytes.length + 17) / 128) * 128);"
+replace = "  const padded = new Uint8Array(Math.ceil((bytes.length + 16) / 128) * 128);"
+
+# --- round 2: install.ps1 ---
+
+[[plant]]
+name = "installers: install.ps1 compares the signed file name by culture, not ordinally"
+meant = "the installers' signature check › install.ps1's, in Windows PowerShell › every malformed shape of a signature file is refused, saying why"
+runs = ["verifiers"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        if (-not [string]::Equals($named.Groups[1].Value, $fileName, [StringComparison]::Ordinal)) {"
+replace = "        if ($named.Groups[1].Value -cne $fileName) {"
+
+[[plant]]
+name = "installers: install.ps1 takes a last line that compares equal to nothing"
+meant = "the installers' signature check › install.ps1's, in Windows PowerShell › every malformed shape of a signature file is refused, saying why"
+runs = ["verifiers"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        if ($lines.Length -ne 5 -or $lines[4].Length -ne 0) { return $notMinisign }"
+replace = "        if ($lines.Length -ne 5 -or $lines[4] -ne '') { return $notMinisign }"
+
+[[plant]]
+name = "installers: install.ps1 compares the names SHA256SUMS lists by culture, not ordinally"
+meant = "the installers' signature check › install.ps1's, in Windows PowerShell › the hash of a file is read from the one line that names it exactly"
+runs = ["verifiers"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "            if ($fields.Count -eq 2 -and ([string]::Equals($fields[1], $name, [StringComparison]::Ordinal) -or"
+replace = "            if ($fields.Count -eq 2 -and ($fields[1] -ceq $name -or"
+
+[[plant]]
+name = "installers: install.ps1 takes the first of two lines that name the installer"
+meant = "the installers' signature check › install.ps1's, in Windows PowerShell › the hash of a file is read from the one line that names it exactly"
+runs = ["verifiers"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        if ($found.Count -eq 1 -and $found[0] -cmatch '\\A[0-9a-f]{64}\\z') { return $found[0] }"
+replace = "        if ($found.Count -ge 1 -and $found[0] -cmatch '\\A[0-9a-f]{64}\\z') { return $found[0] }"
+
+[[plant]]
+name = "installers: install.ps1 reads the installer's hash from SHA256SUMS again, after its signature was checked"
+meant = "install.ps1 in Windows PowerShell › on Windows › what is checked is what goes in › the hash of the installer comes from the bytes of SHA256SUMS whose signature was checked"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        $expected = Get-CfListedHash $sumsBytes $installer"
+replace = "        $expected = Get-CfListedHash ([IO.File]::ReadAllBytes($sums)) $installer"
+
+[[plant]]
+name = "installers: install.ps1 lets the installer be written or deleted between its hash and its run"
+meant = "install.ps1 in Windows PowerShell › on Windows › what is checked is what goes in › the installer is held from its hash until it has run: nothing writes or deletes it"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "[IO.FileAccess]::Read, [IO.FileShare]::Read)"
+replace = "[IO.FileAccess]::Read, [IO.FileShare]'ReadWrite, Delete')"
+
+[[plant]]
+name = "installers: install.ps1 starts the installer under a ConsensFlow opened again while it waited"
+meant = "install.ps1 in Windows PowerShell › on Windows › an open ConsensFlow › opened again right before the installer starts, it is refused"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "            if ((Get-CfOpen $dir).Count -gt 0) {"
+replace = "            if ($false) {"
+
+[[plant]]
+name = "installers: install.ps1 installs beside a ConsensFlow installed for every user"
+meant = "install.ps1 in Windows PowerShell › on Windows › what is installed already › a ConsensFlow installed for every user is not joined by a per-user one"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        if ($machine) {"
+replace = "        if ($false) {"
+
+[[plant]]
+name = "installers: install.ps1 replaces a newer installed ConsensFlow with the feed's release"
+meant = "install.ps1 in Windows PowerShell › on Windows › what is installed already › a ConsensFlow newer than the release is kept, unless --version names the release"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        if ($before -and $before.DisplayVersion -and -not $asked -and (Test-CfNewer $before.DisplayVersion $version)) {"
+replace = "        if ($false) {"
+
+[[plant]]
+name = "installers: install.ps1 does not take --version as asked for"
+meant = "install.ps1 in Windows PowerShell › on Windows › what is installed already › a ConsensFlow newer than the release is kept, unless --version names the release"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = '''            $version = [string]$words[$i]
+            $asked = $version'''
+replace = '''            $version = [string]$words[$i]'''
+
+[[plant]]
+name = "installers: install.ps1 orders versions by their length alone"
+meant = "install.ps1 orders versions as SemVer does, in Windows PowerShell"
+runs = ["ps1"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "            return [Math]::Sign([string]::CompareOrdinal($x, $y))\n        }\n        if ($xn) { return -1 }"
+replace = "            return 0\n        }\n        if ($xn) { return -1 }"
+
+[[plant]]
+name = "installers: install.ps1's Ed25519 decodes a y at or above p"
+meant = "the installers' signature check › install.ps1's, in Windows PowerShell › an encoding decodes as RFC 8032 5.1.3 says: no y at or above p, no x = 0 with its sign bit, no point off the curve"
+runs = ["verifiers"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        if ($y -ge $CfP) { return $null }"
+replace = ""
+
+[[plant]]
+name = "installers: install.ps1's 64-bit sum drops the carry of its low half"
+meant = "the installers' signature check › install.ps1's, in Windows PowerShell › BLAKE2b's 64-bit words add with every carry and rotate as it needs"
+runs = ["verifiers"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "        $high = (($a -shr 32) + ($b -shr 32) + ($low -shr 32)) -band $CfLow32"
+replace = "        $high = (($a -shr 32) + ($b -shr 32)) -band $CfLow32"
+
+[[plant]]
+name = "installers: install.ps1's rotation loses a bit"
+meant = "the installers' signature check › install.ps1's, in Windows PowerShell › BLAKE2b's 64-bit words add with every carry and rotate as it needs"
+runs = ["verifiers"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "install/install.ps1"
+find = "    function CfRotr64([uint64]$x, [int]$n) { [uint64](($x -shr $n) -bor ($x -shl (64 - $n))) }"
+replace = "    function CfRotr64([uint64]$x, [int]$n) { [uint64](($x -shr $n) -bor ($x -shl (65 - $n))) }"

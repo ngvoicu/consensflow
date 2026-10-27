@@ -177,15 +177,26 @@ fn sums_of(files: &Files) -> String {
         .collect()
 }
 
-/// `files` with their SHA256SUMS made again, and a signature of it, as the
+/// `files` with their SHA256SUMS made again, and its signature by the tests'
+/// key ([`signing`](super::signing)) for the release the files are of, as the
 /// signing job leaves them beside the files: what a test changes in a file
 /// after it was built is signed again by this.
 pub fn signed(files: Files) -> Files {
     let sums = sums_of(&files);
-    files.with(SUMS, &sums).with(
-        SIGNATURE,
-        format!("signature of {}", sha256_hex(sums.as_bytes())),
-    )
+    let version = files
+        .names()
+        .iter()
+        .find_map(|name| {
+            name.strip_prefix("ConsensFlow_")
+                .and_then(|rest| rest.strip_suffix("_aarch64.dmg"))
+        })
+        .expect("a release has its DMG")
+        .to_string();
+    let sig = super::signing::sign(
+        sums.as_bytes(),
+        &format!("ConsensFlow_{version}_SHA256SUMS"),
+    );
+    files.with(SUMS, &sums).with(SIGNATURE, sig)
 }
 
 /// A built release's files as the published release holds them, by file name,

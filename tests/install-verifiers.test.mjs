@@ -5,8 +5,12 @@
 // RFC 8032's Ed25519 vectors and their changed copies, BLAKE2b-512's known
 // answers, signatures made by `tauri signer sign`, and a published release's
 // signature by ConsensFlow's own update key (tests/fixtures/install, made by
-// make-fixtures.mjs there). Every engine on this machine is run; the CI runs
-// these on macOS and on Windows, where both PowerShells are.
+// make-fixtures.mjs there); and the edges: encodings that are no point, S = L,
+// signatures of another length, SHA-512 at its padding boundaries, the 64-bit
+// words BLAKE2b adds and rotates, every malformed shape of a signature file
+// (Astraeus's crypto audit's among them, T-806), the line of SHA256SUMS a hash
+// is read from, and the order of the pinned key. Every engine on this machine
+// is run; the CI runs these on macOS and on Windows, where both PowerShells are.
 
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
@@ -20,6 +24,8 @@ import { after, before, describe, test } from 'node:test'
 import {
   INSTALL_PS1,
   INSTALL_SH,
+  jxaCheck,
+  listedHash,
   makeKey,
   minisignProblem,
   ROOT,
@@ -53,6 +59,29 @@ function flipBase64(base64, at) {
   bytes[at] ^= 1
   return bytes.toString('base64')
 }
+
+/** `base64` whose last character before its padding has bits the bytes do not use. */
+function strayBits(base64) {
+  const at = base64.indexOf('=') - 1
+  assert.ok(at > 0, 'base64 with padding')
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+  return base64.slice(0, at) + alphabet[alphabet.indexOf(base64[at]) ^ 1] + base64.slice(at + 1)
+}
+
+/** `hex` as 32 little-endian bytes made a number, plus `n`, as 32 bytes again. */
+function plusLittleEndian(hex, n) {
+  const bytes = Buffer.from(hex, 'hex')
+  let v = 0n
+  for (let i = bytes.length - 1; i >= 0; i--) v = (v << 8n) | BigInt(bytes[i])
+  v += n
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = Number(v & 255n)
+    v >>= 8n
+  }
+  return bytes.toString('hex')
+}
+
+const MASK64 = (1n << 64n) - 1n
 
 /** What every engine is given, and what it must answer. */
 function battery() {
@@ -266,10 +295,203 @@ function battery() {
       expect: 'the signature is for something else',
     },
   )
+  // The edges of Ed25519 (RFC 8032 5.1.7): R or A that is no point, S = L exactly, a signature a
+  // byte short or long, and signatures whose R || A || M ends at SHA-512's padding boundaries.
+  const fileEdges = JSON.parse(fixture('ed25519-edges.json'))
+  const rfc = JSON.parse(fixture('ed25519-rfc8032.json')).vectors[0]
+  const edges = []
+  for (const point of fileEdges.points.filter((p) => !p.decodes)) {
+    edges.push({ ...rfc, name: `A is ${point.name}`, public: point.point, expect: false })
+    edges.push({
+      ...rfc,
+      name: `R is ${point.name}`,
+      signature: point.point + rfc.signature.slice(64),
+      expect: false,
+    })
+  }
+  const sOfRfc = rfc.signature.slice(64)
+  edges.push(
+    {
+      ...rfc,
+      name: 'S = L exactly',
+      signature: rfc.signature.slice(0, 64) + plusLittleEndian('00'.repeat(32), L),
+      expect: false,
+    },
+    {
+      ...rfc,
+      name: 'S + L (the RFC test 1 signature)',
+      signature: rfc.signature.slice(0, 64) + plusLittleEndian(sOfRfc, L),
+      expect: false,
+    },
+    { ...rfc, name: 'a byte short', signature: rfc.signature.slice(0, 126), expect: false },
+    { ...rfc, name: 'a byte long', signature: `${rfc.signature}00`, expect: false },
+    { ...rfc, name: 'a key a byte short', public: rfc.public.slice(0, 62), expect: false },
+  )
+  for (const vector of fileEdges.boundaries) {
+    edges.push({ ...vector, expect: true })
+    edges.push({
+      ...vector,
+      name: `${vector.name}, its last byte changed`,
+      message: flipHex(vector.message, vector.message.length / 2 - 1),
+      expect: false,
+    })
+  }
+
+  // 64-bit words as BLAKE2b adds and rotates them: every carry, and the rotations it uses.
+  const words = []
+  const big = [
+    0n,
+    1n,
+    0xffffffffn,
+    0x100000000n,
+    0xffffffff00000000n,
+    0x8000000000000000n,
+    0x7fffffffffffffffn,
+    MASK64,
+    0x0123456789abcdefn,
+    0xfedcba9876543210n,
+  ]
+  for (const a of big) {
+    for (const b of big)
+      words.push(['add', a.toString(), b.toString(), ((a + b) & MASK64).toString()])
+    for (const n of [16n, 24n, 32n, 63n, 1n]) {
+      const rotated = ((a >> n) | (a << (64n - n))) & MASK64
+      words.push(['rotr', a.toString(), n.toString(), rotated.toString()])
+    }
+  }
+
+  // Every malformed shape of a signature file, as the installers read it: a .sig made here with
+  // an untrusted comment long enough that each layer of base64 is padded.
+  let shaped
+  let shapedLines
+  for (let extra = 0; ; extra++) {
+    shaped = key.sign(made, signedName('3.0.7'))
+    shapedLines = sigLines(shaped)
+    shapedLines[0] = `untrusted comment: ${'x'.repeat(extra)}`
+    shaped = sigOf(shapedLines)
+    if (shaped.endsWith('==')) break
+  }
+  const notMinisign = 'the signature file is not a minisign signature'
+  const envelope = (name, sig, expect = notMinisign) => ({
+    name,
+    key: key.keyLine,
+    sig,
+    file: made,
+    fileName: signedName('3.0.7'),
+    expect,
+  })
+  const [l0, l1, l2, l3] = shapedLines
+  const crossed = makeKey()
+  const crossedLines = sigLines(crossed.sign(made, signedName('3.0.7')))
+  const sameId = Buffer.from(crossedLines[1], 'base64')
+  Buffer.from(l1, 'base64').copy(sameId, 2, 2, 10)
+  const legacy = Buffer.from(l1, 'base64')
+  legacy[1] = 0x64
+  const envelopes = [
+    envelope('the shape itself', shaped, null),
+    envelope('outer whitespace around it', `\n  ${shaped} \r\n`, null),
+    envelope('the untrusted comment missing', sigOf([l1, l2, l3, ''])),
+    envelope('the signature line missing', sigOf([l0, l2, l3, ''])),
+    envelope('the trusted comment missing', sigOf([l0, l1, l3, ''])),
+    envelope('the global signature missing', sigOf([l0, l1, l2, ''])),
+    envelope('no line feed at the end', sigOf([l0, l1, l2, l3])),
+    envelope('an empty line more', sigOf([l0, l1, l2, l3, '', ''])),
+    envelope(
+      'CRLF line ends',
+      Buffer.from(`${[l0, l1, l2, l3].join('\r\n')}\r\n`, 'latin1').toString('base64'),
+    ),
+    envelope('a space before the signature line', sigOf([l0, ` ${l1}`, l2, l3, ''])),
+    envelope('a space after the global signature', sigOf([l0, l1, l2, `${l3} `, ''])),
+    envelope('untrusted comment without its words', sigOf(['untrusted: x', l1, l2, l3, ''])),
+    envelope(
+      'trusted comment without its colon',
+      sigOf([l0, l1, l2.replace('trusted comment: ', 'trusted comment '), l3, '']),
+    ),
+    envelope('outer base64 with a space inside', `${shaped.slice(0, 40)} ${shaped.slice(40)}`),
+    envelope('outer base64 without its padding', shaped.replace(/=+$/, '')),
+    envelope('outer base64 with padding more', `${shaped}=`),
+    envelope('outer base64 with stray bits', strayBits(shaped)),
+    envelope(
+      'the signature line without its padding',
+      sigOf([l0, l1.replace(/=+$/, ''), l2, l3, '']),
+    ),
+    envelope('the signature line with stray bits', sigOf([l0, strayBits(l1), l2, l3, ''])),
+    envelope(
+      'the global signature without its padding',
+      sigOf([l0, l1, l2, l3.replace(/=+$/, ''), '']),
+    ),
+    envelope('the global signature with stray bits', sigOf([l0, l1, l2, strayBits(l3), ''])),
+    envelope(
+      'the signature line a byte short',
+      sigOf([l0, Buffer.from(l1, 'base64').subarray(0, 73).toString('base64'), l2, l3, '']),
+    ),
+    envelope(
+      'the global signature a byte short',
+      sigOf([l0, l1, l2, Buffer.from(l3, 'base64').subarray(0, 63).toString('base64'), '']),
+    ),
+    envelope(
+      "another key, signing under this key's id",
+      sigOf([l0, sameId.toString('base64'), crossedLines[2], crossedLines[3], '']),
+      'the signature does not match the file',
+    ),
+    envelope(
+      "minisign's legacy signature of the file itself (Ed)",
+      sigOf([l0, legacy.toString('base64'), l2, l3, '']),
+      "the signature is not of minisign's prehashed kind (ED)",
+    ),
+  ]
+  // Astraeus's cases (T-806): a NUL after the last line feed, which no key signs, and a signed
+  // file name with a NUL or a soft hyphen after it, which a culture comparison takes as equal.
+  const audit = JSON.parse(fixture('powershell-parser-cases.json'))
+  const auditExpect = {
+    'unsigned trailing NUL': notMinisign,
+    'signed file name plus "\\u0000"': 'the signature is for',
+    'signed file name plus "\u00ad"': 'the signature is for',
+  }
+  for (const c of audit) {
+    assert.ok(c.name in auditExpect, `an audit case this battery knows: ${c.name}`)
+    envelopes.push({ ...c, file: Buffer.from(c.file, 'hex'), expect: auditExpect[c.name] })
+  }
+
+  // The line of SHA256SUMS a hash is read from.
+  const h1 = 'a'.repeat(64)
+  const h2 = 'b'.repeat(64)
+  const dmg = 'ConsensFlow_3.0.7_aarch64.dmg'
+  const listed = [
+    ['the line that names it', `${h1}  ${dmg}\n${h2}  ConsensFlow_3.0.7_x64-setup.exe\n`, h1],
+    ["sha256sum's binary mode", `${h1} *${dmg}\n`, h1],
+    ['a tab between', `${h1}\t${dmg}\n`, h1],
+    ['spaces before the hash', `  ${h1}  ${dmg}\n`, h1],
+    ['two lines that name it', `${h1}  ${dmg}\n${h2}  ${dmg}\n`, null],
+    ['an upper-case hash', `${h1.toUpperCase()}  ${dmg}\n`, null],
+    ['a hash a digit short', `${h1.slice(1)}  ${dmg}\n`, null],
+    ['a field more', `${h1}  ${dmg} x\n`, null],
+    ['a CRLF line end', `${h1}  ${dmg}\r\n`, null],
+    ['the name with a NUL after it', `${h1}  ${dmg}\u0000\n`, null],
+    ['the name with a soft hyphen after it', `${h1}  ${dmg}\u00ad\n`, null],
+    ['a longer name', `${h1}  ${dmg}.bak\n`, null],
+    ['no line that names it', `${h2}  ConsensFlow_3.0.7_x64-setup.exe\n`, null],
+  ].map(([name, text, expect]) => ({
+    name,
+    file: Buffer.from(text, 'latin1').toString('hex'),
+    artifact: dmg,
+    expect,
+  }))
+
   return {
     ed25519,
+    edges,
     blake2b,
+    sha512: JSON.parse(fixture('sha512.json')).vectors,
+    points: fileEdges.points,
+    words,
+    listed,
+    pinned: Buffer.from(updaterKeyLine(), 'base64').subarray(10).toString('hex'),
     minisign: minisign.map((check) => ({
+      ...check,
+      file: Buffer.from(check.file).toString('hex'),
+    })),
+    envelopes: envelopes.map((check) => ({
       ...check,
       file: Buffer.from(check.file).toString('hex'),
     })),
@@ -288,10 +510,20 @@ function between(file, begin, end) {
 const JXA_HARNESS = `
 function run(argv) {
   const input = JSON.parse(argv[0]);
+  const hex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  const identity = "01" + "00".repeat(31);
+  const pinned = decode(fromHex(input.pinned));
   return JSON.stringify({
     ed25519: input.ed25519.map((v) => ed25519Verify(fromHex(v.public), fromHex(v.message), fromHex(v.signature))),
-    blake2b: input.blake2b.map((v) => Array.from(blake2b512(fromHex(v.message)), (b) => b.toString(16).padStart(2, "0")).join("")),
+    edges: input.edges.map((v) => ed25519Verify(fromHex(v.public), fromHex(v.message), fromHex(v.signature))),
+    blake2b: input.blake2b.map((v) => hex(blake2b512(fromHex(v.message)))),
+    sha512: input.sha512.map((v) => hex(sha512(fromHex(v.message)))),
+    points: input.points.map((v) => decode(fromHex(v.point)) !== null),
+    words: input.words.map(([op, a, b]) => (op === "add" ? (BigInt(a) + BigInt(b)) & MASK64 : rotr(BigInt(a), BigInt(b))).toString()),
+    listed: input.listed.map((v) => listedHash(fromHex(v.file), v.artifact)),
+    pinned: { order: hex(encode(multiply(L, pinned))) === identity, small: hex(encode(multiply(8n, pinned))) === identity },
     minisign: input.minisign.map((v) => checkMinisign(v.key, v.sig, fromHex(v.file), v.fileName)),
+    envelopes: input.envelopes.map((v) => checkMinisign(v.key, v.sig, fromHex(v.file), v.fileName)),
   });
 }
 `
@@ -305,11 +537,28 @@ const PS_HARNESS = `
         for ($i = 0; $i -lt $bytes.Length; $i++) { $bytes[$i] = [Convert]::ToByte($hex.Substring(2 * $i, 2), 16) }
         , $bytes
     }
+    function ToHex([byte[]]$bytes) { -join ($bytes | ForEach-Object { $_.ToString('x2') }) }
     $battery = Get-Content -Raw -LiteralPath $args[0] | ConvertFrom-Json
     $ed = @(foreach ($v in $battery.ed25519) { [bool](Test-CfEd25519 (FromHex $v.public) (FromHex $v.message) (FromHex $v.signature)) })
-    $blake = @(foreach ($v in $battery.blake2b) { $hash = Get-CfBlake2b512 (FromHex $v.message); -join ($hash | ForEach-Object { $_.ToString('x2') }) })
+    $edges = @(foreach ($v in $battery.edges) { [bool](Test-CfEd25519 (FromHex $v.public) (FromHex $v.message) (FromHex $v.signature)) })
+    $blake = @(foreach ($v in $battery.blake2b) { ToHex (Get-CfBlake2b512 (FromHex $v.message)) })
+    $sha = [System.Security.Cryptography.SHA512]::Create()
+    $sha512 = @(foreach ($v in $battery.sha512) { ToHex $sha.ComputeHash((FromHex $v.message)) })
+    $points = @(foreach ($v in $battery.points) { $null -ne (CfDecode (FromHex $v.point)) })
+    $words = @(foreach ($w in $battery.words) {
+            if ($w[0] -eq 'add') { (CfAdd64 ([uint64]::Parse($w[1])) ([uint64]::Parse($w[2]))).ToString() }
+            else { (CfRotr64 ([uint64]::Parse($w[1])) ([int]$w[2])).ToString() }
+        })
+    $listed = @(foreach ($v in $battery.listed) { $said = Get-CfListedHash (FromHex $v.file) $v.artifact; if ($null -eq $said) { 'null' } else { $said } })
+    $identity = '01' + ('00' * 31)
+    $pinnedPoint = CfDecode (FromHex $battery.pinned)
+    $pinned = [pscustomobject]@{
+        order = (ToHex (CfEncode (CfMultiply $CfL $pinnedPoint))) -eq $identity
+        small = (ToHex (CfEncode (CfMultiply ([System.Numerics.BigInteger]8) $pinnedPoint))) -eq $identity
+    }
     $mini = @(foreach ($v in $battery.minisign) { $said = Test-CfMinisign $v.key $v.sig (FromHex $v.file) $v.fileName; if ($null -eq $said) { 'null' } else { $said } })
-    [pscustomobject]@{ ed25519 = $ed; blake2b = $blake; minisign = $mini } | ConvertTo-Json -Compress -Depth 4
+    $env = @(foreach ($v in $battery.envelopes) { $said = Test-CfMinisign $v.key $v.sig (FromHex $v.file) $v.fileName; if ($null -eq $said) { 'null' } else { $said } })
+    [pscustomobject]@{ ed25519 = $ed; edges = $edges; blake2b = $blake; sha512 = $sha512; points = $points; words = $words; listed = $listed; pinned = $pinned; minisign = $mini; envelopes = $env } | ConvertTo-Json -Compress -Depth 4
 } @args
 `
 
@@ -348,14 +597,30 @@ const engines = [
           return false
         }
       }
+      const problem = (v) =>
+        minisignProblem(v.key, v.sig, Buffer.from(v.file, 'hex'), v.fileName) ?? 'null'
       const answers = {
         ed25519: input.ed25519.map(verify),
+        edges: input.edges.map(verify),
         blake2b: input.blake2b.map((v) =>
           crypto.createHash('blake2b512').update(Buffer.from(v.message, 'hex')).digest('hex'),
         ),
-        minisign: input.minisign.map(
-          (v) => minisignProblem(v.key, v.sig, Buffer.from(v.file, 'hex'), v.fileName) ?? 'null',
+        sha512: input.sha512.map((v) =>
+          crypto.createHash('sha512').update(Buffer.from(v.message, 'hex')).digest('hex'),
         ),
+        // OpenSSL has no point arithmetic to ask: what decodes, and the order of the key, are
+        // the scripts' own questions.
+        points: null,
+        pinned: null,
+        words: input.words.map(([op, a, b]) =>
+          (op === 'add'
+            ? (BigInt(a) + BigInt(b)) & MASK64
+            : ((BigInt(a) >> BigInt(b)) | (BigInt(a) << (64n - BigInt(b)))) & MASK64
+          ).toString(),
+        ),
+        listed: input.listed.map((v) => listedHash(Buffer.from(v.file, 'hex'), v.artifact)),
+        minisign: input.minisign.map(problem),
+        envelopes: input.envelopes.map(problem),
       }
       return { status: 0, stdout: JSON.stringify(answers), stderr: '' }
     },
@@ -428,6 +693,22 @@ describe("the installers' signature check", () => {
     )
   })
 
+  test("the release workflow's check of install.sh's verifier takes its word only from a clean exit", (t) => {
+    if (process.platform !== 'darwin') return t.skip("osascript is the Mac's")
+    const key = makeKey()
+    const sums = Buffer.from(`${'0'.repeat(64)}  ConsensFlow_3.0.7_aarch64.dmg\n`)
+    const sig = key.sign(sums, signedName('3.0.7'))
+    const args = [key.keyLine, sig, sums, signedName('3.0.7'), 'ConsensFlow_3.0.7_aarch64.dmg']
+    assert.equal(jxaCheck(...args), null)
+    // An osascript that says the word and ends badly.
+    const bin = mkdtempSync(path.join(work, 'bin-'))
+    writeFileSync(path.join(bin, 'osascript'), `#!/bin/sh\necho "ok ${'0'.repeat(64)}"\nexit 3\n`, {
+      mode: 0o755,
+    })
+    const said = jxaCheck(...args, { PATH: `${bin}:${process.env.PATH}` })
+    assert.match(said ?? '', /ended with status 3/)
+  })
+
   test("both scripts hold the update key the app's updater holds", () => {
     assert.equal(scriptKeyLine(readFileSync(INSTALL_SH, 'utf8')), updaterKeyLine())
     assert.equal(scriptKeyLine(readFileSync(INSTALL_PS1, 'utf8')), updaterKeyLine())
@@ -452,6 +733,59 @@ describe("the installers' signature check", () => {
       test("BLAKE2b-512 gives RFC 7693's answer and OpenSSL's at every length around a block", () => {
         input.blake2b.forEach((vector, at) => {
           assert.equal(answers.blake2b[at], vector.hash, `${vector.message.length / 2} bytes`)
+        })
+      })
+
+      test('Ed25519 refuses what RFC 8032 refuses: no point, S = L, another length; and holds at the padding boundaries', () => {
+        assert.equal(answers.edges.length, input.edges.length)
+        input.edges.forEach((vector, at) => {
+          assert.equal(answers.edges[at], vector.expect, vector.name)
+        })
+      })
+
+      test("SHA-512 gives OpenSSL's answer at every length 0 to 300 and around its blocks", () => {
+        assert.equal(answers.sha512.length, input.sha512.length)
+        input.sha512.forEach((vector, at) => {
+          assert.equal(answers.sha512[at], vector.hash, `${vector.message.length / 2} bytes`)
+        })
+      })
+
+      test('an encoding decodes as RFC 8032 5.1.3 says: no y at or above p, no x = 0 with its sign bit, no point off the curve', (t) => {
+        if (answers.points === null) return t.skip('no point arithmetic to ask')
+        input.points.forEach((point, at) => {
+          assert.equal(answers.points[at], point.decodes, point.name)
+        })
+      })
+
+      test("BLAKE2b's 64-bit words add with every carry and rotate as it needs", () => {
+        assert.equal(answers.words.length, input.words.length)
+        input.words.forEach(([op, a, b, expect], at) => {
+          assert.equal(answers.words[at], expect, `${op} ${a} ${b}`)
+        })
+      })
+
+      test('the hash of a file is read from the one line that names it exactly', () => {
+        input.listed.forEach((check, at) => {
+          const said = answers.listed[at] === 'null' ? null : answers.listed[at]
+          assert.equal(said, check.expect, check.name)
+        })
+      })
+
+      test('the pinned key has order L, and no small order', (t) => {
+        if (answers.pinned === null) return t.skip('no point arithmetic to ask')
+        assert.deepEqual(answers.pinned, { order: true, small: false })
+      })
+
+      test('every malformed shape of a signature file is refused, saying why', () => {
+        assert.equal(answers.envelopes.length, input.envelopes.length)
+        input.envelopes.forEach((check, at) => {
+          const said = answers.envelopes[at] === 'null' ? null : answers.envelopes[at]
+          if (check.expect === null) assert.equal(said, null, check.name)
+          else
+            assert.ok(
+              typeof said === 'string' && said.startsWith(check.expect),
+              `${check.name}: ${said}`,
+            )
         })
       })
 

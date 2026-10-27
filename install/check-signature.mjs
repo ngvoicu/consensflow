@@ -7,18 +7,18 @@
 // DIR holds SHA256SUMS and SHA256SUMS.sig. The signature must hold under the key
 // both installers pin, which must be the key the app's updater holds, for the
 // name ConsensFlow_<VERSION>_SHA256SUMS: as Node's crypto checks it, and, on a
-// Mac, as install.sh's own check does, in osascript. Status 0 when it holds,
+// Mac, as install.sh's own check does, in osascript, which must end with status 0
+// and answer the hash the list gives the release's DMG. Status 0 when it holds,
 // else 1 with what does not.
 
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import os from 'node:os'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 
 import {
   INSTALL_PS1,
   INSTALL_SH,
+  jxaCheck,
   minisignProblem,
   scriptKeyLine,
   signedName,
@@ -48,24 +48,9 @@ const problem = minisignProblem(key, sig, sums, name)
 if (problem !== null) refuse(`as Node checks it: ${problem}`)
 
 if (process.platform === 'darwin') {
-  const lines = readFileSync(INSTALL_SH, 'utf8').split('\n')
-  const from = lines.indexOf('    cat > "$1" <<\'VERIFIER\'')
-  const to = lines.indexOf('VERIFIER', from + 1)
-  if (from < 0 || to < 0) refuse('install.sh holds no check to run')
-  const work = mkdtempSync(path.join(os.tmpdir(), 'cf-check-signature-'))
-  try {
-    const script = path.join(work, 'verify.js')
-    writeFileSync(script, lines.slice(from + 1, to).join('\n'))
-    const ran = spawnSync(
-      'osascript',
-      ['-l', 'JavaScript', script, key, sig, sums.toString('hex'), name],
-      { encoding: 'utf8' },
-    )
-    if (ran.stdout.trim() !== 'ok')
-      refuse(`as install.sh checks it: ${ran.stdout.trim()} ${ran.stderr.trim()}`)
-  } finally {
-    rmSync(work, { recursive: true, force: true })
-  }
+  const dmg = `ConsensFlow_${values.version}_aarch64.dmg`
+  const said = jxaCheck(key, sig, sums, name, dmg)
+  if (said !== null) refuse(`as install.sh checks it: ${said}`)
 }
 console.log(
   `check-signature: SHA256SUMS is signed by the update key the installers pin, as ${name}`,

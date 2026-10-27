@@ -15,7 +15,8 @@
 # - the app in the DMG is the version asked for, its code signature holds
 #   (codesign --verify --deep --strict) and is ConsensFlow's own (identifier
 #   dev.ngvoicu.consensflow, Developer ID team 3K53U2H749), and Gatekeeper
-#   accepts it as notarized (spctl --assess).
+#   accepts it as notarized (spctl --assess); and all of that again of the copy
+#   that goes in, made beside the installed app before anything is moved.
 #
 # A download through curl skips Gatekeeper's own look, hence these. No tool
 # is installed for them: the signature is checked by macOS's own JavaScript
@@ -24,10 +25,13 @@
 #
 # The app goes to /Applications, or to ~/Applications where /Applications is
 # not yours to write to (never through sudo), and an installed ConsensFlow is
-# upgraded where it is. An open ConsensFlow is asked to quit, as Quit in its
-# menu would, and the install waits for it; one that stays open is never
-# stopped, and nothing is installed. `cf` comes inside the app: nothing else is
-# set up. ConsensFlow is made for Apple silicon Macs and Windows only.
+# upgraded where it is. An installed ConsensFlow newer than the release is
+# never replaced by it, unless --version names that release. An open
+# ConsensFlow is asked to quit, as Quit in its menu would, and the install waits
+# for it; one that stays open is never stopped, and nothing is installed. The
+# installed app is deleted only once the new one is in place and says its
+# version. `cf` comes inside the app: nothing else is set up. ConsensFlow is
+# made for Apple silicon Macs and Windows only.
 #
 # Everything is inside main, called on the last line, so a download cut short
 # runs nothing. It writes only in a folder of its own under TMPDIR, removed at
@@ -73,7 +77,7 @@ refuse() {
 # Downloads $1 into $2.
 fetch() {
     if [ "$releases" = "$official" ]; then
-        curl --proto '=https' --tlsv1.2 --retry 3 -fsL "$1" -o "$2"
+        curl --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 -fsL "$1" -o "$2"
     else
         curl --retry 3 -fsL "$1" -o "$2"
     fi
@@ -83,6 +87,40 @@ fetch() {
 processes_of() {
     ps -axo pid=,comm= | awk -v inside="$1/Contents/" 'index($0, inside) { print $1 }'
 }
+
+# version order: begin
+# Whether the version $1 comes after $2, by SemVer's precedence: the numbers
+# first, then a release after any of its pre-releases, then the pre-release's
+# fields one by one (numbers by value, below words; words by their bytes), and
+# a build's +metadata counts for nothing.
+newer_than() {
+    LC_ALL=C awk -v a="$1" -v b="$2" '
+        function numeric(x) { return x ~ /^[0-9]+$/ }
+        function field(x, y) {
+            if (numeric(x) && numeric(y)) return (x + 0 > y + 0) - (x + 0 < y + 0)
+            if (numeric(x)) return -1
+            if (numeric(y)) return 1
+            return (x > y) - (x < y)
+        }
+        function order(x, y,    xm, ym, xp, yp, i, n, c, xs, ys) {
+            sub(/\+.*/, "", x); sub(/\+.*/, "", y)
+            xp = index(x, "-") ? substr(x, index(x, "-") + 1) : ""
+            yp = index(y, "-") ? substr(y, index(y, "-") + 1) : ""
+            if (index(x, "-")) x = substr(x, 1, index(x, "-") - 1)
+            if (index(y, "-")) y = substr(y, 1, index(y, "-") - 1)
+            split(x, xm, "."); split(y, ym, ".")
+            for (i = 1; i <= 3; i++) { c = field(xm[i] + 0, ym[i] + 0); if (c) return c }
+            if (xp == "" && yp == "") return 0
+            if (xp == "") return 1
+            if (yp == "") return -1
+            xs = split(xp, xm, "."); ys = split(yp, ym, ".")
+            n = xs < ys ? xs : ys
+            for (i = 1; i <= n; i++) { c = field(xm[i], ym[i]); if (c) return c }
+            return (xs > ys) - (xs < ys)
+        }
+        BEGIN { exit !(order(a, b) > 0) }'
+}
+# version order: end
 
 # The pids of this shell and the processes it runs under.
 ancestry() {
@@ -119,8 +157,9 @@ quit_open_app() {
 }
 
 # Takes away what this run left half done: the mounted DMG, the copy that was
-# going in, the app it was replacing (put back where the new one is not), and
-# the run's own folder.
+# going in, a new app put in place and not yet confirmed, and the app it was
+# replacing, put back; then the run's own folder. So a refusal at any step
+# leaves the folder as it found it.
 cleanup() {
     if [ -n "${mounted:-}" ]; then
         hdiutil detach -quiet "$mounted" >/dev/null 2>&1 || hdiutil detach -quiet -force "$mounted" >/dev/null 2>&1 || true
@@ -128,12 +167,11 @@ cleanup() {
     if [ -n "${stage:-}" ] && [ -e "$stage" ]; then
         rm -rf "$stage"
     fi
+    if [ -n "${placed:-}" ] && [ -e "$dest" ]; then
+        rm -rf "$dest"
+    fi
     if [ -n "${previous:-}" ] && [ -e "$previous" ]; then
-        if [ -e "$dest" ]; then
-            rm -rf "$previous"
-        else
-            mv "$previous" "$dest"
-        fi
+        mv "$previous" "$dest"
     fi
     if [ -n "${tmp:-}" ] && [ -d "$tmp" ]; then
         rm -rf "$tmp"
@@ -149,6 +187,7 @@ main() {
     team=3K53U2H749
     requirement="anchor apple generic and identifier \"dev.ngvoicu.consensflow\" and certificate leaf[subject.OU] = \"$team\""
     spctl=/usr/sbin/spctl
+    plistbuddy=/usr/libexec/PlistBuddy
     quit_wait=120
 
     official=https://github.com/ngvoicu/consensflow/releases
@@ -156,6 +195,7 @@ main() {
     releases="${releases%/}"
     channel="${CONSENSFLOW_CHANNEL:-stable}"
     version="${CONSENSFLOW_VERSION:-}"
+    named="$version"
     while [ $# -gt 0 ]; do
         case "$1" in
             --alpha) channel=alpha ;;
@@ -163,9 +203,10 @@ main() {
             --version)
                 [ $# -ge 2 ] || { echo "consensflow: --version needs a release, for example --version 3.0.7" >&2; exit 2; }
                 version="$2"
+                named="$2"
                 shift
                 ;;
-            --version=*) version="${1#--version=}" ;;
+            --version=*) version="${1#--version=}"; named="$version" ;;
             -h | --help) usage; exit 0 ;;
             *) echo "consensflow: unknown option '$1' (see --help)" >&2; exit 2 ;;
         esac
@@ -202,69 +243,12 @@ main() {
     tmp=$(mktemp -d "${TMPDIR:-/tmp}/consensflow-install.XXXXXX")
     mounted=""
     stage=""
+    placed=""
     previous=""
     dest=""
     trap cleanup EXIT
     trap 'exit 130' INT TERM
     write_verifier "$tmp/verify.js"
-
-    if [ -z "$version" ]; then
-        feed="$releases/download/feed-$channel/latest.json"
-        fetch "$feed" "$tmp/latest.json" || refuse "could not read the $channel update feed at $feed."
-        version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp/latest.json" | head -n 1)
-        case "$version" in
-            [0-9]*) ;;
-            *) refuse "the $channel update feed at $feed names no version." ;;
-        esac
-        case "$version" in
-            *[!0-9A-Za-z.+-]*) refuse "the $channel update feed at $feed names no version." ;;
-        esac
-    fi
-    say "ConsensFlow $version"
-    release="$releases/download/v$version"
-    signed="ConsensFlow_${version}_SHA256SUMS"
-    dmg="ConsensFlow_${version}_aarch64.dmg"
-
-    fetch "$release/SHA256SUMS" "$tmp/SHA256SUMS" || refuse "could not download $release/SHA256SUMS: is $version a release of ConsensFlow?"
-    fetch "$release/SHA256SUMS.sig" "$tmp/SHA256SUMS.sig" ||
-        refuse "ConsensFlow $version has no signed SHA256SUMS, so its files cannot be checked here: releases before 3.0.7-alpha.1 have none. Download it from $releases/tag/v$version; releases from 3.0.7-alpha.1 on install from here."
-    checked=$(osascript -l JavaScript "$tmp/verify.js" "$key" "$(cat "$tmp/SHA256SUMS.sig")" \
-        "$(od -An -tx1 -v "$tmp/SHA256SUMS" | tr -d ' \n')" "$signed" 2>&1 </dev/null) || true
-    if [ "$checked" != ok ]; then
-        refuse "the signature of $version's SHA256SUMS does not hold: ${checked#refused: }"
-    fi
-    say "SHA256SUMS is signed by ConsensFlow's update key, for $version"
-
-    expected=$(awk -v name="$dmg" 'NF == 2 && ($2 == name || $2 == "*" name) { print $1 }' "$tmp/SHA256SUMS")
-    case "$expected" in
-        "" | *[!0-9a-f]*) refuse "$version's SHA256SUMS lists no $dmg." ;;
-    esac
-    [ "${#expected}" -eq 64 ] || refuse "$version's SHA256SUMS lists no $dmg."
-    say "downloading $dmg"
-    fetch "$release/$dmg" "$tmp/$dmg" || refuse "could not download $release/$dmg."
-    got=$(shasum -a 256 "$tmp/$dmg" | awk '{ print $1 }')
-    [ "$got" = "$expected" ] || refuse "$dmg was changed: its SHA-256 is $got, and the signed SHA256SUMS says $expected."
-    say "$dmg has the SHA-256 the signed SHA256SUMS lists"
-
-    mkdir "$tmp/volume"
-    hdiutil attach -nobrowse -readonly -noautoopen -quiet -mountpoint "$tmp/volume" "$tmp/$dmg" </dev/null >/dev/null ||
-        refuse "could not open $dmg."
-    mounted="$tmp/volume"
-    app="$mounted/ConsensFlow.app"
-    [ -d "$app" ] || refuse "$dmg holds no ConsensFlow.app."
-    shown=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null || true)
-    [ "$shown" = "$version" ] || refuse "the app in $dmg is version '$shown', not $version."
-    codesign --verify --deep --strict "$app" 2>"$tmp/codesign.txt" ||
-        refuse "the app's code signature does not hold: $(cat "$tmp/codesign.txt")"
-    codesign --verify -R="$requirement" "$app" 2>"$tmp/codesign.txt" ||
-        refuse "the app is not signed by ConsensFlow's Developer ID (team $team): $(cat "$tmp/codesign.txt")"
-    assessed=$("$spctl" --assess --type execute -vv "$app" 2>&1) ||
-        refuse "Gatekeeper refuses the app: $assessed"
-    case "$assessed" in
-        *"source=Notarized Developer ID"*) ;;
-        *) refuse "Gatekeeper does not take the app as notarized: $assessed" ;;
-    esac
-    say "the app is ConsensFlow's, signed (team $team) and notarized"
 
     if [ -n "${CONSENSFLOW_INSTALL_DIR:-}" ]; then
         dir="${CONSENSFLOW_INSTALL_DIR%/}"
@@ -280,25 +264,110 @@ main() {
     mkdir -p "$dir" 2>/dev/null || refuse "could not make the folder $dir."
     [ -w "$dir" ] || refuse "$dir is not yours to write to. Run this as a user who can, or with CONSENSFLOW_INSTALL_DIR=$HOME/Applications; it never uses sudo itself."
     dest="$dir/ConsensFlow.app"
-    quit_open_app "$dest"
 
+    if [ -z "$version" ]; then
+        feed="$releases/download/feed-$channel/latest.json"
+        fetch "$feed" "$tmp/latest.json" || refuse "could not read the $channel update feed at $feed."
+        version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp/latest.json" | head -n 1)
+        case "$version" in
+            [0-9]*) ;;
+            *) refuse "the $channel update feed at $feed names no version." ;;
+        esac
+        case "$version" in
+            *[!0-9A-Za-z.+-]*) refuse "the $channel update feed at $feed names no version." ;;
+        esac
+    fi
+    say "ConsensFlow $version"
+    if [ -d "$dest" ] && [ -z "$named" ]; then
+        current=$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$dest/Contents/Info.plist" 2>/dev/null || true)
+        if [ -n "$current" ] && newer_than "$current" "$version"; then
+            refuse "ConsensFlow $current is installed in $dir, newer than $version, which the $channel channel names. To go back to $version, run this with --version $version."
+        fi
+    fi
+    release="$releases/download/v$version"
+    signed="ConsensFlow_${version}_SHA256SUMS"
+    dmg="ConsensFlow_${version}_aarch64.dmg"
+
+    fetch "$release/SHA256SUMS" "$tmp/SHA256SUMS" || refuse "could not download $release/SHA256SUMS: is $version a release of ConsensFlow?"
+    fetch "$release/SHA256SUMS.sig" "$tmp/SHA256SUMS.sig" ||
+        refuse "ConsensFlow $version has no signed SHA256SUMS, so its files cannot be checked here: releases before 3.0.7-alpha.1 have none. Download it from $releases/tag/v$version; releases from 3.0.7-alpha.1 on install from here."
+    # The check reads SHA256SUMS once, and answers the hash it lists for the DMG
+    # from the very bytes whose signature it checked; it must end well and say so.
+    if checked=$(osascript -l JavaScript "$tmp/verify.js" "$key" "$(cat "$tmp/SHA256SUMS.sig")" \
+        "$(od -An -tx1 -v "$tmp/SHA256SUMS" | tr -d ' \n')" "$signed" "$dmg" 2>&1 </dev/null); then
+        status=0
+    else
+        status=$?
+    fi
+    case "$status:$checked" in
+        "0:ok "*) expected=${checked#ok } ;;
+        "0:refused: lists no"*) refuse "$version's SHA256SUMS lists no $dmg." ;;
+        0:*) refuse "the signature of $version's SHA256SUMS does not hold: ${checked#refused: }" ;;
+        *) refuse "the check of $version's SHA256SUMS ended with status $status: $checked" ;;
+    esac
+    case "$expected" in
+        "" | *[!0-9a-f]*) refuse "$version's SHA256SUMS lists no $dmg." ;;
+    esac
+    [ "${#expected}" -eq 64 ] || refuse "$version's SHA256SUMS lists no $dmg."
+    say "SHA256SUMS is signed by ConsensFlow's update key, for $version"
+    say "downloading $dmg"
+    fetch "$release/$dmg" "$tmp/$dmg" || refuse "could not download $release/$dmg."
+    got=$(shasum -a 256 "$tmp/$dmg" | awk '{ print $1 }')
+    [ "$got" = "$expected" ] || refuse "$dmg was changed: its SHA-256 is $got, and the signed SHA256SUMS says $expected."
+    say "$dmg has the SHA-256 the signed SHA256SUMS lists"
+
+    mkdir "$tmp/volume"
+    hdiutil attach -nobrowse -readonly -noautoopen -quiet -mountpoint "$tmp/volume" "$tmp/$dmg" </dev/null >/dev/null ||
+        refuse "could not open $dmg."
+    mounted="$tmp/volume"
+    [ -d "$mounted/ConsensFlow.app" ] || refuse "$dmg holds no ConsensFlow.app."
+    check_app "$mounted/ConsensFlow.app" "the app in $dmg"
+
+    # The copy that goes in is made beside the installed app, and checked again
+    # there: what is moved into place is what was checked, whatever happened to
+    # the DMG once it was hashed.
     stage="$dir/.ConsensFlow.app.installing.$$"
-    ditto "$app" "$stage" || refuse "could not copy the app into $dir."
-    codesign --verify --deep --strict "$stage" 2>"$tmp/codesign.txt" ||
-        refuse "the app's code signature does not hold where it was copied: $(cat "$tmp/codesign.txt")"
+    ditto "$mounted/ConsensFlow.app" "$stage" || refuse "could not copy the app into $dir."
+    check_app "$stage" "the copy of the app made in $dir"
+    say "the app is ConsensFlow's, signed (team $team) and notarized"
+
+    quit_open_app "$dest"
+    if [ -n "$(processes_of "$dest")" ]; then
+        refuse "ConsensFlow at $dest was opened again while the install waited. Quit it and run this again."
+    fi
     if [ -e "$dest" ]; then
         previous="$dir/.ConsensFlow.app.previous.$$"
-        mv "$dest" "$previous" || refuse "could not move the installed ConsensFlow aside in $dir."
+        mv "$dest" "$previous" || { previous=""; refuse "could not move the installed ConsensFlow aside in $dir."; }
     fi
     mv "$stage" "$dest" || refuse "could not put the new ConsensFlow in $dir."
     stage=""
+    placed=1
+    installed=$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$dest/Contents/Info.plist" 2>/dev/null || true)
+    [ "$installed" = "$version" ] || refuse "$dest says version '$installed' after the install, not $version; the app that was there is put back."
+    placed=""
     if [ -n "$previous" ]; then
         rm -rf "$previous"
         previous=""
     fi
-    installed=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$dest/Contents/Info.plist" 2>/dev/null || true)
-    [ "$installed" = "$version" ] || refuse "$dest says version '$installed' after the install, not $version."
     say "ConsensFlow $version is installed in $dest. Open it from there or with: open \"$dest\""
+}
+
+# Refuses unless the app at $1 ($2 in the words) is the version asked for, its
+# code signature holds, it is ConsensFlow's under its Developer ID, and
+# Gatekeeper takes it as notarized.
+check_app() {
+    shown=$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null || true)
+    [ "$shown" = "$version" ] || refuse "$2 is version '$shown', not $version."
+    codesign --verify --deep --strict "$1" 2>"$tmp/codesign.txt" ||
+        refuse "the code signature of $2 does not hold: $(cat "$tmp/codesign.txt")"
+    codesign --verify -R="$requirement" "$1" 2>"$tmp/codesign.txt" ||
+        refuse "$2 is not signed by ConsensFlow's Developer ID (team $team): $(cat "$tmp/codesign.txt")"
+    assessed=$("$spctl" --assess --type execute -vv "$1" 2>&1) ||
+        refuse "Gatekeeper refuses $2: $assessed"
+    case "$assessed" in
+        *"source=Notarized Developer ID"*) ;;
+        *) refuse "Gatekeeper does not take $2 as notarized: $assessed" ;;
+    esac
 }
 
 # The check of the signed SHA256SUMS, written into the run's folder by main.
@@ -683,13 +752,27 @@ function checkMinisign(keyLine, sigFileText, file, fileName) {
   return null;
 }
 
+// The SHA-256 the signed list `file` gives `name`: a line of two fields, the
+// hash (64 lowercase hex) and the name, or the name after `*` (sha256sum's
+// binary mode). Null where no line, or more than one, names it.
+function listedHash(file, name) {
+  const found = [];
+  for (const line of String.fromCharCode(...file).split("\n")) {
+    const fields = line.split(/[ \t]+/).filter((field) => field !== "");
+    if (fields.length === 2 && (fields[1] === name || fields[1] === `*${name}`)) found.push(fields[0]);
+  }
+  return found.length === 1 && /^[0-9a-f]{64}$/.test(found[0]) ? found[0] : null;
+}
+
 function run(argv) {
-  if (argv.length !== 4) return "refused: the check takes a key, a signature, a file in hex and its name";
+  if (argv.length !== 5) return "refused: the check takes a key, a signature, a file in hex, its name and the name of the file it lists";
   const file = fromHex(argv[2]);
   if (file === null) return "refused: the file is not hex";
   try {
     const problem = checkMinisign(argv[0], argv[1], file, argv[3]);
-    return problem === null ? "ok" : `refused: ${problem}`;
+    if (problem !== null) return `refused: ${problem}`;
+    const hash = listedHash(file, argv[4]);
+    return hash === null ? `refused: lists no ${argv[4]}` : `ok ${hash}`;
   } catch (error) {
     return `refused: ${error}`;
   }

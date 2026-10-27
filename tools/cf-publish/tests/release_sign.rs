@@ -9,7 +9,10 @@
 // A failure in a test is the test's answer, in its helpers too.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use cf_publish::testing::workflow::release::{HASH, SIGN, SIGNATURE, SUMS};
+use cf_publish::testing::workflow::release::{
+    ARTIFACTS, HASH, MAC_LISTING, PUBLISH, SIGN, SIGNATURE, SIGNED, SIGNED_FILES, SUMS,
+    WINDOWS_LISTING,
+};
 use cf_publish::testing::workflow::{job, read, step};
 
 mod its_text {
@@ -105,6 +108,124 @@ mod its_text {
     }
 }
 
+mod what_it_signs_is_what_was_built {
+    use super::*;
+
+    /// The one command every job lists its files with, by the line that runs it.
+    fn listings(text: &str) -> Vec<String> {
+        text.lines()
+            .filter(|line| line.contains("listing=$("))
+            .map(|line| line.trim().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn holds_the_downloads_to_the_build_jobs_outputs_before_the_sums_and_hands_on_only_on_a_tag() {
+        let text = read("release.yml");
+        let sign = job(&text, "sign");
+        let at = |name: &str| {
+            sign.find(&format!("- name: {name}"))
+                .unwrap_or_else(|| panic!("no step {name}"))
+        };
+        assert!(
+            at(ARTIFACTS) < at(SUMS)
+                && at(SUMS) < at(SIGN)
+                && at(SIGN) < at(SIGNATURE)
+                && at(SIGNATURE) < at(SIGNED),
+            "the downloads checked, the sums written, signed, checked, then hashed"
+        );
+        assert!(
+            sign.find("name: ConsensFlow-mac\n").unwrap() < at(ARTIFACTS)
+                && sign.find("name: ConsensFlow-windows\n").unwrap() < at(ARTIFACTS),
+            "each job's files downloaded apart, before they are checked"
+        );
+        assert!(
+            !sign.contains("pattern: ConsensFlow-*"),
+            "no merged download that is not checked"
+        );
+        let env = step(&sign, ARTIFACTS).env();
+        for (name, value) in [
+            ("MAC_LISTING", "${{ needs.mac.outputs.listing }}"),
+            ("WINDOWS_LISTING", "${{ needs.windows.outputs.listing }}"),
+        ] {
+            assert!(
+                env.contains(&(name.to_string(), value.to_string())),
+                "{env:?}"
+            );
+        }
+        assert!(sign.contains("      sums: ${{ steps.signed.outputs.sums }}\n"));
+        assert!(sign.contains("      signature: ${{ steps.signed.outputs.signature }}\n"));
+        let upload = sign
+            .split("- if: ")
+            .nth(1)
+            .expect("the upload of the signature has a condition");
+        assert!(
+            upload
+                .starts_with("github.event_name == 'push'\n        uses: actions/upload-artifact@")
+                && upload.contains("name: ConsensFlow-signature"),
+            "only a tag's run uploads the signature: {upload}"
+        );
+        assert!(
+            text.contains("    outputs:\n      listing: ${{ steps.listing.outputs.listing }}\n")
+        );
+        let windows = read("windows-build.yml");
+        assert!(windows.contains("        value: ${{ jobs.windows.outputs.listing }}\n"));
+        assert!(windows.contains("      listing: ${{ steps.listing.outputs.listing }}\n"));
+        // One command lists the files in each of the three jobs.
+        let all: Vec<String> = [
+            listings(&job(&text, "mac")),
+            listings(&sign),
+            listings(&windows),
+        ]
+        .concat();
+        assert_eq!(all.len(), 3, "{all:?}");
+        assert!(all.iter().all(|line| *line == all[0]), "{all:?}");
+    }
+
+    #[test]
+    fn has_the_publish_job_hold_the_sums_and_the_signature_to_the_sign_jobs_outputs_before_it_publishes(
+    ) {
+        let publish = job(&read("release.yml"), "publish");
+        let at = |name: &str| {
+            publish
+                .find(&format!("- name: {name}"))
+                .unwrap_or_else(|| panic!("no step {name}"))
+        };
+        assert!(at(HASH) < at(SIGNED_FILES) && at(SIGNED_FILES) < at(PUBLISH));
+        let env = step(&publish, SIGNED_FILES).env();
+        for (name, value) in [
+            ("SUMS_SHA256", "${{ needs.sign.outputs.sums }}"),
+            ("SIGNATURE_SHA256", "${{ needs.sign.outputs.signature }}"),
+        ] {
+            assert!(
+                env.contains(&(name.to_string(), value.to_string())),
+                "{env:?}"
+            );
+        }
+        assert!(
+            !env.iter().any(|(name, _)| name == "GH_TOKEN"),
+            "the token is not this step's"
+        );
+    }
+}
+
+mod the_installers_workflow {
+    use super::*;
+
+    #[test]
+    fn installs_a_real_release_only_after_a_tags_release_run_that_succeeded() {
+        let real = job(&read("installers.yml"), "real-release");
+        let condition = real
+            .lines()
+            .find_map(|line| line.strip_prefix("    if: "))
+            .expect("the real install has a condition");
+        assert_eq!(
+            condition,
+            "github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')"
+        );
+    }
+}
+
 #[cfg(unix)]
 mod its_steps_as_written {
     use std::fs;
@@ -143,6 +264,199 @@ mod its_steps_as_written {
             .lines()
             .find_map(|line| line.strip_prefix(&format!("{name}=")).map(str::to_string))
             .unwrap_or_else(|| panic!("no output {name}"))
+    }
+
+    /// A step of `workflow`'s job `name`, run as written in `dir`.
+    fn run_in(
+        workflow: &str,
+        name: &str,
+        step_name: &str,
+        dir: &Path,
+        env: &[(&str, &str)],
+    ) -> Ran {
+        bash(
+            &step(&job(&read(workflow), name), step_name).script(),
+            dir,
+            env,
+            &[],
+        )
+    }
+
+    #[test]
+    fn the_files_signed_are_the_ones_the_jobs_listed_and_publish_takes_only_what_was_signed() {
+        // The Mac job's files, and the Windows build's, where each job leaves them.
+        let mac = TempDir::new("mac");
+        fs::create_dir(mac.path().join("release")).unwrap();
+        for (name, data) in [
+            (format!("ConsensFlow_{RELEASE}_aarch64.dmg"), "dmg"),
+            (
+                format!("ConsensFlow_{RELEASE}_aarch64.app.tar.gz"),
+                "archive",
+            ),
+            ("latest.json".to_string(), "{}"),
+        ] {
+            fs::write(mac.path().join("release").join(name), data).unwrap();
+        }
+        let mac_out = mac.path().join("outputs");
+        fs::write(&mac_out, "").unwrap();
+        let ran = run_in(
+            "release.yml",
+            "mac",
+            MAC_LISTING,
+            mac.path(),
+            &[
+                ("RUNNER_TEMP", mac.path().to_str().unwrap()),
+                ("GITHUB_OUTPUT", mac_out.to_str().unwrap()),
+            ],
+        );
+        assert_eq!(ran.status, 0, "{}", ran.said());
+        let mac_listing = output(&mac_out, "listing");
+
+        let windows = TempDir::new("windows");
+        let bundle = windows.path().join("app/src-tauri/target/release/bundle");
+        for (folder, name) in [
+            ("nsis", format!("ConsensFlow_{RELEASE}_x64-setup.exe")),
+            (
+                "portable",
+                format!("ConsensFlow_{RELEASE}_x64-portable.exe"),
+            ),
+        ] {
+            fs::create_dir_all(bundle.join(folder)).unwrap();
+            fs::write(bundle.join(folder).join(name), folder).unwrap();
+        }
+        let windows_out = windows.path().join("outputs");
+        fs::write(&windows_out, "").unwrap();
+        let ran = run_in(
+            "windows-build.yml",
+            "windows",
+            WINDOWS_LISTING,
+            windows.path(),
+            &[
+                ("RUNNER_TEMP", windows.path().to_str().unwrap()),
+                ("GITHUB_OUTPUT", windows_out.to_str().unwrap()),
+            ],
+        );
+        assert_eq!(ran.status, 0, "{}", ran.said());
+        let windows_listing = output(&windows_out, "listing");
+        assert_eq!(mac_listing.len(), 64);
+        assert_eq!(windows_listing.len(), 64);
+
+        // The sign job, given what each job uploaded: as built, then with a file replaced.
+        let sign_job = |replace: Option<&str>| {
+            let runner = TempDir::new("sign");
+            let built = runner.path().join("built");
+            fs::create_dir_all(built.join("mac")).unwrap();
+            for entry in fs::read_dir(mac.path().join("release")).unwrap() {
+                let entry = entry.unwrap();
+                fs::copy(entry.path(), built.join("mac").join(entry.file_name())).unwrap();
+            }
+            for folder in ["nsis", "portable"] {
+                fs::create_dir_all(built.join("windows").join(folder)).unwrap();
+                for entry in
+                    fs::read_dir(windows.path().join("windows-artifact").join(folder)).unwrap()
+                {
+                    let entry = entry.unwrap();
+                    fs::copy(
+                        entry.path(),
+                        built.join("windows").join(folder).join(entry.file_name()),
+                    )
+                    .unwrap();
+                }
+            }
+            if let Some(path) = replace {
+                fs::write(built.join(path), "replaced by another job of the run").unwrap();
+            }
+            let ran = run(
+                ARTIFACTS,
+                runner.path(),
+                runner.path(),
+                runner.path(),
+                &[
+                    ("MAC_LISTING", &mac_listing),
+                    ("WINDOWS_LISTING", &windows_listing),
+                ],
+            );
+            (ran, runner)
+        };
+        let (ran, runner) = sign_job(None);
+        assert_eq!(ran.status, 0, "{}", ran.said());
+        for path in [
+            format!("ConsensFlow_{RELEASE}_aarch64.dmg"),
+            format!("nsis/ConsensFlow_{RELEASE}_x64-setup.exe"),
+            format!("portable/ConsensFlow_{RELEASE}_x64-portable.exe"),
+        ] {
+            assert!(
+                runner.path().join("dist").join(&path).is_file(),
+                "{path} is in the folder signed"
+            );
+        }
+        for (replaced, job_name) in [
+            (
+                format!("windows/nsis/ConsensFlow_{RELEASE}_x64-setup.exe"),
+                "windows",
+            ),
+            (format!("mac/ConsensFlow_{RELEASE}_aarch64.dmg"), "mac"),
+            ("mac/another-file".to_string(), "mac"),
+        ] {
+            let (ran, runner) = sign_job(Some(&replaced));
+            assert_eq!(ran.status, 1, "{replaced}: {}", ran.said());
+            assert!(
+                ran.stderr
+                    .contains(&format!("the {job_name} job's files downloaded hash to")),
+                "{replaced}: {}",
+                ran.said()
+            );
+            assert!(
+                !runner.path().join("dist").exists(),
+                "nothing is laid out to be signed"
+            );
+        }
+
+        // What was signed, as its outputs say it, and the publish job's check of its download.
+        let signature = runner.path().join("signature");
+        fs::create_dir(&signature).unwrap();
+        fs::write(signature.join("SHA256SUMS"), "the sums\n").unwrap();
+        fs::write(signature.join("SHA256SUMS.sig"), "the signature").unwrap();
+        let signed_out = runner.path().join("signed-outputs");
+        fs::write(&signed_out, "").unwrap();
+        let ran = run(
+            SIGNED,
+            &signature,
+            runner.path(),
+            runner.path(),
+            &[("GITHUB_OUTPUT", signed_out.to_str().unwrap())],
+        );
+        assert_eq!(ran.status, 0, "{}", ran.said());
+        let (sums, sig) = (
+            output(&signed_out, "sums"),
+            output(&signed_out, "signature"),
+        );
+        assert_eq!(sums, sha256_hex(b"the sums\n"));
+        let publish = |dir: &Path| {
+            run_in(
+                "release.yml",
+                "publish",
+                SIGNED_FILES,
+                dir,
+                &[("SUMS_SHA256", &sums), ("SIGNATURE_SHA256", &sig)],
+            )
+        };
+        let ran = publish(&signature);
+        assert_eq!(ran.status, 0, "{}", ran.said());
+        for name in ["SHA256SUMS", "SHA256SUMS.sig"] {
+            let dist = TempDir::new("dist");
+            for file in ["SHA256SUMS", "SHA256SUMS.sig"] {
+                fs::copy(signature.join(file), dist.path().join(file)).unwrap();
+            }
+            fs::write(dist.path().join(name), "replaced").unwrap();
+            let ran = publish(dist.path());
+            assert_eq!(ran.status, 1, "{name}: {}", ran.said());
+            assert!(
+                ran.stderr.contains(&format!("{name} downloaded hashes to")),
+                "{}",
+                ran.said()
+            );
+        }
     }
 
     #[test]

@@ -32,6 +32,7 @@ import {
   signedName,
   sumsOf,
   testCopy,
+  VERSION_ORDER,
 } from '../install/kit.mjs'
 
 const mac = process.platform === 'darwin'
@@ -60,8 +61,11 @@ let server
 const files = {}
 const dmgs = {}
 
-/** A fake ConsensFlow.app of `version` in `dir`, signed ad hoc as dev.ngvoicu.consensflow. */
-function fakeApp(dir, version) {
+/**
+ * A fake ConsensFlow.app of `version` in `dir`, signed ad hoc as `identifier`, with `extra`
+ * among its resources where it is given (another build of the same version).
+ */
+function fakeApp(dir, version, { identifier = 'dev.ngvoicu.consensflow', extra } = {}) {
   const app = path.join(dir, 'ConsensFlow.app')
   mkdirSync(path.join(app, 'Contents/MacOS'), { recursive: true })
   writeFileSync(
@@ -70,7 +74,7 @@ function fakeApp(dir, version) {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>app</string>
-<key>CFBundleIdentifier</key><string>dev.ngvoicu.consensflow</string>
+<key>CFBundleIdentifier</key><string>${identifier}</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>${version}</string>
 </dict></plist>
@@ -78,7 +82,11 @@ function fakeApp(dir, version) {
   )
   writeFileSync(path.join(app, 'Contents/MacOS/app'), '#!/bin/sh\nexit 0\n')
   chmodSync(path.join(app, 'Contents/MacOS/app'), 0o755)
-  run('codesign', ['-s', '-', '--force', '-i', 'dev.ngvoicu.consensflow', app])
+  if (extra) {
+    mkdirSync(path.join(app, 'Contents/Resources'))
+    writeFileSync(path.join(app, 'Contents/Resources/extra'), extra)
+  }
+  run('codesign', ['-s', '-', '--force', '-i', identifier, app])
   return app
 }
 
@@ -209,6 +217,26 @@ function processesOf(app) {
     .map((line) => Number(line.trim().split(/\s+/)[0]))
 }
 
+/** A folder of stand-ins for the programs `scripts` names (`{ name: shell text }`). */
+function standIns(at, scripts) {
+  const bin = path.join(at.dir, 'bin')
+  mkdirSync(bin, { recursive: true })
+  for (const [name, text] of Object.entries(scripts)) {
+    writeFileSync(path.join(bin, name), `#!/bin/sh\n${text}\n`, { mode: 0o755 })
+  }
+  return `${bin}:/usr/bin:/bin:/usr/sbin:/sbin`
+}
+
+/** What a refusal after an installed ConsensFlow was found must leave: that one, as it was. */
+function assertKept(at, ran, words, version) {
+  assert.equal(ran.status, 1, ran.out)
+  assert.match(ran.out, words)
+  assert.match(ran.out, /nothing was installed/)
+  assert.equal(installedVersion(at), version, 'the installed app is the one that was there')
+  assert.deepEqual(readdirSync(at.apps), ['ConsensFlow.app'], 'no copy is left beside it')
+  assert.deepEqual(readdirSync(at.tmp), [], "the run's own folder is gone")
+}
+
 async function waitFor(check, what) {
   for (let i = 0; i < 100; i++) {
     if (check()) return
@@ -216,6 +244,28 @@ async function waitFor(check, what) {
   }
   assert.fail(`${what} did not happen in 10 s`)
 }
+
+test('install.sh orders versions as SemVer does', () => {
+  const lines = readFileSync(INSTALL_SH, 'utf8').split('\n')
+  const from = lines.indexOf('# version order: begin')
+  const to = lines.indexOf('# version order: end')
+  assert.ok(from >= 0 && to > from, 'install.sh marks its order of versions')
+  const order = lines.slice(from + 1, to).join('\n')
+  for (const [a, b, newer] of VERSION_ORDER) {
+    const ran = spawnSync('/bin/sh', ['-c', `${order}\nnewer_than "$1" "$2"`, 'sh', a, b])
+    assert.equal(ran.status === 0, newer, `${a} after ${b}`)
+  }
+})
+
+test('the official download follows a redirect to https only', () => {
+  const fetch = readFileSync(INSTALL_SH, 'utf8')
+    .split('\n')
+    .filter((line) => line.includes('curl '))
+  assert.ok(
+    fetch.some((line) => line.includes("--proto '=https' --proto-redir '=https' --tlsv1.2")),
+    fetch.join('\n'),
+  )
+})
 
 test('on Linux, install.sh refuses in plain words and installs nothing', {
   skip: process.platform !== 'linux' && 'this is not Linux',
@@ -239,6 +289,11 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       const folder = mkdtempSync(path.join(work, 'app-'))
       dmgs[version] = dmgOf(fakeApp(folder, version), dmgName(version))
     }
+    // Another build of 3.0.7, which no SHA256SUMS here lists.
+    dmgs.other = dmgOf(
+      fakeApp(mkdtempSync(path.join(work, 'app-')), '3.0.7', { extra: 'another build' }),
+      'other.dmg',
+    )
     const notarized = path.join(work, 'spctl')
     writeFileSync(
       notarized,
@@ -607,7 +662,7 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
         assertRefused(
           at,
           await install(at, ['--version', '3.0.7']),
-          /the app's code signature does not hold/,
+          /the code signature of the app in ConsensFlow_3\.0\.7_aarch64\.dmg does not hold/,
         )
       } finally {
         publish('3.0.7')
@@ -619,7 +674,7 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       assertRefused(
         at,
         await install(at, ['--version', '3.0.7']),
-        /the app is not signed by ConsensFlow's Developer ID \(team 3K53U2H749\)/,
+        /the app in ConsensFlow_3\.0\.7_aarch64\.dmg is not signed by ConsensFlow's Developer ID \(team 3K53U2H749\)/,
       )
     })
 
@@ -628,7 +683,7 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       assertRefused(
         at,
         await install(at, ['--version', '3.0.7']),
-        /Gatekeeper (refuses the app|does not take the app as notarized)/,
+        /Gatekeeper (refuses|does not take) the app in ConsensFlow_3\.0\.7_aarch64\.dmg/,
       )
     })
 
@@ -643,8 +698,170 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       assertRefused(
         at,
         await install(at, ['--version', '3.0.7']),
-        /Gatekeeper does not take the app as notarized/,
+        /Gatekeeper does not take the app in ConsensFlow_3\.0\.7_aarch64\.dmg as notarized/,
       )
+    })
+  })
+
+  describe('what is checked is what goes in', () => {
+    test("the check's word is taken only from a clean exit", async () => {
+      const at = freshCase()
+      const PATH = standIns(at, {
+        osascript: 'case "$3" in *verify.js) echo ok; exit 1 ;; esac\nexec /usr/bin/osascript "$@"',
+      })
+      assertRefused(
+        at,
+        await install(at, ['--version', '3.0.7'], { env: { PATH } }),
+        /the check of 3\.0\.7's SHA256SUMS ended with status 1/,
+      )
+    })
+
+    test('the hash of the DMG comes from the bytes of SHA256SUMS whose signature was checked', async () => {
+      // The DMG served is another build; the list on disk is rewritten to its hash once the
+      // signature of the real one was checked.
+      publish(
+        '3.0.7',
+        { sums: sumsOf({ [dmgName('3.0.7')]: dmgs['3.0.7'] }) },
+        { [dmgName('3.0.7')]: dmgs.other },
+      )
+      try {
+        const at = freshCase()
+        const other = sumsOf({ [dmgName('3.0.7')]: dmgs.other })
+        writeFileSync(path.join(at.dir, 'other-sums'), other)
+        const PATH = standIns(at, {
+          osascript: `case "$3" in *verify.js)\n/usr/bin/osascript "$@"; s=$?\ncp "${path.join(at.dir, 'other-sums')}" "$(dirname "$3")/SHA256SUMS"\nexit $s ;;\nesac\nexec /usr/bin/osascript "$@"`,
+        })
+        assertRefused(
+          at,
+          await install(at, ['--version', '3.0.7'], { env: { PATH } }),
+          /ConsensFlow_3\.0\.7_aarch64\.dmg was changed/,
+        )
+      } finally {
+        publish('3.0.7')
+      }
+    })
+
+    test('the copy that goes in is checked again: one swapped once the DMG was checked is refused', async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      const swapped = fakeApp(mkdtempSync(path.join(work, 'app-')), '3.0.7', {
+        identifier: 'dev.someone.else',
+      })
+      const PATH = standIns(at, {
+        ditto: `/usr/bin/ditto "$@" || exit $?\ncase "$2" in *.installing.*) rm -rf "$2"; /usr/bin/ditto "${swapped}" "$2" ;; esac`,
+      })
+      assertKept(
+        at,
+        await install(at, ['--version', '3.0.7'], { env: { PATH } }),
+        /the copy of the app made in .* is not signed by ConsensFlow's Developer ID/,
+        '3.0.7-alpha.1',
+      )
+    })
+
+    test('an open ConsensFlow is asked to quit only once the copy that goes in has passed its checks', async () => {
+      const at = freshCase()
+      const app = applet(at.apps, false)
+      const swapped = fakeApp(mkdtempSync(path.join(work, 'app-')), '3.0.7', {
+        identifier: 'dev.someone.else',
+      })
+      const PATH = standIns(at, {
+        ditto: `/usr/bin/ditto "$@" || exit $?\ncase "$2" in *.installing.*) rm -rf "$2"; /usr/bin/ditto "${swapped}" "$2" ;; esac`,
+      })
+      run('open', ['-g', '-j', app])
+      await waitFor(() => processesOf(app).length > 0, 'the applet starting')
+      try {
+        const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
+        assert.equal(ran.status, 1, ran.out)
+        assert.match(ran.out, /the copy of the app made in .* is not signed/)
+        assert.doesNotMatch(ran.out, /asking it to quit/)
+        assert.ok(processesOf(app).length > 0, 'it still runs, never asked')
+      } finally {
+        for (const pid of processesOf(app)) process.kill(pid, 'SIGKILL')
+      }
+    })
+
+    test('an app opened again between the quit and the swap is refused, and the installed one kept', async () => {
+      const at = freshCase()
+      const installed = fakeApp(at.apps, '3.0.7-alpha.1')
+      const count = path.join(at.dir, 'ps-count')
+      const PATH = standIns(at, {
+        ps: `if [ "$1" = "-axo" ]; then\nn=$(cat "${count}" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "${count}"\n/bin/ps "$@"\n[ "$n" -ge 2 ] && echo "99999 ${installed}/Contents/MacOS/app"\nexit 0\nfi\nexec /bin/ps "$@"`,
+      })
+      assertKept(
+        at,
+        await install(at, ['--version', '3.0.7'], { env: { PATH } }),
+        /was opened again while the install waited/,
+        '3.0.7-alpha.1',
+      )
+    })
+
+    test('the old app is deleted only once the new one says its version, and is put back when it does not', async () => {
+      const wrong = path.join(work, 'plistbuddy-wrong')
+      writeFileSync(
+        wrong,
+        '#!/bin/sh\ncase "$3" in "$WRONG_PLIST") echo 9.9.9; exit 0 ;; esac\nexec /usr/libexec/PlistBuddy "$@"\n',
+        { mode: 0o755 },
+      )
+      const replacements = [
+        [REQUIREMENT, AD_HOC],
+        [SPCTL, `spctl=${path.join(work, 'spctl')}`],
+        ['plistbuddy=/usr/libexec/PlistBuddy', `plistbuddy=${wrong}`],
+      ]
+      const upgrade = freshCase(replacements)
+      fakeApp(upgrade.apps, '3.0.7-alpha.1')
+      const env = (at) => ({
+        WRONG_PLIST: path.join(at.apps, 'ConsensFlow.app/Contents/Info.plist'),
+      })
+      assertKept(
+        upgrade,
+        await install(upgrade, ['--version', '3.0.7'], { env: env(upgrade) }),
+        /says version '9\.9\.9' after the install, not 3\.0\.7; the app that was there is put back/,
+        '3.0.7-alpha.1',
+      )
+      const fresh = freshCase(replacements)
+      assertRefused(
+        fresh,
+        await install(fresh, ['--version', '3.0.7'], { env: env(fresh) }),
+        /says version '9\.9\.9' after the install/,
+      )
+    })
+  })
+
+  describe('an installed ConsensFlow newer than the release', () => {
+    test('is kept, and nothing is downloaded but the feed', async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.8')
+      const from = server.asked.length
+      assertKept(
+        at,
+        await install(at),
+        /ConsensFlow 3\.0\.8 is installed in .*, newer than 3\.0\.7, which the stable channel names\. To go back to 3\.0\.7, run this with --version 3\.0\.7\./,
+        '3.0.8',
+      )
+      assert.deepEqual(server.asked.slice(from), ['/releases/download/feed-stable/latest.json'])
+    })
+
+    test('a release is newer than its own alphas', async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.7')
+      assertKept(
+        at,
+        await install(at, ['--alpha']),
+        /ConsensFlow 3\.0\.7 is installed in .*, newer than 3\.0\.7-alpha\.2/,
+        '3.0.7',
+      )
+    })
+
+    test('goes back to the release --version names', async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.8')
+      assertInstalled(at, await install(at, ['--version', '3.0.7']), '3.0.7')
+    })
+
+    test('an older alpha is upgraded by the alpha feed', async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      assertInstalled(at, await install(at, ['--alpha']), '3.0.7-alpha.2')
     })
   })
 

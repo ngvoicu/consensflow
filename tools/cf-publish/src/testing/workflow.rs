@@ -63,6 +63,16 @@ pub mod release {
     pub const SUMS: &str = "The sums of the release, and the copy that is signed";
     /// The sign job's step that holds the update key.
     pub const SIGN: &str = "Sign the sums";
+    /// The Mac job's step that says what the files it built hash to.
+    pub const MAC_LISTING: &str = "What the Mac's files hash to";
+    /// The Windows build's step that lays out its files and says what they hash to.
+    pub const WINDOWS_LISTING: &str = "The files people download, and what they hash to";
+    /// The sign job's step that holds the files it downloaded to the build jobs' listings.
+    pub const ARTIFACTS: &str = "The files are the ones the Mac and Windows jobs built";
+    /// The sign job's step that says what it signed hashes to.
+    pub const SIGNED: &str = "What was signed hashes to";
+    /// The publish job's step that holds SHA256SUMS and its signature to the sign job's outputs.
+    pub const SIGNED_FILES: &str = "The sums and their signature are the sign job's";
     /// The sign job's step that checks the signature as the installers do.
     pub const SIGNATURE: &str = "The installers take the signature";
     /// Where GitHub serves a release's files, in the steps' words.

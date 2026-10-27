@@ -19,11 +19,17 @@
 # their pages on GitHub have their downloads.
 #
 # The per-user installer runs quietly (no administrator rights), and an
-# installed ConsensFlow is upgraded where it is. An open ConsensFlow is asked to
-# close its window, as closing it by hand would, and the install waits for it;
-# one that stays open is never stopped, and nothing is installed. `cf` comes
-# inside the app: nothing else is set up. ConsensFlow is made for x64 Windows
-# and Apple silicon Macs only.
+# installed ConsensFlow is upgraded where it is. An installed ConsensFlow newer
+# than the release is never replaced by it, unless --version names that
+# release, and one installed for all users of the PC is never joined by a
+# second, per-user one. The installer is held open from before its hash is
+# taken until it has run, so nothing can write or delete it in between. An open
+# ConsensFlow is asked to close its window, as closing it by hand would, and
+# the install waits for it; one that stays open is never stopped, and nothing
+# is installed. Right before the installer starts, nothing may run from the
+# app's folder; Tauri's quiet installer itself closes a ConsensFlow that is
+# opened in that last moment. `cf` comes inside the app: nothing else is set
+# up. ConsensFlow is made for x64 Windows and Apple silicon Macs only.
 #
 # Options, as variables set before the command (irm | iex takes no arguments):
 #
@@ -89,6 +95,7 @@ remove everything.
     $releases = if ($env:CONSENSFLOW_RELEASES_URL) { $env:CONSENSFLOW_RELEASES_URL.TrimEnd('/') } else { $official }
     $channel = if ($env:CONSENSFLOW_CHANNEL) { $env:CONSENSFLOW_CHANNEL } else { 'stable' }
     $version = if ($env:CONSENSFLOW_VERSION) { $env:CONSENSFLOW_VERSION } else { '' }
+    $asked = $version
     $words = @($args)
     for ($i = 0; $i -lt $words.Count; $i++) {
         $word = [string]$words[$i]
@@ -98,8 +105,9 @@ remove everything.
             if ($i + 1 -ge $words.Count) { throw 'consensflow: --version needs a release, for example --version 3.0.7' }
             $i++
             $version = [string]$words[$i]
+            $asked = $version
         }
-        elseif ($word.StartsWith('--version=')) { $version = $word.Substring('--version='.Length) }
+        elseif ($word.StartsWith('--version=')) { $version = $word.Substring('--version='.Length); $asked = $version }
         elseif ($word -eq '--help' -or $word -eq '-h' -or $word -eq '-Help') { return $usage }
         else { throw "consensflow: unknown option '$word' (see --help)" }
     }
@@ -123,6 +131,8 @@ remove everything.
     # global signature over the signature and the trusted comment. Written
     # out here because neither Windows PowerShell's .NET nor PowerShell 7's
     # checks Ed25519; the numbers are .NET's BigInteger and its SHA-512.
+    # Add-Type -AssemblyName loads .NET's own System.Numerics assembly; it
+    # compiles nothing.
     Add-Type -AssemblyName System.Numerics
     $BI = [System.Numerics.BigInteger]
     $CfP = $BI::Subtract($BI::Pow([System.Numerics.BigInteger]2, 255), [System.Numerics.BigInteger]19)
@@ -338,7 +348,7 @@ remove everything.
         $notMinisign = 'the signature file is not a minisign signature'
         if ($null -eq $sigBytes) { return $notMinisign }
         $lines = $latin1.GetString($sigBytes).Split([char]10)
-        if ($lines.Length -ne 5 -or $lines[4] -ne '') { return $notMinisign }
+        if ($lines.Length -ne 5 -or $lines[4].Length -ne 0) { return $notMinisign }
         if (-not $lines[0].StartsWith('untrusted comment: ', [StringComparison]::Ordinal) -or
             -not $lines[2].StartsWith('trusted comment: ', [StringComparison]::Ordinal)) { return $notMinisign }
         $signature = CfFromBase64 $lines[1]
@@ -355,7 +365,23 @@ remove everything.
         }
         $named = [regex]::Match($comment, '\Atimestamp:[0-9]+\tfile:(.*)\z')
         if (-not $named.Success) { return "the signature is for something else, not $fileName" }
-        if ($named.Groups[1].Value -cne $fileName) { return "the signature is for $($named.Groups[1].Value), not $fileName" }
+        if (-not [string]::Equals($named.Groups[1].Value, $fileName, [StringComparison]::Ordinal)) {
+            return "the signature is for $($named.Groups[1].Value), not $fileName"
+        }
+        $null
+    }
+
+    # The SHA-256 the signed list $file gives $name: a line of two fields, the
+    # hash (64 lowercase hex) and the name, or the name after * (sha256sum's
+    # binary mode). $null where no line, or more than one, names it.
+    function Get-CfListedHash([byte[]]$file, [string]$name) {
+        $found = @()
+        foreach ($line in [Text.Encoding]::GetEncoding(28591).GetString($file).Split([char]10)) {
+            $fields = @($line.Split([char[]]@(32, 9), [StringSplitOptions]::RemoveEmptyEntries))
+            if ($fields.Count -eq 2 -and ([string]::Equals($fields[1], $name, [StringComparison]::Ordinal) -or
+                    [string]::Equals($fields[1], "*$name", [StringComparison]::Ordinal))) { $found += $fields[0] }
+        }
+        if ($found.Count -eq 1 -and $found[0] -cmatch '\A[0-9a-f]{64}\z') { return $found[0] }
         $null
     }
     # verifier: end
@@ -404,16 +430,73 @@ remove everything.
         }
     }
 
-    # Where the per-user installer put ConsensFlow, by its uninstall entry.
+    # version order: begin
+    # Whether the version $a comes after $b, by SemVer's precedence: the numbers
+    # first, then a release after any of its pre-releases, then the
+    # pre-release's fields one by one (numbers by value, below words; words by
+    # their bytes), and a build's +metadata counts for nothing.
+    function CfField([string]$x, [string]$y) {
+        $xn = $x -cmatch '\A[0-9]+\z'
+        $yn = $y -cmatch '\A[0-9]+\z'
+        if ($xn -and $yn) {
+            $x = $x.TrimStart([char]'0'); $y = $y.TrimStart([char]'0')
+            if ($x.Length -ne $y.Length) { return [Math]::Sign($x.Length - $y.Length) }
+            return [Math]::Sign([string]::CompareOrdinal($x, $y))
+        }
+        if ($xn) { return -1 }
+        if ($yn) { return 1 }
+        [Math]::Sign([string]::CompareOrdinal($x, $y))
+    }
+    function CfVersionOrder([string]$a, [string]$b) {
+        $parts = foreach ($v in @($a, $b)) {
+            $v = ($v -split '\+', 2)[0]
+            $at = $v.IndexOf([char]'-')
+            if ($at -ge 0) { , @($v.Substring(0, $at), $v.Substring($at + 1)) } else { , @($v, '') }
+        }
+        $am = $parts[0][0].Split([char]'.'); $bm = $parts[1][0].Split([char]'.')
+        for ($k = 0; $k -lt 3; $k++) {
+            $x = if ($k -lt $am.Length) { [regex]::Match($am[$k], '\A[0-9]*').Value } else { '' }
+            $y = if ($k -lt $bm.Length) { [regex]::Match($bm[$k], '\A[0-9]*').Value } else { '' }
+            $c = CfField $(if ($x) { $x } else { '0' }) $(if ($y) { $y } else { '0' })
+            if ($c -ne 0) { return $c }
+        }
+        $ap = $parts[0][1]; $bp = $parts[1][1]
+        if ($ap.Length -eq 0 -and $bp.Length -eq 0) { return 0 }
+        if ($ap.Length -eq 0) { return 1 }
+        if ($bp.Length -eq 0) { return -1 }
+        $af = $ap.Split([char]'.'); $bf = $bp.Split([char]'.')
+        for ($k = 0; $k -lt [Math]::Min($af.Length, $bf.Length); $k++) {
+            $c = CfField $af[$k] $bf[$k]
+            if ($c -ne 0) { return $c }
+        }
+        [Math]::Sign($af.Length - $bf.Length)
+    }
+    function Test-CfNewer([string]$a, [string]$b) { (CfVersionOrder $a $b) -gt 0 }
+    # version order: end
+
+    # Where the per-user installer put ConsensFlow, by its uninstall entry, and
+    # a ConsensFlow installed for every user of the PC, by its own.
+    $userEntry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ConsensFlow'
+    $machineEntries = @('HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ConsensFlow', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\ConsensFlow')
     function Get-CfInstalled {
-        $entry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ConsensFlow'
-        if (-not (Test-Path $entry)) { return $null }
-        Get-ItemProperty $entry
+        if (-not (Test-Path $userEntry)) { return $null }
+        Get-ItemProperty $userEntry
+    }
+    function Get-CfMachineInstall {
+        foreach ($entry in $machineEntries) {
+            if (Test-Path $entry) { return Get-ItemProperty $entry }
+        }
+        $null
     }
 
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ('consensflow-install.' + [guid]::NewGuid().ToString('N').Substring(0, 12))
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
+        $machine = Get-CfMachineInstall
+        if ($machine) {
+            $where = if ($machine.InstallLocation) { $machine.InstallLocation.Trim('"') } else { 'Program Files' }
+            Stop-CfInstall "ConsensFlow $($machine.DisplayVersion) is installed for every user of this PC, in $where. This installer installs for your user only, and would put a second ConsensFlow beside it. Uninstall that one first (Settings > Apps > Installed apps > ConsensFlow), or keep updating it from the app."
+        }
         if (-not $version) {
             $feed = "$releases/download/feed-$channel/latest.json"
             try { Get-CfDownload $feed (Join-Path $tmp 'latest.json') } catch { Stop-CfInstall "could not read the $channel update feed at ${feed}: $($_.Exception.Message)" }
@@ -421,6 +504,10 @@ remove everything.
             if ($version -cnotmatch '\A[0-9][0-9A-Za-z.+-]*\z') { Stop-CfInstall "the $channel update feed at $feed names no version." }
         }
         Write-Host "consensflow: ConsensFlow $version"
+        $before = Get-CfInstalled
+        if ($before -and $before.DisplayVersion -and -not $asked -and (Test-CfNewer $before.DisplayVersion $version)) {
+            Stop-CfInstall "ConsensFlow $($before.DisplayVersion) is installed, newer than $version, which the $channel channel names. To go back to $version, run this with --version $version (or `$env:CONSENSFLOW_VERSION = '$version')."
+        }
         $release = "$releases/download/v$version"
         $signed = "ConsensFlow_${version}_SHA256SUMS"
         $installer = "ConsensFlow_${version}_x64-setup.exe"
@@ -429,33 +516,42 @@ remove everything.
         try { Get-CfDownload "$release/SHA256SUMS.sig" "$sums.sig" } catch {
             Stop-CfInstall "ConsensFlow $version has no signed SHA256SUMS, so its files cannot be checked here: releases before 3.0.7-alpha.1 have none. Download it from $releases/tag/v$version; releases from 3.0.7-alpha.1 on install from here."
         }
-        $problem = Test-CfMinisign $key (Get-Content -Raw "$sums.sig") ([IO.File]::ReadAllBytes($sums)) $signed
+        # SHA256SUMS is read once: the hash of the installer comes from the very
+        # bytes whose signature was checked.
+        $sumsBytes = [IO.File]::ReadAllBytes($sums)
+        $problem = Test-CfMinisign $key (Get-Content -Raw "$sums.sig") $sumsBytes $signed
         if ($problem) { Stop-CfInstall "the signature of $version's SHA256SUMS does not hold: $problem" }
         Write-Host "consensflow: SHA256SUMS is signed by ConsensFlow's update key, for $version"
-
-        $expected = $null
-        foreach ($line in [IO.File]::ReadAllLines($sums)) {
-            $fields = $line -split '\s+'
-            if ($fields.Count -eq 2 -and ($fields[1] -ceq $installer -or $fields[1] -ceq "*$installer") -and $fields[0] -cmatch '\A[0-9a-f]{64}\z') {
-                $expected = $fields[0]
-            }
-        }
+        $expected = Get-CfListedHash $sumsBytes $installer
         if (-not $expected) { Stop-CfInstall "$version's SHA256SUMS lists no $installer." }
+
         Write-Host "consensflow: downloading $installer"
         $setup = Join-Path $tmp $installer
         try { Get-CfDownload "$release/$installer" $setup } catch { Stop-CfInstall "could not download $release/${installer}: $($_.Exception.Message)" }
-        $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $setup).Hash.ToLowerInvariant()
-        if ($got -cne $expected) { Stop-CfInstall "$installer was changed: its SHA-256 is $got, and the signed SHA256SUMS says $expected." }
-        Write-Host "consensflow: $installer has the SHA-256 the signed SHA256SUMS lists"
+        # Held from before its hash is taken until it has run: others may read
+        # it (Windows runs it), and nothing may write or delete it.
+        $held = [IO.File]::Open($setup, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            $hasher = [Security.Cryptography.SHA256]::Create()
+            try { $got = -join ($hasher.ComputeHash($held) | ForEach-Object { $_.ToString('x2') }) } finally { $hasher.Dispose() }
+            if (-not [string]::Equals($got, $expected, [StringComparison]::Ordinal)) {
+                Stop-CfInstall "$installer was changed: its SHA-256 is $got, and the signed SHA256SUMS says $expected."
+            }
+            Write-Host "consensflow: $installer has the SHA-256 the signed SHA256SUMS lists"
 
-        $before = Get-CfInstalled
-        $dir = if ($before -and $before.InstallLocation) { $before.InstallLocation.Trim('"') } else { Join-Path $env:LOCALAPPDATA 'ConsensFlow' }
-        Close-CfOpen $dir
-        Write-Host "consensflow: installing ConsensFlow $version"
-        $run = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+            $dir = if ($before -and $before.InstallLocation) { $before.InstallLocation.Trim('"') } else { Join-Path $env:LOCALAPPDATA 'ConsensFlow' }
+            Close-CfOpen $dir
+            if ((Get-CfOpen $dir).Count -gt 0) {
+                Stop-CfInstall "ConsensFlow in $dir was opened again while the install waited. Close it and run this again."
+            }
+            Write-Host "consensflow: installing ConsensFlow $version"
+            $run = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+        } finally {
+            $held.Dispose()
+        }
         if ($run.ExitCode -ne 0) { Stop-CfInstall "the installer ended with code $($run.ExitCode)." }
         $after = Get-CfInstalled
-        if (-not $after -or $after.DisplayVersion -cne $version) {
+        if (-not $after -or -not [string]::Equals([string]$after.DisplayVersion, $version, [StringComparison]::Ordinal)) {
             $said = if ($after) { $after.DisplayVersion } else { 'nothing' }
             throw "consensflow: the installer ran, and Windows lists ConsensFlow as version '$said', not $version."
         }

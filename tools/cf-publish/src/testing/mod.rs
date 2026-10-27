@@ -6,6 +6,7 @@
 
 mod built;
 mod http;
+pub mod signing;
 mod sim;
 pub mod workflow;
 pub mod worlds;

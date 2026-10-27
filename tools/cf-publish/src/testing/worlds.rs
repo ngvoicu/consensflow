@@ -176,6 +176,7 @@ impl Before {
             repo: self.github.repo(),
             manifest: &manifest,
             patience: quick(),
+            key: super::signing::test_key(),
         };
         let means = Means {
             gh: &self.github,
@@ -262,6 +263,7 @@ impl Releasing {
             repo: self.github.repo(),
             manifest: &manifest,
             patience: quick(),
+            key: super::signing::test_key(),
         };
         let members = |_: &Path| Ok(OLD_LAYOUT.iter().map(|name| (*name).to_string()).collect());
         let means = Means {

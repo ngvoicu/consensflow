@@ -641,6 +641,7 @@ name = "cf-publish"
 version = "3.0.6-alpha.2"
 dependencies = [
  "cf-publish",
+ "minisign-verify",
  "serde_json",
  "sha2",
 ]

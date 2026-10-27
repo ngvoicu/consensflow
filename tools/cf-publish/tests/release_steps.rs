@@ -22,8 +22,8 @@ mod the_publish_job_run_as_written {
     use cf_publish::testing::workflow::{bash, expand};
     use cf_publish::testing::worlds::feed;
     use cf_publish::testing::{
-        archive_of, built_files, folder_of, gh_dir, latest_json, signed, Github, Ran, TempDir,
-        OLD_LAYOUT,
+        archive_of, built_files, folder_of, gh_dir, latest_json, signed, signing::test_key, Github,
+        Ran, TempDir, OLD_LAYOUT,
     };
 
     use super::*;
@@ -116,6 +116,8 @@ mod the_publish_job_run_as_written {
                 ("GITHUB_REF_TYPE", "tag"),
                 ("GH_SIM", self.github.base()),
                 ("HOME", runner_temp.as_str()),
+                // The binary built with the tests' kit checks SHA256SUMS against the tests' key.
+                ("CF_PUBLISH_TEST_KEY", test_key()),
             ]
             .iter()
             .map(|(name, value)| ((*name).to_string(), (*value).to_string()))

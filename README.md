@@ -102,8 +102,9 @@ Each installs the latest release (`sh -s -- --alpha`, or
 the rest). It installs nothing until the release's `SHA256SUMS` carries the
 signature of ConsensFlow's update key for that release and the download matches
 it, and on a Mac until the app's Developer ID signature and notarization hold.
-An installed ConsensFlow is upgraded where it is, once it has quit. The scripts
-are `install/` in this repository.
+An installed ConsensFlow is upgraded where it is, once it has quit; a newer one
+is kept, unless `--version` names the release. The scripts are `install/` in
+this repository.
 
 Everything ConsensFlow needs comes with it. The only other things to install
 are the harnesses you want to use.

@@ -173,11 +173,13 @@ file = ".github/workflows/release.yml"
 find = '''
     permissions:
       contents: read
-    outputs:'''
+    outputs:
+      sha256:'''
 replace = '''
     permissions:
       contents: write
-    outputs:'''
+    outputs:
+      sha256:'''
 
 [[plant]]
 name = "workflow: the publisher is built by a third-party action"

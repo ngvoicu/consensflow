@@ -9,7 +9,15 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { spawn, spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
@@ -23,11 +31,16 @@ import {
   signedName,
   sumsOf,
   testCopy,
+  VERSION_ORDER,
 } from '../install/kit.mjs'
 
 const windows = process.platform === 'win32'
 const UNINSTALL_ENTRY =
   "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ConsensFlow'"
+const MACHINE_ENTRIES =
+  "$machineEntries = @('HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ConsensFlow', 'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ConsensFlow')"
+// Where the cases keep the uninstall entries they make, each under a name of its own.
+const TEST_KEYS = 'HKCU\\Software\\ConsensFlow-installer-tests'
 
 function onPath(program) {
   return spawnSync(windows ? 'where' : 'which', [program], { encoding: 'utf8' }).status === 0
@@ -41,6 +54,35 @@ const shells = [
 const setupName = (version) => `ConsensFlow_${version}_x64-setup.exe`
 
 for (const [label, shell] of shells) {
+  test(`install.ps1 orders versions as SemVer does, in ${label}`, () => {
+    const lines = readFileSync(INSTALL_PS1, 'utf8').split('\n')
+    const from = lines.findIndex((line) => line.trim() === '# version order: begin')
+    const to = lines.findIndex((line) => line.trim() === '# version order: end')
+    assert.ok(from >= 0 && to > from, 'install.ps1 marks its order of versions')
+    const work = mkdtempSync(path.join(os.tmpdir(), 'cf-version-order-'))
+    try {
+      const script = path.join(work, 'order.ps1')
+      writeFileSync(
+        script,
+        `${lines.slice(from + 1, to).join('\n')}\n${VERSION_ORDER.map(([a, b]) => `[bool](Test-CfNewer '${a}' '${b}')`).join('\n')}\n`,
+      )
+      const ran = spawnSync(
+        shell,
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
+        {
+          encoding: 'utf8',
+        },
+      )
+      assert.equal(ran.status, 0, ran.stderr)
+      const said = ran.stdout.trim().split(/\r?\n/)
+      VERSION_ORDER.forEach(([a, b, newer], at) => {
+        assert.equal(said[at], newer ? 'True' : 'False', `${a} after ${b}`)
+      })
+    } finally {
+      rmSync(work, { recursive: true, force: true })
+    }
+  })
+
   describe(`install.ps1 in ${label}`, () => {
     let work
     let key
@@ -56,14 +98,44 @@ for (const [label, shell] of shells) {
       Object.assign(files, scriptedRelease('/releases', version, artifacts, key, options))
     }
 
-    function freshCase() {
+    /**
+     * A fresh case: its own folders, and a test copy that reads uninstall entries of its own
+     * (made by `entry`), with `replacements` made too.
+     */
+    function freshCase(replacements = []) {
       const dir = mkdtempSync(path.join(work, 'case-'))
+      const name = path.basename(dir)
+      const user = `${TEST_KEYS}\\${name}-user`
+      const machine = `${TEST_KEYS}\\${name}-machine`
       const script = testCopy(INSTALL_PS1, path.join(dir, 'install.ps1'), key.keyLine, [
-        [UNINSTALL_ENTRY, "'HKCU:\\Software\\ConsensFlow-installer-tests\\none'"],
+        [UNINSTALL_ENTRY, `'${user.replace('HKCU', 'HKCU:')}'`],
+        [MACHINE_ENTRIES, `$machineEntries = @('${machine.replace('HKCU', 'HKCU:')}')`],
         ['$quitWait = 120', '$quitWait = 3'],
+        ...replacements,
       ])
       for (const folder of ['tmp', 'local']) mkdirSync(path.join(dir, folder))
-      return { dir, script, tmp: path.join(dir, 'tmp'), local: path.join(dir, 'local') }
+      return {
+        dir,
+        script,
+        tmp: path.join(dir, 'tmp'),
+        local: path.join(dir, 'local'),
+        user,
+        machine,
+      }
+    }
+
+    /** Makes the uninstall entry `key` say ConsensFlow `version` is installed in `location`. */
+    function entry(key, version, location) {
+      for (const [name, value] of [
+        ['DisplayName', 'ConsensFlow'],
+        ['DisplayVersion', version],
+        ['InstallLocation', `"${location}"`],
+      ]) {
+        const made = spawnSync('reg', ['add', key, '/v', name, '/d', value, '/f'], {
+          encoding: 'utf8',
+        })
+        assert.equal(made.status, 0, made.stderr)
+      }
     }
 
     function install(at, args = [], { env = {}, launcher } = {}) {
@@ -123,6 +195,7 @@ for (const [label, shell] of shells) {
 
     after(async () => {
       await server?.close()
+      if (windows) spawnSync('reg', ['delete', TEST_KEYS, '/f'])
       if (work) rmSync(work, { recursive: true, force: true })
     })
 
@@ -341,6 +414,93 @@ for (const [label, shell] of shells) {
         }
       })
 
+      describe('what is checked is what goes in', () => {
+        test('the hash of the installer comes from the bytes of SHA256SUMS whose signature was checked', async () => {
+          const other = Buffer.from('MZ another installer')
+          publish(
+            '3.0.7',
+            { sums: sumsOf({ [setupName('3.0.7')]: setup }) },
+            { [setupName('3.0.7')]: other },
+          )
+          try {
+            const swapped = sumsOf({ [setupName('3.0.7')]: other }).trim()
+            const at = freshCase([
+              [
+                `Write-Host "consensflow: SHA256SUMS is signed by ConsensFlow's update key, for $version"`,
+                `Write-Host "consensflow: SHA256SUMS is signed by ConsensFlow's update key, for $version"; [IO.File]::WriteAllText($sums, "${swapped}\`n")`,
+              ],
+            ])
+            assertRefused(
+              at,
+              await install(at, ['--version', '3.0.7']),
+              /ConsensFlow_3\.0\.7_x64-setup\.exe was changed/,
+            )
+          } finally {
+            publish('3.0.7')
+          }
+        })
+
+        test('the installer is held from its hash until it has run: nothing writes or deletes it', async () => {
+          const at = freshCase([
+            [
+              "$run = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru",
+              "try { [IO.File]::WriteAllText($setup, 'swapped'); Write-Host 'consensflow-test: WRITTEN' } catch { Write-Host 'consensflow-test: HELD' }; try { Remove-Item -LiteralPath $setup -Force; Write-Host 'consensflow-test: DELETED' } catch { Write-Host 'consensflow-test: KEPT' }; $run = [pscustomobject]@{ ExitCode = 0 }",
+            ],
+          ])
+          const ran = await install(at, ['--version', '3.0.7'])
+          assert.match(ran.out, /consensflow-test: HELD/)
+          assert.match(ran.out, /consensflow-test: KEPT/)
+          assert.match(ran.out, /Windows lists ConsensFlow as version 'nothing'/)
+          assert.deepEqual(readdirSync(at.tmp), [], "the run's own folder is gone")
+        })
+      })
+
+      describe('what is installed already', () => {
+        test('a ConsensFlow newer than the release is kept, unless --version names the release', async () => {
+          const at = freshCase()
+          entry(at.user, '3.0.8', path.join(at.local, 'ConsensFlow'))
+          const from = server.asked.length
+          assertRefused(
+            at,
+            await install(at),
+            /ConsensFlow 3\.0\.8 is installed, newer than 3\.0\.7, which the stable channel names\. To go back to 3\.0\.7, run this with --version 3\.0\.7/,
+          )
+          assert.deepEqual(server.asked.slice(from), ['/releases/download/feed-stable/latest.json'])
+          stopAtHash('3.0.7')
+          try {
+            assertRefused(
+              at,
+              await install(at, ['--version', '3.0.7']),
+              /ConsensFlow_3\.0\.7_x64-setup\.exe was changed/,
+            )
+          } finally {
+            publish('3.0.7')
+          }
+        })
+
+        test('a release is newer than its own alphas', async () => {
+          const at = freshCase()
+          entry(at.user, '3.0.7', path.join(at.local, 'ConsensFlow'))
+          assertRefused(
+            at,
+            await install(at, ['--alpha']),
+            /ConsensFlow 3\.0\.7 is installed, newer than 3\.0\.7-alpha\.2/,
+          )
+        })
+
+        test('a ConsensFlow installed for every user is not joined by a per-user one', async () => {
+          const at = freshCase()
+          entry(at.machine, '3.0.6', 'C:\\Program Files\\ConsensFlow')
+          const from = server.asked.length
+          assertRefused(
+            at,
+            await install(at, ['--version', '3.0.7']),
+            /ConsensFlow 3\.0\.6 is installed for every user of this PC, in C:\\Program Files\\ConsensFlow\. This installer installs for your user only/,
+          )
+          assert.equal(server.asked.length, from, 'nothing was downloaded')
+        })
+      })
+
       describe('an open ConsensFlow', () => {
         /** A program of the app's that runs on its own: a copy of Windows' ping, which has no window. */
         function program(at, name) {
@@ -374,6 +534,32 @@ for (const [label, shell] of shells) {
             assert.equal(running.exitCode, null, 'it still runs')
           } finally {
             running.kill()
+          }
+        })
+
+        test('opened again right before the installer starts, it is refused', async () => {
+          const at = freshCase()
+          const ping = program(at, 'ConsensFlow.exe')
+          const opened = freshCase([
+            [
+              'Close-CfOpen $dir\n',
+              `Close-CfOpen $dir; $null = Start-Process -FilePath '${ping}' -ArgumentList '-n', '30', '127.0.0.1' -WindowStyle Hidden; Start-Sleep -Milliseconds 500\n`,
+            ],
+          ])
+          opened.local = at.local
+          try {
+            assertRefused(
+              opened,
+              await install(opened, ['--version', '3.0.7'], { env: { LOCALAPPDATA: at.local } }),
+              /ConsensFlow in .* was opened again while the install waited/,
+            )
+          } finally {
+            // The stand-in alone, by its path: no other ConsensFlow on the machine is touched.
+            spawnSync('powershell', [
+              '-NoProfile',
+              '-Command',
+              `Get-Process | Where-Object { $_.Path -eq '${ping}' } | Stop-Process -Force`,
+            ])
           }
         })
 

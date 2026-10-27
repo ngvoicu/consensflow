@@ -7,9 +7,11 @@
 // of a fake app, the checks only a real notarized ConsensFlow passes.
 
 import { Buffer } from 'node:buffer'
+import { spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -129,6 +131,83 @@ export function minisignProblem(keyLine, sigText, bytes, fileName) {
     return `the signature is for ${named === null ? 'something else' : named[1]}, not ${fileName}`
   return null
 }
+
+/**
+ * The SHA-256 the signed list `bytes` gives `name`, as the installers read it: a line of two
+ * fields, the hash (64 lowercase hex) and the name, or `*` and the name. Null where no line, or
+ * more than one, names it.
+ */
+export function listedHash(bytes, name) {
+  const found = []
+  for (const line of Buffer.from(bytes).toString('latin1').split('\n')) {
+    const fields = line.split(/[ \t]+/).filter((field) => field !== '')
+    if (fields.length === 2 && (fields[1] === name || fields[1] === `*${name}`))
+      found.push(fields[0])
+  }
+  return found.length === 1 && /^[0-9a-f]{64}$/.test(found[0]) ? found[0] : null
+}
+
+/**
+ * install.sh's own check, run as install.sh runs it (osascript), of the signature `sigText` of
+ * the list `sums` under `keyLine` for `fileName`: null when it ends with status 0 and answers
+ * `ok` and the hash the list gives `artifact`, else what it did. `env` adds to the environment.
+ */
+export function jxaCheck(keyLine, sigText, sums, fileName, artifact, env = {}) {
+  const lines = readFileSync(INSTALL_SH, 'utf8').split('\n')
+  const from = lines.indexOf('    cat > "$1" <<\'VERIFIER\'')
+  const to = lines.indexOf('VERIFIER', from + 1)
+  if (from < 0 || to < 0) return 'install.sh holds no check to run'
+  const work = mkdtempSync(path.join(os.tmpdir(), 'cf-jxa-check-'))
+  try {
+    const script = path.join(work, 'verify.js')
+    writeFileSync(script, lines.slice(from + 1, to).join('\n'))
+    const ran = spawnSync(
+      'osascript',
+      [
+        '-l',
+        'JavaScript',
+        script,
+        keyLine,
+        sigText,
+        Buffer.from(sums).toString('hex'),
+        fileName,
+        artifact,
+      ],
+      { encoding: 'utf8', env: { ...process.env, ...env } },
+    )
+    const said = `${ran.stdout.trim()} ${ran.stderr.trim()}`.trim()
+    if (ran.status !== 0 || ran.signal)
+      return `the check ended with status ${ran.status ?? ran.signal}: ${said}`
+    const hash = listedHash(sums, artifact)
+    return ran.stdout === `ok ${hash}\n` && hash !== null ? null : said
+  } finally {
+    rmSync(work, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Pairs of versions, and whether the first comes after the second by SemVer's precedence, which
+ * both scripts' order of versions is held to.
+ */
+export const VERSION_ORDER = [
+  ['3.0.8', '3.0.7', true],
+  ['3.0.7', '3.0.8', false],
+  ['3.0.10', '3.0.9', true],
+  ['4.0.0', '3.9.9', true],
+  ['3.0.7', '3.0.7', false],
+  ['3.0.7', '3.0.7-alpha.2', true],
+  ['3.0.7-alpha.2', '3.0.7', false],
+  ['3.0.7-alpha.10', '3.0.7-alpha.2', true],
+  ['3.0.7-alpha.2', '3.0.7-alpha.10', false],
+  ['3.0.7-alpha.1', '3.0.7-alpha', true],
+  ['3.0.7-alpha', '3.0.7-alpha.1', false],
+  ['3.0.7-beta', '3.0.7-alpha.9', true],
+  ['3.0.7-alpha.beta', '3.0.7-alpha.1', true],
+  ['3.0.7-alpha.1', '3.0.7-alpha.beta', false],
+  ['3.0.7+build.5', '3.0.7', false],
+  ['3.0.7-alpha.2+x', '3.0.7-alpha.1', true],
+  ['3.0.07', '3.0.7', false],
+]
 
 /** `text` with each `[find, replace]` made, each `find` found exactly once. */
 export function replaceOnce(text, replacements) {

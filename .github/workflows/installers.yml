@@ -11,7 +11,9 @@
 # later), else from a mirror of the release's own files on the runner, signed
 # for the run. A copy with one byte changed is refused first, and the release
 # before it is installed, opened, and upgraded in place once it quits when asked.
-# It runs after every release, and on a change to the installers.
+# It runs after a Release run that a tag's push started and that succeeded (not
+# after a hand run, which publishes nothing, nor after a failed one), on a
+# change to the installers, and by hand.
 name: Installers
 
 on:
@@ -46,6 +48,7 @@ jobs:
       - run: node --test tests/install-sh.test.mjs tests/install-ps1.test.mjs tests/install-verifiers.test.mjs
 
   real-release:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     strategy:
       fail-fast: false
       matrix:
