@@ -43,11 +43,7 @@ find = '''
         let Some(snapshot) = self.snapshot_now(&pane).await else {
             self.unknown(record, NO_ANSWER);
             return Ok(false);
-        };
-        if js::truthy(snapshot.get("pasteInFlight")) {
-            self.unknown(record, "its pane host is writing a paste into it still");
-            return Ok(false);
-        }'''
+        };'''
 replace = '''
         let snapshot = json!({});'''
 
@@ -123,11 +119,7 @@ find = '''
         let Some(snapshot) = self.snapshot_now(&pane).await else {
             self.unknown(record, NO_ANSWER);
             return Ok(false);
-        };
-        if js::truthy(snapshot.get("pasteInFlight")) {
-            self.unknown(record, "its pane host is writing a paste into it still");
-            return Ok(false);
-        }'''
+        };'''
 replace = '''
         let snapshot = json!({});'''
 
@@ -186,7 +178,7 @@ runs = ["engine-unknown-looks"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
-                    // A look that failed says nothing of what is on its way in (`arrival`).
+                    // nor of the window's rest (`pacing`).
                     self.unknown(record, "a look at it failed");'''
 replace = ""
 

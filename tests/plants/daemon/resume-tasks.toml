@@ -2152,7 +2152,7 @@ runs = ["engine-stale-box"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = """
-        if !matches!(outcome, Admission::Refused { .. }) {
+        if !matches!(outcome, Admission::Refused { .. } | Admission::Busy { .. }) {
             record.delivery.borrow_mut().emptied = None;
         }"""
 replace = """

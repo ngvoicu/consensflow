@@ -351,7 +351,7 @@ pub(crate) fn delivery_begun_at(
             "SELECT e.at FROM message m
                JOIN event e ON e.project_id = m.project_id AND e.kind = 'delivery.begun'
                 AND json_extract(e.data, '$.message') = m.id
-              WHERE m.id = ? AND m.state = 'delivering'
+              WHERE m.state = 'delivering' AND m.id = ?
               ORDER BY e.id DESC LIMIT 1",
             [message_id],
             |row| row.get::<_, String>(0),
