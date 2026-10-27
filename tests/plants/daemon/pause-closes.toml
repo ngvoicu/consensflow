@@ -21,7 +21,8 @@
 # - the live suite's cases against the stand-in agent (`crates/cf-e2e/tests/live_stops/
 #   midturn/`) read the lane over the stop as working and then closed, at whatever look
 #   the first came: held to "+0.0 s" they failed when the daemon answered the pause late
-#   (T-403), and a lane that never closed must still fail them.
+#   (T-403), and a lane that never closed must still fail them; and a close is read
+#   from the pane host's closes of the window, never from a note's words alone (T-807).
 #
 # Every name holds `pause closes`, so `cargo xtask plants daemon "pause closes"` runs
 # them all.
@@ -167,6 +168,16 @@ runs = ["live-stops-judge"]
 file = "crates/cf-e2e/tests/live_stops/midturn/judge.rs"
 find = '    lane_words(said).is_some_and(|words| words.starts_with(&["working", "closed"]))'
 replace = '    said.contains("     the lane over the stop: working at +0.0 s, closed at +")'
+
+[[plant]]
+name = "pause closes: the live suite's judge takes a closed window for one open"
+meant = "a_press_a_look_after_the_window_read_at_rest_and_a_task_not_paused_do_not_hold"
+runs = ["live-stops-judge"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/midturn/judge.rs"
+find = "        *closed == 0,"
+replace = "        true,"
 
 [[plant]]
 name = "pause closes: a window that ignores every round is left open, on the live suite's case"

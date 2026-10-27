@@ -19,7 +19,12 @@
 #   not yet counted is pressed again (Calliope on T-551, T-644);
 # - the ledger cannot say who asked a stop;
 # - the pause's help says the window and its work wait (T-650);
-# - the stand-in's `AGENTS --then` starts no agents, so the rig's cases lose their shape.
+# - the stand-in's `AGENTS --then` starts no agents, so the rig's cases lose their shape;
+# - a message of the user's after the one the pressed turn began with is no turn passed,
+#   so the turns Claude begins by itself for its agents' notices, a second after the
+#   Escape that stopped its turn, are pressed again and closed (T-807);
+# - a turn passed is read from the last item of any kind, or from a compaction's summary,
+#   so a hung turn that writes, or is compacted, pays its stop and is never closed.
 #
 # The engine's tests are in `crates/cf-engine/tests/dispatcher/nothing_to_stop.rs` and
 # `stops.rs`; Claude's look, in `crates/cf-harness/tests/launch/claude/agents.rs`; the
@@ -65,6 +70,13 @@ builds = true
 file = "crates/cf-engine/src/stops.rs"
 find = "} else if observed.settled || observed.over == Over::Held || self.cut_short(observed) {"
 replace = "} else if observed.settled || self.cut_short(observed) {"
+
+# The stand-in writes Claude's own message of the interrupt, `[Request interrupted by user]`,
+# which pays the stop as a turn passed too (T-807): on the rig, that rule goes with it.
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "    pressed.is_some_and(|pressed| last_message(observed).is_some_and(|now| now != pressed))"
+replace = "    pressed.is_some_and(|pressed| last_message(observed).is_some_and(|now| now != pressed && false))"
 
 [[plant]]
 name = "nothing to stop: a turn a refusal for quota ended is at work"
@@ -183,3 +195,33 @@ runs = ["cf-help"]
 file = "crates/cf/src/board/usage.txt"
 find = "stop a worker's task: the agent stops and its window waits;"
 replace = "stop a worker's task: the agent stops, its window and work wait;"
+
+[[plant]]
+name = "nothing to stop: a turn the window began after the one its stop pressed is pressed again"
+meant = "a_tell_whose_escape_stopped_the_turn_is_paid_though_the_window_began_turns_of_its_own_before_its_rest_stood"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "    pressed.is_some_and(|pressed| last_message(observed).is_some_and(|now| now != pressed))"
+replace = "    pressed.is_some_and(|pressed| last_message(observed).is_some_and(|now| now != pressed && false))"
+
+[[plant]]
+name = "nothing to stop: a turn passed is read from the last item of any kind"
+meant = "a_turn_that_writes_and_is_compacted_through_its_rounds_is_no_turn_passed_and_is_closed"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        .find(|item| item.role == Role::User && !item.compaction)"
+replace = "        .find(|item| !item.compaction)"
+
+[[plant]]
+name = "nothing to stop: a compaction's summary is a message of the user's"
+meant = "a_turn_that_writes_and_is_compacted_through_its_rounds_is_no_turn_passed_and_is_closed"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        .find(|item| item.role == Role::User && !item.compaction)"
+replace = "        .find(|item| item.role == Role::User)"

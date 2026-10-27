@@ -37,9 +37,6 @@ use serde_json::{json, Value};
 
 use crate::{config, secs, Outcome, FAKE_DEVIN};
 
-/// What the human is told when a window ignored every round of a stop.
-const IGNORED: &str = "did not stop for T-";
-
 /// The roster of the case: the stand-in Claude is the chief, and a Devin (its
 /// stand-in) the worker.
 pub(crate) fn write_roster(rig: &Rig) -> cf_e2e::Result {
@@ -129,7 +126,7 @@ fn a_pause_stops_a_devin_window_that_takes_escape_twice_within_the_rounds_and_th
         asked - paused
     );
     // The window was read at rest after the pause, and the stop was paid there:
-    // within the rounds, which the human hears of no ignored stop below. How many
+    // within the rounds, which what the stop closed below shows. How many
     // seconds that took is the machine's (CI's macOS read it at rest 9.2 s after).
     when_of(&events, "window.activity", |event| {
         event["participant"] == handle.as_str()
@@ -153,23 +150,64 @@ fn a_pause_stops_a_devin_window_that_takes_escape_twice_within_the_rounds_and_th
         rig.screen(&pane)
     );
 
-    // No word of an ignored stop, to the human or to the chief.
-    let human = rig.page("inbox.get", json!({ "project": project.id() }))?;
-    let mut inboxes: Vec<Value> = human["messages"].as_array().cloned().unwrap_or_default();
-    inboxes.extend(project.inbox("chief")?);
-    let told: Vec<&Value> = inboxes
+    // The window stopped, so the stop closed nothing: no close was asked of its pane and
+    // none is in the ledger, the lane is on the window it was, the board says nothing of an
+    // ignored stop, and the task is paused by the stop its pause asked. What happened is
+    // read, never a note's words, which T-551 moved to whoever gave the task and so blinded
+    // a check of the human's (T-664, B's round 1: the window was closed with its plant of a
+    // cancelled Devin turn read as unended in, and the case passed). A failure says what the
+    // daemon wrote from just before the pause on, and the keys it pressed: what the stop read
+    // is there, after the fact.
+    let events = rig.events();
+    let since = |event: &Value| at_ms(event).is_some_and(|at| at > paused - 3_000);
+    let written: Vec<String> = events
         .iter()
-        .filter(|message| {
-            message["body"]
-                .as_str()
-                .is_some_and(|body| body.contains(IGNORED))
-        })
+        .filter(|event| since(event))
+        .map(|event| format!("{:+} ms {event}", at_ms(event).unwrap_or(0) - paused))
+        .collect();
+    let what = format!(
+        "the daemon wrote, from 3 s before the pause:\n{}\nand pressed Escape at {:?}",
+        written.join("\n"),
+        presses.iter().map(|at| at - paused).collect::<Vec<_>>()
+    );
+    let closes: Vec<Value> = rig
+        .kills()
+        .into_iter()
+        .filter(|kill| kill["id"] == pane.as_str())
         .collect();
     assert!(
-        told.is_empty(),
-        "the human and the chief were told: {told:?}"
+        closes.is_empty(),
+        "the daemon closed the window, {closes:?}; {what}"
     );
-    assert_eq!(project.task(1)?["state"], "paused");
+    let ended: Vec<&Value> = events
+        .iter()
+        .filter(|event| since(event))
+        .filter(|event| {
+            matches!(
+                event["kind"].as_str(),
+                Some("session.ended" | "conversation.ended")
+            )
+        })
+        .collect();
+    assert!(ended.is_empty(), "the ledger ended {ended:?}; {what}");
+    let lane = project.lane("devin-worker")?;
+    assert_eq!(
+        lane["pane"]["id"],
+        pane.as_str(),
+        "the lane: {lane}; {what}"
+    );
+    assert!(lane["unstopped"].is_null(), "the lane: {lane}; {what}");
+    let stopped = when_of(&events, "task.state", |event| {
+        event["data"]["task"] == 1
+            && event["data"]["to"] == "paused"
+            && event["data"]["stop"].is_i64()
+    });
+    assert_eq!(
+        stopped,
+        Some(paused),
+        "the pause asked no stop of T-1; {what}"
+    );
+    assert_eq!(project.task(1)?["state"], "paused", "{what}");
     rig.close()?;
     Ok(())
 }

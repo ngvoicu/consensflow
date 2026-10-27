@@ -10,7 +10,12 @@
 //! where a refusal for quota ended it: such a window was never interrupted,
 //! and never closed for keys nothing in it could heed, which ended what it
 //! left running in the background (T-502's window, held for quota, and
-//! T-604's, told mid-turn, on 2026-10-25). While the window is
+//! T-604's, told mid-turn, on 2026-10-25). Nor is a window whose record shows a
+//! message of the user's after the one the turn its first round was pressed into
+//! began with: that turn is over (Claude writes its own message of the interrupt,
+//! and begins a turn by itself for a notice of its background agents, both before
+//! a record's word that the turn is over has stood its moment, T-807), and what is
+//! at work there now is no turn the stop was asked of. While the window is
 //! at work, read from what its harness's record shows and never from what
 //! the board says, it is interrupted: Escape, as many presses as its harness
 //! asks for, again a few seconds later, three rounds in all. A window that
@@ -29,6 +34,7 @@
 //! follow by it.
 
 use std::rc::Rc;
+use std::sync::Arc;
 
 use cf_harness::contract::{Observed, Over};
 use cf_harness::records::Role;
@@ -58,14 +64,17 @@ pub(crate) enum StopKey {
 }
 
 /// The rounds one stop has had: how many were pressed, when the last was
-/// (or when the close of its window was last refused), and whether the
-/// window ignored them all and was kept open by the host.
+/// (or when the close of its window was last refused), whether the
+/// window ignored them all and was kept open by the host, and the turn its
+/// first round was pressed into, by the message of the user's that began it
+/// ([`last_message`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Interrupted {
     key: StopKey,
     rounds: u32,
     at: i64,
     kept: bool,
+    turn: Option<Arc<str>>,
 }
 
 /// A stop a window ignored in every round, and still has not paid, the host
@@ -149,6 +158,46 @@ fn next_round(done: Option<&Interrupted>, key: StopKey, now: i64) -> Round {
     }
 }
 
+/// What a pause's `stop` is pressed for.
+fn pause_key(stop: &Stop) -> StopKey {
+    StopKey::Pause {
+        task: stop.task_id,
+        seq: stop.seq,
+    }
+}
+
+/// The message of the user's the look's record shows last, by its id: what began the
+/// turn at work, or what came after it. A compaction's summary, which the harness writes
+/// in the user's place within a turn, is none.
+fn last_message(observed: &Observed) -> Option<Arc<str>> {
+    observed
+        .items()
+        .iter()
+        .rev()
+        .find(|item| item.role == Role::User && !item.compaction)
+        .map(|item| Arc::clone(&item.id))
+}
+
+/// Whether the window is past the turn the first round of `stop` was pressed into:
+/// its record shows a message of the user's after the one that turn began with. The
+/// turn is over, whatever its status says: Claude writes the interrupt as a message of
+/// its own, and begins a turn by itself for a notice of its background agents, a second
+/// after the Escape and before its record's word that the turn is over has stood
+/// (T-807); a message the human typed began one too. None of those is a turn the stop
+/// was asked of, and a key pressed into them, or a close, ends what the window does on
+/// its own (T-604's agents).
+fn past_its_turn(record: &Record, stop: &Stop, observed: &Observed) -> bool {
+    let key = pause_key(stop);
+    let pressed = record
+        .window
+        .borrow()
+        .interrupted
+        .as_ref()
+        .filter(|done| done.key == key)
+        .and_then(|done| done.turn.clone());
+    pressed.is_some_and(|pressed| last_message(observed).is_some_and(|now| now != pressed))
+}
+
 impl Dispatcher {
     /// A stop that a window ignored in every round, whose close the host
     /// refused: none while it is paid, was never asked, or closed its window.
@@ -204,6 +253,11 @@ impl Dispatcher {
         }
         let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
         if let Some(stop) = stop.filter(|stop| self.owes(record, stop)) {
+            let look = if look == Look::Work && past_its_turn(record, &stop, observed) {
+                Look::Rest
+            } else {
+                look
+            };
             return match look {
                 Look::Rest => {
                     // What the ledger is told is written first: a failure leaves
@@ -217,7 +271,7 @@ impl Dispatcher {
                         .await
                 }
                 Look::Work => {
-                    self.interrupt_for(project, participant, record, &stop)
+                    self.interrupt_for(project, participant, record, &stop, observed)
                         .await
                 }
                 Look::Neither => Ok(()),
@@ -279,16 +333,14 @@ impl Dispatcher {
         participant: &ParticipantView,
         record: &Rc<Record>,
         stop: &Stop,
+        observed: &Observed,
     ) -> Result<(), EngineError> {
-        let key = StopKey::Pause {
-            task: stop.task_id,
-            seq: stop.seq,
-        };
+        let key = pause_key(stop);
         let done = record.window.borrow().interrupted.clone();
         match next_round(done.as_ref(), key, self.now()) {
             Round::Wait => Ok(()),
             Round::Press => {
-                self.press_round(record, key);
+                self.press_round(record, key, observed);
                 self.press(record).await;
                 Ok(())
             }
@@ -339,29 +391,29 @@ impl Dispatcher {
         };
         let done = record.window.borrow().interrupted.clone();
         if next_round(done.as_ref(), key, self.now()) == Round::Press {
-            self.press_round(record, key);
+            self.press_round(record, key, observed);
             self.press(record).await;
         }
         Ok(())
     }
 
-    /// A round is pressed: counted. A stop that begins shows none of what the
-    /// one before it ignored.
-    fn press_round(&self, record: &Record, key: StopKey) {
+    /// A round is pressed into the turn `observed` shows: counted. A stop that
+    /// begins shows none of what the one before it ignored, and keeps the turn
+    /// its first round is pressed into.
+    fn press_round(&self, record: &Record, key: StopKey, observed: &Observed) {
         let now = self.now();
         let changed = {
             let mut part = record.window.borrow_mut();
-            let rounds = part
-                .interrupted
-                .as_ref()
-                .filter(|done| done.key == key)
-                .map_or(0, |done| done.rounds)
-                + 1;
+            let (rounds, turn) = match part.interrupted.as_ref().filter(|done| done.key == key) {
+                Some(done) => (done.rounds, done.turn.clone()),
+                None => (0, last_message(observed)),
+            };
             part.interrupted = Some(Interrupted {
                 key,
-                rounds,
+                rounds: rounds + 1,
                 at: now,
                 kept: false,
+                turn,
             });
             part.unstopped.take().is_some()
         };
@@ -376,11 +428,13 @@ impl Dispatcher {
     fn keep(&self, record: &Record, key: StopKey, number: i64, rounds: u32) {
         {
             let mut part = record.window.borrow_mut();
+            let turn = part.interrupted.as_ref().and_then(|done| done.turn.clone());
             part.interrupted = Some(Interrupted {
                 key,
                 rounds,
                 at: self.now(),
                 kept: true,
+                turn,
             });
             part.unstopped = Some(Unstopped {
                 task: number,
@@ -527,6 +581,7 @@ mod tests {
             rounds,
             at,
             kept,
+            turn: None,
         }
     }
 
