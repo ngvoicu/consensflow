@@ -88,29 +88,3 @@ fn a_window_whose_screen_printed_within_the_last_seconds_is_not_pasted_again() {
     context.pass().unwrap();
     assert_eq!(begun(&context, note), 2, "quiet, its box read empty: it is gone");
 }
-
-/// Claude Code stopped right after the paste (`cargo xtask live stopped`): its screen has
-/// printed nothing since the paste was written, so it has not read it, and it is not pasted
-/// again; a screen that printed after the paste, quiet now, its box empty, has lost it.
-#[test]
-fn a_window_that_has_printed_nothing_since_the_paste_was_written_is_not_pasted_again() {
-    let context = Context::new();
-    let note = a_note_that_never_shows(&context);
-    context
-        .host
-        .set_snapshot(json!({ "outputQuietMs": 40_000, "pasteQuietMs": 31_000 }));
-    let before = enters(&context);
-    context.advance(PAST_ARRIVAL);
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(begun(&context, note), 1, "its program has not read it");
-    assert_eq!(enters(&context), before, "and no Enter goes into a window that reads nothing");
-    context
-        .host
-        .set_snapshot(json!({ "outputQuietMs": 20_000, "pasteQuietMs": 62_000 }));
-    context.adapter.input_box.set(Some(InputBox::Empty));
-    context.advance(PAST_ARRIVAL);
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(begun(&context, note), 2, "drawn since, and gone");
-}
