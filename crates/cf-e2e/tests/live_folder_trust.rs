@@ -724,7 +724,11 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     }
     let answered = !engine_asks(harness, &screen)?;
     let unread = speaks_of_trust(&first) && !asked;
-    let at_prompt = drew && !window.closed() && answered && engine_reads_prompt(harness, &screen)?;
+    // A window that asked drew its question: on Windows the output of a window that asks never
+    // held still for the minute `drew` waited (Claude Code 2.1.310 on zeewin and zeewin2,
+    // 2026-10-28; the same window's prompt does), so its question is the drawing.
+    let at_prompt =
+        (drew || asked) && !window.closed() && answered && engine_reads_prompt(harness, &screen)?;
     if grants {
         lines.push(format!(
             "the question of the folder's grants, a yes trusting {folder} (the project's: {inside}); {keys} keys; still asks after: {}",
