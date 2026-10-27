@@ -32,9 +32,11 @@ if [ "${how#@}" != "$how" ]; then
 else
   bash "$tool" "$tree" --machine "$machine" powershell -NoProfile -File tools/xtask/windows-linger.ps1 -How "$how" -Seconds "$seconds" > "$log" 2>&1
 fi
-echo "$(date +%T) first run's Mac side ended with $?" >> "$out/$label.times"
+status=$?
+echo "$(date +%T) first run's Mac side ended with $status" >> "$out/$label.times"
 bash "$tool" "$tree" --machine "$machine" --wait 0 cmd /c "echo second run ran" > "$second" 2>&1
-echo "$(date +%T) second run ended with $?: $(grep -m1 -E 'second run ran|busy|still going' "$second")" >> "$out/$label.times"
+status=$?
+echo "$(date +%T) second run ended with $status: $(grep -m1 -E 'second run ran|busy|still going' "$second")" >> "$out/$label.times"
 # Until the machine is clear, at most a quarter of an hour.
 for i in $(seq 1 900); do
   last=$(tail -1 "$poll")

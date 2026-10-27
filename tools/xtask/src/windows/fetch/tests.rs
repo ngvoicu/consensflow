@@ -537,6 +537,72 @@ fn a_run_that_ended_there_with_a_status_brings_its_reports_back_and_answers_the_
     );
 }
 
+/// A run the machine did not take: its lock refused it (75), or the unpack failed, so it said no
+/// tree and the command was never started. It left nothing to bring back, and the listing that
+/// asks for it is a connection more: over one that had died it held both machines for two hours
+/// (zeewin2, 2026-10-27, T-804).
+#[test]
+fn a_run_the_machine_did_not_take_brings_no_report_back_and_asks_for_none() {
+    for (said, why) in [
+        (
+            75,
+            "A run is still going on this machine (process 7): one at a time.",
+        ),
+        (1, "could not unpack the tree"),
+    ] {
+        let rig = Rig::with_tree();
+        rig.remote("long/run.md", "report");
+        rig.lists(&[("long/run.md", 6)]);
+        rig.program(
+            "ssh",
+            &format!(
+                r#"printf 'ssh\t%s\n' "$1" >> "$CF_LOG"; echo "{why}"; echo "== exit {said}"; exit 1"#
+            ),
+        );
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let ended = run_keeping(
+            &rig.context,
+            &Machine::at("zeewin"),
+            &rig.options(),
+            &mut Console {
+                out: &mut out,
+                err: &mut err,
+            },
+            &Interrupt::default(),
+        );
+        assert_eq!(ended.unwrap(), Outcome::NotStarted(said), "{said}");
+        assert_eq!(rig.here("long/run.md"), None, "{said}");
+        assert_eq!(String::from_utf8(err).unwrap(), "", "{said}");
+        // The tree was sent and the run was asked, and that is all that was asked of the machine.
+        let log = rig.log();
+        assert_eq!(log.len(), 2, "{said}: {log:?}");
+        assert!(log[0].starts_with("scp\t"), "{said}: {log:?}");
+        assert_eq!(log[1], "ssh\tzeewin", "{said}: {log:?}");
+    }
+}
+
+/// And a command that ended with the refusal's own status after the machine took the run (it said
+/// its tree) did run, and left what it left.
+#[test]
+fn a_command_that_ended_with_75_after_the_machine_took_it_brings_its_reports_back() {
+    let rig = Rig::with_tree().runs_ending_with(75);
+    rig.remote("long/run.md", "report");
+    rig.lists(&[("long/run.md", 6)]);
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let ended = run_keeping(
+        &rig.context,
+        &Machine::at("zeewin"),
+        &rig.options(),
+        &mut Console {
+            out: &mut out,
+            err: &mut err,
+        },
+        &Interrupt::default(),
+    );
+    assert_eq!(ended.unwrap(), Outcome::Exited(75));
+    assert_eq!(rig.here("long/run.md").as_deref(), Some("report"));
+}
+
 /// The matrix runs its evals through the same machine, and the eval's own report is one of what
 /// stays there: it is brought back after each run too.
 #[test]

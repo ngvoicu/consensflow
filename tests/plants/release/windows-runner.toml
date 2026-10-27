@@ -54,6 +54,7 @@
 xtask-lib-windows = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "windows::"]
 xtask-test-windows = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "windows"]
 xtask-test-ssh-and-scp = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "ssh_and_scp"]
+xtask-test-shell-status = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "shell_status"]
 
 # What the copy keeps.
 
@@ -2234,3 +2235,143 @@ replace = '''            turn
         }
     });
     let scratch'''
+
+
+# T-804, second round: the script rule reads an ssh or scp called by a path, named for a program that runs
+# another, or found with `command -v`, in every shell script of `tools/` and in the package scripts; a
+# run the machine did not take (it said no tree: its lock refused it, its unpack failed) brings no report
+# back and lists none (the listing of one such run, over a connection that had died, held both machines
+# for two hours); a script keeps the status of a command before it says it.
+
+[[plant]]
+name = "windows runner: a script's ssh by its path waits for a silent peer"
+meant = "a_script_that_runs_ssh_or_scp_gives_it_the_bounds_too"
+runs = ["xtask-test-ssh-and-scp"]
+
+[[plant.edit]]
+file = "tools/xtask/windows-silent.sh"
+find = ' -o ServerAliveInterval=5 -o ServerAliveCountMax=1 "$machine" "$ASK"'
+replace = ' "$machine" "$ASK"'
+
+[[plant]]
+name = "windows runner: a script's ssh found by command -v waits for a silent peer"
+meant = "a_script_that_runs_ssh_or_scp_gives_it_the_bounds_too"
+runs = ["xtask-test-ssh-and-scp"]
+
+[[plant.edit]]
+file = "tools/xtask/windows-memory.sh"
+find = '$(ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=5 -o ServerAliveCountMax=1 '
+replace = '$("$(command -v ssh)" -o BatchMode=yes -o ConnectTimeout=8 '
+
+[[plant]]
+name = "windows runner: a package script that runs ssh by its path waits for a silent peer"
+meant = "a_script_that_runs_ssh_or_scp_gives_it_the_bounds_too"
+runs = ["xtask-test-ssh-and-scp"]
+
+[[plant.edit]]
+file = "package.json"
+find = '''  "scripts": {
+'''
+replace = '''  "scripts": {
+    "remote": "/usr/bin/ssh host ls",
+'''
+
+[[plant]]
+name = "windows runner: a wrapper that says its caller gives the bounds is not told from one that says nothing"
+meant = "a_line_that_says_who_gives_the_bounds_is_the_callers_to_say"
+runs = ["xtask-test-ssh-and-scp"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/ssh_and_scp.rs"
+find = ' || line.contains(BOUNDS_ARE_THE_CALLERS)'
+replace = ''
+
+[[plant]]
+name = "windows runner: the script rule takes a path to ssh for another program"
+meant = "the_rule_calls_a_command_that_runs_ssh_whatever_way_it_is_named"
+runs = ["xtask-test-ssh-and-scp"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/ssh_and_scp.rs"
+find = '''PROGRAMS.contains(&word.rsplit('/').next().unwrap_or(word))'''
+replace = 'PROGRAMS.contains(&word)'
+
+[[plant]]
+name = "windows runner: the script rule reads one package's scripts only"
+meant = "the_rule_reads_the_shell_scripts_of_the_tools_folder_and_the_package_scripts"
+runs = ["xtask-test-ssh-and-scp"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/ssh_and_scp.rs"
+find = 'for package in ["package.json", "app/package.json"] {'
+replace = 'for package in ["package.json"] {'
+
+[[plant]]
+name = "windows runner: the script rule reads the shell scripts of the xtask package only"
+meant = "the_rule_reads_the_shell_scripts_of_the_tools_folder_and_the_package_scripts"
+runs = ["xtask-test-ssh-and-scp"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/ssh_and_scp.rs"
+find = 'let tools = root.join("tools");'
+replace = 'let tools = root.join("tools").join("xtask");'
+
+[[plant]]
+name = "windows runner: a run that ended before the machine said its tree lists its reports"
+meant = "a_run_the_machine_did_not_take_brings_no_report_back_and_asks_for_none"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = '    if let Outcome::Exited(_) = ended {'
+replace = '    if let Outcome::Exited(_) | Outcome::NotStarted(_) = ended {'
+
+[[plant]]
+name = "windows runner: the lock's 75 is taken for a command that ran"
+meant = "a_run_the_machine_did_not_take_brings_no_report_back_and_asks_for_none"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/session.rs"
+find = '                Ended::Exited(status) if !tree_said => Ended::Unstarted(status),'
+replace = '                Ended::Exited(status) if !tree_said && status != 75 => Ended::Unstarted(status),'
+
+[[plant]]
+name = "windows runner: a command's own 75 is taken for the lock's refusal"
+meant = "a_command_that_ended_with_75_after_the_machine_took_it_brings_its_reports_back"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/session.rs"
+find = '                Ended::Exited(status) if !tree_said => Ended::Unstarted(status),'
+replace = '                Ended::Exited(status) if !tree_said || status == 75 => Ended::Unstarted(status),'
+
+[[plant]]
+name = "windows runner: a run that did not begin is answered as one that ran"
+meant = "a_run_the_machine_did_not_take_brings_no_report_back_and_asks_for_none"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run.rs"
+find = '        Ended::Unstarted(status) => Ok(Outcome::NotStarted(status)),'
+replace = '        Ended::Unstarted(status) => Ok(Outcome::Exited(status)),'
+
+[[plant]]
+name = "windows runner: a script says the status of the command before the date"
+meant = "no_script_of_the_repository_reads_a_status_after_a_command_substitution"
+runs = ["xtask-test-shell-status"]
+
+[[plant.edit]]
+file = "tools/xtask/windows-linger.sh"
+find = 'second run ended with $status:'
+replace = 'second run ended with $?:'
+
+[[plant]]
+name = "windows runner: the status rule does not see a read after a command substitution"
+meant = "the_rule_knows_a_status_read_after_a_substitution_from_one_that_is_not"
+runs = ["xtask-test-shell-status"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/shell_status.rs"
+find = '''        if command.contains("$(") || command.contains('`') {'''
+replace = '''        if command.contains("$(x") || command.contains('`') {'''

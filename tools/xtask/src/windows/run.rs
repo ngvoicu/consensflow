@@ -38,6 +38,10 @@ use crate::process::{self, Invocation};
 pub enum Outcome {
     /// The command ended there with this status, which is the run's own.
     Exited(i32),
+    /// The machine ended the run before it began, with this status, which is the run's own: it
+    /// said no tree (its lock refused the run, or the unpack failed). The command was not
+    /// started, so nothing of it is left to bring back.
+    NotStarted(i32),
     /// The machine may not take a run now, and why (the person is told): nothing was sent,
     /// and the run answers [`REFUSED`], as the machine's own lock refuses one.
     Refused(String),
@@ -197,6 +201,7 @@ pub fn run(
     let tree_said = format!("{TREE_MARK}{identity}");
     match session::stream(&run, &context.env, console, interrupt, &tree_said)? {
         Ended::Exited(status) => Ok(Outcome::Exited(status)),
+        Ended::Unstarted(status) => Ok(Outcome::NotStarted(status)),
         Ended::WrongTree(said) => {
             let ended = end_there(context, machine, &plan)?;
             Err(Error::WrongTree {

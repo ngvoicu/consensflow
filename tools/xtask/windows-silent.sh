@@ -32,7 +32,7 @@ cat > "$out/bin/ssh" <<WRAPPER
 #!/bin/sh
 # The runner's ssh, first on the PATH: the same words, through the relay; through a hanging one after the freeze.
 if [ -e "$out/state/frozen" ]; then proxy="sleep 600"; else proxy="$out/bin/relay.sh %h %p $out/state"; fi
-exec /usr/bin/ssh -o "ProxyCommand=\$proxy" "\$@"
+exec /usr/bin/ssh -o "ProxyCommand=\$proxy" "\$@" # ssh-bounds: given by the caller
 WRAPPER
 chmod +x "$out/bin/relay.sh" "$out/bin/ssh"
 ASK='$d = Join-Path $env:USERPROFILE "consensflow-build"; $of = @(Get-Content (Join-Path $d ".windows-run.id") -ErrorAction SilentlyContinue); $p = if ($of.Count -ge 2) { Get-Process -Id ([int]$of[1]) -ErrorAction SilentlyContinue } ; $held = try { $l = [IO.File]::Open((Join-Path $d ".windows-run.lock"), "Open", "ReadWrite", "ReadWrite"); $l.Dispose(); "free" } catch { "HELD" }; "{0} owner-file={1} process={2} lock={3}" -f (Get-Date -Format HH:mm:ss.fff), (Test-Path (Join-Path $d ".windows-run.id")), $(if ($p) { "$($p.Id) exited=$($p.HasExited)" } else { "gone" }), $held'

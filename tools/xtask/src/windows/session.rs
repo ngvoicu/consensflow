@@ -45,6 +45,10 @@ pub enum Ended {
     /// With this status, the remote command's own, as far as it is known: what the
     /// machine said of it, or else ssh's (`exited` says which, and why).
     Exited(i32),
+    /// With this status, the machine's or ssh's, before the machine had said which tree it
+    /// unpacked: the command was not started there as far as is known (the machine's lock refused
+    /// the run, 75; the unpack failed; the connection ended first), so it left nothing to bring back.
+    Unstarted(i32),
     /// Because this program was stopped: ssh is gone, the run may not be.
     Stopped,
     /// Because what it wrote could not be written: ssh is gone, the run may not be.
@@ -143,13 +147,14 @@ pub fn stream(
             };
             let said = tail.last_line().as_deref().and_then(exit_said);
             let silent = said_silence.found().is_some_and(reach::says_silence);
-            let (ended, note) = exited(
-                status.code(),
-                said,
-                said_tree.found().is_some(),
-                silent,
-                interrupt,
-            );
+            let tree_said = said_tree.found().is_some();
+            let (ended, note) = exited(status.code(), said, tree_said, silent, interrupt);
+            // The line is said right after the unpack and before the command: a run that ended
+            // without it never began.
+            let ended = match ended {
+                Ended::Exited(status) if !tree_said => Ended::Unstarted(status),
+                ended => ended,
+            };
             if let Some(note) = note {
                 if let Err(cause) = writeln!(console.err, "windows: {note}") {
                     return Ok(Ended::Unwritten(cause));

@@ -239,10 +239,10 @@ fn run_on(
 fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_answered() {
     let rig = Rig::new();
     rig.program("scp", KEEPS);
-    // The machine's lock: 75 said, and ssh ends with 1.
+    // The machine's lock: 75 said, and ssh ends with 1. The run said no tree: it never began.
     rig.program("ssh", &machine(75));
     let (ended, out, err) = run_it(&rig, &Interrupt::default());
-    assert_eq!(ended.unwrap(), Outcome::Exited(75));
+    assert_eq!(ended.unwrap(), Outcome::NotStarted(75));
     // What the machine said is the run's output, its last line too.
     assert_eq!((out.as_str(), err.as_str()), ("out\n== exit 75\n", "err\n"));
 
@@ -621,7 +621,7 @@ fn a_run_that_ended_well_without_the_machine_saying_which_tree_it_ran_did_not_en
         r#"printf 'ssh\t%s\t%s\n' "$1" "$2" >> "$CF_LOG"; echo "out"; echo "== exit 0""#,
     );
     let (ended, _out, err) = run_it(&rig, &Interrupt::default());
-    assert_eq!(ended.unwrap(), Outcome::Exited(1));
+    assert_eq!(ended.unwrap(), Outcome::NotStarted(1));
     assert_eq!(
         err,
         "windows: no `== tree …` line said which tree the machine ran, and a status 0 is not taken for a pass without it: answering 1\n"
@@ -637,7 +637,13 @@ fn a_run_answers_what_the_machine_said_of_the_command_whatever_ssh_answered() {
         rig.program("scp", KEEPS);
         rig.program("ssh", &machine(said));
         let (ended, _, err) = run_it(&rig, &Interrupt::default());
-        assert_eq!(ended.unwrap(), Outcome::Exited(said), "ssh {ssh}");
+        // The lock's refusal says no tree: the command never began. Every other said its tree.
+        let expected = if said == 75 {
+            Outcome::NotStarted(75)
+        } else {
+            Outcome::Exited(said)
+        };
+        assert_eq!(ended.unwrap(), expected, "ssh {ssh}");
         assert_eq!(err, "err\n", "{said}");
     }
 }
@@ -658,7 +664,8 @@ fn a_run_whose_machine_said_nothing_of_the_command_answers_what_ssh_did_and_says
         rig.program("scp", KEEPS);
         rig.program("ssh", &silent(ssh));
         let (ended, out, err) = run_it(&rig, &Interrupt::default());
-        assert_eq!(ended.unwrap(), Outcome::Exited(answer), "ssh {ssh}");
+        // It said no tree either: whatever ssh answered, nothing of the command is known to have begun.
+        assert_eq!(ended.unwrap(), Outcome::NotStarted(answer), "ssh {ssh}");
         assert_eq!(out, "out\n");
         assert_eq!(
             err,
@@ -1042,8 +1049,8 @@ fn of_two_runs_that_ask_for_the_lock_together_one_runs_and_the_other_ends_with_7
         from_b.0.as_ref().ok().map(|ended| format!("{ended:?}")),
     );
     let (won, refused) = match (&from_a.0, &from_b.0) {
-        (Ok(Outcome::Exited(0)), Ok(Outcome::Exited(75))) => (&from_a, &from_b),
-        (Ok(Outcome::Exited(75)), Ok(Outcome::Exited(0))) => (&from_b, &from_a),
+        (Ok(Outcome::Exited(0)), Ok(Outcome::NotStarted(75))) => (&from_a, &from_b),
+        (Ok(Outcome::NotStarted(75)), Ok(Outcome::Exited(0))) => (&from_b, &from_a),
         _ => panic!("one run and one refused with 75, not {statuses:?}"),
     };
     // The one that ran said the tree it sent; the other said none and ran nothing.

@@ -217,7 +217,9 @@
 //! brought back to the main checkout's `evals/reports` here, the files it lacks (a long run's report and
 //! ledger among them: the sweep of a later run removes what is older than two weeks from the
 //! machine's copy), and says so on the error stream; the status is the command's own either way
-//! ([`fetch`]).
+//! ([`fetch`]). Only a run that began has anything to bring back: one that ended before the
+//! machine said its tree (its lock refused it, with 75; its unpack failed) asks nothing of the
+//! machine after it ([`run::Outcome::NotStarted`]).
 //!
 //! `windows-matrix` is the evals there: each `--scenario` for each `--pair
 //! chief:staff`, one run after another through the same run, with `--env` given
@@ -403,7 +405,7 @@ fn windows(context: &Context, args: &[OsString], console: &mut Console) -> Resul
         return Ok(STOPPED);
     };
     match fetch::run_keeping(context, &machine, &options, console, &interrupt) {
-        Ok(Outcome::Exited(status)) => Ok(status),
+        Ok(Outcome::Exited(status) | Outcome::NotStarted(status)) => Ok(status),
         Ok(Outcome::Refused(_)) => Ok(run::REFUSED),
         Ok(Outcome::Stopped) => Ok(STOPPED),
         Err(error) => {

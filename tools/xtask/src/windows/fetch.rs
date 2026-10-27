@@ -38,9 +38,10 @@ use crate::process::{self, Invocation};
 const SAID: usize = 4;
 
 /// [`run::run`], and then, where the command ended there with a status, what it left in
-/// `evals/reports` brought back here. A run that could not be sent brings back nothing, and a run
-/// that was stopped here is not waited for any longer: it is ended there, and its half-written
-/// report is the next run's to be pruned.
+/// `evals/reports` brought back here. A run that could not be sent brings back nothing, nor does
+/// one the machine did not take (its lock refused it, its unpack failed: it said no tree, and the
+/// command never began, [`Outcome::NotStarted`]), and a run that was stopped here is not waited for
+/// any longer: it is ended there, and its half-written report is the next run's to be pruned.
 pub fn run_keeping(
     context: &Context,
     machine: &Machine,

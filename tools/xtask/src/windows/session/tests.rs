@@ -210,6 +210,7 @@ fn exits(status: &str, said: &str) -> (Ended, String) {
 fn shown(ended: &Ended) -> String {
     match ended {
         Ended::Exited(status) => format!("exited {status}"),
+        Ended::Unstarted(status) => format!("unstarted {status}"),
         Ended::Stopped => "stopped".into(),
         Ended::Unwritten(cause) => format!("unwritten: {cause}"),
         Ended::WrongTree(said) => format!("another tree: {said}"),
@@ -245,8 +246,9 @@ fn what_a_run_writes_is_written_as_it_comes_to_the_stream_it_came_on() {
         TREE,
     )
     .unwrap();
-    // It said nothing of how it ended, so ssh's status is the answer: and said so.
-    assert_eq!(shown(&ended), "exited 75");
+    // It said nothing of how it ended, so ssh's status is the answer: and said so. It said no tree,
+    // either: the command is not known to have begun.
+    assert_eq!(shown(&ended), "unstarted 75");
     let (out, err) = (out.text(), String::from_utf8(err).unwrap());
     assert!(
         out.find("out one").unwrap() < out.find("out two").unwrap(),
@@ -545,7 +547,7 @@ fn a_machine_that_says_another_tree_than_the_one_sent_ends_the_run_and_what_it_s
 fn a_run_that_ended_with_0_without_saying_which_tree_it_ran_did_not_end_well() {
     // 0 is a pass, and a pass of no one's tree is none.
     let (ended, _, err) = exits_held_to("1", "== exit 0", TREE);
-    assert_eq!(shown(&ended), "exited 1");
+    assert_eq!(shown(&ended), "unstarted 1");
     assert_eq!(
         err,
         "windows: no `== tree …` line said which tree the machine ran, and a status 0 is not taken for a pass without it: answering 1\n"
@@ -556,7 +558,7 @@ fn a_run_that_ended_with_0_without_saying_which_tree_it_ran_did_not_end_well() {
         let (ended, _, err) = exits_held_to(status, line, TREE);
         assert_eq!(
             shown(&ended),
-            format!("exited {}", line.trim_start_matches("== exit "))
+            format!("unstarted {}", line.trim_start_matches("== exit "))
         );
         assert_eq!(err, "");
     }
@@ -584,7 +586,7 @@ fn a_tree_that_was_said_does_not_change_what_a_failed_run_answers() {
     assert_eq!(err, "");
     // No tree, and no exit line either: ssh's own status, as before, and said so.
     let (ended, _, err) = exits_held_to("3", "", TREE);
-    assert_eq!(shown(&ended), "exited 3");
+    assert_eq!(shown(&ended), "unstarted 3");
     assert_eq!(
         err,
         "windows: no `== exit N` line ended the output, so ssh's own status is the answer: 3\n"
@@ -614,4 +616,18 @@ fn the_words_of_a_silent_peer_are_not_silence_unless_ssh_ended_with_255_without_
     }
     let (ended, _) = exits("255", "!Connection to zeewin2 closed by remote host.");
     assert_eq!(shown(&ended), "exited 255");
+}
+
+#[test]
+fn a_run_began_if_the_machine_said_its_tree_and_not_if_it_did_not_whatever_it_ended_with() {
+    // The tree line is said once the tree is unpacked, before the command: with it, a status is the
+    // command's own, whatever it is; without it, the run never began (its lock refused it, its
+    // unpack failed, the connection ended first), and there is nothing of it to bring back.
+    for (status, said) in [("1", "== exit 75"), ("1", "== exit 0"), ("1", "== exit 3")] {
+        let (with, _) = exits(status, said);
+        let (without, _, _) = exits_held_to(status, said, TREE);
+        let expected = said.trim_start_matches("== exit ");
+        assert_eq!(shown(&with), format!("exited {expected}"), "{said}");
+        assert!(shown(&without).starts_with("unstarted "), "{said}");
+    }
 }
