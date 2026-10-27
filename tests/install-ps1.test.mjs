@@ -642,7 +642,8 @@ for (const [label, shell] of shells) {
             `consensflow-install.${dead}.${hex.slice(0, 11)}`,
             `consensflow-install.${dead}.${hex}c`,
             `consensflow-install.${dead}.${hex.slice(0, 10)}ag`,
-            `consensflow-install.${dead}.${hex.toUpperCase()}`,
+            // Windows takes upper case for lower, so this one has other digits than the real ones.
+            `consensflow-install.${dead}.${'fedcba987654'.toUpperCase()}`,
             `consensflow-install.0${dead}.${hex}`,
             `consensflow-install.${dead}x.${hex}`,
             `consensflow-install.99999999999.${hex}`,
