@@ -196,6 +196,7 @@ impl Adapter for CodexAdapter {
                         launch.starts_given_up,
                     ),
                     left_open: RefCell::new(left_open),
+                    at_work: Cell::new(false),
                 }),
             })
         })
@@ -272,6 +273,9 @@ struct CodexWindow {
     /// The turn the record had open when the window was opened, while the
     /// window has begun no turn of its own: the old process's.
     left_open: RefCell<Option<LeftOpen>>,
+    /// The broker said, at the last look, that Codex called the thread busy
+    /// (`Window::at_work`).
+    at_work: Cell<bool>,
 }
 
 impl CodexWindow {
@@ -399,6 +403,10 @@ impl Window for CodexWindow {
         })
     }
 
+    fn at_work(&self) -> bool {
+        self.at_work.get()
+    }
+
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
         Box::pin(async move {
             let thread = self.thread.borrow().clone();
@@ -423,6 +431,13 @@ impl Window for CodexWindow {
             // started both at once, and a record its look had read before the
             // broker answered could be older.
             let shown = self.shown().await;
+            // Codex's own word that the thread is at work, which its rollout shows only
+            // once the turn has written something (T-716 §3): kept for the pacing.
+            self.at_work.set(
+                shown
+                    .as_ref()
+                    .is_some_and(|shown| shown.idle == Some(false)),
+            );
             let reading = self
                 .records
                 .look(Harness::Codex, &thread, &Options::default())

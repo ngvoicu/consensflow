@@ -657,7 +657,7 @@ fn routes_are_exact_and_every_request_needs_the_launchs_token() {
         assert_eq!(session.header("cache-control").as_deref(), Some("no-store"));
         assert_eq!(
             session.json(),
-            json!({ "launchId": "launch-1", "sessionId": null, "revision": 0, "empty": false, "available": false })
+            json!({ "launchId": "launch-1", "sessionId": null, "revision": 0, "empty": false, "available": false, "idle": null })
         );
     });
 }
@@ -675,8 +675,42 @@ fn the_session_view_reports_a_thread_its_revision_and_whether_a_delivery_would_b
         .await;
         assert_eq!(
             f.read().await,
-            json!({ "launchId": "launch-1", "sessionId": A, "revision": 1, "empty": true, "available": true })
+            json!({ "launchId": "launch-1", "sessionId": A, "revision": 1, "empty": true, "available": true, "idle": true })
         );
+    });
+}
+
+/// The thread's own idle, as Codex last said it, is on the session view for the
+/// daemon's pacing (3.0.7 chief-meeting, CMT-06): at work from a turn's start, or from
+/// a delivery the broker took, until Codex says the turn completed; none while the
+/// window shows no thread.
+#[test]
+fn the_session_view_says_whether_codex_last_said_the_shown_thread_is_idle() {
+    run(async {
+        let f = Fixture::start().await;
+        let tui = f.connect().await;
+        assert_eq!(f.read().await["idle"], Value::Null, "no thread yet");
+        f.start_thread(&tui, 1, json!({ "id": A, "status": { "type": "idle" } }))
+            .await;
+        assert_eq!(f.read().await["idle"], true);
+        let (first, _) = tokio::join!(
+            f.deliver(A, json!({})),
+            f.respond("turn/start", json!({ "turn": { "id": "turn-1" } })),
+        );
+        assert_eq!(first, admitted());
+        assert_eq!(f.read().await["idle"], false, "the delivery began a turn");
+        f.codex.send_json(
+            0,
+            &json!({ "method": "turn/completed", "params": { "threadId": A } }),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(f.read().await["idle"], true);
+        f.codex.send_json(
+            0,
+            &json!({ "method": "turn/started", "params": { "threadId": A } }),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(f.read().await["idle"], false, "a turn of its own");
     });
 }
 

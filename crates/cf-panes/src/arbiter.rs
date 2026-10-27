@@ -796,6 +796,44 @@ mod tests {
         }
     }
 
+    /// How long the human's keys have been quiet, which the daemon's pacing waits on
+    /// before it types a message in (3.0.7 chief-meeting, CMT-03): counted from the
+    /// human's last key only. The daemon's own keys, its pastes and their Enter leave
+    /// it as it was; a key of the human's starts it again.
+    #[test]
+    fn the_human_s_keys_alone_start_the_quiet_the_pacing_waits_on() {
+        let key = PaneKey::new("quiet", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        arbiter.register(&key).expect("register pane");
+        let quiet = || arbiter.snapshot(&key).expect("snapshot").typed_quiet_ms;
+        assert_eq!(quiet(), None, "never typed in");
+
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"hi\r")
+            .expect("the human's keys");
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        arbiter
+            .write_via(writer.as_ref(), &key, b"\x03")
+            .expect("the daemon's key");
+        arbiter
+            .write_paste_via(writer.as_ref(), &key, b"a message", None)
+            .expect("the daemon's paste");
+        assert!(
+            quiet().is_some_and(|quiet| quiet >= 40),
+            "the daemon's keys and paste are not the human's: {:?}",
+            quiet()
+        );
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"x")
+            .expect("the human's key");
+        assert!(
+            quiet().is_some_and(|quiet| quiet < 40),
+            "a key of the human's starts it again: {:?}",
+            quiet()
+        );
+    }
+
     /// What the human typed and has not sent holds a paste back until they
     /// send it or erase it, and never a native send's claim, which leaves the
     /// input box alone (the owner's choice, 2026-10-03). The daemon's own keys

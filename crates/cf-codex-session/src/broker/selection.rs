@@ -152,6 +152,14 @@ impl Selection {
         !self.switching && self.empty
     }
 
+    /// Whether the shown thread is idle, as Codex last said it (a turn's start or a
+    /// delivery taken makes it at work, a turn's completion idle again): none while
+    /// the window shows no thread, or Codex has said nothing of the one it shows.
+    pub(crate) fn idle(&self) -> Option<bool> {
+        self.session_id()
+            .and_then(|thread| self.idle.get(thread).copied())
+    }
+
     /// Whether a delivery would be taken now. `control_open` is whether the
     /// broker's connection to Codex is open.
     pub(crate) fn available(&self, control_open: bool) -> bool {

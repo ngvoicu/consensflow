@@ -149,8 +149,16 @@ impl Dispatcher {
     /// its screen drawn. A rest goes on only over looks that follow each other, each
     /// reading the same frontier.
     pub(crate) fn note_rest(&self, record: &Record, observed: &Observed, idle: bool, looked: u64) {
+        // The harness's live word that its window is at work outranks a record that has
+        // not caught up (Codex's broker).
+        let at_work = record
+            .window
+            .borrow()
+            .window
+            .as_ref()
+            .is_some_and(|window| window.at_work());
         let mut part = record.delivery.borrow_mut();
-        if !(idle && read(observed)) {
+        if !(idle && read(observed)) || at_work {
             part.rest = None;
             return;
         }

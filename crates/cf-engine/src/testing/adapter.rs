@@ -101,6 +101,9 @@ pub struct FakeAgent {
     /// Its harness says its window waits at its prompt, whatever its record says of the
     /// turn ([`Observed::at_prompt`]): set by [`FakeAdapter::answer_never_over`].
     pub at_prompt: bool,
+    /// Its harness's live word says its window is at work, whatever its record says
+    /// (`Window::at_work`: Codex's broker).
+    pub at_work: bool,
     /// Another program than the window's has shown its conversation since it opened
     /// ([`Observed::shared`]): a Claude Code the human started outside ConsensFlow.
     pub shared: bool,
@@ -965,6 +968,7 @@ impl Asked {
             takes_back: false,
             took_back: false,
             at_prompt: false,
+            at_work: false,
             shared: false,
             over: Over::No,
             busy_when_interrupted: false,

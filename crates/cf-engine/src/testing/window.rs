@@ -323,6 +323,11 @@ impl Window for FakeWindow {
     }
 
     /// Not written down: the JavaScript fake was never asked.
+    fn at_work(&self) -> bool {
+        self.fake.of_launch(&self.launch, |agent| agent.at_work)
+    }
+
+    /// Not written down: the JavaScript fake was never asked.
     fn idle_word(&self) -> bool {
         self.fake.idle_word.get()
     }

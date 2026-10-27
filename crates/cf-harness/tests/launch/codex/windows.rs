@@ -380,6 +380,42 @@ fn settled_record(thread: &str) -> Arc<Reading> {
     reading(vec![item], Settlement::Settled, None)
 }
 
+/// The broker's word that the thread is at work, which Codex says live, before its
+/// rollout says a turn began (3.0.7 chief-meeting, CMT-06): the window is at work by
+/// it, for the pacing, whatever the record says; idle, or no word, and it is not. A
+/// look whose broker did not answer keeps no word of it.
+#[test]
+fn a_window_is_at_work_while_the_broker_says_codex_last_called_its_thread_busy() {
+    let home = Home::new();
+    let stand = Rc::new(Stand {
+        asked: RefCell::new(Vec::new()),
+        reading: settled_record("any"),
+    });
+    let (adapter, fakes) =
+        adapter_with(&home, Some(Rc::clone(&stand) as Rc<dyn Records>), "", true);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    let says = |idle: Value| {
+        let word = json!({ "launchId": LAUNCH, "sessionId": THREAD, "available": true, "idle": idle });
+        fakes
+            .loopback
+            .serve("GET /session", [replies(&word.to_string())]);
+    };
+    assert!(!window.at_work(), "nothing said yet");
+    for (idle, at_work) in [
+        (json!(false), true),
+        (json!(true), false),
+        (json!(false), true),
+        (json!(null), false),
+    ] {
+        says(idle.clone());
+        let observed = finished(window.observe()).unwrap();
+        assert!(observed.settled, "the record's word stands for its lane");
+        assert_eq!(window.at_work(), at_work, "{idle}");
+    }
+}
+
 #[test]
 fn follows_the_window_to_the_thread_a_new_or_resume_left_it_on_holding_while_it_shows_none() {
     let home = Home::new();

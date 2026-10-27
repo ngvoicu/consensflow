@@ -467,6 +467,14 @@ pub trait Window {
     fn idle_word(&self) -> bool {
         true
     }
+    /// Whether the harness's live word, apart from its record, said at the last look
+    /// that the window is at work (Codex's broker: Codex called the thread busy before
+    /// its rollout shows the turn). Nothing is typed into a window at work (`pacing`);
+    /// the record's word stands for everything else. False from a harness that has no
+    /// such word, or said none.
+    fn at_work(&self) -> bool {
+        false
+    }
 }
 
 /// A window's pane, by the pane host's id and the generation it opened in.

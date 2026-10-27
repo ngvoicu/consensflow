@@ -84,6 +84,10 @@ pub struct Session {
     pub revision: u64,
     pub empty: bool,
     pub available: bool,
+    /// Whether the shown thread is idle, as Codex last said it: the daemon types a
+    /// message in only while it is not at work (`pacing`). None while the window shows
+    /// no thread, or Codex has said nothing of it.
+    pub idle: Option<bool>,
 }
 
 /// What the daemon hands a broker at `POST /deliver`: the text for the
@@ -239,20 +243,22 @@ mod tests {
             revision: 3,
             empty: false,
             available: false,
+            idle: None,
         };
         assert_eq!(
             serde_json::to_string(&session).unwrap(),
-            r#"{"launchId":"launch-1","sessionId":null,"revision":3,"empty":false,"available":false}"#
+            r#"{"launchId":"launch-1","sessionId":null,"revision":3,"empty":false,"available":false,"idle":null}"#
         );
         let shown = Session {
             session_id: Some("01a09094-938f-7fd1-a2d3-315cf92b4559".into()),
             empty: true,
             available: true,
+            idle: Some(false),
             ..session
         };
         assert_eq!(
             serde_json::to_string(&shown).unwrap(),
-            r#"{"launchId":"launch-1","sessionId":"01a09094-938f-7fd1-a2d3-315cf92b4559","revision":3,"empty":true,"available":true}"#
+            r#"{"launchId":"launch-1","sessionId":"01a09094-938f-7fd1-a2d3-315cf92b4559","revision":3,"empty":true,"available":true,"idle":false}"#
         );
     }
 

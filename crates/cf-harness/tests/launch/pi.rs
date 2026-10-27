@@ -225,6 +225,12 @@ fn shows(home: &Home, session: &str) {
 /// What the extension does with each record in the inbox: takes it,
 /// acknowledges it as taken, and takes it out. The text of each.
 fn extension_takes(home: &Home) -> Vec<String> {
+    extension_answers(home, &json!({ "admitted": true, "mode": "tui" }))
+}
+
+/// The extension answers each message in its inbox with `verdict`, as its own
+/// acknowledgement writes it, and says what each held.
+fn extension_answers(home: &Home, verdict: &Value) -> Vec<String> {
     let folder = home.launch_folder();
     let (inbox, ack) = (
         path::join(&[&folder, "inbox"]),
@@ -245,7 +251,8 @@ fn extension_takes(home: &Home) -> Vec<String> {
         let record: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
         texts.push(record["text"].as_str().unwrap().to_owned());
         fs::create_dir_all(&ack).unwrap();
-        let verdict = json!({ "id": record["id"], "admitted": true, "mode": "tui" });
+        let mut verdict = verdict.clone();
+        verdict["id"] = record["id"].clone();
         fs::write(path::join(&[&ack, &name]), verdict.to_string()).unwrap();
         fs::remove_file(file).unwrap();
     }
@@ -479,6 +486,43 @@ fn delivers_through_the_real_channel_a_claim_then_the_extension_inbox() {
             "half  of it, \u{241b}[31mred\u{241b}[0m and 50%\u{240d}60%"
         ]
     );
+}
+
+/// The extension sends nothing while Pi is at work (`nativeTuiState`'s `chief busy`):
+/// that refusal is the harness's word that it is busy, which spends no attempt
+/// (3.0.7 chief-meeting, D9). Any other refusal is one.
+#[test]
+fn a_refusal_of_the_extension_s_for_pi_being_at_work_is_busy_and_any_other_a_refusal() {
+    for (reason, admission) in [
+        (
+            "chief busy",
+            Admission::Busy {
+                reason: "Pi is at work: its extension sends nothing until it is idle".to_owned(),
+            },
+        ),
+        (
+            "native TUI unavailable",
+            Admission::Refused {
+                reason: "failed-with-zero-bytes".to_owned(),
+            },
+        ),
+    ] {
+        let home = Home::new();
+        let (adapter, fakes) = adapter(&home);
+        let window = prepare(&adapter, &Request::default()).unwrap().window;
+        let host = Rc::new(AnsweringHost::new(|_| Ok(json!({ "ok": true }))));
+        let pane = Pane {
+            id: "s1-zeus".to_owned(),
+            generation: 2,
+        };
+        let mut driver = Driver::default();
+        driver.begin(0, async move { window.deliver(&*host, &pane, "hi").await });
+        assert!(driver.run().is_empty(), "waits for the extension's verdict");
+        let refused = json!({ "admitted": false, "bytesWritten": 0, "reason": reason });
+        assert_eq!(extension_answers(&home, &refused), ["hi"]);
+        assert!(fakes.time.fire_next(fakes.time.wall_ms() + 10));
+        assert_eq!(driver.run(), [(0, Ok(admission))], "{reason}");
+    }
 }
 
 /// Both reviews of 2026-10-16, round 4: Pi's claim comes after the engine's last

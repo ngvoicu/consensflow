@@ -43,6 +43,9 @@ pub struct Shown {
     /// Whether it would take a delivery now: a thread shown, no switch, its
     /// app-server connected.
     pub available: bool,
+    /// Whether the shown thread is idle, as Codex last told the broker (`idle`): none
+    /// where the broker says nothing of it (none shown, or a broker older than 3.0.7).
+    pub idle: Option<bool>,
 }
 
 /// The thread the window's TUI shows (`sessionId`).
@@ -140,6 +143,7 @@ impl Channel {
         Some(Shown {
             session,
             available: current.get("available") == Some(&Value::Bool(true)),
+            idle: current.get("idle").and_then(Value::as_bool),
         })
     }
 }
