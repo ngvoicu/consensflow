@@ -43,7 +43,7 @@ pub async fn hand_over(run: &Run, env: &Env, within: Duration) -> Result<Handed,
         .stderr(Stdio::null());
     hide_window(&mut command);
     lead(&mut command);
-    let mut child = command.spawn().map_err(|failed| {
+    let mut child = crate::spawning::one_at_a_time(|| command.spawn()).map_err(|failed| {
         format!(
             "spawn {} {}",
             run.program.to_string_lossy(),

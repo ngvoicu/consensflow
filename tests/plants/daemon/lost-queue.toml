@@ -3,7 +3,7 @@
 # chief's reopen opened it again on its conversation, and the reopen's turn never read as over, since
 # the record still had that message to come. ConsensFlow knows where the new process began: the Claude
 # adapter takes the transcript's length when it prepares a window on a conversation that already
-# was, every look of the window says it (`Options::relaunched_at`), and Claude's reader empties the
+# was, every look of the window says it (`Options::relaunched`, the length and the bytes before it), and Claude's reader empties the
 # queue there, keeping what the new process queued after it
 # (`crates/cf-harness/src/claude/record.rs`, `crates/cf-harness/src/claude/adapter.rs`, the length
 # from the records seam: `crates/cf-harness/src/records/thread.rs`,
@@ -36,7 +36,7 @@ runs = ["lost-queue-adapter"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            let relaunched = if resumable && launch.previous_gone {"
+find = "            let relaunched = if resumable && gone {"
 replace = "            let relaunched = if resumable {"
 
 [[plant]]
@@ -144,14 +144,8 @@ runs = ["lost-queue-adapter", "lost-queue-reader"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
 find = '''
-        if let Some(at) = options
-            .relaunched_at
-            .filter(|at| *at > self.at.load(Ordering::Relaxed))
-        {
-            self.at.store(at, Ordering::Relaxed);
-            self.reader.retell(|state| state.relaunched(at));
-        }'''
-replace = ""
+        if let Some(boundary) = options.relaunched.as_ref() {'''
+replace = "        if let Some(boundary) = options.relaunched.as_ref().filter(|_| false) {"
 
 [[plant]]
 name = "lost-queue: a look's relaunch reaches no reader, and the answer to a reopen of a window that closed at rest with a notification queued is never the result"
@@ -162,14 +156,8 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
 find = '''
-        if let Some(at) = options
-            .relaunched_at
-            .filter(|at| *at > self.at.load(Ordering::Relaxed))
-        {
-            self.at.store(at, Ordering::Relaxed);
-            self.reader.retell(|state| state.relaunched(at));
-        }'''
-replace = ""
+        if let Some(boundary) = options.relaunched.as_ref() {'''
+replace = "        if let Some(boundary) = options.relaunched.as_ref().filter(|_| false) {"
 
 [[plant]]
 name = "lost-queue: the reader empties the queue at every look that tells no relaunch"
@@ -222,8 +210,8 @@ runs = ["lost-queue-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
-find = "            .filter(|at| *at > self.at.load(Ordering::Relaxed))"
-replace = "            .filter(|at| *at != self.at.load(Ordering::Relaxed))"
+find = "                Some(known) => boundary.at > known.at || !self.reader.holds(known),"
+replace = "                Some(known) => boundary.at != known.at || !self.reader.holds(known),"
 
 [[plant]]
 name = "lost-queue: the adapter takes no length of the transcript it opens a window again on"
@@ -232,18 +220,27 @@ runs = ["lost-queue-adapter"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "                length.map(|at| (session.clone(), at))"
-replace = "                length.and(None)"
+find = "                boundary.map(|boundary| (session.clone(), boundary))"
+replace = "                boundary.and(None)"
 
 [[plant]]
-name = "lost-queue: the window's looks tell no relaunch"
+name = "lost-queue: the window's looks tell no relaunch, nor the turn the old process left open"
 meant = "a_window_opened_again_reads_its_own_turn_at_rest_though_the_closed_process_had_a_message_queued"
 runs = ["lost-queue-adapter"]
 
+# Since T-432 a Claude window is never launched with a message: one opened again reads
+# the turn the old process left open as well (`left_open`), which sets its queued
+# message aside as the relaunch's reading does. Either alone keeps the window's turn
+# its own, so the plant takes both away (each alone: 7 of 7 cases pass; both: 3 fail).
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
 find = "            let options = told(self.relaunched.as_ref(), &session);"
 replace = "            let options = Options::default();"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            let left_open = if resumable {"
+replace = "            let left_open = if false {"
 
 [[plant]]
 name = "lost-queue: the window tells its relaunch to a conversation it was followed to"
@@ -253,11 +250,11 @@ runs = ["lost-queue-adapter"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
 find = '''
-        relaunched_at: relaunched
+        relaunched: relaunched
             .filter(|(on, _)| on == session)
-            .map(|(_, at)| *at),'''
+            .map(|(_, boundary)| boundary.clone()),'''
 replace = '''
-        relaunched_at: relaunched.map(|(_, at)| *at),'''
+        relaunched: relaunched.map(|(_, boundary)| boundary.clone()),'''
 
 [[plant]]
 name = "lost-queue: the daemon's records seam tells no transcript's length, and the answer to a reopen is never the result"
@@ -269,13 +266,13 @@ builds = true
 file = "crates/cf-daemon/src/seams/boundary.rs"
 find = '''
 
-    fn transcript_length<'a>(
+    fn transcript_boundary<'a>(
         &'a self,
         harness: Harness,
         session: &'a str,
-    ) -> Work<'a, Result<Option<u64>, String>> {
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
         self.spawn
-            .arrival(self.records.transcript_length(harness, session))
+            .arrival(self.records.transcript_boundary(harness, session))
     }'''
 replace = ""
 
@@ -312,7 +309,7 @@ runs = ["lost-queue-reader"]
 file = "crates/cf-harness/src/claude/record/replay.rs"
 find = '''
         if record.closes_a_cut_turn {
-            self.items.commentary(item);
+            self.items.synthetic(item);
         }'''
 replace = ""
 
@@ -394,8 +391,8 @@ runs = ["lost-queue-adapter"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''observed(at_rest, settled && !at_rest, waiting, by_press, at_prompt)'''
-replace = '''observed(at_rest, settled && !at_rest, waiting, by_press, false)'''
+find = '''observed(at_rest, over, waiting, by_press, at_prompt)'''
+replace = '''observed(at_rest, over, waiting, by_press, false)'''
 
 [[plant]]
 name = "lost-queue: a relaunch empties what was queued but keeps what the closing process took"
@@ -435,3 +432,42 @@ runs = ["lost-queue-looks"]
 file = "crates/cf-engine/src/turn_end.rs"
 find = "        self.told_finished = None;\n"
 replace = ""
+# Calliope's P3-5 and P3-6 on 5c223bc8 (T-621, T-646): a dialog up or a job still running is no finished
+# turn (Claude Code's `shell` status reads idle while a job runs), and words told to the window that wait
+# to go in hold the note back, as they hold Finish back (`words-on-their-way`).
+
+[[plant]]
+name = "lost-queue: a turn with its dialog open is told as finished"
+meant = "a_reopened_turn_with_its_dialog_open_is_told_nothing"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            && observed.waiting.is_none()\n"
+replace = ""
+
+[[plant]]
+name = "lost-queue: a turn with a job still running is told as finished"
+meant = "a_reopened_turn_with_a_job_still_running_is_told_nothing"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            && observed.pending().total() == 0\n"
+replace = ""
+
+[[plant]]
+name = "lost-queue: a turn whose told words wait to go in is told to be finished, which Finish refuses"
+meant = "a_reopened_turn_that_looks_finished_with_words_told_on_their_way_is_told_nothing"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+            && !self
+                .seams
+                .ledger
+                .borrow()
+                .told_waiting(participant.id, thread.task.id)?;'''
+replace = ";"
+

@@ -161,7 +161,7 @@ fn a_tarball_that_cannot_be_made_is_said_with_what_tar_said_and_leaves_no_list_b
     )
     .unwrap_err();
     let said = said.to_string();
-    assert!(said.starts_with("`tar czf "), "{said}");
+    assert!(said.starts_with("`tar cf "), "{said}");
     // What tar says of it is its own, which differs by system (`gone.txt: Cannot
     // stat` where one has the name, `Couldn't visit directory` where another has not).
     let (_, after) = said.split_once("` ended with status ").unwrap();
@@ -218,8 +218,8 @@ fn the_tarball_is_made_by_tar_in_the_scratch_from_the_checkout_by_a_list_of_name
     assert_eq!(
         words,
         [
-            "czf",
-            "tree.tgz",
+            "cf",
+            "tree.tar",
             "-C",
             "checkout",
             "--null",
@@ -229,6 +229,23 @@ fn the_tarball_is_made_by_tar_in_the_scratch_from_the_checkout_by_a_list_of_name
         .map(String::from)
     );
     assert_eq!(made.vars, [("COPYFILE_DISABLE".into(), Some("1".into()))]);
+    // What the run keeps of its own is appended from its folder in the scratch, in a second
+    // step: no one `tar` line reads two folders the same on every system the runner runs on.
+    let appended = append(
+        Path::new("scratch/state"),
+        [".synced-files", ".windows-tree"].into_iter(),
+    );
+    assert_eq!(appended.program, "tar");
+    assert_eq!(appended.cwd, Path::new("scratch/state"));
+    let words: Vec<_> = appended
+        .args
+        .iter()
+        .map(|word| word.to_string_lossy())
+        .collect();
+    assert_eq!(
+        words,
+        ["rf", "../tree.tar", ".synced-files", ".windows-tree"].map(String::from)
+    );
 }
 
 #[test]
@@ -515,4 +532,89 @@ fn a_tree_whose_file_cannot_be_read_is_said_with_the_file() {
         .to_string();
     assert!(said.starts_with("could not read "), "{said}");
     assert!(said.contains("gone.txt"), "{said}");
+}
+
+/// What a run keeps of its own while it packs is in its own scratch folder and never in the
+/// checkout: a checkout whose root cannot be written to is packed all the same. (Before, the
+/// list, the identity, the sweep and the run script were files of the root for as long as
+/// `tar` read it, and a second run from the same tree, to the other machine, wrote over them
+/// and took them away: T-664, 2026-10-26, a run's upload failed.)
+#[cfg(unix)]
+#[test]
+fn a_run_writes_nothing_into_the_checkout_it_packs() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (dir, context) = checkout(&[("keep.txt", "kept")]);
+    let mut closed = fs::metadata(dir.path()).unwrap().permissions();
+    let open = closed.clone();
+    closed.set_mode(0o555);
+    fs::set_permissions(dir.path(), closed).unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let packed = pack(
+        &context,
+        &["keep.txt".to_owned()],
+        "none 0123456789abcdef",
+        "the run script\n",
+        scratch.path(),
+    );
+    fs::set_permissions(dir.path(), open).unwrap();
+    let tarball = packed.unwrap();
+    let there = unpacked(&context, &tarball);
+    for (name, text) in [
+        (SYNCED, "keep.txt\n"),
+        (TREE, "none 0123456789abcdef\n"),
+        (RUN, "the run script\n"),
+    ] {
+        assert_eq!(
+            fs::read_to_string(there.path().join(name)).unwrap(),
+            text,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(there.path().join(SWEEP)).unwrap(),
+        sweep_script()
+    );
+    assert_eq!(
+        fs::read_to_string(there.path().join("keep.txt")).unwrap(),
+        "kept"
+    );
+}
+
+/// Runs of one tree to two machines at once, each with a run script of its own: each tarball
+/// holds its own, and the list of what went over is the tree's alone, none of it another run's
+/// files.
+#[test]
+fn two_runs_from_one_tree_at_once_each_send_their_own_run_script_and_the_trees_files_alone() {
+    const RUNS: usize = 4;
+    const ROUNDS: usize = 8;
+    let (_dir, context) = checkout(&[("keep.txt", "kept"), ("src/lib.rs", "fn lib() {}\n")]);
+    let ready = std::sync::Barrier::new(RUNS);
+    std::thread::scope(|scope| {
+        let mut all = Vec::new();
+        for run in 0..RUNS {
+            let (context, ready) = (&context, &ready);
+            all.push(scope.spawn(move || {
+                for round in 0..ROUNDS {
+                    ready.wait();
+                    let scratch = tempfile::tempdir().unwrap();
+                    let script = format!("run {run} round {round}\n");
+                    let listed = files(context).unwrap();
+                    let tarball = pack(context, &listed, "none x", &script, scratch.path())
+                        .unwrap_or_else(|error| panic!("run {run} round {round}: {error}"));
+                    let there = unpacked(context, &tarball);
+                    let held = |name: &str| fs::read_to_string(there.path().join(name)).unwrap();
+                    assert_eq!(held(RUN), script, "run {run} round {round}");
+                    assert_eq!(
+                        sorted(held(SYNCED).lines().map(str::to_owned).collect()),
+                        ["keep.txt", "src/lib.rs"],
+                        "run {run} round {round}"
+                    );
+                }
+            }));
+        }
+        for one in all {
+            one.join().unwrap();
+        }
+    });
 }

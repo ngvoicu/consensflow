@@ -1,0 +1,146 @@
+# Turn-end's own follow-ups, the engine half (T-487).
+#
+# - A window closed with `retire` whose kill the host took and whose exit never comes was left
+#   retiring for good, never looked at, reused or released (Astraeus on turn-end-min). Its exit is
+#   settled once `EXIT_WAIT` has gone by since the kill was taken, as the engine's own close settles
+#   one (`crates/cf-engine/src/windows.rs`, `dispatcher.rs`; the engine's tests in
+#   `crates/cf-engine/tests/dispatcher/exit_overdue.rs`).
+# - A paused task's window that stops at rest stays open, and what its turn left runs on: the work
+#   in its tree, and what may be the window's outside it (a loop a tool shell detached, T-160's).
+#   The pause names both to whoever gave the task, once, and ends neither (the chief's decision of
+#   2026-10-24, a detached job is reported, never ended): the engine (`stops.rs`, `background.rs`;
+#   `tests/dispatcher/paused_left.rs`), the pane host's `pane.background`, which names what may be
+#   the window's as a close's exit does (`crates/cf-panes/src/pty/turn.rs`, `pane_handlers.rs`;
+#   `tests/headless.rs`), and the daemon's reading of it (`crates/cf-daemon/src/host.rs`).
+#
+# Every name holds `turn-end follow-ups`, so `cargo xtask plants daemon "turn-end follow-ups"`
+# runs them all.
+
+[run]
+tefu-engine-exit = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "exit_overdue::"]
+tefu-engine-paused = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_left::"]
+tefu-panes-headless = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_look_at_what_a_window_left"]
+tefu-daemon-host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::tests::a_look_at_what_a_window_left"]
+
+[[plant]]
+name = "turn-end follow-ups exit: a close whose exit never comes leaves its window retiring for good"
+meant = "a_close_whose_exit_never_comes_is_settled_once_its_wait_is_over_and_the_next_task_opens_a_window"
+runs = ["tefu-engine-exit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        if record.window.borrow().retiring {
+            return self.exit_overdue(record).await;
+        }'''
+replace = '''        if record.window.borrow().retiring {
+            return Ok(());
+        }'''
+
+[[plant]]
+name = "turn-end follow-ups exit: the wait for a taken kill's exit never starts"
+meant = "a_close_whose_exit_never_comes_is_settled_once_its_wait_is_over_and_the_next_task_opens_a_window"
+runs = ["tefu-engine-exit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "                part.kill_taken = Some(self.now());"
+replace = "                part.kill_taken = None;"
+
+[[plant]]
+name = "turn-end follow-ups exit: a taken kill's exit is made up before its wait is over"
+meant = "a_close_whose_exit_never_comes_is_settled_once_its_wait_is_over_and_the_next_task_opens_a_window"
+runs = ["tefu-engine-exit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = ".is_some_and(|taken| self.now() - taken >= EXIT_WAIT.as_millis() as i64);"
+replace = ".is_some_and(|taken| self.now() - taken >= 0);"
+
+[[plant]]
+name = "turn-end follow-ups pause: a pause paid at rest names nothing its window left running"
+meant = "a_pause_whose_window_stops_names_what_its_turn_left_running_once_and_ends_none_of_it"
+runs = ["tefu-engine-paused"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '''                    self.tell_paused_left_running(project, record, stop.number)
+                        .await'''
+replace = '''                    Ok(())'''
+
+[[plant]]
+name = "turn-end follow-ups pause: a pause's note names nothing outside the window's tree"
+meant = "a_pause_names_a_job_that_may_be_its_windows_though_its_tree_runs_nothing_of_the_turn"
+runs = ["tefu-engine-paused"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = "    if let Some(words) = possibly_left_words(&left.possibly_left) {"
+replace = "    if let Some(words) = possibly_left_words(&[]) {"
+
+[[plant]]
+name = "turn-end follow-ups pause: a window that left only a job outside its tree is told of as one that left nothing"
+meant = "a_pause_names_a_job_that_may_be_its_windows_though_its_tree_runs_nothing_of_the_turn"
+runs = ["tefu-engine-paused"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = "        if left.total == 0 && left.possibly_left.is_empty() {"
+replace = "        if left.total == 0 {"
+
+[[plant]]
+name = "turn-end follow-ups pause: a task resumed before its window stopped is told it is paused"
+meant = "a_pause_resumed_before_its_window_stopped_says_nothing_of_what_it_left"
+runs = ["tefu-engine-paused"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''        let Some(thread) = task.filter(|thread| thread.task.state == "paused") else {'''
+replace = '''        let Some(thread) = task else {'''
+
+[[plant]]
+name = "turn-end follow-ups pause: a pause ends the work its window's turn left"
+meant = "a_pause_whose_window_stops_names_what_its_turn_left_running_once_and_ends_none_of_it"
+runs = ["tefu-engine-paused"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '''
+                    self.pay(record, &stop);
+                    // The window stays: what its turn left runs on, named and never ended.'''
+replace = '''
+                    self.pay(record, &stop);
+                    self.retire(record).await?;
+                    // The window stays: what its turn left runs on, named and never ended.'''
+
+[[plant]]
+name = "turn-end follow-ups host: the pane host's look names nothing outside the window's tree"
+meant = "a_look_at_what_a_window_left_names_a_server_its_agents_tool_shell_detached_and_signals_nothing"
+platforms = ["macos"]
+runs = ["tefu-panes-headless"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = "        background.possibly_left = tree.possibly_left();\n"
+replace = "        background.possibly_left = Vec::new();\n"
+
+[[plant]]
+name = "turn-end follow-ups host: pane.background's answer leaves out what may be the window's"
+meant = "a_look_at_what_a_window_left_names_a_server_its_agents_tool_shell_detached_and_signals_nothing"
+platforms = ["macos"]
+runs = ["tefu-panes-headless"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "        if !background.possibly_left.is_empty() {"
+replace = "        if background.possibly_left.is_empty() {"
+
+[[plant]]
+name = "turn-end follow-ups host: the daemon reads no possiblyLeft from the look"
+meant = "a_look_at_what_a_window_left_running_is_asked_by_its_pane_and_reads_what_may_be_its_own"
+runs = ["tefu-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/panes.rs"
+find = '''        rename = "possiblyLeft",
+        skip_serializing_if = "Vec::is_empty"'''
+replace = '''        skip_serializing_if = "Vec::is_empty"'''

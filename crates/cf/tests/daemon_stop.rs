@@ -580,14 +580,9 @@ fn cf() -> Command {
 #[cfg(target_os = "macos")]
 #[test]
 fn the_daemon_a_test_keeps_holds_nothing_of_the_tests_but_its_streams() {
-    use std::os::fd::AsRawFd;
-
     let root = Root::new();
     let stray = cf_process::test_support::stray();
     let daemon = Daemon::start(&root);
-    assert!(
-        !cf_process::test_support::holds_null(daemon.child.id(), stray.as_raw_fd()),
-        "the daemon holds it"
-    );
+    assert!(!stray.held_by(daemon.child.id()), "the daemon holds it");
     drop(daemon);
 }

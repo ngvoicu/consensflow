@@ -10,6 +10,15 @@
 #   (T-502);
 # - Claude's look says nothing of its record's word that the turn is over;
 # - a close is told to the human and to the requester, two notes of one event;
+# - a close of a task the human gave goes to the chief, or in the chief's words
+#   (the human arm of the notes);
+# - whoever asked the stop, the human pausing a task the chief gave or the chief
+#   telling one the human gave, is not told their act closed the window (T-650);
+# - the record's word that a turn is over counts at once, so a look in the moment
+#   Claude says busy before a new turn's message is written reads it over, and one
+#   not yet counted is pressed again (Calliope on T-551, T-644);
+# - the ledger cannot say who asked a stop;
+# - the pause's help says the window and its work wait (T-650);
 # - the stand-in's `AGENTS --then` starts no agents, so the rig's cases lose their shape.
 #
 # The engine's tests are in `crates/cf-engine/tests/dispatcher/nothing_to_stop.rs` and
@@ -17,6 +26,9 @@
 # rig's cases, in `crates/cf-e2e/tests/regressions/
 # a_window_with_nothing_to_stop_was_closed_and_its_work_ended.rs`, which run the native
 # `cf` built from the planted sources (`builds`).
+#
+# The ledger's test of who asked a stop is in `crates/cf-ledger/tests/receipt/sessions.rs`;
+# the pause's help, in `crates/cf/tests/help.rs` and `board_goldens.rs`.
 #
 # Every name holds `nothing to stop`, so `cargo xtask plants daemon "nothing to stop"`
 # runs them all.
@@ -28,6 +40,10 @@ harness-launch-claude-agents = ["cargo", "test", "--offline", "-p", "cf-harness"
 rig-regression-nothing-to-stop = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_window_with_nothing_to_stop_was_closed_and_its_work_ended::"], builds = true }
 # The stand-in's own tests of what it answers.
 fake-agent-reply = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "reply::"]
+# The ledger's tests of the sessions' stops.
+ledger-receipt-sessions = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "sessions::"]
+# The board's help, against the usage.
+cf-help = ["cargo", "test", "--offline", "-p", "cf", "--test", "help"]
 
 [[plant]]
 name = "nothing to stop: a turn its record ends is at work while Claude says busy"
@@ -36,7 +52,7 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "} else if observed.settled || observed.over || self.cut_short(observed) {"
+find = "} else if observed.settled || observed.over == Over::Held || self.cut_short(observed) {"
 replace = "} else if observed.settled || self.cut_short(observed) {"
 
 [[plant]]
@@ -47,7 +63,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "} else if observed.settled || observed.over || self.cut_short(observed) {"
+find = "} else if observed.settled || observed.over == Over::Held || self.cut_short(observed) {"
 replace = "} else if observed.settled || self.cut_short(observed) {"
 
 [[plant]]
@@ -57,8 +73,8 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "} else if observed.settled || observed.over || self.cut_short(observed) {"
-replace = "} else if observed.settled || observed.over {"
+find = "} else if observed.settled || observed.over == Over::Held || self.cut_short(observed) {"
+replace = "} else if observed.settled || observed.over == Over::Held {"
 
 [[plant]]
 name = "nothing to stop: Claude's look says nothing of its record's end of the turn"
@@ -67,8 +83,8 @@ runs = ["harness-launch-claude-agents"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''observed(at_rest, settled && !at_rest, waiting, by_press, at_prompt)'''
-replace = '''observed(at_rest, false, waiting, by_press, at_prompt)'''
+find = "observed(at_rest, over, waiting, by_press, at_prompt)"
+replace = "observed(at_rest, Over::No, waiting, by_press, at_prompt)"
 
 [[plant]]
 name = "nothing to stop: a close is told to the human and to the requester"
@@ -77,14 +93,8 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = """            Some(requester) => (requester, to_requester),"""
-replace = """            Some(requester) => {
-                self.seams.ledger.borrow_mut().note(
-                    project.id,
-                    &NewNote { from: None, to: "human".to_owned(), task: Some(number), body: human },
-                )?;
-                (requester, to_requester)
-            }"""
+find = """        let mut readers = vec![requester.unwrap_or_else(|| "human".to_owned())];"""
+replace = """        let mut readers = vec![requester.unwrap_or_else(|| "human".to_owned()), "human".to_owned()];"""
 
 [[plant]]
 name = "nothing to stop: the stand-in's agents then a turn start no agents"
@@ -99,3 +109,77 @@ find = """        window.agents.start(count, seconds, move || {
         return reply_to(&agents[3], window);"""
 replace = """        let _ = (count, seconds, wake, woken);
         return reply_to(&agents[3], window);"""
+
+[[plant]]
+name = "nothing to stop: a close of a task the human gave is told in the chief's words"
+meant = "a_window_closed_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_task"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = """            let body = if to == "human" {"""
+replace = """            let body = if to != "human" {"""
+
+[[plant]]
+name = "nothing to stop: a close of a task the human gave goes to the chief"
+meant = "a_window_closed_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_task"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = """        let mut readers = vec![requester.unwrap_or_else(|| "human".to_owned())];"""
+replace = """        let mut readers = vec![requester
+            .filter(|requester| requester != "human")
+            .unwrap_or_else(|| "chief".to_owned())];"""
+
+[[plant]]
+name = "nothing to stop: whoever asked the stop is not told their act closed the window"
+meant = "the_human_whose_pause_closed_a_chief_given_tasks_window_is_told_too_once"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = """        readers.extend(asked_by.filter(|by| !readers.contains(by)));"""
+replace = """        let _ = asked_by;"""
+
+[[plant]]
+name = "nothing to stop: the ledger cannot say who asked a stop"
+meant = "each_stop_says_who_asked_it_and_one_consensflow_asked_says_nobody"
+runs = ["ledger-receipt-sessions"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = """            "SELECT json_extract(data, '$.by') FROM event"""
+replace = """            "SELECT NULL FROM event"""
+
+[[plant]]
+name = "nothing to stop: a turn the record says is over a moment ago is pressed again"
+meant = "a_record_that_says_the_turn_is_over_only_a_moment_ago_is_pressed_no_more_and_paid_once_it_stands"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        } else if observed.over == Over::Pending {"
+replace = "        } else if false {"
+
+[[plant]]
+name = "nothing to stop: Claude's record's word that the turn is over counts at once"
+meant = "a_turn_beginning_is_not_over_in_the_moment_claude_says_busy_before_its_message_is_written"
+runs = ["harness-launch-claude-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = """                *since = Some((now, turn));
+                Over::Pending"""
+replace = """                *since = Some((now, turn));
+                Over::Held"""
+
+[[plant]]
+name = "nothing to stop: the pause's help says the window and its work wait"
+meant = "every_line_of_the_usage_is_a_commands_to_answer_help_with"
+runs = ["cf-help"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = "stop a worker's task: the agent stops and its window waits;"
+replace = "stop a worker's task: the agent stops, its window and work wait;"

@@ -305,6 +305,17 @@ mod tests {
             run(&["-c", "echo $CLAUDE_CONFIG_DIR", "fake"]),
             "/rig/claude\n"
         );
+        // A run given a Claude config of its own has the stand-in write there, where the
+        // daemon reads Claude's records: never in the owner's own (T-432).
+        let own = crate::process::Run::new("/bin/sh")
+            .arg(&shim)
+            .args(["-c", "echo $CLAUDE_CONFIG_DIR", "fake"])
+            .var("HOME", "/h")
+            .var("CLAUDE_CONFIG_DIR", "/run/own")
+            .run()
+            .unwrap()
+            .stdout;
+        assert_eq!(own, "/run/own\n");
     }
 
     #[cfg(windows)]

@@ -343,6 +343,47 @@ fn replaces_the_files_that_are_in_the_folder_and_leaves_the_others() {
     );
 }
 
+/// Every run stages the console host before its command (T-487), and a file of it that is in use is
+/// one Windows will not write: the panes a run before left running hold `conpty.dll` loaded, and
+/// writing the bytes it already has would refuse the next run. A file that already holds the
+/// package's bytes is left as it is (here a read-only one, which no write can change).
+#[test]
+fn leaves_the_files_that_already_hold_the_packages_bytes_so_one_in_use_is_no_refusal() {
+    let scene = Scene::new();
+    let bytes = console_host_package();
+    let hash = sha256_of(&bytes);
+    let package = Package {
+        version: "9.9.9",
+        sha256: &hash,
+    };
+    write(&scene.into.join("conpty.dll"), "the console host's dll");
+    write(&scene.into.join("OpenConsole.exe"), "an older one");
+    let held = scene.into.join("conpty.dll");
+    let mut kept = fs::metadata(&held).unwrap().permissions();
+    kept.set_readonly(true);
+    fs::set_permissions(&held, kept).unwrap();
+
+    let (result, said) = scene.prepare(&package, &mut serving(&bytes));
+
+    result.unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(
+        read(&scene.into.join("OpenConsole.exe")),
+        "the console host's exe"
+    );
+    assert_eq!(read(&held), "the console host's dll");
+    // Each file is still said, as staged.
+    assert!(
+        said.contains("conpty.dll") && said.contains("OpenConsole.exe"),
+        "{said}"
+    );
+    #[allow(clippy::permissions_set_readonly_false)]
+    {
+        let mut open = fs::metadata(&held).unwrap().permissions();
+        open.set_readonly(false);
+        fs::set_permissions(&held, open).unwrap();
+    }
+}
+
 #[test]
 fn into_is_the_one_folder_conpty_takes_and_a_relative_one_is_from_the_root() {
     let (_dir, context) = checkout();

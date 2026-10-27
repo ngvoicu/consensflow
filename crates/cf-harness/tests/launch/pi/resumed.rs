@@ -41,6 +41,7 @@ fn item(id: &str, role: Role, text: &str, complete: bool) -> Item {
         complete,
         at: None,
         commentary: false,
+        synthetic: false,
         compaction: false,
     }
 }
@@ -63,6 +64,20 @@ fn cut_before_an_answer() -> Arc<Reading> {
     reading(
         vec![item("u1", Role::User, "Count to forty", true)],
         Settlement::InFlight,
+        None,
+    )
+}
+
+/// The record of a turn that failed (the provider's error ended it): the user's message
+/// and an assistant step with no answer. Pi's reader cannot settle a failed turn, so
+/// the record says nothing of its end.
+fn failed_before_an_answer() -> Arc<Reading> {
+    reading(
+        vec![
+            item("u1", Role::User, "Count to forty", true),
+            item("a1", Role::Assistant, "", false),
+        ],
+        Settlement::Unknown,
         None,
     )
 }
@@ -140,6 +155,25 @@ fn a_window_opened_again_on_a_turn_the_quit_cut_is_at_rest_once_its_extension_ha
 }
 
 #[test]
+fn a_window_opened_again_on_a_turn_its_record_cannot_end_is_at_rest_once_its_extension_has_seen_no_turn_of_it(
+) {
+    // T-722: a failed turn is no turn in flight, and the record never settles it; the
+    // window read as at work for as long as it was open.
+    let home = Home::new();
+    let (_record, window) = resumed(&home, failed_before_an_answer(), None);
+    shows(&home, SESSION);
+    assert!(
+        settled(&window),
+        "no process is in the turn that failed, and the extension has seen none begin"
+    );
+
+    begins_a_turn(&home, SESSION);
+    assert!(!settled(&window), "a turn is at work");
+    settles(&home);
+    assert!(settled(&window), "Pi settled, with the record as it was");
+}
+
+#[test]
 fn a_window_that_shows_another_conversation_is_not_read_at_rest_by_the_turn_the_quit_cut() {
     let home = Home::new();
     let (_record, window) = resumed(&home, cut_in_a_call(), None);
@@ -149,14 +183,18 @@ fn a_window_that_shows_another_conversation_is_not_read_at_rest_by_the_turn_the_
     assert_eq!(observed.switched.as_deref(), Some("another-conversation"));
 }
 
+/// A window opened for a message its extension's inbox gives it once it is up
+/// (T-432) begins no turn as it opens: the message a launch names is not on its
+/// command line, and the window reads at rest by the turn the quit cut, as one
+/// opened with none does, so that its message can go in.
 #[test]
-fn a_window_opened_with_a_message_of_its_own_is_not_read_at_rest_by_the_turn_the_quit_cut() {
+fn a_window_opened_for_a_message_it_is_given_once_up_is_read_at_rest_by_the_turn_the_quit_cut() {
     let home = Home::new();
     let (_record, window) = resumed(&home, cut_in_a_call(), Some(TASK));
     shows(&home, SESSION);
     assert!(
-        !settled(&window),
-        "its message is its turn, and it is not in the record yet"
+        settled(&window),
+        "its message is not in it yet, and the turn the quit cut is no turn of its own"
     );
 }
 

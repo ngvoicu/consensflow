@@ -1,6 +1,7 @@
 //! A long transcript, made like a big one (`synthetic`), read whole.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use super::synthetic::{self, Plan};
 use super::*;
@@ -79,7 +80,7 @@ fn a_record_claiming_a_uuid_a_decision_looked_up_has_the_transcript_read_again()
     let located = file.clone();
     let mut followed = Followed::new(
         Box::new(move || Ok(Some(located.clone()))),
-        Box::new(|| Transcript::new(Arc::from(SESSION), local(), 0)),
+        Box::new(|_: &Path| Transcript::new(Arc::from(SESSION), local(), None)),
     );
     assert_eq!(
         followed.read(LONG_AFTER_MS).unwrap().unwrap().state.count,

@@ -3,7 +3,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
@@ -45,6 +45,11 @@ const EXIT_GRACE: Duration = Duration::from_secs(5);
 /// what the program printed last.
 #[cfg(windows)]
 const EXIT_FLUSH: Duration = Duration::from_secs(1);
+
+/// How many windows killed before they opened a table keeps ([`PaneTable::kill`]): an
+/// open the daemon gave up on reaches the host a moment after its kill, and the kills
+/// of windows long gone, which find nothing too, make room for the latest.
+const CANCELLED_KEPT: usize = 256;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PaneKey {
@@ -127,6 +132,10 @@ pub enum PaneError {
     ProgramNotAbsolute(PathBuf),
     AlreadyOpen(PaneKey),
     NotFound(PaneKey),
+    /// The daemon closed the window before its open reached the table.
+    Cancelled(PaneKey),
+    /// The window is still being ended by a close before this one.
+    Ending(PaneKey),
     Pty(String),
     Io(io::Error),
     InvalidBacklog,
@@ -163,6 +172,16 @@ impl fmt::Display for PaneError {
             Self::NotFound(key) => write!(
                 formatter,
                 "pane {} generation {} is not open",
+                key.id, key.generation
+            ),
+            Self::Cancelled(key) => write!(
+                formatter,
+                "pane {} generation {} was closed before it opened",
+                key.id, key.generation
+            ),
+            Self::Ending(key) => write!(
+                formatter,
+                "pane {} generation {} is still being ended",
                 key.id, key.generation
             ),
             Self::Pty(message) => write!(formatter, "PTY error: {message}"),
@@ -369,10 +388,15 @@ impl OutputFlow {
 
 pub struct PaneTable {
     panes: Mutex<HashMap<PaneKey, Pane>>,
+    /// The windows killed before their open reached the table, the latest
+    /// [`CANCELLED_KEPT`]: one of them never opens. Taken under `panes`' lock,
+    /// after it, by a kill and an open alike.
+    cancelled: Mutex<VecDeque<PaneKey>>,
     #[cfg(any(test, feature = "test-support"))]
     next_id: AtomicU64,
     updating: AtomicBool,
     teardown: Arc<Teardown>,
+    ending: Arc<Ending>,
     /// The exits of the windows whose output is read, which are yet to be told.
     exits: Arc<owed::ExitsOwed>,
     /// How long a closed window's programs are given to end once asked to
@@ -411,6 +435,54 @@ impl Teardown {
     }
 }
 
+/// The windows whose programs are being ended now, by their keys: a kill of one that has
+/// left the table already waits for that end, so that its answer says the programs are
+/// gone (the daemon asks again for the end of a window whose open it gave up on where
+/// its first kill went unanswered, which may still be waiting out the grace).
+#[derive(Default)]
+struct Ending {
+    keys: Mutex<Vec<PaneKey>>,
+    ended: Condvar,
+}
+
+impl Ending {
+    /// `key`'s programs are being ended. Called with `panes`' lock held, as the pane
+    /// leaves the table.
+    fn begin(&self, key: &PaneKey) {
+        self.keys
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(key.clone());
+    }
+
+    /// `key`'s programs are ended, or what could be done to end them was.
+    fn end(&self, key: &PaneKey) {
+        let mut keys = self.keys.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(at) = keys.iter().position(|ending| ending == key) {
+            keys.swap_remove(at);
+        }
+        self.ended.notify_all();
+    }
+
+    /// Waits until nothing ends `key`'s programs, for up to `within`: whether nothing does.
+    fn wait(&self, key: &PaneKey, within: Duration) -> bool {
+        let deadline = Instant::now() + within;
+        let mut keys = self.keys.lock().unwrap_or_else(PoisonError::into_inner);
+        while keys.contains(key) {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            keys = self
+                .ended
+                .wait_timeout(keys, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        true
+    }
+}
+
 /// The installer owns admission until restart, or until failure drops this guard.
 pub struct UpdatePermit(Arc<PaneTable>);
 
@@ -432,10 +504,12 @@ impl PaneTable {
     pub fn closing_within(grace: Duration) -> Self {
         Self {
             panes: Mutex::new(HashMap::new()),
+            cancelled: Mutex::new(VecDeque::new()),
             #[cfg(any(test, feature = "test-support"))]
             next_id: AtomicU64::new(1),
             updating: AtomicBool::new(false),
             teardown: Arc::new(Teardown::default()),
+            ending: Arc::new(Ending::default()),
             exits: Arc::new(owed::ExitsOwed::default()),
             close_grace: grace,
         }
@@ -524,6 +598,9 @@ impl PaneTable {
         }
         if panes.contains_key(&key) {
             return Err(PaneError::AlreadyOpen(key));
+        }
+        if self.uncancel(&key) {
+            return Err(PaneError::Cancelled(key));
         }
 
         // A window whose tree cannot be owned does not open: closing it could not end
@@ -860,9 +937,45 @@ impl PaneTable {
     fn close_pane(&self, key: &PaneKey, told: bool) -> Result<(), PaneError> {
         let mut panes = self.lock_panes()?;
         let Some(pane) = panes.remove(key) else {
-            return Ok(());
+            // Gone already, or not open yet: an open of it that comes now is one
+            // the daemon gave up on (its answer came too late), and it never opens.
+            // One being ended by a close before this is gone once that close is over.
+            self.cancel(key);
+            drop(panes);
+            if self.ending.wait(key, self.close_grace + EXIT_GRACE) {
+                return Ok(());
+            }
+            return Err(PaneError::Ending(key.clone()));
         };
-        self.tear_down(panes, pane, told)
+        self.tear_down(panes, key, pane, told)
+    }
+
+    /// `key` is closed before its open reached the table: that open is refused.
+    /// Called with `panes`' lock held, as the open checks it with that lock held,
+    /// so a kill and an open of one window are the one or the other way round.
+    fn cancel(&self, key: &PaneKey) {
+        let mut cancelled = self
+            .cancelled
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if cancelled.contains(key) {
+            return;
+        }
+        if cancelled.len() == CANCELLED_KEPT {
+            cancelled.pop_front();
+        }
+        cancelled.push_back(key.clone());
+    }
+
+    /// Whether `key` was closed before its open reached the table, which then
+    /// takes it off the list. Called with `panes`' lock held.
+    fn uncancel(&self, key: &PaneKey) -> bool {
+        let mut cancelled = self
+            .cancelled
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let at = cancelled.iter().position(|cancelled| cancelled == key);
+        at.and_then(|at| cancelled.remove(at)).is_some()
     }
 
     /// [`PaneTable::kill`], with the close on a thread of its own: the pane is out of the
@@ -878,17 +991,20 @@ impl PaneTable {
             return Ok(());
         };
         self.teardown.begin();
+        self.ending.begin(key);
         drop(panes);
         let (teardown, grace) = (Arc::clone(&self.teardown), self.close_grace);
-        let ender = Arc::clone(&teardown);
+        let (ender, ending, ended) = (Arc::clone(&teardown), Arc::clone(&self.ending), key.clone());
         std::thread::Builder::new()
             .name("consensflow-pty-ender".to_string())
             .spawn(move || {
                 let _ = end_pane(pane, &ender, grace, true);
+                ending.end(&ended);
             })
             .map(|_| ())
             .map_err(|error| {
                 teardown.resolve(false);
+                self.ending.end(key);
                 PaneError::Io(error)
             })
     }
@@ -918,7 +1034,7 @@ impl PaneTable {
             };
             if has_exited(pane)? {
                 if let Some(pane) = panes.remove(key) {
-                    self.tear_down(panes, pane, true)?;
+                    self.tear_down(panes, key, pane, true)?;
                 }
                 return Ok(true);
             }
@@ -936,12 +1052,16 @@ impl PaneTable {
     fn tear_down(
         &self,
         panes: MutexGuard<'_, HashMap<PaneKey, Pane>>,
+        key: &PaneKey,
         pane: Pane,
         told: bool,
     ) -> Result<(), PaneError> {
         self.teardown.begin();
+        self.ending.begin(key);
         drop(panes);
-        end_pane(pane, &self.teardown, self.close_grace, told)
+        let ended = end_pane(pane, &self.teardown, self.close_grace, told);
+        self.ending.end(key);
+        ended
     }
 
     /// The built-in ConPTY keeps a pane's output open after its program exits
@@ -1448,7 +1568,7 @@ mod tests {
         process_exists, serial_pty_test, write_paste_via, OpenedPane, PaneEnvironment, PaneKey,
         Sentinel,
     };
-    use super::{PaneError, PaneTable};
+    use super::{PaneError, PaneTable, CANCELLED_KEPT};
 
     fn terminal_size(rows: u16, cols: u16) -> PtySize {
         PtySize {
@@ -1654,6 +1774,107 @@ mod tests {
                 idle_ms: 0,
             }]
         );
+    }
+
+    /// A window the daemon killed before its open reached the table never opens: the
+    /// daemon gave up on that open at its deadline and its kill found nothing (kluris,
+    /// 2026-10-26: the window started three seconds after the deadline and worked on
+    /// unseen). The next generation of the window opens as ever.
+    #[cfg(unix)]
+    #[test]
+    fn a_window_killed_before_its_open_never_opens_and_its_next_generation_does() {
+        let _pty_guard = serial_pty_test();
+        let table = PaneTable::new();
+        let argv = shell("sleep 1000");
+        let env = HashMap::new();
+        let given_up = PaneKey::new("worker", 1);
+        table
+            .kill(&given_up)
+            .expect("a kill that finds nothing is no failure");
+
+        let late = table.open_at(
+            given_up.clone(),
+            Path::new("/tmp"),
+            &argv,
+            &env,
+            terminal_size(24, 80),
+        );
+        match late {
+            Err(PaneError::Cancelled(key)) => assert_eq!(key, given_up),
+            Err(other) => panic!("refused for another reason: {other}"),
+            Ok(_) => panic!("the window given up on opened"),
+        }
+        assert!(table.list().expect("list").is_empty());
+
+        let next = PaneKey::new("worker", 2);
+        let reader = table
+            .open_at(
+                next.clone(),
+                Path::new("/tmp"),
+                &argv,
+                &env,
+                terminal_size(24, 80),
+            )
+            .expect("the next generation opens");
+        table.kill(&next).expect("kill the next generation");
+        assert_eq!(read_to_end(reader), b"");
+    }
+
+    /// A kill of a window that a kill before it is still ending answers once that one
+    /// has ended its program: the daemon asks again where its first kill of a window it
+    /// gave up on went unanswered, and opens the next window on the answer.
+    #[cfg(unix)]
+    #[test]
+    fn a_kill_of_a_window_another_kill_is_ending_answers_once_its_program_is_gone() {
+        let _pty_guard = serial_pty_test();
+        let table = Arc::new(PaneTable::closing_within(Duration::from_secs(2)));
+        let OpenedPane { key, mut reader } =
+            open_shell(&table, &cf_base::fixture::deaf("TERM HUP", "printf ready"));
+        let mut shown = Vec::new();
+        let mut chunk = [0_u8; 64];
+        while !String::from_utf8_lossy(&shown).contains("ready") {
+            let read = reader.read(&mut chunk).expect("read the pane");
+            assert!(read > 0, "the pane ended before it was ready");
+            shown.extend_from_slice(&chunk[..read]);
+        }
+        let pid = child_process_id(&table, &key);
+        let first = {
+            let (table, key) = (Arc::clone(&table), key.clone());
+            thread::spawn(move || table.kill(&key))
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !table.list().expect("list").is_empty() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            table.list().expect("list").is_empty(),
+            "the first kill took it"
+        );
+        assert!(process_exists(pid), "it waits out its grace");
+
+        table.kill(&key).expect("the second kill");
+        assert!(!process_exists(pid), "answered while its program still ran");
+        first.join().unwrap().expect("the first kill");
+        drop(reader);
+    }
+
+    /// The windows killed before they opened are the latest [`CANCELLED_KEPT`]: the kills
+    /// of windows long gone, which find nothing as well, push out the oldest, and a window
+    /// is kept from opening once.
+    #[test]
+    fn the_windows_killed_before_they_opened_are_the_latest_few() {
+        let table = PaneTable::new();
+        let key = |generation: u64| super::PaneKey::new("worker", generation);
+        for generation in 0..=u64::try_from(CANCELLED_KEPT).unwrap() {
+            table.kill(&key(generation)).expect("kill");
+        }
+        let panes = table.lock_panes().expect("lock");
+        assert!(!table.uncancel(&key(0)), "the oldest made room");
+        assert!(table.uncancel(&key(1)));
+        assert!(!table.uncancel(&key(1)), "once");
+        let last = u64::try_from(CANCELLED_KEPT).unwrap();
+        assert!(table.uncancel(&key(last)));
+        drop(panes);
     }
 
     #[cfg(unix)]
@@ -2508,7 +2729,12 @@ mod tests {
         let _pty_guard = serial_pty_test();
         const BACKLOG_BYTES: usize = 64;
         const INPUT_BYTES: usize = 1 + 511 * 1024;
-        const FLOW_TIMEOUT: Duration = Duration::from_secs(10);
+        // How long the flow may go without a step: a chunk of output, an ack, the write's end.
+        // The flow itself is not timed: it is a thousand round trips of 64 bytes of output
+        // and an ack each, then half a megabyte of input, and takes 4 s alone and over ten at
+        // a load of 100 (T-581: 3 of 7 runs out of ten seconds at that load, the output
+        // flowing all the while). A flow that is stuck is stuck for ever.
+        const STALL: Duration = Duration::from_secs(30);
 
         let table = Arc::new(PaneTable::new());
         let streamed = table
@@ -2532,7 +2758,7 @@ mod tests {
         let mut last_seq = 0;
         while initial_output.len() < BACKLOG_BYTES {
             let chunk = output
-                .recv_timeout(Duration::from_secs(1))
+                .recv_timeout(STALL)
                 .expect("fill raw child output window");
             last_seq = chunk.seq;
             initial_output.extend(chunk.bytes);
@@ -2570,11 +2796,25 @@ mod tests {
             Err(std::sync::mpsc::TryRecvError::Empty)
         ));
 
-        let started = Instant::now();
-        table
-            .write(&responsive_key, b"R")
+        // The write to the other pane returns while this one's is blocked: it would, if it
+        // were held up by the flow, wait for acks that only come once it has returned.
+        let (answer_sender, answer_receiver) = std::sync::mpsc::channel();
+        let (answering_table, answering_key) = (Arc::clone(&table), responsive_key.clone());
+        let answering = thread::spawn(move || {
+            let _ = answer_sender.send(answering_table.write(&answering_key, b"R"));
+        });
+        answer_receiver
+            .recv_timeout(STALL)
+            .expect("write to unrelated pane returns while the flood cycle is blocked")
             .expect("write to unrelated pane while the flood cycle is blocked");
-        assert!(started.elapsed() < Duration::from_millis(500));
+        answering.join().expect("responsive writer thread");
+        assert!(
+            matches!(
+                write_receiver.try_recv(),
+                Err(std::sync::mpsc::TryRecvError::Empty)
+            ),
+            "the blocked write was still blocked when the other returned"
+        );
         assert_eq!(
             String::from_utf8(read_to_end(responsive_reader))
                 .expect("responsive recorder output")
@@ -2590,7 +2830,6 @@ mod tests {
             consumer_table
                 .ack(&consumer_key, last_seq)
                 .expect("release initial output window");
-            let deadline = Instant::now() + FLOW_TIMEOUT;
             loop {
                 let compact = String::from_utf8_lossy(&terminal_output)
                     .split_whitespace()
@@ -2598,10 +2837,9 @@ mod tests {
                 if compact.contains("INPUT:5a") {
                     return terminal_output;
                 }
-                assert!(Instant::now() < deadline, "raw child did not consume input");
                 let chunk = output
-                    .recv_timeout(Duration::from_secs(1))
-                    .expect("receive flood output after ack");
+                    .recv_timeout(STALL)
+                    .expect("raw child did not consume input: no output after an ack");
                 consumer_table
                     .ack(&consumer_key, chunk.seq)
                     .expect("ack flood output");
@@ -2609,12 +2847,14 @@ mod tests {
             }
         });
 
+        // The child prints INPUT once it has consumed all the input, and the write is over
+        // by then: the output is followed to there, and the write's end is waited for after.
+        let terminal_output = consumer.join().expect("output consumer thread");
         write_receiver
-            .recv_timeout(FLOW_TIMEOUT)
+            .recv_timeout(STALL)
             .expect("blocked input write resumes after output acks")
             .expect("write complete input body");
         writer.join().expect("input writer thread");
-        let terminal_output = consumer.join().expect("output consumer thread");
         assert!(String::from_utf8_lossy(&terminal_output)
             .split_whitespace()
             .collect::<String>()

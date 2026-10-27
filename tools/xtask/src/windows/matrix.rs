@@ -106,6 +106,7 @@ pub fn run(
                 inside: ".".to_owned(),
                 env: options.env.clone(),
                 command: eval(options, scenario, pair),
+                wait: options.wait,
             };
             build = false;
             let verdict = match once(remote, &run, &log)? {

@@ -466,3 +466,21 @@ find = """
 replace = """
     let _ = (fcntl, FcntlArg::F_SETFD(FdFlag::empty()), stray.as_raw_fd());
 """
+
+# Integration B round 2 (T-800): the stray is a file of the test's own, found by its name; a `/dev/null`
+# stray, found by its number, was taken for one a program left where the program held a `/dev/null` of
+# its own at that number (node at 11: the loopback server, 1 run in 10).
+
+[[plant]]
+name = "descriptors: a program that holds a /dev/null of its own is taken for one left the stray"
+meant = "a_program_holding_a_file_of_its_own_at_the_strays_number_does_not_hold_the_stray"
+runs = ["process-test-support"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/test_support.rs"
+find = """
+            .any(|line| line.starts_with('n') && line.ends_with(&format!("/{name}")))
+"""
+replace = """
+            .any(|line| !name.is_empty() && line.starts_with('n') && line.ends_with("/dev/null"))
+"""

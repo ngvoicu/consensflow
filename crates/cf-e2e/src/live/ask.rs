@@ -24,8 +24,8 @@ use crate::process::Run;
 use crate::{cf, Error, Result};
 
 pub use launch::{
-    devin_hooks, devin_launch, devin_ready, devin_took, pi_launch, DevinLaunch, DevinReady,
-    DevinTook, PiLaunch,
+    devin_config, devin_hooks, devin_launch, devin_ready, devin_took, pi_launch, DevinLaunch,
+    DevinReady, DevinTook, PiLaunch,
 };
 pub use readiness::{devin_readiness, DevinReadiness};
 
@@ -162,19 +162,6 @@ pub struct Record {
     pub jobs_retired: u64,
     /// How many of the jobs are monitors whose notice of their end came.
     pub monitors_noticed: u64,
-}
-
-impl Record {
-    /// Whether the record reads a turn at work and nothing else: not settled, its word
-    /// `in-flight`, and the turn neither failed nor stopped by a quota. The daemon's
-    /// `settled` is false for a record read `unknown` too, and a turn that failed or ran
-    /// out of quota is none at work.
-    pub fn in_flight_alone(&self) -> bool {
-        !self.settled
-            && self.settlement == "in-flight"
-            && matches!(self.failed, Value::Null | Value::Bool(false))
-            && self.quota.is_null()
-    }
 }
 
 /// What the record of the conversation `session` of a harness of the kind
@@ -537,34 +524,6 @@ mod tests {
         let going = record_of(&going).unwrap();
         assert!(!going.settled && going.items.is_empty());
         assert_eq!(going.settlement, "in-flight");
-    }
-
-    #[test]
-    fn a_record_reads_in_flight_alone_only_where_the_turn_is_at_work_and_neither_failed_nor_out_of_quota(
-    ) {
-        let reading = |settled: bool, state: &str, failed: Value, quota: Value| {
-            record_of(&json!({
-                "settled": settled,
-                "reading": {
-                    "items": [{ "id": "u1", "role": "user", "text": "Hello" }],
-                    "settlement": { "state": state },
-                    "failed": failed,
-                    "quota": quota,
-                },
-            }))
-            .unwrap()
-        };
-        let stopped = json!({ "resetsAt": "2026-10-24T20:00:00.000Z" });
-        assert!(reading(false, "in-flight", json!(false), Value::Null).in_flight_alone());
-        // The key absent reads as not failed.
-        assert!(reading(false, "in-flight", Value::Null, Value::Null).in_flight_alone());
-        // Every other word of the record leaves the daemon's `settled` false or true, and
-        // none is a turn at work.
-        assert!(!reading(true, "settled", json!(false), Value::Null).in_flight_alone());
-        assert!(!reading(false, "unknown", json!(false), Value::Null).in_flight_alone());
-        assert!(!reading(false, "in-flight", json!(true), Value::Null).in_flight_alone());
-        assert!(!reading(false, "in-flight", json!(false), stopped).in_flight_alone());
-        assert!(!reading(true, "in-flight", json!(false), Value::Null).in_flight_alone());
     }
 
     #[test]

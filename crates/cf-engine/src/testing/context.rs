@@ -215,6 +215,7 @@ impl Context {
             limits: Limits {
                 arrival_ms: 30_000,
                 launch_ms: 120_000,
+                open_ms: 60_000,
                 max_attempts: 3,
             },
         };

@@ -248,7 +248,7 @@ pub fn register_pane_handlers(
     });
 
     // What the window's tree has running that is the turn's work: what began after
-    // its last mark and the host can prove its.
+    // its last mark and the host can prove its; and what may be the window's outside it.
     let background_panes = Arc::clone(&panes);
     builder.on("pane.background", move |_bridge, body| {
         let request: PaneRequest = parse_body(body)?;
@@ -256,7 +256,13 @@ pub fn register_pane_handlers(
         let background = background_panes
             .background(&key)
             .map_err(|error| error.to_string())?;
-        Ok(json!({"ok":true,"total":background.total,"processes":background.processes}))
+        let mut answer =
+            json!({"ok":true,"total":background.total,"processes":background.processes});
+        // Only where it names any, as an exit says it.
+        if !background.possibly_left.is_empty() {
+            answer["possiblyLeft"] = json!(background.possibly_left);
+        }
+        Ok(answer)
     });
 
     // Which commands of the window's harness run in its tree now, less what ran at the
@@ -418,9 +424,9 @@ fn stream_to_page(
             // How it ended by itself, where that came after the output did; not the
             // host's own end of it.
             let status = status.or_else(|| (!handed.ended_by_host).then(|| ended.get()).flatten());
-            // What may be the window's and runs on, which no close or ending signals: named
-            // as the program is proven gone, which a close's ending of what is the window's
-            // does not change.
+            // What may be the window's and runs on, which no close signals: named as the
+            // program is proven gone, which the close's ending of what is the window's does
+            // not change.
             let left = Left {
                 background,
                 possibly: possibly_left(

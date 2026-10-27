@@ -44,7 +44,10 @@ use std::rc::Rc;
 use cf_base::refusal::Refusal;
 use cf_ledger::{ParticipantView, TaskThread, TaskView};
 
-use super::{leftovers, lost_in_turn, with_leftovers, with_lost, words_of};
+use super::{
+    first_on_its_way, leftovers, lost_in_turn, pending_after_look, watching_of, with_leftovers,
+    with_lost, words_of,
+};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
@@ -171,15 +174,15 @@ impl Dispatcher {
             })?;
         // The task may have moved while the window was read.
         let (thread, _, _) = self.finishable(project, number)?;
-        let none = || {
-            refused(
-                "no-answer",
+        if first_on_its_way(record) {
+            return Err(refused(
+                "first-message-on-its-way",
                 format!(
-                    "cannot finish T-{number}: @{} has written no complete answer since its latest message about it; wait for one, or cancel it",
+                    "cannot finish T-{number}: @{}'s window has not shown its first message yet, and its answer to it is the result; finish it once it has answered it, or cancel it",
                     participant.handle
                 ),
-            )
-        };
+            ));
+        }
         let items = observed.items();
         let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
         let start = self
@@ -196,6 +199,24 @@ impl Dispatcher {
         // Where torn-line counts the lines its record lost from (`lost_in_turn`): the paste of
         // the latest message about the task, before any later one (3.0.6-alpha.3's integration B).
         let delivered = self.delivered_at(participant.id, &thread, items)?;
+        let lost = lost_in_turn(record, &observed, delivered);
+        // A line lost in the turn may have been the answer: the refusal says so (Calliope's
+        // P3 (a), T-624).
+        let none = || {
+            let handle = &participant.handle;
+            let because = match lost {
+                Some(line) => format!(
+                    "; a line of @{handle}'s record was lost (record {line}) in the turn, which may have been its answer: send it a message about the task, or cancel it"
+                ),
+                None => "; wait for one, or cancel it".to_owned(),
+            };
+            refused(
+                "no-answer",
+                format!(
+                    "cannot finish T-{number}: @{handle} has written no complete answer since its latest message about it{because}"
+                ),
+            )
+        };
         let run = answers_to_the_task(&items[start + 1..], &replacements)
             .and_then(|answers| answers.complete_run)
             .ok_or_else(none)?;
@@ -216,12 +237,10 @@ impl Dispatcher {
                 ),
             ));
         }
-        let pending = observed.pending();
-        let words = with_lost(
-            words_of(&run),
-            &participant.handle,
-            lost_in_turn(record, &observed, delivered),
-        );
+        // What the turn left, as the note to the chief counts it: a monitor that said it ended
+        // is over where a look found no command in the window.
+        let pending = pending_after_look(&observed, watching_of(&record.held.borrow()));
+        let words = with_lost(words_of(&run), &participant.handle, lost);
         let body = with_leftovers(
             words,
             &leftovers(&participant.handle, pending, Some(by), observed.settled),

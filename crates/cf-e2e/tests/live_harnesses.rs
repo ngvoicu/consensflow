@@ -100,7 +100,7 @@ impl Admin {
             vars.retain(|(known, _)| known != "PATH");
             vars.push(("PATH".to_owned(), path.to_string_lossy().into_owned()));
         }
-        let mut daemon = Daemon::start(vars)?;
+        let mut daemon = home.daemon_with(vars)?;
         let handle = daemon.handle(Duration::from_secs(60))?;
         Ok(Self {
             url: handle["url"].as_str().unwrap_or_default().to_owned(),

@@ -294,6 +294,7 @@ fn said_by(role: Role, text: &str, complete: bool) -> Item {
         complete,
         at: None,
         commentary: false,
+        synthetic: false,
         compaction: false,
     }
 }
@@ -550,6 +551,8 @@ fn a_displaced_message_that_rides_in_the_paste_of_another_is_not_begun_and_its_l
         entered_again: false,
         carried: Vec::new(),
         session: None,
+        owed: None,
+        late: false,
     };
     assert!(
         context

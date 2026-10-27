@@ -3,9 +3,11 @@
 //! as `show` writes one; a failure V8 threw is said here in words of its own.
 
 mod cells;
+mod compaction;
 mod logs;
 mod messages;
 mod rows;
+mod stamped;
 mod turns;
 
 use std::fs;

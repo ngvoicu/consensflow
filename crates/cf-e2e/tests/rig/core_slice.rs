@@ -11,7 +11,7 @@ use cf_e2e::{files, Error};
 use regex::Regex;
 use serde_json::{json, Value};
 
-use crate::{after, config, rig, secs, session_of, Outcome};
+use crate::{after, config, first_told, on_command_line, rig, secs, session_of, Outcome};
 
 /// The tier the member `added` was given, as a word the chief's brief names.
 fn tier(added: &Value) -> &str {
@@ -53,12 +53,15 @@ fn a_chief_hands_a_task_to_a_worker_through_the_board_and_the_result_lands_in_it
         .find(|frame| frame["id"] == worker_id.as_str())
         .unwrap_or(Value::Null);
     let argv = worker_frame["argv"].as_array().cloned().unwrap_or_default();
-    let brief = argv.last().and_then(Value::as_str).unwrap_or_default();
+    // The brief is on no word of the window's command line: the window is given it once
+    // up, the first message of its conversation (T-432).
+    assert!(!on_command_line(&worker_frame, "WORKER_OK"), "{argv:?}");
+    let brief = first_told(&rig, &session_of(&worker_frame));
     assert!(
         Regex::new(
             r"^\[ConsensFlow m-\d+ · T-1 · task from @chief\]\nReply with exactly: WORKER_OK$"
         )?
-        .is_match(brief),
+        .is_match(&brief),
         "{brief:?}"
     );
     assert!(
@@ -262,7 +265,10 @@ fn switching_the_chief_opens_a_fresh_window_that_gets_the_handoff_and_reads_what
 #[test]
 fn a_restart_leaves_the_project_suspended_and_the_humans_resume_brings_the_chief_back_on_its_own_conversation(
 ) -> Outcome {
-    let mut rig = rig()?;
+    // The stand-in takes two seconds to say it is at rest once its answer is in its
+    // record, as a loaded machine makes it: the case goes on when the daemon has seen
+    // the chief at rest, and not when the answer is there.
+    let mut rig = Rig::start(config().var("CF_TEST_REST_MS", "2000"))?;
     // The human's own agent, not the rig's: the restart must keep the roster.
     let roster = json!({
         "schemaVersion": 1,
@@ -282,6 +288,14 @@ fn a_restart_leaves_the_project_suspended_and_the_humans_resume_brings_the_chief
             .transcript(&session)
             .contains("\"text\":\"BEFORE-RESTART\""))
     })?;
+    // And its turn to be over in the record: the answer is there before the end of the
+    // turn is (Claude writes the stop hooks' summary a moment on, and the record of a
+    // turn without it reads as cut), so a quit between them cuts the turn.
+    rig.wait_for("the chief's turn to end in its record", secs(30), || {
+        Ok(rig
+            .transcript(&session)
+            .contains("\"subtype\":\"stop_hook_summary\""))
+    })?;
 
     // The app's quit order: the daemon dies first, then the pane host.
     rig.kill_daemon();
@@ -294,13 +308,30 @@ fn a_restart_leaves_the_project_suspended_and_the_humans_resume_brings_the_chief
     let board = Project::new(&rig, project).board()?;
     assert_eq!(board["project"]["state"], "suspended");
     // Its Resume brings the chief back on the conversation it had, which was at
-    // rest when the app quit: it is told nothing.
+    // rest when the app quit: it is told nothing. Whether its turn was cut is read
+    // before its window opens, and a note that says so is its first message, pasted
+    // once it is up (a while after the window opens, on a loaded machine): the
+    // chief's inbox, once the window has opened, says whether one was written
+    // (integration B round 2, T-800: its record, read then, never held it yet).
     let resumed = rig.page("project.resume", json!({ "project": project }))?;
     assert_eq!(resumed["ok"], true, "{resumed}");
     let again = rig.open_frame(&format!("p{project}-chief"), secs(30))?;
     assert_eq!(after(&again, "--resume"), session, "{:?}", again["argv"]);
-    let board = Project::new(&rig, project).board()?;
-    assert_eq!(board["project"]["state"], "open");
+    let resumed = Project::new(&rig, project);
+    assert_eq!(resumed.board()?["project"]["state"], "open");
+    let told: Vec<Value> = resumed
+        .inbox("chief")?
+        .into_iter()
+        .filter(|message| {
+            message["body"]
+                .as_str()
+                .is_some_and(|body| body.contains("ConsensFlow stopped"))
+        })
+        .collect();
+    assert!(
+        told.is_empty(),
+        "the chief was told its turn was cut: {told:?}"
+    );
     assert!(!rig.transcript(&session).contains("ConsensFlow stopped"));
     rig.close()?;
     Ok(())

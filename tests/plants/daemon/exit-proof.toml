@@ -233,3 +233,39 @@ find = """
                         self.left_exits.borrow_mut().remove(&participant);"""
 replace = """
                     let _ = self.left_exits.borrow_mut().remove(&participant);"""
+
+# Calliope's P3-1 and P3-3 on 46664f52 (T-621, T-646): the skip in `keep_proof` is by another window
+# of the participant on the same conversation, opened or opening (`Opening::conversation`), not by
+# any window at all; and the skip on the exit's own path has its test (a same-task reopen of a
+# deleted session, whose first window still waits for its kill, goes on in the conversation).
+
+[[plant]]
+name = "exit proof: any window of the participant, on any conversation, keeps an exit's proof from its own"
+meant = "a_brought_back_windows_end_on_its_new_conversation_is_kept_while_the_deleted_sessions_window_waits_for_its_kill"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                    (window.pane.is_some() && window.conversation == on)"
+replace = "                    window.pane.is_some()"
+
+[[plant]]
+name = "exit proof: another window running on the conversation keeps no exit's proof from it"
+meant = "a_brought_back_windows_end_proves_nothing_of_the_conversation_the_deleted_sessions_window_still_runs_on"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        if !windowed {"
+replace = "        if !windowed || true {"
+
+[[plant]]
+name = "exit proof: a window opening on the conversation is taken for one on none"
+meant = "a_late_word_while_a_window_opens_on_the_conversation_proves_nothing_of_it"
+runs = ["ep-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            conversation: resumed_on,"
+replace = "            conversation: None,"
+

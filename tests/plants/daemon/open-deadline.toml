@@ -1,0 +1,207 @@
+# A window whose open the pane host did not answer by the open's deadline (T-669; kluris,
+# 2026-10-26, T-668's diagnosis): the host goes on with an open it was asked for, and the
+# window started three seconds after the daemon gave up on it, ran its brief unseen for
+# fourteen minutes and held the Codex thread the task sent again opened on. The bridge's
+# deadline is no refusal (`crates/cf-daemon/src/host.rs`, `opened`: `Opened::Unanswered`);
+# the engine ends such a window and takes no proof from it, and no other window of the
+# participant opens until the host says it has ended it, asked again at each step
+# (`crates/cf-engine/src/windows.rs`, `end_abandoned`; `crates/cf-engine/src/dispatcher.rs`,
+# `step` and `pass`); and the pane host never opens a window it was asked to kill before its
+# open reached it (`crates/cf-panes/src/pty.rs`, `cancel` and `uncancel`). The daemon's open
+# deadline can be cut for a test (`CONSENSFLOW_OPEN_DEADLINE_MS`,
+# `crates/cf-engine/src/seams.rs`). The case on the rig is
+# `crates/cf-e2e/tests/regressions/a_window_whose_open_missed_its_deadline_worked_on_unseen.rs`,
+# which builds the native `cf` and pane host from the sources as planted, so its plants say
+# `builds`.
+#
+# Every name holds `open deadline`, so `npm run plants:daemon -- "open deadline"` runs them all.
+
+[run]
+# The engine's tests of a window whose open went unanswered, on the fake windows.
+od-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "open_deadline::"]
+# The engine's limits, the open's wait among them.
+od-limits = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "seams::"]
+# The daemon's end of the host: what an open's answer, or none, is.
+od-host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::"]
+# The pane table's windows killed before they opened.
+od-panes = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::tests::"]
+# The field's shape on the rig: the real daemon and pane host, the open held in the rig.
+od-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_window_whose_open_missed_its_deadline_worked_on_unseen::"]
+
+[[plant]]
+name = "open deadline: an open the host did not answer in time is taken for a refusal"
+meant = "an_open_the_host_never_answers_is_unanswered_after_sixty_seconds_not_refused"
+runs = ["od-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "    if error == DEADLINE {"
+replace = "    if error == DEADLINE && false {"
+
+[[plant]]
+name = "open deadline rig: an open the host did not answer in time is taken for a refusal, and its window works on unseen"
+meant = "an_open_whose_answer_came_after_its_deadline_has_every_process_of_its_window_ended"
+runs = ["od-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "    if error == DEADLINE {"
+replace = "    if error == DEADLINE && false {"
+
+[[plant]]
+name = "open deadline: the window given up on is not killed"
+meant = "an_open_the_host_did_not_answer_in_time_is_killed_and_keeps_no_proof_of_the_window_before"
+runs = ["od-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "                record.window.borrow_mut().abandoned = Some(Abandoned {\n                    pane: pane.clone(),\n                    told: false,\n                });"
+replace = "                let _ = &pane;"
+
+[[plant]]
+name = "open deadline rig: the window given up on is not killed, and holds the Codex thread the task sent again opens on"
+meant = "a_codex_thread_a_window_given_up_on_held_is_free_for_the_task_sent_again"
+runs = ["od-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "                record.window.borrow_mut().abandoned = Some(Abandoned {\n                    pane: pane.clone(),\n                    told: false,\n                });"
+replace = "                let _ = &pane;"
+
+[[plant]]
+name = "open deadline: an open the host did not answer in time keeps the proof of the window before, as integration B's merge did"
+meant = "an_open_the_host_did_not_answer_in_time_is_killed_and_keeps_no_proof_of_the_window_before"
+runs = ["od-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "                record.window.borrow_mut().abandoned = Some(Abandoned {\n                    pane: pane.clone(),\n                    told: false,\n                });"
+replace = "                record.window.borrow_mut().abandoned = Some(Abandoned {\n                    pane: pane.clone(),\n                    told: false,\n                });\n                if let Some(id) = resumed_on.filter(|_| proven) {\n                    self.seams.ledger.borrow_mut().set_program_gone(id, true)?;\n                }"
+
+[[plant]]
+name = "open deadline: the next window of a session opens while the one given up on may run"
+meant = "the_next_window_of_a_session_waits_until_the_host_has_ended_the_one_given_up_on"
+runs = ["od-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        if !self.end_abandoned(record).await? {\n            return Ok(());\n        }\n        record.window.borrow_mut().launches += 1;"
+replace = "        let _ = self.end_abandoned(record).await?;\n        record.window.borrow_mut().launches += 1;"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        if !self.end_abandoned(&record).await? {\n            return Ok(());\n        }"
+replace = "        let _ = self.end_abandoned(&record).await?;"
+
+[[plant]]
+name = "open deadline: a member with nothing more for it is not stepped, and the kill of its window given up on is never asked again"
+meant = "the_next_window_of_a_session_waits_until_the_host_has_ended_the_one_given_up_on"
+runs = ["od-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                    && self.pane(participant.id).is_none()\n                    && !self.abandoned(participant.id);"
+replace = "                    && self.pane(participant.id).is_none()\n                    && (true || !self.abandoned(participant.id));"
+
+[[plant]]
+name = "open deadline: a step of a participant with no window does not ask again for the end of its window given up on"
+meant = "the_next_window_of_a_session_waits_until_the_host_has_ended_the_one_given_up_on"
+runs = ["od-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        if !self.end_abandoned(&record).await? {\n            return Ok(());\n        }"
+replace = "        if false && !self.end_abandoned(&record).await? {\n            return Ok(());\n        }"
+
+[[plant]]
+name = "open deadline: a kill that finds no window lets its open come later"
+meant = "a_window_killed_before_its_open_never_opens_and_its_next_generation_does"
+runs = ["od-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = "            self.cancel(key);\n            drop(panes);"
+replace = "            drop(panes);"
+
+[[plant]]
+name = "open deadline rig: a kill that finds no window lets its open come later, and the window given up on starts"
+meant = "an_open_given_up_on_before_the_host_started_it_never_starts_and_the_task_sent_again_takes_its_message_once"
+runs = ["od-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = "            self.cancel(key);\n            drop(panes);"
+replace = "            drop(panes);"
+
+[[plant]]
+name = "open deadline: an open does not look at the windows killed before they opened"
+meant = "a_window_killed_before_its_open_never_opens_and_its_next_generation_does"
+runs = ["od-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = "        if self.uncancel(&key) {"
+replace = "        if false && self.uncancel(&key) {"
+
+[[plant]]
+name = "open deadline: the windows killed before they opened are kept without bound"
+meant = "the_windows_killed_before_they_opened_are_the_latest_few"
+runs = ["od-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = "            cancelled.pop_front();"
+replace = "            let _ = &cancelled;"
+
+[[plant]]
+name = "open deadline: the environment's open wait is not read"
+meant = "the_open_wait_is_a_minute_unless_the_environment_names_a_number_of_milliseconds"
+runs = ["od-limits"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/seams.rs"
+find = "            open_ms: named(OPEN_MS_VARIABLE).unwrap_or(default.open_ms),"
+replace = "            open_ms: default.open_ms,"
+
+[[plant]]
+name = "open deadline: the daemon's host waits a minute for an open whatever it was given"
+meant = "an_open_waits_as_long_as_the_daemon_gives_the_host"
+runs = ["od-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "            .request(\"pane.open\", body, Some(self.open_deadline));"
+replace = "            .request(\"pane.open\", body, Some(OPEN_DEADLINE));"
+
+[[plant]]
+name = "open deadline: a kill of a window a kill before it is still ending answers before its program is gone"
+meant = "a_kill_of_a_window_another_kill_is_ending_answers_once_its_program_is_gone"
+runs = ["od-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = "            if self.ending.wait(key, self.close_grace + EXIT_GRACE) {"
+replace = "            if true || self.ending.wait(key, self.close_grace + EXIT_GRACE) {"
+
+[[plant]]
+name = "open deadline: the trace says the kill of the window given up on failed at every step"
+meant = "the_next_window_of_a_session_waits_until_the_host_has_ended_the_one_given_up_on"
+runs = ["od-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        if !told {"
+replace = "        if true || !told {"
+
+[[plant]]
+name = "open deadline: an exit is a window's by its id alone, and the end of the window given up on closes the next"
+meant = "the_end_of_the_window_given_up_on_told_after_the_next_one_opened_is_nothing_to_it"
+runs = ["od-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        let ended = |candidate: Option<&Pane>| candidate.is_some_and(|candidate| candidate == pane);"
+replace = "        let ended = |candidate: Option<&Pane>| candidate.is_some_and(|candidate| candidate.id == pane.id);"

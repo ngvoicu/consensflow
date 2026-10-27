@@ -117,6 +117,14 @@ impl Keys {
         self.input.buffer.clear();
     }
 
+    /// Puts `text` back in front of what is typed, as Claude Code puts a cancelled
+    /// command back in its input box: what is pasted or typed next goes after it.
+    // The stand-in Devin, which reads its terminal here too, cancels no command.
+    #[allow(dead_code)]
+    pub fn put_back(&mut self, text: &str) {
+        self.input.buffer.insert_str(0, text);
+    }
+
     /// What the terminal gave since the last call, as events, waiting a moment
     /// for it (an Escape that nothing follows in that moment is the key). None
     /// when the terminal is gone.

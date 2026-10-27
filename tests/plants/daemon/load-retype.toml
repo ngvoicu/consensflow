@@ -23,6 +23,8 @@ panes-lib-snapshot = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "
 panes-lib-handlers = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::"]
 e2e-lib-route = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::route::"]
 harness-reading = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::reading::"]
+engine-resume-close-look = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::a_window_that_asks_and_ends_by_itself_while_the_close_looks_past"]
+e2e-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger::"]
 harness-contract = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "contract::tests::"]
 rig-regression-load-retype = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_message_the_chief_took_was_typed_in_again_under_load::"]
 
@@ -398,3 +400,91 @@ file = "crates/cf-harness/src/contract.rs"
 find = "            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => Pending::default(),"
 replace = '''            Some(Reading::Missing(_)) => Pending { jobs: 1, ..Pending::default() },
             Some(Reading::Unknown(_)) | None => Pending::default(),'''
+
+# Calliope's re-check of the merge (T-505), its P3s 1, 2 and 6 (T-663). A Close's look at an
+# asking window's screen (`bank_yes_before_close`) runs inside pass steps too (an out chief's
+# switch, here), and outlasts the bound a pass waits for its steps: the step goes on apart,
+# holding the window's record. The result follows the item the latest message's receipt
+# names, with no paste found in its stead. And the rig's look at how its stranger ended waits
+# for no pipe a process the stranger left holds.
+
+[[plant]]
+name = "load retype: a Close looks at no asking window's screen, so no pass step is left on the look"
+meant = "a_switch_whose_close_looks_at_an_asking_chief_past_the_bound_holds_its_window_apart_until_it_ends"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "        if !asking {"
+replace = "        if !asking || true {"
+
+[[plant]]
+name = "load retype: a pass steps a window whose record a step left apart holds"
+meant = "a_switch_whose_close_looks_at_an_asking_chief_past_the_bound_holds_its_window_apart_until_it_ends"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/runtime.rs"
+find = """
+    ) -> Option<Begun<T>> {
+        if self.held() {
+            return None;
+        }
+        Some(self.hold_for(spawn, work).await)"""
+replace = """
+    ) -> Option<Begun<T>> {
+        if false && self.held() {
+            return None;
+        }
+        Some(self.hold_for(spawn, work).await)"""
+
+[[plant]]
+name = "load retype: the Close marks its kill after a look at an asking window's screen held past a pass's bound"
+meant = "a_window_that_asks_and_ends_by_itself_while_the_close_looks_past_a_passs_bound_and_whose_kill_fails_leaves_its_task_paused"
+runs = ["engine-resume-close-look"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+            record.window.borrow_mut().killing.push(Killing {
+                pane: pane.clone(),
+                paused: None,
+            });
+            // The exit is settled here, and says nothing of the screen the window ends
+            // with: where it was asking, the human's yes in it is read off the screen now.
+            self.bank_yes_before_close(record, pane).await;
+'''
+replace = '''
+            // The exit is settled here, and says nothing of the screen the window ends
+            // with: where it was asking, the human's yes in it is read off the screen now.
+            self.bank_yes_before_close(record, pane).await;
+            record.window.borrow_mut().killing.push(Killing {
+                pane: pane.clone(),
+                paused: None,
+            });
+'''
+
+[[plant]]
+name = "load retype and turn-end: the answer is looked for after neither the item the receipt names nor a paste of the message"
+meant = "an_answer_its_record_shows_as_the_window_is_read_once_more_is_what_the_result_follows"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '        let receipt = latest.receipt.get("item").and_then(Value::as_str);'
+replace = '        let receipt: Option<&str> = None;'
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                && is_paste_of(&item.text, latest.id, first.as_deref())"
+replace = "                && false && is_paste_of(&item.text, latest.id, first.as_deref())"
+
+[[plant]]
+name = "load retype: the rig's look at how its stranger ended waits for the pipe a process it left holds"
+meant = "a_look_at_how_a_stranger_ended_waits_for_no_pipe_a_process_it_left_holds"
+runs = ["e2e-lib-stranger"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/stranger.rs"
+find = "        let status = self.spawned.status()?;"
+replace = "        let status = self.spawned.wait(Duration::ZERO).ok().flatten()?;"

@@ -256,10 +256,10 @@ replace = '''
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/record/wires.rs"
 find = '''
-                    .filter(|said| cause == Cause::Error && !said.trim().is_empty())
+                .filter(|said| cause == Cause::Error && !said.trim().is_empty())
 '''
 replace = '''
-                    .filter(|said| !said.trim().is_empty())
+                .filter(|said| !said.trim().is_empty())
 '''
 
 [[plant]]

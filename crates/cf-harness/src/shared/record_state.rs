@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use crate::contract::{Observed, Waiting};
+use crate::contract::{Observed, Over, Waiting};
 use crate::records::{Reading, Settlement};
 
 /// The look a record says of its window: settled when its turn is, or when
@@ -30,7 +30,7 @@ pub(crate) fn record_state(reading: Arc<Reading>) -> Observed {
     Observed {
         reading: Some(reading),
         settled,
-        over: false,
+        over: Over::No,
         waiting: None,
         failed,
         quota,
@@ -38,6 +38,7 @@ pub(crate) fn record_state(reading: Arc<Reading>) -> Observed {
         unnamed: false,
         took_back: false,
         at_prompt: false,
+        shared: false,
     }
 }
 
@@ -59,10 +60,11 @@ pub(crate) fn dialog_waiting(reading: Option<&Reading>) -> Option<Waiting> {
 pub(crate) fn switched_to(observed: Observed, session: String) -> Observed {
     Observed {
         settled: false,
-        over: false,
+        over: Over::No,
         waiting: None,
         switched: Some(session),
         at_prompt: false,
+        shared: false,
         ..observed
     }
 }

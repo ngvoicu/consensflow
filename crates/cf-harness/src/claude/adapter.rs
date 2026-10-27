@@ -31,10 +31,25 @@
 //! - A window opened again on a conversation runs a process of its own, the
 //!   one before gone with its window where the pane host proved it gone: what
 //!   that one had queued in its memory and not begun went with it, though its
-//!   record still says it is queued (T-442). The transcript's length when the
-//!   window is prepared is where the new process began, and every look the
-//!   window takes says so (`Options::relaunched_at`). Where the host could not
-//!   end the old program, or the engine never heard how it ended, none is told.
+//!   record still says it is queued (T-442). Where the transcript ended when the
+//!   window is prepared, its length and the bytes before it, is where the new
+//!   process began, and every look the window takes says so
+//!   (`Options::relaunched`). Claude Code's own statuses
+//!   say the same where the host could not: no Claude it runs shows the
+//!   conversation then, so none writes it ([`status::holders`]; a window open when
+//!   the app quit, ended after the daemon had gone, leaves no sign in the record
+//!   and no proof in the ledger, T-526). Where a Claude still shows it (one the
+//!   host could not end, or one the human started outside ConsensFlow), what it
+//!   writes past the boundary would be read as the new process's, and none is
+//!   told; so it is where neither the host nor the statuses can say.
+//! - A Claude the human starts outside ConsensFlow on a window's conversation
+//!   (`claude --resume <id>` in a terminal of their own) writes its turns into the
+//!   same transcript, in records no different from the window's: nothing in them
+//!   says which process wrote one. Its status names the conversation as the
+//!   window's does: a window that has seen another Claude show its conversation, or
+//!   one that showed it before the window opened, says so on every look
+//!   (`Observed::shared`) from then on, and the engine takes none of the record's
+//!   answers for its task's result.
 //! - The window's Claude process is the pane's own child when a status names
 //!   it, so the first look already sees a /clear. Otherwise (Claude may run
 //!   as another process the child starts) it is the process whose status
@@ -65,14 +80,14 @@ use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
-    Adapter, Admission, Held, Input, Launch, Observed, Pane, PaneHost, Prepared, Question,
-    Readiness, Records, ServersChosen, Skill, Trusts, Waiting, Window, Work,
+    Adapter, Admission, FirstMessage, Held, Input, Launch, Observed, Over, Pane, PaneHost,
+    Prepared, Question, Readiness, Records, ServersChosen, Skill, Trusts, Waiting, Window, Work,
 };
 use crate::detect::executable;
-use crate::records::{Options, Reading, Settlement};
+use crate::records::{Boundary, Options, Reading, Settlement};
 use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
-use crate::shared::input_box::{self, Unsent};
+use crate::shared::input_box::{self, InputBox, Unsent};
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::switched_to;
 use crate::shared::resumable::transcript_kept;
@@ -127,41 +142,49 @@ impl Adapter for ClaudeAdapter {
                 Some(resume) => self.records.has_transcript(Harness::Claude, resume).await?,
                 None => false,
             };
+            // The Claudes that show the conversation before this window exists:
+            // none of them is the window's.
+            let holders = if resumable {
+                status::holders(&statuses, &session)
+            } else {
+                Some(Vec::new())
+            };
             // What the record holds before this window exists is the old
             // process's, gone with its window where the pane host proved it
-            // (`Launch::previous_gone`): what it had queued and not begun went
-            // with it, and every look of this window says where the new one
-            // began (`Options::relaunched_at`). One the host could not end may
-            // still write to the record, and what it writes past the length
-            // taken would be read as the new process's: no length is taken.
-            let relaunched = if resumable && launch.previous_gone {
-                let length = self
+            // (`Launch::previous_gone`), or where Claude's statuses say no
+            // Claude shows the conversation: what it had queued and not begun
+            // went with it, and every look of this window says where the new
+            // one began (`Options::relaunched`). One still showing it may
+            // still write to the record, and what it writes past the boundary
+            // taken would be read as the new process's: none is taken.
+            let gone = holders.as_ref().map_or(launch.previous_gone, Vec::is_empty);
+            let relaunched = if resumable && gone {
+                let boundary = self
                     .records
-                    .transcript_length(Harness::Claude, &session)
+                    .transcript_boundary(Harness::Claude, &session)
                     .await?;
-                length.map(|at| (session.clone(), at))
+                boundary.map(|boundary| (session.clone(), boundary))
             } else {
                 None
             };
             let options = told(relaunched.as_ref(), &session);
-            // A turn the old process left open, which a window with no message
-            // to begin one has to be told apart from by what the record holds
-            // later. A window given a message begins its own turn.
-            let left_open = if resumable && launch.message.is_none() {
+            // A turn the old process left open, which the window has to be told
+            // apart from by what the record holds later: it begins its own only
+            // once it is delivered a message.
+            let left_open = if resumable {
                 let before = self.records.look(Harness::Claude, &session, &options).await;
                 LeftOpen::of(&before)
             } else {
                 None
             };
             let agent = launch.agent.unwrap_or_default();
-            let message = launch.message.map(window_text);
             let open = if resumable {
                 window_args::resume
             } else {
                 window_args::start
             };
             // None only for a conversation of an empty id, which no ledger holds.
-            let invocation = open(Harness::Claude, agent, Some(&session), message.as_deref())
+            let invocation = open(Harness::Claude, agent, Some(&session), None)
                 .ok_or_else(|| "a Claude window opens on a session id".to_owned())?;
             let mut argv = vec![executable];
             argv.extend(settings);
@@ -186,9 +209,14 @@ impl Adapter for ClaudeAdapter {
                     asked: RefCell::new(None),
                     pressed: RefCell::new(None),
                     restored: Cell::new(false),
+                    put_back: Cell::new(false),
+                    clear_first: Cell::new(false),
                     read_empty: Cell::new(None),
                     left_open: RefCell::new(left_open),
+                    over_since: RefCell::new(None),
                     relaunched,
+                    before: RefCell::new(holders.unwrap_or_default()),
+                    shared: Cell::new(false),
                     trusts: trust::trusts(launch.directory),
                     directory: launch.directory.to_owned(),
                 }),
@@ -223,6 +251,15 @@ impl Adapter for ClaudeAdapter {
     /// change, and those at work went on on the new account.
     fn one_account(&self) -> bool {
         true
+    }
+
+    /// Pasted once the window is past the question of trusting its folder and has
+    /// drawn, as every later message is: Claude Code 2.1.310 has no other way in
+    /// for an interactive window's first message (a SessionStart hook's
+    /// `initialUserMessage` is read and never sent, T-432). Its record wraps the
+    /// paste (`<pasted_content id="…">`), as it wraps every later message's.
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Delivered
     }
 
     /// Pasted, and its box cleared with Control-C ([`stopped::CLEAR_INPUT`]).
@@ -262,6 +299,12 @@ struct ClaudeWindow {
     /// The latest look read the window at rest by that press: Claude has put
     /// the message back in its input box.
     restored: Cell<bool>,
+    /// The latest look read the window at rest after a command Claude put back in
+    /// its input box (a compaction cancelled with Escape, `Lines::put_back`).
+    put_back: Cell<bool>,
+    /// The latest readiness read that command still in the box on the screen, with
+    /// no key of the human's since: the delivery's paste clears it first.
+    clear_first: Cell<bool>,
     /// The human's keys left something unsent by the pane host's count, and the
     /// latest readiness read the input box empty on the screen, at this count of
     /// their keys: the delivery's paste says so ([`Unsent::ReadEmpty`]).
@@ -269,10 +312,21 @@ struct ClaudeWindow {
     /// The turn the record had open when the window was opened, while the
     /// window has begun no turn of its own: the old process's.
     left_open: RefCell<Option<LeftOpen>>,
-    /// The conversation the window was opened again on, and how many bytes its
-    /// transcript held then, the window it was on closed: where the program
-    /// the window runs began writing.
-    relaunched: Option<(String, u64)>,
+    /// Since when the looks have read the turn of this last user message over by
+    /// the record while the window was not at rest (the wall clock, in
+    /// milliseconds): Claude says busy a moment before it appends the message of
+    /// a turn it begins, and the turn before reads over meanwhile.
+    over_since: RefCell<Option<(i64, Option<Arc<str>>)>>,
+    /// The conversation the window was opened again on, and where its transcript
+    /// ended then, the window it was on closed: where the program the window runs
+    /// began writing.
+    relaunched: Option<(String, Boundary)>,
+    /// The Claudes that showed the launch's conversation before the window was
+    /// opened: none of them is the window's.
+    before: RefCell<Vec<u32>>,
+    /// Another Claude than the window's has shown its conversation since it
+    /// opened (`Observed::shared`).
+    shared: Cell<bool>,
     /// What a yes to Claude Code's question about the window's folder trusts.
     trusts: Trusts,
     /// The window's folder, whose local settings keep what Claude Code was told of the
@@ -282,19 +336,46 @@ struct ClaudeWindow {
 
 /// What a look at `session` is told: where the window's program began writing,
 /// when the window was opened again on that conversation.
-fn told(relaunched: Option<&(String, u64)>, session: &str) -> Options {
+fn told(relaunched: Option<&(String, Boundary)>, session: &str) -> Options {
     Options {
-        relaunched_at: relaunched
+        relaunched: relaunched
             .filter(|(on, _)| on == session)
-            .map(|(_, at)| *at),
+            .map(|(_, boundary)| boundary.clone()),
         ..Options::default()
     }
 }
 
 impl ClaudeWindow {
+    /// Whether the record says the window's turn is over, though the look is not
+    /// at rest (`reads_over`), and has said so for [`stopped::HOLD_MS`] of the same
+    /// turn ([`Over`]): Claude's status goes busy a moment before the message of a
+    /// turn it begins is in the record, and a look in that moment reads the turn
+    /// before over (Calliope on T-551, T-644). A turn whose message came since
+    /// begins the wait anew.
+    fn held_over(&self, reads_over: bool) -> Over {
+        let mut since = self.over_since.borrow_mut();
+        if !reads_over {
+            *since = None;
+            return Over::No;
+        }
+        let now = self.time.wall_ms();
+        let turn = self.asked.borrow().clone();
+        match since.as_ref() {
+            Some((at, of)) if *of == turn && now - at >= stopped::HOLD_MS => Over::Held,
+            Some((_, of)) if *of == turn => Over::Pending,
+            _ => {
+                *since = Some((now, turn));
+                Over::Pending
+            }
+        }
+    }
+
     /// Claude's status of the window's process: the pane's own child's,
     /// when the host named it and Claude keeps one, else the status of the
-    /// process that first named the window's conversation.
+    /// process that first named the window's conversation, but one that showed
+    /// it before the window opened (`before`): that Claude is another's, the
+    /// human's outside ConsensFlow or the program before the window's, however
+    /// Claude's statuses are listed (T-800).
     fn status(&self) -> Option<Status> {
         let statuses = status::statuses(&self.statuses);
         let of = |pid: u32| {
@@ -308,12 +389,24 @@ impl ClaudeWindow {
         }
         if self.claude_pid.get().is_none() {
             let session = self.session.borrow();
+            let before = self.before.borrow();
             let named = statuses
                 .iter()
-                .find(|(_, status)| status.session == *session);
+                .find(|(pid, status)| status.session == *session && !before.contains(pid));
             self.claude_pid.set(named.map(|(pid, _)| *pid));
         }
         self.claude_pid.get().and_then(of)
+    }
+
+    /// Whether another Claude than the window's shows its conversation now: one
+    /// that showed it before the window was opened, or a second beside the
+    /// window's own. Which of two is the window's need not be known.
+    fn shares(&self) -> bool {
+        let session = self.session.borrow();
+        status::holders(&self.statuses, &session).is_some_and(|holders| {
+            let before = self.before.borrow();
+            holders.len() > 1 || holders.iter().any(|pid| before.contains(pid))
+        })
     }
 
     /// Whether `status` names another conversation than the window's.
@@ -332,6 +425,24 @@ impl ClaudeWindow {
             .as_ref()
             .is_some_and(|pressed| pressed.stopped(record, self.time.wall_ms()))
     }
+
+    /// Whether a paste may go in after a compaction the human cancelled, the
+    /// human's keys having left nothing unsent: the box on the screen empty, or
+    /// holding what Claude put back, which the paste clears first (one Ctrl+C,
+    /// only where the box shows text: at an empty box a second one in a row ends
+    /// Claude). A box the screen does not show holds the paste as the human's own
+    /// words do, for the `/compact` they typed may be there unsent, and the board
+    /// tells them so (`holding`).
+    async fn put_back_cleared(&self, host: &dyn PaneHost, pane: &Pane) -> Readiness {
+        match input_box::on_screen(host, pane, Harness::Claude).await {
+            Some(InputBox::Empty) => Readiness::Ready,
+            Some(InputBox::Holds) => {
+                self.clear_first.set(true);
+                Readiness::Ready
+            }
+            None => Readiness::Held(Held::Unsent),
+        }
+    }
 }
 
 impl Window for ClaudeWindow {
@@ -348,7 +459,12 @@ impl Window for ClaudeWindow {
         *self.asked.borrow_mut() = None;
         *self.pressed.borrow_mut() = None;
         self.restored.set(false);
+        self.put_back.set(false);
         *self.left_open.borrow_mut() = None;
+        // Who showed the conversation the window left is no word on the one it
+        // shows now: another Claude there is seen beside the window's.
+        self.before.borrow_mut().clear();
+        self.shared.set(false);
     }
 
     fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
@@ -382,6 +498,10 @@ impl Window for ClaudeWindow {
     /// A paste waits for the window to be readable, on its conversation,
     /// with no paste going in, and for what the human typed and did not send,
     /// unless the input box reads empty on the screen ([`input_box::unsent`]).
+    /// After a compaction the human cancelled, Claude has the `/compact` back in
+    /// its box, which the human's keys never typed: the box on the screen says
+    /// whether it is still there, to be cleared first, and a box that cannot be
+    /// read holds the paste, which would go in behind it (`put_back`).
     fn ready<'a>(
         &'a self,
         host: &'a dyn PaneHost,
@@ -408,8 +528,13 @@ impl Window for ClaudeWindow {
                 return Ok(Readiness::Held(Held::Because(reason)));
             }
             self.read_empty.set(None);
+            self.clear_first.set(false);
             if !js::truthy(snapshot.get("unsent")) {
-                return Ok(Readiness::Ready);
+                return Ok(if self.put_back.get() {
+                    self.put_back_cleared(host, pane).await
+                } else {
+                    Readiness::Ready
+                });
             }
             // The count is the human's keys, a guess: the box on the screen says.
             Ok(
@@ -432,10 +557,10 @@ impl Window for ClaudeWindow {
     ) -> Work<'a, Result<Admission, String>> {
         Box::pin(async move {
             // A window read at rest by an interrupt of ours has the message it
-            // was given in its input box again, and this one would be pasted
-            // after it, to go as one: the box is cleared first, unless the engine
-            // just cleared it.
-            if self.restored.get() && !host.cleared() {
+            // was given in its input box again, and one the human's cancel left
+            // has the `/compact`: this one would be pasted after it, to go as one.
+            // The box is cleared first, unless the engine just cleared it.
+            if (self.restored.get() || self.clear_first.take()) && !host.cleared() {
                 if let Err(cause) = pane::write_keys(host, pane, &stopped::CLEAR_INPUT).await {
                     let reason = format!("the window's input box could not be cleared: {cause}");
                     return Ok(Admission::Refused { reason });
@@ -463,6 +588,9 @@ impl Window for ClaudeWindow {
             // a transcript its look had read before the status came back
             // could be older than the status.
             let live = self.status();
+            if self.shares() {
+                self.shared.set(true);
+            }
             let session = self.session.borrow().clone();
             let options = told(self.relaunched.as_ref(), &session);
             let reading = self.records.look(Harness::Claude, &session, &options).await;
@@ -487,10 +615,11 @@ impl Window for ClaudeWindow {
                 unnamed: false,
                 took_back,
                 at_prompt,
+                shared: self.shared.get(),
             };
             Ok(match live {
                 Some(live) if self.elsewhere(&live) => {
-                    switched_to(observed(false, false, None, false, false), live.session)
+                    switched_to(observed(false, Over::No, None, false, false), live.session)
                 }
                 live => {
                     // Claude's own status is the word on whether the window
@@ -525,6 +654,8 @@ impl Window for ClaudeWindow {
                     // out of the conversation it answers from: the look says so.
                     let by_press = idle && self.stopped(&reading);
                     self.restored.set(by_press);
+                    self.put_back
+                        .set(matches!(&*reading, Reading::Known(record) if record.lines.put_back));
                     *self.asked.borrow_mut() = stopped::last_user(&reading);
                     // A turn the quit cut is over, though its record never says
                     // so: Claude at its prompt has begun no other.
@@ -535,9 +666,11 @@ impl Window for ClaudeWindow {
                         .is_some_and(|open| open.still(&reading));
                     // The record's word that the turn is over stands whatever the
                     // status says: busy while a background agent runs, after a turn
-                    // an interrupt or a refusal ended with no count of them (T-604).
+                    // an interrupt or a refusal ended with no count of them (T-604),
+                    // once it has stood a moment.
                     let at_rest = at_prompt && (settled || empty || left) || by_press;
-                    observed(at_rest, settled && !at_rest, waiting, by_press, at_prompt)
+                    let over = self.held_over(settled && !at_rest);
+                    observed(at_rest, over, waiting, by_press, at_prompt)
                 }
             })
         })

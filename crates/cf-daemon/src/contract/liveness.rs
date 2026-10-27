@@ -11,15 +11,22 @@
 //! of, and a wake's push and check take longer than the drain's two steps
 //! there, so no test can land in it). So it is crowded instead: a thread
 //! streams wakes for a random few microseconds while the drain they start
-//! runs, and the last of each stream must be taken, over many rounds, under a
-//! deadline. A driver that is not woken, or that is not registered, fails it
-//! in its first round; it is a regression guard for the protocol around the
-//! window, not a proof of the window.
+//! runs, and the last of each stream must be taken, over many rounds. A driver
+//! that is not woken, or that is not registered, fails it in its first round; it
+//! is a regression guard for the protocol around the window, not a proof of the
+//! window.
+//!
+//! How long the rounds take is the machine's, not the test's: five thousand
+//! hand-offs between two threads took 1.5 s alone and over ten under a load of
+//! 140 (the longest single round waited 38 ms), so no deadline for all of them
+//! says anything of a lost wake (T-581: 7 of 12 runs out of ten seconds at that
+//! load). A lost wake is not late, it never comes: a round is given [`STALL`] to
+//! be taken, and the rounds as a whole are only watched to go on.
 
 use std::cell::Cell;
 use std::future::poll_fn;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Poll, Waker};
 use std::time::{Duration, Instant};
@@ -30,7 +37,12 @@ use super::scene;
 use crate::testing::{worked, Worked};
 
 /// How long a lost wake is waited for: a driver that is alive answers in
-/// microseconds, and the daemon's own tests take seconds.
+/// microseconds (38 ms the longest of five thousand rounds under a load of 140),
+/// and a wake that is lost is lost for ever.
+const STALL: Duration = Duration::from_secs(5);
+
+/// How long the first test waits for the driver: the daemon's own tests take
+/// seconds.
 const DEADLINE: Duration = Duration::from_secs(10);
 
 #[tokio::test]
@@ -87,7 +99,10 @@ async fn wakes_streamed_from_another_thread_while_drains_run_and_end_are_never_l
         // Run once, so that it is waiting, its waker where the thread finds it.
         spawn.drain();
         let (told, finished) = oneshot::channel();
+        // The rounds done so far, which the watch below reads.
+        let done = Arc::new(AtomicUsize::new(0));
         let (setting, finding) = (Arc::clone(&flag), Arc::clone(&waker));
+        let counting = Arc::clone(&done);
         let waking = std::thread::spawn(move || {
             let work = finding
                 .lock()
@@ -121,7 +136,7 @@ async fn wakes_streamed_from_another_thread_while_drains_run_and_end_are_never_l
                 let waited = Instant::now();
                 let mut spins = 0_u32;
                 while setting.load(Ordering::SeqCst) {
-                    if waited.elapsed() > Duration::from_secs(5) {
+                    if waited.elapsed() > STALL {
                         let _ = told.send(Err(round));
                         return;
                     }
@@ -132,13 +147,29 @@ async fn wakes_streamed_from_another_thread_while_drains_run_and_end_are_never_l
                         std::thread::yield_now();
                     }
                 }
+                counting.store(round + 1, Ordering::SeqCst);
             }
             let _ = told.send(Ok(()));
         });
-        let ended = tokio::time::timeout(DEADLINE, finished)
-            .await
-            .expect("the rounds ended")
-            .expect("the thread told how they ended");
+        // The rounds are not timed as a whole. They are watched: a stretch of
+        // [`STALL`] in which none finished is a thread that is stuck.
+        let mut finished = std::pin::pin!(finished);
+        let mut seen = None;
+        let ended = loop {
+            match tokio::time::timeout(STALL * 2, finished.as_mut()).await {
+                Ok(told) => break told.expect("the thread told how they ended"),
+                Err(_) => {
+                    let rounds = done.load(Ordering::SeqCst);
+                    assert_ne!(
+                        seen,
+                        Some(rounds),
+                        "no round finished in {:?}: the thread is stuck at round {rounds}",
+                        STALL * 2
+                    );
+                    seen = Some(rounds);
+                }
+            }
+        };
         assert_eq!(ended, Ok(()), "a wake was lost at this round");
         waking.join().expect("the thread ended");
     })

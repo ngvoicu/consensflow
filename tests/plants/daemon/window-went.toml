@@ -44,8 +44,9 @@ runs = ["engine-dispatcher-window-went"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
                 self.settle_gone(delivering, move |delivering| {
+                    let once_up = delivering.owed.is_some() || delivering.late;
                     // A chief's first message (a handoff, most often) waits for its next window.
-                    if delivering.chief {
+                    if delivering.chief || (once_up && closed_with_project) {
                         this.give_back(delivering.message, &told)
                     } else {
                         let retry = !delivering.launch;
@@ -55,8 +56,9 @@ find = '''
                 .await?;'''
 replace = '''
                 let _ = (&this, &told);
+                let once_up = delivering.owed.is_some() || delivering.late;
                 // A chief's first message (a handoff, most often) waits for its next window.
-                if delivering.chief {
+                if delivering.chief || (once_up && closed_with_project) {
                     self.give_back(delivering.message, &because)?;
                 } else {
                     let retry = !delivering.launch;

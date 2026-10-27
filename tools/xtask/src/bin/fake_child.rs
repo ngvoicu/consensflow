@@ -13,6 +13,10 @@
 //! With `FAKE_CHILD_KEEP` naming a folder it keeps a copy of any file it is given that is
 //! named `….tgz` there (`1.tgz`, `2.tgz` in the order it was given them), which is what
 //! `scp` is given: the tarball a run sends, for a test to read what is in it.
+//! With `FAKE_CHILD_PROBE` set, an `ssh` asked as the runner probes a machine (a word
+//! `BatchMode=yes` among its arguments) says that text, and nothing else, and ends with 0: the
+//! machine's state (`free 614`), which the runner asks of every machine before it sends a run to
+//! it, and which is no part of the run the case is about.
 //! `FAKE_CHILD_STDERR` is written to its standard error, and `FAKE_CHILD_EXIT` is
 //! the code it exits with (0 when it is not a number or not there). With
 //! `FAKE_CHILD_QUIET` set it reports nothing: for a test that lets it write where
@@ -27,6 +31,12 @@ use cf_base::env::Env;
 
 fn main() -> ExitCode {
     let env = Env::from_process();
+    if let Some(probe) = env.text("FAKE_CHILD_PROBE") {
+        if std::env::args_os().any(|arg| arg == "BatchMode=yes") {
+            let _ = writeln!(io::stdout().lock(), "{probe}");
+            return ExitCode::SUCCESS;
+        }
+    }
     if let Some(keep) = env.path("FAKE_CHILD_KEEP") {
         for arg in std::env::args_os().skip(1) {
             let path = std::path::PathBuf::from(&arg);

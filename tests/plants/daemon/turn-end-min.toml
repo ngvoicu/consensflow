@@ -386,10 +386,10 @@ runs = ["tem-engine-turn-end"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.total() > 0 {'''
 replace = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.total() > 0 && false {'''
 
 [[plant]]
@@ -401,10 +401,10 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.total() > 0 {'''
 replace = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.total() > 0 && false {'''
 
 [[plant]]
@@ -415,10 +415,10 @@ runs = ["tem-engine-pending"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.total() > 0 {'''
 replace = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.jobs > 0 {'''
 
 [[plant]]
@@ -838,8 +838,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '        let way = if thread.task.requester == "human" {'
-replace = '        let way = if false {'
+find = '    if thread.task.requester == "human" {'
+replace = '    if false {'
 
 [[plant]]
 name = "turn-end-min reader: OpenCode's compaction summary is a reply of the member's"
@@ -1278,8 +1278,11 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '        record.held.borrow_mut().rests.pasted();'
-replace = ''
+find = '''
+        self.mark_turn(record, &pane).await;
+        record.held.borrow_mut().rests.pasted();'''
+replace = '''
+        self.mark_turn(record, &pane).await;'''
 
 [[plant]]
 name = "turn-end-min engine: a window idle after its result takes a rest at every pass"

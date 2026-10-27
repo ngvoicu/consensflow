@@ -50,12 +50,12 @@ use crate::daemon_log::StartLine;
 use crate::live::members::Identity;
 use crate::outcome::{self, Verdict};
 use crate::process::{Ran, Run, Sink, Spawned};
-use crate::{cf, checkout, files, wire, Error, Result};
+use crate::{checkout, files, wire, Error, Result};
 
 pub use jobs::Job;
 pub use names::project_name;
 pub use project::{write_staff, Project};
-pub use route::Pasted;
+pub use route::{Held, Pasted};
 
 pub(crate) use observe::events_of;
 
@@ -95,6 +95,8 @@ pub struct Config {
     existing_root: Option<PathBuf>,
     daemon: Option<PathBuf>,
     claude_config: Option<Arc<dyn ClaudeConfig>>,
+    /// The `cf` the daemon's copy is made of, where it is not the release build.
+    cf: Option<PathBuf>,
     codex: Option<PathBuf>,
     devin: Option<PathBuf>,
     /// The stand-in `opencode`: of an OpenCode 1.x, or of one that is 2.
@@ -164,6 +166,7 @@ impl Config {
             existing_root: None,
             daemon: None,
             claude_config: None,
+            cf: None,
             codex: None,
             devin: None,
             opencode: None,
@@ -353,6 +356,14 @@ impl Config {
         self
     }
 
+    /// With the daemon's `cf` copied from `program`, and not from the release build:
+    /// for the case that takes the program away once the rig is up, as a build does.
+    #[must_use]
+    pub fn cf_from(mut self, program: impl Into<PathBuf>) -> Self {
+        self.cf = Some(program.into());
+        self
+    }
+
     /// With the Claude Code config folder of every window `claude_config`'s, in place
     /// of the folder the rig makes in its home: for a case whose windows run the real
     /// Claude Code on a login of the machine's, copied into a folder of its own, so
@@ -423,6 +434,9 @@ pub struct Rig {
     shared: Arc<Shared>,
     daemon: Daemon,
     host: Spawned,
+    /// The `cf` the daemon runs, which its windows find first on their `PATH`: the rig's own
+    /// copy (`crate::bundle`).
+    cf: PathBuf,
     /// A process none of the windows' is, which nothing may have ended when they are.
     stranger: Stranger,
     /// The Claude config folder the windows run on, where a case gave one
@@ -462,6 +476,12 @@ impl Rig {
     /// Which daemon this is, as its own start line says.
     pub fn start_line(&self) -> &StartLine {
         &self.start_line
+    }
+
+    /// The `cf` the daemon runs: the one a window of the rig finds first, and the one
+    /// whose path the daemon writes in what it gives the windows.
+    pub fn cf(&self) -> &Path {
+        &self.cf
     }
 
     /// The daemon's process id.
@@ -616,7 +636,7 @@ impl Rig {
         S: AsRef<std::ffi::OsStr>,
     {
         let env = &frame["env"];
-        Run::new(cf::binary()?)
+        Run::new(&self.cf)
             .vars(self.env.iter().map(|(name, value)| (name, value)))
             .var(
                 "CONSENSFLOW_URL",

@@ -29,6 +29,7 @@ use crate::{claude, codex, devin, opencode, pi};
 mod thread;
 
 pub use crate::shared::quota::{Level, Quota};
+pub use crate::shared::record::boundary::Boundary;
 pub use crate::shared::record::cache::{Cache, Look, Open, Options, PiSettlement, IDLE_MS};
 pub use crate::shared::record::reading::{
     End, Item, Lines, Monitor, Notice, Pending, Reading, Record, Role, Settlement, Source,
@@ -115,24 +116,38 @@ pub fn has_transcript(harness: Harness, session: &str, env: &Env) -> Result<bool
     }
 }
 
-/// How many bytes `harness`'s transcript of `session` holds now, where a reader
-/// of it reads a relaunch (Claude's alone): none where it keeps no transcript of
-/// it. A home the places are under, needed and missing, is the failure.
-pub fn transcript_length(
+/// Where `harness`'s transcript of `session` ends now, how many bytes it holds and
+/// the last of them, where a reader of it reads a relaunch (Claude's alone): none
+/// where it keeps no transcript of it. A home the places are under, needed and
+/// missing, is the failure.
+pub fn transcript_boundary(
     harness: Harness,
     session: &str,
     env: &Env,
-) -> Result<Option<u64>, String> {
+) -> Result<Option<Boundary>, String> {
     let file = match harness {
         Harness::Claude => claude::paths::transcript(session, env)?,
         Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin => None,
     };
-    file.map(|file| {
-        std::fs::metadata(&file)
-            .map(|found| found.len())
-            .map_err(|failed| format!("{}: {failed}", file.display()))
-    })
-    .transpose()
+    file.map(|file| Boundary::of(&file).map_err(|failed| format!("{}: {failed}", file.display())))
+        .transpose()
+}
+
+/// Where `harness`'s transcript of `session` ends now ([`transcript_boundary`]), where
+/// the harness's own word says no program of its writes it any more: Claude's, whose
+/// statuses say no Claude shows the conversation. None where one does, where they
+/// cannot say, and for every other harness.
+pub fn transcript_left(
+    harness: Harness,
+    session: &str,
+    env: &Env,
+) -> Result<Option<Boundary>, String> {
+    match harness {
+        Harness::Claude if claude::shown_by_none(session, env) => {
+            transcript_boundary(harness, session, env)
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Whether `harness`'s own store says, with no window open, that the window of

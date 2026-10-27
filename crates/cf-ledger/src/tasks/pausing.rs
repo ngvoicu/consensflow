@@ -53,14 +53,21 @@ pub(crate) fn pause_task(
 /// pauses one whose window went away. In a suspended project the window closed
 /// with the project, and the pause is marked for the human's Resume of the
 /// project, which resumes the task ([`resume_with_project`]); in an open one
-/// it is as any other pause of ConsensFlow's.
+/// it is as any other pause of ConsensFlow's. Says which stop the pause is, for its
+/// mark to be taken back by that pause alone ([`unmark_pause`]).
 pub(crate) fn pause_with_project(
     store: &mut Store,
     project_id: i64,
     number: i64,
     because: &str,
-) -> Result<TaskView, LedgerError> {
-    pause_task_as(store, project_id, number, None, Some(because), true)
+) -> Result<Stop, LedgerError> {
+    let task = pause_task_as(store, project_id, number, None, Some(because), true)?;
+    let row = store.task_row(project_id, number)?;
+    Ok(Stop {
+        task_id: task.id,
+        number,
+        seq: row.stop_seq,
+    })
 }
 
 /// A pause by `by` (none: ConsensFlow), marked as its project's suspension's
@@ -132,17 +139,22 @@ fn pause_task_as(
 /// The window of a task the engine paused with its project ended by itself after
 /// all: its exit came while the engine's kill of it waited for its answer, and the
 /// kill was refused. The task stays paused, as any whose window closed by itself,
-/// and no Resume of its project resumes it.
+/// and no Resume of its project resumes it. Only the pause that exit made, `stop`
+/// ([`pause_with_project`]): a kill answered late takes back no later pause's mark
+/// (Calliope's P3-2 of T-510: a refusal answered after a Resume and a second Close
+/// took back the second Close's).
 pub(crate) fn unmark_pause(
     store: &mut Store,
     project_id: i64,
     number: i64,
+    stop: i64,
 ) -> Result<(), LedgerError> {
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
         store.db.execute(
-            "UPDATE task SET paused_with_project = 0 WHERE id = ? AND state = 'paused'",
-            [task.id],
+            "UPDATE task SET paused_with_project = 0
+             WHERE id = ? AND state = 'paused' AND stop_seq = ?",
+            params![task.id, stop],
         )?;
         Ok(())
     })
@@ -358,6 +370,29 @@ pub(crate) fn stop_of(store: &Store, participant_id: i64) -> Result<Option<Stop>
             },
         )
         .optional()?)
+}
+
+/// Who asked the stop `seq` of task `number`: the pause that counted it, by the
+/// chief or the human (its `by`), as its move to paused was logged; none where
+/// ConsensFlow asked it (a hold, a closed window) or no move says so.
+pub(crate) fn stop_asked_by(
+    store: &Store,
+    project_id: i64,
+    number: i64,
+    seq: i64,
+) -> Result<Option<String>, LedgerError> {
+    let by: Option<Option<String>> = store
+        .db
+        .query_row(
+            "SELECT json_extract(data, '$.by') FROM event
+             WHERE project_id = ?1 AND kind = 'task.state' AND json_valid(data)
+               AND json_extract(data, '$.task') = ?2 AND json_extract(data, '$.stop') = ?3
+             ORDER BY id DESC LIMIT 1",
+            params![project_id, number, seq],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(by.flatten())
 }
 
 /// The task a participant's window is on as far as a question or a note it

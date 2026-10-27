@@ -132,11 +132,20 @@ pub struct PossiblyLeft {
 /// `pane.background`'s answer: what the window's tree has running that began
 /// after the window's last `pane.mark` and that the host can tell is the turn's
 /// work, `total` of it and the first `processes` of it by how long ago they began.
-/// A window with no mark has none: nothing says where its turn began.
+/// A window with no mark has none: nothing says where its turn began. And what may be
+/// the window's and runs outside its tree (`possiblyLeft`, as `pane.exit` names it at a
+/// close), which the host names and never signals: a pause leaves both running (T-487).
+/// A look at the commands of the window's harness names none of that.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Background {
     pub total: usize,
     pub processes: Vec<BackgroundProcess>,
+    #[serde(
+        default,
+        rename = "possiblyLeft",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub possibly_left: Vec<PossiblyLeft>,
 }
 
 /// `pane.commands`' answer, under `commands`: the commands of the window's harness that

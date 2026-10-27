@@ -17,6 +17,8 @@
 mod catalog;
 #[path = "cli/commands.rs"]
 mod commands;
+#[path = "cli/fixtures_end_with_their_owner.rs"]
+mod fixtures_end_with_their_owner;
 #[path = "cli/host_verbs.rs"]
 mod host_verbs;
 #[path = "cli/off_node.rs"]

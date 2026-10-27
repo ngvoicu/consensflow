@@ -24,8 +24,10 @@ use crate::records::{Reading, Record, Role, Settlement};
 
 /// How long after the last press the window must have read idle, with
 /// nothing written, before the press counts as what stopped it: a turn that
-/// was about to begin is busy by then.
-const HOLD_MS: i64 = 1_000;
+/// was about to begin is busy by then. The record's word that a turn is over
+/// while Claude says busy is held as long before it counts (`ClaudeWindow`'s
+/// `over`): a turn that was about to begin has its message in the record by then.
+pub(super) const HOLD_MS: i64 = 1_000;
 
 /// The keys that clear the text Claude put back into its input box before
 /// the next message is pasted: a paste goes in where the cursor is, and

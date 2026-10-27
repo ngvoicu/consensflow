@@ -82,7 +82,7 @@ fn every_window_is_given_what_the_app_took_of_a_terminals_environment_before_its
     let env = Env::from_vars([
         (
             TERMINAL_ENV,
-            r#"["LANG","PNPM_HOME","CONSENSFLOW_URL","Path","NOT_THERE"]"#,
+            r#"["LANG","PNPM_HOME","EMPTY_BY_THE_RC","CONSENSFLOW_URL","Path","NOT_THERE"]"#,
         ),
         ("LANG", "en_GB.UTF-8"),
         ("PNPM_HOME", "/home/me/Library/pnpm"),
@@ -90,6 +90,7 @@ fn every_window_is_given_what_the_app_took_of_a_terminals_environment_before_its
         ("Path", "/rc/bin"),
         ("PATH", "/usr/bin"),
         ("NOT_NAMED", "kept out"),
+        ("EMPTY_BY_THE_RC", ""),
     ]);
     let window = WindowEnv::new(&env, "http://127.0.0.1:4242", "/bundle/bin");
     let started = window.env(participant(&scene.project, "zeus"), &scene.project);
@@ -99,6 +100,7 @@ fn every_window_is_given_what_the_app_took_of_a_terminals_environment_before_its
         [
             "LANG",
             "PNPM_HOME",
+            "EMPTY_BY_THE_RC",
             "CONSENSFLOW_URL",
             "CONSENSFLOW_PROJECT",
             "CONSENSFLOW_PARTICIPANT",
@@ -106,8 +108,9 @@ fn every_window_is_given_what_the_app_took_of_a_terminals_environment_before_its
         ]
     );
     assert_eq!(started[0].1, "en_GB.UTF-8");
+    assert_eq!(started[2].1, "", "an rc's `export NAME=` is given as it is");
     assert_eq!(
-        started[2].1, "http://127.0.0.1:4242",
+        started[3].1, "http://127.0.0.1:4242",
         "ConsensFlow's own address"
     );
     // A daemon the app said nothing to gives what it always gave.

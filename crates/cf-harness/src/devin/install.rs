@@ -18,6 +18,8 @@ mod tests;
 mod version;
 
 // What the admin judges a Devin by: the rule a launch holds to.
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use config::native as native_config;
 pub(crate) use version::{at_least, minimum as minimum_version, supported as supported_version};
 
 use std::fs;

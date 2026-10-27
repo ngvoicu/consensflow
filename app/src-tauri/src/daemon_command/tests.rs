@@ -157,7 +157,9 @@ fn the_login_shell_holds_nothing_of_the_apps_but_its_streams() {
     );
 }
 
-/// The pid a shell wrote in `file`, once it has.
+/// The pid a shell wrote in `file`, once it has. How soon a shell runs is the machine's
+/// (a loaded one took seconds to start a script), not what is tested: the bound is for a
+/// shell that never does.
 #[cfg(unix)]
 fn pid_in(file: &Path) -> i32 {
     let started = Instant::now();
@@ -169,7 +171,7 @@ fn pid_in(file: &Path) -> i32 {
             return pid;
         }
         assert!(
-            started.elapsed() < Duration::from_secs(10),
+            started.elapsed() < Duration::from_secs(60),
             "the shell never ran"
         );
         thread::sleep(Duration::from_millis(20));
@@ -188,6 +190,12 @@ fn kill(pid: i32) {
 /// PATH the app was started with; the app's start does not wait on it. Only
 /// the shell is ended: what its login files started is the user's, an
 /// `ssh-agent -D` that other programs use, say (the reviews of 2026-10-16).
+///
+/// The shell that hangs is not given a time to run in: it is a slow start of a loaded
+/// machine that kills it, at the time it is given, before it has started anything
+/// (T-581: "the shell never ran" in the gate at a load of 50 to 150, the shell killed
+/// at 300 ms before its first command). What it started is looked for when it says it
+/// did, and the shell is ended then, as the app's quit ends it.
 #[cfg(unix)]
 #[test]
 fn a_login_shell_that_fails_or_hangs_gives_no_path_and_leaves_what_it_started() {
@@ -199,21 +207,52 @@ fn a_login_shell_that_fails_or_hangs_gives_no_path_and_leaves_what_it_started() 
         None
     );
 
-    let waited_for = home.path().join("waited-for.pid");
-    let hanging = login_shell(
+    // A shell that hangs is not waited for beyond its time, though a program it started
+    // holds its output as long as it lives (30 s here): the time is up long before.
+    let held = home.path().join("held.pid");
+    let holding = login_shell(
         home.path(),
-        &format!("/bin/sleep 30 & echo $! > '{}'; wait", waited_for.display()),
+        &format!("/bin/sleep 30 & echo $! > '{}'; wait", held.display()),
     );
     let started = Instant::now();
     assert_eq!(
-        login_path_in(&hanging, Duration::from_millis(300), &lookup),
+        login_path_in(
+            &holding,
+            Duration::from_millis(300),
+            &LoginLookup::default()
+        ),
         None
     );
     assert!(
-        started.elapsed() < Duration::from_secs(2),
+        started.elapsed() < Duration::from_secs(20),
         "the shell held up the start"
     );
+    if let Some(held) = std::fs::read_to_string(&held)
+        .ok()
+        .and_then(|said| said.trim().parse().ok())
+    {
+        kill(held);
+    }
+
+    // What the shell started is left running when the shell is ended. It starts slowly, as a
+    // loaded machine's does; the time it is given is long, and it is ended when it has
+    // started what it started, as the app's quit ends it.
+    let waited_for = home.path().join("waited-for.pid");
+    let hanging = login_shell(
+        home.path(),
+        &format!(
+            "/bin/sleep 1; /bin/sleep 30 & echo $! > '{}'; wait",
+            waited_for.display()
+        ),
+    );
+    let asking = std::sync::Arc::new(LoginLookup::default());
+    let asked = {
+        let (asking, hanging) = (std::sync::Arc::clone(&asking), hanging.clone());
+        thread::spawn(move || login_path_in(&hanging, Duration::from_secs(120), &asking))
+    };
     let agent = pid_in(&waited_for);
+    asking.end();
+    assert_eq!(asked.join().expect("the lookup ended"), None);
     // Given a moment to be ended, as it would have been with the shell.
     thread::sleep(Duration::from_millis(200));
     let left = cf_panes::pty::process_exists(agent);
@@ -272,7 +311,7 @@ fn a_lookup_the_app_has_quit_starts_no_shell() {
     let mut asked = crate::testing::command(&shell);
     asked.stdout(Stdio::piped());
     assert!(lookup.start(&mut asked).is_none(), "a shell was started");
-    assert!(lookup.status().is_err(), "a shell is held");
+    assert!(lookup.lock().shells.is_empty(), "a shell is held");
     thread::sleep(Duration::from_millis(300));
     assert!(!started.exists(), "a shell ran after the quit");
 }
@@ -293,19 +332,22 @@ fn ending_a_lookup_ends_the_shell_it_asks_at_once_and_only_it() {
         ])
         .stdout(Stdio::piped());
     let lookup = LoginLookup::default();
-    let _output = lookup.start(&mut shell).expect("the shell is started");
+    let started = lookup.start(&mut shell).expect("the shell is started");
     let agent = pid_in(&sleeper);
     lookup.end();
     let until = Instant::now() + Duration::from_secs(3);
     let mut ended = false;
     while Instant::now() < until {
-        if lookup.status().is_ok_and(|status| status.is_some()) {
+        if lookup
+            .status(started.asked)
+            .is_ok_and(|status| status.is_some())
+        {
             ended = true;
             break;
         }
         thread::sleep(Duration::from_millis(20));
     }
-    lookup.finish();
+    lookup.finish(started.asked);
     let left = cf_panes::pty::process_exists(agent);
     kill(agent);
     assert!(ended, "the shell outlived the quit");
@@ -326,13 +368,16 @@ fn a_lookup_given_up_on_has_ended_its_shell_before_a_quit_can_miss_it() {
         .args([
             "-c",
             &format!(
-                "i=0; while :; do i=$((i+1)); echo $i > '{}'; /bin/sleep 0.05; done",
+                "i=0; while kill -0 $PPID 2>/dev/null; do i=$((i+1)); echo $i > '{}'; /bin/sleep 0.05; done",
                 beat.display()
             ),
         ])
         .stdout(Stdio::piped());
     let lookup = LoginLookup::default();
-    let _output = lookup.start(&mut shell).expect("the shell is started");
+    let asked = lookup
+        .start(&mut shell)
+        .expect("the shell is started")
+        .asked;
     let started = Instant::now();
     while !beat.exists() {
         assert!(
@@ -342,7 +387,7 @@ fn a_lookup_given_up_on_has_ended_its_shell_before_a_quit_can_miss_it() {
         thread::sleep(Duration::from_millis(20));
     }
     let mut stopped = false;
-    lookup.finish_with(|| {
+    lookup.finish_with(asked, || {
         // The quit comes here, and the app could end with it.
         lookup.end();
         let before = std::fs::read_to_string(&beat).unwrap_or_default();
@@ -559,8 +604,10 @@ fn a_shell_that_ends_without_its_path_while_what_it_started_writes_on_is_given_u
     let shell = login_shell(
         home.path(),
         &format!(
-            "/bin/sh -c 'echo $$ > {}; while :; do echo noise; /bin/sleep 0.2; done' & exit 0",
-            writer.display()
+            "/bin/sh -c 'echo $$ > {}; while {}; do echo noise; /bin/sleep 0.2; done' & exit 0",
+            writer.display(),
+            // Its parent is the shell that exits at once: its owner is the test.
+            cf_base::fixture::owner_there(std::process::id())
         ),
     );
     let (sent, ended) = mpsc::channel();
@@ -668,7 +715,7 @@ fn an_interactive_rc_that_hangs_falls_back_to_the_login_path_within_its_time() {
     let started = Instant::now();
     let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(2));
     assert!(
-        started.elapsed() < Duration::from_millis(2_900),
+        started.elapsed() < Duration::from_millis(3_500),
         "the start waited {:?}, past its one limit",
         started.elapsed()
     );
@@ -897,10 +944,63 @@ fn a_shell_that_hangs_on_every_question_costs_the_start_one_limit() {
     let started = Instant::now();
     let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(2));
     assert!(
-        started.elapsed() < Duration::from_millis(2_900),
+        started.elapsed() < Duration::from_millis(3_500),
         "the start waited {:?}",
         started.elapsed()
     );
     assert_eq!(given_of(&command, "PATH").as_deref(), Some(FINDER_PATH));
     assert!(said.is_some(), "the log says the shell gave none");
+}
+
+/// Login files that are slow, which both questions run, leave the interactive one its
+/// whole limit: the two are asked at once, not one after the other, and the start still
+/// waits one limit at most.
+#[cfg(unix)]
+#[test]
+fn slow_login_files_leave_the_interactive_question_its_whole_limit() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = login_shell(
+        home.path(),
+        "/bin/sleep 2.5\ncase \"$1\" in *i*) export PARITY_ONLY_INTERACTIVE=1 ;; esac\nexec /bin/sh -c \"$2\"",
+    );
+    let started = Instant::now();
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(4));
+    assert!(
+        started.elapsed() < Duration::from_millis(5_500),
+        "the start waited {:?}, past its one limit",
+        started.elapsed()
+    );
+    assert_eq!(
+        given_of(&command, "PARITY_ONLY_INTERACTIVE").as_deref(),
+        Some("1"),
+        "the interactive question ran out of time behind the login one"
+    );
+    assert_eq!(said, None);
+}
+
+/// The app's quit ends every shell the lookup asks, when it asks two at once.
+#[cfg(unix)]
+#[test]
+fn ending_a_lookup_ends_both_shells_it_asks_at_once() {
+    let lookup = LoginLookup::default();
+    let mut first = Command::new("/bin/sleep");
+    first.arg("30").stdout(Stdio::piped());
+    let mut second = Command::new("/bin/sleep");
+    second.arg("30").stdout(Stdio::piped());
+    let one = lookup.start(&mut first).expect("the first is started");
+    let two = lookup.start(&mut second).expect("the second is started");
+    assert_ne!(one.asked, two.asked);
+    lookup.end();
+    let until = Instant::now() + Duration::from_secs(3);
+    let ended = |asked| lookup.status(asked).is_ok_and(|status| status.is_some());
+    while Instant::now() < until && !(ended(one.asked) && ended(two.asked)) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        ended(one.asked) && ended(two.asked),
+        "a shell outlived the quit"
+    );
+    lookup.finish(one.asked);
+    lookup.finish(two.asked);
+    assert!(lookup.lock().shells.is_empty(), "a shell is still held");
 }

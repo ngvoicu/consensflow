@@ -345,6 +345,9 @@ mod shell {
         program.end_input();
         let status = program.wait(Duration::from_secs(10)).unwrap();
         assert_eq!(status.and_then(|status| status.code()), Some(0));
+        // What it wrote is read on a thread of its own, which may not have run yet when the
+        // program has ended: the wait has waited for it to the end of the stream (T-643, on
+        // merge-flakes' settle).
         assert_eq!(program.errors(), "queued twice");
     }
 

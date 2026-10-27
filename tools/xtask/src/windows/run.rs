@@ -15,8 +15,9 @@
 //! started ends nothing there, for nothing has started.
 
 use super::interrupt::Interrupt;
-use super::machine::{Machine, Ready};
+use super::machine::Machine;
 use super::options::Options;
+use super::queue::{self, Queues, Waited, Who};
 use super::script::{
     command_line, encode_script, remote_script, run_id, run_script, stop_script, upload_name,
     Refusal, Script, BUILD_STEPS, TREE_MARK,
@@ -66,6 +67,7 @@ impl Plan {
             command: &command,
             env: &options.env,
             node: &machine.node,
+            limits: machine.limits,
         };
         let upload = upload_name(&options.dir, id);
         Ok(Self {
@@ -111,25 +113,37 @@ pub fn run(
 ) -> Result<Outcome, Error> {
     let id = run_id();
     let plan = Plan::new(machine, options, &id)?;
-    // A machine the runner shares is asked first, and a run it may not take now is not sent. A
-    // Ctrl-C ends the probes with this program (they are in the terminal's group), so a stop is
+    // The machine is waited for in its queue, every project's runs behind each other on this Mac, and
+    // asked (`Machine::ready`) when it is this run's turn: a run it may not take now is not sent.
+    // A Ctrl-C ends the probes with this program (they are in the terminal's group), so a stop is
     // looked for before what they came to is read: a probe it ended is no zeelin that did not
     // answer, no disk not said, and no refusal.
-    let ready = machine.ready(context, &options.dir);
-    if stopped(interrupt, !matches!(ready, Ok(Ready::Go(_)))) {
-        return Ok(Outcome::Stopped);
-    }
-    match ready.map_err(Error::Unready)? {
-        Ready::Refused(why) => {
+    let queues = Queues::of(&context.env);
+    let who = Who::of(&context.root, &options.command);
+    let mut pace = queue::Real::new(interrupt, &context.env);
+    let waited = queue::wait(
+        queues.as_ref(),
+        &machine.name,
+        &who,
+        options.wait,
+        &mut || machine.ready(context, &options.dir),
+        &mut pace,
+        &mut |line| writeln!(console.err, "windows: {line}"),
+    )?;
+    // The ticket is the run's place, kept until the run is over.
+    let _turn = match waited {
+        Waited::Stopped => return Ok(Outcome::Stopped),
+        Waited::Refused(why) => {
             writeln!(console.out, "{why}").map_err(Error::Output)?;
             return Ok(Outcome::Refused(why));
         }
-        Ready::Go(said) => {
+        Waited::Go(said, turn) => {
             for line in said {
                 writeln!(console.err, "windows: {line}").map_err(Error::Output)?;
             }
+            turn
         }
-    }
+    };
     let scratch = tempfile::tempdir().map_err(Error::Scratch)?;
 
     // A stop is looked for after each step, before what it says is: a Ctrl-C ends

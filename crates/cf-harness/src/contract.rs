@@ -18,7 +18,9 @@ use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
-use crate::records::{Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement};
+use crate::records::{
+    Boundary, Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement,
+};
 
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -101,14 +103,8 @@ pub trait Adapter {
         false
     }
 
-    /// Whether a window's first message goes in once the window is up, through
-    /// the harness's own server, which asks [`PaneHost::admits`] then
-    /// ([`Window::started`]): OpenCode's. Every other harness's goes in with the
-    /// command line its window opens with ([`Launch::message`]), handed over as
-    /// the window's pane is asked for.
-    fn first_message_once_up(&self) -> bool {
-        false
-    }
+    /// How a window is given its first message ([`FirstMessage`]).
+    fn first_message(&self) -> FirstMessage;
 
     /// How its windows take the words they are handed: over a channel of the
     /// harness's own, or pasted into the window's input box ([`Input`]).
@@ -167,6 +163,27 @@ pub struct Interrupt {
     pub close_after: Option<Duration>,
 }
 
+/// How a window is given its first message. None is on its command line: what
+/// is there is read by every process on the machine (`ps` is set-uid root on
+/// macOS), and a kill or wait by pattern whose words a message holds matches the
+/// window (T-432: a SIGINT to "xtask plants" closed two workers' windows).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FirstMessage {
+    /// In a file of the launch's own that the command line names, read as the
+    /// window opens ([`Launch::message`]), and handed over as the window's pane is
+    /// asked for: Devin's `--prompt-file`.
+    Opened,
+    /// Posted through the harness's own server once the window is up, which asks
+    /// [`PaneHost::admits`] then ([`Window::started`]): OpenCode's.
+    Started,
+    /// Handed over as any later message is, by the window's own
+    /// [`Window::deliver`], once the window is past any question of trusting its
+    /// folder and has drawn its screen: Claude Code's pasted (its record wraps it
+    /// as it wraps every paste), Pi's through its extension's inbox, Codex's
+    /// through its broker. The launch is given no [`Launch::message`].
+    Delivered,
+}
+
 /// How a harness's windows take the words they are handed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Input {
@@ -200,7 +217,10 @@ pub struct Launch<'a> {
     /// window of a daemon before this one): what the record holds then may still
     /// be written to by a process ConsensFlow does not hold.
     pub previous_gone: bool,
-    /// The window's first message, as the engine wrote it.
+    /// The window's first message, as the engine wrote it, where its harness takes
+    /// it as its window opens or once it is up ([`FirstMessage::Opened`],
+    /// [`FirstMessage::Started`]): none for a harness whose windows are delivered
+    /// their first message.
     pub message: Option<&'a str>,
     /// The agent it runs on: none for a chief from before every chief had one.
     pub agent: Option<Agent<'a>>,
@@ -513,6 +533,26 @@ pub enum Readiness {
     Unfit(String),
 }
 
+/// Whether the turn a window was last in is over by its harness's own record,
+/// though its live status kept the look from reading it settled
+/// ([`Observed::over`]): nothing in it is then left for an interrupt to stop. Claude
+/// says it is busy for as long as a background agent runs, and a turn an interrupt or
+/// a refusal ended writes no count of them (T-604, 2026-10-25); and it says busy a
+/// moment before the message of a turn it begins is in its record, when the turn
+/// before still reads over (Calliope on T-551, T-644). So the record's word counts
+/// once it has stood a moment.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Over {
+    /// The record says no more than the look did.
+    #[default]
+    No,
+    /// The record says the turn is over, and has not said so long enough to count:
+    /// neither at rest nor at work yet.
+    Pending,
+    /// The record has said so a moment: the turn is over.
+    Held,
+}
+
 /// Why a delivery waits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Held {
@@ -561,13 +601,10 @@ pub struct Observed {
     /// None where the window has not named a conversation to read yet.
     pub reading: Option<Arc<Reading>>,
     pub settled: bool,
-    /// The turn the window was last in is over by its harness's own record,
-    /// though its live status kept the look from reading it `settled`: nothing
-    /// in it is left for an interrupt to stop. Claude says it is busy for as long
-    /// as a background agent runs, and a turn an interrupt or a refusal ended
-    /// writes no count of them (T-604, 2026-10-25). A harness whose `settled` is
-    /// its record's word says no.
-    pub over: bool,
+    /// Whether the turn the window was last in is over by its harness's own
+    /// record, though its live status kept the look from reading it `settled`
+    /// ([`Over`]). A harness whose `settled` is its record's word says no.
+    pub over: Over,
     pub waiting: Option<Waiting>,
     pub failed: bool,
     pub quota: Option<Arc<Quota>>,
@@ -589,6 +626,12 @@ pub struct Observed {
     /// the program before was gone keeps what that program had queued) from one still at
     /// work. False from a harness that says no such thing apart from its record.
     pub at_prompt: bool,
+    /// Another program of the harness's, not the window's, has shown the window's
+    /// conversation since the window opened (a Claude Code the human started outside
+    /// ConsensFlow on it, `claude --resume <id>`): the record holds that one's turns
+    /// too, written as the window's are, and nothing in it tells them apart. False
+    /// from a harness that cannot tell.
+    pub shared: bool,
 }
 
 impl Observed {
@@ -686,15 +729,28 @@ pub trait Records {
         session: &'a str,
     ) -> Work<'a, Result<bool, String>>;
 
-    /// How many bytes `harness`'s transcript of `session` holds now, where a
-    /// reader of it reads a relaunch (`Options::relaunched_at`, Claude's
-    /// alone): none where it keeps no transcript of it, or a seam that keeps no
-    /// files says none.
-    fn transcript_length<'a>(
+    /// Where `harness`'s transcript of `session` ends now, how many bytes it
+    /// holds and the last of them, where a reader of it reads a relaunch
+    /// (`Options::relaunched`, Claude's alone): none where it keeps no
+    /// transcript of it, or a seam that keeps no files says none.
+    fn transcript_boundary<'a>(
         &'a self,
         _harness: Harness,
         _session: &'a str,
-    ) -> Work<'a, Result<Option<u64>, String>> {
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    /// Where `harness`'s transcript of `session` ends now, where the harness's own
+    /// word says no program of its writes it any more (Claude's statuses): what is
+    /// before it was written by programs that are gone, and what they had queued
+    /// went with them. None where one may, where it cannot say, or a seam that
+    /// keeps no files says none.
+    fn transcript_left<'a>(
+        &'a self,
+        _harness: Harness,
+        _session: &'a str,
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
         Box::pin(async { Ok(None) })
     }
 
@@ -718,10 +774,18 @@ pub trait Records {
     /// where it ends at rest, and none where the record cannot tell. Devin's
     /// cannot: it reads a turn as going on only while its window shows it working,
     /// and one whose last word is the message it was given as settled, which with
-    /// no window open is a turn never answered as much as one at rest.
+    /// no window open is a turn never answered as much as one at rest. Where no
+    /// program writes the record any more ([`Records::transcript_left`]), what they
+    /// had queued and not begun went with them and is no turn: a Claude that quit
+    /// idle with a message queued leaves no sign of its quit in its record, and was
+    /// cut in nothing (T-442's three).
     fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<bool>> {
         Box::pin(async move {
-            match &*self.look(harness, session, &Options::default()).await {
+            let options = Options {
+                relaunched: self.transcript_left(harness, session).await.ok().flatten(),
+                ..Options::default()
+            };
+            match &*self.look(harness, session, &options).await {
                 Reading::Known(record) => match record.settlement {
                     Settlement::InFlight => Some(true),
                     Settlement::Settled if ends_in_a_reply(record) => Some(false),

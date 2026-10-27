@@ -122,7 +122,7 @@
 //!
 //! **A relaunch retires, it does not end.** Where ConsensFlow closed the window and the
 //! host proved its program gone before it opened the conversation again
-//! (`Options::relaunched_at`), the jobs that process started are no longer the window's
+//! (`Options::relaunched`), the jobs that process started are no longer the window's
 //! to wait on: their notifications went with the process. They are retired, not ended:
 //! nothing says the processes they ran are gone (a job its shell detached can outlive the
 //! window), and the reading says how many were retired so (`Pending::retired`).

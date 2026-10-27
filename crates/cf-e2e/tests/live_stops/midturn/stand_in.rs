@@ -242,8 +242,9 @@ fn a_member_whose_window_never_shows_its_first_message_is_said_to_have_failed_as
     assert!(started.elapsed() < Duration::from_secs(120), "{said}");
     for words in [
         // The failure, in the daemon's words, from what the chief was told: the stand-in's
-        // screen names an API key, so the daemon quotes none of it.
-        "FAIL the member did not write its numbers: its task is failed, and the chief was told: T-1 failed: the window never showed its first message; its last screen lines named a secret, so they are left out",
+        // screen names an API key, so the daemon quotes none of it. Its window, delivered its
+        // first message once up (T-432), was never ready for it.
+        "FAIL the member did not write its numbers: its task is failed, and the chief was told: T-1 failed: the window was never ready for its first message; its last screen lines named a secret, so they are left out",
         "     the task: T-1 is failed",
         "     what the daemon wrote:",
         "     the chief was told (",

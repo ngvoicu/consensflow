@@ -30,7 +30,7 @@
 
 use std::rc::Rc;
 
-use cf_harness::contract::Observed;
+use cf_harness::contract::{Observed, Over};
 use cf_harness::records::Role;
 use cf_ledger::{NewNote, ParticipantView, ProjectView, Stop};
 
@@ -178,12 +178,16 @@ impl Dispatcher {
             || record.delivery.borrow().delivering.is_some()
         {
             Look::Neither
-        } else if observed.settled || observed.over || self.cut_short(observed) {
+        } else if observed.settled || observed.over == Over::Held || self.cut_short(observed) {
             // A turn its record says is over, whatever the window's status says, and one
             // a refusal for quota ended, have nothing left for an interrupt to stop: no
             // key, and no close for keys nothing heeded (T-502's and T-604's windows,
             // closed with their background work on 2026-10-25).
             Look::Rest
+        } else if observed.over == Over::Pending {
+            // The record's word has not stood a moment yet: a turn may be beginning, or
+            // the one the last key stopped is over. The next look tells.
+            Look::Neither
         } else {
             Look::Work
         };
@@ -208,7 +212,9 @@ impl Dispatcher {
                         self.take_back(participant, &stop, observed)?;
                     }
                     self.pay(record, &stop);
-                    Ok(())
+                    // The window stays: what its turn left runs on, named and never ended.
+                    self.tell_paused_left_running(project, record, stop.number)
+                        .await
                 }
                 Look::Work => {
                     self.interrupt_for(project, participant, record, &stop)
@@ -290,13 +296,13 @@ impl Dispatcher {
                 let rounds = done.as_ref().map_or(0, |done| done.rounds);
                 let told = done.is_some_and(|done| done.kept);
                 if self.retire(record).await? {
-                    return self.say_closed(project, participant, stop.number, rounds);
+                    return self.say_closed(project, participant, stop, rounds);
                 }
                 self.keep(record, key, stop.number, rounds);
                 if told {
                     return Ok(());
                 }
-                self.say_kept(project, participant, stop.number, rounds)
+                self.say_kept(project, participant, stop, rounds)
             }
         }
     }
@@ -384,17 +390,17 @@ impl Dispatcher {
         self.changed();
     }
 
-    /// Whoever gave the task is told that the window did not stop and was
-    /// closed, and what became of the task once the close was taken
-    /// ([`became_of`]).
+    /// Whoever gave the task, and whoever asked the stop, are told that the window
+    /// did not stop and was closed, and what became of the task once the close was
+    /// taken ([`became_of`]).
     fn say_closed(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
-        number: i64,
+        stop: &Stop,
         rounds: u32,
     ) -> Result<(), EngineError> {
-        let handle = &participant.handle;
+        let (handle, number) = (&participant.handle, stop.number);
         let task = self
             .seams
             .ledger
@@ -409,7 +415,7 @@ impl Dispatcher {
         );
         self.tell_stop(
             project,
-            number,
+            stop,
             task.map(|task| task.requester),
             format!(
                 "@{handle} did not stop for T-{number}: it ignored the interrupt {rounds} times, so ConsensFlow closed its window. {human}"
@@ -420,16 +426,16 @@ impl Dispatcher {
         )
     }
 
-    /// Whoever gave the task is told once that the window did not stop and
-    /// would not close, and what that means.
+    /// Whoever gave the task, and whoever asked the stop, are told once that the
+    /// window did not stop and would not close, and what that means.
     fn say_kept(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
-        number: i64,
+        stop: &Stop,
         rounds: u32,
     ) -> Result<(), EngineError> {
-        let handle = &participant.handle;
+        let (handle, number) = (&participant.handle, stop.number);
         let requester = self
             .seams
             .ledger
@@ -438,7 +444,7 @@ impl Dispatcher {
             .map(|thread| thread.task.requester);
         self.tell_stop(
             project,
-            number,
+            stop,
             requester,
             format!(
                 "@{handle} did not stop for T-{number}: it ignored the interrupt {rounds} times, and its window would not close. ConsensFlow tries to close it again every minute; until then what is for it waits, and what it writes is not T-{number}'s result."
@@ -449,31 +455,44 @@ impl Dispatcher {
         )
     }
 
-    /// One note of T-`number`'s stop: to whoever gave the task, `requester`, in
-    /// its words, or to the human in theirs where the human gave it or nobody
-    /// is known to have. The board shows every note of a task to the human, and
-    /// two of one event said it twice (T-502's, 2026-10-25).
+    /// A note of `stop`'s end to each who needs it, once each: whoever gave the
+    /// task, `requester`, else the human; and whoever asked the stop, where that
+    /// is someone else (the human's pause or the chief's tell of a task the other
+    /// gave): their own act closed the window and ended its work. The human reads
+    /// `human`, any other `to_requester`. Two notes to one reader of one event said
+    /// it twice (T-502's, 2026-10-25).
     fn tell_stop(
         &self,
         project: &ProjectView,
-        number: i64,
+        stop: &Stop,
         requester: Option<String>,
         human: String,
         to_requester: String,
     ) -> Result<(), EngineError> {
-        let (to, body) = match requester.filter(|requester| requester != "human") {
-            Some(requester) => (requester, to_requester),
-            None => ("human".to_owned(), human),
-        };
-        self.seams.ledger.borrow_mut().note(
-            project.id,
-            &NewNote {
-                from: None,
-                to,
-                task: Some(number),
-                body,
-            },
-        )?;
+        let asked_by =
+            self.seams
+                .ledger
+                .borrow()
+                .stop_asked_by(project.id, stop.number, stop.seq)?;
+        let mut readers = vec![requester.unwrap_or_else(|| "human".to_owned())];
+        readers.extend(asked_by.filter(|by| !readers.contains(by)));
+        let mut ledger = self.seams.ledger.borrow_mut();
+        for to in readers {
+            let body = if to == "human" {
+                human.clone()
+            } else {
+                to_requester.clone()
+            };
+            ledger.note(
+                project.id,
+                &NewNote {
+                    from: None,
+                    to,
+                    task: Some(stop.number),
+                    body,
+                },
+            )?;
+        }
         Ok(())
     }
 

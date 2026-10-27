@@ -4,10 +4,10 @@
 //! from where the last look stopped into the state its parser makes, and
 //! says whether it read anything. A transcript that is not the one read so
 //! far, or whose parser asked for it again (`Stop::Reread`), is read again
-//! from its start, into a fresh state. One that could not be read is not
+//! from its start, into a fresh state, made for the file it reads. One that could not be read is not
 //! read again until it changes.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use cf_base::file::{settled, stat, Stat};
@@ -49,10 +49,13 @@ pub(crate) trait Parser {
 /// be looked for.
 pub(crate) type Locate = Box<dyn FnMut() -> Result<Option<PathBuf>, String> + Send>;
 
+/// How a fresh state is made, for the file it reads.
+pub(crate) type Fresh<P> = Box<dyn FnMut(&Path) -> P + Send>;
+
 /// A transcript followed from look to look.
 pub(crate) struct Followed<P> {
     locate: Locate,
-    parse: Box<dyn FnMut() -> P + Send>,
+    parse: Fresh<P>,
     file: Option<PathBuf>,
     seen: Option<Seen>,
     state: Option<P>,
@@ -75,7 +78,7 @@ pub(crate) struct Read<'a, P> {
 }
 
 impl<P: Parser> Followed<P> {
-    pub(crate) fn new(locate: Locate, parse: Box<dyn FnMut() -> P + Send>) -> Self {
+    pub(crate) fn new(locate: Locate, parse: Fresh<P>) -> Self {
         Self {
             locate,
             parse,
@@ -113,7 +116,7 @@ impl<P: Parser> Followed<P> {
         }
         self.broken = None;
         loop {
-            let state = self.state.get_or_insert_with(|| (self.parse)());
+            let state = self.state.get_or_insert_with(|| (self.parse)(&file));
             let looked = read_on_with(
                 &file,
                 self.seen.as_ref(),
@@ -138,7 +141,7 @@ impl<P: Parser> Followed<P> {
                         .map(|seen| seen.passed_over().to_vec())
                         .unwrap_or_default();
                     return Ok(Some(Read {
-                        state: self.state.get_or_insert_with(|| (self.parse)()),
+                        state: self.state.get_or_insert_with(|| (self.parse)(&file)),
                         file,
                         changed,
                         lost,
@@ -186,14 +189,20 @@ impl<P> TranscriptReader<P> {
         }
     }
 
-    /// Tells the state read so far, if there is one, what `tell` tells it, and
-    /// has the next look answer anew: from that state where `tell` says it
-    /// took it, else from the transcript read again from its start into a
-    /// fresh state.
-    pub(crate) fn retell(&mut self, tell: impl FnOnce(&mut P) -> bool) {
+    /// The transcript the reader read last, once it found one.
+    pub(crate) fn file(&self) -> Option<&Path> {
+        self.transcript.file.as_deref()
+    }
+
+    /// Tells the state read so far, if there is one, what `tell` tells it of
+    /// the file it read, and has the next look answer anew: from that state
+    /// where `tell` says it took it, else from the transcript read again from
+    /// its start into a fresh state.
+    pub(crate) fn retell(&mut self, tell: impl FnOnce(&mut P, &Path) -> bool) {
         self.answer = None;
-        if let Some(state) = self.transcript.state.as_mut() {
-            if !tell(state) {
+        let transcript = &mut self.transcript;
+        if let (Some(state), Some(file)) = (transcript.state.as_mut(), transcript.file.as_deref()) {
+            if !tell(state, file) {
                 self.transcript.seen = None;
                 self.transcript.state = None;
             }
@@ -264,7 +273,7 @@ mod tests {
         let (making, visiting) = (Arc::clone(&made), Arc::clone(&visits));
         let mut followed = Followed::new(
             Box::new(move || Ok(Some(located.clone()))),
-            Box::new(move || {
+            Box::new(move |_: &Path| {
                 making.fetch_add(1, Ordering::Relaxed);
                 Counting(Arc::clone(&visiting))
             }),
@@ -301,7 +310,7 @@ mod tests {
         let (making, visiting) = (Arc::clone(&made), Arc::clone(&visits));
         let mut followed = Followed::new(
             Box::new(move || Ok(Some(located.clone()))),
-            Box::new(move || {
+            Box::new(move |_: &Path| {
                 making.fetch_add(1, Ordering::Relaxed);
                 Counting(Arc::clone(&visiting))
             }),
@@ -352,7 +361,7 @@ mod tests {
         let located = file.clone();
         let mut followed = Followed::new(
             Box::new(move || Ok(Some(located.clone()))),
-            Box::new(|| Counting(Arc::new(AtomicUsize::new(0)))),
+            Box::new(|_: &Path| Counting(Arc::new(AtomicUsize::new(0)))),
         );
         assert!(followed.read(looked).is_err());
         write_at(&file, mended, looked - 1_000);
@@ -378,7 +387,7 @@ mod tests {
         let (located, visiting) = (file.clone(), Arc::clone(&visits));
         let mut followed = Followed::new(
             Box::new(move || Ok(Some(located.clone()))),
-            Box::new(move || Counting(Arc::clone(&visiting))),
+            Box::new(move |_: &Path| Counting(Arc::clone(&visiting))),
         );
         let mut look = |at: i64| followed.read(written + at).unwrap().unwrap().changed;
         assert!(look(500));
@@ -417,7 +426,7 @@ mod tests {
         let located = file.clone();
         let followed = Followed::new(
             Box::new(move || Ok(Some(located.clone()))),
-            Box::new(move || Rereading {
+            Box::new(move |_: &Path| Rereading {
                 number: made.fetch_add(1, Ordering::Relaxed) + 1,
                 visited: Vec::new(),
                 asks_at,

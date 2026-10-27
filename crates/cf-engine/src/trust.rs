@@ -34,7 +34,9 @@
 //! The watch ends once the window is past the question: its harness's prompt on its
 //! screen, or its record grown since it opened (a window
 //! opened again on its conversation has that conversation in its record from the
-//! first look); a window that never asked is let go after [`ASKS_WITHIN_MS`]. A look
+//! first look); a window that never asked is let go after [`ASKS_WITHIN_MS`], but for one
+//! still owed its launch's first message, which only its prompt lets go, within its
+//! launch's time. A look
 //! the host shows no screen for says nothing either way: a window that asked is held
 //! until one does, and the human is told once that lasts [`UNREAD_MS`]. A question
 //! whose choice the reader cannot place is pressed nothing, and the human is told of
@@ -70,6 +72,7 @@ use cf_proto::panes::{SnapshotRequest, TAIL_LINES};
 use serde_json::{json, Value};
 
 use crate::dispatcher::Dispatcher;
+use crate::handoff::is_handoff;
 use crate::record::Record;
 use crate::runtime::returning;
 use crate::seams::EngineError;
@@ -81,6 +84,10 @@ const LOOK: Duration = Duration::from_millis(500);
 /// How long a window that never held still, its record empty, is watched for the
 /// question: a harness asks it as it starts, before anything else is drawn.
 pub(crate) const ASKS_WITHIN_MS: i64 = 30_000;
+
+/// How long a chief's window owed its first message may show neither the question nor
+/// its prompt before the human is told, once (T-629).
+const NO_PROMPT_MS: i64 = 120_000;
 
 /// How many looks a screen the last key went into may stay as it was before the key
 /// is pressed again, where it may be ([`presses_again`]): the window did not take it.
@@ -190,6 +197,21 @@ fn dialog(question: Question) -> u8 {
     }
 }
 
+/// Whether `record`'s launch still owes its window its first message, handed over
+/// once the window is past the question ([`Dispatcher::hand_first`]): its Enter would
+/// answer a question drawn late, under load, with the choice the question opens on,
+/// "No, exit" (Calliope's review of T-432, T-520). Such a window is watched until its
+/// prompt shows, within its launch's time (`arrival`), never let go for having asked
+/// nothing yet.
+fn owes_first(record: &Record) -> bool {
+    record
+        .delivery
+        .borrow()
+        .delivering
+        .as_ref()
+        .is_some_and(|delivering| delivering.owed.is_some())
+}
+
 /// What one look at the window found.
 enum Seen {
     /// The question, the key toward a yes where its choice could be placed, and the
@@ -257,6 +279,36 @@ impl Dispatcher {
         }
     }
 
+    /// Whether `record`'s window, about to be handed its first message, shows one of
+    /// its harness's questions on a look at its screen now: the question about its
+    /// folder's trust or grants, or the dialog of new servers, drawn after the watch let
+    /// it go (late, or one after another). Where it does, the watch is begun again, and
+    /// answers it or tells the human as it does any; nothing goes into a dialog. A window
+    /// whose harness asks none, or a screen that cannot be read, shows none.
+    pub(crate) async fn asks_before_its_first_message(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        pane: &Pane,
+    ) -> Result<bool, EngineError> {
+        let window = record.window.borrow().window.clone();
+        let Some(window) = window.filter(|window| window.trusts().is_some()) else {
+            return Ok(false);
+        };
+        if !matches!(self.trust_look(pane, &*window).await, Seen::Asks(..)) {
+            return Ok(false);
+        }
+        if !self.shows(record, pane) {
+            return Ok(true);
+        }
+        let (Some(project), Some(participant)) =
+            (self.project_of(record.id)?, self.participant_of(record)?)
+        else {
+            return Ok(true);
+        };
+        self.watch_trust(record, &project, &participant, pane).await;
+        Ok(true)
+    }
+
     /// Watches a window that was just opened for its harness's question about
     /// trusting its folder, apart from its launch, where its harness may ask one.
     pub(crate) async fn watch_trust(
@@ -300,7 +352,8 @@ impl Dispatcher {
     /// record's. A window is past it once its harness's prompt is on its screen, or
     /// its record has grown since it opened (a window opened again on its
     /// conversation has the whole conversation in its record from the first look),
-    /// or, where it never asked, once [`ASKS_WITHIN_MS`] passed.
+    /// or, where it never asked and is owed no first message, once [`ASKS_WITHIN_MS`]
+    /// passed.
     async fn trust_until_past(
         self: &Rc<Self>,
         record: &Rc<Record>,
@@ -355,6 +408,8 @@ impl Dispatcher {
         // is told of again.
         let mut grants = false;
         let mut servers = false;
+        // Whether the human was told that a chief's window shows no prompt.
+        let mut told_no_prompt = false;
         let (at_prompt, cleared) = loop {
             // A window no longer the record's ends the watch as any other: what it was
             // told of is forgotten below, and nothing else is done for it.
@@ -369,6 +424,21 @@ impl Dispatcher {
             let seen = self.trust_look(pane, &**window).await;
             if !matches!(seen, Seen::Unread) {
                 unread_since = None;
+            }
+            // A chief's launch is never given up, and nothing is pasted blind into a window
+            // that may still ask: one that shows neither a question nor a prompt the reader
+            // knows (a harness that draws it otherwise since an update) would hold its first
+            // message for good, so the human hears once (T-629).
+            let no_prompt = matches!(seen, Seen::Other | Seen::Unread)
+                && !record.window.borrow().trust.asks()
+                && owes_first(record);
+            if no_prompt
+                && participant.role == "chief"
+                && !told_no_prompt
+                && self.now() - began > NO_PROMPT_MS
+            {
+                told_no_prompt = true;
+                self.tell_no_prompt(project, record)?;
             }
             match seen {
                 Seen::Asks(question, lines) => {
@@ -519,7 +589,7 @@ impl Dispatcher {
                         if gone >= GONE_LOOKS {
                             break (false, false);
                         }
-                    } else if self.now() - began > ASKS_WITHIN_MS {
+                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {
                         break (false, false);
                     }
                 }
@@ -552,7 +622,7 @@ impl Dispatcher {
                             )?;
                             self.changed();
                         }
-                    } else if self.now() - began > ASKS_WITHIN_MS {
+                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {
                         break (false, false);
                     }
                 }
@@ -821,6 +891,33 @@ impl Dispatcher {
         )?;
         self.changed();
         Ok(())
+    }
+
+    /// The note to the human that the chief's window, owed its first message, has shown
+    /// no prompt for [`NO_PROMPT_MS`]: the message waits, and the window is theirs to look
+    /// at (T-629).
+    fn tell_no_prompt(&self, project: &ProjectView, record: &Record) -> Result<(), EngineError> {
+        let owed = record
+            .delivery
+            .borrow()
+            .delivering
+            .as_ref()
+            .map(|delivering| delivering.message);
+        let message = match owed {
+            Some(id) => self.seams.ledger.borrow().message(id)?,
+            None => None,
+        };
+        let what = if message.as_ref().is_some_and(is_handoff) {
+            "its handoff"
+        } else {
+            "the message for it"
+        };
+        self.note_to_human(
+            project,
+            format!(
+                "The chief's window has shown no prompt for 2 minutes; {what} is waiting. Look at its terminal."
+            ),
+        )
     }
 
     /// A note to the human about `folder`, the first time the project's windows

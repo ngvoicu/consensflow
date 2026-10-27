@@ -29,6 +29,8 @@ use std::hash::{BuildHasher, Hasher};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
+use super::machine::Limits;
+
 /// What the line that ends the script's output begins with: the number is the
 /// status the command ended with (`== exit 7`), a signed decimal as PowerShell
 /// writes an `[int]`. It is a line of its own, as `== env NAME=VALUE` and
@@ -149,6 +151,28 @@ pub const BUILD_STEPS: [&str; 6] = [
     "cargo xtask conpty --into app/src-tauri/target/release",
 ];
 
+/// What every run makes sure of on the machine, after `--build`'s steps and before its command,
+/// whether or not it was asked to build (T-627 and T-487, 2026-10-26): a copy that nobody has built
+/// in is not left to run on what happens to be there. Each is idempotent, and a run ends with the
+/// step's status, saying what it needs, if one cannot be made.
+///
+/// - **The crates** every offline command wants (`cargo test --offline`, and nextest's own `cargo
+///   metadata --offline`): `cargo fetch --locked --offline` says whether the registry holds the
+///   lockfile's, and only if it does not is the network asked. A copy that had only built what
+///   its tests compile lacked the optional crates, and nextest ended at once with 102 and no
+///   report (zeewin2, the plant runner of T-627).
+/// - **The console host**, `conpty.dll` and `OpenConsole.exe`, beside the builds the tests run
+///   from. A test program finds the host in the folder cargo puts on its PATH, the profile's
+///   folder: `debug` for `cargo test`, `release` for the programs the black-box suites build.
+///   Only `--build` put it in `release`, and nothing in `debug`, so on a machine where nobody had
+///   done that by hand the panes ran on Windows' own console host, and a test of the keys read
+///   Alt as key 18 (`pty::keys::conpty`, zeewin2).
+pub const PREPARE_STEPS: [&str; 3] = [
+    "cargo fetch --locked --offline >nul 2>&1 || cargo fetch --locked",
+    "cargo xtask conpty --into app/src-tauri/target/debug",
+    "cargo xtask conpty --into app/src-tauri/target/release",
+];
+
 /// What the machine's shell reads of a command line: cmd.exe's 8191 characters,
 /// less what ssh puts before the script (`powershell -NoProfile -NonInteractive
 /// -EncodedCommand `) and a margin. Only the bootstrap is on the line, and it is the
@@ -245,7 +269,24 @@ fn is_name(name: &str) -> bool {
 
 /// `text` as PowerShell takes it between single quotes.
 fn quoted(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "''"))
+    format!("'{}'", single_quoted(text))
+}
+
+/// The quotes PowerShell ends a single-quoted string at: the apostrophe and the four
+/// typographic single quotes, which it reads as one (a plant's name "a worker’s turn" ended
+/// the run's command there, integration B round 2, T-800).
+const SINGLE_QUOTES: [char; 5] = ['\'', '\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'];
+
+/// `text` as it goes between PowerShell's single quotes: each quote said twice.
+fn single_quoted(text: &str) -> String {
+    let mut said = String::with_capacity(text.len());
+    for c in text.chars() {
+        if SINGLE_QUOTES.contains(&c) {
+            said.push(c);
+        }
+        said.push(c);
+    }
+    said
 }
 
 /// The script as `powershell -EncodedCommand` takes it, or the refusal that says it will not fit.
@@ -292,6 +333,8 @@ pub struct Script<'a> {
     /// The folder of the Node the run puts first on its PATH, in PowerShell's words
     /// ([`super::machine::Machine::node`]).
     pub node: &'a str,
+    /// What the machine takes at once, if less than all it has ([`Limits`]).
+    pub limits: Option<Limits>,
 }
 
 /// The bootstrap: the run's own tarball ([`upload_name`]) unpacked into `dir` under the
@@ -351,6 +394,10 @@ pub fn run_script(script: &Script) -> String {
         .iter()
         .map(|step| format!("'{step}'"))
         .collect();
+    let prepare: Vec<String> = PREPARE_STEPS
+        .iter()
+        .map(|step| format!("'{step}'"))
+        .collect();
     let given: String = script
         .env
         .iter()
@@ -368,12 +415,31 @@ pub fn run_script(script: &Script) -> String {
             ("node", script.node),
             ("in_job", IN_JOB),
             ("command_file", COMMAND_FILE),
+            ("limits", &limits_of(script.limits)),
             ("steps", &steps.join(", ")),
+            ("prepare", &prepare.join(", ")),
             ("given", &given),
             ("inside", script.inside),
-            ("command", &script.command.replace('\'', "''")),
+            ("command", &single_quoted(script.command)),
             ("crlf", "\r\n"),
         ],
+    )
+}
+
+/// The lines of the run script that give the process what the machine takes at once: the jobs of
+/// the builds and the threads of the tests, said in the output, before any step or command. A
+/// variable the run names (`--env`) is given after them, and is the command's.
+fn limits_of(limits: Option<Limits>) -> String {
+    let Some(Limits {
+        build_jobs,
+        test_threads,
+    }) = limits
+    else {
+        return String::new();
+    };
+    format!(
+        "$env:CARGO_BUILD_JOBS = '{build_jobs}'\n$env:RUST_TEST_THREADS = '{test_threads}'\n\
+         Write-Output \"== limits: CARGO_BUILD_JOBS={build_jobs} RUST_TEST_THREADS={test_threads} (what this machine takes at once)\"\n"
     )
 }
 
@@ -554,7 +620,6 @@ $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) } catch {}
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
-function Exit-Run([int]$code) { Write-Output "`n«exit»$code"; exit $code }
 $dir = Join-Path $env:USERPROFILE '«dir»'
 $tarball = Join-Path $env:USERPROFILE '«tarball»'
 $running = Join-Path $dir '«running»'
@@ -562,6 +627,15 @@ $owner = Join-Path $dir '«owner»'
 $held = $false
 $lock = $null
 $job = $null
+function Free-Machine {
+  if ($script:held) {
+    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue
+    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }
+    $script:held = $false
+  }
+  if ($script:lock) { $script:lock.Dispose(); $script:lock = $null }
+}
+function Exit-Run([int]$code) { Free-Machine; Write-Output "`n«exit»$code"; exit $code }
 try {
 New-Item -ItemType Directory -Force $dir | Out-Null
 try { $lock = [IO.File]::Open((Join-Path $dir '«lock»'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {} catch { $why = $_.Exception.Message }
@@ -581,12 +655,8 @@ Write-Output "«tree_mark»$(Get-Content -LiteralPath (Join-Path $dir '«tree_fi
 . ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '«run»'))))
 } finally {
   if ($null -ne $job) { [CfJob]::Release($job) }
+  Free-Machine
   Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue
-  if ($held) {
-    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue
-    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }
-  }
-  if ($lock) { $lock.Dispose() }
 }
 "##;
 
@@ -609,6 +679,10 @@ Write-Output "«tree_mark»$(Get-Content -LiteralPath (Join-Path $dir '«tree_fi
 ///   tree, as one that is not in the job.
 /// - Codex's own PATH entry is a junction an SSH session may not cross ("an untrusted
 ///   mount point"): its release folder is named outright.
+/// - After the build's steps, if there were any, the steps of [`PREPARE_STEPS`] make sure of
+///   what the tests of the copy run on (the crates, the console host), and a run that cannot
+///   have them ends with that step's status and says what it needed, before its command, which
+///   is never run on what happens to be there.
 const RUN_TEMPLATE: &str = r##"
 $job = $null
 try {
@@ -627,10 +701,18 @@ $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorA
 if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
 Set-Location $dir
 $ErrorActionPreference = 'Continue'
-foreach ($step in @(«steps»)) {
+«limits»foreach ($step in @(«steps»)) {
   Write-Output "== $step"
   cmd /c "$step 2>&1"
   if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
+}
+foreach ($step in @(«prepare»)) {
+  Write-Output "== $step"
+  cmd /c "$step 2>&1"
+  if ($LASTEXITCODE -ne 0) {
+    Write-Output "== the run needs what '$step' makes there, and it could not be made (status $LASTEXITCODE): the command is not run on what happens to be on the machine"
+    Exit-Run $LASTEXITCODE
+  }
 }
 «given»Set-Location (Join-Path $dir '«inside»')
 $run = Join-Path $dir '«command_file»'

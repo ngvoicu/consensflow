@@ -290,8 +290,12 @@ fn entry_of(line: &str) -> Option<Entry> {
         Value::Array(parts) => parts.clone(),
         _ => Vec::new(),
     };
-    let role = record["message"]["role"]
+    // A request Claude Code 2.1.310 keeps of what it sent the API carries the message it
+    // sent (`api-request-blob`), which is none of the conversation's: it is its type.
+    let role = record["type"]
         .as_str()
+        .filter(|kind| kind.starts_with("api-request"))
+        .or_else(|| record["message"]["role"].as_str())
         .or_else(|| record["type"].as_str())
         .unwrap_or("undefined");
     let kind = match record["subtype"].as_str() {

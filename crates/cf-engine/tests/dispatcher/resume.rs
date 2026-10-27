@@ -5,11 +5,12 @@
 //! resumed the chief at the start and paused what its windows were at, and its
 //! Resume after a Close resumed no task, so none of these is held to a Node trace.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use cf_engine::testing::{Context, FakeAdapter, Gate, Made, Restarted, TRUST_QUESTION};
 use cf_engine::{ActivityState, SwitchWhen};
-use cf_harness::contract::Readiness;
+use cf_harness::contract::{Pane, Readiness};
 use cf_ledger::{MessageView, NewNote, RESUME_WORDS};
 use serde_json::{json, Value};
 
@@ -668,6 +669,66 @@ fn a_window_that_asks_and_ends_by_itself_while_the_close_looks_at_its_screen_and
     let closing = context.begin_close_project(project);
     context.settle();
     // Zeus's harness crashes while the Close looks at its screen; then its kill fails.
+    context.exit("zeus");
+    context.host.refuse_kills.set(true);
+    looking.open();
+    let refused = context.finish(closing).unwrap_err();
+    assert_match(&refused.to_string(), "would not close");
+    context.host.refuse_kills.set(false);
+
+    context.resume_project(project).unwrap();
+
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["paused", "working"],
+        "a window that closed by itself is the chief's to resume"
+    );
+}
+
+/// Calliope's re-check of T-504 (T-505, P3-1): the same, with the Close's look at the
+/// screen held for many times the bound a pass waits for its steps (`STEP_WAIT`), and
+/// passes made meanwhile. The Close holds the window's record all that while: no pass
+/// looks at the window, and the exit that comes during the look is still the window's
+/// own once the kill fails.
+#[test]
+fn a_window_that_asks_and_ends_by_itself_while_the_close_looks_past_a_passs_bound_and_whose_kill_fails_leaves_its_task_paused(
+) {
+    let context = Context::new();
+    context.adapter.asks_to_trust("/work/repository", false);
+    context
+        .host
+        .set_snapshot(json!({ "tail": [TRUST_QUESTION] }));
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = context.host.last("zeus").expect("its window").pane;
+    let id = zeus.id.clone();
+    let looking = context
+        .host
+        .request_holds
+        .hold(move |args| args[0] == "pane.snapshot" && args[1]["id"] == id.as_str());
+    let looks = |handle: &str| {
+        let launch = context.adapter.agent(handle).launch;
+        context
+            .recorder
+            .calls("adapter:claude-code", &["observe"])
+            .iter()
+            .filter(|(_, args)| args[0]["launch"]["launchId"] == launch.as_str())
+            .count()
+    };
+    let closing = context.begin_close_project(project);
+    context.settle();
+    let before = looks("zeus");
+    let bound = i64::try_from(cf_engine::steps::STEP_WAIT.as_millis()).unwrap();
+    for _ in 0..4 {
+        context.advance(2 * bound);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        looks("zeus"),
+        before,
+        "no pass looks at the window the Close holds"
+    );
+    // Zeus's harness crashes while the Close still looks at its screen; then its kill fails.
     context.exit("zeus");
     context.host.refuse_kills.set(true);
     looking.open();
@@ -2888,5 +2949,131 @@ fn a_give_up_whose_kill_is_taken_after_a_close_pauses_its_task_once_for_the_resu
             .count(),
         1,
         "{given:?}"
+    );
+}
+
+/// A window's generation and the gates of its kills, held one by one.
+type HeldKills = (u64, Vec<Gate>);
+
+/// A member opened again at the Resume whose window never comes up, its kills held one
+/// by one as `refused` says ([`FakeHost::hold_kills`]) and its exits held, the first
+/// kill, the give-up's, not answered in its wait: the launch goes on without the exit.
+/// The staff, the engine started again, the member's handle, its window and the gates
+/// of its kills.
+fn given_up_with_its_kill_unanswered<'a>(
+    context: &'a Context,
+    refused: &[bool],
+) -> (Tiers<'a>, Restarted<'a>, String, Pane, Vec<Gate>) {
+    let tiers = Tiers::new(context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context.adapter.with(&session, |agent| agent.settled = true);
+    let after = quit_and_start(context);
+    context.advance(1_000);
+    context.host.hold_exits.set(true);
+    // Each window's kills are held once, as the first launch that sees it starts: the
+    // adapter's start is asked of every launch, the chief's too.
+    let gates: Rc<RefCell<Vec<HeldKills>>> = Rc::default();
+    let (host, handle, held, refused) = (
+        Rc::clone(&context.host),
+        session.clone(),
+        Rc::clone(&gates),
+        refused.to_vec(),
+    );
+    *context.adapter.started.borrow_mut() = Some(Rc::new(move || {
+        let window = host.last(&handle).expect("its window").pane;
+        let mut held = held.borrow_mut();
+        if !held
+            .iter()
+            .any(|(generation, _)| *generation == window.generation)
+        {
+            held.push((window.generation, host.hold_kills(&window, &refused)));
+        }
+        Err(NEVER_NAMED.to_owned())
+    }));
+    after.resume_project(project).unwrap();
+    after.pass().unwrap();
+    assert!(context.timers.fire_next(), "the kill's wait ends");
+    context.settle();
+    assert_eq!(tiers.task(1).task.state, "working", "no exit has paused it");
+    *context.adapter.started.borrow_mut() = None;
+    let window = context.host.last(&session).unwrap().pane;
+    let gates = gates
+        .borrow()
+        .iter()
+        .find(|(generation, _)| *generation == window.generation)
+        .map(|(_, gates)| gates.clone())
+        .expect("its kills held");
+    (tiers, after, session, window, gates)
+}
+
+/// Rule 4's case, the Close's kill of the window answered first and taken: the exit is
+/// the Close's, and T-1's pause its. The give-up's kill of the same window, refused
+/// after, is no answer of the Close's: the human's Resume brings T-1 back (Calliope's
+/// P3-3 of T-510: each kill of the window kept an entry, the Close's answer took the
+/// give-up's and the exit marked the Close's, and the refusal took the mark back).
+#[test]
+fn a_give_up_whose_kill_is_refused_after_the_closes_kill_of_its_window_was_taken_leaves_the_pause_the_closes(
+) {
+    let context = Context::new();
+    let (tiers, after, _, _, gates) = given_up_with_its_kill_unanswered(&context, &[true, false]);
+    let project = tiers.project.id;
+    let closing = after.begin_close_project(project);
+    context.settle();
+    gates[1].open();
+    context.finish(closing).unwrap();
+    assert_eq!(context.project(project).state, "suspended");
+    assert_eq!(tiers.task(1).task.state, "paused");
+    gates[0].open();
+    context.settle();
+
+    context.host.hold_exits.set(false);
+    after.resume_project(project).unwrap();
+    assert_eq!(
+        tiers.task(1).task.state,
+        "working",
+        "the Close's pause, which its Resume ends"
+    );
+}
+
+/// The same, the give-up's kill refused only after the human's Resume and a second
+/// Close: the first Close's pause is over, and the second Close's, of the window the
+/// Resume opened, is no pause the earlier kill can take back (Calliope's P3-2 of T-510:
+/// the refusal took back whatever mark the task held then, the second Close's too).
+#[test]
+fn a_give_up_whose_kill_is_refused_after_a_resume_and_a_second_close_leaves_the_second_closes_pause(
+) {
+    let context = Context::new();
+    let (tiers, after, session, first, gates) =
+        given_up_with_its_kill_unanswered(&context, &[true, false]);
+    let project = tiers.project.id;
+    let closing = after.begin_close_project(project);
+    context.settle();
+    gates[1].open();
+    context.finish(closing).unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+
+    context.host.hold_exits.set(false);
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert_ne!(context.host.last(&session).unwrap().pane, first);
+    after.begin_close_project(project);
+    context.settle();
+    assert_eq!(context.project(project).state, "suspended");
+    assert_eq!(tiers.task(1).task.state, "paused");
+    gates[0].open();
+    context.settle();
+
+    after.resume_project(project).unwrap();
+    assert_eq!(
+        tiers.task(1).task.state,
+        "working",
+        "the second Close's pause, which its Resume ends"
     );
 }

@@ -71,7 +71,7 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
         command.current_dir(cwd);
     }
     crate::job::start_in_job(&mut command);
-    let mut process = command.spawn().map_err(|failed| {
+    let mut process = crate::spawning::one_at_a_time(|| command.spawn()).map_err(|failed| {
         format!(
             "spawn {} {}",
             run.program.to_string_lossy(),
@@ -258,9 +258,11 @@ impl Ender {
     }
 
     /// Forces the child to end, and the group it leads with it, if it is
-    /// still there, and waits for nothing (on Windows its job is ended, and a program
-    /// with none has `taskkill` started and let go): this is the end of a process on
-    /// its way out.
+    /// still there, and waits for nothing: on Windows its job is ended, and a program
+    /// with none has `taskkill` started and let go; on Unix the group is looked at once
+    /// more, at once, for what it had started as the signal went round, and that is
+    /// forced too. This is the end of a process on its way out (the daemon's stop tail
+    /// forces every kept child so), which must not wait (Calliope's P2 on T-581, T-672).
     pub fn force(&self) {
         let Some(live) = self.live.upgrade() else {
             return;
@@ -537,7 +539,9 @@ mod tests {
 
             // Asked to end, it may take its time: it is not forced.
             let child = spawn(
-                &shell("trap 'sleep 1; exit 0' TERM; while true; do sleep 0.05; done"),
+                &shell(
+                    "trap 'sleep 1; exit 0' TERM; while kill -0 $PPID 2>/dev/null; do sleep 0.05; done",
+                ),
                 None,
                 &system_env(),
                 Streams::Quiet,

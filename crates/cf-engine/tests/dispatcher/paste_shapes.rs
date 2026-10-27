@@ -60,6 +60,85 @@ fn confirms_a_paste_claude_code_recorded_in_its_wrapper_and_pastes_it_once() {
     assert_eq!(context.message(note.id).state, "delivered");
 }
 
+/// A result of some 2,600 characters, as a worker's report is: Claude Code is given it in
+/// pieces, two of a thousand characters, and what is left of it, short of a piece.
+fn a_long_result() -> String {
+    "A line of the result, as long as the lines of a worker's report.\n".repeat(40)
+}
+
+#[test]
+fn confirms_a_paste_claude_code_recorded_in_pieces_with_the_last_left_bare_at_the_first_look() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.adapter.splits_pastes.set(true);
+    let result = context.note(project.id, "zeus", "chief", &a_long_result());
+    context.pass().unwrap();
+    // As the field's record held it (T-763: m-4272, m-4273, m-4367, m-4382, m-4518): the pieces
+    // in the wrapper, and the last of them bare after the last closing tag.
+    let recorded = context
+        .adapter
+        .agent("chief")
+        .items
+        .last()
+        .unwrap()
+        .text
+        .clone();
+    let after_last_close = recorded
+        .rsplit_once("</pasted_content id=\"b118\">")
+        .unwrap()
+        .1;
+    assert!(
+        recorded.starts_with("\n\n<pasted_content id="),
+        "the pieces are in the wrapper"
+    );
+    assert!(
+        after_last_close.starts_with("\n\n") && !after_last_close.trim().is_empty(),
+        "a tail is loose after the last closing tag"
+    );
+    // The first look after it confirms: one attempt, nothing retried.
+    context.pass().unwrap();
+    let confirmed = context.message(result.id);
+    assert_eq!(
+        (confirmed.state.as_str(), confirmed.attempts),
+        ("delivered", 1)
+    );
+    // The chief answers, and its window is at rest past the arrival window: nothing is pasted again.
+    context.adapter.answer("chief", "Noted");
+    context.advance(60_000);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        given_saying(&context, "A line of the result"),
+        1,
+        "the chief was given it once"
+    );
+    let events = context.ledger.borrow().events(project.id, 0, 500).unwrap();
+    assert!(
+        events.iter().all(|event| event.kind != "delivery.retried"),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn confirms_a_paste_claude_code_recorded_in_pieces_behind_the_placeholders_of_its_images_at_the_first_look(
+) {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.adapter.attaches_images.set(true);
+    context.adapter.splits_pastes.set(true);
+    let words = format!("{DESIGNER}\n{}", a_long_result());
+    let result = context.note(project.id, "zeus", "chief", &words);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let confirmed = context.message(result.id);
+    assert_eq!(
+        (confirmed.state.as_str(), confirmed.attempts),
+        ("delivered", 1)
+    );
+}
+
 /// A result as the designer's role asks it: the absolute path of each picture on a line of
 /// its own, then a line on what they show.
 const DESIGNER: &str = "/work/images/desk.png\n/work/images/hero.png\nWarm editorial desk scene.";
@@ -106,6 +185,13 @@ fn confirms_a_paste_claude_code_recorded_behind_the_placeholders_of_its_images_a
         .collect();
     assert_eq!((roles[at], roles[at + 1]), (Role::User, Role::Custom));
     context.pass().unwrap();
+    // The first look after it confirms: one attempt, nothing retried (the field: pasted three
+    // times and failed, T-215).
+    let confirmed = context.message(result.id);
+    assert_eq!(
+        (confirmed.state.as_str(), confirmed.attempts),
+        ("delivered", 1)
+    );
     // The chief answers, and its window is at rest past the arrival window.
     context.adapter.answer("chief", "Noted");
     context.advance(60_000);

@@ -170,21 +170,36 @@ fn mybuilder() -> Value {
     })
 }
 
-/// Whether `folder` holds the `cf` under test: the daemon's bundle, first on
-/// every window's `PATH`. The daemon finds its folder from its own path as the
-/// system gives it, and macOS gives a program's path by any link that last
-/// reached its file (the gate's exported trees link to this build folder), so
-/// the file is compared, not the words.
+/// Whether `folder` holds the `cf` under test: the daemon's bundle, first on every window's
+/// `PATH`. The daemon runs a copy of the build's `cf` in its home (a `cargo build` takes the
+/// build's away and puts it back, and a window that runs `cf` then finds none), so what is
+/// compared is the program, byte for byte, and not where it is.
 fn holds_the_cf_under_test(folder: &Path) -> cf_e2e::Result<bool> {
-    let resolve = |path: &Path| {
-        std::fs::canonicalize(path).map_err(|source| cf_e2e::Error::File {
-            action: "resolve",
-            path: path.to_path_buf(),
-            source,
-        })
-    };
     let named = folder.join(format!("cf{}", std::env::consts::EXE_SUFFIX));
-    Ok(resolve(&named)? == resolve(cf::binary()?)?)
+    Ok(files::read(&named)? == files::read(cf::binary()?)?)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_daemon_runs_a_copy_of_the_cf_in_its_home_and_not_the_build_a_cargo_build_takes_away() -> Outcome
+{
+    let home = Home::new()?;
+    let daemon = running_daemon(&home)?;
+    // The program the daemon runs, as the system says it.
+    let ran = cf_e2e::process::Run::new("/bin/ps")
+        .args(["-o", "comm=", "-p", &daemon.id().to_string()])
+        .run()?;
+    let program = std::fs::canonicalize(ran.stdout.trim())?;
+    let inside = std::fs::canonicalize(home.root())?;
+    assert!(
+        program.starts_with(&inside),
+        "the daemon runs {} and not a copy in {}",
+        program.display(),
+        inside.display()
+    );
+    assert_eq!(files::read(&program)?, files::read(cf::binary()?)?);
+    daemon.end_input();
+    Ok(())
 }
 
 #[test]

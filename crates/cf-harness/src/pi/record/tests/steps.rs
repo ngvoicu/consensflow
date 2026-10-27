@@ -404,3 +404,51 @@ fn a_record_whose_newline_a_short_write_dropped_keeps_its_place_and_its_time() {
     // Each item with its record's place, the header's at 0.
     assert_eq!(after.lines.places, Some(vec![1, 2]));
 }
+
+/// The step Pi writes of its own when a run fails or is aborted before the model's
+/// first token (`handleRunFailure`, Pi 1.4.0): an empty text, no usage, and how
+/// the run ended.
+fn of_its_own(id: &str, stop: &str) -> Value {
+    message(
+        id,
+        json!({ "role": "assistant", "stopReason": stop, "content": [{ "type": "text", "text": "" }],
+            "usage": { "input": 0, "output": 0, "totalTokens": 0 },
+            "errorMessage": "Request was aborted" }),
+    )
+}
+
+#[test]
+fn a_step_pi_wrote_with_no_model_behind_it_is_synthetic_and_one_the_model_began_is_not() {
+    // T-530: the check that a window got a turn through took a step Pi writes of its
+    // own, at an Escape before the model's first token, for an answer: it is over,
+    // not failed, and dated when Pi wrote it.
+    for stop in ["aborted", "error"] {
+        let record = Stage::with(&[header(), user("u1", "go"), of_its_own("a1", stop)]).at(0);
+        let step = record.items.last().unwrap();
+        assert_eq!(
+            (step.role, step.synthetic),
+            (Role::Assistant, true),
+            "{stop}"
+        );
+    }
+    // A provider's abort keeps what had come: nothing, or the model's first words.
+    let aborted = |content: Value| {
+        let step = message(
+            "a1",
+            json!({ "role": "assistant", "stopReason": "aborted", "content": content }),
+        );
+        let record = Stage::with(&[header(), user("u1", "go"), step]).at(0);
+        record.items.last().unwrap().synthetic
+    };
+    assert!(aborted(json!([])));
+    assert!(!aborted(json!([{ "type": "text", "text": "Reading the" }])));
+    assert!(!aborted(
+        json!([{ "type": "thinking", "thinking": "The user wants" }])
+    ));
+    assert!(!aborted(
+        json!([{ "type": "toolCall", "id": "c1", "name": "read" }])
+    ));
+    // A step that stopped is the model's, whatever it says.
+    let record = Stage::with(&[header(), user("u1", "go"), assistant("a1", "stop", "")]).at(0);
+    assert!(!record.items.last().unwrap().synthetic);
+}

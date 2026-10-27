@@ -169,16 +169,7 @@ fn made(
     run: Option<&str>,
 ) -> std::result::Result<PathBuf, String> {
     let folder = target(root).join(BUILDS);
-    files::make_dir(&folder).map_err(|cause| cause.to_string())?;
-    let lock = folder.join("build.lock");
-    let lock = File::options()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&lock)
-        .and_then(|file| file.lock().map(|()| file))
-        .map_err(|cause| format!("could not take the lock {}: {cause}", lock.display()))?;
+    let lock = taking_turns(&folder)?;
     let built_for = folder.join(format!("{bin}.run"));
     let built = release(root).join(exe(bin));
     let made = run.is_some_and(|run| {
@@ -192,6 +183,21 @@ fn made(
     }
     drop(lock);
     Ok(built)
+}
+
+/// The lock the builds in the folder `folder` (the one for `BUILDS`) take turns on, taken once
+/// no build is under way and held until the file it answers is dropped.
+fn taking_turns(folder: &Path) -> std::result::Result<File, String> {
+    files::make_dir(folder).map_err(|cause| cause.to_string())?;
+    let lock = folder.join("build.lock");
+    File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock)
+        .and_then(|file| file.lock().map(|()| file))
+        .map_err(|cause| format!("could not take the lock {}: {cause}", lock.display()))
 }
 
 /// The folder the workspace builds in, from the checkout's root.
@@ -458,13 +464,17 @@ mod tests {
     /// The cargo of the cases below, as cargo is: one build at a time in a build
     /// folder (its lock, `.cargo-lock`, is let go as it ends), and a program that
     /// is linked again even where there was nothing to build: removed, and made
-    /// again a moment later. It writes down each time it is run.
-    const REPLACING: &str = "until mkdir .cargo-lock 2>/dev/null; do sleep 0.01; done; \
-         echo built >> cargo-calls; \
-         rm -f app/src-tauri/target/release/cf; \
-         sleep 0.2; \
-         mkdir -p app/src-tauri/target/release && : > app/src-tauri/target/release/cf; \
-         rmdir .cargo-lock";
+    /// again `window` seconds later. It writes down each time it is run.
+    fn replacing(window: &str) -> String {
+        format!(
+            "until mkdir .cargo-lock 2>/dev/null; do sleep 0.01; done; \
+             echo built >> cargo-calls; \
+             rm -f app/src-tauri/target/release/cf; \
+             sleep {window}; \
+             mkdir -p app/src-tauri/target/release && : > app/src-tauri/target/release/cf; \
+             rmdir .cargo-lock"
+        )
+    }
 
     /// The variables that give `helper_asks_for_the_cf_of_a_run` the checkout and
     /// the cargo it asks in.
@@ -474,7 +484,12 @@ mod tests {
     /// Run by the cases below in processes of their own, as the tests of a nextest
     /// run are, given the checkout in `ROOT`, the script of the cargo in `CARGO`
     /// and the run in `RUN`: asks for the `cf` of the run, says where it is, and
-    /// says whether it is still there a moment later.
+    /// says whether it is still there a moment later: after half a second, for a
+    /// process of a run, which shares one build that nothing makes again; between
+    /// builds, for a process of no run, which builds its own, and the builds of the
+    /// others take the program away for a moment as they make it again (it was
+    /// looked for half a second after its own build, and a machine at a load of 25
+    /// to 40 let that fall in the window of another's: T-776).
     #[test]
     #[ignore = "a program the tests of cf start"]
     fn helper_asks_for_the_cf_of_a_run() {
@@ -483,8 +498,16 @@ mod tests {
         let cargo = Run::new("/bin/sh").arg(own_var(CARGO).unwrap());
         match built_by(&CELL, cargo, &root, ("cf", "cf", &[]), None) {
             Ok(path) => {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                println!("cf: {}\nthere: {}", path.display(), path.is_file());
+                let there: std::result::Result<bool, String> = if own_var(RUN).is_some() {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    Ok(path.is_file())
+                } else {
+                    taking_turns(&target(&root).join(BUILDS)).map(|_between| path.is_file())
+                };
+                match there {
+                    Ok(there) => println!("cf: {}\nthere: {there}", path.display()),
+                    Err(failed) => println!("failed: {failed}"),
+                }
             }
             Err(failed) => println!("failed: {failed}"),
         }
@@ -546,7 +569,7 @@ mod tests {
     #[test]
     fn the_processes_of_a_run_build_a_program_once_and_none_has_it_taken_from_under_it() {
         let root = tempfile::tempdir().unwrap();
-        let (_folder, cargo) = script(REPLACING);
+        let (_folder, cargo) = script(&replacing("0.2"));
         let said = ask_for_the_cf(root.path(), &cargo, Some("run-a"), 8);
         let there = release(root.path()).join(exe("cf"));
         for said in &said {
@@ -562,7 +585,7 @@ mod tests {
     #[test]
     fn a_program_built_for_another_run_is_built_again_and_one_built_for_this_one_is_not() {
         let root = tempfile::tempdir().unwrap();
-        let (_folder, cargo) = script(REPLACING);
+        let (_folder, cargo) = script(&replacing("0.2"));
         ask_for_the_cf(root.path(), &cargo, Some("run-a"), 2);
         assert_eq!(calls(root.path()), 1);
         ask_for_the_cf(root.path(), &cargo, Some("run-b"), 2);
@@ -574,7 +597,7 @@ mod tests {
     #[test]
     fn a_program_the_run_built_and_that_is_gone_is_built_again() {
         let root = tempfile::tempdir().unwrap();
-        let (_folder, cargo) = script(REPLACING);
+        let (_folder, cargo) = script(&replacing("0.2"));
         ask_for_the_cf(root.path(), &cargo, Some("run-a"), 1);
         std::fs::remove_file(release(root.path()).join(exe("cf"))).unwrap();
         ask_for_the_cf(root.path(), &cargo, Some("run-a"), 1);
@@ -584,7 +607,10 @@ mod tests {
     #[test]
     fn processes_that_belong_to_no_run_each_build_their_own_and_write_down_nothing() {
         let root = tempfile::tempdir().unwrap();
-        let (_folder, cargo) = script(REPLACING);
+        // The program is gone for longer than the half second a process of a run waits
+        // before it looks, so that a look made beside the builds of the others finds it
+        // gone here on any machine, and a look that waits is not what makes this pass.
+        let (_folder, cargo) = script(&replacing("1"));
         let said = ask_for_the_cf(root.path(), &cargo, None, 3);
         for said in &said {
             assert!(said.contains("there: true"), "{said}");
@@ -604,7 +630,7 @@ mod tests {
             said[0]
         );
         assert!(!target(root.path()).join(BUILDS).join("cf.run").exists());
-        let (_folder, cargo) = script(REPLACING);
+        let (_folder, cargo) = script(&replacing("0.2"));
         let said = ask_for_the_cf(root.path(), &cargo, Some("run-a"), 1);
         assert!(said[0].contains("there: true"), "{}", said[0]);
         assert_eq!(calls(root.path()), 2, "the next process builds it again");

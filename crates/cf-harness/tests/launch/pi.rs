@@ -253,7 +253,8 @@ fn extension_takes(home: &Home) -> Vec<String> {
 }
 
 #[test]
-fn launches_pi_with_its_extension_a_session_name_of_ours_and_the_task_last() {
+fn launches_pi_with_its_extension_a_session_name_of_ours_and_no_task_or_role_text_on_its_command_line(
+) {
     let home = Home::new();
     let (adapter, _fakes) = adapter(&home);
     let plan = prepare(&adapter, &Request::default()).unwrap();
@@ -283,8 +284,9 @@ fn launches_pi_with_its_extension_a_session_name_of_ours_and_the_task_last() {
         "SKILL.md",
     ]);
     let mut argv = vec![home.executable.clone(), "--extension".to_owned(), extension];
-    argv.extend(["--skill".to_owned(), skill]);
-    argv.extend(["--append-system-prompt".to_owned(), ROLE.to_owned()]);
+    argv.extend(["--skill".to_owned(), skill.clone()]);
+    // The role's text by its file, which Pi reads where the path names one.
+    argv.extend(["--append-system-prompt".to_owned(), skill]);
     argv.extend(words(&["--session-id"]));
     argv.push(session);
     argv.extend(words(&[
@@ -293,9 +295,14 @@ fn launches_pi_with_its_extension_a_session_name_of_ours_and_the_task_last() {
         "--thinking",
         "high",
         "--approve",
-        TASK,
     ]));
+    // Its task goes in through the extension's inbox once the window is up
+    // (`FirstMessage::Delivered`): every process on the machine reads a command line.
     assert_eq!(plan.argv, argv);
+    assert!(plan
+        .argv
+        .iter()
+        .all(|word| !word.contains(TASK) && !word.contains(ROLE)));
     let root = home.launch_folder();
     let env = |name: &str| {
         let found = plan.env.iter().find(|(held, _)| held == name);
@@ -333,21 +340,31 @@ fn a_window_keeps_the_append_system_file_pi_finds_by_itself_before_its_role() {
         ..Request::default()
     };
     let plan = prepare(&adapter, &request).unwrap();
-    assert_eq!(appended(&plan.argv), [ROLE]);
+    // The role by its file (T-432), after what Pi would have found by itself.
+    let role = path::join(&[
+        &home.launch_folder(),
+        "role",
+        ".claude",
+        "skills",
+        "consensflow-worker",
+        "SKILL.md",
+    ]);
+    assert_eq!(appended(&plan.argv), [role.as_str()]);
     let agent = path::join(&[home.var("HOME"), ".pi", "agent"]);
     fs::create_dir_all(&agent).unwrap();
     let user = path::join(&[&agent, "APPEND_SYSTEM.md"]);
     fs::write(&user, "the user's").unwrap();
     let plan = prepare(&adapter, &request).unwrap();
-    assert_eq!(appended(&plan.argv), [user.as_str(), ROLE]);
+    assert_eq!(appended(&plan.argv), [user.as_str(), role.as_str()]);
     // The project's, where there is one, and not the user's: Pi reads one.
     fs::create_dir_all(path::join(&[&project, ".pi"])).unwrap();
     let own = path::join(&[&project, ".pi", "APPEND_SYSTEM.md"]);
     fs::write(&own, "the project's").unwrap();
     let plan = prepare(&adapter, &request).unwrap();
-    assert_eq!(appended(&plan.argv), [own.as_str(), ROLE]);
-    // Everything else is where it was, the task last.
-    assert_eq!(plan.argv.last().map(String::as_str), Some(TASK));
+    assert_eq!(appended(&plan.argv), [own.as_str(), role.as_str()]);
+    // Everything else is where it was, and the task on no word of it (it goes in through
+    // the extension's inbox once the window is up).
+    assert!(plan.argv.iter().all(|word| !word.contains(TASK)));
 }
 
 #[test]
@@ -534,6 +551,7 @@ fn settled_record(text: &str) -> Arc<Reading> {
         complete: true,
         at: None,
         commentary: false,
+        synthetic: false,
         compaction: false,
     };
     let items = vec![item("1", Role::User), item("2", Role::Assistant)];

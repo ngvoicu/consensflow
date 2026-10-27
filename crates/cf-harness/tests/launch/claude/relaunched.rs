@@ -3,7 +3,7 @@
 //! its record still says it is queued (T-442, Claude Code 2.1.302). The window
 //! is prepared before its program starts, when the transcript is as the old
 //! process left it, and what the transcript holds then is the old process's
-//! (`Options::relaunched_at`): its own turn ends as any, the queued message no
+//! (`Options::relaunched`): its own turn ends as any, the queued message no
 //! part of it.
 
 use super::*;
@@ -42,15 +42,13 @@ fn a_window_opened_again_reads_its_own_turn_at_rest_though_the_closed_process_ha
         queued_line(SESSION, 4),
     ];
     home.transcript(SESSION, &lines);
-    let request = Request {
-        message: Some(REOPENED.to_owned()),
-        ..Request::resumed(SESSION)
-    };
-    let window = window(&home.adapter(), &request);
+    // Opened with nothing on its command line: the engine pastes the reopen once the
+    // window is up (T-432).
+    let window = window(&home.adapter(), &Request::resumed(SESSION));
     home.status(SESSION, &json!({ "status": "busy" }), me());
     assert!(!at_rest(&window), "busy");
 
-    // The new process takes the message it was given and answers it.
+    // The new process takes the message it was pasted and answers it.
     lines.extend([
         user_line(SESSION, 5, REOPENED),
         answer_line(SESSION, 6, "Done again"),
@@ -180,8 +178,11 @@ fn a_late_turn_end_of_the_old_program_never_reads_the_busy_new_window_at_rest() 
 #[test]
 fn a_window_opened_again_after_a_program_the_host_could_not_end_is_told_no_relaunch() {
     // The old program may still run, and write past any length taken: the record
-    // is read as it was before relaunches were told, the queued message held.
+    // is read as it was before relaunches were told, the queued message held. It
+    // shows the conversation still, as Claude's status of it says.
     let home = Home::new();
+    let survivor = OtherProcess::start();
+    home.status(SESSION, &json!({ "status": "idle" }), survivor.pid());
     let mut lines = vec![
         user_line(SESSION, 1, TASK),
         answer_line(SESSION, 2, "Done"),
@@ -257,7 +258,9 @@ fn a_window_on_a_new_conversation_tells_no_relaunch() {
 }
 
 /// T-526 (the consensflow board, Claude Code 2.1.310, 2026-10-25): a window opened again on
-/// the conversation with no proof that the closed process was gone is told no relaunch, so
+/// the conversation with no proof that the closed process was gone, from the host or from
+/// Claude's statuses (none kept yet: `outside` has the case where they say), is told no
+/// relaunch, so
 /// the message that process had queued holds every turn of the new one, its answer
 /// written and Claude at its prompt. The look says the turn is not over, as the record
 /// does, and that the window waits at its prompt, as Claude's status does: what the engine

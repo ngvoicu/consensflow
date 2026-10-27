@@ -15,9 +15,11 @@
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use cf_base::env::Env;
 use rusqlite::types::Value as Bound;
+use serde::Deserialize;
 use serde_json::Value;
 
 use super::chain::Chain;
@@ -65,6 +67,15 @@ pub(super) struct Row {
     pub(super) created_at: Option<Cell>,
     /// Its message's JSON, parsed the first time it is read (`parsed`).
     parsed: OnceCell<Value>,
+    /// The id Devin gave its message, read alone the first time it is asked
+    /// ([`Row::message_id`]).
+    id_of_message: OnceCell<Option<Arc<str>>>,
+}
+
+/// A message's id, read with nothing else of it.
+#[derive(Deserialize)]
+struct MessageId {
+    message_id: Option<Value>,
 }
 
 impl Store {
@@ -213,6 +224,11 @@ impl Store {
         self.nodes.get(node).map(|&at| &self.rows[at])
     }
 
+    /// Every row, in the order its node was first read: the oldest first.
+    pub(super) fn rows(&self) -> &[Row] {
+        &self.rows
+    }
+
     /// The row written last below `parent`, if any (`newestChild`): the one
     /// of the greatest row id, the first read of equals.
     pub(super) fn newest_child(&self, parent: &Key) -> Option<&Row> {
@@ -258,7 +274,32 @@ impl Row {
             message,
             created_at,
             parsed: OnceCell::new(),
+            id_of_message: OnceCell::new(),
         }
+    }
+
+    /// The id Devin gave its message, where it is a text: what tells a copy Devin made
+    /// of a message (a compaction copies the steps it keeps, each a new node with the
+    /// same id) from another message. Read alone, from a message no look parsed, and
+    /// once: a store holds every revision and branch of a session, which no chain reads.
+    pub(super) fn message_id(&self) -> Option<&str> {
+        self.id_of_message
+            .get_or_init(|| {
+                let id = match self.parsed.get() {
+                    Some(message) => message.get("message_id").cloned(),
+                    None => match &self.message {
+                        Some(Cell::Text(text)) => serde_json::from_str::<MessageId>(text)
+                            .ok()
+                            .and_then(|id| id.message_id),
+                        _ => None,
+                    },
+                };
+                match id {
+                    Some(Value::String(id)) => Some(Arc::from(id)),
+                    _ => None,
+                }
+            })
+            .as_deref()
     }
 
     /// Its message (`JSON.parse(row.chat_message)`, the column made text as

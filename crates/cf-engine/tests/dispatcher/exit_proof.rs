@@ -7,8 +7,10 @@
 //! the one whose late word proved it gone. Node's dispatcher had none of it, so none of
 //! these is held to a Node trace.
 
-use cf_engine::testing::{Context, Gate, Restarted};
-use cf_ledger::NewTask;
+use cf_engine::seams::EngineError;
+use cf_engine::testing::{Answer, Context, Gate, Restarted};
+use cf_harness::contract::Pane;
+use cf_ledger::{NewTask, ProjectView};
 
 use crate::fixtures::{closed, native_of, Tiers};
 
@@ -384,6 +386,149 @@ fn the_exit_of_a_deleted_sessions_window_proves_nothing_of_the_window_that_broug
         (new, false),
         "the window on it still runs"
     );
+}
+
+/// The human keeps the window of the session that did T-1 open, T-1 is done (and accepted
+/// where `accepted`), and the
+/// human deletes the session, the window's kill held: the session, its first window's
+/// pane and conversation, and the kill and the session's end, to let go.
+fn deleted_with_its_window_held(context: &Context, accepted: bool) -> Deleted<'_> {
+    context.host.exits_showing(Some(0), None, None);
+    let (tiers, session) = session_at_work(context);
+    context.open_window(tiers.project.id, &session).unwrap();
+    context.adapter.answer(&session, "Recorded");
+    passes(context, 2);
+    if accepted {
+        context
+            .ledger
+            .borrow_mut()
+            .accept_task(tiers.project.id, 1, "chief")
+            .unwrap();
+    }
+    let first = context.host.last(&session).unwrap().pane;
+    let (old, _) = current_proven(context, &tiers, &session);
+    let kill = Gate::default();
+    *context.host.hold_kill.borrow_mut() = Some((first.generation, kill.clone()));
+    let ending = context.begin_end_session(tiers.project.id, &session);
+    context.settle();
+    (tiers, session, first, old, kill, ending)
+}
+
+/// What [`deleted_with_its_window_held`] leaves.
+type Deleted<'a> = (
+    Tiers<'a>,
+    String,
+    Pane,
+    i64,
+    Gate,
+    Answer<Result<ProjectView, EngineError>>,
+);
+
+/// Calliope's P3-1 on 46664f52 (T-621): the session brought back for another task's
+/// follow-up opens on a new conversation, and that window ends, its program proven gone,
+/// while the deleted session's first window still waits for its kill. The first window
+/// writes to the old conversation alone: the proof is kept on the new one.
+#[test]
+fn a_brought_back_windows_end_on_its_new_conversation_is_kept_while_the_deleted_sessions_window_waits_for_its_kill(
+) {
+    let context = Context::new();
+    let (tiers, session, first, old, kill, ending) = deleted_with_its_window_held(&context, true);
+    follow_up(&context, &tiers, 1, "Write the docs");
+    passes(&context, 3);
+    let second = context.host.last(&session).unwrap().pane;
+    assert_ne!(second, first, "a window of its own");
+    let (new, _) = current_proven(&context, &tiers, &session);
+    assert_ne!(new, old, "a new conversation");
+    // The window that brought it back ends by itself; the first one's kill waits still.
+    context.exit(&session);
+    assert_eq!(
+        current_proven(&context, &tiers, &session),
+        (new, true),
+        "the window that wrote to it is gone"
+    );
+    kill.open();
+    context.finish(ending).unwrap();
+    context.settle();
+    assert!(closed(&context, &first));
+}
+
+/// Calliope's P3-3 on 46664f52 (T-621), the shape of the skip on the exit's own path: the
+/// session's task is reopened while the deleted session's first window waits for its
+/// kill, and with no proof of that window's end, the window that brings the session back
+/// goes on in the same conversation. That window ends proven gone first: the first
+/// window, still running on the conversation, may write to it, so nothing is proven of
+/// it until its own end comes.
+#[test]
+fn a_brought_back_windows_end_proves_nothing_of_the_conversation_the_deleted_sessions_window_still_runs_on(
+) {
+    let context = Context::new();
+    let (tiers, session, first, old, kill, ending) = deleted_with_its_window_held(&context, false);
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(tiers.project.id, 1, "chief", "Handle empty input too")
+        .unwrap();
+    passes(&context, 3);
+    let second = context.host.last(&session).unwrap().pane;
+    assert_ne!(second, first, "a window of its own");
+    assert_eq!(
+        current_proven(&context, &tiers, &session).0,
+        old,
+        "the same conversation"
+    );
+    // The window that brought it back ends by itself; the first one's kill waits still.
+    context.exit(&session);
+    assert_eq!(
+        current_proven(&context, &tiers, &session),
+        (old, false),
+        "the first window runs on it"
+    );
+    kill.open();
+    context.finish(ending).unwrap();
+    context.settle();
+    assert!(closed(&context, &first));
+    assert_eq!(
+        current_proven(&context, &tiers, &session),
+        (old, true),
+        "both windows on it are gone"
+    );
+}
+
+/// The host's late word on a window the engine's own close settled comes while the
+/// window that goes on with its conversation is still opening: that window's program may
+/// write to the conversation as soon as its open is answered, so the word proves nothing
+/// of it (`Opening::conversation`, T-646).
+#[test]
+fn a_late_word_while_a_window_opens_on_the_conversation_proves_nothing_of_it() {
+    let context = Context::new();
+    context.host.exits_showing(Some(0), None, None);
+    let (tiers, session) = session_at_work(&context);
+    let window = context.host.last(&session).unwrap().pane;
+    let (conversation, _) = current_proven(&context, &tiers, &session);
+    // The human's Close settles the window itself; the host's word on it is held.
+    context.host.hold_exits.set(true);
+    context.close_project(tiers.project.id).unwrap();
+    assert!(closed(&context, &window));
+    context.host.hold_exits.set(false);
+    // The Resume opens the session's window again on its conversation; its open is held.
+    let opening = context.host.open_holds.hold(|_| true);
+    context.resume_project(tiers.project.id).unwrap();
+    passes(&context, 2);
+    assert_eq!(
+        context.host.last(&session).unwrap().pane,
+        window,
+        "still opening"
+    );
+    let (host, ended) = (std::rc::Rc::clone(&context.host), window.clone());
+    context.run(async move { host.exited(ended).await });
+    assert!(
+        !context.ledger.borrow().program_gone(conversation).unwrap(),
+        "the window opening on it may write to it"
+    );
+    opening.open();
+    context.settle();
+    assert_ne!(context.host.last(&session).unwrap().pane, window, "opened");
+    assert!(!context.ledger.borrow().program_gone(conversation).unwrap());
 }
 
 /// Calliope's P3-2 on 0181cd9a (T-573): the host's word on a deleted session's window,

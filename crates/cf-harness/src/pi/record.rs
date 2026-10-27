@@ -62,7 +62,7 @@ pub fn reader(session: &str, env: &Env, local: &TimeZone) -> Box<dyn Look + Send
         env: env.clone(),
         transcript: Followed::new(
             Box::new(move || transcript(&locating, &searched)),
-            Box::new(move || Session::new(Arc::clone(&reading), local.clone())),
+            Box::new(move |_: &Path| Session::new(Arc::clone(&reading), local.clone())),
         ),
     })
 }
@@ -175,6 +175,7 @@ impl Session {
             complete,
             at: Some(at),
             commentary: false,
+            synthetic: false,
             compaction: false,
         });
     }
@@ -254,6 +255,14 @@ impl Session {
             stop == Some("stop"),
             at,
         );
+        // A run that failed or was aborted before the model's first token: the step
+        // is Pi's own (`handleRunFailure`, Pi 1.4.0), or a provider's abort of a reply
+        // that had not begun, and no turn got through.
+        if matches!(stop, Some("aborted" | "error")) && !the_model_wrote(field("content")) {
+            if let Some(step) = self.items.last_mut() {
+                step.synthetic = true;
+            }
+        }
         self.quota = None;
         self.turn_open = true;
         match stop {
@@ -394,6 +403,28 @@ fn pi_text(content: Option<&Value>) -> String {
         .filter_map(|block| block.get("text").and_then(Value::as_str))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Whether an assistant's `content` holds anything of the model's: words, its
+/// thinking, a tool call.
+fn the_model_wrote(content: Option<&Value>) -> bool {
+    let Some(Value::Array(blocks)) = content else {
+        return false;
+    };
+    blocks.iter().any(|block| {
+        let said = |name: &str| {
+            block
+                .get(name)
+                .and_then(Value::as_str)
+                .is_some_and(|text| !js::trim(text).is_empty())
+        };
+        match block.get("type").and_then(Value::as_str) {
+            Some("toolCall") => true,
+            Some("text") => said("text"),
+            Some("thinking") => said("thinking"),
+            _ => false,
+        }
+    })
 }
 
 #[cfg(test)]

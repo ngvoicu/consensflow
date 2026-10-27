@@ -29,6 +29,8 @@ use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
 mod agents;
+mod compact_cancelled;
+mod outside;
 mod relaunched;
 mod resumed;
 mod specs;
@@ -271,7 +273,8 @@ fn me() -> u32 {
 }
 
 #[test]
-fn launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_with_the_task_last() {
+fn launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_task_on_no_command_line(
+) {
     let home = Home::new();
     let plan = prepare(&home.adapter(), &Request::default()).unwrap();
     let session = plan.native_session.clone().unwrap();
@@ -307,9 +310,11 @@ fn launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_with_th
         "high",
         "--permission-mode",
         "bypassPermissions",
-        TASK,
     ]));
+    // Its task is pasted once the window is up (`FirstMessage::Delivered`): every
+    // process on the machine reads a command line.
     assert_eq!(plan.argv, argv);
+    assert!(plan.argv.iter().all(|word| !word.contains(TASK)));
     assert!(plan.env.is_empty(), "cf stays usable inside the window");
     assert_eq!(plan.drop_env, ["ANTHROPIC_API_KEY"]);
     let written: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
@@ -410,10 +415,9 @@ fn starts_afresh_under_the_same_id_a_conversation_claude_never_kept_instead_of_r
         .position(|arg| arg == "--session-id")
         .unwrap();
     assert_eq!(plan.argv[at..at + 2], words(&["--session-id", session]));
-    assert_eq!(
-        plan.argv.last().map(String::as_str),
-        Some("Review T-1"),
-        "the brief goes in as its first message"
+    assert!(
+        plan.argv.iter().all(|word| !word.contains("Review T-1")),
+        "the brief is pasted once the window is up"
     );
 }
 
@@ -660,7 +664,7 @@ fn gives_the_window_text_it_can_take_and_leaves_a_paste_the_bridge_lost_uncertai
         ..Request::default()
     };
     let plan = prepare(&adapter, &request).unwrap();
-    assert_eq!(plan.argv.last().map(String::as_str), Some(taken));
+    assert!(plan.argv.iter().all(|word| word != taken && word != text));
     let answer: RefCell<Result<Value, HostError>> = RefCell::new(Ok(json!({ "ok": true })));
     let host = AnsweringHost::new(|_| answer.borrow().clone());
     let pane = Pane {

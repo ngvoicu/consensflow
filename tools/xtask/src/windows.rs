@@ -25,7 +25,9 @@
 //! and a run stopped here (Ctrl-C, or a `kill`) is ended there too, which
 //! Windows' SSH server does not do (the status is then 130).
 //!
-//! The runs of several trees queue for the one machine, so a run shares nothing with
+//! The runs of several trees queue for the one machine ([`queue`]: a run that finds it busy
+//! waits for its turn, first come first served, with every project's runner on this Mac, and says
+//! where it stands; `--wait MINUTES`, an hour by default, 0 asks once), so a run shares nothing with
 //! another before it holds the lock. Each run's tarball has a name of its own (this
 //! process's id and a random part, `script::run_id`), sent before the script is asked
 //! for, and that script unpacks that one and removes it however it ends, a refusal by
@@ -41,7 +43,9 @@
 //! The lock is a file opened for the run alone, as the script's first act in the folder:
 //! one act of the system, so of two runs that ask at once one is refused, and closed by
 //! the system whenever the run ends, however it ends, with nothing a run starts holding
-//! it (a handle is not inherited). The process id in the older file is kept for the
+//! it (a handle is not inherited; a program of another tool that opens the same file the same way
+//! holds the machine as a run does, and is told by the machine's state as a lock held by a
+//! program that is no run of this runner, T-701). The process id in the older file is kept for the
 //! scripts of the form before it, which refuse a run by it, and is read as a run only if
 //! it is a PowerShell started before the file was written. A lock is refused with 75,
 //! and with the reason where the system gives one that is not "it is open". **An orphaned
@@ -49,6 +53,15 @@
 //! (the Mac slept, the network dropped, this program was killed), the run goes on there to
 //! the end of its command and the lock with it, and every run after it is refused, naming
 //! its process, until it ends or someone ends that process on the machine.
+//!
+//! A run frees the machine before it says how it ended: its records and its lock go first
+//! (`Free-Machine`, which `Exit-Run` calls), and the line `== exit N` is written after them,
+//! so that the machine holds nothing of a run whose line was read, whatever the PowerShell does
+//! after it. (T-602 found a run's PowerShell alive minutes after its line and the next run
+//! refused for as long, `A run is still going on this machine (process 54196)`; what kept it
+//! alive was not seen again in three tries to reproduce it: a program left by `start /b`, a job of
+//! the command's own as T-602's wrapper made, and T-602's own command. The next run is no longer
+//! refused by it.)
 //!
 //! A stop ends the run and everything it started. The run script puts the run in a job
 //! (`CfJob`, compiled by `Add-Type` in about 150 ms) before it starts anything: a job that
@@ -89,6 +102,22 @@
 //! PowerShell that was started before the owner file was written (as the lock reads the older
 //! file's): the id of a run that has ended, which a stop that landed as the run ended finds in
 //! the record, is some other program's by then (the stop ended a `ping` that way, in a case).
+//!
+//! What a run packs it packs apart from the checkout: the list of what went over, the tree's
+//! identity, the sweep and the run script are written in the run's own scratch folder and appended
+//! to the tarball from there ([`tree::pack`]). Runs of one tree to the two machines, or two to one,
+//! pack the same checkout at once, and files of its root were each other's to write over and to
+//! take away (T-664: a run was sent another's script).
+//!
+//! Before its command every run makes sure of what the tests of the copy run on
+//! ([`script::PREPARE_STEPS`]): the crates, which nextest's `cargo metadata --offline` wants all
+//! of (zeewin2 had fetched only what its builds compiled, and nextest ended at once with 102 and
+//! no report: T-627), and the console host beside the `debug` and the `release` builds, where
+//! cargo puts the tests' PATH (a copy where nobody had built ran the panes on Windows' own
+//! console host and read Alt as key 18: T-487). A step that cannot be done ends the run with its
+//! status, saying what it needed, and the command is not run on what happens to be there. A
+//! machine that takes less at once than it has ([`machine::Limits`]: zeewin, 7.4 GB) gives the run
+//! `CARGO_BUILD_JOBS` and `RUST_TEST_THREADS`, which a variable the run names itself overrides.
 //!
 //! Two scripts are sent. The bootstrap goes on ssh's command line, which holds 8,000
 //! characters of it ([`script::ENCODED_LIMIT`]) and is the same for every run but for
@@ -188,6 +217,7 @@ mod interrupt;
 mod machine;
 mod matrix;
 mod options;
+mod queue;
 mod run;
 mod script;
 mod session;
@@ -215,13 +245,13 @@ pub const COMMANDS: &[Command] = &[
     Command {
         words: &["windows"],
         about: "Run a command on the Windows machine this checkout is tried on, over ssh",
-        usage: "[--machine zeewin2|zeewin | --host HOST] [--build] [--dir DIR] [--in DIR] [--env NAME=VALUE ...] -- <command ...>",
+        usage: "[--machine zeewin2|zeewin | --host HOST] [--build] [--dir DIR] [--in DIR] [--wait MINUTES] [--env NAME=VALUE ...] -- <command ...>",
         run: Run::Native(windows),
     },
     Command {
         words: &["windows-matrix"],
         about: "Run the chief evals on the Windows machine, a pair of chief and staff at a time",
-        usage: "[--machine zeewin2|zeewin | --host HOST] [--build] [--env NAME=VALUE ...] --scenario NAME ... --pair CHIEF:STAFF ... [--claude-model M] [--pi-model M]",
+        usage: "[--machine zeewin2|zeewin | --host HOST] [--build] [--wait MINUTES] [--env NAME=VALUE ...] --scenario NAME ... --pair CHIEF:STAFF ... [--claude-model M] [--pi-model M]",
         run: Run::Native(windows_matrix),
     },
 ];

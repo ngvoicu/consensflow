@@ -13,4 +13,5 @@
 
 mod fixtures;
 mod launches;
+mod resumed;
 mod windows;
