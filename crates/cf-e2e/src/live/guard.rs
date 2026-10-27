@@ -82,6 +82,21 @@ pub fn copy_folder_kept(from: &Path, to: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// What a run of Muse's reads copies of the human's folders into `scratch`: the login file
+/// (its secret is in the keychain, which the copy does not carry) and the model catalog cache,
+/// and nothing else of the config (the settings and their backup, what it trusts) or of the data
+/// (its sessions): Muse lists the account's models from the cache and the login alone.
+pub fn copy_muse_into(home: &Path, scratch: &Path) -> io::Result<()> {
+    copy_kept(
+        &home.join(".config/muse/auth.json"),
+        &scratch.join("config/muse/auth.json"),
+    )?;
+    copy_folder_kept(
+        &home.join(".local/share/muse/model-catalog"),
+        &scratch.join("data/muse/model-catalog"),
+    )
+}
+
 impl Drop for Scratch {
     fn drop(&mut self) {
         // The folder this run made, by its own name: nothing else is removed.
@@ -165,5 +180,51 @@ mod tests {
         copy_folder_kept(&catalog, &copied).unwrap();
         assert_eq!(mode(&copied.join("rows.json")), 0o644);
         assert!(copied.join("inner/more.json").is_file());
+    }
+
+    #[test]
+    fn a_run_of_muse_copies_the_login_file_and_the_model_catalog_and_nothing_else_of_the_config() {
+        let root = tempfile::tempdir().unwrap();
+        let (home, scratch) = (root.path().join("home"), root.path().join("scratch"));
+        let config = home.join(".config/muse");
+        let catalog = home.join(".local/share/muse/model-catalog");
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::create_dir_all(&catalog).unwrap();
+        // The files of the human's folder: the login, the settings and their backup, what it
+        // trusts, a lock; and the one cache.
+        for name in [
+            "auth.json",
+            "settings.json",
+            "settings.json.bak",
+            "trust.json",
+            ".auth.json.lock",
+        ] {
+            std::fs::write(config.join(name), "{}").unwrap();
+        }
+        std::fs::write(catalog.join("6d657461__p746268.json"), "{}").unwrap();
+        // Something else of the data folder, a session, which is the human's.
+        std::fs::create_dir_all(home.join(".local/share/muse/sessions")).unwrap();
+        std::fs::write(home.join(".local/share/muse/sessions/one.jsonl"), "{}").unwrap();
+        copy_muse_into(&home, &scratch).unwrap();
+        let mut found: Vec<String> = Vec::new();
+        let mut folders = vec![scratch.clone()];
+        while let Some(folder) = folders.pop() {
+            for entry in std::fs::read_dir(&folder).unwrap().flatten() {
+                if entry.path().is_dir() {
+                    folders.push(entry.path());
+                } else {
+                    let name = entry.path().strip_prefix(&scratch).unwrap().to_owned();
+                    found.push(name.display().to_string());
+                }
+            }
+        }
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                "config/muse/auth.json",
+                "data/muse/model-catalog/6d657461__p746268.json"
+            ]
+        );
     }
 }

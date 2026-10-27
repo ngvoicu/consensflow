@@ -6,7 +6,7 @@
 //! history.
 
 use cf_engine::testing::Context;
-use cf_harness::records::{Level, ModelMoved, Quota};
+use cf_harness::records::{Level, ModelMoved, Quota, Role};
 use std::sync::Arc;
 
 use crate::fixtures::{after, given, now, placed, Tiers};
@@ -375,6 +375,7 @@ fn reopened_after_try_again(
     context: &Context,
     held: impl Fn(String) -> Quota,
     failed: bool,
+    keeps_reading: bool,
 ) -> (Tiers<'_>, String) {
     context.adapter.resumes_records.set(true);
     context.adapter.rereads_failures.set(true);
@@ -411,10 +412,15 @@ fn reopened_after_try_again(
     }
     context.adapter.with(&zeus, |agent| {
         agent.failed = false;
-        agent.quota = None;
+        if !keeps_reading {
+            agent.quota = None;
+        }
     });
-    context.advance(1_000);
-    context.adapter.writes(&zeus, "Going on.", &now(context));
+    // Past the time a refusal is the same wait: its answer says the task goes on.
+    context.advance(6 * 60_000);
+    let mut said = context.adapter.item(Role::Assistant, "Going on.");
+    said.at = Some(serde_json::json!(now(context)));
+    context.adapter.with(&zeus, |agent| agent.items.push(said));
     for _ in 0..4 {
         context.pass().unwrap();
     }
@@ -459,6 +465,7 @@ fn a_task_held_for_an_account_goes_on_at_try_again_when_its_window_was_reopened_
             because: BECAUSE.to_owned(),
         },
         true,
+        false,
     );
     went_on(&context, &tiers, &zeus);
 }
@@ -468,7 +475,8 @@ fn a_task_held_for_a_moved_model_goes_on_at_try_again_when_its_window_was_reopen
 ) {
     // Muse's shape: the 402 fails the turn, and the reconfigure follows it.
     let context = Context::new();
-    let (tiers, zeus) = reopened_after_try_again(&context, |at| fell_back(&at).as_quota(), true);
+    let (tiers, zeus) =
+        reopened_after_try_again(&context, |at| fell_back(&at).as_quota(), true, false);
     went_on(&context, &tiers, &zeus);
 }
 
@@ -477,7 +485,8 @@ fn a_task_held_for_a_moved_model_goes_on_at_try_again_when_its_window_was_reopen
 {
     // Claude's `fallback` and Codex's reroute: no failed turn, the window rests on the move.
     let context = Context::new();
-    let (tiers, zeus) = reopened_after_try_again(&context, |at| fell_back(&at).as_quota(), false);
+    let (tiers, zeus) =
+        reopened_after_try_again(&context, |at| fell_back(&at).as_quota(), false, false);
     went_on(&context, &tiers, &zeus);
 }
 
@@ -540,4 +549,26 @@ fn a_flip_between_two_models_is_told_once_for_each_way_in_a_window_and_again_in_
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(human_notes(&tiers).len(), 3, "told anew in the new window");
+}
+
+#[test]
+fn a_move_older_than_the_window_does_not_keep_the_requester_from_hearing_the_task_goes_on() {
+    // The window was reopened on a conversation whose record goes on reading the move: dated
+    // before the window opened, it is history, so the window's own answer is news, and the
+    // requester, told the task waits, is told it goes on (T-841: `refused_unhandled`).
+    let context = Context::new();
+    let (tiers, zeus) =
+        reopened_after_try_again(&context, |at| fell_back(&at).as_quota(), false, true);
+    went_on(&context, &tiers, &zeus);
+    let goes_on: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|note| note.starts_with("T-1 goes on"))
+        .collect();
+    assert_eq!(
+        goes_on,
+        ["T-1 goes on: the human said its model may go on."],
+        "{:?}",
+        tiers.notes("chief")
+    );
 }
