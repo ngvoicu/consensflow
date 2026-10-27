@@ -30,75 +30,96 @@ use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-use cf_e2e::live::ask;
+use cf_e2e::live::{ask, machine};
+use cf_e2e::process::own_var;
+use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
 
 /// Every file under `root` with a digest of its bytes: what a run changed is said by name,
 /// never by what the files hold (Muse's config names its account).
-fn tree(root: &Path) -> BTreeMap<PathBuf, u64> {
+fn tree(root: &Path) -> Result<BTreeMap<PathBuf, u64>> {
     let mut found = BTreeMap::new();
     let mut folders = vec![root.to_owned()];
     while let Some(folder) = folders.pop() {
-        for entry in std::fs::read_dir(&folder).into_iter().flatten().flatten() {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
                 folders.push(path);
-            } else if let Ok(bytes) = std::fs::read(&path) {
+            } else {
                 let mut hasher = DefaultHasher::new();
-                bytes.hash(&mut hasher);
+                files::read(&path)?.hash(&mut hasher);
                 found.insert(path, hasher.finish());
             }
         }
     }
-    found
+    Ok(found)
 }
 
-/// `from` copied to `to`, folders and all.
-fn copy(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).unwrap();
-    for entry in std::fs::read_dir(from).into_iter().flatten().flatten() {
-        let target = to.join(entry.file_name());
-        if entry.path().is_dir() {
-            copy(&entry.path(), &target);
-        } else {
-            std::fs::copy(entry.path(), target).unwrap();
-        }
+/// A failure of the file or folder `path`, as the kit says one.
+fn failed(action: &'static str, path: &Path) -> impl FnOnce(std::io::Error) -> Error {
+    let path = path.to_owned();
+    move |source| Error::File {
+        action,
+        path,
+        source,
     }
 }
 
-/// The process's environment with Muse's folders those of `scratch`.
+/// The folder `from` copied to `to`, with what is under it.
+fn copy_tree(from: &Path, to: &Path) -> Result {
+    for entry in std::fs::read_dir(from)
+        .map_err(failed("list", from))?
+        .flatten()
+    {
+        let (source, target) = (entry.path(), to.join(entry.file_name()));
+        if source.is_dir() {
+            copy_tree(&source, &target)?;
+        } else {
+            files::copy(&source, &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// What Muse is given to run in: the run's own home, shell and search path, and its folders
+/// (config, data, cache, state) those of `scratch`. No key of an account's is passed.
 fn env(scratch: &Path) -> Value {
-    let mut vars: serde_json::Map<String, Value> = std::env::vars()
-        .map(|(name, value)| (name, Value::String(value)))
-        .collect();
+    let mut vars = serde_json::Map::new();
+    for name in ["HOME", "PATH", "USER", "LANG", "TMPDIR", "SHELL"] {
+        if let Some(value) = own_var(name) {
+            vars.insert(name.to_owned(), Value::String(value));
+        }
+    }
     for (name, folder) in [
         ("XDG_CONFIG_HOME", "config"),
         ("XDG_DATA_HOME", "data"),
         ("XDG_CACHE_HOME", "cache"),
         ("XDG_STATE_HOME", "state"),
     ] {
-        vars.insert(name.into(), json!(scratch.join(folder)));
+        vars.insert(name.to_owned(), json!(scratch.join(folder)));
     }
-    vars.remove("META_API_KEY");
     Value::Object(vars)
 }
 
 #[test]
 #[ignore = "opt-in: reads Muse's model list and usage, no model turn; cargo xtask live muse-reads (npm run live:muse-reads)"]
-fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() {
-    ask::prepare().unwrap();
-    let home = PathBuf::from(std::env::var("HOME").unwrap());
+fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() -> Result {
+    ask::prepare()?;
+    let home = machine::home()?;
     let config = home.join(".config/muse");
-    let before = tree(&config);
+    let before = tree(&config)?;
     let scratch = std::env::temp_dir().join(format!("muse-reads-{}", std::process::id()));
-    copy(&config, &scratch.join("config/muse"));
-    copy(
+    copy_tree(&config, &scratch.join("config/muse"))?;
+    copy_tree(
         &home.join(".local/share/muse/model-catalog"),
         &scratch.join("data/muse/model-catalog"),
-    );
+    )?;
     let env = env(&scratch);
 
-    let listed = ask::question(&json!({ "op": "muse_models", "env": env })).unwrap();
+    let listed = ask::question(&json!({ "op": "muse_models", "env": env }))?;
     assert_eq!(
         listed["stale"], false,
         "Muse listed its bundled models, not the account's: is it logged in?"
@@ -140,7 +161,7 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() {
         contributors.len()
     );
 
-    let usage = ask::question(&json!({ "op": "muse_usage", "env": env })).unwrap();
+    let usage = ask::question(&json!({ "op": "muse_usage", "env": env }))?;
     eprintln!(
         "muse-reads: usage says {}",
         usage
@@ -149,8 +170,8 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() {
             .unwrap_or("nothing known")
     );
 
-    std::fs::remove_dir_all(&scratch).unwrap();
-    let after = tree(&config);
+    std::fs::remove_dir_all(&scratch).map_err(failed("remove", &scratch))?;
+    let after = tree(&config)?;
     let changed: Vec<&PathBuf> = before
         .keys()
         .chain(after.keys())
@@ -160,4 +181,5 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() {
         changed.is_empty(),
         "a read changed ~/.config/muse: {changed:?}"
     );
+    Ok(())
 }

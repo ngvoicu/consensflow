@@ -686,3 +686,28 @@ fn the_humans_own_model_command_is_no_move() {
     refused["payload"]["record"]["apply_outcome"] = json!("failed");
     assert_eq!(record_of(&[metadata("1.4.13"), refused]).model_moved, None);
 }
+
+#[test]
+fn what_the_engine_is_told_of_a_refused_window_that_muse_moved_is_the_move_besides_the_refusal() {
+    // T-705's recordings: the 402 and then the move, in one log. The human who fixes the billing
+    // and tries again must have heard that the window's model moved, or the engine would paste
+    // into a window on a model Meta trains on (MUS-24).
+    for (name, from) in [
+        ("billing-spark", "muse-spark-1.3"),
+        ("billing-wonder", "muse-wonder-1.0"),
+    ] {
+        let log = fixture(name);
+        let observed =
+            crate::shared::record_state::record_state(fresh_reading(&session_of(log), log));
+        let Some(Quota::Unavailable { because, .. }) = observed.quota.as_deref() else {
+            panic!("{name}: {:?}", observed.quota);
+        };
+        assert!(
+            because.starts_with(&format!(
+                "its model moved from {from} to muse-spark-1.3-contributor on its own (Muse switched on its own after its turn failed (Muse refused: the account has no allowance"
+            )),
+            "{name}: {because}"
+        );
+        assert!(observed.failed, "{name}");
+    }
+}

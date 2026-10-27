@@ -82,6 +82,16 @@ fn the_humans_model_command_a_synthetic_message_a_subagent_and_a_relaunch_are_no
         on("claude-sonnet-5-5", "a2", "u2", "m2"),
     ];
     assert_eq!(plain(&theirs), None);
+    // `/fast` switches the model Claude Code runs a turn on too (its fast mode): the human's.
+    assert_eq!(
+        plain(&[
+            hello(),
+            on("claude-opus-5-5", "a1", "u1", "m1"),
+            typed("u2", "a1", "/fast"),
+            on("claude-sonnet-5-5", "a2", "u2", "m2"),
+        ]),
+        None
+    );
     let mut later = theirs.to_vec();
     later.push(user("u3", json!("a2"), json!("More")));
     later.push(on("claude-haiku-5-5", "a3", "u3", "m3"));

@@ -22,6 +22,10 @@ muse-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claud
 muse-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
 muse-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
 muse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says an account that refused"]
+muse-accounts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_teammates_turn"]
+muse-page-held = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "held for an account"]
+muse-page-why = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says why an unavailable member"]
+muse-scheduler = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "scheduler::"]
 muse-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts"]
 
 # The reader: a turn stopped before a word of it, its message put back in the box.
@@ -628,12 +632,11 @@ runs = ["muse-state"]
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record_state.rs"
 find = '''
-                record.quota.clone().or_else(|| {
-                    record
-                        .model_moved
-                        .as_ref()
-                        .map(|moved| Arc::new(moved.as_quota()))
-                }),
+                record
+                    .model_moved
+                    .as_ref()
+                    .map(|moved| Arc::new(moved.as_quota()))
+                    .or_else(|| record.quota.clone()),
 '''
 replace = '''
                 record.quota.clone(),
@@ -979,4 +982,120 @@ const unavailable = (participant) => participant.outUntil?.startsWith('9999-') =
 '''
 replace = '''
 const unavailable = (participant) => participant.outUntil?.startsWith('99999-') === true
+'''
+
+# The move is told besides the refusal it came after, or the human's Try again would paste into the moved window.
+[[plant]]
+name = "muse: a refusal hides the move"
+meant = "a_window_whose_harness_moved_its_model_on_its_own_is_read_as_unavailable_until_the_human_says"
+runs = ["muse-state"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = '''
+                record
+                    .model_moved
+                    .as_ref()
+                    .map(|moved| Arc::new(moved.as_quota()))
+                    .or_else(|| record.quota.clone()),
+'''
+replace = '''
+                record.quota.clone().or_else(|| {
+                    record
+                        .model_moved
+                        .as_ref()
+                        .map(|moved| Arc::new(moved.as_quota()))
+                }),
+'''
+
+[[plant]]
+name = "muse: a refusal hides the move from the engine"
+meant = "what_the_engine_is_told_of_a_refused_window_that_muse_moved_is_the_move_besides_the_refusal"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = '''
+                record
+                    .model_moved
+                    .as_ref()
+                    .map(|moved| Arc::new(moved.as_quota()))
+                    .or_else(|| record.quota.clone()),
+'''
+replace = '''
+                record.quota.clone().or_else(|| {
+                    record
+                        .model_moved
+                        .as_ref()
+                        .map(|moved| Arc::new(moved.as_quota()))
+                }),
+'''
+
+[[plant]]
+name = "muse: claude's /fast moves the model"
+meant = "the_humans_model_command_a_synthetic_message_a_subagent_and_a_relaunch_are_no_move"
+runs = ["muse-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''
+        && ["/model", "/fast"]
+'''
+replace = '''
+        && ["/model"]
+'''
+
+[[plant]]
+name = "muse: an unavailable chief is a later limit"
+meant = "a_teammates_turn_that_got_through_brings_back_an_unavailable_chief_and_it_is_no_later_limit"
+runs = ["muse-accounts"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                    if later_limit(&until, returned) && !never(&until) {
+'''
+replace = '''
+                    if later_limit(&until, returned) {
+'''
+
+[[plant]]
+name = "muse: the page says a held card waits for a time"
+meant = "a task held for an account no time resets says it waits for the human, not for a time"
+runs = ["muse-page-held"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+    const until = task.heldUntil.startsWith('9999-')
+'''
+replace = '''
+    const until = task.heldUntil.startsWith('99999-')
+'''
+
+[[plant]]
+name = "muse: the page says why only generically"
+meant = "says why an unavailable member is, in the words the engine gave: a model its harness moved on its own"
+runs = ["muse-page-why"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+    const why = activity?.reason?.startsWith('unavailable: ')
+'''
+replace = '''
+    const why = activity?.reason?.startsWith('unavailable:: ')
+'''
+
+[[plant]]
+name = "muse: an unavailable refusal read again is a new one"
+meant = "an_unavailable_refusal_a_look_read_again_is_the_same_refusal_whatever_its_time"
+runs = ["muse-scheduler"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            || (quota.unavailable() && handled == quota)
+'''
+replace = '''
 '''

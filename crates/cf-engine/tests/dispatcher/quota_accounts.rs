@@ -6,6 +6,7 @@
 
 use cf_engine::testing::{Context, FakeAdapter, Made};
 use cf_engine::ActivityState;
+use cf_harness::records::Quota;
 use cf_ledger::{MessageView, NewTask};
 use serde_json::json;
 
@@ -438,6 +439,49 @@ fn a_member_back_from_its_reset_brings_back_no_chief_out_until_a_later_one() {
     context.pass().unwrap();
     assert_eq!(tiers.out_until("chief"), Some(week));
     assert_eq!(still_out().len(), 1);
+}
+
+#[test]
+fn a_teammates_turn_that_got_through_brings_back_an_unavailable_chief_and_it_is_no_later_limit() {
+    // MUS-23: the chief's account refused for its billing (out until never), zeus's limit
+    // resets in five hours. Zeus's turn getting through says the account works, so the chief's
+    // refusal is over; it is no limit that resets later, which the human is told stays.
+    let context = Context::new();
+    context.adapter.one_account.set(true);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let hours = after(&context, 5 * 3_600_000);
+    context
+        .adapter
+        .refuse(&session, exhausted(Some(&now(&context)), Some(&hours)));
+    context.adapter.refuse(
+        "chief",
+        Quota::Unavailable {
+            at: Some(now(&context)),
+            because: "its billing was refused".to_owned(),
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(tiers
+        .out_until("chief")
+        .is_some_and(|until| until.starts_with("9999-")));
+    context.advance(60_000);
+    goes_on(&context.adapter, &session, &now(&context));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), None);
+    assert_eq!(tiers.out_until("chief"), None, "the account works");
+    assert!(
+        tiers
+            .notes("human")
+            .iter()
+            .all(|note| !note.contains("still out of quota")),
+        "{:?}",
+        tiers.notes("human")
+    );
 }
 
 #[test]

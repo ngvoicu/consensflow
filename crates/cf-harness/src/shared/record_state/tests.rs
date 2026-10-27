@@ -178,8 +178,7 @@ fn a_window_switched_away_settles_nothing_and_waits_for_nothing_and_one_unnamed_
 #[test]
 fn a_window_whose_harness_moved_its_model_on_its_own_is_read_as_unavailable_until_the_human_says() {
     // MUS-24: the move is the account's refusal for what only the human cures, so the engine
-    // holds the window's work and sends it nothing, as for a billing refusal; and a quota the
-    // harness said is not hidden by it.
+    // holds the window's work and sends it nothing, as for a billing refusal.
     let moved = Arc::new(ModelMoved {
         from: "muse-spark-1.3".to_owned(),
         to: "muse-spark-1.3-contributor".to_owned(),
@@ -196,11 +195,15 @@ fn a_window_whose_harness_moved_its_model_on_its_own_is_read_as_unavailable_unti
             because: "its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own after its turn failed), a model nobody chose".to_owned(),
         })
     );
+    // A refusal the same record shows (the 402 of T-705's recordings, which Muse moved the model
+    // after) does not hide it: the human who fixes the billing and tries again is told, besides,
+    // that the window runs on a model they never chose, or the same refusal's handled mark would
+    // let the engine paste into it (MUS-24).
     let refused = Arc::new(Quota::Exhausted {
         at: None,
         resets_at: None,
     });
-    record.quota = Some(Arc::clone(&refused));
+    record.quota = Some(refused);
     let observed = record_state(Arc::new(Reading::Known(record)));
-    assert_eq!(observed.quota, Some(refused));
+    assert_eq!(observed.quota, Some(Arc::new(moved.as_quota())));
 }

@@ -1259,6 +1259,24 @@ test('says an account that refused for its billing or login is unavailable, with
   expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
 })
 
+test('says why an unavailable member is, in the words the engine gave: a model its harness moved on its own', async ({
+  page,
+}) => {
+  // MUS-24: the move holds the member as a refused account does, and the row says what moved.
+  const data = model()
+  const diana = data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana')
+  diana.participant.outUntil = '9999-12-31T23:59:59.999Z'
+  diana.activity = {
+    state: 'out',
+    reason:
+      'unavailable: its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own), a model nobody chose',
+  }
+  await open(page, data)
+  await expect(page.locator('tr[data-handle="diana"] .row-status')).toHaveText(
+    'Unavailable: its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own), a model nobody chose. Press Try again now once it works',
+  )
+})
+
 test('names the day of a reset that is not today, and tries a member or the chief out of quota again', async ({
   page,
 }) => {
@@ -1300,6 +1318,22 @@ test('a task held while its member is out of quota says when it goes on', async 
   await open(page, data)
   await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
     /^out of quota until (\S+ )?\d\d:\d\d · from /,
+  )
+})
+
+test('a task held for an account no time resets says it waits for the human, not for a time', async ({
+  page,
+}) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  lane.tasks.push(
+    task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, {
+      heldUntil: '9999-12-31T23:59:59.999Z',
+    }),
+  )
+  await open(page, data)
+  await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
+    /^unavailable until you say it works again · from /,
   )
 })
 

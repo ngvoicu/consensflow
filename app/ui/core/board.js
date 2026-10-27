@@ -309,7 +309,10 @@ function route(task) {
       : `blocked by ${taskNumbers(task.blockedBy)} · ${waitsFor}`
   }
   if (task.state === 'paused' && task.heldUntil) {
-    return `out of quota until ${backAt(task.heldUntil)} · from ${who(task.requester)}`
+    const until = task.heldUntil.startsWith('9999-')
+      ? 'unavailable until you say it works again'
+      : `out of quota until ${backAt(task.heldUntil)}`
+    return `${until} · from ${who(task.requester)}`
   }
   return task.blockedBy.length === 0
     ? `from ${who(task.requester)}`
@@ -382,8 +385,13 @@ export function laneStatus(lane, board, now) {
   // is out of quota: the lane says both, or the hold hides behind the wait (T-288).
   const holding = 'A message waits until you send or erase what you typed here'
   if (outOfQuota(participant, now)) {
+    // Why, in the engine's own words (its account refused, its model moved on its own), where
+    // it said them; else what an account that no time resets was most likely refused for.
+    const why = activity?.reason?.startsWith('unavailable: ')
+      ? activity.reason.slice('unavailable: '.length)
+      : 'its account was refused for billing or login'
     const out = unavailable(participant)
-      ? `Unavailable: its account was refused for billing or login. Press Try again now once it works`
+      ? `Unavailable: ${why}. Press Try again now once it works`
       : `Out of quota until ${backAt(participant.outUntil, now)}`
     return ['out', lane.holding ? `${out}. ${holding}` : out]
   }

@@ -24,12 +24,15 @@ pub(crate) fn record_state(reading: Arc<Reading>) -> Observed {
                 record.failed,
                 // A window whose harness moved its model on its own is not used on it
                 // unasked: it reads as an account only the human can bring back (MUS-24).
-                record.quota.clone().or_else(|| {
-                    record
-                        .model_moved
-                        .as_ref()
-                        .map(|moved| Arc::new(moved.as_quota()))
-                }),
+                // The move comes before a refusal the same record shows (Muse moved the model
+                // after the 402 of T-705's recordings): the human who fixes the billing and
+                // tries again is told besides that the window runs on a model nobody chose,
+                // or that refusal's handled mark would let the engine paste into it.
+                record
+                    .model_moved
+                    .as_ref()
+                    .map(|moved| Arc::new(moved.as_quota()))
+                    .or_else(|| record.quota.clone()),
             )
         }
         Reading::Unknown(_) | Reading::Missing(_) => (true, false, None),

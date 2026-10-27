@@ -111,7 +111,11 @@ pub(crate) struct SchedulerState {
 /// The same refusal: the one a record's reading gave, or one of the same time.
 fn same_refusal(handled: Option<&Arc<Quota>>, quota: &Arc<Quota>) -> bool {
     handled.is_some_and(|handled| {
-        Arc::ptr_eq(handled, quota) || quota.at().is_some_and(|at| handled.at() == Some(at))
+        Arc::ptr_eq(handled, quota)
+            || quota.at().is_some_and(|at| handled.at() == Some(at))
+            // An unavailable account says its words and time again as a new object at every
+            // look (a move of the model, MUS-24): equal, it is the one refusal.
+            || (quota.unavailable() && handled == quota)
     })
 }
 
@@ -568,7 +572,9 @@ impl Dispatcher {
                     returned: Some(returned),
                     ..
                 } => {
-                    if later_limit(&until, returned) {
+                    // A later reset is a limit of its own; an account unavailable has none (MUS-23),
+                    // and a turn that got through says its refusal is over.
+                    if later_limit(&until, returned) && !never(&until) {
                         // A later reset is a limit of its own, which no teammate's turn
                         // undoes: the human hears it stays out, once for the limit.
                         if self.tried_anew(other.id, &until) {
@@ -1218,5 +1224,31 @@ mod tests {
         assert_eq!(what_it_is("answer", Some(3)), "an answer on T-3");
         assert_eq!(what_it_is("question", Some(3)), "a question on T-3");
         assert_eq!(what_it_is("note", None), "a note");
+    }
+
+    #[test]
+    fn an_unavailable_refusal_a_look_read_again_is_the_same_refusal_whatever_its_time() {
+        // A window's look gives the refusal as a new object each time where the harness's
+        // reading names one it did not keep (a move of the model, MUS-24): equal words and time
+        // are one refusal, and a record that names no time is one too, or it would be acted on
+        // at every look.
+        let refusal = |at: Option<&str>, because: &str| {
+            Arc::new(Quota::Unavailable {
+                at: at.map(str::to_owned),
+                because: because.to_owned(),
+            })
+        };
+        let handled = refusal(None, "moved");
+        assert!(same_refusal(Some(&handled), &refusal(None, "moved")));
+        assert!(!same_refusal(Some(&handled), &refusal(None, "moved again")));
+        let dated = refusal(Some("2026-10-27T05:00:00.000Z"), "moved");
+        assert!(same_refusal(
+            Some(&dated),
+            &refusal(Some("2026-10-27T05:00:00.000Z"), "moved")
+        ));
+        assert!(!same_refusal(
+            Some(&dated),
+            &refusal(Some("2026-10-27T06:00:00.000Z"), "moved")
+        ));
     }
 }

@@ -167,7 +167,8 @@ pub(super) struct User {
     /// What a TaskStop result of the record says it stopped, of the main conversation:
     /// the call it answers, as the block says it, and the job's id.
     pub(super) stopped: Option<(Option<Value>, Arc<str>)>,
-    /// The record is a `/model` the human typed at the prompt, of the main conversation.
+    /// The record is a `/model` (or `/fast`) the human typed at the prompt, of the main
+    /// conversation.
     pub(super) model_command: bool,
 }
 
@@ -372,8 +373,11 @@ fn user(record: &Value, session: &str) -> Projected {
             uuid: text_id(record.get("uuid")),
         }));
     }
+    // `/model`, and `/fast` (its fast mode runs the turn on another model): the human's own.
     let model_command = of_main_conversation(record, session)
-        && text.contains("<command-name>/model</command-name>");
+        && ["/model", "/fast"]
+            .iter()
+            .any(|command| text.contains(&format!("<command-name>{command}</command-name>")));
     let output_of = record
         .get("parentUuid")
         .and_then(Value::as_str)
