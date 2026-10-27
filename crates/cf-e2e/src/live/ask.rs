@@ -24,8 +24,8 @@ use crate::process::Run;
 use crate::{cf, Error, Result};
 
 pub use launch::{
-    devin_hooks, devin_launch, devin_ready, devin_took, pi_launch, DevinLaunch, DevinReady,
-    DevinTook, PiLaunch,
+    devin_config, devin_hooks, devin_launch, devin_ready, devin_took, pi_launch, DevinLaunch,
+    DevinReady, DevinTook, PiLaunch,
 };
 pub use readiness::{devin_readiness, DevinReadiness};
 

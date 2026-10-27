@@ -32,6 +32,10 @@
 //! tool does whose turn has ended. And a turn can end the window's program under it
 //! (`EXIT <code> <words>`: `crash`), as a harness that crashes does.
 //!
+//! Where `FAKE_DEVIN_STAMPS` is set, its wire log is written as Devin 3000.11 writes one
+//! (`wire`): its work stamped with its time, its turns begun and ended by its word on them,
+//! no request of its TUI's, and a window opened again replaying its last turn.
+//!
 //! A window can do wrong once, as Devin has (`faults`): drop a paste, as a TUI that
 //! never took it (`FAKE_DEVIN_DROP`), or end as its agent takes a message, once the
 //! message is recorded (`FAKE_DEVIN_CRASH`).
@@ -117,6 +121,11 @@ enum Given {
     New(String),
 }
 
+/// What makes the window write its wire log as Devin 3000.11 does (`Wire::stamped`): its
+/// work stamped, its turns begun and ended by its word on them, a window opened again
+/// replaying its last turn. Nothing in a person's environment sets it.
+const STAMPS_VARIABLE: &str = "FAKE_DEVIN_STAMPS";
+
 /// What Devin says to `--version`: the Devin whose store and TUI it plays, which writes a
 /// prompt's history row at its Enter (`store::submitted`).
 const VERSION: &str = "devin 3000.11.92 (stand-in)";
@@ -183,9 +192,17 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     let asked_full = launch.permission_mode.as_deref() == Some("dangerous");
     let cut_in_its_first_turn = launch.resume.is_some() && !store.finished_a_turn();
     let permission = Arc::new(Permission::new(asked_full && !cut_in_its_first_turn));
-    let mut wire = Wire::open(Path::new(&wire_log), &session).map_err(said)?;
+    let stamped = own_var(STAMPS_VARIABLE).is_some_and(|stamps| !stamps.is_empty());
+    let mut wire = Wire::open(Path::new(&wire_log), &session)
+        .map_err(said)?
+        .stamped(stamped);
     let mut opened = 0;
     wire.announce(permission.mode()).map_err(said)?;
+    if launch.resume.is_some() {
+        let (user, answer) = store.last_turn()?;
+        wire.replayed(user.as_deref(), answer.as_deref())
+            .map_err(said)?;
+    }
     signals::leave_on(signals, || leave(0));
     say(&format!("fake devin started on {session}\n")).map_err(said)?;
 

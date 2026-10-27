@@ -10,7 +10,10 @@
 //! the window would read as working for good, its task never done. Nor is
 //! the history a window reopened on the conversation replays, which carries
 //! its timestamps and ends in no turn end (poker-lab's T-4 read as working
-//! for good after its window was opened again, 2026-10-03).
+//! for good after its window was opened again, 2026-10-03). Devin 3000.11
+//! stamps the work of a turn at work too: what tells it from a replay is the
+//! stream its words are said in, and Devin's own word that the turn is at work
+//! (`session_info_update`, `working` until `blocked`), which a replay never says.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -33,6 +36,10 @@ use crate::shared::record::key::Key;
 /// well.
 const WORK: [&str; 3] = ["agent_thought_chunk", "agent_message_chunk", "tool_call"];
 
+/// The words a stream of Devin's agent is said in: only those a turn at work streams carry
+/// a stream's id, which the history a reopened window replays has not.
+const STREAMED: [&str; 2] = ["agent_thought_chunk", "agent_message_chunk"];
+
 /// What the launches' wire logs said of a session.
 #[derive(Default)]
 pub(super) struct Wires {
@@ -42,6 +49,9 @@ pub(super) struct Wires {
     logs: HashMap<String, Log>,
     /// How each request's turn ended, by the request.
     outcomes: HashMap<String, Outcome>,
+    /// How each turn ended, by the model's request it ended in (Devin's own request id),
+    /// where the wire names one ([`Active::native`]).
+    natives: HashMap<String, Outcome>,
 }
 
 /// One launch's log: where the last look stopped, and what it said so far.
@@ -67,16 +77,19 @@ struct Said {
     mine: bool,
 }
 
-/// A reply being streamed: its stream, its text so far, and the request it
-/// answers once the log names it.
+/// A reply being streamed: its stream, its text so far, the request it
+/// answers once the log names it, and the model's request the turn ends in, once the
+/// log names that (`turnRequestId`, beside the request as the turn ends: what the
+/// stored reply holds as its `metadata.request_id`).
 struct Active {
     id: String,
     text: String,
     request: Option<String>,
+    native: Option<String>,
 }
 
 /// How a request's turn ended, with the reply it streamed.
-#[derive(PartialEq)]
+#[derive(Clone, PartialEq)]
 pub(super) struct Outcome {
     pub(super) text: String,
     pub(super) cause: Cause,
@@ -117,12 +130,15 @@ impl Wires {
                 let kept = self.logs.remove(launch);
                 let was_kept = kept.is_some();
                 let mut log = kept.unwrap_or_default();
-                let outcomes = &mut self.outcomes;
+                let ended = &mut Ended {
+                    outcomes: &mut self.outcomes,
+                    natives: &mut self.natives,
+                };
                 let looked = read_on(
                     Path::new(&file),
                     log.seen.as_ref(),
                     now_ms,
-                    &mut |event, _| log.said.visit(&event, session, outcomes),
+                    &mut |event, _| log.said.visit(&event, session, ended),
                     Some(only.as_bytes()),
                 );
                 match looked {
@@ -164,6 +180,7 @@ impl Wires {
             }
             self.logs.clear();
             self.outcomes.clear();
+            self.natives.clear();
         }
     }
 
@@ -213,17 +230,48 @@ impl Wires {
             _ => None,
         }
     }
+
+    /// How the turn that ended in the model's request `native` ended, if a log said so,
+    /// naming that request both as the turn ended and in the end's statistics.
+    pub(super) fn native_outcome(&self, native: &Key) -> Option<&Outcome> {
+        match native {
+            Key::Text(native) => self.natives.get(&**native),
+            _ => None,
+        }
+    }
+}
+
+/// Where a log's ends of turns go: by the request, and by the model's request.
+struct Ended<'a> {
+    outcomes: &'a mut HashMap<String, Outcome>,
+    natives: &'a mut HashMap<String, Outcome>,
+}
+
+/// `outcome` as how the turn of `key` ended in `outcomes`: a log that says another of
+/// the same turn fails the look, and every look after it while the log says both (the
+/// client id's rule, which the model request's ends keep too). A retried turn whose two
+/// ends disagree reads unknown for good, never settled early (Calliope's P3-3 on T-655).
+fn record(
+    outcomes: &mut HashMap<String, Outcome>,
+    key: &str,
+    outcome: &Outcome,
+) -> Result<(), Stop> {
+    if outcomes
+        .get(key)
+        .is_some_and(|previous| previous != outcome)
+    {
+        return Err(Stop::Failed(
+            "conflicting Devin completion evidence".to_owned(),
+        ));
+    }
+    outcomes.insert(key.to_owned(), outcome.clone());
+    Ok(())
 }
 
 impl Said {
     /// A record of the log (`visitWire`): what it says of the session's
     /// turn. A line that names the session is never JSON's `null`.
-    fn visit(
-        &mut self,
-        event: &Value,
-        session: &str,
-        outcomes: &mut HashMap<String, Outcome>,
-    ) -> Result<(), Stop> {
+    fn visit(&mut self, event: &Value, session: &str, ended: &mut Ended<'_>) -> Result<(), Stop> {
         if event.get("sessionId").and_then(Value::as_str) != Some(session) {
             return Ok(());
         }
@@ -231,9 +279,24 @@ impl Said {
         let update = |name: &str| event.get("update").and_then(|update| update.get(name));
         let meta = |name: &str| update("_meta").and_then(|meta| meta.get(name));
         let kind = update("sessionUpdate").and_then(Value::as_str);
-        let replayed = meta("cognition.ai/timestamp").is_some();
+        // Devin 3000.11 stamps every record of its work with its time, as it stamps the
+        // history a reopened window replays: work stamped so is the turn's where its stream
+        // is named (a replay names none), and Devin says itself when a turn is at work
+        // (`statusEnum` `working`) and when it waits for its user (`blocked`, before the
+        // turn's end), which a replay never says at work (two probes of 2026-10-26, T-660:
+        // stamped work alone read a Devin turn at rest through a minute's command).
+        let replayed = meta("cognition.ai/timestamp").is_some()
+            && !(kind.is_some_and(|kind| STREAMED.contains(&kind))
+                && meta("cognition.ai/streamingMessageId").is_some());
         if kind.is_some_and(|kind| WORK.contains(&kind)) && !replayed {
             self.busy = true;
+        }
+        if kind == Some("session_info_update") {
+            match meta("cognition.ai/statusEnum").and_then(Value::as_str) {
+                Some("working") => self.busy = true,
+                Some("blocked") => self.busy = false,
+                _ => {}
+            }
         }
         if kind == Some("agent_message_chunk") {
             // History replay has timestamps but no streaming UUID.
@@ -254,6 +317,7 @@ impl Said {
                     id: id.clone(),
                     text: String::new(),
                     request: None,
+                    native: None,
                 }),
             };
             let piece = js::string(content.and_then(|content| content.get("text")))
@@ -264,6 +328,10 @@ impl Said {
             (&mut self.active, event.get("turnClientMessageId"))
         {
             active.request = Some(request.clone());
+            active.native = match event.get("turnRequestId") {
+                Some(Value::String(native)) => Some(native.clone()),
+                _ => None,
+            };
         }
         let cause = match event.get("cause").and_then(Value::as_str) {
             Some("complete") => Cause::Complete,
@@ -273,30 +341,36 @@ impl Said {
             _ => return Ok(()),
         };
         if let Some(active) = &self.active {
+            let error = event
+                .get("errorMessage")
+                .and_then(Value::as_str)
+                .filter(|said| cause == Cause::Error && !said.trim().is_empty())
+                .map(str::to_owned);
+            let outcome = Outcome {
+                text: active.text.clone(),
+                cause,
+                error,
+            };
             if let Some(request) = active
                 .request
                 .as_ref()
                 .filter(|request| !request.is_empty())
             {
-                let error = event
-                    .get("errorMessage")
-                    .and_then(Value::as_str)
-                    .filter(|said| cause == Cause::Error && !said.trim().is_empty())
-                    .map(str::to_owned);
-                let outcome = Outcome {
-                    text: active.text.clone(),
-                    cause,
-                    error,
-                };
-                if outcomes
-                    .get(request)
-                    .is_some_and(|previous| *previous != outcome)
+                record(ended.outcomes, request, &outcome)?;
+                // The model's request, where the end names the same one in its
+                // statistics: a compaction can leave a stored reply no other way back to
+                // the turn it ended (T-652).
+                let stated = event
+                    .get("stats")
+                    .and_then(|stats| stats.get("requestId"))
+                    .and_then(Value::as_str);
+                if let Some(native) = active
+                    .native
+                    .as_deref()
+                    .filter(|native| !native.is_empty() && stated == Some(native))
                 {
-                    return Err(Stop::Failed(
-                        "conflicting Devin completion evidence".to_owned(),
-                    ));
+                    record(ended.natives, native, &outcome)?;
                 }
-                outcomes.insert(request.clone(), outcome);
             }
         }
         self.active = None;

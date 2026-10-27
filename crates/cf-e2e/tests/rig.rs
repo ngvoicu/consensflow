@@ -18,6 +18,10 @@
 //! window opened as the app opens one, the harness code asked as a process).
 //! So is `devin_bypass_first`: a resumed Devin worker's first message behind
 //! `/bypass`, received once however Devin stores the command.
+//! So is `devin_compaction`: a Devin worker's answer from the chief, given once
+//! into the same window after Devin's compactor cut the user's message out of the
+//! turn's chain (T-655). So is `devin_stamped`: a Devin window that writes its wire log
+//! as Devin 3000.11 does is at work for as long as its turn is (T-660).
 //! So is `live_member`: a Devin member's window as `live_devin_resume` opens
 //! one, whole as the adapter prepares it, cut, and opened again on its
 //! conversation with the note in its launch.
@@ -89,6 +93,10 @@ mod decided_result;
 mod described;
 #[path = "rig/devin_bypass_first.rs"]
 mod devin_bypass_first;
+#[path = "rig/devin_compaction.rs"]
+mod devin_compaction;
+#[path = "rig/devin_stamped.rs"]
+mod devin_stamped;
 #[path = "rig/help.rs"]
 mod help;
 #[path = "rig/homes.rs"]
