@@ -46,8 +46,9 @@ pub fn terminate(pid: u32, how: Ending) {
 pub(crate) fn end(pid: u32, how: Ending, reach: Reach, wait: bool, job: &Job) {
     #[cfg(unix)]
     {
-        // Signalling waits for nothing but what a group forced to end is looked at again for
-        // (`force_stragglers`), and a group holds what a job would.
+        // Signalling waits for nothing: a group forced to end is looked at once more, at once,
+        // for what was started as the signal went round (`force_stragglers`), and a group
+        // holds what a job would.
         let _ = (wait, job);
         let Some(target) = i32::try_from(pid).ok().and_then(|pid| target(pid, reach)) else {
             return;
@@ -102,29 +103,52 @@ pub(crate) fn end(pid: u32, how: Ending, reach: Reach, wait: bool, job: &Job) {
     }
 }
 
-/// How long a group forced to end is looked at again for what was started as the signal went
-/// round: a program that keeps starting programs is in the middle of starting one when it is
-/// sent the signal, and the one it was starting is in the group, and was not there to be sent it.
-/// The program ends of it, and starts no more; this long is for it to be scheduled to (T-581:
-/// at a load of 100, after the crate's tests had ended a program that kept starting `sleep`s, one
-/// of them was found running, orphaned, in the group the program had led).
+/// How long the end of a capture looks again at a group it forced to end, for what was started
+/// as the signal went round: a program that keeps starting programs is in the middle of starting
+/// one when it is sent the signal, and the one it was starting is in the group, and was not there
+/// to be sent it. The program ends of it, and starts no more; this long is for it to be scheduled
+/// to (T-581: at a load of 100, after the crate's tests had ended a program that kept starting
+/// `sleep`s, one of them was found running, orphaned, in the group the program had led). Only an
+/// end that may wait waits so ([`crate::group::Group::stragglers_forced`], the async end of a
+/// capture): an end on the way out (`Ender::force`, the daemon's stop tail; a group dropped)
+/// looks once, at once (Calliope's P2 on T-581, T-672).
 #[cfg(unix)]
-const STRAGGLERS_WITHIN: std::time::Duration = std::time::Duration::from_millis(500);
+pub(crate) const STRAGGLERS_WITHIN: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// Forces the group `target` names (`-pgid`) again for as long as a process of it that is not
-/// a zombie is there, for [`STRAGGLERS_WITHIN`] at most. The group is held by its leader, which
-/// the caller has not reaped: while it is not, no number it leads is another's.
+/// Forces the group `target` names (`-pgid`) again if a process of it that is not a zombie is
+/// there now, with no wait: whether one was. The group is held by its leader, which the caller
+/// has not reaped: while it is not, no number it leads is another's.
 #[cfg(unix)]
-fn force_stragglers(target: i32) {
-    let until = std::time::Instant::now() + STRAGGLERS_WITHIN;
-    while !crate::table::in_group(-target).is_empty() && std::time::Instant::now() < until {
-        std::thread::sleep(crate::table::BETWEEN_PASSES);
-        #[allow(unsafe_code)]
-        // SAFETY: as above: two integers, and the group is still held by its unreaped leader.
-        unsafe {
-            libc::kill(target, libc::SIGKILL);
-        }
+pub(crate) fn force_stragglers(target: i32) -> bool {
+    if !still_there(target) {
+        return false;
     }
+    #[allow(unsafe_code)]
+    // SAFETY: as above: two integers, and the group is still held by its unreaped leader.
+    unsafe {
+        libc::kill(target, libc::SIGKILL);
+    }
+    true
+}
+
+/// Whether a process of the group `target` names that is not a zombie is there: what the system
+/// says, or what a test says in its place ([`STILL_THERE`]).
+#[cfg(unix)]
+fn still_there(target: i32) -> bool {
+    #[cfg(test)]
+    if let Some(there) = STILL_THERE.with(|hook| hook.borrow().as_ref().map(|there| there())) {
+        return there;
+    }
+    !crate::table::in_group(-target).is_empty()
+}
+
+#[cfg(all(test, unix))]
+thread_local! {
+    /// What a test says, in place of the system, of whether a group forced to end still holds a
+    /// process, asked at each look: a group whose processes cannot die promptly (a loaded
+    /// machine's, one in the kernel), or one that holds a late one for a few looks.
+    pub(crate) static STILL_THERE: std::cell::RefCell<Option<Box<dyn Fn() -> bool>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(all(test, unix))]

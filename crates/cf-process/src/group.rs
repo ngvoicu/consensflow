@@ -48,6 +48,8 @@ use crate::live::Live;
 #[cfg(unix)]
 use crate::table::{self, Identity};
 use crate::terminate::{end, Reach};
+#[cfg(unix)]
+use crate::terminate::{force_stragglers, STRAGGLERS_WITHIN};
 use crate::{Ender, Ending};
 
 /// How often a program asked to end is looked at for whether it has.
@@ -152,6 +154,28 @@ impl Group {
             }
         }
         end(pid, how, Reach::Group, true, self.live.job());
+    }
+
+    /// Forces again what of the group was started as it was forced to end, for as long as a
+    /// process of it is there, [`STRAGGLERS_WITHIN`] at most, waiting between looks without
+    /// holding the thread: the async end of a capture (`forced`), never an end on the way out,
+    /// which [`end`] looks once for (Calliope's P2 on T-581, T-672).
+    #[cfg(unix)]
+    pub(crate) async fn stragglers_forced(&self) {
+        let (Some(pid), false) = (self.pid, self.live.exited()) else {
+            return;
+        };
+        let Some(target) = i32::try_from(pid)
+            .ok()
+            .filter(|&pid| pid > 1)
+            .map(|pid| -pid)
+        else {
+            return;
+        };
+        let until = tokio::time::Instant::now() + STRAGGLERS_WITHIN;
+        while tokio::time::Instant::now() < until && force_stragglers(target) {
+            tokio::time::sleep(table::BETWEEN_PASSES).await;
+        }
     }
 
     /// Notes the processes descended from the program `pid`, which it is about to be
@@ -584,5 +608,79 @@ mod tests {
             "in it still, it is forced"
         );
         leader.wait().unwrap();
+    }
+
+    /// Says, in place of the system, whether each group forced to end still holds a process
+    /// (`terminate::STILL_THERE`): `there` is asked at each look, which is counted.
+    fn groups_hold(there: impl Fn(usize) -> bool + 'static) -> Rc<std::cell::Cell<usize>> {
+        let looks = Rc::new(std::cell::Cell::new(0));
+        let counted = Rc::clone(&looks);
+        crate::terminate::STILL_THERE.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                counted.set(counted.get() + 1);
+                there(counted.get())
+            }));
+        });
+        looks
+    }
+
+    /// Lets the system say again what the groups hold.
+    fn groups_as_they_are() {
+        crate::terminate::STILL_THERE.with(|hook| *hook.borrow_mut() = None);
+    }
+
+    /// The daemon's stop tail forces every child it kept (`SystemProcesses::end_all`, an
+    /// `Ender::force` each) after its deadline, and the app ends the daemon 2 s after asking it
+    /// to stop: an end on the way out waits for nothing. Here two children whose groups never
+    /// stop holding a process (a loaded machine's, one in the kernel) are forced, one look each
+    /// at what the group started as the signal went round, at once (Calliope's P2 on T-581,
+    /// T-672: each waited 500 ms in a loop).
+    #[test]
+    fn children_forced_on_the_way_out_whose_groups_do_not_die_are_not_waited_for() {
+        let looks = groups_hold(|_| true);
+        let (mut first, mut second) = (sleeper(), sleeper());
+        let groups = [
+            Group::new(Some(first.id()), false, Job::unheld()),
+            Group::new(Some(second.id()), false, Job::unheld()),
+        ];
+        let began = std::time::Instant::now();
+        for group in &groups {
+            group.ender().force();
+        }
+        let took = began.elapsed();
+        groups_as_they_are();
+        for group in &groups {
+            group.release();
+        }
+        assert_eq!(first.wait().unwrap().signal(), Some(libc::SIGKILL));
+        assert_eq!(second.wait().unwrap().signal(), Some(libc::SIGKILL));
+        assert_eq!(looks.get(), 2, "one look a group");
+        assert!(took < Duration::from_millis(250), "forced in {took:?}");
+    }
+
+    /// The end of a capture may wait, and does, for what its group was starting as it was forced
+    /// to end (T-581): it looks again for as long as the group holds a process, within
+    /// `STRAGGLERS_WITHIN`, where an end on the way out looks once.
+    #[test]
+    fn the_end_of_a_capture_forces_its_group_again_for_as_long_as_it_holds_a_process() {
+        let looks = groups_hold(|look| look <= 3);
+        let mut leader = sleeper();
+        let group = Group::new(Some(leader.id()), false, Job::unheld());
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                group.end(Ending::Forced);
+                group.stragglers_forced().await;
+            });
+        groups_as_they_are();
+        group.release();
+        assert_eq!(leader.wait().unwrap().signal(), Some(libc::SIGKILL));
+        assert_eq!(
+            looks.get(),
+            4,
+            "the end's own look, then again until the group held none"
+        );
     }
 }

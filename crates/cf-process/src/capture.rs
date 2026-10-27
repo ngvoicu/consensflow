@@ -312,7 +312,9 @@ async fn node_end(
 
 /// Once a program asked to end has ended at the ask, or its time to has run out,
 /// whatever is left of the group it leads is forced to end: a child that took no notice
-/// of the ask would go on after the answer. On Unix the program is not waited for until
+/// of the ask would go on after the answer, and on Unix what was started as the signal went
+/// round is forced too, for a moment (`Group::stragglers_forced`). On Unix the program is not
+/// waited for until
 /// then, so that its id, and its group's, name no other; Windows ended the whole tree at
 /// the ask. What it came to.
 async fn forced(child: &mut tokio::process::Child, group: &Group) -> std::io::Result<ExitStatus> {
@@ -323,6 +325,7 @@ async fn forced(child: &mut tokio::process::Child, group: &Group) -> std::io::Re
             tokio::time::sleep(ENDED_EVERY).await;
         }
         group.end(Ending::Forced);
+        group.stragglers_forced().await;
         child.wait().await
     }
     #[cfg(not(unix))]

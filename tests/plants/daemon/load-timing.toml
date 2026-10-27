@@ -26,6 +26,7 @@
 [run]
 lt-terminate = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "terminate::tests::a_program_started_as_the_group"]
 lt-sweep = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "group::tests::a_sweep_goes_on"]
+lt-group = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "group::tests::"]
 lt-spawning = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "spawning::"]
 lt-closed = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "execute::tests::a_program_out_of_time_that_writes_once_asked"]
 lt-held = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "stalls::held::tests::a_job_is_stopped_under_its_program"]
@@ -58,16 +59,38 @@ replace = '''        if how == Ending::Forced && reach == Reach::Group && false 
             force_stragglers(target);
         }'''
 
+# Calliope's P2 on T-581 (T-672), fixed in 3.0.6-alpha.3 integration B round 2 (T-800): the look again for
+# what a group forced to end was starting waits only in the async end of a capture; `end` (so `Ender::force`,
+# the daemon's stop tail, and a group dropped) looks once, at once.
+
 [[plant]]
-name = "load timing: a group forced to end is looked at again only once"
-meant = "a_program_started_as_the_group_was_forced_to_end_is_forced_to_end_too"
-runs = ["lt-terminate"]
+name = "load timing: the end of a capture looks at the group it forced only once"
+meant = "the_end_of_a_capture_forces_its_group_again_for_as_long_as_it_holds_a_process"
+runs = ["lt-group"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/group.rs"
+find = '''        while tokio::time::Instant::now() < until && force_stragglers(target) {'''
+replace = '''        while false && tokio::time::Instant::now() < until && force_stragglers(target) {'''
+
+[[plant]]
+name = "load timing: an end on the way out waits in a loop for what its group still holds"
+meant = "children_forced_on_the_way_out_whose_groups_do_not_die_are_not_waited_for"
+runs = ["lt-group"]
 platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/terminate.rs"
-find = '''    while !crate::table::in_group(-target).is_empty() && std::time::Instant::now() < until {'''
-replace = '''    while false && !crate::table::in_group(-target).is_empty() && std::time::Instant::now() < until {'''
+find = '''        if how == Ending::Forced && reach == Reach::Group {
+            force_stragglers(target);
+        }'''
+replace = '''        if how == Ending::Forced && reach == Reach::Group {
+            let until = std::time::Instant::now() + STRAGGLERS_WITHIN;
+            while force_stragglers(target) && std::time::Instant::now() < until {
+                std::thread::sleep(crate::table::BETWEEN_PASSES);
+            }
+        }'''
 
 [[plant]]
 name = "load timing: the sweep of what a held program left stops after one pass"

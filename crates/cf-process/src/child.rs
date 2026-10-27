@@ -258,11 +258,11 @@ impl Ender {
     }
 
     /// Forces the child to end, and the group it leads with it, if it is
-    /// still there, and waits for nothing (on Windows its job is ended, and a program
-    /// with none has `taskkill` started and let go) but, on Unix, for what the group
-    /// had started as the signal went round: it is forced again for as long as a
-    /// process of it runs, a moment (500 ms at most, a millisecond or so where nothing
-    /// was starting). This is the end of a process on its way out.
+    /// still there, and waits for nothing: on Windows its job is ended, and a program
+    /// with none has `taskkill` started and let go; on Unix the group is looked at once
+    /// more, at once, for what it had started as the signal went round, and that is
+    /// forced too. This is the end of a process on its way out (the daemon's stop tail
+    /// forces every kept child so), which must not wait (Calliope's P2 on T-581, T-672).
     pub fn force(&self) {
         let Some(live) = self.live.upgrade() else {
             return;
