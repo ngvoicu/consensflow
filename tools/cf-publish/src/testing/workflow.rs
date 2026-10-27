@@ -247,6 +247,28 @@ pub fn step(text: &str, name: &str) -> StepText {
     }
 }
 
+/// A one-line YAML value as YAML reads it: a quoted one (with a comment after it, or not) without
+/// its quotes and what they escape; any other as it is written.
+fn scalar(value: &str) -> String {
+    let value = value.trim();
+    if let Some(inner) = value.strip_prefix('\'') {
+        if let Some(end) = inner.rfind('\'') {
+            if inner[end + 1..].trim().is_empty() || inner[end + 1..].trim_start().starts_with('#')
+            {
+                return inner[..end].replace("''", "'");
+            }
+        }
+    } else if let Some(inner) = value.strip_prefix('"') {
+        if let Some(end) = inner.rfind('"') {
+            if inner[end + 1..].trim().is_empty() || inner[end + 1..].trim_start().starts_with('#')
+            {
+                return inner[..end].replace("\\\"", "\"").replace("\\\\", "\\");
+            }
+        }
+    }
+    value.to_string()
+}
+
 /// Every step of `text` (a job's text, or the whole workflow's), in order, with the
 /// comment lines left out: a step is its first line (`      - `) and the lines under
 /// it, up to the next step's or to a line indented less.
@@ -314,7 +336,7 @@ impl StepText {
                 let lines: Vec<&str> = self.lines.iter().map(String::as_str).collect();
                 block_after(&lines[run + 1..])
             }
-            line => line.to_string(),
+            line => scalar(line),
         }
     }
 

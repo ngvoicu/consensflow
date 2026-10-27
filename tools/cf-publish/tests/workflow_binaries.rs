@@ -976,6 +976,19 @@ fn an_indented_comment_inside_a_job_does_not_end_it() {
     assert_caught(&commented, LINUX_TOOL_ON_MAC);
 }
 
+#[test]
+fn a_run_written_as_a_quoted_yaml_value_is_read_as_its_script() {
+    for run in [
+        "      - run: 'chmod +x \"$RUNNER_TEMP/tool/tool\"'\n",
+        "      - run: \"chmod +x \\\"$RUNNER_TEMP/tool/tool\\\"\"\n",
+        "      - name: Make it run\n        run: 'chmod +x \"$RUNNER_TEMP/tool/tool\"'\n",
+        "      - name: Run it\n        run: '\"$RUNNER_TEMP/tool/tool\" --version' # a comment\n",
+    ] {
+        let quoted = fixture("macos-latest", "", &format!("{}{run}", download(TEMP_TOOL)));
+        assert_caught(&quoted, LINUX_TOOL_ON_MAC);
+    }
+}
+
 // --- and what it leaves alone, and what it says it cannot read -------------------------------
 
 #[test]
