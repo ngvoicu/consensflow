@@ -8,6 +8,7 @@
 mod background;
 mod live;
 mod provisional;
+mod shapes;
 
 use std::fs;
 use std::path::PathBuf;

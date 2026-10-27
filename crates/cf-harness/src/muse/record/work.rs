@@ -14,6 +14,12 @@
 //!   the watched stream ends (or its `timeout_ms` passes);
 //! - any task of the run still open at the run's `terminal`, whatever it is.
 //!
+//! A task ends with its own end, however it came: stopped by the model (`work_stop`,
+//! accepted, then the task `cancelled`, `terminated by bash_input`) or by the human from
+//! Muse's `/tasks` (`cancelled`, `cancelled by runtime client`); the stop's acceptance
+//! ends nothing. Either way Muse queues the end for the agent (`background_task_terminal`,
+//! `terminal_kind: cancelled`), and that delivery holds as any other.
+//!
 //! **A piece of work is over when its agent has been told,** as Claude Code's job ends
 //! when its notification is delivered: Muse queues what the work says
 //! (`inbox_item_queued`, from `background_task_terminal`, `monitor_event`,
@@ -23,34 +29,49 @@
 //! drained into a run that has started: in the moment between a command's end and the
 //! start of the turn it wakes, its task is over and nothing has begun, and the task
 //! that waits on it must not be called done there. The user's own message pasted
-//! mid-turn (`user_steer`) is queued and drained the same way: it is no work, and a
-//! turn is under way until it is drained ([`Work::steering`]), as Claude Code's queued
-//! message keeps its turn in flight.
+//! mid-turn (`user_steer`) and a goal the user sets with `/goal` (`goal_control`) are
+//! queued and drained the same way: they are no work, and a turn is under way until a
+//! run takes them in ([`Work::steering`]), as Claude Code's queued message keeps its turn
+//! in flight. The deliveries are queued under the run that ended, not the one they wake
+//! (live): who drains them, and when, is what counts.
 //!
 //! **A child agent** (`subagent_spawn`) is no task of the parent's that starts: its
 //! life is told by `subagent.control` records, from `spawn_accepted` (by
 //! `subagent_id`); its `result_ready` comes a record before its result is queued for
 //! the agent (`subagent_result`, by the same id), and it is pending until that is taken
-//! in as above.
+//! in as above. No status says it completed (live: a child its parent did not wait on);
+//! a status that says it ended (`CHILD_ENDED`) ends it too, provisionally.
 //! It is counted among the agents, where a turn's own children (its reminders) never
 //! are. Where Muse differs from Codex: Codex keeps a turn in flight while a subagent it
 //! started runs; Muse ends the turn first, as Claude Code does, and the agent pending is
 //! said of a settled turn.
 //!
 //! **What a process leaves is retired, not pending,** when its segment of the log ends
-//! (`session.end`, which a resume writes for a dead process too, or a later
-//! `session.started`): no Muse that runs is going to tell its agent of it. A turn
+//! (`session.end`, which a resume writes for a dead process too, `crash_inferred`, or a
+//! later `session.started`): no Muse that runs is going to tell its agent of it. A turn
 //! finished is never called working for good so, as Claude Code's jobs of a process that
-//! is gone are retired at a relaunch.
+//! is gone are retired at a relaunch. And where Muse then ends the task itself (live:
+//! the resume cancels it, `resume_reconcile:orphaned_by_process_loss`, though the session
+//! starts with `background_tasks: keep`), word came that it ended, and it is retired no
+//! more: the engine says of a retired job that no word of its end came.
+//!
+//! **A goal** (`/goal`) is bound to the run that takes its `goal_control` in
+//! (`goal_run_binding`, by `goal_id`), and is that run's work: the run is in flight
+//! while it works on it. It is closed when a tool's result says its state is no longer
+//! `active` (`update_goal`'s `{"goal": {goal_id, status: "complete"}}`, live). A goal
+//! still open when its run ends is counted among the agents, as Muse continues an open
+//! goal in a run of its own (provisional: the live goal closed within its run; its
+//! continuation is in Muse's own `goals.db`), and one the user pauses or clears
+//! (`goal_control` `pause`, `clear`) runs no more (provisional). A goal outlives its
+//! process's end: Muse keeps it in its store and recovers it on a resume.
 //!
 //! Seen live (Muse 1.4.13): a background command, a monitor and a child, each through to
 //! its end and drained into the run that started it, its agent waiting on it (T-705's
-//! contributor run); and a command that outlived its turn, its end queued, then the run
-//! it woke started, then the end drained into it (T-789's live case on
-//! `muse-spark-1.3`, `tests/fixtures/muse/live/background-outlives-turn.jsonl`). Not seen
-//! live, so read as the rules above say until a recording shows it (T-789's result names
-//! each): a monitor or a child that outlives its turn, a backgrounded task stopped
-//! (`work_stop`, `bash_input`), work open when the process ended, and goals.
+//! contributor run); a command that outlived its turn and the run it woke (T-789's live
+//! case, `tests/fixtures/muse/live/background-outlives-turn.jsonl`); and T-801's shapes
+//! (`live/monitor-outlives-turn.jsonl`, `child-not-waited.jsonl`,
+//! `stopped-by-the-model.jsonl`, `stopped-by-the-human.jsonl`, `killed-and-resumed.jsonl`,
+//! `goal.jsonl`). What stays provisional is listed in `provisional`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -70,8 +91,9 @@ const CHILD_ENDED: [&str; 5] = ["completed", "failed", "cancelled", "closed", "e
 /// What a queued item is to the task that waits.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Family {
-    /// The user's own message, pasted mid-turn.
-    Steer,
+    /// The user's own input: a message pasted mid-turn (`user_steer`), or a goal they
+    /// set, changed, paused or cleared (`goal_control`). No work: a turn it starts.
+    Input,
     /// A child's result.
     Agent,
     /// What a command, a monitor or Muse itself delivers.
@@ -103,7 +125,12 @@ pub(super) struct Work {
     /// Items drained into a run that has not started yet, by that run.
     draining: HashMap<Arc<str>, Vec<Item>>,
     started: HashSet<Arc<str>>,
-    retired: usize,
+    /// The goals bound to a run and not closed, paused or cleared.
+    goals: HashSet<Arc<str>>,
+    /// The work a process's segment left, by its id, no word of whose end came since.
+    retired: HashSet<Arc<str>>,
+    /// The deliveries a process's segment left that name no work.
+    retired_unnamed: usize,
 }
 
 impl Work {
@@ -136,6 +163,9 @@ impl Work {
             }
             Some(kind) if ENDED.contains(&kind) => {
                 self.tasks.remove(&task);
+                // A resume's word that a dead process's task ended (live:
+                // `resume_reconcile:orphaned_by_process_loss`): it is retired no more.
+                self.retired.remove(&task);
             }
             _ => {}
         }
@@ -169,7 +199,18 @@ impl Work {
         };
         let source = field(event, "source");
         let (family, owner) = match field(source, "source").and_then(Value::as_str) {
-            Some("user_steer") => (Family::Steer, None),
+            Some("user_steer") => (Family::Input, None),
+            Some("goal_control") => {
+                // A goal the user paused or cleared runs no more (provisional: the live
+                // goal was set, then closed by its agent).
+                let action = field(source, "action").and_then(Value::as_str);
+                if matches!(action, Some("pause" | "clear")) {
+                    if let Some(goal) = text(field(source, "goal_id")) {
+                        self.goals.remove(&goal);
+                    }
+                }
+                (Family::Input, None)
+            }
             Some("subagent_result") => {
                 let owner = text(field(source, "subagent_id"));
                 // The child's result: it is pending as this item now, until taken in.
@@ -211,25 +252,66 @@ impl Work {
                 let status = field(record, "control_status").and_then(Value::as_str);
                 if status.is_some_and(|status| CHILD_ENDED.contains(&status)) {
                     self.children.remove(&child);
+                    self.retired.remove(&child);
                 }
             }
             _ => {}
         }
     }
 
-    /// The process's segment of the log ended: what it left is retired.
+    /// A goal bound to its run (`goal_run_binding`): it is work while it is open.
+    pub(super) fn goal_bound(&mut self, record: Option<&Value>) {
+        if let Some(goal) = text(field(record, "goal_id")) {
+            self.goals.insert(goal);
+        }
+    }
+
+    /// A tool's result that says a goal's state (`update_goal`'s `{"goal": {goal_id,
+    /// status}}`, live): one that is not `active` closes it.
+    pub(super) fn goal_said(&mut self, said: &str) {
+        let Ok(said) = serde_json::from_str::<Value>(said) else {
+            return;
+        };
+        let goal = said.get("goal");
+        let status = field(goal, "status").and_then(Value::as_str);
+        if let (Some(goal), Some(status)) = (text(field(goal, "goal_id")), status) {
+            if status != "active" {
+                self.goals.remove(&goal);
+            }
+        }
+    }
+
+    /// The process's segment of the log ended: what it left is retired. A goal is not:
+    /// Muse keeps it in its own store and continues it in the process that resumes.
     pub(super) fn segment_ended(&mut self) {
-        let pending = self.pending();
-        self.retired += pending.jobs + pending.agents;
+        let running = self
+            .tasks
+            .iter()
+            .filter(|(_, task)| task.background)
+            .map(|(id, _)| Arc::clone(id))
+            .chain(self.children.iter().cloned());
+        let mut left: HashSet<Arc<str>> = running.collect();
+        let mut unnamed = 0;
+        for item in self.items().filter(|item| item.family != Family::Input) {
+            match &item.owner {
+                Some(owner) => {
+                    left.insert(Arc::clone(owner));
+                }
+                None => unnamed += 1,
+            }
+        }
+        self.retired_unnamed += unnamed;
+        self.retired.extend(left);
         self.tasks.clear();
         self.children.clear();
         self.queued.clear();
         self.draining.clear();
     }
 
-    /// Whether the user's message pasted mid-turn waits to be taken in.
+    /// Whether the user's input (a message pasted mid-turn, a goal set) waits to be taken
+    /// in by a run.
     pub(super) fn steering(&self) -> bool {
-        self.items().any(|item| item.family == Family::Steer)
+        self.items().any(|item| item.family == Family::Input)
     }
 
     /// What runs, and what its agent has not yet been told of: each piece of work once.
@@ -240,9 +322,9 @@ impl Work {
             .filter(|(_, task)| task.background)
             .map(|(id, _)| Arc::clone(id));
         Pending {
-            agents: self.count(Family::Agent, self.children.iter().cloned()),
+            agents: self.count(Family::Agent, self.children.iter().cloned()) + self.goals.len(),
             jobs: self.count(Family::Job, tasks),
-            retired: self.retired,
+            retired: self.retired.len() + self.retired_unnamed,
             noticed: 0,
         }
     }

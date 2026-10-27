@@ -288,6 +288,7 @@ impl Log {
                     self.add(id, Role::Custom, body.to_owned(), at);
                 }
             }
+            Some("goal_run_binding") => self.work.goal_bound(field(event, "record")),
             Some("inbox_item_drained") => self.work.drained(event),
             Some("context_compaction_installed") => {
                 let replacement = field(event, "replacement");
@@ -308,6 +309,17 @@ impl Log {
             // background, which Muse 1.4.13 says in the task's output instead.
             Some("task_backgrounded") => self.work.backgrounded(field(event, "task_id")),
             Some(kind) => {
+                if kind == "tool_result_batch_committed" {
+                    for result in field(event, "results")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                    {
+                        if let Some(said) = result.get("text").and_then(Value::as_str) {
+                            self.work.goal_said(said);
+                        }
+                    }
+                }
                 for (id, role, text) in self.held.event(kind, &run, record, event, seq)? {
                     self.add(id, role, text, at);
                 }

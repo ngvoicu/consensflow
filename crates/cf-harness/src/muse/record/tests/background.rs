@@ -396,3 +396,112 @@ fn a_turn_whose_foreground_is_done_is_in_flight_while_its_reminders_run_and_leav
         "the reminders were no work of the agent's"
     );
 }
+
+/// The goal `goal` bound to the run `run`, as Muse binds it when it drains the goal's
+/// `goal_control` into the run.
+fn goal_bound(sequence: u64, run: &str, goal: &str) -> Value {
+    run_event(
+        sequence,
+        run,
+        json!({ "kind": "goal_run_binding", "record": { "goal_id": goal, "run_id": run,
+                "authority_kind": "goal_control", "continuation_generation": 1 } }),
+    )
+}
+
+/// The result of `update_goal`, the goal `goal` now `status`.
+fn goal_updated(sequence: u64, run: &str, goal: &str, status: &str) -> Value {
+    let said = json!({ "goal": { "goal_id": goal, "status": status } }).to_string();
+    run_event(
+        sequence,
+        run,
+        json!({ "kind": "tool_result_batch_committed",
+                "results": [{ "tool_call_id": format!("g{sequence}"), "text": said }] }),
+    )
+}
+
+#[test]
+fn a_goal_still_open_when_its_run_ends_is_work_pending_and_its_close_ends_it() {
+    // Provisional (the binary's strings, and goals.db's continuations): no live run left
+    // a goal open at its end; Muse continues an active goal in a run of its own.
+    let goal = |sequence| {
+        queued(
+            sequence,
+            "t1",
+            "g-item",
+            json!({ "source": "goal_control", "action": "set", "goal_id": "g1" }),
+        )
+    };
+    let mut records = vec![
+        goal(1),
+        started(2, "t1"),
+        drained(3, "t1", "g-item", "t1"),
+        goal_bound(4, "t1", "g1"),
+        ended(5, "t1", "completed"),
+    ];
+    let open = record_of(&records);
+    assert_eq!(open.settlement, Settlement::Settled);
+    assert_eq!(open.pending, pending(0, 1, 0), "the goal runs on");
+    records.extend([
+        started(6, "t2"),
+        goal_updated(7, "t2", "g1", "complete"),
+        ended(8, "t2", "completed"),
+    ]);
+    assert_eq!(record_of(&records).pending, Pending::default());
+    // A goal the user paused or cleared runs no more.
+    for action in ["pause", "clear"] {
+        let mut records = vec![
+            goal(1),
+            started(2, "t1"),
+            drained(3, "t1", "g-item", "t1"),
+            goal_bound(4, "t1", "g1"),
+            ended(5, "t1", "completed"),
+        ];
+        records.push(queued(
+            6,
+            "t1",
+            "g-stop",
+            json!({ "source": "goal_control", "action": action, "goal_id": "g1" }),
+        ));
+        records.extend([
+            started(7, "t2"),
+            drained(8, "t2", "g-stop", "t2"),
+            ended(9, "t2", "completed"),
+        ]);
+        assert_eq!(record_of(&records).pending, Pending::default(), "{action}");
+    }
+    // A tool's result that is no goal's changes none.
+    let mut records = vec![
+        goal(1),
+        started(2, "t1"),
+        drained(3, "t1", "g-item", "t1"),
+        goal_bound(4, "t1", "g1"),
+    ];
+    records.push(run_event(
+        5,
+        "t1",
+        json!({ "kind": "tool_result_batch_committed",
+        "results": [{ "tool_call_id": "x", "text": "{\"status\":\"complete\"}" }] }),
+    ));
+    records.push(ended(6, "t1", "completed"));
+    assert_eq!(record_of(&records).pending, pending(0, 1, 0));
+}
+
+#[test]
+fn a_task_a_resume_ends_after_its_process_ended_is_retired_no_more() {
+    let mut records = left_running();
+    records.push(session(7, "session.end"));
+    assert_eq!(record_of(&records).pending, pending(0, 0, 1));
+    records.push(session(8, "session.started"));
+    records.push(task(
+        9,
+        "t1",
+        "k1",
+        json!({ "kind": "cancelled", "reason": "resume_reconcile:orphaned_by_process_loss" }),
+    ));
+    assert_eq!(record_of(&records).pending, Pending::default());
+    // Another task's end retires nothing of it.
+    let mut records = left_running();
+    records.push(session(7, "session.end"));
+    records.push(task(8, "t9", "k9", json!({ "kind": "cancelled" })));
+    assert_eq!(record_of(&records).pending, pending(0, 0, 1));
+}

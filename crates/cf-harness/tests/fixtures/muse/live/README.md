@@ -43,3 +43,36 @@ throwaway home, scrubbed by `cargo xtask scrub-muse-session`. The model started 
 task completed (92); Muse started the run it wakes (95, no message of the user's) and
 then drained the end into it (107); that run answered (119) and ended (125), and the
 window quit (126).
+
+T-801 (Phoebus, 2026-10-27) recorded six shapes on Muse 1.4.13-R6996.1,
+`muse-spark-1.3` at `minimal`, contributor mode off, `--yolo`, each in a throwaway home
+and project, scrubbed by `cargo xtask scrub-muse-session` and then T-705's identity
+scrubber (paths, uuids, call ids, sockets as placeholders). Copied unchanged from
+`consensflow-trees/.runs/muse-research/fixtures/t-shapes/<case>/session.jsonl`, where
+each case's README, argv, actions, usage, hooks and screens are. The line numbers below
+are physical lines, as `src/muse/record/tests/shapes.rs` reads them.
+
+- `monitor-outlives-turn.jsonl`: a monitor armed (75, `work.v2.monitor.`); the turn ends
+  (95); its two events are queued under the ended run (98, 99) and its task completes
+  (100); another run starts (103), drains both (115, 116) and ends (136).
+- `child-not-waited.jsonl`: a child spawned (67) and running (77); the parent's turn
+  ends (104) without `subagent_wait`; the child's `result_ready` (107) and its result
+  queued under the old run (108); a new run starts (111), drains it (123), ends (143).
+- `stopped-by-the-model.jsonl`: a background command (74) the model stops with
+  `work_stop` (91, accepted 109): its end queued (120, `terminal_kind: cancelled`), its
+  task cancelled (122, `terminated by bash_input`), a delivery anomaly (123); the turn
+  ends (134); a new run (138) drains it (150) and ends (170).
+- `stopped-by-the-human.jsonl`: the same stopped from `/tasks` after the turn ended
+  (95): queued (99), cancelled (101, `cancelled by runtime client`), a new run (104)
+  drains it (116), ends (136).
+- `killed-and-resumed.jsonl`: Muse killed (SIGKILL) after its turn ended (94) with a
+  background command running; its first 95 lines are the log as the kill left it. The
+  resume writes `session.end` `crash_inferred` (96), starts with `background_tasks: keep`
+  (98–100), `session.resumed` (104), and cancels the old task itself (106,
+  `resume_reconcile:orphaned_by_process_loss`); no delivery, no run.
+- `goal.jsonl`: `/goal` queued as `goal_control` `set` (24) before any run; drained into
+  a run (42) and bound to it (43, `goal_run_binding`); `update_goal` `complete` (129,
+  its result 145); the run ends (165).
+- `escape-before-a-word.jsonl`: Escape right after the run started: `terminal
+  cancelled` (46) and `run_retracted` `no_output_interrupt_restore` (47), no word of
+  the model's.

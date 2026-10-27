@@ -1,11 +1,18 @@
 //! What a Muse log may say that no live log has shown. **Provisional (the binary's
 //! strings only):** each shape below is read from a name in Muse 1.4.13's binary, never
-//! from a record of a real session, and is replaced when a recording shows it:
+//! from a record of a real session, and is replaced when a recording shows it. The quota
+//! rule is here; the others are read where their live neighbours are, and listed here:
 //! - a refusal for quota (MUS-14, MUS-23: T-770's): a failed turn whose reason is an
 //!   API error 429 or 402, or Muse's own "usage limit reached";
-//! - `task_backgrounded`, the binary's word for a task put in the background, which no
-//!   live log has written (Muse 1.4.13 says `execution_state: background_running` in the
-//!   task's output instead: `work`).
+//! - `task_backgrounded` (`record`), the binary's word for a task put in the background,
+//!   which no live log has written (Muse 1.4.13 says `execution_state:
+//!   background_running` in the task's output: `work`);
+//! - a child's status that says it ended (`work`'s `CHILD_ENDED`): live, a child ends by
+//!   its result;
+//! - a goal still open when its run ends, and one the user paused or cleared (`work`):
+//!   live, the goal closed within its run;
+//! - a message handed to the session of another kind or surface than a chat of the main
+//!   one (`record`'s `intent`).
 
 use std::collections::HashMap;
 use std::sync::Arc;

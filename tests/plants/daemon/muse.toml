@@ -22,6 +22,7 @@ muse-env = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "env::"]
 muse-scrub = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "scrub_muse_session::"]
 muse-fixtures = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "fixtures"]
 muse-daemon-seams = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::"]
+muse-shapes = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::shapes::"]
 muse-window-args = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::window_args::"]
 muse-unsent = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::window::"]
 muse-first-message = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "first_message::"]
@@ -1044,3 +1045,121 @@ platforms = ["macos", "linux"]
 file = "crates/cf-harness/src/muse/launch.rs"
 find = '''    let linked = fs::symlink_metadata(launcher).is_ok_and(|meta| meta.file_type().is_symlink());'''
 replace = '''    let linked = fs::symlink_metadata(launcher).is_ok_and(|meta| meta.file_type().is_symlink()) && false;'''
+
+# --- T-802: T-801's live shapes ---
+
+# The rule the window's merge keeps: an adapter whose windows do not open is no adapter (T-767's P1).
+[[plant]]
+name = "muse: an adapter that opens no window is given work"
+meant = "a_harness_whose_windows_do_not_open_has_no_adapter_so_the_engine_refuses_it_at_the_door"
+runs = ["muse-daemon-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''
+                .filter(|(_, adapter)| adapter.opens_windows())
+'''
+replace = ""
+
+# Work: a task Muse's resume ends after its process's end is retired no more (live: orphaned_by_process_loss).
+[[plant]]
+name = "muse: a task ended after its process's end stays retired"
+meant = "a_command_a_killed_process_left_is_retired_then_ended_by_the_resumes_word"
+runs = ["muse-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''
+                self.retired.remove(&task);
+'''
+replace = ""
+
+# Work: what a process's segment leaves is retired.
+[[plant]]
+name = "muse: what a process left is not retired"
+meant = "a_command_a_killed_process_left_is_retired_then_ended_by_the_resumes_word"
+runs = ["muse-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''
+        self.retired.extend(left);
+'''
+replace = '''
+        let _ = left;
+'''
+
+# Work: a goal the user sets is the user's input, a turn coming, not a job (live).
+[[plant]]
+name = "muse: a goal set is a job"
+meant = "a_goal_set_is_the_users_input_and_its_run_holds_it_until_the_goal_is_closed"
+runs = ["muse-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''
+                (Family::Input, None)
+            }
+'''
+replace = '''
+                (Family::Job, None)
+            }
+'''
+
+# Work: a goal bound to its run is work while open (provisional at a run's end).
+[[plant]]
+name = "muse: a bound goal is no work"
+meant = "a_goal_still_open_when_its_run_ends_is_work_pending_and_its_close_ends_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+            Some("goal_run_binding") => self.work.goal_bound(field(event, "record")),
+'''
+replace = '''
+            Some("goal_run_binding") => {}
+'''
+
+# Work: a goal is closed when update_goal says it is no longer active (live).
+[[plant]]
+name = "muse: a goal closed stays open"
+meant = "a_goal_still_open_when_its_run_ends_is_work_pending_and_its_close_ends_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''
+            if status != "active" {
+'''
+replace = '''
+            if status == "never" {
+'''
+
+# Work: a goal the user paused or cleared runs no more (provisional).
+[[plant]]
+name = "muse: a paused goal runs on"
+meant = "a_goal_still_open_when_its_run_ends_is_work_pending_and_its_close_ends_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''
+                if matches!(action, Some("pause" | "clear")) {
+'''
+replace = '''
+                if matches!(action, Some("never")) {
+'''
+
+# The window's command line: a window of a model that is no contributor model runs out of contributor mode (T-802: a fresh Muse profile's saved default is on).
+[[plant]]
+name = "muse: a window runs in Muse's saved contributor mode"
+meant = "a_muse_window_opens_in_full_permission_on_its_model_and_effort_with_its_first_message_last"
+runs = ["muse-window-args"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/window_args.rs"
+find = '''
+                args.extend(words(&["--contributor-mode", "off"]));
+'''
+replace = ""
