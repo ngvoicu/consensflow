@@ -47,7 +47,7 @@ use std::time::Duration;
 
 use cf_base::time::{Clock, SystemClock};
 use cf_harness::contract::{Records, Work};
-use cf_harness::records::{Options, Reading};
+use cf_harness::records::{Boundary, Options, Reading};
 use cf_harness::seams::Time;
 use cf_proto::agents::Harness;
 use tokio::sync::Notify;
@@ -234,13 +234,22 @@ impl Records for DaemonRecords {
             .arrival(self.records.has_transcript(harness, session))
     }
 
-    fn transcript_length<'a>(
+    fn transcript_boundary<'a>(
         &'a self,
         harness: Harness,
         session: &'a str,
-    ) -> Work<'a, Result<Option<u64>, String>> {
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
         self.spawn
-            .arrival(self.records.transcript_length(harness, session))
+            .arrival(self.records.transcript_boundary(harness, session))
+    }
+
+    fn transcript_left<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
+        self.spawn
+            .arrival(self.records.transcript_left(harness, session))
     }
 
     fn took<'a>(

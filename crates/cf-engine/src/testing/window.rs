@@ -388,6 +388,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             unnamed: false,
             took_back: false,
             at_prompt: false,
+            shared: false,
         };
     }
     let waiting = match &agent.unnamed {
@@ -407,6 +408,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
         unnamed: agent.unnamed.is_some(),
         took_back: agent.took_back,
         at_prompt: agent.at_prompt,
+        shared: agent.shared,
     }
 }
 

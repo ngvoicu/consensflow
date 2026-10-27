@@ -72,6 +72,37 @@ pub(super) fn statuses(folder: &str) -> Vec<(u32, Status)> {
     statuses
 }
 
+/// The Claudes running that show the conversation `session`, by process id: none
+/// where the folder cannot be read, which says nothing of who runs. A parked job
+/// (`parkedJobId`) is no holder of it, as Claude Code's own count of a
+/// conversation's live sessions passes over one (2.1.310). Each of them writes
+/// the conversation's transcript as it goes, and Claude Code lets two show one
+/// conversation at once: one the human started outside ConsensFlow, beside a
+/// window's (`claude --resume <id>`).
+pub(super) fn holders(folder: &str, session: &str) -> Option<Vec<u32>> {
+    let listed = entries(Path::new(folder)).ok()?;
+    let mut holders: Vec<u32> = Vec::new();
+    for entry in listed {
+        if !is_status_file(&entry.file_name().to_string_lossy()) {
+            continue;
+        }
+        let Ok(bytes) = fs::read(entry.path()) else {
+            continue;
+        };
+        let parked = from_slice_lossy(&bytes)
+            .is_ok_and(|row| row.get("parkedJobId").is_some_and(|job| !job.is_null()));
+        match read(&bytes) {
+            Some((pid, status))
+                if status.session == session && !parked && !holders.contains(&pid) =>
+            {
+                holders.push(pid);
+            }
+            _ => {}
+        }
+    }
+    Some(holders)
+}
+
 /// `<digits>.json`, the name Claude gives a status file.
 fn is_status_file(name: &str) -> bool {
     name.strip_suffix(".json")

@@ -41,7 +41,8 @@ use jiff::tz::TimeZone;
 use tokio::sync::{mpsc, oneshot};
 
 use super::{
-    has_transcript, open, took, transcript_length, Cache, Open, Options, Reading, IDLE_MS,
+    has_transcript, open, took, transcript_boundary, transcript_left, Boundary, Cache, Open,
+    Options, Reading, IDLE_MS,
 };
 use crate::contract::{Records, Work};
 use crate::seams::Time;
@@ -91,10 +92,15 @@ enum Ask {
         session: String,
         answer: oneshot::Sender<Result<bool, String>>,
     },
-    TranscriptLength {
+    TranscriptBoundary {
         harness: Harness,
         session: String,
-        answer: oneshot::Sender<Result<Option<u64>, String>>,
+        answer: oneshot::Sender<Result<Option<Boundary>, String>>,
+    },
+    TranscriptLeft {
+        harness: Harness,
+        session: String,
+        answer: oneshot::Sender<Result<Option<Boundary>, String>>,
     },
     Took {
         harness: Harness,
@@ -183,13 +189,28 @@ impl Records for Thread {
         })
     }
 
-    fn transcript_length<'a>(
+    fn transcript_boundary<'a>(
         &'a self,
         harness: Harness,
         session: &'a str,
-    ) -> Work<'a, Result<Option<u64>, String>> {
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
         Box::pin(async move {
-            let asked = self.ask(|answer| Ask::TranscriptLength {
+            let asked = self.ask(|answer| Ask::TranscriptBoundary {
+                harness,
+                session: session.to_owned(),
+                answer,
+            });
+            asked.await.unwrap_or_else(|| Err(ENDED.to_owned()))
+        })
+    }
+
+    fn transcript_left<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
+        Box::pin(async move {
+            let asked = self.ask(|answer| Ask::TranscriptLeft {
                 harness,
                 session: session.to_owned(),
                 answer,
@@ -300,16 +321,27 @@ fn serve(mut waiting: mpsc::Receiver<Ask>, env: &Env, mut caches: Caches) {
                     });
                 let _ = answer.send(found);
             }
-            Ask::TranscriptLength {
+            Ask::TranscriptBoundary {
                 harness,
                 session,
                 answer,
             } => {
-                let length = panics_to_text(|| transcript_length(harness, &session, env))
+                let boundary = panics_to_text(|| transcript_boundary(harness, &session, env))
                     .unwrap_or_else(|panicked| {
-                        Err(format!("the transcript's length panicked: {panicked}"))
+                        Err(format!("the transcript's boundary panicked: {panicked}"))
                     });
-                let _ = answer.send(length);
+                let _ = answer.send(boundary);
+            }
+            Ask::TranscriptLeft {
+                harness,
+                session,
+                answer,
+            } => {
+                let boundary = panics_to_text(|| transcript_left(harness, &session, env))
+                    .unwrap_or_else(|panicked| {
+                        Err(format!("the transcript's boundary panicked: {panicked}"))
+                    });
+                let _ = answer.send(boundary);
             }
             Ask::Took {
                 harness,

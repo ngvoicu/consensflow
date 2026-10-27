@@ -29,6 +29,7 @@ mod inputs;
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::Arc;
 
 use cf_base::env::Env;
@@ -55,7 +56,7 @@ pub fn reader(session: &str, env: &Env) -> Box<dyn Look + Send> {
     Box::new(TranscriptReader::new(
         Followed::new(
             Box::new(move || transcript(&locating, &env)),
-            Box::new(move || Rollout::new(Arc::clone(&reading))),
+            Box::new(move |_: &Path| Rollout::new(Arc::clone(&reading))),
         ),
         format!("codex rollout for {session}"),
     ))

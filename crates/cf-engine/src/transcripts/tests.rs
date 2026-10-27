@@ -84,6 +84,7 @@ fn look(items: Vec<Item>) -> Observed {
         unnamed: false,
         took_back: false,
         at_prompt: false,
+        shared: false,
     }
 }
 

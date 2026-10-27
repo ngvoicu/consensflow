@@ -120,6 +120,9 @@ pub(crate) struct HeldPart {
     quiet: Option<(i64, i64)>,
     /// The task whose requester was told its turn looks finished: told once.
     told_finished: Option<i64>,
+    /// The task whose requester was told another program shows its window's
+    /// conversation ([`Dispatcher::shared`]): told once.
+    told_shared: Option<i64>,
     /// The window's rests, which outlive the task's hold: they are the window's, and go
     /// with it, or with the conversation it shows ([`HeldPart::reset`]).
     pub(crate) rests: Rests,
@@ -150,6 +153,7 @@ impl HeldPart {
         self.told = None;
         self.quiet = None;
         self.told_finished = None;
+        self.told_shared = None;
     }
 
     /// What a window keeps of its task's hold once no task of its is working: nothing of
@@ -272,6 +276,10 @@ impl Dispatcher {
         let Some(start) = self.delivered_at(participant.id, &thread, items)? else {
             return Ok(Turn::Open);
         };
+        if observed.shared {
+            self.shared(project, participant, record, &thread)?;
+            return Ok(Turn::Open);
+        }
         if observed.failed {
             // A failed turn holds its task for nothing it left (T-532's P3-3).
             record.held.borrow_mut().reset();
@@ -373,6 +381,49 @@ impl Dispatcher {
             .record_result(project.id, thread.task.number, &body)?;
         self.changed();
         Ok(Turn::Answered)
+    }
+
+    /// A worker's window whose conversation another program of its harness's has shown
+    /// since the window opened (`Observed::shared`): a Claude Code the human started
+    /// outside ConsensFlow on it, or the program of an earlier window that the host could
+    /// not end. That one's turns are written into the same record, in
+    /// records no different from the window's, so the record's answer after the task's
+    /// message may be that one's: it is never the task's result. Its requester is told
+    /// once how to take the answer they choose to; nothing is recorded and nothing ends.
+    fn shared(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        thread: &TaskThread,
+    ) -> Result<(), EngineError> {
+        let number = thread.task.number;
+        {
+            let mut held = record.held.borrow_mut();
+            if held.told_shared == Some(number) {
+                return Ok(());
+            }
+            held.told_shared = Some(number);
+        }
+        let way = match thread.task.requester.as_str() {
+            "human" => "Finish in the task's drawer takes the last answer".to_owned(),
+            _ => format!("`cf task finish T-{number}` takes the last answer"),
+        };
+        let body = format!(
+            "T-{number}: another Claude than @{}'s window has shown its conversation (one started outside ConsensFlow, or an earlier window's that never ended). Its turns are written into the same record, and nothing tells them from the window's, so no answer there is taken for T-{number}'s result. {way}.",
+            participant.handle,
+        );
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: thread.task.requester.clone(),
+                task: Some(number),
+                body,
+            },
+        )?;
+        self.changed();
+        Ok(())
     }
 
     /// A turn whose record never reads it as over, though it looks finished: the window

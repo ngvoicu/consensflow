@@ -30,6 +30,7 @@ use tempfile::TempDir;
 
 mod agents;
 mod compact_cancelled;
+mod outside;
 mod relaunched;
 mod resumed;
 mod specs;

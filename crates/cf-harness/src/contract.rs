@@ -18,7 +18,9 @@ use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
-use crate::records::{Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement};
+use crate::records::{
+    Boundary, Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement,
+};
 
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -624,6 +626,12 @@ pub struct Observed {
     /// the program before was gone keeps what that program had queued) from one still at
     /// work. False from a harness that says no such thing apart from its record.
     pub at_prompt: bool,
+    /// Another program of the harness's, not the window's, has shown the window's
+    /// conversation since the window opened (a Claude Code the human started outside
+    /// ConsensFlow on it, `claude --resume <id>`): the record holds that one's turns
+    /// too, written as the window's are, and nothing in it tells them apart. False
+    /// from a harness that cannot tell.
+    pub shared: bool,
 }
 
 impl Observed {
@@ -721,15 +729,28 @@ pub trait Records {
         session: &'a str,
     ) -> Work<'a, Result<bool, String>>;
 
-    /// How many bytes `harness`'s transcript of `session` holds now, where a
-    /// reader of it reads a relaunch (`Options::relaunched_at`, Claude's
-    /// alone): none where it keeps no transcript of it, or a seam that keeps no
-    /// files says none.
-    fn transcript_length<'a>(
+    /// Where `harness`'s transcript of `session` ends now, how many bytes it
+    /// holds and the last of them, where a reader of it reads a relaunch
+    /// (`Options::relaunched`, Claude's alone): none where it keeps no
+    /// transcript of it, or a seam that keeps no files says none.
+    fn transcript_boundary<'a>(
         &'a self,
         _harness: Harness,
         _session: &'a str,
-    ) -> Work<'a, Result<Option<u64>, String>> {
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    /// Where `harness`'s transcript of `session` ends now, where the harness's own
+    /// word says no program of its writes it any more (Claude's statuses): what is
+    /// before it was written by programs that are gone, and what they had queued
+    /// went with them. None where one may, where it cannot say, or a seam that
+    /// keeps no files says none.
+    fn transcript_left<'a>(
+        &'a self,
+        _harness: Harness,
+        _session: &'a str,
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
         Box::pin(async { Ok(None) })
     }
 
@@ -753,10 +774,18 @@ pub trait Records {
     /// where it ends at rest, and none where the record cannot tell. Devin's
     /// cannot: it reads a turn as going on only while its window shows it working,
     /// and one whose last word is the message it was given as settled, which with
-    /// no window open is a turn never answered as much as one at rest.
+    /// no window open is a turn never answered as much as one at rest. Where no
+    /// program writes the record any more ([`Records::transcript_left`]), what they
+    /// had queued and not begun went with them and is no turn: a Claude that quit
+    /// idle with a message queued leaves no sign of its quit in its record, and was
+    /// cut in nothing (T-442's three).
     fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<bool>> {
         Box::pin(async move {
-            match &*self.look(harness, session, &Options::default()).await {
+            let options = Options {
+                relaunched: self.transcript_left(harness, session).await.ok().flatten(),
+                ..Options::default()
+            };
+            match &*self.look(harness, session, &options).await {
                 Reading::Known(record) => match record.settlement {
                     Settlement::InFlight => Some(true),
                     Settlement::Settled if ends_in_a_reply(record) => Some(false),

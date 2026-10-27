@@ -2,8 +2,8 @@
 //! queue of messages is the process's own, held in memory, so what the process
 //! before had queued and not begun went with it, and no record says so.
 //! ConsensFlow knows where the new process began, as it closed the window the
-//! old one ran in before it started the new one: a look is told the transcript's
-//! length then (`Options::relaunched_at`), and the queue is empty from there on,
+//! old one ran in before it started the new one: a look is told where the transcript
+//! ended then (`Options::relaunched`), and the queue is empty from there on,
 //! what the new process queued after it kept. The record's own signs of a resume
 //! (Claude's close of a cut turn, a `SessionStart:resume` hook's run) say
 //! nothing of it: Claude writes them for a `/resume` in the window too, which
@@ -18,6 +18,8 @@
 //! shape with made-up words (`tests/fixtures/claude/README.md`).
 
 use super::*;
+use crate::records::Boundary;
+use crate::shared::record::jsonl::EDGE_BYTES;
 use crate::shared::record::reading::Role;
 
 /// The records of T-442's shape, for the session of these tests.
@@ -48,7 +50,7 @@ fn queued_notice(record: &Value, job: &str, status: &str) -> bool {
 /// records before `from` ends: ConsensFlow opened the window again then.
 fn relaunched(records: &[Value], from: usize) -> Options {
     Options {
-        relaunched_at: Some(Stage::lines(&records[..from]).len() as u64),
+        relaunched: Some(boundary(&Stage::lines(&records[..from]))),
         ..Options::default()
     }
 }
@@ -58,6 +60,17 @@ fn record_told(records: &[Value], options: &Options) -> Record {
     let mut stage = Stage::new();
     stage.write(records);
     known(&stage.look_told(options))
+}
+
+/// Where a transcript written as `text` ends: its length, and the bytes before it that
+/// the reader checks.
+pub(super) fn boundary(text: &str) -> Boundary {
+    let bytes = text.as_bytes();
+    let edge = bytes.len().saturating_sub(EDGE_BYTES as usize);
+    Boundary {
+        at: bytes.len() as u64,
+        edge: Arc::from(&bytes[edge..]),
+    }
 }
 
 /// What a look at `records` reads.
@@ -718,5 +731,133 @@ fn a_notification_the_closing_process_took_and_never_began_holds_no_turn_after_t
     assert_eq!(
         (last.role, &*last.text, last.complete),
         (Role::Assistant, "LANDED", true)
+    );
+}
+
+/// What a process writes of itself as it goes that a rewrite of the transcript can leave
+/// out: `count` lines of bookkeeping, long enough that the transcript without them is
+/// shorter than it was with them.
+fn bookkeeping(count: usize) -> Vec<Value> {
+    (0..count)
+        .map(|at| json!({ "type": "last-prompt", "sessionId": SESSION, "lastPrompt": format!("{at}{}", "x".repeat(600)) }))
+        .collect()
+}
+
+/// A reader's state told `options` on each look of `stages`, each stage the whole
+/// transcript then: written anew where it says so, else added to it.
+fn settlements(stages: &[(bool, Vec<Value>)], options: &Options) -> Vec<Settlement> {
+    let mut stage = Stage::new();
+    stages
+        .iter()
+        .map(|(anew, records)| {
+            if *anew {
+                stage.write(records);
+            } else {
+                stage.append(records);
+            }
+            known(&stage.look_told(options)).settlement
+        })
+        .collect()
+}
+
+#[test]
+fn a_transcript_rewritten_shorter_than_the_relaunch_keeps_the_new_process_answer() {
+    // Both reviews of the relaunch boundary (P2, rounds 2 and 4): the transcript is
+    // written anew, shorter than it was where the new process began, and still holds
+    // what the new process wrote: its answer, whose stop hooks' summary comes after the
+    // rewrite. The boundary is told as a length alone, and so is read where the file is
+    // that long no more: at its end, which drops the new answer as the old process's,
+    // and the summary then ends no turn.
+    let mut old = vec![hello(), answer("a1", "u1"), summary("s1", "a1")];
+    old.extend(bookkeeping(8));
+    let options = relaunched(&old, old.len());
+    let new = vec![
+        user("u2", json!("s1"), json!("Again")),
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([text(json!("Done"))]),
+            json!("end_turn"),
+        ),
+    ];
+    let mut rewritten = old[..3].to_vec();
+    rewritten.extend(new.clone());
+    assert!(Stage::lines(&rewritten).len() < Stage::lines(&old).len());
+    let read = settlements(
+        &[
+            (true, old.clone()),
+            (false, new),
+            (true, rewritten),
+            (false, vec![summary("s2", "a2")]),
+        ],
+        &options,
+    );
+    assert_eq!(
+        read,
+        [
+            Settlement::Settled,
+            Settlement::InFlight,
+            Settlement::InFlight,
+            Settlement::Settled
+        ]
+    );
+}
+
+#[test]
+fn a_relaunch_told_after_a_rewrite_shorter_than_the_one_before_is_where_the_new_process_began() {
+    // Sol's review of round 2 (P2): after a rewrite below the boundary, the next process
+    // ConsensFlow starts begins at a length below the last one told, which a length
+    // compared with the last as a number takes for an earlier launch's. The process
+    // before it had queued a notification as it went; the new one queued its message
+    // and has not yet taken it, and its window is busy.
+    let mut first = vec![hello(), answer("a1", "u1"), summary("s1", "a1")];
+    first.extend(bookkeeping(8));
+    let earlier = relaunched(&first, first.len());
+    let mut rewritten = first[..3].to_vec();
+    rewritten.extend([
+        user("u2", json!("s1"), json!("Again")),
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([text(json!("Done"))]),
+            json!("end_turn"),
+        ),
+        summary("s2", "a2"),
+        queue("enqueue", json!("stale")),
+    ]);
+    let later = relaunched(&rewritten, rewritten.len());
+    let mut records = rewritten.clone();
+    records.push(queue("enqueue", json!("Go on")));
+    assert!(Stage::lines(&records).len() < Stage::lines(&first).len());
+    let mut stage = Stage::new();
+    stage.write(&first);
+    assert_eq!(
+        known(&stage.look_told(&earlier)).settlement,
+        Settlement::Settled
+    );
+    stage.write(&records);
+    assert_eq!(
+        known(&stage.look_told(&later)).settlement,
+        Settlement::InFlight,
+        "the new process's message is still to be taken"
+    );
+    stage.append(&[
+        queue("dequeue", Value::Null),
+        user("u3", json!("s2"), json!("Go on")),
+        assistant(
+            "a3",
+            "u3",
+            json!("m3"),
+            json!([text(json!("Gone on"))]),
+            json!("end_turn"),
+        ),
+        summary("s3", "a3"),
+    ]);
+    assert_eq!(
+        known(&stage.look_told(&later)).settlement,
+        Settlement::Settled,
+        "the old process's notification went with it"
     );
 }

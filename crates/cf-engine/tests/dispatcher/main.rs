@@ -95,6 +95,7 @@ mod servers;
 mod session_windows;
 mod sessions;
 mod several_roles;
+mod shared;
 mod slow_records;
 mod specs;
 mod stale_box;
