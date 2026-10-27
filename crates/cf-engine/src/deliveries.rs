@@ -125,6 +125,10 @@ pub(crate) struct DeliveryPart {
     /// is at work, on the engine's clock: a settle of it asks the harness again
     /// (`Dispatcher::recheck_if_due`).
     pub(crate) at_work_since: Option<i64>,
+    /// The message whose delivery began last, and when, as the ledger writes a time:
+    /// what an item since then is held to (`take_unproven`), with no scan of the events.
+    /// A start has none, and asks the ledger's `delivery_begun_at`.
+    pub(crate) begun_at: Option<(i64, String)>,
     /// What goes into the window before anything else of its queue, in this
     /// order and while it waits and may go: a launch that is to say a role
     /// first puts the replacement here, and the message it displaced after it
@@ -581,7 +585,12 @@ impl Dispatcher {
                 .begin_delivery_looked(message.id, &look)?,
             None => self.seams.ledger.borrow_mut().begin_delivery(message.id)?,
         };
-        record.delivery.borrow_mut().paced = None;
+        let at = self.seams.ledger.borrow_mut().now();
+        {
+            let mut part = record.delivery.borrow_mut();
+            part.paced = None;
+            part.begun_at = Some((message.id, at));
+        }
         let owner = record.window.borrow().owner;
         if self.begins_a_turn(owner, &begun.message)? {
             let mut delivery = record.delivery.borrow_mut();
@@ -669,12 +678,24 @@ impl Dispatcher {
         }
         // Refused for being at work (Pi's extension, D9): nothing went in, so the
         // attempt is given back, and the message waits for the window's next rest.
+        // Logged once a message: the same refusal said again is no news (T-842's P3).
         if let Admission::Busy { reason } = &outcome {
-            self.seams
+            let why = format!("its harness refused it for being at work: {reason}");
+            let told = self
+                .seams
                 .ledger
-                .borrow_mut()
-                .retry_delivery(message.id, reason, true)?;
+                .borrow()
+                .given_back_because(message.id, reason)?;
+            {
+                let mut ledger = self.seams.ledger.borrow_mut();
+                if told {
+                    ledger.requeue_unlogged(message.id, reason)?;
+                } else {
+                    ledger.retry_delivery(message.id, reason, true)?;
+                }
+            }
             self.rest_ends(record);
+            self.held_once(record, message.id, &why)?;
             self.changed();
             return Ok(());
         }

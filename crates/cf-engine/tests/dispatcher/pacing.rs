@@ -358,6 +358,19 @@ fn a_harness_that_refuses_a_message_for_being_busy_spends_no_attempt() {
         0,
         "the attempt is given back"
     );
+    // Refused again and again: the retry is logged once, and the board's reader says
+    // why it waits (T-842's P3).
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.advance(SETTLE);
+        context.pass().unwrap();
+    }
+    let chief = context.id(project, "chief");
+    assert_eq!(logged(&context, "delivery.retried").len(), 1, "logged once");
+    assert_eq!(
+        context.dispatcher.held_back(chief).map(|held| held.reason),
+        Some("its harness refused it for being at work: Pi is at work".to_owned())
+    );
     busy.set(false);
     context.pass().unwrap();
     assert_eq!(

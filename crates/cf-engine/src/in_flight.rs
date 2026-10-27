@@ -195,6 +195,11 @@ impl Dispatcher {
                 self.confirm_delivered(&message, &json!({ "item": item }))?;
                 self.changed();
             }
+            // The copy holds its header in an item since its delivery began that is no
+            // paste of it: arrived, unproven, as a look past its arrival window takes it
+            // (CMT-23; T-842's P3). The window's own reading went with it, so only a
+            // compaction's summary is told apart here.
+            None if self.take_unproven(message.recipient_id, message.id, &|_| false)? => {}
             None => otherwise(delivering)?,
         }
         Ok(())

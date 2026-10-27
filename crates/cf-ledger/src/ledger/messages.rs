@@ -366,7 +366,7 @@ impl Ledger {
     ) -> Result<MessageView, LedgerError> {
         #[cfg(feature = "test-support")]
         self.watched("retry_delivery", Some(message_id))?;
-        messages::retry_delivery(&mut self.store, message_id, reason, refund, None)
+        messages::retry_delivery(&mut self.store, message_id, reason, refund, None, true)
     }
 
     /// [`Ledger::retry_delivery`], its `delivery.retried` saying what the engine's look
@@ -380,7 +380,25 @@ impl Ledger {
     ) -> Result<MessageView, LedgerError> {
         #[cfg(feature = "test-support")]
         self.watched("retry_delivery", Some(message_id))?;
-        messages::retry_delivery(&mut self.store, message_id, reason, refund, Some(look))
+        messages::retry_delivery(
+            &mut self.store,
+            message_id,
+            reason,
+            refund,
+            Some(look),
+            true,
+        )
+    }
+
+    /// [`Ledger::retry_delivery`] with its attempt given back and no `delivery.retried`:
+    /// the same refusal said again (a harness that refuses a message while it is at work,
+    /// each time it is asked), which its first refusal logged already.
+    pub fn requeue_unlogged(
+        &mut self,
+        message_id: i64,
+        reason: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::retry_delivery(&mut self.store, message_id, reason, true, None, false)
     }
 
     /// When the delivery of message `message_id` on its way began (its last
@@ -398,7 +416,7 @@ impl Ledger {
         message_id: i64,
         item: &str,
         shape: &Value,
-        tell: &NewNote,
+        tell: &[NewNote],
     ) -> Result<MessageView, LedgerError> {
         messages::confirm_unproven(&mut self.store, message_id, item, shape, tell)
     }

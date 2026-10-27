@@ -367,7 +367,7 @@ pub(crate) fn confirm_unproven(
     message_id: i64,
     item: &str,
     shape: &Value,
-    tell: &NewNote,
+    tell: &[NewNote],
 ) -> Result<MessageView, LedgerError> {
     store.write(|store| {
         let receipt = json!({ "item": item, "unproven": true });
@@ -377,7 +377,9 @@ pub(crate) fn confirm_unproven(
             "delivery.unproven",
             json!({ "message": message_id, "item": item, "shape": shape }),
         )?;
-        super::note(store, confirmed.project_id, tell)?;
+        for note in tell {
+            super::note(store, confirmed.project_id, note)?;
+        }
         Ok(confirmed)
     })
 }
@@ -746,6 +748,7 @@ pub(crate) fn retry_delivery(
     reason: &str,
     refund: bool,
     look: Option<&Value>,
+    log: bool,
 ) -> Result<MessageView, LedgerError> {
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
@@ -787,11 +790,13 @@ pub(crate) fn retry_delivery(
             "UPDATE message SET handed_at = NULL WHERE carried_by = ? AND state = 'queued'",
             [message_id],
         )?;
-        store.log(
-            message.project_id,
-            "delivery.retried",
-            looked(json!({ "message": message_id, "reason": reason }), look),
-        )?;
+        if log {
+            store.log(
+                message.project_id,
+                "delivery.retried",
+                looked(json!({ "message": message_id, "reason": reason }), look),
+            )?;
+        }
         store.db.execute(
             "UPDATE message SET carried_by = NULL
              WHERE id = ?1

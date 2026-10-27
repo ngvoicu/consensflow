@@ -328,7 +328,7 @@ impl Dispatcher {
         }
         // A record that holds the message's header in an item the proof cannot match
         // has it, unproven: it is never pasted again (CMT-23).
-        if self.arrived_unproven(record, delivering.message)? {
+        if self.arrived_unproven(record, observed, delivering.message)? {
             return Ok(());
         }
         // Nor does a paste go again that is still there for the window: on its way to
@@ -513,18 +513,60 @@ impl Dispatcher {
     /// arrived, never pasted again and never said not to have reached its window: its
     /// shape is logged for filing (`delivery.unproven`), and whoever can act on it is
     /// told once. A human who quoted the header there meanwhile is covered by that note.
-    fn arrived_unproven(&self, record: &Record, message: i64) -> Result<bool, EngineError> {
+    fn arrived_unproven(
+        &self,
+        record: &Record,
+        observed: &Observed,
+        message: i64,
+    ) -> Result<bool, EngineError> {
+        // The harness's own words (a notification, a compaction's summary) are no item
+        // the window was given: one that quotes the header proves nothing (T-842's P3).
+        let own = |item: &str| {
+            observed
+                .items()
+                .iter()
+                .any(|seen| &*seen.id == item && (seen.synthetic || seen.compaction))
+        };
+        if !self.take_unproven(record.id, message, &own)? {
+            return Ok(false);
+        }
+        record.delivery.borrow_mut().delivering = None;
+        Ok(true)
+    }
+
+    /// Takes `message`, on its way to `participant`'s window, for arrived, unproven, where
+    /// ConsensFlow's copy of the window's conversation holds, since the message's delivery
+    /// began, a user's item with its header that is none of the harness's own (`own`, and
+    /// no compaction's summary): the look's rule past the arrival window, and the window's
+    /// end's (T-842's P3). The shape goes to `delivery.unproven`, and whoever can act is
+    /// told once. False where no such item is, or the message is on its way no more.
+    pub(crate) fn take_unproven(
+        &self,
+        participant: i64,
+        message: i64,
+        own: &dyn Fn(&str) -> bool,
+    ) -> Result<bool, EngineError> {
         let found = {
-            let ledger = self.seams.ledger.borrow();
             // Since its delivery began: the hand-over's own time moves with an Enter
-            // pressed once more, which admits the paste again (Devin, 2026-10-27).
-            let Some(begun) = ledger.delivery_begun_at(message)? else {
+            // pressed once more, which admits the paste again (Devin, 2026-10-27). The
+            // record keeps it; a start asks the ledger's events.
+            let kept = self
+                .record(participant)
+                .and_then(|record| record.delivery.borrow().begun_at.clone())
+                .filter(|(of, _)| *of == message)
+                .map(|(_, at)| at);
+            let ledger = self.seams.ledger.borrow();
+            let begun = match kept {
+                Some(at) => Some(at),
+                None => ledger.delivery_begun_at(message)?,
+            };
+            let Some(begun) = begun else {
                 return Ok(false);
             };
             ledger
-                .copied_items_since(record.id, &marker_of(message), &begun)?
+                .copied_items_since(participant, &marker_of(message), &begun)?
                 .into_iter()
-                .next()
+                .find(|(item, _)| !own(item))
         };
         let Some((item, text)) = found else {
             return Ok(false);
@@ -533,22 +575,22 @@ impl Dispatcher {
         let Some(on_its_way) = on_its_way.filter(|found| found.state == "delivering") else {
             return Ok(false);
         };
-        let tell = self.unproven_note(&on_its_way)?;
+        let tell = self.unproven_notes(&on_its_way)?;
         self.seams.ledger.borrow_mut().confirm_unproven(
             message,
             &item,
             &header_shape(&text, message),
             &tell,
         )?;
-        record.delivery.borrow_mut().delivering = None;
         self.changed();
         Ok(true)
     }
 
-    /// The note that says `message` arrived unproven: to its task's requester where
-    /// that is another than its recipient, else to the chief, who for its own window
-    /// is the recipient, and reads it there.
-    fn unproven_note(&self, message: &MessageView) -> Result<NewNote, EngineError> {
+    /// The notes that say `message` arrived unproven: to its task's requester where that
+    /// is another than its recipient, else to the chief, who for its own window is the
+    /// recipient, and reads it there; and to a member recipient's own window, which may
+    /// not have it (T-842's P3).
+    fn unproven_notes(&self, message: &MessageView) -> Result<Vec<NewNote>, EngineError> {
         let requester = match message.task_number {
             Some(number) => self
                 .seams
@@ -561,16 +603,28 @@ impl Dispatcher {
         let to = requester
             .filter(|requester| *requester != message.recipient)
             .unwrap_or_else(|| "chief".to_owned());
-        Ok(NewNote {
+        let mut notes = vec![NewNote {
             from: None,
-            to,
+            to: to.clone(),
             task: message.task_number,
             body: format!(
                 "m-{id}'s arrival couldn't be proven from the record; it was not pasted again. @{who} can read it with `cf inbox read m-{id}`.",
                 id = message.id,
                 who = message.recipient,
             ),
-        })
+        }];
+        if message.recipient_role != "chief" && message.recipient != to {
+            notes.push(NewNote {
+                from: None,
+                to: message.recipient.clone(),
+                task: message.task_number,
+                body: format!(
+                    "m-{id}'s arrival couldn't be proven from your window's record; it was not pasted again. Read it with `cf inbox read m-{id}`.",
+                    id = message.id,
+                ),
+            });
+        }
+        Ok(notes)
     }
 
     /// The conversation the message on its way was pasted into, where the window is on

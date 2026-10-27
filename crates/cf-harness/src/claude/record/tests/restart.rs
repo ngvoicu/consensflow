@@ -524,12 +524,14 @@ fn the_close_of_a_cut_turn_is_no_part_of_any_answer() {
         (close.role, close.commentary, close.synthetic),
         (Role::Assistant, true, true)
     );
-    // Every other message is the agent's own words.
+    // Every other message is the agent's own words, but the harness's notifications,
+    // which are its own user's items (T-842's P3).
     assert!(read
         .items
         .iter()
         .filter(|item| item.id != close.id)
-        .all(|item| !item.commentary && !item.synthetic));
+        .all(|item| !item.commentary
+            && item.synthetic == item.text.starts_with("<task-notification>")));
     // The same words the model wrote, or the API's refusal says, are not Claude's close.
     let words = |close: Value| {
         record_of(&[hello(), close])

@@ -180,6 +180,17 @@ fn a_member_s_message_arrived_unproven_is_told_to_its_task_s_requester() {
         ))),
         "the chief gave T-1: it hears"
     );
+    // And so does the member's window, which may not have it (T-842's P3).
+    let member = context.id(project.id, &session);
+    assert!(
+        context.inbox(member).iter().any(|message| message.sender.is_none()
+            && message.body.starts_with(&format!(
+                "m-{}'s arrival couldn't be proven from your window's record; it was not pasted again. Read it with `cf inbox read m-{}`.",
+                note.id, note.id
+            ))),
+        "{:?}",
+        context.inbox(member)
+    );
 }
 
 /// Devin glued the paste behind words the human had left in its box, in one item, and
@@ -212,4 +223,41 @@ fn an_item_that_came_between_the_hand_over_and_the_enter_pressed_again_holds_the
     context.pass().unwrap();
     assert_eq!(context.message(note).receipt["unproven"], json!(true));
     assert_eq!(handed(&context, note), 1, "never pasted again");
+}
+
+/// T-842's P3: a notification of the harness's own (Claude Code's `<task-notification>`,
+/// which a reader marks `synthetic`) or a compaction's summary that quotes the header after
+/// the hand-over is no item the window was given: it proves nothing, and the paste goes
+/// again as one the record never showed does.
+#[test]
+fn a_header_in_the_harnesss_own_words_after_the_hand_over_takes_nothing_for_arrived() {
+    for compaction in [false, true] {
+        let context = Context::new();
+        let (_, note) = a_note_that_never_shows(&context);
+        let words = format!(
+            "<task-notification>\n<summary>read {}· note from @zeus]</summary>\n</task-notification>",
+            marker_of(note)
+        );
+        let mut own = context.adapter.item(Role::User, &words);
+        if compaction {
+            own.compaction = true;
+        } else {
+            own.synthetic = true;
+        }
+        context.adapter.with("chief", |agent| agent.items.push(own));
+        context.pass().unwrap();
+        context.advance(PAST_ARRIVAL);
+        context.pass().unwrap();
+        context.pass().unwrap();
+        assert_eq!(
+            logged(&context, "delivery.unproven"),
+            Vec::<Value>::new(),
+            "compaction {compaction}"
+        );
+        assert_eq!(
+            handed(&context, note),
+            2,
+            "compaction {compaction}: it goes again"
+        );
+    }
 }

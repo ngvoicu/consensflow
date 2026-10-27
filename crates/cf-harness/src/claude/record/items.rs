@@ -46,6 +46,14 @@ impl Items {
         self.list.push(Entry::new(id, role, text, true, at, seq));
     }
 
+    /// A notification the harness wrote in the user's place (`<task-notification>`): a
+    /// user's item, as Node read it, of the harness's own words (`synthetic`).
+    pub(super) fn notification(&mut self, id: Arc<str>, text: &str, at: &Value, seq: usize) {
+        let mut entry = Entry::new(id, Role::User, text, true, at, seq);
+        entry.item.synthetic = true;
+        self.list.push(entry);
+    }
+
     /// The summary a compaction wrote in the user's place: a user's item, as Node read
     /// it, that says it is the harness's own.
     pub(super) fn summary(&mut self, id: Arc<str>, text: &str, at: &Value, seq: usize) {

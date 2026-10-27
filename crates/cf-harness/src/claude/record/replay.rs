@@ -258,6 +258,8 @@ impl Transcript {
             self.items.summary(id, &record.text, at, seq);
         } else if record.transcript_only {
             self.items.push(id, Role::Custom, &record.text, at, seq);
+        } else if record.notification {
+            self.items.notification(id, &record.text, at, seq);
         } else {
             self.items.push(id, Role::User, &record.text, at, seq);
         }
