@@ -530,8 +530,11 @@ fn a_pane_host_that_answers_late_holds_nothing_back() {
     looking.open();
     context.settle();
     passing.take().unwrap().unwrap();
-    context.pass().unwrap();
-    assert_eq!(pasted(&context, "chief"), [note.id]);
+    assert_eq!(
+        pasted(&context, "chief"),
+        [note.id],
+        "in the pass the late answer came in"
+    );
 }
 
 /// T-842's P2 (item 3): a record that cannot be read lets no message in (CMT-05), and the

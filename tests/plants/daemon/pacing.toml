@@ -142,6 +142,11 @@ file = "crates/cf-engine/src/pacing.rs"
 find = "        if !(idle && read(observed)) || at_work {"
 replace = "        if !(idle && read(observed)) {"
 
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "            Ok(_) if at_work => Some(AT_WORK.to_owned()),"
+replace = "            Ok(_) if at_work && false => Some(AT_WORK.to_owned()),"
+
 [[plant]]
 name = "pacing gate: the human's keys are not waited on"
 meant = "a_key_of_the_humans_within_the_settle_holds_the_message"
@@ -161,20 +166,6 @@ runs = ["pacing-kit"]
 file = "crates/cf-engine/src/pacing.rs"
 find = "        if fallback && output_quiet_ms.is_none_or(|quiet| quiet < settle) {"
 replace = "        if fallback && output_quiet_ms.is_none_or(|quiet| quiet < 0) {"
-
-[[plant]]
-name = "pacing gate: the chief's urgent tell waits for the settle"
-meant = "an_urgent_tell_goes_at_the_first_look_at_rest"
-runs = ["pacing-kit"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/pacing.rs"
-find = '''
-        if message.urgent
-            || prelude'''
-replace = '''
-        if false
-            || prelude'''
 
 [[plant]]
 name = "pacing gate: a harness's busy refusal spends an attempt"
@@ -447,7 +438,7 @@ replace = "            Ok(_) if at_work && false => Some(AT_WORK.to_owned()),"
 
 [[plant]]
 name = "pacing review: urgent: the head of a queue an urgent row waits in waits for the settle"
-meant = "the_head_of_a_queue_an_urgent_row_waits_in_goes_at_the_first_rest"
+meant = "an_urgent_tell_goes_at_the_first_look_at_rest"
 runs = ["pacing-kit"]
 
 [[plant.edit]]

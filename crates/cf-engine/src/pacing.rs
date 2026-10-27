@@ -337,16 +337,15 @@ impl Dispatcher {
     }
 
     /// What a launch put ahead of the window's queue, and an urgent row, go at the
-    /// window's first rest, as they went before the pacing.
+    /// window's first rest, as they went before the pacing; an urgent head is one of the
+    /// urgent rows its queue holds.
     /// So does the head of a queue an urgent row waits in: the urgent row is not held
     /// back behind the head's settle (T-842's P3: a member's question goes first).
     fn goes_at_rest(&self, record: &Record, message: &MessageView) -> Result<bool, EngineError> {
         let prelude = record.delivery.borrow().prelude.clone();
-        if message.urgent
-            || prelude.is_some_and(|prelude| {
-                prelude.replacement == message.id || prelude.displaced == Some(message.id)
-            })
-        {
+        if prelude.is_some_and(|prelude| {
+            prelude.replacement == message.id || prelude.displaced == Some(message.id)
+        }) {
             return Ok(true);
         }
         Ok(self
