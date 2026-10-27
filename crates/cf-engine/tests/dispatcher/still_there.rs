@@ -50,7 +50,9 @@ fn enters(context: &Context) -> usize {
 fn a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again() {
     let context = Context::new();
     let note = a_note_that_never_shows(&context);
-    context.host.set_snapshot(json!({ "outputQuietMs": 60_000 }));
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 60_000 }));
     context.adapter.input_box.set(Some(InputBox::Holds));
     let before = enters(&context);
     context.advance(PAST_ARRIVAL);
@@ -68,7 +70,11 @@ fn a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again
     context.advance(PAST_ARRIVAL);
     context.pass().unwrap();
     context.pass().unwrap();
-    assert_eq!(begun(&context, note), 2, "gone from the screen as from the record");
+    assert_eq!(
+        begun(&context, note),
+        2,
+        "gone from the screen as from the record"
+    );
 }
 
 #[test]
@@ -81,10 +87,20 @@ fn a_window_whose_screen_printed_within_the_last_seconds_is_not_pasted_again() {
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(begun(&context, note), 1, "at work, or taking it in");
-    assert_eq!(enters(&context), before, "and no Enter into a window that draws");
-    context.host.set_snapshot(json!({ "outputQuietMs": 60_000 }));
+    assert_eq!(
+        enters(&context),
+        before,
+        "and no Enter into a window that draws"
+    );
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 60_000 }));
     context.advance(PAST_ARRIVAL);
     context.pass().unwrap();
     context.pass().unwrap();
-    assert_eq!(begun(&context, note), 2, "quiet, its box read empty: it is gone");
+    assert_eq!(
+        begun(&context, note),
+        2,
+        "quiet, its box read empty: it is gone"
+    );
 }

@@ -397,7 +397,8 @@ fn a_window_is_at_work_while_the_broker_says_codex_last_called_its_thread_busy()
         .unwrap()
         .window;
     let says = |idle: Value| {
-        let word = json!({ "launchId": LAUNCH, "sessionId": THREAD, "available": true, "idle": idle });
+        let word =
+            json!({ "launchId": LAUNCH, "sessionId": THREAD, "available": true, "idle": idle });
         fakes
             .loopback
             .serve("GET /session", [replies(&word.to_string())]);

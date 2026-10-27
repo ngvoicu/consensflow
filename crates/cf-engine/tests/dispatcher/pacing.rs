@@ -63,7 +63,11 @@ fn a_message_waits_until_the_window_has_read_at_rest_for_the_settle() {
     let project = chief_at_rest(&context);
     let note = context.note(project, "zeus", "chief", "One");
     context.pass().unwrap();
-    assert_eq!(pasted(&context, "chief"), Vec::<i64>::new(), "its rest begins");
+    assert_eq!(
+        pasted(&context, "chief"),
+        Vec::<i64>::new(),
+        "its rest begins"
+    );
     context.advance(SETTLE - 1);
     context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), Vec::<i64>::new(), "not yet");
@@ -142,7 +146,9 @@ fn a_key_of_the_humans_within_the_settle_holds_the_message() {
     let note = context.note(project, "zeus", "chief", "One");
     context.pass().unwrap();
     context.advance(SETTLE * 2);
-    context.host.set_snapshot(json!({ "typedQuietMs": SETTLE - 1 }));
+    context
+        .host
+        .set_snapshot(json!({ "typedQuietMs": SETTLE - 1 }));
     context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
     assert_eq!(context.message(note.id).state, "queued");
@@ -227,7 +233,14 @@ fn the_look_that_lets_a_message_go_is_in_its_delivery_begun() {
     let context = paced();
     let project = chief_at_rest(&context);
     context.adapter.answer("chief", "Ready.");
-    let last = context.adapter.agent("chief").items.last().unwrap().id.clone();
+    let last = context
+        .adapter
+        .agent("chief")
+        .items
+        .last()
+        .unwrap()
+        .id
+        .clone();
     context.host.set_snapshot(json!({ "typedQuietMs": 9_000 }));
     let note = context.note(project, "zeus", "chief", "One");
     context.pass().unwrap();
@@ -255,12 +268,16 @@ fn a_harness_with_no_idle_word_of_its_own_waits_for_a_quiet_screen_too_and_says_
         Some("at rest by its record and a quiet screen: its harness says nothing of its own")
     );
     let note = context.note(project, "zeus", "chief", "One");
-    context.host.set_snapshot(json!({ "outputQuietMs": SETTLE - 1 }));
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": SETTLE - 1 }));
     context.pass().unwrap();
     context.advance(SETTLE);
     context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
-    context.host.set_snapshot(json!({ "outputQuietMs": SETTLE }));
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": SETTLE }));
     context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), [note.id]);
 }
@@ -280,7 +297,11 @@ fn a_window_whose_harness_says_it_is_at_work_is_given_nothing_whatever_its_recor
     assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
     context.adapter.with("chief", |agent| agent.at_work = false);
     context.pass().unwrap();
-    assert_eq!(pasted(&context, "chief"), Vec::<i64>::new(), "its settle begins");
+    assert_eq!(
+        pasted(&context, "chief"),
+        Vec::<i64>::new(),
+        "its settle begins"
+    );
     context.advance(SETTLE);
     context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), [note.id]);
@@ -332,10 +353,18 @@ fn a_harness_that_refuses_a_message_for_being_busy_spends_no_attempt() {
     context.advance(SETTLE);
     context.pass().unwrap();
     assert_eq!(context.message(note.id).state, "queued");
-    assert_eq!(context.message(note.id).attempts, 0, "the attempt is given back");
+    assert_eq!(
+        context.message(note.id).attempts,
+        0,
+        "the attempt is given back"
+    );
     busy.set(false);
     context.pass().unwrap();
-    assert_eq!(pasted(&context, "chief"), Vec::<i64>::new(), "its settle begins again");
+    assert_eq!(
+        pasted(&context, "chief"),
+        Vec::<i64>::new(),
+        "its settle begins again"
+    );
     context.advance(SETTLE);
     context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), [note.id]);

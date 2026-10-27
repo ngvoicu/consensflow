@@ -15,9 +15,7 @@ use super::continuations::{withdraw_stale_among, withdrawn_if_stale};
 use super::pauses::withdrawn_on_its_way;
 use super::receipt::reconcile;
 use super::told::{arrived_after_all, behind_held_words, fail_for, kept_for_resume, told};
-use super::{
-    known_message, message_task, messages, require_message, settle_answered, NewNote,
-};
+use super::{known_message, message_task, messages, require_message, settle_answered, NewNote};
 use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;

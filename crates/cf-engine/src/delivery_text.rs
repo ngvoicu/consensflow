@@ -224,7 +224,8 @@ pub fn header_shape(text: &str, message_id: i64) -> serde_json::Value {
         "space"
     } else if after_placeholders(head.trim_start()).is_some_and(|rest| rest.trim().is_empty()) {
         "image placeholders"
-    } else if after_wrapper_opening(head.trim_start()).is_some_and(|(_, rest)| rest.trim().is_empty())
+    } else if after_wrapper_opening(head.trim_start())
+        .is_some_and(|(_, rest)| rest.trim().is_empty())
     {
         "wrapper"
     } else {

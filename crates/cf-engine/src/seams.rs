@@ -298,7 +298,12 @@ impl Limits {
                 LAUNCH_MS_VARIABLE,
             ),
             ("open wait", self.open_ms, default.open_ms, OPEN_MS_VARIABLE),
-            ("settle", self.settle_ms, default.settle_ms, SETTLE_MS_VARIABLE),
+            (
+                "settle",
+                self.settle_ms,
+                default.settle_ms,
+                SETTLE_MS_VARIABLE,
+            ),
         ]
         .into_iter()
         .filter(|(_, now, was, _)| now != was)

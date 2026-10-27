@@ -476,7 +476,13 @@ impl Dispatcher {
     /// or failure says (CMT-08): how many of the record's items hold its header and
     /// where the first of them has it, the record's last item, how long the window
     /// rested, the longest pass and how long its screen printed nothing.
-    fn arrival_look(&self, record: &Record, observed: &Observed, message: i64, rested: i64) -> Value {
+    fn arrival_look(
+        &self,
+        record: &Record,
+        observed: &Observed,
+        message: i64,
+        rested: i64,
+    ) -> Value {
         let marker = marker_of(message);
         let items = observed.items();
         let holding: Vec<_> = items

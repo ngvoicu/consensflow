@@ -486,9 +486,11 @@ fn a_result_whose_paste_devins_tui_dropped_is_not_pasted_over_the_humans_words_t
     )?;
     // The human's turn, and the daemon's arrival window of the window's rest after it: the
     // paste would have gone again, and does not: the record holds its header.
-    rig.wait_for("the result to be taken for arrived, unproven", secs(240), || {
-        Ok(!of_message(&rig.events(), "delivery.unproven", first).is_empty())
-    })?;
+    rig.wait_for(
+        "the result to be taken for arrived, unproven",
+        secs(240),
+        || Ok(!of_message(&rig.events(), "delivery.unproven", first).is_empty()),
+    )?;
     let events = rig.events();
     assert_eq!(
         (
@@ -503,7 +505,10 @@ fn a_result_whose_paste_devins_tui_dropped_is_not_pasted_over_the_humans_words_t
     let settled = result_of(&project, FIRST)?
         .ok_or_else(|| Error::Daemon("the result is gone".to_owned()))?;
     assert_eq!(
-        (settled["state"].clone(), settled["receipt"]["unproven"].clone()),
+        (
+            settled["state"].clone(),
+            settled["receipt"]["unproven"].clone()
+        ),
         (json!("delivered"), json!(true))
     );
     let told: Vec<String> = project

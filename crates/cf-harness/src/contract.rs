@@ -18,11 +18,11 @@ use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
-/// What an input box on the screen holds ([`Window::input_box`]).
-pub use crate::shared::input_box::InputBox;
 use crate::records::{
     Boundary, Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement,
 };
+/// What an input box on the screen holds ([`Window::input_box`]).
+pub use crate::shared::input_box::InputBox;
 
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;

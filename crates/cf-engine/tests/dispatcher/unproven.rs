@@ -30,7 +30,10 @@ fn a_note_that_never_shows(context: &Context) -> (i64, i64) {
 /// The chief's record is given an item that carries message `id`'s header behind
 /// words: the human quoting it, or a shape of a paste the proof does not know.
 fn header_behind_words(context: &Context, id: i64) {
-    let words = format!("Why is \"{}· note from @zeus]\" still queued?", marker_of(id));
+    let words = format!(
+        "Why is \"{}· note from @zeus]\" still queued?",
+        marker_of(id)
+    );
     let said = context.adapter.item(Role::User, &words);
     context
         .adapter
@@ -63,7 +66,11 @@ fn a_record_that_holds_the_header_after_the_hand_over_takes_it_for_arrived_and_n
     let (project, note) = a_note_that_never_shows(&context);
     header_behind_words(&context, note);
     context.pass().unwrap();
-    assert_eq!(context.message(note).state, "delivering", "not before its time");
+    assert_eq!(
+        context.message(note).state,
+        "delivering",
+        "not before its time"
+    );
     context.advance(PAST_ARRIVAL);
     context.pass().unwrap();
     context.pass().unwrap();
@@ -125,7 +132,10 @@ fn a_header_the_record_held_before_the_hand_over_proves_nothing_and_the_paste_go
     assert_eq!(look["first"]["shape"]["before"], json!("words"));
     assert!(look["lastItem"].is_string(), "{look}");
     assert!(look["restMs"].as_i64().unwrap() > 30_000, "{look}");
-    assert!(look["longestPassMs"].as_i64().unwrap() >= PAST_ARRIVAL, "{look}");
+    assert!(
+        look["longestPassMs"].as_i64().unwrap() >= PAST_ARRIVAL,
+        "{look}"
+    );
 }
 
 #[test]
@@ -180,7 +190,9 @@ fn a_member_s_message_arrived_unproven_is_told_to_its_task_s_requester() {
 fn an_item_that_came_between_the_hand_over_and_the_enter_pressed_again_holds_the_message() {
     let context = Context::new();
     let (_, note) = a_note_that_never_shows(&context);
-    context.host.set_snapshot(json!({ "outputQuietMs": 60_000 }));
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 60_000 }));
     context.advance(1_000);
     header_behind_words(&context, note);
     context.pass().unwrap();

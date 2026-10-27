@@ -89,7 +89,10 @@ fn chief_pane(members: &Members) -> Value {
 /// The chief's message of `kind` whose body holds `words`.
 fn message_of(members: &Members, kind: &str, words: &str) -> Result<Option<Value>> {
     Ok(members.inbox(Some("chief"))?.into_iter().find(|message| {
-        message["kind"] == kind && message["body"].as_str().is_some_and(|body| body.contains(words))
+        message["kind"] == kind
+            && message["body"]
+                .as_str()
+                .is_some_and(|body| body.contains(words))
     }))
 }
 
@@ -103,9 +106,8 @@ fn wait_for(
     states: &[&str],
 ) -> Result<Option<Value>> {
     let found = find(log, what, WITHIN, LOOK, || {
-        Ok(message_of(members, kind, words)?.filter(|message| {
-            states.iter().any(|state| message["state"] == *state)
-        }))
+        Ok(message_of(members, kind, words)?
+            .filter(|message| states.iter().any(|state| message["state"] == *state)))
     })?;
     if found.is_none() {
         // What the chief's inbox held instead, for the failure to say.
@@ -123,7 +125,13 @@ fn wait_for(
                 )
             })
             .collect();
-        log.say(format!("{what}: never; the chief's inbox: {held:?}; board: {}", members.board().map(|board| live::cut(&board.to_string(), 600)).unwrap_or_default()));
+        log.say(format!(
+            "{what}: never; the chief's inbox: {held:?}; board: {}",
+            members
+                .board()
+                .map(|board| live::cut(&board.to_string(), 600))
+                .unwrap_or_default()
+        ));
     }
     Ok(found)
 }
@@ -206,9 +214,10 @@ fn delivered_once(
             rested.is_some_and(|rested| rested >= SETTLE_MS),
             format!(
                 "the look that let it go: {}",
-                begun
-                    .first()
-                    .map_or_else(|| "none".to_owned(), |begun| begun["data"]["look"].to_string())
+                begun.first().map_or_else(
+                    || "none".to_owned(),
+                    |begun| begun["data"]["look"].to_string()
+                )
             ),
         ),
     ]
@@ -229,7 +238,9 @@ fn in_order(who: &str, question: &Value, result: &Value, events: &[Value]) -> Ve
             .and_then(|event| at_ms(event))
     };
     let (asked, told) = (begun_at(question), begun_at(result));
-    let gap = confirmed_at(question).zip(told).map(|(confirmed, told)| told - confirmed);
+    let gap = confirmed_at(question)
+        .zip(told)
+        .map(|(confirmed, told)| told - confirmed);
     vec![
         Check::new(
             who,
@@ -303,27 +314,57 @@ fn typing(members: &Members, log: &Log, who: &str, harness: Harness) -> Result<V
     let words = "half a thought";
     members.rig().types(&pane, words.as_bytes())?;
     members.give(STAND_IN_WORKER, "Reply with exactly: TWO_DONE")?;
-    let waiting = wait_for(members, log, "the third result to queue", "result", "TWO_DONE", &["queued", "delivering", "delivered"])?;
+    let waiting = wait_for(
+        members,
+        log,
+        "the third result to queue",
+        "result",
+        "TWO_DONE",
+        &["queued", "delivering", "delivered"],
+    )?;
     std::thread::sleep(HELD);
     let held = message_of(members, "result", "TWO_DONE")?;
-    let still = held.as_ref().is_some_and(|message| message["state"] == "queued");
+    let still = held
+        .as_ref()
+        .is_some_and(|message| message["state"] == "queued");
     members
         .rig()
         .types(&pane, &vec![0x7f; words.chars().count()])?;
-    let third = wait_for(members, log, "the third result to go in", "result", "TWO_DONE", &["delivered", "failed"])?;
+    let third = wait_for(
+        members,
+        log,
+        "the third result to go in",
+        "result",
+        "TWO_DONE",
+        &["delivered", "failed"],
+    )?;
     let mut checks = vec![Check::new(
         who,
         "words typed and not sent hold the result",
         waiting.is_some() && still,
-        format!("after {} s: {:?}", HELD.as_secs(), held.map(|held| held["state"].clone())),
+        format!(
+            "after {} s: {:?}",
+            HELD.as_secs(),
+            held.map(|held| held["state"].clone())
+        ),
     )];
     let events = members.events();
     let items = record_of(members, harness)?;
     if let Some(third) = &third {
-        checks.extend(delivered_once(who, "the result held for the typing", third, &events, &items));
-        let quiet = of(&events, "delivery.begun", third["id"].as_i64().unwrap_or_default())
-            .first()
-            .and_then(|begun| begun["data"]["look"]["typedQuietMs"].as_i64());
+        checks.extend(delivered_once(
+            who,
+            "the result held for the typing",
+            third,
+            &events,
+            &items,
+        ));
+        let quiet = of(
+            &events,
+            "delivery.begun",
+            third["id"].as_i64().unwrap_or_default(),
+        )
+        .first()
+        .and_then(|begun| begun["data"]["look"]["typedQuietMs"].as_i64());
         checks.push(Check::new(
             who,
             "it went in once the human's keys had been quiet the settle",
@@ -340,16 +381,28 @@ fn typing(members: &Members, log: &Log, who: &str, harness: Harness) -> Result<V
     let fourth = find(log, "the fourth result to go in", WITHIN, LOOK, || {
         Ok(members.inbox(Some("chief"))?.into_iter().find(|message| {
             message["kind"] == "result"
-                && message["body"].as_str().is_some_and(|body| body.contains("THREE_DONE"))
+                && message["body"]
+                    .as_str()
+                    .is_some_and(|body| body.contains("THREE_DONE"))
                 && (message["state"] == "delivered" || message["state"] == "failed")
         }))
     })?;
     let events = members.events();
     let items = record_of(members, harness)?;
     if let Some(fourth) = &fourth {
-        checks.extend(delivered_once(who, "the result behind the human's words", fourth, &events, &items));
+        checks.extend(delivered_once(
+            who,
+            "the result behind the human's words",
+            fourth,
+            &events,
+            &items,
+        ));
     } else {
-        checks.push(Check::failed(who, "the result behind the human's words settled", "it never did"));
+        checks.push(Check::failed(
+            who,
+            "the result behind the human's words settled",
+            "it never did",
+        ));
     }
     Ok(checks)
 }
@@ -361,29 +414,74 @@ fn run(log: &Log, harness: Harness) -> Result<Vec<Check>> {
     members.add(STAND_IN_WORKER, &[])?;
     members.add(SECOND, &[])?;
     if !members.chief_is_idle(log)? {
-        let checks = vec![Check::failed(&who, "the chief's window goes idle", members.chief_window())];
+        let checks = vec![Check::failed(
+            &who,
+            "the chief's window goes idle",
+            members.chief_window(),
+        )];
         members.close()?;
         return Ok(checks);
     }
     // The chief works: what the workers send waits behind its turn. The human asks for the
     // work as a human does, in words and then Enter, its own key.
     says(&members, WORK)?;
-    find(log, "the chief to be at work", Duration::from_secs(60), LOOK, || {
-        Ok((members.lane("chief")?["activity"]["state"] == "working").then_some(()))
-    })?;
+    find(
+        log,
+        "the chief to be at work",
+        Duration::from_secs(60),
+        LOOK,
+        || Ok((members.lane("chief")?["activity"]["state"] == "working").then_some(())),
+    )?;
     members.give(STAND_IN_WORKER, "Reply with exactly: ONE_DONE")?;
-    wait_for(&members, log, "the result to wait for the chief", "result", "ONE_DONE", &["queued", "delivering", "delivered"])?;
-    members.give(SECOND, "CF ask :: Which output format do you want, JSON or text?\nReply with exactly: ASKED")?;
-    wait_for(&members, log, "the question to wait for the chief", "question", "output format", &["queued", "delivering", "delivered"])?;
-    let result = wait_for(&members, log, "the result to go in", "result", "ONE_DONE", &["delivered", "failed"])?;
-    let question = wait_for(&members, log, "the question to go in", "question", "output format", &["delivered", "failed"])?;
+    wait_for(
+        &members,
+        log,
+        "the result to wait for the chief",
+        "result",
+        "ONE_DONE",
+        &["queued", "delivering", "delivered"],
+    )?;
+    members.give(
+        SECOND,
+        "CF ask :: Which output format do you want, JSON or text?\nReply with exactly: ASKED",
+    )?;
+    wait_for(
+        &members,
+        log,
+        "the question to wait for the chief",
+        "question",
+        "output format",
+        &["queued", "delivering", "delivered"],
+    )?;
+    let result = wait_for(
+        &members,
+        log,
+        "the result to go in",
+        "result",
+        "ONE_DONE",
+        &["delivered", "failed"],
+    )?;
+    let question = wait_for(
+        &members,
+        log,
+        "the question to go in",
+        "question",
+        "output format",
+        &["delivered", "failed"],
+    )?;
     members.chief_is_idle(log)?;
     let events = members.events();
     let items = record_of(&members, harness)?;
     let mut checks = Vec::new();
     match (&question, &result) {
         (Some(question), Some(result)) => {
-            checks.extend(delivered_once(&who, "the question", question, &events, &items));
+            checks.extend(delivered_once(
+                &who,
+                "the question",
+                question,
+                &events,
+                &items,
+            ));
             checks.extend(delivered_once(&who, "the result", result, &events, &items));
             checks.extend(in_order(&who, question, result, &events));
         }
@@ -426,9 +524,10 @@ fn a_real_chief_is_given_one_message_at_a_time_each_once_after_it_rested() -> Re
     let mut checks = Vec::new();
     for harness in chiefs(&live::list("harness"))? {
         log.found(harness)?;
-        checks.extend(run(&log, harness).map_err(|error| {
-            Error::Daemon(format!("{}: {error}", harness.name()))
-        })?);
+        checks.extend(
+            run(&log, harness)
+                .map_err(|error| Error::Daemon(format!("{}: {error}", harness.name())))?,
+        );
     }
     report::conclude(&log, "what each check came to", &checks)
 }
@@ -461,14 +560,40 @@ mod tests {
     #[test]
     fn a_message_pasted_once_after_the_settle_holds_and_one_pasted_again_does_not() {
         let events = [
-            event("2026-10-27T12:00:00.000Z", "delivery.begun", json!({ "message": 4, "look": { "restMs": 3_200 } })),
-            event("2026-10-27T12:01:00.000Z", "delivery.begun", json!({ "message": 5, "look": { "restMs": 900 } })),
-            event("2026-10-27T12:02:00.000Z", "delivery.retried", json!({ "message": 5 })),
-            event("2026-10-27T12:03:00.000Z", "delivery.begun", json!({ "message": 5, "look": { "restMs": 3_000 } })),
+            event(
+                "2026-10-27T12:00:00.000Z",
+                "delivery.begun",
+                json!({ "message": 4, "look": { "restMs": 3_200 } }),
+            ),
+            event(
+                "2026-10-27T12:01:00.000Z",
+                "delivery.begun",
+                json!({ "message": 5, "look": { "restMs": 900 } }),
+            ),
+            event(
+                "2026-10-27T12:02:00.000Z",
+                "delivery.retried",
+                json!({ "message": 5 }),
+            ),
+            event(
+                "2026-10-27T12:03:00.000Z",
+                "delivery.begun",
+                json!({ "message": 5, "look": { "restMs": 3_000 } }),
+            ),
         ];
-        let items = [item("[ConsensFlow m-4 · note]\nOne"), item("[ConsensFlow m-5 · note]\nTwo"), item("[ConsensFlow m-5 · note]\nTwo")];
-        assert_eq!(held(&delivered_once("c", "m-4", &message(4, 1), &events, &items)), [true, true, true, true]);
-        assert_eq!(held(&delivered_once("c", "m-5", &message(5, 2), &events, &items)), [false, false, false, false]);
+        let items = [
+            item("[ConsensFlow m-4 · note]\nOne"),
+            item("[ConsensFlow m-5 · note]\nTwo"),
+            item("[ConsensFlow m-5 · note]\nTwo"),
+        ];
+        assert_eq!(
+            held(&delivered_once("c", "m-4", &message(4, 1), &events, &items)),
+            [true, true, true, true]
+        );
+        assert_eq!(
+            held(&delivered_once("c", "m-5", &message(5, 2), &events, &items)),
+            [false, false, false, false]
+        );
     }
 
     #[test]
@@ -476,16 +601,46 @@ mod tests {
         let question = message(6, 1);
         let result = message(5, 1);
         let paced = [
-            event("2026-10-27T12:00:00.000Z", "delivery.begun", json!({ "message": 6 })),
-            event("2026-10-27T12:00:01.000Z", "delivery.confirmed", json!({ "message": 6 })),
-            event("2026-10-27T12:00:20.000Z", "delivery.begun", json!({ "message": 5 })),
+            event(
+                "2026-10-27T12:00:00.000Z",
+                "delivery.begun",
+                json!({ "message": 6 }),
+            ),
+            event(
+                "2026-10-27T12:00:01.000Z",
+                "delivery.confirmed",
+                json!({ "message": 6 }),
+            ),
+            event(
+                "2026-10-27T12:00:20.000Z",
+                "delivery.begun",
+                json!({ "message": 5 }),
+            ),
         ];
-        assert_eq!(held(&in_order("c", &question, &result, &paced)), [true, true]);
+        assert_eq!(
+            held(&in_order("c", &question, &result, &paced)),
+            [true, true]
+        );
         let oldest_first = [
-            event("2026-10-27T12:00:00.000Z", "delivery.begun", json!({ "message": 5 })),
-            event("2026-10-27T12:00:01.000Z", "delivery.begun", json!({ "message": 6 })),
-            event("2026-10-27T12:00:02.000Z", "delivery.confirmed", json!({ "message": 6 })),
+            event(
+                "2026-10-27T12:00:00.000Z",
+                "delivery.begun",
+                json!({ "message": 5 }),
+            ),
+            event(
+                "2026-10-27T12:00:01.000Z",
+                "delivery.begun",
+                json!({ "message": 6 }),
+            ),
+            event(
+                "2026-10-27T12:00:02.000Z",
+                "delivery.confirmed",
+                json!({ "message": 6 }),
+            ),
         ];
-        assert_eq!(held(&in_order("c", &question, &result, &oldest_first)), [false, false]);
+        assert_eq!(
+            held(&in_order("c", &question, &result, &oldest_first)),
+            [false, false]
+        );
     }
 }

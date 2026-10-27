@@ -77,13 +77,22 @@ fn shape(snapshot: &Value) -> String {
         .as_array()
         .map(|lines| lines.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
-    let header = lines.iter().filter(|line| line.contains("[ConsensFlow m-9")).count();
-    let placeholder = lines.iter().filter(|line| line.contains("[Pasted text #")).count();
+    let header = lines
+        .iter()
+        .filter(|line| line.contains("[ConsensFlow m-9"))
+        .count();
+    let placeholder = lines
+        .iter()
+        .filter(|line| line.contains("[Pasted text #"))
+        .count();
     let numbered = lines
         .iter()
         .filter(|line| line.contains("A line of the note"))
         .count();
-    let prompt = lines.iter().filter(|line| line.trim_start().starts_with('>') || line.trim_start().starts_with('❯')).count();
+    let prompt = lines
+        .iter()
+        .filter(|line| line.trim_start().starts_with('>') || line.trim_start().starts_with('❯'))
+        .count();
     format!(
         "outputQuietMs {} pasteQuietMs {} pasteInFlight {} · bottom {} lines: header {header}, placeholder {placeholder}, numbered {numbered}, prompt-marked {prompt}",
         snapshot["outputQuietMs"],
@@ -155,7 +164,11 @@ fn a_claude_code_window_stopped_after_a_paste_shows_and_records_it_as_it_shows()
             sleep(wait);
         }
         let snapshot = window.snapshot(20)?;
-        let said = format!("{at:>3} s stopped: {} · record: header in {} user item(s)", shape(&snapshot), in_record(&window));
+        let said = format!(
+            "{at:>3} s stopped: {} · record: header in {} user item(s)",
+            shape(&snapshot),
+            in_record(&window)
+        );
         log.say(&said);
         if at == LOOKS[0] || at == LOOKS[LOOKS.len() - 1] {
             log.say(drawn(&snapshot));
@@ -175,7 +188,12 @@ fn a_claude_code_window_stopped_after_a_paste_shows_and_records_it_as_it_shows()
     log.say(format!("at rest: {}", shape(&after)));
     log.say(drawn(&after));
     let checks = vec![
-        Check::new("claude", "the paste went in", pasted["ok"] == true, pasted.to_string()),
+        Check::new(
+            "claude",
+            "the paste went in",
+            pasted["ok"] == true,
+            pasted.to_string(),
+        ),
         Check::new(
             "claude",
             "the turn answered the note once it went on",
@@ -186,7 +204,10 @@ fn a_claude_code_window_stopped_after_a_paste_shows_and_records_it_as_it_shows()
             "claude",
             "the record holds the note once",
             in_record(&window) == 1,
-            format!("{} user item(s) with its header; looks: {seen:#?}", in_record(&window)),
+            format!(
+                "{} user item(s) with its header; looks: {seen:#?}",
+                in_record(&window)
+            ),
         ),
     ];
     drop(window);
@@ -209,7 +230,11 @@ fn stopped_chief_is_handed_its_result_once_though_it_shows_nothing_for_ninety_se
     let mut members = Members::open(&plan, std::path::Path::new(FAKE_AGENT), &log)?;
     members.add(STAND_IN_WORKER, &[])?;
     if !members.chief_is_idle(&log)? {
-        let checks = vec![Check::failed("claude chief", "goes idle", members.chief_window())];
+        let checks = vec![Check::failed(
+            "claude chief",
+            "goes idle",
+            members.chief_window(),
+        )];
         members.close()?;
         return report::conclude(&log, "what each check came to", &checks);
     }
@@ -241,17 +266,25 @@ fn stopped_chief_is_handed_its_result_once_though_it_shows_nothing_for_ninety_se
         .ok_or_else(|| Error::Daemon("the pane host named no process of the chief".into()))?;
     members.give(STAND_IN_WORKER, "Reply with exactly: ONE done.")?;
     // Stopped as soon as the daemon begins to hand the result over.
-    let result = find(&log, "the result's delivery to begin", Duration::from_secs(300), Duration::from_millis(100), || {
-        Ok(members.events().into_iter().find(|event| {
-            event["kind"] == "delivery.begun"
-                && members
-                    .inbox(Some("chief"))
-                    .ok()
-                    .into_iter()
-                    .flatten()
-                    .any(|message| message["kind"] == "result" && message["id"] == event["data"]["message"])
-        }))
-    })?;
+    let result = find(
+        &log,
+        "the result's delivery to begin",
+        Duration::from_secs(300),
+        Duration::from_millis(100),
+        || {
+            Ok(members.events().into_iter().find(|event| {
+                event["kind"] == "delivery.begun"
+                    && members
+                        .inbox(Some("chief"))
+                        .ok()
+                        .into_iter()
+                        .flatten()
+                        .any(|message| {
+                            message["kind"] == "result" && message["id"] == event["data"]["message"]
+                        })
+            }))
+        },
+    )?;
     let Some(begun) = result else {
         members.close()?;
         return Err(Error::Daemon("the result's delivery never began".into()));
@@ -262,11 +295,18 @@ fn stopped_chief_is_handed_its_result_once_though_it_shows_nothing_for_ninety_se
     signal_group(pid, Signal::SIGCONT)?;
     log.say("claude chief: going on");
     let id = begun["data"]["message"].as_i64().unwrap_or_default();
-    let settled = find(&log, "the result to settle", Duration::from_secs(300), Duration::from_secs(1), || {
-        Ok(members.inbox(Some("chief"))?.into_iter().find(|message| {
-            message["id"] == id && (message["state"] == "delivered" || message["state"] == "failed")
-        }))
-    })?;
+    let settled = find(
+        &log,
+        "the result to settle",
+        Duration::from_secs(300),
+        Duration::from_secs(1),
+        || {
+            Ok(members.inbox(Some("chief"))?.into_iter().find(|message| {
+                message["id"] == id
+                    && (message["state"] == "delivered" || message["state"] == "failed")
+            }))
+        },
+    )?;
     let events = members.events();
     let count = |kind: &str| {
         events
@@ -282,9 +322,13 @@ fn stopped_chief_is_handed_its_result_once_though_it_shows_nothing_for_ninety_se
         .find(|frame| frame["id"] == pane["id"])
         .and_then(|frame| cf_e2e::live::members::session_of(&frame));
     let items = match session {
-        Some(session) => ask::records(Harness::Claude.kind(), &session, members.rig().environment())?
-            .map(|record| record.items)
-            .unwrap_or_default(),
+        Some(session) => ask::records(
+            Harness::Claude.kind(),
+            &session,
+            members.rig().environment(),
+        )?
+        .map(|record| record.items)
+        .unwrap_or_default(),
         None => Vec::new(),
     };
     let marker = format!("[ConsensFlow m-{id} ");
@@ -296,14 +340,20 @@ fn stopped_chief_is_handed_its_result_once_though_it_shows_nothing_for_ninety_se
         Check::new(
             "claude chief",
             "the result is delivered on its first attempt",
-            settled.as_ref().is_some_and(|message| message["state"] == "delivered" && message["attempts"] == 1),
+            settled
+                .as_ref()
+                .is_some_and(|message| message["state"] == "delivered" && message["attempts"] == 1),
             format!("{settled:?}"),
         ),
         Check::new(
             "claude chief",
             "it is pasted once",
             count("delivery.begun") == 1 && count("delivery.retried") == 0,
-            format!("{} begun, {} retried", count("delivery.begun"), count("delivery.retried")),
+            format!(
+                "{} begun, {} retried",
+                count("delivery.begun"),
+                count("delivery.retried")
+            ),
         ),
         Check::new(
             "claude chief",

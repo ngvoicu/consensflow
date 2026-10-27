@@ -65,7 +65,9 @@ impl Frontier {
     fn of(observed: &Observed) -> Self {
         let items = observed.items();
         Self {
-            last: items.last().map(|item| (Arc::clone(&item.id), item.complete)),
+            last: items
+                .last()
+                .map(|item| (Arc::clone(&item.id), item.complete)),
             items: items.len(),
             at_prompt: observed.at_prompt,
         }

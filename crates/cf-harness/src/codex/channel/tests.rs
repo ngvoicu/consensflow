@@ -202,9 +202,14 @@ fn a_thread_is_idle_or_at_work_only_where_the_broker_says_so_in_a_flag() {
         (json!(0), None),
         (json!("idle"), None),
     ] {
-        let body = json!({ "launchId": LAUNCH, "sessionId": THREAD, "available": true, "idle": idle });
+        let body =
+            json!({ "launchId": LAUNCH, "sessionId": THREAD, "available": true, "idle": idle });
         stage.says(&body.to_string(), 200);
-        assert_eq!(stage.shown().map(|shown| shown.idle), Some(expected), "{idle}");
+        assert_eq!(
+            stage.shown().map(|shown| shown.idle),
+            Some(expected),
+            "{idle}"
+        );
     }
     let older = json!({ "launchId": LAUNCH, "sessionId": THREAD, "available": true });
     stage.says(&older.to_string(), 200);
