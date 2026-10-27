@@ -580,7 +580,9 @@ impl FakeAdapter {
     /// turn ends on the refusal, which the record reads as a failure.
     pub fn refuse(&self, handle: &str, quota: Quota) {
         let mut item = self.item(Role::Assistant, "You've hit your weekly limit");
-        if let Quota::Exhausted { at: Some(at), .. } = &quota {
+        if let Quota::Exhausted { at: Some(at), .. } | Quota::Unavailable { at: Some(at), .. } =
+            &quota
+        {
             item.at = Some(json!(at));
         }
         self.with(handle, |agent| {

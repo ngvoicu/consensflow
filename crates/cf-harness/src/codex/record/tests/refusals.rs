@@ -5,6 +5,7 @@
 //! 2026-10-19: two tasks held out of quota ended failed at the reset).
 
 use super::*;
+use crate::records::ModelMoved;
 use crate::shared::quota::Level;
 
 /// The rate limits as a `token_count` reports them: the primary window `used`
@@ -241,4 +242,47 @@ fn a_failed_turn_keeps_the_words_of_its_error_and_the_next_turn_drops_them() {
     let after = read(&[started(json!("t1")), end, started(json!("t2"))]).unwrap();
     assert!(!after.failed);
     assert_eq!(after.failure, None);
+}
+
+#[test]
+fn a_model_codex_rerouted_a_turn_to_is_a_move_nobody_chose() {
+    // MUS-24. Provisional: Codex 0.164 names `model_reroute` (its `EventMsg::ModelReroute`, and
+    // `exec` prints "model rerouted: <from> -> <to> (<reason>)"); none was ever recorded on this
+    // machine, so the fields are the protocol's: `from_model`, `to_model` and `reason`.
+    let rerouted = json!({
+        "timestamp": AT,
+        "type": "event_msg",
+        "payload": {
+            "type": "model_reroute",
+            "from_model": "gpt-6-astra",
+            "to_model": "gpt-6-safe",
+            "reason": "high_risk_cyber_activity",
+        },
+    });
+    let read = read(&[started(json!("t1")), rerouted.clone()]).unwrap();
+    assert_eq!(
+        read.model_moved.as_deref(),
+        Some(&ModelMoved {
+            from: "gpt-6-astra".to_owned(),
+            to: "gpt-6-safe".to_owned(),
+            because: "Codex rerouted it: high_risk_cyber_activity".to_owned(),
+            at: Some(AT.to_owned()),
+        })
+    );
+    // One that names the same model, or none, moved nothing.
+    for (from, to) in [("gpt-6-astra", "gpt-6-astra"), ("", "gpt-6-safe")] {
+        let mut same = rerouted.clone();
+        same["payload"]["from_model"] = json!(from);
+        same["payload"]["to_model"] = json!(to);
+        assert_eq!(
+            read_ok(&[started(json!("t1")), same]).model_moved,
+            None,
+            "{from:?} -> {to:?}"
+        );
+    }
+    assert_eq!(read_ok(&[started(json!("t1"))]).model_moved, None);
+}
+
+fn read_ok(records: &[Value]) -> Record {
+    read(records).unwrap()
 }

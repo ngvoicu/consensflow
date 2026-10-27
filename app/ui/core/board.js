@@ -268,6 +268,11 @@ const backAt = (iso, now = Date.now()) => {
 }
 const outOfQuota = (participant, now) =>
   participant.outUntil !== null && Date.parse(participant.outUntil) > now
+/**
+ * A member out until "never" has an account that refused for what no wait cures (its
+ * billing or its login): nothing resets it, so no time is shown, only the human's way back.
+ */
+const unavailable = (participant) => participant.outUntil?.startsWith('9999-') === true
 /** "@zeus · amber-pine" for a session; the member's own name otherwise. */
 export const laneName = (participant) =>
   participant.member
@@ -377,7 +382,9 @@ export function laneStatus(lane, board, now) {
   // is out of quota: the lane says both, or the hold hides behind the wait (T-288).
   const holding = 'A message waits until you send or erase what you typed here'
   if (outOfQuota(participant, now)) {
-    const out = `Out of quota until ${backAt(participant.outUntil, now)}`
+    const out = unavailable(participant)
+      ? `Unavailable: its account was refused for billing or login. Press Try again now once it works`
+      : `Out of quota until ${backAt(participant.outUntil, now)}`
     return ['out', lane.holding ? `${out}. ${holding}` : out]
   }
   if (lane.holding) return ['holding', holding]

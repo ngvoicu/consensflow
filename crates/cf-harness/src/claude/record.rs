@@ -78,7 +78,7 @@ use crate::shared::record::cache::{Look, Options};
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
-use crate::shared::record::reading::{self, null_record, Reading, Record, Settlement};
+use crate::shared::record::reading::{self, null_record, ModelMoved, Reading, Record, Settlement};
 use ancestry::Ancestry;
 use items::Items;
 use jobs::Jobs;
@@ -165,6 +165,11 @@ struct Transcript {
     /// The latest turn failed: the API refused it, in these words.
     failure: Option<String>,
     quota: Option<Arc<Quota>>,
+    /// The model the main conversation's assistant last answered from, and the move away
+    /// from it that nobody asked for (MUS-24).
+    model: Option<Arc<str>>,
+    model_asked: bool,
+    model_moved: Option<Arc<ModelMoved>>,
     /// The records visited.
     count: usize,
     ancestry: Ancestry,
@@ -236,6 +241,9 @@ impl Transcript {
             active_assistant: None,
             failure: None,
             quota: None,
+            model: None,
+            model_asked: false,
+            model_moved: None,
             count: 0,
             ancestry: Ancestry::default(),
             pending: Vec::new(),
@@ -275,6 +283,10 @@ impl Transcript {
             relaunch.reached = true;
             self.queues.restart();
             self.jobs.retire();
+            // The process ConsensFlow started on the conversation names its own model: a
+            // change across it is its launch's, and the baseline is what the launch runs.
+            self.model = None;
+            self.model_asked = false;
             self.open_tools.clear();
             if let Some(candidate) = self.candidate.take() {
                 self.hooks.remove(&candidate.item_id);
@@ -375,6 +387,7 @@ impl Answer for Transcript {
         record.failed = self.failure.is_some();
         record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
         record.quota = self.quota.clone();
+        record.model_moved.clone_from(&self.model_moved);
         record.settlement = settlement;
         // The jobs are those Claude Code has said no end of, whenever the record is
         // read: Finish takes a turn still under way, and says what runs (Astraeus on

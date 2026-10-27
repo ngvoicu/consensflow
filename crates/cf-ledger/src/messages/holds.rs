@@ -27,6 +27,18 @@ const TAIL: &str = ", or sooner if its account has quota again; it goes on by it
 /// A task held by an older build has its note so, delivered or not.
 const OLD_TAIL: &str = "; it goes on by itself then.";
 
+/// How a hold note of an unavailable account ends: nothing resets such an account.
+const TAIL_UNAVAILABLE: &str =
+    ", and nothing resets that; it goes on when the human says the account works again.";
+
+/// The words of a hold note of an account that is unavailable for `because`
+/// (MUS-23): no time is named, for there is none.
+fn render_unavailable(number: i64, handle: &str, because: &str) -> String {
+    format!(
+        "T-{number} waits with @{handle}: its account is unavailable ({because}){TAIL_UNAVAILABLE}"
+    )
+}
+
 /// The words of a hold note: T-`number` waits with `handle`, who is out of
 /// quota until `until`, an ISO time.
 fn render(number: i64, handle: &str, until: &str) -> String {
@@ -46,7 +58,9 @@ pub(super) fn goes_on(number: i64) -> String {
 /// ends so.
 fn is_hold_note(number: i64, body: &str) -> bool {
     body.starts_with(&format!("T-{number} waits with @"))
-        && [TAIL, OLD_TAIL].iter().any(|tail| body.ends_with(tail))
+        && [TAIL, OLD_TAIL, TAIL_UNAVAILABLE]
+            .iter()
+            .any(|tail| body.ends_with(tail))
 }
 
 /// Tells `to` that T-`number` is held with `handle` while its quota is out,
@@ -66,6 +80,29 @@ pub(crate) fn note_hold(
         &Sent {
             to,
             body: &render(number, handle, until),
+            task: Some(number),
+            kind: "note",
+            ..Sent::default()
+        },
+    )
+}
+
+/// Tells `to` that T-`number` is held with `handle` because its account is
+/// unavailable for `because`, which no time cures: the human's word does.
+pub(crate) fn note_hold_unavailable(
+    store: &mut Store,
+    project_id: i64,
+    to: &str,
+    number: i64,
+    handle: &str,
+    because: &str,
+) -> Result<MessageView, LedgerError> {
+    send(
+        store,
+        project_id,
+        &Sent {
+            to,
+            body: &render_unavailable(number, handle, because),
             task: Some(number),
             kind: "note",
             ..Sent::default()

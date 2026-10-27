@@ -22,7 +22,14 @@ pub(crate) fn record_state(reading: Arc<Reading>) -> Observed {
                 record.settlement == Settlement::Settled
                     || (record.settlement != Settlement::InFlight && empty),
                 record.failed,
-                record.quota.clone(),
+                // A window whose harness moved its model on its own is not used on it
+                // unasked: it reads as an account only the human can bring back (MUS-24).
+                record.quota.clone().or_else(|| {
+                    record
+                        .model_moved
+                        .as_ref()
+                        .map(|moved| Arc::new(moved.as_quota()))
+                }),
             )
         }
         Reading::Unknown(_) | Reading::Missing(_) => (true, false, None),

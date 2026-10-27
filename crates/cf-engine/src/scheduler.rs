@@ -37,6 +37,26 @@ const AGAIN_MS: i64 = 5 * 60_000;
 /// How long a quota lasts when its harness names no reset.
 const UNKNOWN_RESET_MS: i64 = 60 * 60_000;
 
+/// What a member is marked out until when its account is unavailable (MUS-23): no
+/// reset exists, so nothing resets it, and its held tasks are due at no time of their
+/// own. Only the human's Try again now, or a turn of its account that got through, ends it.
+const NEVER: &str = "9999-12-31T23:59:59.999Z";
+
+/// Whether `until`, a member's time out, is [`NEVER`]: its account is unavailable.
+pub(crate) fn never(until: &str) -> bool {
+    until.starts_with("9999-")
+}
+
+/// What a window of a member out says it is doing: out of quota until the reset, or,
+/// where the account is unavailable (no reset), why (MUS-23).
+pub(crate) fn out_words(until: &str, unavailable: Option<&str>) -> String {
+    match unavailable {
+        Some(because) => format!("unavailable: {because}"),
+        None if never(until) => "unavailable".to_owned(),
+        None => format!("out of quota until {until}"),
+    }
+}
+
 /// How much later one reset must be than another to be a limit of its own: a
 /// harness names a reset to the hour (Claude Code's "resets 3pm"), or none, and
 /// one that names none is an hour from each refusal.
@@ -262,11 +282,15 @@ impl Dispatcher {
             Some(Some(_)) => {}
         }
         if self.out(member.out_until.as_deref()) {
-            return Some(format!(
-                "@{} is out of quota until {}",
-                member.handle,
-                member.out_until.as_deref().unwrap_or_default()
-            ));
+            let until = member.out_until.as_deref().unwrap_or_default();
+            return Some(if never(until) {
+                format!(
+                    "@{}'s account is unavailable (its billing or login was refused)",
+                    member.handle
+                )
+            } else {
+                format!("@{} is out of quota until {until}", member.handle)
+            });
         }
         if self.is_low(member.id) {
             return Some(format!("@{} is low on quota", member.handle));
@@ -415,9 +439,51 @@ impl Dispatcher {
 
     /// When a quota resets: the time its harness names, or an hour from now.
     pub(crate) fn reset_of(&self, quota: Option<&Quota>) -> String {
+        if quota.is_some_and(Quota::unavailable) {
+            return NEVER.to_owned();
+        }
         quota
             .and_then(Quota::resets_at)
             .map_or_else(|| time::iso(self.now() + UNKNOWN_RESET_MS), str::to_owned)
+    }
+
+    /// Why a member's account is unavailable, as a refusal said it: none for a quota that
+    /// resets, and for a refusal that is not shown now.
+    pub(crate) fn unavailable_because(quota: Option<&Quota>) -> Option<&str> {
+        match quota {
+            Some(Quota::Unavailable { because, .. }) => Some(because),
+            _ => None,
+        }
+    }
+
+    /// The human is told that an account is unavailable, once for each time its member
+    /// is marked out, whatever waits for it (MUS-23): nothing is sent to it until their
+    /// word, so they hear it and what to do.
+    pub(crate) fn tell_unavailable(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        owner: &ParticipantView,
+        because: &str,
+    ) -> Result<(), EngineError> {
+        let mark = (owner.id, owner.out_since.clone().unwrap_or_default());
+        if !self.scheduler.out_noted.borrow_mut().insert(mark) {
+            return Ok(());
+        }
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: format!(
+                    "@{}'s account is unavailable: {because}. Nothing is sent to it until you say it works again: press Try again now on @{} once it does.",
+                    participant.handle, owner.handle
+                ),
+            },
+        )?;
+        self.changed();
+        Ok(())
     }
 
     /// News that an account has quota again brings back the others out on it.
@@ -487,7 +553,7 @@ impl Dispatcher {
                     returned: Some(returned),
                     ..
                 } => {
-                    if later_limit(&until, returned) {
+                    if later_limit(&until, returned) && !never(&until) {
                         // A later reset is a limit of its own, which no teammate's turn
                         // undoes: the human hears it stays out, once for the limit.
                         if self.tried_anew(other.id, &until) {
@@ -586,11 +652,15 @@ impl Dispatcher {
         let Some(waiting) = waiting else {
             return Ok(());
         };
+        let until = owner.out_until.clone().unwrap_or_default();
+        // An unavailable account is told once, whatever waits (`tell_unavailable`).
+        if never(&until) {
+            return Ok(());
+        }
         let mark = (participant.id, owner.out_since.clone().unwrap_or_default());
         if !self.scheduler.out_noted.borrow_mut().insert(mark) {
             return Ok(());
         }
-        let until = owner.out_until.clone().unwrap_or_default();
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
@@ -627,25 +697,42 @@ impl Dispatcher {
         owner: &ParticipantView,
         until: &str,
         refused_at: Option<i64>,
+        unavailable: Option<&str>,
     ) -> Result<(), EngineError> {
         if participant.role == "chief" {
             return Ok(());
         }
         for task in self.active_work(project, participant)? {
             let again = match refused_at {
-                Some(at) => self.refused_its_resume(participant, &task, at)?,
-                None => false,
+                Some(at) if unavailable.is_none() => {
+                    self.refused_its_resume(participant, &task, at)?
+                }
+                _ => false,
             };
             self.seams.ledger.borrow_mut().hold_task(
                 project.id,
                 task.number,
                 until,
-                "out of quota",
+                if unavailable.is_some() {
+                    "account unavailable"
+                } else {
+                    "out of quota"
+                },
             )?;
             if refused_at.is_none() {
                 continue;
             }
-            if again {
+            if let Some(because) = unavailable {
+                // The requester is told it waits for the human's word, whatever the
+                // refusal answered: the human is told too, once (`tell_unavailable`).
+                self.seams.ledger.borrow_mut().note_hold_unavailable(
+                    project.id,
+                    &task.requester,
+                    task.number,
+                    &participant.handle,
+                    because,
+                )?;
+            } else if again {
                 self.tell_the_human_it_may_need_them(project, participant, owner, &task)?;
             } else {
                 self.seams.ledger.borrow_mut().note_hold(

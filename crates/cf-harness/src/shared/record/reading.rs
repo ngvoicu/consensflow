@@ -90,6 +90,13 @@ pub struct Record {
     /// reading Node wrote has it.
     #[serde(skip)]
     pub took_back: bool,
+    /// The model the window answers from moved to another that nobody the window answers
+    /// to chose: its harness switched on its own (Muse after a refused turn, MUS-24). The
+    /// latest such move the record shows, where its reader reads one. Never said: no
+    /// reading Node wrote has it. A window is never used on it silently
+    /// ([`ModelMoved::as_quota`]).
+    #[serde(skip)]
+    pub model_moved: Option<Arc<ModelMoved>>,
     pub quota: Option<Arc<Quota>>,
     pub settlement: Settlement,
     /// What the settled turn left running that its harness wakes its agent for as
@@ -104,6 +111,40 @@ pub struct Record {
     /// item began in. Never said: no reading Node wrote has it.
     #[serde(skip)]
     pub lines: Box<Lines>,
+}
+
+/// A harness that moved a window's model on its own: from the model the window answered
+/// from to another, which no one the window answers to asked for (the human's own `/model`
+/// is not one). Why a harness did, where it says: after a refusal, at a `/clear`. The
+/// engine never goes on in such a window unasked (MUS-24).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelMoved {
+    pub from: String,
+    pub to: String,
+    /// What the move came after, in plain words.
+    pub because: String,
+    /// When the record says it happened.
+    pub at: Option<String>,
+}
+
+impl ModelMoved {
+    /// The words the human and the requester are told it in.
+    pub fn words(&self) -> String {
+        format!(
+            "its model moved from {} to {} on its own ({}), a model nobody chose",
+            self.from, self.to, self.because
+        )
+    }
+
+    /// The move as the account refusing for what only the human cures: the window is
+    /// marked out until they say it may go on, and nothing is sent to it meanwhile, as to
+    /// an account whose billing was refused ([`Quota::Unavailable`]).
+    pub fn as_quota(&self) -> Quota {
+        Quota::Unavailable {
+            at: self.at.clone(),
+            because: self.words(),
+        }
+    }
 }
 
 /// Where a record's lines stand, as its reader read them (T-223, T-290). Behind a box in
@@ -242,6 +283,7 @@ impl Record {
             failed: false,
             failure: None,
             took_back: false,
+            model_moved: None,
             quota: None,
             settlement: Settlement::Unknown,
             pending: Pending::default(),

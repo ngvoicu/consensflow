@@ -100,6 +100,9 @@ pub(super) struct Assistant {
     /// What the account refused for, where it is its billing or its login: no limit that
     /// resets (MUS-23).
     pub(super) account: Option<Refusal>,
+    /// The model a message of the main conversation says it was written by, where it names
+    /// one (not Claude Code's own `<synthetic>` messages, nor an API error's).
+    pub(super) model: Option<Arc<str>>,
 }
 
 /// A block of an assistant's content that opens or closes a call.
@@ -164,6 +167,8 @@ pub(super) struct User {
     /// What a TaskStop result of the record says it stopped, of the main conversation:
     /// the call it answers, as the block says it, and the job's id.
     pub(super) stopped: Option<(Option<Value>, Arc<str>)>,
+    /// The record is a `/model` the human typed at the prompt, of the main conversation.
+    pub(super) model_command: bool,
 }
 
 /// The record `record` of the session `session`, as replay reads it.
@@ -325,6 +330,10 @@ fn assistant(record: &Value, session: &str) -> Projected {
     let closes_a_cut_turn = !refused
         && in_message("model").and_then(Value::as_str) == Some("<synthetic>")
         && text == CUT_TURN_CLOSED;
+    let model = in_message("model")
+        .and_then(Value::as_str)
+        .filter(|model| main && !refused && !model.is_empty() && *model != "<synthetic>")
+        .map(Arc::from);
     let rate_limited = status == Some(429.0)
         || record.get("error").and_then(Value::as_str) == Some("rate_limit")
         || spent;
@@ -340,6 +349,7 @@ fn assistant(record: &Value, session: &str) -> Projected {
         closes_a_cut_turn,
         refused,
         rate_limited,
+        model,
         account: if refused && !rate_limited {
             account_refusal(&text, status)
         } else {
@@ -362,6 +372,8 @@ fn user(record: &Value, session: &str) -> Projected {
             uuid: text_id(record.get("uuid")),
         }));
     }
+    let model_command = of_main_conversation(record, session)
+        && text.contains("<command-name>/model</command-name>");
     let output_of = record
         .get("parentUuid")
         .and_then(Value::as_str)
@@ -389,6 +401,7 @@ fn user(record: &Value, session: &str) -> Projected {
         stopped: of_main_conversation(record, session)
             .then(|| stopped(record, content))
             .flatten(),
+        model_command,
     }))
 }
 

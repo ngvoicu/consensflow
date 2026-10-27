@@ -10,7 +10,7 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use super::*;
-use crate::records::{Item, Quota, Record, Role, Settlement};
+use crate::records::{Item, ModelMoved, Quota, Record, Role, Settlement};
 
 /// The reading a row's record is, or none where no reading says it.
 fn reading_of(record: &Value) -> Option<Reading> {
@@ -173,4 +173,34 @@ fn a_window_switched_away_settles_nothing_and_waits_for_nothing_and_one_unnamed_
         })
     );
     assert!(held.unnamed && held.settled && held.switched.is_none());
+}
+
+#[test]
+fn a_window_whose_harness_moved_its_model_on_its_own_is_read_as_unavailable_until_the_human_says() {
+    // MUS-24: the move is the account's refusal for what only the human cures, so the engine
+    // holds the window's work and sends it nothing, as for a billing refusal; and a quota the
+    // harness said is not hidden by it.
+    let moved = Arc::new(ModelMoved {
+        from: "muse-spark-1.3".to_owned(),
+        to: "muse-spark-1.3-contributor".to_owned(),
+        because: "Muse switched on its own after its turn failed".to_owned(),
+        at: Some("2026-10-26T15:46:19.674Z".to_owned()),
+    });
+    let mut record = Record::new();
+    record.model_moved = Some(Arc::clone(&moved));
+    let observed = record_state(Arc::new(Reading::Known(record.clone())));
+    assert_eq!(
+        observed.quota.as_deref(),
+        Some(&Quota::Unavailable {
+            at: Some("2026-10-26T15:46:19.674Z".to_owned()),
+            because: "its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own after its turn failed), a model nobody chose".to_owned(),
+        })
+    );
+    let refused = Arc::new(Quota::Exhausted {
+        at: None,
+        resets_at: None,
+    });
+    record.quota = Some(Arc::clone(&refused));
+    let observed = record_state(Arc::new(Reading::Known(record)));
+    assert_eq!(observed.quota, Some(refused));
 }

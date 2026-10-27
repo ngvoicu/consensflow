@@ -11,7 +11,7 @@ use super::patterns::QUIET_COMMAND;
 use super::project::{Assistant, Block, Boundary, Call, Hook, Projected, ToolResult, User};
 use super::{Candidate, Terminal, Transcript};
 use crate::shared::quota::{exhausted_quota, unavailable_quota};
-use crate::shared::record::reading::{native_id, Role};
+use crate::shared::record::reading::{native_id, ModelMoved, Role};
 
 impl Transcript {
     /// The record at `seq` among the transcript's, with its `place` in the
@@ -57,6 +57,25 @@ impl Transcript {
         Ok(())
     }
 
+    /// The main conversation's assistant answered from `model`: where it names another than
+    /// the last, and the human typed no `/model` since, Claude Code moved it itself (a fallback
+    /// model on overload, a remap of one it retired). Provisional (MUS-24): neither was ever
+    /// recorded here.
+    fn answered_from(&mut self, model: &Arc<str>, at: Option<&Value>) {
+        let asked = std::mem::take(&mut self.model_asked);
+        if let Some(from) = self.model.replace(Arc::clone(model)) {
+            if from != *model && !asked {
+                self.model_moved = Some(Arc::new(ModelMoved {
+                    from: from.to_string(),
+                    to: model.to_string(),
+                    because: "Claude Code switched models mid-conversation (a fallback model, or a remap)"
+                        .to_owned(),
+                    at: at.and_then(Value::as_str).map(str::to_owned),
+                }));
+            }
+        }
+    }
+
     /// An assistant's record: a fragment of a message, the tool calls it
     /// makes and the results it holds; its refusal when the API refused; and
     /// its answer, if it ended the turn. Claude Code's own close of a turn it
@@ -86,6 +105,9 @@ impl Transcript {
         }
         // The latest assistant record has the last word on quota.
         self.quota = None;
+        if let Some(model) = &record.model {
+            self.answered_from(model, record.at.as_ref());
+        }
         let message_id = id_of(record.message_id.as_ref(), "claude message", seq)?;
         self.active_assistant = Some(Arc::clone(&message_id));
         let item = self.items.assistant(Arc::clone(&message_id), at, seq);
@@ -209,6 +231,7 @@ impl Transcript {
             self.jobs
                 .ended_by(&record.text, record.at.as_ref().and_then(Value::as_str));
         }
+        self.model_asked |= record.model_command;
         if record.interrupt {
             let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
             self.items.push(id, Role::User, &record.text, at, seq);

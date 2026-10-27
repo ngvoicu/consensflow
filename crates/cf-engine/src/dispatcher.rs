@@ -43,7 +43,7 @@ use crate::computer_use::ComputerUseState;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
-use crate::scheduler::{News, SchedulerState};
+use crate::scheduler::{out_words, News, SchedulerState};
 use crate::seams::{EngineError, Seams};
 use crate::shown::Shown;
 use crate::stalls::StallsState;
@@ -1331,15 +1331,27 @@ impl Dispatcher {
             return self.perform_switch(project, participant, record, to).await;
         }
         let until = owner.out_until.clone().unwrap_or_default();
+        let reported = record.quota.borrow().reported.clone();
+        let unavailable = Self::unavailable_because(reported.as_deref()).map(str::to_owned);
         self.set_activity(
             record,
-            Activity::because(ActivityState::Out, format!("out of quota until {until}")),
+            Activity::because(
+                ActivityState::Out,
+                out_words(&until, unavailable.as_deref()),
+            ),
         )?;
         // A refusal of its own, dated before its member was marked out, holds the
         // window's work as the first did, with no note of its own.
         if participant.role != "chief" && self.refused_unhandled(record) {
             self.handled(record);
-            self.hold_work(project, participant, owner, &until, None)?;
+            self.hold_work(
+                project,
+                participant,
+                owner,
+                &until,
+                None,
+                unavailable.as_deref(),
+            )?;
             self.changed();
         }
         self.tell_what_waits(project, participant, record, owner)?;
@@ -1426,23 +1438,48 @@ impl Dispatcher {
         record.held.borrow_mut().reset();
         let reported = record.quota.borrow().reported.clone();
         let reset = self.reset_of(reported.as_deref());
-        let marked = self
-            .seams
-            .ledger
-            .borrow_mut()
-            .mark_out(owner.id, &reset, "out of quota")?;
+        let unavailable = Self::unavailable_because(reported.as_deref()).map(str::to_owned);
+        let marked = self.seams.ledger.borrow_mut().mark_out(
+            owner.id,
+            &reset,
+            if unavailable.is_some() {
+                "account unavailable"
+            } else {
+                "out of quota"
+            },
+        )?;
         let until = marked.out_until.clone().unwrap_or_default();
         self.set_activity(
             record,
-            Activity::because(ActivityState::Out, format!("out of quota until {until}")),
+            Activity::because(
+                ActivityState::Out,
+                out_words(&until, unavailable.as_deref()),
+            ),
         )?;
         self.confirm_arrival(record, observed)?;
         let delivering = record.delivery.borrow_mut().delivering.take();
         if let Some(delivering) = delivering {
-            self.give_back(delivering.message, "the harness ran out of quota")?;
+            self.give_back(
+                delivering.message,
+                if unavailable.is_some() {
+                    "its account is unavailable"
+                } else {
+                    "the harness ran out of quota"
+                },
+            )?;
         }
         let refused_at = self.refused_at(reported.as_deref());
-        self.hold_work(project, participant, owner, &until, Some(refused_at))?;
+        self.hold_work(
+            project,
+            participant,
+            owner,
+            &until,
+            Some(refused_at),
+            unavailable.as_deref(),
+        )?;
+        if let Some(because) = &unavailable {
+            self.tell_unavailable(project, participant, &marked, because)?;
+        }
         if participant.role != "chief" {
             self.close_if_free(record).await?;
         }

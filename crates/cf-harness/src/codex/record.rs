@@ -45,7 +45,9 @@ use crate::shared::record::cache::Look;
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
-use crate::shared::record::reading::{native_id, null_record, Item, Record, Role, Settlement};
+use crate::shared::record::reading::{
+    native_id, null_record, Item, ModelMoved, Record, Role, Settlement,
+};
 
 /// The reader of the thread `session`, in the Codex home `env` names.
 pub fn reader(session: &str, env: &Env) -> Box<dyn Look + Send> {
@@ -98,6 +100,8 @@ struct Rollout {
     current_turn: Key,
     latest_turn: Key,
     quota: Option<Arc<Quota>>,
+    /// The latest model Codex rerouted a turn to on its own (MUS-24).
+    rerouted: Option<Arc<ModelMoved>>,
     records: usize,
     /// The place among the records of the one being read.
     reading: usize,
@@ -161,6 +165,7 @@ impl Rollout {
             current_turn: Key::Null,
             latest_turn: Key::Null,
             quota: None,
+            rerouted: None,
             records: 0,
             reading: 0,
             keys: Keys::default(),
@@ -289,6 +294,26 @@ impl Rollout {
                     End::Complete(field(payload, "last_agent_message").cloned())
                 };
                 self.named_turn(&named, "task_complete", seq)?.end = Some(end);
+            }
+            // Provisional (MUS-24): Codex 0.164 names `model_reroute`; its fields are the
+            // protocol's. A reroute to the model it was on moves nothing.
+            Some("model_reroute") => {
+                let model = |name: &str| {
+                    field(payload, name)
+                        .and_then(Value::as_str)
+                        .filter(|model| !model.is_empty())
+                };
+                if let (Some(from), Some(to)) = (model("from_model"), model("to_model")) {
+                    if from != to {
+                        let reason = model("reason").unwrap_or("no reason given");
+                        self.rerouted = Some(Arc::new(ModelMoved {
+                            from: from.to_owned(),
+                            to: to.to_owned(),
+                            because: format!("Codex rerouted it: {reason}"),
+                            at: at.as_str().map(str::to_owned),
+                        }));
+                    }
+                }
             }
             Some("turn_aborted") => {
                 self.latest_turn = named.clone();
@@ -633,6 +658,7 @@ impl Answer for Rollout {
             )) => Some(Arc::clone(refusal)),
             _ => self.quota.clone(),
         };
+        record.model_moved.clone_from(&self.rerouted);
         record.settlement = match end {
             _ if in_flight => Settlement::InFlight,
             // A task_complete whose final answer cannot be matched proves nothing.

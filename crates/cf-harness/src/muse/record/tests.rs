@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 
 use super::*;
-use crate::records::{Options, Quota, Reading};
+use crate::records::{ModelMoved, Options, Quota, Reading};
 use crate::testing::LONG_AFTER_MS;
 
 /// A recorded session's log.
@@ -31,11 +31,14 @@ fn fixture(name: &str) -> &'static str {
         "billing-wonder" => include_str!("../../../tests/fixtures/muse/billing-wonder.jsonl"),
         "clear-before" => include_str!("../../../tests/fixtures/muse/clear-before.jsonl"),
         "clear-after" => include_str!("../../../tests/fixtures/muse/clear-after.jsonl"),
+        "launch-model-restored" => {
+            include_str!("../../../tests/fixtures/muse/launch-model-restored.jsonl")
+        }
         other => panic!("no fixture {other}"),
     }
 }
 
-const FIXTURES: [&str; 12] = [
+const FIXTURES: [&str; 13] = [
     "plain",
     "retracted",
     "cut",
@@ -48,6 +51,7 @@ const FIXTURES: [&str; 12] = [
     "billing-wonder",
     "clear-before",
     "clear-after",
+    "launch-model-restored",
 ];
 
 /// The session a log is of: the stream of its first envelope.
@@ -72,6 +76,18 @@ impl Stage {
         };
         fs::create_dir_all(stage.log().parent().unwrap()).unwrap();
         stage
+    }
+
+    /// Another session's log in the same data folder, as Muse writes it.
+    fn alongside(&self, session: &str, text: &str) {
+        let log = self
+            .home
+            .path()
+            .join("muse/sessions/2026/10/26")
+            .join(session)
+            .join("session.jsonl");
+        fs::create_dir_all(log.parent().unwrap()).unwrap();
+        fs::write(log, text).unwrap();
     }
 
     fn env(&self) -> Env {
@@ -510,4 +526,163 @@ fn a_refusal_for_billing_is_a_failed_turn_in_plain_words_and_an_account_no_reset
         );
         assert_eq!(quota.resets_at(), None, "{name}");
     }
+}
+
+/// The move the log says of the model, if one.
+fn moved(record: &Record) -> Option<&ModelMoved> {
+    record.model_moved.as_deref()
+}
+
+#[test]
+fn a_model_muse_switched_to_after_a_refused_turn_is_a_move_nobody_chose() {
+    // T-705's two recordings, `--contributor-mode off` on the model named: after the 402,
+    // Muse reconfigures to the contributor model, which Meta trains on, and no turn follows.
+    for (name, from) in [
+        ("billing-spark", "muse-spark-1.3"),
+        ("billing-wonder", "muse-wonder-1.0"),
+    ] {
+        let record = read(name);
+        let Some(moved) = moved(&record) else {
+            panic!("{name}: no move");
+        };
+        assert_eq!(moved.from, from, "{name}");
+        assert_eq!(moved.to, "muse-spark-1.3-contributor", "{name}");
+        assert!(
+            moved
+                .because
+                .starts_with("Muse switched on its own after its turn failed (Muse refused"),
+            "{name}: {}",
+            moved.because
+        );
+        assert!(
+            moved
+                .at
+                .as_deref()
+                .is_some_and(|at| at.starts_with("2026-10-26T")),
+            "{name}"
+        );
+        // The harness's refusal is the account's, and the move is read besides it.
+        assert!(record.failed && record.quota.is_some(), "{name}");
+    }
+}
+
+#[test]
+fn a_clear_that_lands_on_another_model_with_no_reconfigure_event_is_a_move_too() {
+    // T-718's chain: the old session ran `muse-spark-1.3-contributor`; `/clear` started a
+    // new one whose metadata, start and configuration name `muse-spark-1.3`, and nothing in
+    // either log says `model_reconfigure`.
+    let before = fixture("clear-before");
+    let after = fixture("clear-after");
+    assert!(!after.contains("model_reconfigure"));
+    let stage = Stage::new(&session_of(after));
+    stage.alongside(&session_of(before), before);
+    let mut reading_on = stage.reader();
+    let mut text = String::new();
+    for line in after.lines() {
+        stage.append(line);
+        text.push_str(line);
+        text.push('\n');
+        let on = look(&mut reading_on);
+        // Read on a record at a time, or fresh, the same.
+        let fresh = {
+            let stage = Stage::new(&session_of(after));
+            stage.alongside(&session_of(before), before);
+            stage.write(&text);
+            look(&mut stage.reader())
+        };
+        assert_eq!(on, fresh);
+    }
+    let record = known(&look(&mut reading_on)).clone();
+    let Some(moved) = moved(&record) else {
+        panic!("no move");
+    };
+    assert_eq!(
+        (moved.from.as_str(), moved.to.as_str()),
+        ("muse-spark-1.3-contributor", "muse-spark-1.3")
+    );
+    assert!(moved.because.contains("/clear"), "{}", moved.because);
+    // Where the old session's log cannot be found, nothing is known to have moved.
+    assert_eq!(moved_of("clear-after"), None);
+}
+
+fn moved_of(name: &str) -> Option<ModelMoved> {
+    moved(&read(name)).cloned()
+}
+
+#[test]
+fn a_change_nobody_asked_for_is_the_only_one_flagged() {
+    // Controls. Every other recorded log: no move. The resume that restores the model the
+    // launch named (previous source `replay`) is the launch's own: ConsensFlow's, not Muse's.
+    for name in FIXTURES {
+        if matches!(name, "billing-spark" | "billing-wonder") {
+            continue;
+        }
+        assert_eq!(moved_of(name), None, "{name}");
+    }
+    let restored = read("launch-model-restored");
+    assert!(restored.model_moved.is_none());
+}
+
+/// A reconfigure the harness recorded, `from` to `to`, whose previous model came from `source`.
+fn reconfigure(sequence: u64, from: &str, to: &str, source: &str) -> Value {
+    json!({
+        "schema_version": 1, "id": format!("r{sequence}"), "sequence": sequence,
+        "recorded_at": 1_793_032_773_917_599_i64 + sequence as i64,
+        "stream": { "kind": "session", "id": "s1" }, "record_type": "event",
+        "payload_type": "runtime.model_reconfigure.completed",
+        "payload": { "kind": "model_reconfigure", "record": {
+            "command_id": "c", "apply_outcome": "completed",
+            "previous": { "model_id": from, "source": source },
+            "effective": { "model_id": to, "source": "model_reconfigure" },
+        } },
+    })
+}
+
+#[test]
+fn the_humans_own_model_command_is_no_move() {
+    // Provisional (MUS-24): a `/model` the human typed was never recorded live. Muse records
+    // a command it ran (`command.invoked`), as it did `/clear` and `/compact`; a reconfigure
+    // that follows one is theirs. The same reconfigure with none is Muse's own.
+    let command = |sequence: u64, command: &str| {
+        json!({
+            "schema_version": 1, "id": format!("r{sequence}"), "sequence": sequence,
+            "stream": { "kind": "session", "id": "s1" },
+            "payload_type": "command.invoked",
+            "payload": { "kind": "command_invoked", "record": { "command": command } },
+        })
+    };
+    let theirs = record_of(&[
+        metadata("1.4.13"),
+        command(4, "/model muse-wonder-1.0"),
+        reconfigure(5, "muse-spark-1.3", "muse-wonder-1.0", "startup"),
+    ]);
+    assert_eq!(theirs.model_moved, None);
+    let own = record_of(&[
+        metadata("1.4.13"),
+        reconfigure(5, "muse-spark-1.3", "muse-spark-1.3-contributor", "startup"),
+    ]);
+    assert!(own.model_moved.is_some());
+    // The command is the next reconfigure's alone: a later one with none is Muse's.
+    let later = record_of(&[
+        metadata("1.4.13"),
+        command(4, "/model muse-wonder-1.0"),
+        reconfigure(5, "muse-spark-1.3", "muse-wonder-1.0", "startup"),
+        reconfigure(
+            6,
+            "muse-wonder-1.0",
+            "muse-spark-1.3-contributor",
+            "model_reconfigure",
+        ),
+    ]);
+    let Some(moved) = later.model_moved.as_deref() else {
+        panic!("no move")
+    };
+    assert_eq!(
+        (moved.from.as_str(), moved.to.as_str()),
+        ("muse-wonder-1.0", "muse-spark-1.3-contributor")
+    );
+    // A reconfigure that did not complete moved nothing.
+    let mut refused = reconfigure(5, "muse-spark-1.3", "muse-wonder-1.0", "startup");
+    refused["payload"]["record"]["apply_outcome"] = json!("failed");
+    assert_eq!(record_of(&[metadata("1.4.13"), refused]).model_moved, None);
 }
