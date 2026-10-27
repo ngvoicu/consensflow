@@ -148,10 +148,10 @@ mod its_steps_as_written {
     #[test]
     fn sign_the_sums_under_the_releases_name_and_refuse_a_signature_by_a_key_not_pinned() {
         let tauri = repo().join("app/node_modules/.bin/tauri");
-        if !tauri.exists() {
-            eprintln!("skipped: no app/node_modules (npm ci --prefix app)");
-            return;
-        }
+        assert!(
+            tauri.exists(),
+            "Tauri's signer is not in app/node_modules: run npm ci --prefix app"
+        );
         // A checkout of the version, the signer, and the installers with their check.
         let workspace = TempDir::new("workspace");
         fs::write(
