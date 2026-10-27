@@ -30,7 +30,7 @@ reply does nothing.
     cf task done T-3 "…"          finish your own task with its result
     cf task accept T-3 · cf task reopen T-3 "…" · cf task cancel T-3
     cf task edit T-3 "…"          replace the brief of a task no window has yet (open, queued, or paused)
-    cf task pause T-3             stop a worker's task: the agent stops, its window and work wait
+    cf task pause T-3             stop a worker's task: its window waits; background work runs on
     cf task resume T-3 "…"        go on with it: the same window, with your words
     cf tell T-3 "…"               stop T-3 and put this to its window: its answer arrives as a message; then resume it
     cf task get T-3 · cf task list · cf inbox · cf inbox read m-12

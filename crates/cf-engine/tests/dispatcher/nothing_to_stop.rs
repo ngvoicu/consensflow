@@ -15,7 +15,7 @@
 //! words that send the task on go into the same window once it rests.
 
 use cf_engine::testing::Context;
-use cf_harness::contract::Pane;
+use cf_harness::contract::{Over, Pane};
 use cf_harness::records::{Pending, Role};
 use serde_json::{json, Value};
 
@@ -214,6 +214,54 @@ fn a_pause_whose_escape_stopped_a_turn_with_background_agents_keeps_the_window_a
     );
 }
 
+#[test]
+fn a_record_that_says_the_turn_is_over_only_a_moment_ago_is_pressed_no_more_and_paid_once_it_stands(
+) {
+    // Claude says busy a moment before the message of a turn it begins is in its
+    // record, so the record's word that a turn is over counts once it has stood a
+    // moment (Calliope on T-551, T-644). Until then the stop neither presses again
+    // nor is paid, however late the next look comes.
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.inputs().len(),
+        1,
+        "the turn at work: one Escape"
+    );
+    context
+        .adapter
+        .with("zeus", |agent| agent.over = Over::Pending);
+    for _ in 0..3 {
+        context.advance(10_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.host.inputs().len(),
+        1,
+        "no second key while it stands"
+    );
+    assert!(context.host.killed().is_empty());
+    let zeus = context.id(project, "zeus");
+    context
+        .adapter
+        .with("zeus", |agent| agent.over = Over::Held);
+    context.pass().unwrap();
+    context.resume_task(project, 1, "Go on");
+    context.adapter.with("zeus", |agent| agent.settled = true);
+    context.pass().unwrap();
+    assert_eq!(
+        given(&context, "zeus", "Resumed: Go on"),
+        1,
+        "paid, and resumed in it"
+    );
+    assert_eq!(context.host.inputs().len(), 1);
+    assert_eq!(context.dispatcher.unstopped(zeus), None);
+    assert_eq!(closes_told(&context, project), Vec::<String>::new());
+}
+
 /// zeus's turn on T-1 ended and left a job running in the background: the task
 /// goes on in the background, held for it.
 fn held_for_its_job(context: &Context) -> i64 {
@@ -331,5 +379,55 @@ fn a_window_closed_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_
         closes_told(&context, project.id),
         ["@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. T-1 stays paused, and its window reopens on its conversation when it is resumed."],
         "one note, in the human's words, and none to the chief"
+    );
+}
+
+/// What the human and the chief read of a window closed for a stop it ignored, its
+/// task still paused.
+const CLOSED: [&str; 2] = [
+    "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
+    "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
+];
+
+#[test]
+fn the_human_whose_pause_closed_a_chief_given_tasks_window_is_told_too_once() {
+    // The chief gave the task and hears of the close; the human paused it, and their
+    // own act closed the window and ended its work (the chief's call on T-644).
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.busy("zeus");
+    context.human_pause(project, 1);
+    rounds(&context);
+    context.host.exits_showing(Some(0), None, None);
+    context.pass().unwrap();
+    assert_eq!(context.host.killed().len(), 1, "a hung turn is closed");
+    assert_eq!(closes_told(&context, project), CLOSED, "one note to each");
+}
+
+#[test]
+fn the_chief_whose_tell_closed_a_human_given_tasks_window_is_told_too_once() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.create_task(
+        project.id,
+        cf_ledger::NewTask {
+            from: "human".to_owned(),
+            to: Some("zeus".to_owned()),
+            body: "Parser".to_owned(),
+            ..cf_ledger::NewTask::default()
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    context.tell(project.id, "zeus", 1, "Use the v2 grammar");
+    rounds(&context);
+    context.host.exits_showing(Some(0), None, None);
+    context.pass().unwrap();
+    assert_eq!(context.host.killed().len(), 1, "a hung turn is closed");
+    assert_eq!(
+        closes_told(&context, project.id),
+        CLOSED,
+        "one note to each"
     );
 }

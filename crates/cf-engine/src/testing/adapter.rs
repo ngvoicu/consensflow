@@ -23,8 +23,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, FirstMessage, Input, Interrupt, Launch, Prepared, Readiness, Skill, Trusts,
-    Waiting, Window, Work,
+    Adapter, Admission, FirstMessage, Input, Interrupt, Launch, Over, Prepared, Readiness, Skill,
+    Trusts, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
@@ -101,10 +101,10 @@ pub struct FakeAgent {
     /// Its harness says its window waits at its prompt, whatever its record says of the
     /// turn ([`Observed::at_prompt`]): set by [`FakeAdapter::answer_never_over`].
     pub at_prompt: bool,
-    /// Its record says its turn is over though its status kept the look from
-    /// reading it settled (`Observed::over`): Claude's busy while a background
+    /// Whether its record says its turn is over though its status kept the look
+    /// from reading it settled (`Observed::over`): Claude's busy while a background
     /// agent runs, after a turn an interrupt or a refusal ended.
-    pub over: bool,
+    pub over: Over,
     /// Interrupted, its turn ends in its record and its status stays busy: the
     /// look reads it over, not settled (a Claude whose background agents run).
     pub busy_when_interrupted: bool,
@@ -408,7 +408,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(item);
             agent.settled = true;
-            agent.over = false;
+            agent.over = Over::No;
             agent.pending = Pending::default();
             agent.monitors.clear();
             agent.took_back = false;
@@ -424,7 +424,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(item);
             agent.settled = false;
-            agent.over = false;
+            agent.over = Over::No;
             agent.at_prompt = true;
             agent.pending = Pending::default();
             agent.monitors.clear();
@@ -484,7 +484,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(item);
             agent.settled = false;
-            agent.over = false;
+            agent.over = Over::No;
             agent.pending = Pending::default();
             agent.monitors.clear();
             agent.took_back = false;
@@ -506,7 +506,7 @@ impl FakeAdapter {
     pub fn busy(&self, handle: &str) {
         self.with(handle, |agent| {
             agent.settled = false;
-            agent.over = false;
+            agent.over = Over::No;
             agent.pending = Pending::default();
             agent.monitors.clear();
             agent.took_back = false;
@@ -592,7 +592,7 @@ impl FakeAdapter {
             agent.quota = Some(Arc::new(quota));
             agent.failed = true;
             agent.settled = true;
-            agent.over = false;
+            agent.over = Over::No;
             agent.at_prompt = false;
             agent.pending = Pending::default();
             agent.monitors.clear();
@@ -608,7 +608,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(said);
             agent.settled = false;
-            agent.over = false;
+            agent.over = Over::No;
             agent.pending = Pending::default();
             agent.failed = false;
             agent.took_back = false;
@@ -895,7 +895,7 @@ impl Asked {
             takes_back: false,
             took_back: false,
             at_prompt: false,
-            over: false,
+            over: Over::No,
             busy_when_interrupted: false,
             cannot_tell_a_cut: false,
             resumable: Some(true),

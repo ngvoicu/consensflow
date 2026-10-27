@@ -65,8 +65,8 @@ use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
-    Adapter, Admission, FirstMessage, Held, Input, Launch, Observed, Pane, PaneHost, Prepared,
-    Question, Readiness, Records, ServersChosen, Skill, Trusts, Waiting, Window, Work,
+    Adapter, Admission, FirstMessage, Held, Input, Launch, Observed, Over, Pane, PaneHost,
+    Prepared, Question, Readiness, Records, ServersChosen, Skill, Trusts, Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
@@ -187,6 +187,7 @@ impl Adapter for ClaudeAdapter {
                     restored: Cell::new(false),
                     read_empty: Cell::new(None),
                     left_open: RefCell::new(left_open),
+                    over_since: RefCell::new(None),
                     relaunched,
                     trusts: trust::trusts(launch.directory),
                     directory: launch.directory.to_owned(),
@@ -277,6 +278,11 @@ struct ClaudeWindow {
     /// The turn the record had open when the window was opened, while the
     /// window has begun no turn of its own: the old process's.
     left_open: RefCell<Option<LeftOpen>>,
+    /// Since when the looks have read the turn of this last user message over by
+    /// the record while the window was not at rest (the wall clock, in
+    /// milliseconds): Claude says busy a moment before it appends the message of
+    /// a turn it begins, and the turn before reads over meanwhile.
+    over_since: RefCell<Option<(i64, Option<Arc<str>>)>>,
     /// The conversation the window was opened again on, and how many bytes its
     /// transcript held then, the window it was on closed: where the program
     /// the window runs began writing.
@@ -300,6 +306,30 @@ fn told(relaunched: Option<&(String, u64)>, session: &str) -> Options {
 }
 
 impl ClaudeWindow {
+    /// Whether the record says the window's turn is over, though the look is not
+    /// at rest (`reads_over`), and has said so for [`stopped::HOLD_MS`] of the same
+    /// turn ([`Over`]): Claude's status goes busy a moment before the message of a
+    /// turn it begins is in the record, and a look in that moment reads the turn
+    /// before over (Calliope on T-551, T-644). A turn whose message came since
+    /// begins the wait anew.
+    fn held_over(&self, reads_over: bool) -> Over {
+        let mut since = self.over_since.borrow_mut();
+        if !reads_over {
+            *since = None;
+            return Over::No;
+        }
+        let now = self.time.wall_ms();
+        let turn = self.asked.borrow().clone();
+        match since.as_ref() {
+            Some((at, of)) if *of == turn && now - at >= stopped::HOLD_MS => Over::Held,
+            Some((_, of)) if *of == turn => Over::Pending,
+            _ => {
+                *since = Some((now, turn));
+                Over::Pending
+            }
+        }
+    }
+
     /// Claude's status of the window's process: the pane's own child's,
     /// when the host named it and Claude keeps one, else the status of the
     /// process that first named the window's conversation.
@@ -498,7 +528,7 @@ impl Window for ClaudeWindow {
             };
             Ok(match live {
                 Some(live) if self.elsewhere(&live) => {
-                    switched_to(observed(false, false, None, false, false), live.session)
+                    switched_to(observed(false, Over::No, None, false, false), live.session)
                 }
                 live => {
                     // Claude's own status is the word on whether the window
@@ -543,9 +573,11 @@ impl Window for ClaudeWindow {
                         .is_some_and(|open| open.still(&reading));
                     // The record's word that the turn is over stands whatever the
                     // status says: busy while a background agent runs, after a turn
-                    // an interrupt or a refusal ended with no count of them (T-604).
+                    // an interrupt or a refusal ended with no count of them (T-604),
+                    // once it has stood a moment.
                     let at_rest = at_prompt && (settled || empty || left) || by_press;
-                    observed(at_rest, settled && !at_rest, waiting, by_press, at_prompt)
+                    let over = self.held_over(settled && !at_rest);
+                    observed(at_rest, over, waiting, by_press, at_prompt)
                 }
             })
         })

@@ -15,8 +15,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Admission, Held, Observed, Pane, PaneHost, Question, Readiness, Trusts, Waiting, Window, Work,
-    NOT_ADMITTED,
+    Admission, Held, Observed, Over, Pane, PaneHost, Question, Readiness, Trusts, Waiting, Window,
+    Work, NOT_ADMITTED,
 };
 use cf_harness::records::{Item, Lines, Reading, Record, Role, Settlement};
 use serde_json::{json, Value};
@@ -344,7 +344,7 @@ impl Window for FakeWindow {
                 agent.took_back = agent.takes_back;
             }
             if agent.busy_when_interrupted {
-                agent.over = true;
+                agent.over = Over::Held;
             }
         });
     }
@@ -379,7 +379,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
         return Observed {
             reading: reading(agent.records.get(session).cloned().unwrap_or_default()),
             settled: false,
-            over: false,
+            over: Over::No,
             waiting: None,
             failed: agent.failed,
             quota: agent.quota.clone(),

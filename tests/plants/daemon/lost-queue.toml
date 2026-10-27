@@ -403,8 +403,8 @@ runs = ["lost-queue-adapter"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''observed(at_rest, settled && !at_rest, waiting, by_press, at_prompt)'''
-replace = '''observed(at_rest, settled && !at_rest, waiting, by_press, false)'''
+find = '''observed(at_rest, over, waiting, by_press, at_prompt)'''
+replace = '''observed(at_rest, over, waiting, by_press, false)'''
 
 [[plant]]
 name = "lost-queue: a relaunch empties what was queued but keeps what the closing process took"
