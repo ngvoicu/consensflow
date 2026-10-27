@@ -378,10 +378,15 @@ pub fn claude_project_key(folder: &str) -> String {
     project_key(folder, cfg!(windows))
 }
 
-/// [`claude_project_key`] for a system that is Windows (`windows`) or is not.
+/// [`claude_project_key`] for a system that is Windows (`windows`) or is not. A folder the
+/// system canonicalized has Windows' verbatim prefix (`\\?\C:\Users\…`), which Claude Code never
+/// sees in the folder it works in.
 fn project_key(folder: &str, windows: bool) -> String {
     if windows {
-        folder.replace('\\', "/")
+        folder
+            .strip_prefix(r"\\?\")
+            .unwrap_or(folder)
+            .replace('\\', "/")
     } else {
         folder.to_owned()
     }

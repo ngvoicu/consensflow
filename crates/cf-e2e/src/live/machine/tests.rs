@@ -556,6 +556,11 @@ fn claude_code_keeps_a_folder_on_windows_with_forward_slashes_and_elsewhere_as_i
         project_key(folder, true),
         "C:/Users/AGV/.consensflow-candidate/live"
     );
+    // The verbatim prefix a canonical path has on Windows is not part of the folder.
+    assert_eq!(
+        project_key(r"\\?\C:\Users\AGV\live", true),
+        "C:/Users/AGV/live"
+    );
     // A backslash is a character of a name on the other systems.
     assert_eq!(project_key(folder, false), folder);
     assert_eq!(project_key("/home/me/live", true), "/home/me/live");
