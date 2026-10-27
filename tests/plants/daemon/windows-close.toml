@@ -406,6 +406,8 @@ replace = '''
 name = "windows close: the host tells the daemon and retires the pane as it did, by retire_exited"
 meant = "a_program_whose_console_host_died_is_ended_and_gone_before_the_daemon_hears_its_window_closed"
 runs = ["panes-handlers-windows", "headless-cleans-up"]
+# Its meant test is Windows' alone (T-487's plan, integration B round 2).
+platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
