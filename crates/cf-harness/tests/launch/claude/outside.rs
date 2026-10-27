@@ -216,6 +216,34 @@ fn a_window_followed_to_another_conversation_shares_it_only_if_another_claude_sh
     );
 }
 
+/// The window's own Claude is found by the conversation it shows where the host did not name
+/// it (on Windows the pane's program is not Claude's own process): a Claude that showed the
+/// conversation before the window opened is not it, whatever order Claude's statuses are listed
+/// in. Taken for the window's, its status stood for the window's on every look: the window read
+/// at its prompt while its own Claude worked, and a window followed to another conversation read
+/// as switched (zeewin2, 2 of 5: the relaunch plant missed, integration B round 2, T-800).
+#[test]
+fn a_claude_that_showed_the_conversation_before_the_window_opened_never_speaks_for_its_state() {
+    let home = Home::new();
+    let other = OtherProcess::start();
+    home.status(SESSION, &json!({ "status": "idle" }), other.pid());
+    home.transcript(SESSION, &left_queued());
+    let request = Request {
+        message: Some(REOPENED.to_owned()),
+        ..Request::resumed(SESSION)
+    };
+    let window = window(&home.adapter(), &request);
+    // The window's own Claude has said nothing yet: the other's idle is not the window's.
+    assert!(!finished(window.observe()).unwrap().at_prompt);
+    home.status(SESSION, &json!({ "status": "busy" }), me());
+    assert!(
+        !finished(window.observe()).unwrap().at_prompt,
+        "the window's own Claude works"
+    );
+    home.status(SESSION, &json!({ "status": "idle" }), me());
+    assert!(finished(window.observe()).unwrap().at_prompt);
+}
+
 #[test]
 fn a_claude_that_showed_the_conversation_before_the_window_opened_is_never_taken_for_the_windows() {
     // The window's own Claude has written no status yet: the one that names the conversation

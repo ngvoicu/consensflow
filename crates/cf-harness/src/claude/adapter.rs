@@ -372,7 +372,10 @@ impl ClaudeWindow {
 
     /// Claude's status of the window's process: the pane's own child's,
     /// when the host named it and Claude keeps one, else the status of the
-    /// process that first named the window's conversation.
+    /// process that first named the window's conversation, but one that showed
+    /// it before the window opened (`before`): that Claude is another's, the
+    /// human's outside ConsensFlow or the program before the window's, however
+    /// Claude's statuses are listed (T-800).
     fn status(&self) -> Option<Status> {
         let statuses = status::statuses(&self.statuses);
         let of = |pid: u32| {
@@ -386,9 +389,10 @@ impl ClaudeWindow {
         }
         if self.claude_pid.get().is_none() {
             let session = self.session.borrow();
+            let before = self.before.borrow();
             let named = statuses
                 .iter()
-                .find(|(_, status)| status.session == *session);
+                .find(|(pid, status)| status.session == *session && !before.contains(pid));
             self.claude_pid.set(named.map(|(pid, _)| *pid));
         }
         self.claude_pid.get().and_then(of)
