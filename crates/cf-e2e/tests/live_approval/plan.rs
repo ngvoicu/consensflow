@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn every_harness_is_the_chief_of_one_project_and_holds_every_other_seat_once() {
         let all = projects(&[], &[]);
-        assert_eq!(all.len(), 5);
+        assert_eq!(all.len(), Harness::ALL.len());
         for harness in Harness::ALL {
             let seat = |of: fn(&Seats) -> Harness| {
                 all.iter()
