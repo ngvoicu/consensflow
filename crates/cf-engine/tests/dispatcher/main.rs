@@ -63,6 +63,7 @@ mod looks;
 mod looks_finished;
 mod lost_lines;
 mod meeting_main;
+mod moved_models;
 mod no_adapter;
 mod not_ready;
 mod nothing_to_stop;

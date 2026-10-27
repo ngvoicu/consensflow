@@ -1,0 +1,273 @@
+//! A member whose harness moved its window's model on its own (MUS-24, T-816): held, as an
+//! account that refused for its billing is, and released by the human's word for that member
+//! alone, never by a teammate's turn, an allowance or another window's answer, or the
+//! engine would paste into a window on a model nobody chose. A model that only drifts in the
+//! harness's records is told once and never held on. A move dated before the window opened is
+//! history.
+
+use cf_engine::testing::Context;
+use cf_harness::records::{Level, ModelMoved, Quota};
+use std::sync::Arc;
+
+use crate::fixtures::{after, given, now, placed, Tiers};
+
+/// What Claude Code's own `fallback` record says, at `at`.
+fn fell_back(at: &str) -> ModelMoved {
+    ModelMoved {
+        from: "claude-fable-5-1".to_owned(),
+        to: "claude-opus-4-8".to_owned(),
+        because: "Claude Code fell back to another model (its own `fallback` record)".to_owned(),
+        at: Some(at.to_owned()),
+    }
+}
+
+/// The notes the human was sent, oldest first.
+fn human_notes(tiers: &Tiers) -> Vec<String> {
+    crate::fixtures::notes(tiers.context, tiers.context.id(tiers.project.id, "human"))
+}
+
+/// zeus and diana, each at work on a task, on a harness whose windows are on one account;
+/// zeus's window then reads a move of the model.
+fn zeus_moved(context: &Context) -> (Tiers<'_>, String, String) {
+    context.adapter.one_account.set(true);
+    let tiers = Tiers::new(context, &["zeus", "diana"]);
+    tiers.open_body("One");
+    tiers.open_body("Two");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let (zeus, diana) = (tiers.assignee(1), tiers.assignee(2));
+    assert!(
+        zeus.starts_with("zeus") && diana.starts_with("diana"),
+        "{zeus} {diana}"
+    );
+    context.advance(60_000);
+    context
+        .adapter
+        .refuse(&zeus, fell_back(&now(context)).as_quota());
+    context.pass().unwrap();
+    context.pass().unwrap();
+    (tiers, zeus, diana)
+}
+
+#[test]
+fn a_teammates_turn_and_the_humans_word_for_another_member_release_no_member_held_for_a_move() {
+    let context = Context::new();
+    let (tiers, zeus, diana) = zeus_moved(&context);
+    let held = |tiers: &Tiers| tiers.out_until("zeus").is_some();
+    assert!(held(&tiers), "zeus is held for the move");
+    assert_eq!(tiers.task(1).task.state, "paused");
+    // diana finishes a turn on the same account: no word for zeus.
+    context.advance(60_000);
+    context.adapter.writes(&diana, "Going on.", &now(&context));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(held(&tiers), "a teammate's turn is no word for zeus");
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert!(
+        given(&context, &zeus)
+            .iter()
+            .all(|said| !said.contains("Resumed:")),
+        "nothing was pasted into the moved window: {:?}",
+        given(&context, &zeus)
+    );
+    // The human's Try again now on diana is for diana alone.
+    context.back_from_quota(tiers.project.id, "diana").unwrap();
+    context.pass().unwrap();
+    assert!(held(&tiers), "Try again now on diana is not on zeus");
+    assert_eq!(tiers.task(1).task.state, "paused");
+    // The sentinel names no time and says why it is held.
+    assert!(tiers
+        .out_until("zeus")
+        .is_some_and(|until| until.starts_with("9999-")));
+}
+
+#[test]
+fn the_humans_word_for_that_member_brings_it_back_and_its_task_goes_on() {
+    let context = Context::new();
+    let (tiers, zeus, _) = zeus_moved(&context);
+    context.back_from_quota(tiers.project.id, "zeus").unwrap();
+    // Its window reads at rest again: the human put the model back, or accepted it.
+    context.adapter.with(&zeus, |agent| {
+        agent.quota = None;
+        agent.failed = false;
+    });
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), None);
+    assert_eq!(
+        placed(&tiers.task(1).task),
+        ("working", Some(zeus.as_str()))
+    );
+    assert!(
+        given(&context, &zeus)
+            .iter()
+            .any(|said| said.contains("Resumed:")),
+        "{:?}",
+        given(&context, &zeus)
+    );
+}
+
+#[test]
+fn another_window_of_the_member_that_answers_and_an_allowance_release_no_hold_for_a_move() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open_body("One");
+    tiers.open_body("Two");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let (one, two) = (tiers.assignee(1), tiers.assignee(2));
+    context.advance(60_000);
+    context
+        .adapter
+        .refuse(&one, fell_back(&now(&context)).as_quota());
+    context.pass().unwrap();
+    assert!(tiers.out_until("zeus").is_some());
+    // The member's other window gets a turn through a minute later.
+    context.advance(60_000);
+    context.adapter.writes(&two, "Going on.", &now(&context));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(
+        tiers.out_until("zeus").is_some(),
+        "another window's answer is no word for the move"
+    );
+    assert_eq!(tiers.task(1).task.state, "paused");
+    // And a count that is not used up, which brings an unavailable account back, does not.
+    context.adapter.with(&one, |agent| {
+        agent.failed = false;
+        agent.quota = Some(Arc::new(Quota::Usage {
+            level: Level::Ok,
+            used_percent: Some(3.into()),
+            resets_at: None,
+        }));
+    });
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(
+        tiers.out_until("zeus").is_some(),
+        "an allowance is no word for the move"
+    );
+    assert_eq!(tiers.task(1).task.state, "paused");
+}
+
+#[test]
+fn the_requester_and_the_human_are_told_why_once_in_words_of_the_move_not_of_a_billing() {
+    let context = Context::new();
+    let (tiers, zeus, _) = zeus_moved(&context);
+    let waits: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|note| note.contains(" waits with @"))
+        .collect();
+    assert_eq!(waits.len(), 1, "{waits:?}");
+    assert!(
+        waits[0].starts_with(&format!("T-1 waits with @{zeus}: its model moved from claude-fable-5-1 to claude-opus-4-8 on its own")),
+        "{}",
+        waits[0]
+    );
+    assert!(!waits[0].contains("account"), "{}", waits[0]);
+    let told = human_notes(&tiers);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(told[0].contains("a model nobody chose"), "{}", told[0]);
+    assert!(told[0].contains("Try again now"), "{}", told[0]);
+    assert!(!told[0].contains("account is unavailable"), "{}", told[0]);
+    for _ in 0..3 {
+        context.advance(3_600_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(human_notes(&tiers).len(), 1);
+}
+
+#[test]
+fn a_move_dated_before_the_window_opened_holds_nothing_and_one_after_it_does() {
+    // A Resume of a project whose transcript holds an old change: the window opens now, and what
+    // its harness's record says was written before is history.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let zeus = tiers.assignee(1);
+    let old = after(&context, -3_600_000);
+    context
+        .adapter
+        .quota(&zeus, Some(fell_back(&old).as_quota()));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), None, "an old move holds nothing");
+    assert_eq!(
+        placed(&tiers.task(1).task),
+        ("working", Some(zeus.as_str()))
+    );
+    // One written after the window opened holds.
+    context.advance(60_000);
+    context
+        .adapter
+        .quota(&zeus, Some(fell_back(&now(&context)).as_quota()));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(tiers.out_until("zeus").is_some());
+    assert_eq!(tiers.task(1).task.state, "paused");
+}
+
+#[test]
+fn a_model_that_only_drifts_is_told_to_the_human_once_and_holds_nothing() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let zeus = tiers.assignee(1);
+    context.advance(60_000);
+    let at = now(&context);
+    context
+        .adapter
+        .drifts(&zeus, "claude-opus-5", "claude-opus-5-5", Some(&at));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), None, "a drift holds no member");
+    assert_eq!(
+        placed(&tiers.task(1).task),
+        ("working", Some(zeus.as_str()))
+    );
+    let told = human_notes(&tiers);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(
+        told[0].contains("claude-opus-5") && told[0].contains("claude-opus-5-5"),
+        "{}",
+        told[0]
+    );
+    assert!(told[0].contains("Nothing is held"), "{}", told[0]);
+    // The same drift read at every look is told once; another is told again.
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(human_notes(&tiers).len(), 1);
+    context.advance(60_000);
+    context.adapter.drifts(
+        &zeus,
+        "claude-opus-5-5",
+        "claude-opus-5",
+        Some(&now(&context)),
+    );
+    context.pass().unwrap();
+    assert_eq!(human_notes(&tiers).len(), 2);
+}
+
+#[test]
+fn a_drift_dated_before_the_window_opened_is_not_told() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let zeus = tiers.assignee(1);
+    let old = after(&context, -3_600_000);
+    context
+        .adapter
+        .drifts(&zeus, "claude-opus-5", "claude-opus-5-5", Some(&old));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(human_notes(&tiers), Vec::<String>::new());
+}

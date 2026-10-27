@@ -26,7 +26,7 @@ use cf_harness::contract::{
     Adapter, Admission, Input, Interrupt, Launch, Prepared, Readiness, Skill, Trusts, Waiting,
     Window, Work,
 };
-use cf_harness::records::{Item, Monitor, Pending, Quota, Role};
+use cf_harness::records::{Item, ModelMoved, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::{json, Value};
@@ -56,6 +56,9 @@ pub struct FakeAgent {
     pub says_places: bool,
     pub waiting: Option<Waiting>,
     pub quota: Option<Arc<Quota>>,
+    /// The model its harness's records say changed with no word of the harness's own
+    /// for it (Claude Code's drift): said to the human, never held on.
+    pub model_drift: Option<Arc<ModelMoved>>,
     /// Whether a delivery is taken.
     pub admit: bool,
     /// Whether a delivery taken shows in the record.
@@ -576,12 +579,26 @@ impl FakeAdapter {
         self.with(handle, |agent| agent.quota = quota.map(Arc::new));
     }
 
+    /// The window's records say its model changed from `from` to `to` at `at`, with no word
+    /// of its harness's own for it.
+    pub fn drifts(&self, handle: &str, from: &str, to: &str, at: Option<&str>) {
+        let drift = ModelMoved {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            because: "its records name another model with no word of Claude Code's own for it"
+                .to_owned(),
+            at: at.map(str::to_owned),
+        };
+        self.with(handle, |agent| agent.model_drift = Some(Arc::new(drift)));
+    }
+
     /// The harness refuses the turn, as Claude Code writes its limit: the
     /// turn ends on the refusal, which the record reads as a failure.
     pub fn refuse(&self, handle: &str, quota: Quota) {
         let mut item = self.item(Role::Assistant, "You've hit your weekly limit");
-        if let Quota::Exhausted { at: Some(at), .. } | Quota::Unavailable { at: Some(at), .. } =
-            &quota
+        if let Quota::Exhausted { at: Some(at), .. }
+        | Quota::Unavailable { at: Some(at), .. }
+        | Quota::Moved { at: Some(at), .. } = &quota
         {
             item.at = Some(json!(at));
         }
@@ -871,6 +888,7 @@ impl Asked {
             says_places: fake.says_places.get(),
             waiting: None,
             quota: None,
+            model_drift: None,
             admit: true,
             arrive: true,
             queued: false,
