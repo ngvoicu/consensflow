@@ -318,6 +318,17 @@ impl Rollout {
     /// comes after it (`reset_after`).
     fn refusal(&self, error: Option<&Value>, at: &Value) -> Option<Arc<Quota>> {
         let info = field(error, "codex_error_info").and_then(Value::as_str);
+        // A login Codex refused (expired, revoked) resets nothing: the account is unavailable
+        // until its human logs in again (MUS-23).
+        if info == Some("unauthorized") {
+            return Some(Arc::new(Quota::Unavailable {
+                at: at.as_str().and_then(time::parse).map(time::iso),
+                because: format!(
+                    "its login was refused: {}",
+                    Self::error_words(error).unwrap_or_default()
+                ),
+            }));
+        }
         if !info.is_some_and(|info| LIMITS.contains(&info)) {
             return None;
         }

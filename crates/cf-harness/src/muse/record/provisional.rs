@@ -14,7 +14,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use super::field;
-use crate::shared::quota::Quota;
+use crate::shared::quota::{account_refusal, Quota, Refusal};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::reading::{native_id, Pending, Role};
 
@@ -153,17 +153,36 @@ impl Provisional {
         }
     }
 
-    /// A run that failed for `reason`, at `at`: a refusal for quota where its words are
-    /// one of Muse's limits. Provisional (MUS-14): the 402 below is the one refusal
-    /// seen (the Mac's billing, T-700); a spent allowance's words were never seen.
-    pub(super) fn failed(&mut self, run: &Arc<str>, reason: Option<&str>, at: &Value) {
-        if reason.is_some_and(refused_for_quota) {
-            let refusal = Quota::Exhausted {
-                at: at.as_str().map(str::to_owned),
-                resets_at: None,
-            };
-            self.refusals.insert(Arc::clone(run), Arc::new(refusal));
-        }
+    /// A run that failed for `reason`, at `at`: what the account refused for, where its
+    /// words say it, and the plain words for the failure it is. A usage limit is a quota
+    /// that resets (provisional, MUS-14: only the 429 shape and Muse's own "usage limit
+    /// reached" are known, a subscribed account has not shown one); a refusal for billing
+    /// or for the login is the account unavailable, with no reset, only the human's fix
+    /// (MUS-23; the 402 is the refusal seen, T-705).
+    pub(super) fn failed(
+        &mut self,
+        run: &Arc<str>,
+        reason: Option<&str>,
+        at: &Value,
+    ) -> Option<&'static str> {
+        let at = at.as_str().map(str::to_owned);
+        let (refusal, plain) = match refused_for(reason?)? {
+            Refused::Limit => (
+                Quota::Exhausted {
+                    at,
+                    resets_at: None,
+                },
+                None,
+            ),
+            Refused::Account(Refusal::Billing) => {
+                (unavailable(at, NO_ALLOWANCE), Some(NO_ALLOWANCE))
+            }
+            Refused::Account(Refusal::Credentials) => {
+                (unavailable(at, LOGIN_REFUSED), Some(LOGIN_REFUSED))
+            }
+        };
+        self.refusals.insert(Arc::clone(run), Arc::new(refusal));
+        plain
     }
 
     /// Whether the run `run` holds a tool call or a question open.
@@ -190,14 +209,52 @@ impl Provisional {
     }
 }
 
-/// Muse's words for a refused request that its account's limits refused: an API error
-/// 429 (a rate or usage limit) or 402 (credit or billing), or its own "usage limit
-/// reached". Provisional (MUS-14).
-fn refused_for_quota(reason: &str) -> bool {
-    let reason = reason.to_ascii_lowercase();
-    ["api error 429", "api error 402", "usage limit reached"]
+/// A failure of a turn that the account refused: by a limit that resets, or for what
+/// only its human cures.
+enum Refused {
+    Limit,
+    Account(Refusal),
+}
+
+/// The plain words of a failure for billing (MUS-23): what `muse usage` calls
+/// `no_allowance`, where the human fixes it.
+const NO_ALLOWANCE: &str = "Muse refused: the account has no allowance; set up billing at accountscenter.meta.com/muse_code";
+
+/// The plain words of a failure for the login.
+const LOGIN_REFUSED: &str = "Muse refused: its login is not valid; run `muse login`";
+
+fn unavailable(at: Option<String>, because: &str) -> Quota {
+    Quota::Unavailable {
+        at,
+        because: because.to_owned(),
+    }
+}
+
+/// What Muse's words for a failed request say the account refused for. A turn's reason
+/// is `API error <status> [request_id=…]: <message> (<kind>)` for a refused request
+/// (`billing_error`, T-705), or Muse's own words for no login. A 429 or Muse's "usage
+/// limit reached" is a limit that resets; a 402 or 401 and the words the other harnesses
+/// share (`account_refusal`) are the account's own. Provisional (MUS-14): a spent
+/// allowance's words were never seen.
+fn refused_for(reason: &str) -> Option<Refused> {
+    let lower = reason.to_ascii_lowercase();
+    if lower.contains("no meta credentials") || lower.contains("not logged in") {
+        return Some(Refused::Account(Refusal::Credentials));
+    }
+    if let Some(refusal) = account_refusal(reason, api_status(&lower)) {
+        return Some(Refused::Account(refusal));
+    }
+    ["api error 429", "usage limit reached"]
         .iter()
-        .any(|words| reason.contains(words))
+        .any(|words| lower.contains(words))
+        .then_some(Refused::Limit)
+}
+
+/// The status of `API error <status>`, in a lowercased reason.
+fn api_status(lower: &str) -> Option<f64> {
+    let after = lower.split("api error ").nth(1)?;
+    let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
+    (digits.len() == 3).then(|| digits.parse().ok()).flatten()
 }
 
 /// The elements of a list; none of anything else.

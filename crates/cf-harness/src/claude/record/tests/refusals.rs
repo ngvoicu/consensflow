@@ -39,7 +39,6 @@ fn a_status_of_429_and_an_error_that_is_rate_limit_are_each_a_refusal_for_quota(
         (r#"{"apiErrorStatus":"429"}"#, false),
         (r#"{"apiErrorStatus":[429]}"#, false),
         (r#"{"apiErrorStatus":true}"#, false),
-        (r#"{"apiErrorStatus":402}"#, false),
         (r#"{"apiErrorStatus":500,"error":"overloaded"}"#, false),
         (r#"{"error":"Rate_Limit"}"#, false),
         (r#"{"error":["rate_limit"]}"#, false),
@@ -300,4 +299,61 @@ fn a_refused_turn_keeps_the_words_the_api_refused_it_in_and_the_next_turn_drops_
     );
     let next = user("u2", json!("a1"), json!("Try again"));
     assert_eq!(failure_of(&[hello(), refusal, next]), None);
+}
+
+/// The `quota` of the reading of a refusal that says `said` and has `fields`.
+fn quota_of(said: &str, fields: &str) -> Value {
+    let record = having(
+        assistant(
+            "a1",
+            "u1",
+            json!("m1"),
+            json!([text(json!(said))]),
+            Value::Null,
+        ),
+        json!({ "isApiErrorMessage": true, "timestamp": "2026-09-19T10:00:00.000Z" }),
+    );
+    let record = having(record, serde_json::from_str(fields).unwrap());
+    let reading: Value = serde_json::from_str(&once(&[hello(), record])).unwrap();
+    reading["quota"].clone()
+}
+
+#[test]
+fn a_refusal_of_the_accounts_billing_or_login_is_the_account_unavailable_and_no_quota_that_resets()
+{
+    // MUS-23: a 402, a 401, and the words Anthropic gives an API account with no credit or
+    // a key it does not know have no reset, as a 429's has: unavailable until the human fixes it.
+    for (said, fields, because) in [
+        (
+            "Payment required.",
+            r#"{"apiErrorStatus":402}"#,
+            "its billing was refused: Payment required.",
+        ),
+        (
+            "Invalid API key",
+            r#"{"apiErrorStatus":401}"#,
+            "its login was refused: Invalid API key",
+        ),
+        (
+            "Your credit balance is too low to access the Anthropic API.",
+            r#"{"apiErrorStatus":400}"#,
+            "its billing was refused: Your credit balance is too low to access the Anthropic API.",
+        ),
+    ] {
+        let quota = quota_of(said, fields);
+        assert_eq!(
+            quota,
+            json!({ "state": "unavailable", "at": AT, "resetsAt": null, "because": because }),
+            "{said}"
+        );
+    }
+    // A limit that resets is a quota still, and a server's error is neither.
+    assert_eq!(
+        quota_of("You've hit your limit.", r#"{"apiErrorStatus":429}"#)["state"],
+        "exhausted"
+    );
+    assert_eq!(
+        quota_of("Overloaded", r#"{"apiErrorStatus":529}"#),
+        Value::Null
+    );
 }

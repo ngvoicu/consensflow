@@ -87,6 +87,25 @@ fn another_error_fails_its_turn_and_says_nothing_of_quota() {
 }
 
 #[test]
+fn a_turn_ended_for_a_login_codex_refused_is_the_account_unavailable_and_no_quota_that_resets() {
+    // MUS-23: `unauthorized` (an expired or revoked login) has no reset, as a usage limit has.
+    let read = read(&[
+        limits(40.0, RESETS),
+        started(json!("t1")),
+        failed("t1", "unauthorized", AT),
+    ])
+    .unwrap();
+    assert!(read.failed);
+    assert_eq!(
+        read.quota.as_deref(),
+        Some(&Quota::Unavailable {
+            at: Some(AT.to_owned()),
+            because: "its login was refused: You've hit your usage limit.".to_owned(),
+        })
+    );
+}
+
+#[test]
 fn the_next_turn_takes_the_refusal_back_and_the_limits_say_again() {
     let read = read(&[
         started(json!("t1")),

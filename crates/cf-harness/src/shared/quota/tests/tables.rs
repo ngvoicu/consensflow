@@ -67,9 +67,16 @@ fn every_error_text_of_the_table_is_told_a_refusal_for_quota_as_node_told_it() {
         } else {
             js::text(Some(&row["text"])).into_owned()
         };
+        // Node read a 402 as a quota; a billing refusal is none since MUS-23 (a
+        // difference kept from Node: it has no reset, `account_refusal`).
+        let expected = if account_refusal(&text, None) == Some(Refusal::Billing) {
+            Value::Bool(false)
+        } else {
+            row["refused"].clone()
+        };
         assert_eq!(
             js::stringify(&Value::Bool(refused_for_quota(&text))),
-            js::stringify(&row["refused"]),
+            js::stringify(&expected),
             "{text:?}"
         );
     }
@@ -81,9 +88,16 @@ fn every_status_of_the_table_is_told_a_refusal_for_quota_as_node_told_it() {
     let rows = quota_tables()["statuses"].as_array().unwrap().clone();
     for row in &rows {
         let status = (!is_undefined(&row["status"])).then_some(&row["status"]);
+        let number = js::to_number(status).unwrap();
+        // Node read a 402 as a quota; it is none since MUS-23 (a difference kept from Node).
+        let expected = if (number - 402.0).abs() < f64::EPSILON {
+            Value::Bool(false)
+        } else {
+            row["quota"].clone()
+        };
         assert_eq!(
-            js::stringify(&Value::Bool(quota_status(js::to_number(status).unwrap()))),
-            js::stringify(&row["quota"]),
+            js::stringify(&Value::Bool(quota_status(number))),
+            js::stringify(&expected),
             "{status:?}"
         );
     }

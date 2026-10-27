@@ -212,27 +212,25 @@ fn a_turn_refused_for_the_accounts_limits_says_the_quota_spent_at_its_time() {
             ),
         ])
     };
-    // The one refusal seen (T-700): the Mac's billing, a 402.
-    let billing = refused(
-        "run ended with Failed: API error 402 [request_id=x]: Billing verification failed. (billing_error)",
-    );
-    assert!(billing.failed);
-    let Some(quota) = billing.quota.as_deref() else {
-        panic!("no quota");
-    };
-    assert!(matches!(
-        quota,
-        Quota::Exhausted {
-            resets_at: None,
-            ..
-        }
-    ));
-    assert!(quota.at().is_some_and(|at| at.starts_with("2026-10-26T")));
     for reason in [
         "API error 429: rate limited",
         "Usage limit reached. Check /usage.",
     ] {
-        assert!(refused(reason).quota.is_some(), "{reason}");
+        let quota = refused(reason).quota;
+        let Some(quota) = quota.as_deref() else {
+            panic!("{reason}: no quota");
+        };
+        assert!(
+            matches!(
+                quota,
+                Quota::Exhausted {
+                    resets_at: None,
+                    ..
+                }
+            ),
+            "{reason}: {quota:?}"
+        );
+        assert!(quota.at().is_some_and(|at| at.starts_with("2026-10-26T")));
     }
     for reason in ["API error 500: upstream", "tool failed"] {
         assert_eq!(refused(reason).quota, None, "{reason}");
@@ -253,4 +251,48 @@ fn a_turn_refused_for_the_accounts_limits_says_the_quota_spent_at_its_time() {
         ),
     ]);
     assert_eq!(after.quota, None);
+}
+
+#[test]
+fn a_402_is_no_quota_and_an_account_whose_login_is_refused_is_unavailable_too() {
+    // MUS-23: Muse's billing refusal has no reset, in whatever words the status is
+    // said: unavailable, and a failed turn in plain words (the shape seen live is
+    // `billing-spark.jsonl`'s; these are the variants the schema allows).
+    let refused = |reason: &str| {
+        record_of(&[
+            run(2, "t1", json!({ "kind": "started" })),
+            run(
+                3,
+                "t1",
+                json!({ "kind": "terminal", "terminal": "failed", "reason": reason }),
+            ),
+        ])
+    };
+    for (reason, plain) in [
+        (
+            "run ended with Failed: API error 402 [request_id=x]: Billing verification failed. (billing_error)",
+            "Muse refused: the account has no allowance; set up billing at accountscenter.meta.com/muse_code",
+        ),
+        (
+            "API error 402: payment required",
+            "Muse refused: the account has no allowance; set up billing at accountscenter.meta.com/muse_code",
+        ),
+        (
+            "No Meta credentials were found. Run `muse login`.",
+            "Muse refused: its login is not valid; run `muse login`",
+        ),
+        (
+            "API error 401 [request_id=x]: invalid api key (authentication_error)",
+            "Muse refused: its login is not valid; run `muse login`",
+        ),
+    ] {
+        let record = refused(reason);
+        assert!(record.failed, "{reason}");
+        assert_eq!(record.failure.as_deref(), Some(plain), "{reason}");
+        let quota = record.quota;
+        let Some(Quota::Unavailable { because, .. }) = quota.as_deref() else {
+            panic!("{reason}: {quota:?}");
+        };
+        assert_eq!(because, plain, "{reason}");
+    }
 }

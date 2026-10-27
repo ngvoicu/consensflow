@@ -10,7 +10,7 @@ use serde_json::Value;
 use super::patterns::QUIET_COMMAND;
 use super::project::{Assistant, Block, Boundary, Call, Hook, Projected, ToolResult, User};
 use super::{Candidate, Terminal, Transcript};
-use crate::shared::quota::exhausted_quota;
+use crate::shared::quota::{exhausted_quota, unavailable_quota};
 use crate::shared::record::reading::{native_id, Role};
 
 impl Transcript {
@@ -125,6 +125,10 @@ impl Transcript {
             if record.rate_limited {
                 let at_ms = date_parse(record.at.as_ref())?;
                 let quota = exhausted_quota(&record.text, at_ms, &self.local)?;
+                self.quota = Some(Arc::new(quota));
+            } else if let Some(refusal) = record.account {
+                let at_ms = date_parse(record.at.as_ref())?;
+                let quota = unavailable_quota(at_ms, refusal, &record.text)?;
                 self.quota = Some(Arc::new(quota));
             }
             self.terminal = Some(Terminal::Native);

@@ -21,7 +21,7 @@ use super::jobs::Watch;
 use super::patterns::OUTPUT;
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
-use crate::shared::quota::spent_extra_usage;
+use crate::shared::quota::{account_refusal, spent_extra_usage, Refusal};
 use crate::shared::record::reading::Source;
 
 /// What Claude Code says, in a message of its own, as it closes the turn it
@@ -97,6 +97,9 @@ pub(super) struct Assistant {
     /// A refusal for quota: a status of 429, the error `rate_limit`, or words
     /// that say the account's extra usage is spent.
     pub(super) rate_limited: bool,
+    /// What the account refused for, where it is its billing or its login: no limit that
+    /// resets (MUS-23).
+    pub(super) account: Option<Refusal>,
 }
 
 /// A block of an assistant's content that opens or closes a call.
@@ -322,11 +325,13 @@ fn assistant(record: &Value, session: &str) -> Projected {
     let closes_a_cut_turn = !refused
         && in_message("model").and_then(Value::as_str) == Some("<synthetic>")
         && text == CUT_TURN_CLOSED;
+    let rate_limited = status == Some(429.0)
+        || record.get("error").and_then(Value::as_str) == Some("rate_limit")
+        || spent;
     Projected::Assistant(Box::new(Assistant {
         at: timestamp(record),
         message_id: text_id(in_message("id")),
         uuid: text_id(record.get("uuid")),
-        text,
         blocks,
         ended: matches!(
             in_message("stop_reason").and_then(Value::as_str),
@@ -334,9 +339,13 @@ fn assistant(record: &Value, session: &str) -> Projected {
         ),
         closes_a_cut_turn,
         refused,
-        rate_limited: status == Some(429.0)
-            || record.get("error").and_then(Value::as_str) == Some("rate_limit")
-            || spent,
+        rate_limited,
+        account: if refused && !rate_limited {
+            account_refusal(&text, status)
+        } else {
+            None
+        },
+        text,
     }))
 }
 

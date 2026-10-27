@@ -235,9 +235,17 @@ impl Log {
                             .map(str::to_owned),
                     },
                 };
-                if let End::Failed { reason } = &end {
-                    self.provisional.failed(&run, reason.as_deref(), at);
-                }
+                let end = match end {
+                    // Where the account refused for what only its human cures, the failure
+                    // is said in plain words (MUS-23), not as the API said it.
+                    End::Failed { reason } => {
+                        let plain = self.provisional.failed(&run, reason.as_deref(), at);
+                        End::Failed {
+                            reason: plain.map(str::to_owned).or(reason),
+                        }
+                    }
+                    end => end,
+                };
                 self.runs.entry(run).or_default().end = Some(end);
             }
             Some("run_retracted") => {

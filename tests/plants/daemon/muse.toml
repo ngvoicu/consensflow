@@ -351,19 +351,87 @@ replace = '''
                 if body.trim().is_empty() {
 '''
 
-# Provisional (MUS-14): a 402 is a refusal for quota.
+# MUS-23 (reversing T-703's 402-as-quota, Calliope's P2 on T-767): a billing refusal is not a
+# quota that resets. It is the account unavailable, in plain words.
 [[plant]]
-name = "muse: a 402 is no refusal for quota"
+name = "muse: a 402 is a quota that resets"
+meant = "a_refusal_for_billing_is_a_failed_turn_in_plain_words_and_an_account_no_reset_cures"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/provisional.rs"
+find = '''
+            Refused::Account(Refusal::Billing) => (unavailable(at, NO_ALLOWANCE), Some(NO_ALLOWANCE)),
+'''
+replace = '''
+            Refused::Account(Refusal::Billing) => (
+                Quota::Exhausted {
+                    at,
+                    resets_at: None,
+                },
+                Some(NO_ALLOWANCE),
+            ),
+'''
+
+[[plant]]
+name = "muse: a 402 says no refusal"
+meant = "a_402_is_no_quota_and_an_account_whose_login_is_refused_is_unavailable_too"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/provisional.rs"
+find = '''
+    if let Some(refusal) = account_refusal(reason, api_status(&lower)) {
+'''
+replace = '''
+    if let Some(refusal) = account_refusal(reason, api_status(&lower)).filter(|_| false) {
+'''
+
+[[plant]]
+name = "muse: a billing refusal is told in the API's words"
+meant = "a_refusal_for_billing_is_a_failed_turn_in_plain_words_and_an_account_no_reset_cures"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''
+                            reason: plain.map(str::to_owned).or(reason),
+'''
+replace = '''
+                            reason: reason.or(plain.map(str::to_owned)),
+'''
+
+[[plant]]
+name = "muse: a login refusal is a billing one"
+meant = "a_402_is_no_quota_and_an_account_whose_login_is_refused_is_unavailable_too"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/provisional.rs"
+find = '''
+            Refused::Account(Refusal::Credentials) => {
+                (unavailable(at, LOGIN_REFUSED), Some(LOGIN_REFUSED))
+            }
+'''
+replace = '''
+            Refused::Account(Refusal::Credentials) => {
+                (unavailable(at, NO_ALLOWANCE), Some(NO_ALLOWANCE))
+            }
+'''
+
+# Provisional (MUS-14): a 429 and Muse's own limit words are a quota that resets, a limit.
+[[plant]]
+name = "muse: a 429 is no refusal for quota"
 meant = "a_turn_refused_for_the_accounts_limits_says_the_quota_spent_at_its_time"
 runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/record/provisional.rs"
 find = '''
-    ["api error 429", "api error 402", "usage limit reached"]
+    ["api error 429", "usage limit reached"]
 '''
 replace = '''
-    ["api error 429", "usage limit reached"]
+    ["usage limit reached"]
 '''
 
 # Detection: Muse where its installer puts it on macOS and Linux.

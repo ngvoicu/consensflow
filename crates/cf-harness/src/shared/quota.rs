@@ -1,7 +1,9 @@
 //! A harness's quota as its own record says it, in the dispatcher's terms.
 //! Codex reports its usage ahead of time; the others say so only once a request
-//! is refused (a 429, or a 402 for spent credit), so for them the daemon learns
-//! at the first refusal.
+//! is refused (a 429), so for them the daemon learns at the first refusal. An
+//! account that refuses for what no wait cures, its billing or its login (a 402,
+//! a 401), is no quota: it is [`Quota::Unavailable`], with no reset, whichever
+//! harness's record says it (`account_refusal`, MUS-23).
 //!
 //! A reset that names a time of day and a zone is read in jiff's copy of the
 //! time zone database, bundled into the program (`tzdb-bundle-always`) and not
@@ -33,7 +35,7 @@ use jiff::tz::TimeZone;
 use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
 
-use patterns::{REFUSED, SPENT};
+use patterns::{BILLING, CREDENTIALS, REFUSED, SPENT};
 
 /// What a record says of the account's quota.
 #[derive(Debug, Clone, PartialEq)]
@@ -52,6 +54,19 @@ pub enum Quota {
         used_percent: Option<serde_json::Number>,
         resets_at: Option<String>,
     },
+    /// An account that refused for what no wait cures (its billing, its login):
+    /// when it happened, if the record says, and why in plain words. It has no reset,
+    /// only the human's fix, so nothing is retried but at their word (MUS-23).
+    Unavailable { at: Option<String>, because: String },
+}
+
+/// What an account refused for that is no usage limit: nothing resets it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// Its billing: no plan, spent credit, a billing hold (a 402).
+    Billing,
+    /// Its login: an expired or revoked one, a key that is not valid (a 401).
+    Credentials,
 }
 
 /// How much of a window is used.
@@ -68,7 +83,7 @@ impl Quota {
     /// exhausted, a count says its own level.
     pub fn level(&self) -> Level {
         match self {
-            Quota::Exhausted { .. } => Level::Exhausted,
+            Quota::Exhausted { .. } | Quota::Unavailable { .. } => Level::Exhausted,
             Quota::Usage { level, .. } => *level,
         }
     }
@@ -77,7 +92,7 @@ impl Quota {
     /// count has none.
     pub fn at(&self) -> Option<&str> {
         match self {
-            Quota::Exhausted { at, .. } => at.as_deref(),
+            Quota::Exhausted { at, .. } | Quota::Unavailable { at, .. } => at.as_deref(),
             Quota::Usage { .. } => None,
         }
     }
@@ -88,7 +103,13 @@ impl Quota {
             Quota::Exhausted { resets_at, .. } | Quota::Usage { resets_at, .. } => {
                 resets_at.as_deref()
             }
+            Quota::Unavailable { .. } => None,
         }
+    }
+
+    /// Whether the account is unavailable: refused for what only its human cures.
+    pub fn unavailable(&self) -> bool {
+        matches!(self, Quota::Unavailable { .. })
     }
 }
 
@@ -104,7 +125,7 @@ impl Level {
 
 impl Serialize for Quota {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(3))?;
+        let mut map = serializer.serialize_map(Some(3 + usize::from(self.unavailable())))?;
         match self {
             Quota::Exhausted { at, resets_at } => {
                 map.serialize_entry("state", "exhausted")?;
@@ -120,15 +141,25 @@ impl Serialize for Quota {
                 map.serialize_entry("usedPercent", used_percent)?;
                 map.serialize_entry("resetsAt", resets_at)?;
             }
+            Quota::Unavailable { at, because } => {
+                map.serialize_entry("state", "unavailable")?;
+                map.serialize_entry("at", at)?;
+                map.serialize_entry("resetsAt", &Option::<&str>::None)?;
+                map.serialize_entry("because", because)?;
+            }
         }
         map.end()
     }
 }
 
 /// The statuses that mean an account takes no more for now: a rate or usage
-/// limit (429), or its credit spent (402, OpenRouter's "requires more
-/// credits").
-const QUOTA_STATUSES: [f64; 2] = [402.0, 429.0];
+/// limit (429), which resets. Its credit spent (402, OpenRouter's "requires more
+/// credits") is no limit that resets: [`account_refusal`] reads it.
+const QUOTA_STATUSES: [f64; 1] = [429.0];
+
+/// The status of a refusal for billing, and of one for login.
+const BILLING_STATUS: f64 = 402.0;
+const CREDENTIALS_STATUS: f64 = 401.0;
 
 /// Whether a provider's status, as `Number` reads it (`js::to_number`), is a
 /// refusal for quota.
@@ -151,6 +182,46 @@ pub(crate) fn refused_for_quota(text: &str) -> bool {
 /// whatever the status, in any harness's words.
 pub(crate) fn spent_extra_usage(text: &str) -> bool {
     SPENT.is_match(text)
+}
+
+/// What a provider's refusal says the account refused for that no wait cures: its
+/// billing (a 402, "requires more credits", Muse's `billing_error`, Anthropic's "credit
+/// balance is too low", an `insufficient_quota`), or its login (a 401, an
+/// `authentication_error`, a token whose refresh was refused with a 401). `status` is
+/// where the record names one; else the status the text opens on counts
+/// (`refused_for_quota`'s two shapes). None for a limit that resets, backoff, and a
+/// failure of the request itself. The same reading for every harness (MUS-23): where a
+/// reader called these a quota it waited out an hour at a time, and where it called them
+/// nothing the next task went to the same refused account.
+pub(crate) fn account_refusal(text: &str, status: Option<f64>) -> Option<Refusal> {
+    let status = status.or_else(|| REFUSED.captures(text).map(|found| js::number(&found[1])));
+    match status {
+        Some(status) if status == BILLING_STATUS => Some(Refusal::Billing),
+        Some(status) if status == CREDENTIALS_STATUS => Some(Refusal::Credentials),
+        _ if BILLING.is_match(text) => Some(Refusal::Billing),
+        _ if CREDENTIALS.is_match(text) => Some(Refusal::Credentials),
+        _ => None,
+    }
+}
+
+/// An account that refused at `at_ms` (none when it is no number) for what only its
+/// human cures, told as the harness said it (`said`, held to a line's length). Fails
+/// where `toISOString` throws.
+pub(crate) fn unavailable_quota(at_ms: f64, refusal: Refusal, said: &str) -> Result<Quota, String> {
+    let at = if at_ms.is_finite() {
+        Some(date(at_ms)?)
+    } else {
+        None
+    };
+    let what = match refusal {
+        Refusal::Billing => "its billing was refused",
+        Refusal::Credentials => "its login was refused",
+    };
+    let said: String = said.trim().chars().take(300).collect();
+    Ok(Quota::Unavailable {
+        at,
+        because: format!("{what}: {said}"),
+    })
 }
 
 /// A refused request: exhausted, with the reset the text names when it names

@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 
 use super::*;
-use crate::records::{Options, Reading};
+use crate::records::{Options, Quota, Reading};
 use crate::testing::LONG_AFTER_MS;
 
 /// A recorded session's log.
@@ -27,11 +27,15 @@ fn fixture(name: &str) -> &'static str {
         "cut-resumed" => include_str!("../../../tests/fixtures/muse/cut-resumed.jsonl"),
         "quit-mid-turn" => include_str!("../../../tests/fixtures/muse/quit-mid-turn.jsonl"),
         "steered" => include_str!("../../../tests/fixtures/muse/steered.jsonl"),
+        "billing-spark" => include_str!("../../../tests/fixtures/muse/billing-spark.jsonl"),
+        "billing-wonder" => include_str!("../../../tests/fixtures/muse/billing-wonder.jsonl"),
+        "clear-before" => include_str!("../../../tests/fixtures/muse/clear-before.jsonl"),
+        "clear-after" => include_str!("../../../tests/fixtures/muse/clear-after.jsonl"),
         other => panic!("no fixture {other}"),
     }
 }
 
-const FIXTURES: [&str; 8] = [
+const FIXTURES: [&str; 12] = [
     "plain",
     "retracted",
     "cut",
@@ -40,6 +44,10 @@ const FIXTURES: [&str; 8] = [
     "cut-resumed",
     "quit-mid-turn",
     "steered",
+    "billing-spark",
+    "billing-wonder",
+    "clear-before",
+    "clear-after",
 ];
 
 /// The session a log is of: the stream of its first envelope.
@@ -462,4 +470,44 @@ fn a_session_with_no_log_is_missing_and_one_whose_log_appears_is_read() {
     assert!(!look(&mut reader).read_failed(), "missing is read");
     stage.write(&format!("{}\n", intent(1, "t1", "Go.")));
     assert_eq!(said(known(&look(&mut reader))), [(Role::User, "Go.")]);
+}
+
+/// What Muse's reader says of an account with no allowance (MUS-23).
+const NO_ALLOWANCE: &str = "Muse refused: the account has no allowance; set up billing at accountscenter.meta.com/muse_code";
+
+#[test]
+fn a_refusal_for_billing_is_a_failed_turn_in_plain_words_and_an_account_no_reset_cures() {
+    // T-705's two recordings of the refusal, on `muse-spark-1.3` and `muse-wonder-1.0`,
+    // contributor mode off: HTTP 402 `billing_error`, the turn failed, nothing answered.
+    for name in ["billing-spark", "billing-wonder"] {
+        let record = read(name);
+        assert!(
+            record.failed && !record.took_back && !record.in_flight,
+            "{name}"
+        );
+        assert_eq!(record.settlement, Settlement::Settled, "{name}");
+        assert_eq!(record.failure.as_deref(), Some(NO_ALLOWANCE), "{name}");
+        assert_eq!(
+            said(&record)
+                .iter()
+                .filter(|(role, _)| *role == Role::Assistant)
+                .count(),
+            0,
+            "{name}: nothing was answered"
+        );
+        // Not a quota that resets: unavailable, dated at the refusal, with the words.
+        let Some(quota) = record.quota.as_deref() else {
+            panic!("{name}: no refusal")
+        };
+        let Quota::Unavailable { at, because } = quota else {
+            panic!("{name}: {quota:?} is a quota that resets");
+        };
+        assert_eq!(because, NO_ALLOWANCE, "{name}");
+        assert!(
+            at.as_deref()
+                .is_some_and(|at| at.starts_with("2026-10-26T")),
+            "{name}: {at:?}"
+        );
+        assert_eq!(quota.resets_at(), None, "{name}");
+    }
 }

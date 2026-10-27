@@ -15,7 +15,9 @@ use jiff::tz::TimeZone;
 use serde_json::Value;
 
 use super::read::{optional, property, Read, Stored};
-use crate::shared::quota::{exhausted_quota, quota_status, refused_for_quota};
+use crate::shared::quota::{
+    account_refusal, exhausted_quota, quota_status, refused_for_quota, unavailable_quota,
+};
 use crate::shared::record::key::{Key, Keys};
 use crate::shared::record::reading::{visible_text, Item, Record, Role, Settlement};
 use crate::shared::record::sort::sort;
@@ -166,11 +168,16 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
                 Some(said) => js::string(Some(said))?.into_owned(),
                 None => visible_text(error),
             };
-            if quota_status(js::to_number(optional(data, "statusCode"))?)
-                || refused_for_quota(&failure)
-            {
+            // An account refused for its billing or its login has no reset to wait for
+            // (MUS-23); a limit that resets is the quota.
+            let status = js::to_number(optional(data, "statusCode"))?;
+            let refusal = account_refusal(&failure, status.is_finite().then_some(status));
+            if refusal.is_some() || quota_status(status) || refused_for_quota(&failure) {
                 let at_ms = js::to_number(completed_at)?;
-                record.quota = Some(Arc::new(exhausted_quota(&failure, at_ms, local)?));
+                record.quota = Some(Arc::new(match refusal {
+                    Some(refusal) => unavailable_quota(at_ms, refusal, &failure)?,
+                    None => exhausted_quota(&failure, at_ms, local)?,
+                }));
             }
             record.failure = error_words(error);
         }

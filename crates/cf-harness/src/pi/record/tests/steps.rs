@@ -144,6 +144,49 @@ fn a_refusal_names_its_quota_and_only_the_next_assistant_step_clears_it() {
 }
 
 #[test]
+fn a_refusal_of_the_accounts_billing_or_login_is_the_account_unavailable_and_no_quota_that_resets()
+{
+    // MUS-23: OpenRouter's spent credit (a 402) and a login Pi could not refresh (a 401) have
+    // no reset, as a 429's has: the account is unavailable until its human fixes it.
+    for (error, said) in [
+        (
+            "402: {\"message\":\"This request requires more credits, or fewer max_tokens.\"}",
+            "its billing was refused: 402:",
+        ),
+        (
+            "OAuth refresh failed for openai-codex: OpenAI Codex token refresh failed (401)",
+            "its login was refused: OAuth refresh failed",
+        ),
+    ] {
+        let mut stage = Stage::with(&[
+            header(),
+            failing("a1", &json!(error), &json!(1_790_000_000_000_i64)),
+        ]);
+        let record = stage.at(0);
+        assert!(record.failed, "{error}");
+        let Some(Quota::Unavailable { at, because }) = record.quota.as_deref() else {
+            panic!("{error}: {:?}", record.quota);
+        };
+        assert_eq!(at.as_deref(), Some("2026-09-21T14:13:20.000Z"), "{error}");
+        assert!(because.starts_with(said), "{because}");
+        assert_eq!(record.quota.as_deref().unwrap().resets_at(), None);
+    }
+    // A 429 is still a limit that resets.
+    let mut stage = Stage::with(&[
+        header(),
+        failing(
+            "a1",
+            &json!("429: slow down"),
+            &json!(1_790_000_000_000_i64),
+        ),
+    ]);
+    assert!(matches!(
+        stage.at(0).quota.as_deref(),
+        Some(Quota::Exhausted { .. })
+    ));
+}
+
+#[test]
 fn a_failure_is_the_text_string_makes_of_it() {
     let quota_of = |error: &Value| {
         let mut stage = Stage::with(&[header(), failing("a1", error, &json!(0))]);

@@ -130,7 +130,6 @@ fn tells_a_provider_s_quota_refusal_a_429_or_spent_credit_from_its_other_errors(
         r#"429: {"message":"Provider returned error","code":429}"#,
         r#"OpenAI API error (429): {"type":"GoUsageLimitError","message":"Weekly usage limit reached. Resets in 2 days."}"#,
         r#"OpenAI API error (429): {"code":"rate_limit_exceeded","type":"rate_limit_error"}"#,
-        r#"402: {"message":"This request requires more credits, or fewer max_tokens."}"#,
     ] {
         assert!(refused_for_quota(text), "{text}");
     }
@@ -140,6 +139,8 @@ fn tells_a_provider_s_quota_refusal_a_429_or_spent_credit_from_its_other_errors(
         "OAuth refresh failed for openai-codex: OpenAI Codex token refresh failed (401)",
         "Provider returned error",
         "Stream ended without finish_reason",
+        // An account's billing is no usage limit: it has no reset (`account_refusal`).
+        r#"402: {"message":"This request requires more credits, or fewer max_tokens."}"#,
     ] {
         assert!(!refused_for_quota(text), "{text}");
     }
@@ -149,6 +150,69 @@ fn tells_a_provider_s_quota_refusal_a_429_or_spent_credit_from_its_other_errors(
             quota_status(js::to_number(Some(&json!("402"))).unwrap()),
             quota_status(js::to_number(Some(&json!(503))).unwrap()),
         ],
-        [true, true, false]
+        [true, false, false]
+    );
+}
+
+#[test]
+fn tells_a_refusal_no_wait_cures_from_a_limit_that_resets() {
+    // The words real refusals carried: OpenRouter's spent credit through Pi (2026-09),
+    // Muse's billing refusal (T-705, 2026-10-26), Anthropic's API credit, an OpenAI
+    // account over its plan.
+    for text in [
+        r#"402: {"message":"This request requires more credits, or fewer max_tokens."}"#,
+        "API error 402 [request_id=x]: Billing verification failed. Billing Issue. (billing_error)",
+        r#"400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}"#,
+        r#"OpenAI API error (429): {"code":"insufficient_quota","type":"insufficient_quota"}"#,
+    ] {
+        assert_eq!(
+            account_refusal(text, None),
+            Some(Refusal::Billing),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        account_refusal("anything", Some(402.0)),
+        Some(Refusal::Billing)
+    );
+    for text in [
+        r#"401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
+        "OAuth refresh failed for openai-codex: OpenAI Codex token refresh failed (401)",
+    ] {
+        assert_eq!(
+            account_refusal(text, None),
+            Some(Refusal::Credentials),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        account_refusal("anything", Some(401.0)),
+        Some(Refusal::Credentials)
+    );
+    // A limit that resets, backoff, and a failure of the request itself are not.
+    for text in [
+        r#"429: {"message":"Provider returned error","code":429}"#,
+        r#"OpenAI API error (429): {"code":"rate_limit_exceeded","type":"rate_limit_error"}"#,
+        "500: provider down",
+        r#"400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long"}}"#,
+        "Usage limit reached. Check /usage.",
+    ] {
+        assert_eq!(account_refusal(text, None), None, "{text}");
+    }
+    assert_eq!(account_refusal("rate limited", Some(429.0)), None);
+}
+
+#[test]
+fn an_unavailable_account_has_no_reset_and_says_why() {
+    let unavailable = Quota::Unavailable {
+        at: Some("2026-10-27T05:00:00.000Z".to_owned()),
+        because: "no allowance".to_owned(),
+    };
+    assert_eq!(unavailable.level(), Level::Exhausted);
+    assert_eq!(unavailable.resets_at(), None);
+    assert_eq!(unavailable.at(), Some("2026-10-27T05:00:00.000Z"));
+    assert_eq!(
+        serde_json::to_string(&unavailable).unwrap(),
+        r#"{"state":"unavailable","at":"2026-10-27T05:00:00.000Z","resetsAt":null,"because":"no allowance"}"#
     );
 }
