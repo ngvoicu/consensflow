@@ -52,13 +52,17 @@ impl Root {
     /// is ended with it). The two files are what this gives: the program's and its
     /// helper's. The daemon runs a CLI in the environment's `HOME`, which is
     /// made here: a program whose folder is not there does not start. And a run
-    /// that never gets its version never asks a release feed.
+    /// that never gets its version never asks a release feed. It names every program it
+    /// runs by its path: the daemon gives it the test's PATH, the folder of this `claude`
+    /// alone, where a bare `sleep` is not found, and its loop spun and wrote that until the
+    /// version probe's 8 KiB were spent, and the probe ended it, 200 ms after it began
+    /// (CI, 2026-10-27: a slow machine's test looked later).
     #[cfg(unix)]
     pub fn claude_that_never_answers(&self) -> (PathBuf, PathBuf) {
         std::fs::create_dir_all(self.dir.path().join("home")).expect("a home folder");
         std::fs::write(
             self.bin().join("claude"),
-            "#!/bin/sh\necho $$ > \"${0%/*}/asked\"\n/bin/sleep 120 &\nhelper=$!\necho $helper > \"${0%/*}/helper\"\nwhile kill -0 $helper 2>/dev/null && kill -0 $PPID 2>/dev/null; do sleep 0.2; done\nkill $helper 2>/dev/null\n",
+            "#!/bin/sh\necho $$ > \"${0%/*}/asked\"\n/bin/sleep 120 &\nhelper=$!\necho $helper > \"${0%/*}/helper\"\nwhile kill -0 $helper 2>/dev/null && kill -0 $PPID 2>/dev/null; do /bin/sleep 0.2; done\nkill $helper 2>/dev/null\n",
         )
         .expect("a stand-in claude");
         (self.bin().join("asked"), self.bin().join("helper"))

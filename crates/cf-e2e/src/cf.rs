@@ -467,7 +467,7 @@ mod tests {
     /// again `window` seconds later. It writes down each time it is run.
     fn replacing(window: &str) -> String {
         format!(
-            "until mkdir .cargo-lock 2>/dev/null; do sleep 0.01; done; \
+            "until mkdir .cargo-lock 2>/dev/null; do /bin/sleep 0.01; done; \
              echo built >> cargo-calls; \
              rm -f app/src-tauri/target/release/cf; \
              sleep {window}; \

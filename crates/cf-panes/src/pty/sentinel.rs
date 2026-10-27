@@ -39,7 +39,7 @@ const FIRST: &str = "/bin/sh -c \"$0\" &";
 fn second(owner: u32) -> String {
     format!(
         "sleep 120 & job=$!; trap 'kill $job 2>/dev/null; exit 0' TERM; echo $$ $job; \
-         while kill -0 $job 2>/dev/null && {}; do sleep 0.2; done; kill $job 2>/dev/null",
+         while kill -0 $job 2>/dev/null && {}; do /bin/sleep 0.2; done; kill $job 2>/dev/null",
         cf_base::fixture::owner_there(owner)
     )
 }
