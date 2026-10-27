@@ -472,7 +472,7 @@ impl Running {
         let shell = std::env::var_os("ComSpec").expect("ComSpec names the command interpreter");
         fs::create_dir_all(at.parent().expect("a folder")).expect("its folder");
         fs::copy(shell, at).expect("copy the command interpreter");
-        let mut child = Command::new(at)
+        let mut child = crate::testing::command(at)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

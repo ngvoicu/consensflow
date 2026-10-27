@@ -250,12 +250,31 @@ mod tests {
         );
     }
 
+    /// The pipe is closed here, and only here: a program another test starts as the pipe is
+    /// made holds its end, a moment if it is started by fork, for as long as it runs if it is
+    /// started by `posix_spawn`, and the `echo` answered then goes into a pipe that is still read
+    /// from. What is tested is the order here, not that moment: the test runs in a process of
+    /// its own, where no other test starts anything.
     #[cfg(unix)]
     #[test]
     fn a_program_out_of_time_that_writes_once_asked_dies_of_its_closed_stream() {
+        crate::testing::alone(&[], "execute::tests::the_closed_stream_alone");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "run alone, by the test above it"]
+    fn the_closed_stream_alone() {
+        if !crate::testing::is_alone() {
+            return;
+        }
+        let _ran = crate::testing::Ran;
         // Probed on Node v26.8.1: the streams are closed before the program is
-        // asked to end, so the trap's `echo` meets a closed pipe (SIGPIPE).
-        let run = shell("trap 'echo bye; exit 0' TERM; echo hi; while true; do sleep 0.05; done");
+        // asked to end, so the trap's `echo` meets a closed pipe (SIGPIPE). The program
+        // goes with its owner, should the test be ended on its way (T-686).
+        let run = shell(
+            "trap 'echo bye; exit 0' TERM; echo hi; while kill -0 $PPID 2>/dev/null; do sleep 0.05; done",
+        );
         let limits = Limits {
             timeout: Duration::from_millis(300),
             max_buffer: 1024,
@@ -264,6 +283,58 @@ mod tests {
         assert!(failed.killed);
         assert_eq!(failed.code, None);
         assert_eq!(failed.stdout, "hi\n");
+    }
+
+    /// The test above, run fifty times while sixteen threads start `sleep 1` without end, as
+    /// std starts a program, through no start of this crate's: one that starts as a pipe of the
+    /// test's is being made holds its end for the second the `sleep` runs, and the `echo` goes
+    /// into it. Run by hand, and by the plant that runs the test beside the others:
+    /// `cargo test -p cf-process --lib -- --ignored whatever_other_tests_start`.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "a stress of programs started without end, around fifty runs of a test"]
+    #[allow(clippy::disallowed_methods)] // The starts are std's own, as another test's are.
+    fn a_program_out_of_time_dies_of_its_closed_stream_whatever_other_tests_start() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let starting: Vec<_> = (0..16)
+            .map(|_| {
+                let stop = Arc::clone(&stop);
+                std::thread::spawn(move || {
+                    let mut live = std::collections::VecDeque::new();
+                    while !stop.load(Ordering::Relaxed) {
+                        let mut sleep = std::process::Command::new("/bin/sleep");
+                        sleep
+                            .arg("1")
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null());
+                        live.push_back(sleep.spawn().unwrap());
+                        if live.len() >= 64 {
+                            live.pop_front().unwrap().wait().unwrap();
+                        }
+                    }
+                    for mut sleep in live {
+                        sleep.wait().unwrap();
+                    }
+                })
+            })
+            .collect();
+        let failed = (0..50)
+            .filter(|_| {
+                std::panic::catch_unwind(
+                    a_program_out_of_time_that_writes_once_asked_dies_of_its_closed_stream,
+                )
+                .is_err()
+            })
+            .count();
+        stop.store(true, Ordering::Relaxed);
+        for thread in starting {
+            thread.join().unwrap();
+        }
+        assert_eq!(failed, 0, "{failed} of 50 runs met an open pipe");
     }
 
     #[cfg(unix)]
@@ -307,10 +378,19 @@ mod tests {
         );
     }
 
+    /// A program that ignores the ask to end and goes on for as long as the process that started
+    /// it is there. One that went on for ever was left in a group of its own by a test that was
+    /// ended on its way: a harness whose output is closed exits at once, with its tests in flight
+    /// (T-686: two of them, for eight hours).
+    #[cfg(unix)]
+    fn deaf() -> String {
+        cf_base::fixture::deaf("TERM", "")
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_program_that_will_not_end_when_asked_is_forced_a_moment_later() {
-        let run = shell("trap '' TERM; while true; do sleep 0.05; done");
+        let run = shell(&deaf());
         let limits = Limits {
             timeout: Duration::from_millis(200),
             max_buffer: 1024,
@@ -320,6 +400,38 @@ mod tests {
         assert!(failed.killed);
         assert_eq!(failed.code, None);
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[allow(clippy::disallowed_methods)] // The test starts what it probes.
+    fn a_program_that_ignores_the_ask_to_end_goes_when_the_process_that_started_it_is_gone() {
+        use std::io::{BufRead, BufReader};
+        use std::process::{Command, Stdio};
+
+        // An owner starts the program, says its number and waits; it is ended as a test is when
+        // the harness around it exits.
+        let mut owner = Command::new("/bin/sh")
+            .args(["-c", "/bin/sh -c \"$DEAF\" & echo $!; wait"])
+            .env("DEAF", deaf())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut said = String::new();
+        BufReader::new(owner.stdout.take().unwrap())
+            .read_line(&mut said)
+            .unwrap();
+        let program: u32 = said.trim().parse().unwrap();
+        let mut left = crate::testing::Survivors(vec![program]);
+        assert!(crate::testing::running(program));
+        owner.kill().unwrap();
+        owner.wait().unwrap();
+        assert!(
+            crate::testing::gone(program),
+            "the program went on with the process that started it gone"
+        );
+        // It has gone: nothing is sent to a number that may be another's by now.
+        left.0.clear();
     }
 
     #[test]

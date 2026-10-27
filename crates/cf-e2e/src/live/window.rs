@@ -9,9 +9,9 @@
 //! which is the product's code), a Claude window has the settings file the app
 //! writes for a launch and the flags that shut the human's MCP servers and
 //! browser out, and Claude Code is asked, in a window of its own that is closed
-//! after, to trust the folder first ([`trust_claude`]). A Devin window may be a
-//! member's ([`Member`]): the launch is then the adapter's whole, its config and
-//! hooks and prompt file among it. What goes in goes in as
+//! after, to trust the folder first ([`trust_claude`]). A Devin or Pi window may
+//! be a member's ([`Member`]): the launch is then the adapter's whole, Devin's
+//! config and hooks and prompt file, Pi's extension and role skill, among it. What goes in goes in as
 //! the daemon sends it ([`Window::send`]: a bracketed paste, then Enter once the
 //! window has drawn it), and nothing presses Enter a second time. What a window
 //! printed is read as the text of its screen, and as it came ([`raw_end`]), which
@@ -141,20 +141,24 @@ impl Window<'_> {
         *self.session.borrow_mut() = Some(session.to_owned());
     }
 
-    /// Everything it printed so far, as the text on its screen.
+    /// What it printed so far, as the text on its screen ([`Rig::screen`]: the last 8
+    /// MiB or so of it).
     pub fn screen(&self) -> String {
         self.rig.screen(&self.id)
     }
 
-    /// How much it printed so far, in characters of [`Window::screen`]: a mark to
-    /// ask what it printed after ([`Window::screen_after`]).
+    /// How much it printed so far, in characters of its screen, those the rig let go
+    /// of among them: a mark to ask what it printed after ([`Window::screen_after`]).
     pub fn mark(&self) -> usize {
-        self.screen().chars().count()
+        let (screen, dropped) = self.rig.screen_and_dropped(&self.id);
+        dropped + screen.chars().count()
     }
 
-    /// What it printed after the mark `mark`.
+    /// What it printed after the mark `mark`: all the rig keeps of it, where the rig
+    /// let go of the place.
     pub fn screen_after(&self, mark: usize) -> String {
-        after(&self.screen(), mark)
+        let (screen, dropped) = self.rig.screen_and_dropped(&self.id);
+        after(&screen, mark.saturating_sub(dropped))
     }
 
     /// The end of its screen, as a line ([`last_lines`]): what a report says of a
@@ -289,6 +293,21 @@ impl Window<'_> {
         )
     }
 
+    /// Types `bytes` into the window as the human does at the app's page
+    /// ([`Rig::types`]): the pane host counts what they leave unsent.
+    pub fn types(&self, bytes: &[u8]) -> Result<()> {
+        self.rig.types(&self.pane(), bytes)
+    }
+
+    /// What the pane host says of the window now (`pane.snapshot`), with the
+    /// last `bottom` lines of its screen as drawn.
+    pub fn snapshot(&self, bottom: usize) -> Result<Value> {
+        self.rig.host(
+            "pane.snapshot",
+            json!({ "id": self.id, "generation": 1, "bottom": bottom }),
+        )
+    }
+
     /// Interrupts the window as the daemon does: Escape as many times in a row
     /// (150 ms apart, the daemon's own gap) as the harness's adapter asks for
     /// ([`ask::interrupt`]) and, where those presses open a dialog at a turn that
@@ -314,9 +333,26 @@ impl Window<'_> {
     /// two strokes, which the screen's text then splits. Nothing presses Enter a
     /// second time.
     pub fn send(&self, body: &str, answer: &str) -> Result<Sent> {
+        self.sent(answer, || self.paste(body))
+    }
+
+    /// [`Window::send`], the paste telling the pane host that the input box read
+    /// empty when it had taken `typed` writes of the human's keys (`readEmpty`), as
+    /// an adapter that reads its harness's box sends one.
+    pub fn send_read_empty(&self, body: &str, answer: &str, typed: u64) -> Result<Sent> {
+        self.sent(answer, || {
+            self.rig.host(
+                "pane.write_paste",
+                json!({ "id": self.id, "generation": 1, "body": body, "readEmpty": typed }),
+            )
+        })
+    }
+
+    /// What came of the paste `paste` makes, `answer` waited for.
+    fn sent(&self, answer: &str, paste: impl FnOnce() -> Result<Value>) -> Result<Sent> {
         let mark = self.mark();
         let pasted = Instant::now();
-        let written = self.paste(body)?;
+        let written = paste()?;
         let mut shown = false;
         while !shown && pasted.elapsed() < ANSWER && !self.closed() {
             sleep(ASKING);

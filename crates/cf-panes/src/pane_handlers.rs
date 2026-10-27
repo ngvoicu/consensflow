@@ -22,8 +22,8 @@ use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::panes::{
-    BackgroundProcess, CommandsRequest, EndRequest, MarkRequest, PaneExit, Rest, RestRequest,
-    SnapshotRequest, TAIL_LINES,
+    BackgroundProcess, CommandsRequest, MarkRequest, PaneExit, PossiblyLeft, Rest, RestRequest,
+    SnapshotRequest, BOTTOM_LINES, TAIL_LINES,
 };
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
@@ -86,6 +86,10 @@ struct PasteRequest {
     id: String,
     generation: u64,
     body: String,
+    /// The count of the human's keys (`pane.snapshot`'s `typed`) at which the
+    /// window's adapter read its input box empty on the screen.
+    #[serde(default, rename = "readEmpty")]
+    read_empty: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -187,8 +191,8 @@ pub fn register_pane_handlers(
     // reached the window, a request it could not read included.
     let paste_queue = Arc::clone(&inputs);
     builder.on("pane.write_paste", move |_bridge, body| {
-        let pasted = paste_request(body).and_then(|(key, body)| {
-            wait_for_input_blocking(paste_queue.paste(key, body.into_bytes())?)
+        let pasted = paste_request(body).and_then(|(key, body, read_empty)| {
+            wait_for_input_blocking(paste_queue.paste(key, body.into_bytes(), read_empty)?)
         });
         Ok(match pasted {
             Ok(()) => json!({"ok":true}),
@@ -244,7 +248,7 @@ pub fn register_pane_handlers(
     });
 
     // What the window's tree has running that is the turn's work: what began after
-    // its last mark and the host can prove its.
+    // its last mark and the host can prove its; and what may be the window's outside it.
     let background_panes = Arc::clone(&panes);
     builder.on("pane.background", move |_bridge, body| {
         let request: PaneRequest = parse_body(body)?;
@@ -252,7 +256,13 @@ pub fn register_pane_handlers(
         let background = background_panes
             .background(&key)
             .map_err(|error| error.to_string())?;
-        Ok(json!({"ok":true,"total":background.total,"processes":background.processes}))
+        let mut answer =
+            json!({"ok":true,"total":background.total,"processes":background.processes});
+        // Only where it names any, as an exit says it.
+        if !background.possibly_left.is_empty() {
+            answer["possiblyLeft"] = json!(background.possibly_left);
+        }
+        Ok(answer)
     });
 
     // Which commands of the window's harness run in its tree now, less what ran at the
@@ -280,19 +290,6 @@ pub fn register_pane_handlers(
             .rest(&key, &request.keep)
             .map_err(|error| error.to_string())?;
         Ok(json!({"ok":true,"rest":rest}))
-    });
-
-    // What the window's turn left running ends, the window staying open: it is
-    // asked to end, and given the table's grace, as a close gives one. The host
-    // chooses what, from all it can prove the turn's.
-    let end_panes = Arc::clone(&panes);
-    builder.on("pane.end_background", move |_bridge, body| {
-        let request: EndRequest = parse_body(body)?;
-        let key = pane_key(&request.id, request.generation)?;
-        let ending = end_panes
-            .end_background(&key)
-            .map_err(|error| error.to_string())?;
-        Ok(json!({"ok":true,"ended":ending.ended,"left":ending.left}))
     });
 
     let list_panes = Arc::clone(&panes);
@@ -329,7 +326,10 @@ pub fn register_pane_handlers(
             "pasteInFlight":snapshot.paste_in_flight,
             "inputFailed":snapshot.input_failed,
             "unsent":snapshot.unsent,
+            "typed":snapshot.typed,
+            "typedQuietMs":snapshot.typed_quiet_ms,
             "outputQuietMs":snapshot.output_quiet_ms,
+            "pasteQuietMs":snapshot.paste_quiet_ms,
         });
         // The screen's last lines, for a request that asks for them. A pane
         // the table no longer holds has none to give.
@@ -338,7 +338,39 @@ pub fn register_pane_handlers(
                 answer["tail"] = json!(tail);
             }
         }
+        // The screen's last lines as drawn, for an adapter that reads its
+        // harness's input box.
+        if let Some(lines) = request.bottom {
+            if let Ok(drawn) = snapshot_panes.bottom(&key, lines.min(BOTTOM_LINES)) {
+                answer["bottom"] = json!(drawn.lines);
+                answer["cursor"] = drawn.cursor.map_or(Value::Null, |cursor| {
+                    json!({
+                        "line": cursor.line, "col": cursor.col, "shown": cursor.shown,
+                        "plainAfter": cursor.plain_after,
+                    })
+                });
+            }
+        }
         Ok(answer)
+    });
+}
+
+/// The human's own keys over the bridge (`pane.typed`), for the headless host,
+/// which has no page: its peer types as the window's page does
+/// (`pane_input_enqueue`), and the keys are counted for what they leave unsent.
+/// The window never takes it: there, the bridge's peer is the daemon, whose
+/// keys are never the human's; nor does the headless host, but where the rig
+/// asks for it (`headless::HUMAN_KEYS`).
+pub(crate) fn register_typed(builder: &mut BridgeBuilder, inputs: Arc<InputQueue>) {
+    builder.on("pane.typed", move |_bridge, body| {
+        let request: BytesRequest = parse_body(body)?;
+        validate_input(&request.bytes)?;
+        let key = pane_key(&request.id, request.generation)?;
+        inputs
+            .typed(key, request.bytes)
+            .and_then(wait_for_input_blocking)
+            .map_err(|error| error.to_string())?;
+        Ok(json!({"ok":true}))
     });
 }
 
@@ -376,6 +408,8 @@ fn stream_to_page(
             ended,
             // Paid, with this thread's end, once the exit is told.
             owed: _owed,
+            #[cfg(target_os = "macos")]
+            tree,
         } = streamed;
         for message in stream {
             printed.note();
@@ -390,7 +424,17 @@ fn stream_to_page(
             // How it ended by itself, where that came after the output did; not the
             // host's own end of it.
             let status = status.or_else(|| (!handed.ended_by_host).then(|| ended.get()).flatten());
-            let exit = exit_body(&key, &screen, status, background, handed.survivor);
+            // What may be the window's and runs on, which no close signals: named as the
+            // program is proven gone, which the close's ending of what is the window's does
+            // not change.
+            let left = Left {
+                background,
+                possibly: possibly_left(
+                    #[cfg(target_os = "macos")]
+                    &tree,
+                ),
+            };
+            let exit = exit_body(&key, &screen, status, left, handed.survivor);
             #[cfg(test)]
             if let Some(handed) = EXIT_HANDED
                 .lock()
@@ -407,6 +451,29 @@ fn stream_to_page(
     });
 }
 
+/// What may be the window's and runs on, not ended, for its exit to name: on macOS what its
+/// process tree names (`ProcessTree::possibly_left`); elsewhere none, and on Windows the
+/// pane's job ends its whole tree as its last handle closes, with the pane.
+fn possibly_left(
+    #[cfg(target_os = "macos")] tree: &crate::process_tree::ProcessTree,
+) -> Vec<PossiblyLeft> {
+    #[cfg(target_os = "macos")]
+    {
+        tree.possibly_left()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Vec::new()
+    }
+}
+
+/// What a window left running, for its exit: the turn's work, which its close ended, and
+/// what may be the window's and was not ended.
+struct Left {
+    background: Vec<BackgroundProcess>,
+    possibly: Vec<PossiblyLeft>,
+}
+
 /// `pane.exit`'s body: the pane, how its program ended where that was read,
 /// the last lines its screen showed, what it left running, and the program
 /// where it could not be proven gone.
@@ -414,7 +481,7 @@ fn exit_body(
     key: &PaneKey,
     screen: &PaneScreen,
     ended: Option<Ended>,
-    background: Vec<BackgroundProcess>,
+    left: Left,
     survivor: Option<u32>,
 ) -> Value {
     let exit = PaneExit {
@@ -423,7 +490,8 @@ fn exit_body(
         exit_code: ended.as_ref().map(|ended| ended.code),
         signal: ended.and_then(|ended| ended.signal),
         tail: Some(screen.tail(TAIL_LINES)),
-        background,
+        background: left.background,
+        possibly_left: left.possibly,
         survivor,
     };
     serde_json::to_value(&exit).unwrap_or_else(|_| json!({"id":key.id,"generation":key.generation}))
@@ -439,11 +507,11 @@ fn parse_body<T: DeserializeOwned>(body: Value) -> Result<T, String> {
 
 /// A paste's pane and body. A request that does not name them was refused
 /// before anything was written.
-fn paste_request(body: Value) -> Result<(PaneKey, String), InputError> {
+fn paste_request(body: Value) -> Result<(PaneKey, String, Option<u64>), InputError> {
     let refused = |cause| InputError::refused(INVALID_BODY, cause);
     let request: PasteRequest = parse_body(body).map_err(refused)?;
     let key = pane_key(&request.id, request.generation).map_err(refused)?;
-    Ok((key, request.body))
+    Ok((key, request.body, request.read_empty))
 }
 
 /// Everything a `pane.open` asks for, checked before anything is spawned; the
@@ -625,6 +693,8 @@ mod tests {
         );
         let snapshot = ask("pane.snapshot", json!({"id":"typing-pane","generation":1}));
         assert_eq!(snapshot["pasteInFlight"], false, "{snapshot}");
+        // And says how long since it wrote that paste.
+        assert!(snapshot["pasteQuietMs"].is_u64(), "{snapshot}");
         // Keys over the bridge are the daemon's, never the human's unsent text.
         assert_eq!(snapshot["unsent"], false, "{snapshot}");
 

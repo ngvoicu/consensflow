@@ -284,6 +284,39 @@ pub(crate) fn set_conversation_role_text(
     })
 }
 
+/// Whether the host proved the program of the last window that ran on a
+/// conversation gone (migration 0024).
+pub(crate) fn program_gone(store: &Store, conversation_id: i64) -> Result<bool, LedgerError> {
+    store
+        .db
+        .query_row(
+            "SELECT program_gone FROM conversation WHERE id = ?",
+            [conversation_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .map(|gone| gone == 1)
+        .ok_or_else(|| unknown_conversation(conversation_id))
+}
+
+/// Whether the program of the last window that ran on a conversation is gone, as the
+/// host proved it: `true` as the host proves it, `false` before a window opens on it.
+/// A conversation that is not there has nothing to keep it on. It logs no event: no
+/// trace of Node's has one.
+pub(crate) fn set_program_gone(
+    store: &mut Store,
+    conversation_id: i64,
+    gone: bool,
+) -> Result<(), LedgerError> {
+    store.write(|store| {
+        store.db.execute(
+            "UPDATE conversation SET program_gone = ? WHERE id = ?",
+            params![i64::from(gone), conversation_id],
+        )?;
+        Ok(())
+    })
+}
+
 /// A conversation ends; one that has ended already, or none, stays as it is.
 pub(crate) fn end_conversation(
     store: &mut Store,
@@ -361,9 +394,12 @@ pub(crate) fn follow_conversation(
         )?;
         let id = match own {
             Some(id) => {
-                store
-                    .db
-                    .execute("UPDATE conversation SET ended_at = NULL WHERE id = ?", [id])?;
+                // A window writes to it again: what was proven of the last that ran on
+                // it holds no more (migration 0024).
+                store.db.execute(
+                    "UPDATE conversation SET ended_at = NULL, program_gone = 0 WHERE id = ?",
+                    [id],
+                )?;
                 id
             }
             None => {

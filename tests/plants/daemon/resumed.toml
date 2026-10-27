@@ -19,10 +19,14 @@
 harness-left-open = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "left_open"]
 # A Claude window opened again on the records of two live runs: its looks and its pastes.
 harness-launch-claude-resumed = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::resumed"]
+# A Devin window opened again on a conversation whose record cannot end its turn (T-722): its looks.
+harness-launch-devin-resumed = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "devin::resumed"]
 # A Pi window opened again on a turn the quit cut: its looks.
 harness-launch-pi-resumed = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "pi::resumed"]
 # The case of the rig that cuts the chief's turn by the app's quit, found by the start of its name.
 rig-resumed-cut = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "approval::a_restart_that_cuts"]
+# The case of the rig that opens a finished Devin worker's window again with no task (T-722).
+rig-reopened = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_reopened_window_with_no_task_read_working_for_good"]
 # What the stand-in agent writes of a conversation it is resumed on.
 fake-agent-records = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "records::"]
 
@@ -35,18 +39,18 @@ runs = ["harness-launch-claude-resumed"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '                        at_prompt && (settled || empty || left) || by_press,'
-replace = '                        at_prompt && (settled || empty) || by_press,'
+find = '                    let at_rest = at_prompt && (settled || empty || left) || by_press;'
+replace = '                    let at_rest = at_prompt && (settled || empty) || by_press;'
 
 [[plant]]
-name = "resumed: a window given a message of its own is read at rest by the turn before it"
-meant = "claude::resumed::a_window_opened_with_a_message_of_its_own_is_not_read_at_rest_by_the_turn_the_quit_cut"
+name = "resumed: a window opened for a message it is pasted once up reads the turn the quit cut as its own (T-432)"
+meant = "claude::resumed::a_window_opened_for_a_message_it_is_pasted_once_up_is_read_at_rest_by_the_turn_the_quit_cut"
 runs = ["harness-launch-claude-resumed"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '            let left_open = if resumable && launch.message.is_none() {'
-replace = '            let left_open = if resumable {'
+find = '            let left_open = if resumable {'
+replace = '            let left_open = if resumable && launch.message.is_none() {'
 
 [[plant]]
 name = "resumed: a window that shows another conversation keeps the turn it was opened on"
@@ -66,24 +70,21 @@ runs = ["harness-launch-claude-resumed"]
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/left_open.rs"
 find = '''
-        record.settlement == Settlement::InFlight
-            && record.items.len() == self.items
-            && record.items.last().is_some_and(|last| last.id == self.last)'''
+        *self == Self::of_items(&record.items)'''
 replace = '''
-        record.settlement == Settlement::InFlight'''
+        *self == Self::of_items(&record.items) || true'''
 
 [[plant]]
 name = "resumed: a turn that is over is taken for one the quit cut"
-meant = "a_turn_in_flight_is_the_one_the_window_was_opened_on_and_one_that_ended_is_none"
+meant = "a_turn_the_record_has_not_ended_is_the_one_the_window_was_opened_on_and_one_that_ended_is_none"
 runs = ["harness-left-open"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/left_open.rs"
 find = '''
-        if record.settlement != Settlement::InFlight {
-            return None;
-        }'''
-replace = ''
+            Reading::Known(record) if record.settlement != Settlement::Settled => {'''
+replace = '''
+            Reading::Known(_) => {'''
 
 # --- the Pi adapter: the same rule, with its extension's word that no turn is at work ---
 
@@ -118,14 +119,14 @@ find = '                && shown.as_deref() == Some(session.as_str())'
 replace = '                && true'
 
 [[plant]]
-name = "resumed: a Pi window given a message of its own is read at rest by the turn before it"
-meant = "pi::resumed::a_window_opened_with_a_message_of_its_own_is_not_read_at_rest_by_the_turn_the_quit_cut"
+name = "resumed: a Pi window opened for a message its inbox gives it once up reads the turn the quit cut as its own (T-432)"
+meant = "pi::resumed::a_window_opened_for_a_message_it_is_given_once_up_is_read_at_rest_by_the_turn_the_quit_cut"
 runs = ["harness-launch-pi-resumed"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/adapter.rs"
-find = '            let left_open = if launch.resume.is_some() && launch.message.is_none() {'
-replace = '            let left_open = if launch.resume.is_some() {'
+find = '            let left_open = if launch.resume.is_some() {'
+replace = '            let left_open = if launch.resume.is_some() && launch.message.is_none() {'
 
 [[plant]]
 name = "resumed: a Pi window that follows another conversation keeps the turn it was opened on"
@@ -169,3 +170,157 @@ runs = ["fake-agent-records"]
 file = "crates/cf-e2e/src/bin/fake_agent/records.rs"
 find = '    record["type"] == "user" && record["message"]["content"][0]["text"] != INTERRUPTED'
 replace = '    record["type"] == "user"'
+
+# --- a record that cannot end a turn that ended (T-722): the same rule, for every harness ---
+
+[[plant]]
+name = "resumed: a turn the record cannot end is taken for one that ended"
+meant = "a_window_opened_again_with_no_message_is_at_rest_on_a_turn_nothing_in_the_record_ends"
+runs = ["harness-launch-devin-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/left_open.rs"
+find = '''
+        if record.items.is_empty() {
+            return None;
+        }'''
+replace = '''
+        if record.items.is_empty() || record.settlement != Settlement::InFlight {
+            return None;
+        }'''
+
+[[plant]]
+name = "resumed: a Pi turn that failed is taken for one at work"
+meant = "a_window_opened_again_on_a_turn_its_record_cannot_end_is_at_rest_once_its_extension_has_seen_no_turn_of_it"
+runs = ["harness-launch-pi-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/left_open.rs"
+find = '''
+            Reading::Known(record) if record.settlement != Settlement::Settled => {'''
+replace = '''
+            Reading::Known(record) if record.settlement == Settlement::InFlight => {'''
+
+[[plant]]
+name = "resumed: a turn the record cannot end is no longer the one the window was opened on"
+meant = "the_turn_is_still_there_while_the_record_holds_no_more_than_it_did"
+runs = ["harness-left-open"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/left_open.rs"
+find = '''
+        record.settlement != Settlement::Settled && self.unchanged(reading)'''
+replace = '''
+        record.settlement == Settlement::InFlight && self.unchanged(reading)'''
+
+# --- the Devin adapter: the same rule, with no word of its own that no turn is at work ---
+
+[[plant]]
+name = "resumed: a Devin window opened on a turn its record cannot end never reads at rest"
+meant = "a_window_opened_again_with_no_message_is_at_rest_on_a_turn_nothing_in_the_record_ends"
+runs = ["harness-launch-devin-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '                .is_some_and(|open| open.unchanged(&reading))'
+replace = '                .is_some_and(|open| open.unchanged(&reading) && reading.read_failed())'
+
+[[plant]]
+name = "resumed: a Devin window opened on a turn its record cannot end reads at rest for good"
+meant = "a_finished_devin_worker_opened_again_with_no_task_reads_at_rest_whatever_its_record_cannot_say"
+runs = ["rig-reopened"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '                .is_some_and(|open| open.unchanged(&reading))'
+replace = '                .is_some_and(|open| open.unchanged(&reading) && reading.read_failed())'
+
+[[plant]]
+name = "resumed: a Devin window given a message of its own is read at rest by the turn before it"
+meant = "devin::resumed::a_window_opened_with_a_message_of_its_own_is_not_at_rest_on_the_turn_before_it"
+runs = ["harness-launch-devin-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '                Some(session) if launch.message.is_none() => {'
+replace = '                Some(session) => {'
+
+[[plant]]
+name = "resumed: a Devin window that follows another conversation keeps the turn it was opened on"
+meant = "devin::resumed::a_window_that_follows_another_conversation_forgets_the_turn_it_was_opened_on"
+runs = ["harness-launch-devin-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '        *self.left_open.borrow_mut() = None;'
+replace = ''
+
+[[plant]]
+name = "resumed: a Devin window whose record grew is read at rest by the turn it was opened on"
+meant = "devin::resumed::a_window_whose_record_grew_is_read_by_the_record_and_not_by_the_turn_it_was_opened_on"
+runs = ["harness-launch-devin-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/left_open.rs"
+find = '''
+        *self == Self::of_items(&record.items)'''
+replace = '''
+        *self == Self::of_items(&record.items) || true'''
+
+[[plant]]
+name = "resumed: a Devin window opened on a message the cut left unanswered reads it as a turn begun"
+meant = "devin::resumed::a_window_opened_again_on_a_message_the_cut_left_unanswered_is_at_rest_at_once"
+runs = ["harness-launch-devin-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '            } else if self.begun_on_the_store(&observed) {'
+replace = '''
+            }
+            if self.begun_on_the_store(&observed) {'''
+
+[[plant]]
+name = "resumed: a Devin window given a message since is read at rest by the record it was opened on"
+meant = "devin::resumed::a_message_given_to_the_window_since_is_a_turn_begun_as_any_for_half_a_minute"
+runs = ["harness-launch-devin-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '                .is_some_and(|open| open.unchanged(&reading))'
+replace = '                .is_some_and(|open| open.unchanged(&reading) || true)'
+
+[[plant]]
+name = "resumed: a record the open held is taken for one that is not held"
+meant = "what_the_record_held_at_the_open_is_held_whatever_it_said_of_its_turn"
+runs = ["harness-left-open"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/left_open.rs"
+find = '''
+        if record.items.is_empty() {
+            return None;
+        }'''
+replace = '''
+        if record.items.is_empty() || record.settlement == Settlement::Settled {
+            return None;
+        }'''
+
+[[plant]]
+name = "resumed: what the old process wrote after the open is taken for a turn the window began"
+meant = "what_the_old_process_wrote_after_the_open_is_no_turn_the_window_began"
+runs = ["harness-left-open"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/left_open.rs"
+find = '        let mut users = items.iter().filter(|item| item.role == Role::User);'
+replace = '        let mut users = items.iter().filter(|item| item.role != Role::Tool);'
+
+[[plant]]
+name = "resumed: a Devin agent's last rows after the open are taken for a turn the window began"
+meant = "devin::resumed::rows_the_old_process_wrote_after_the_open_are_no_turn_the_window_began"
+runs = ["harness-launch-devin-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/left_open.rs"
+find = '        let mut users = items.iter().filter(|item| item.role == Role::User);'
+replace = '        let mut users = items.iter().filter(|item| item.role != Role::Tool);'

@@ -432,10 +432,12 @@ pub(super) fn empty_record() -> Reading {
         in_flight: false,
         asking: false,
         failed: false,
+        failure: None,
         quota: None,
         settlement: Settlement::Unknown,
         pending: Default::default(),
         monitors: Vec::new(),
+        lines: Box::default(),
     })
 }
 
@@ -449,14 +451,17 @@ pub(super) fn working_record() -> Record {
             complete: true,
             at: None,
             commentary: false,
+            synthetic: false,
             compaction: false,
         }],
         in_flight: true,
         asking: false,
         failed: false,
+        failure: None,
         quota: None,
         settlement: Settlement::InFlight,
         pending: Default::default(),
         monitors: Vec::new(),
+        lines: Box::default(),
     }
 }

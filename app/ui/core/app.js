@@ -157,6 +157,7 @@ const tryAgain = (participant) =>
 // A crowded cell's cards are listed in the stack dialog, the board's own.
 const board = new BoardView(boardRoot, $('#stack-dialog'), {
   onRead: (message) => act(() => daemon('message.read', { message: message.id })),
+  onSystemSettings: (pane) => act(() => daemon('computer_use.open', { pane })),
   // What waits for the human's approval goes on, goes back, or is declined with a word to its sender.
   onApprove: (message) =>
     act(async () => {
@@ -190,7 +191,9 @@ const board = new BoardView(boardRoot, $('#stack-dialog'), {
     askToDeleteTasks(
       project.id,
       deletable,
-      `Delete ${deletable.length} finished task${deletable.length === 1 ? '' : 's'}?`,
+      deletable.length === 0
+        ? 'No finished task can be deleted now'
+        : `Delete ${deletable.length} finished task${deletable.length === 1 ? '' : 's'}?`,
       kept,
     ),
 })
@@ -564,23 +567,49 @@ deleteDialog.addEventListener('close', () => {
 // Deleting finished tasks is confirmed in a dialog that says what goes and
 // what stays: one task from its drawer, or every finished task that may go
 // from the Finished heading, with those kept because a task still needs them.
+// With nothing that may go it only says so, and what keeps each task.
 const deleteTasksDialog = $('#delete-tasks-dialog')
 const deleteTasksTitle = $('#delete-tasks-title')
+const deleteTasksHelp = $('#delete-tasks-help')
+const deleteTasksNothing = $('#delete-tasks-nothing')
+const deleteTasksGoing = $('#delete-tasks-going')
 const deleteTasksKept = $('#delete-tasks-kept')
+const deleteTasksKeep = $('#delete-tasks-keep')
+const deleteTasksConfirm = $('#delete-tasks-confirm')
 let deletingTasks = null
-function askToDeleteTasks(project, numbers, title, kept = []) {
+/** Task numbers in a sentence: "T-5", "T-5 and T-8", "T-5, T-8 and T-9". */
+const tasksNamed = (numbers) => {
+  const names = numbers.map((number) => `T-${number}`)
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+}
+/**
+ * Asks to delete `numbers` of `project`, none when nothing may go. `kept` is
+ * null for one task from its drawer; for the Finished heading it lists those
+ * that stay, each with the tasks that need it.
+ */
+function askToDeleteTasks(project, numbers, title, kept = null) {
   deletingTasks = { project, numbers }
+  const nothing = numbers.length === 0
   deleteTasksTitle.textContent = title
+  deleteTasksHelp.hidden = nothing
+  deleteTasksNothing.hidden = !nothing
+  const going = kept !== null && !nothing
+  deleteTasksGoing.hidden = !going
+  deleteTasksGoing.textContent = going
+    ? `${tasksNamed(numbers)} ${numbers.length === 1 ? 'goes' : 'go'}.`
+    : ''
   deleteTasksKept.replaceChildren(
-    ...kept.map(({ number, neededBy }) =>
+    ...(kept ?? []).map(({ number, neededBy }) =>
       element(
         'li',
         null,
-        `T-${number} stays: ${neededBy.map((other) => `T-${other}`).join(', ')} still need${neededBy.length === 1 ? 's' : ''} it.`,
+        `T-${number} stays: ${tasksNamed(neededBy)} still need${neededBy.length === 1 ? 's' : ''} it, and it failed: the chief can still reopen it.`,
       ),
     ),
   )
-  deleteTasksKept.hidden = kept.length === 0
+  deleteTasksKept.hidden = (kept ?? []).length === 0
+  deleteTasksConfirm.hidden = nothing
+  deleteTasksKeep.textContent = nothing ? 'Close' : 'Keep'
   deleteTasksDialog.showModal()
 }
 // The ask is used up here, not when the dialog closes: a close event comes
@@ -794,6 +823,7 @@ $('#new-project').addEventListener('click', async () => {
 // chosen; once the switch is taken, the chief's window is the one in front.
 const switchChief = new SwitchChiefDialog($('#switch-chief-dialog'), {
   selected: () => state.selected,
+  board: () => state.board,
   daemon,
   act,
   onSwitch: () => {

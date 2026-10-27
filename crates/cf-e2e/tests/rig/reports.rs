@@ -376,6 +376,61 @@ fn a_rig_its_case_closed_leaves_no_report() -> Outcome {
 const HEADING: &str = "--- the rig, as the failed case left it";
 
 #[test]
+fn a_rig_its_case_ends_as_a_drop_on_purpose_leaves_no_report() -> Outcome {
+    // A case about what a drop does (live-keychain's: the Claude config of a rig a failed
+    // case dropped is asked what the run came to), merged with the rule that a case that
+    // passes leaves no report (T-501). Its rig is not judged by what the case returns: an
+    // unjudged rig keeps its report for every drop unclosed, a case that passed included,
+    // so only a drop on purpose that is honoured leaves none here (a judged rig of a case
+    // that passes leaves none whatever, T-503).
+    let rig = Rig::start(Config::new(crate::FAKE_AGENT))?;
+    let home = home_of(&rig);
+
+    rig.close_as_dropped();
+
+    assert!(
+        !report_beside(&home).exists(),
+        "a report was kept of a rig its case dropped on purpose"
+    );
+    assert!(
+        !home.exists(),
+        "the home of a rig dropped on purpose is gone"
+    );
+    Ok(())
+}
+
+/// A case about what a drop does that ends its rig as a drop on purpose and then fails,
+/// as most do, by the error of a step it returns: the rig is judged by what its case
+/// returns, and its case has failed by the time the error is made.
+fn a_case_that_drops_on_purpose_and_then_returns_an_error(home: &mut Option<PathBuf>) -> Outcome {
+    let rig = crate::rig()?;
+    *home = Some(home_of(&rig));
+    rig.close_as_dropped();
+    Err(std::io::Error::other("what the case found after the drop"))?;
+    Ok(())
+}
+
+#[test]
+fn a_rig_its_case_ends_as_a_drop_on_purpose_keeps_no_report_though_the_case_fails_after() -> Outcome
+{
+    // The rule that a rig dropped unclosed keeps its report once its case has failed
+    // (T-428) meets the one that a drop on purpose keeps none (T-501): as with a close the
+    // case holds to fail (`expect_the_close_to_fail`), what the case finds after is the
+    // case's to say, in its error.
+    let mut home = None;
+
+    let failed = a_case_that_drops_on_purpose_and_then_returns_an_error(&mut home);
+
+    assert!(failed.is_err(), "the step ended well");
+    let home = home.ok_or("the case never started its rig")?;
+    assert!(
+        !report_beside(&home).exists(),
+        "a report was kept of a rig its case dropped on purpose, once the case failed"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_rig_its_case_left_on_an_error_it_returned_keeps_its_report() -> Outcome {
     let mut home = None;
 
@@ -955,8 +1010,14 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
     }
     let pinned = Regex::new(r"^uses: actions/upload-artifact@[0-9a-f]{40} # v\d+\.\d+\.\d+$")?;
     for (upload, name) in [
-        (temp_upload, "name: rig-reports-${{ matrix.os }}"),
-        (live_upload, "name: live-rig-reports-${{ matrix.os }}"),
+        (
+            temp_upload,
+            "name: rig-reports-${{ matrix.os }}-${{ strategy.job-index }}",
+        ),
+        (
+            live_upload,
+            "name: live-rig-reports-${{ matrix.os }}-${{ strategy.job-index }}",
+        ),
     ] {
         assert!(
             upload.iter().any(|line| pinned.is_match(line)),

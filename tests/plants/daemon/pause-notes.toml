@@ -23,7 +23,7 @@ runs = ["pause-notes-ledger"]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
         // A refusal below writes nothing, this withdrawal with it.
-        leave_pause_notes(store, &task, "resumed")?;'''
+        leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)?;'''
 replace = ""
 
 [[plant]]
@@ -35,7 +35,7 @@ runs = ["pause-notes-ledger"]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
     // A note of several that names it, still queued, names it no more.
-    leave_pause_notes(store, &task, "cancelled")?;'''
+    leave_pause_notes(store, &task, "cancelled", Afterwards::MovesOn)?;'''
 replace = ""
 
 [[plant]]
@@ -47,14 +47,14 @@ runs = ["ledger-resumes"]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
         // A refusal below writes nothing, this withdrawal with it.
-        leave_pause_notes(store, &task, "resumed")?;'''
+        leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)?;'''
 replace = ""
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '        let words = carrier_body(store, &task, assignee.id, &format!("Resumed: {body}"))?;'
 replace = '''
-        leave_pause_notes(store, &task, "resumed")?;
+        leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)?;
         let words = carrier_body(store, &task, assignee.id, &format!("Resumed: {body}"))?;'''
 
 [[plant]]
@@ -73,7 +73,7 @@ replace = '''
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
         require_task_state(&task, &["paused"], "resume")?;
-        leave_pause_notes(store, &task, "resumed")
+        leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)
     })?;
     store.write(|store| {
         let author = by'''
@@ -95,8 +95,10 @@ runs = ["pause-notes-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = '''         AND state = 'queued' AND body != ? RETURNING body",'''
-replace = '         AND body != ? RETURNING body",'
+find = '''         AND state = 'queued' AND body != ? AND substr(body, 1, length(?)) != ?
+         AND substr(body, 1, length(?)) != ? RETURNING body",'''
+replace = '''         AND body != ? AND substr(body, 1, length(?)) != ?
+         AND substr(body, 1, length(?)) != ? RETURNING body",'''
 
 [[plant]]
 name = "pause notes: a resume leaves a note of several naming the task"
@@ -205,3 +207,19 @@ runs = ["ledger-replay"]
 file = "crates/cf-ledger/tests/replay.rs"
 find = '("core-dispatcher-042", 72, '
 replace = '("core-dispatcher-042", 73, '
+
+# 3.0.6-alpha.3's integration B (T-664): failure-reasons' `go_on_in_window` (a task held for quota whose
+# window went on by itself) leaves its wait with tell-then-done's `Afterwards::MovesOn`, so a kept answer of
+# its window is said in the words of a task that moved on, as a resume's is.
+
+[[plant]]
+name = "pause notes: a held task whose window went on by itself keeps its window's answer as if still paused"
+meant = "a_held_tasks_window_that_goes_on_by_itself_keeps_its_answer_in_words_true_of_a_task_that_moved_on"
+runs = ["pause-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''                    "its window went on by itself",
+                    Afterwards::MovesOn,'''
+replace = '''                    "its window went on by itself",
+                    Afterwards::StaysPaused,'''

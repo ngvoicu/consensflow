@@ -60,6 +60,11 @@ impl Rig {
             .chain([
                 ("PATH".into(), path),
                 ("CF_LOG".into(), bin.path().join("log").into_os_string()),
+                // A queue of its own: the real one is in the home folder (T-778).
+                (
+                    "CF_WINDOWS_QUEUES".into(),
+                    bin.path().join("queues").into_os_string(),
+                ),
                 ("CF_COUNT".into(), bin.path().join("count").into_os_string()),
                 (
                     "CF_TARBALL".into(),
@@ -154,6 +159,11 @@ impl Rig {
 
     fn program(&self, name: &str, body: &str) {
         let path = self.bin.path().join(name);
+        let body = if name == "ssh" {
+            crate::windows::testing::ssh_stand_in(body)
+        } else {
+            body.to_owned()
+        };
         fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -199,6 +209,7 @@ impl Rig {
             inside: ".".into(),
             env: Vec::new(),
             command: vec!["cargo".into(), "xtask".into(), "live".into(), "long".into()],
+            wait: 0,
         }
     }
 
@@ -582,6 +593,38 @@ fn a_run_that_could_not_be_sent_brings_nothing_back_and_asks_nothing() {
     assert!(rig.log().is_empty(), "{:?}", rig.log());
 }
 
+#[test]
+fn a_run_the_machine_was_refused_asks_nothing_of_it_after_the_refusal() {
+    // poker-lab holds zeewin2: the run is refused, and the machine is not asked for its reports
+    // either (that was an ssh to the laptop after being told to leave it alone, T-610).
+    let rig = Rig::with_tree().runs_ending_with(0);
+    rig.program(
+        "ssh",
+        r#"for word; do host=$last; last=$word; done; printf 'ssh\t%s\n' "$host" >> "$CF_LOG"; echo held"#,
+    );
+    rig.lists(&[("long/run.md", 6)]);
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let ended = run_keeping(
+        &rig.context,
+        &Machine::named("zeewin2").unwrap(),
+        &Options {
+            machine: Machine::named("zeewin2"),
+            ..rig.options()
+        },
+        &mut Console {
+            out: &mut out,
+            err: &mut err,
+        },
+        &Interrupt::default(),
+    );
+    assert!(ended.is_ok(), "{ended:?}");
+    assert!(String::from_utf8(out)
+        .unwrap()
+        .contains("is busy: poker-lab's job holds it"));
+    assert_eq!(rig.log(), ["ssh\tzeelin"]);
+    assert_eq!(String::from_utf8(err).unwrap(), "");
+}
+
 /// A worker's runs go from its tree, and the tree goes with its task: what lived only there would
 /// go with it. The reports come into the main checkout's folder, the parent of the repository's
 /// common git folder, which the tree's own `evals/reports` is not (T-194, P3-3).
@@ -605,4 +648,13 @@ fn the_reports_come_into_the_main_checkouts_folder_when_the_run_goes_from_a_tree
     let (ended, said) = rig.bring();
     ended.unwrap();
     assert_eq!(said, "");
+}
+
+/// The cases keep a queue of their own (the real one is in the home folder, and a run told not to
+/// wait reads it): see `windows::run`'s case of the same words.
+#[test]
+fn a_case_names_a_queue_folder_of_its_own() {
+    let rig = Rig::new();
+    let queues = rig.context.env.path("CF_WINDOWS_QUEUES").unwrap();
+    assert!(queues.starts_with(rig.bin.path()), "{queues:?}");
 }

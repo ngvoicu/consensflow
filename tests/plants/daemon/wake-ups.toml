@@ -524,6 +524,7 @@ runs = ["ledger-wake-ups"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/transcripts.rs"
 find = '''         WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete
+            OR transcript.role != excluded.role
        RETURNING rowid, compaction",'''
 replace = '''         WHERE 1
        RETURNING rowid, compaction",'''
@@ -646,9 +647,9 @@ runs = ["daemon-wake-up-page", "proto-page"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/page.rs"
-find = '''                | Self::HistoryPart
+find = '''                | Self::ComputerUseOpen
         )'''
-replace = '''                | Self::HistoryPart
+replace = '''                | Self::ComputerUseOpen
                 | Self::WakeUpSet
         )'''
 

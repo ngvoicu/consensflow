@@ -107,7 +107,7 @@ fn reporting(uuid: &str, parent: &str) -> Value {
 fn says(stage: &mut Stage) -> (Settlement, usize) {
     let record = match &*stage.reader.look(&Options::default(), 0) {
         Reading::Known(record) => record.clone(),
-        Reading::Unknown(reason) => panic!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
     };
     (record.settlement, record.pending.total())
 }
@@ -228,15 +228,36 @@ fn a_notification_ends_its_job_whichever_record_says_it_and_whichever_end_it_say
         );
 
         // Only the queue's: the turn it wakes has not begun, and the job is counted until
-        // a turn takes its notification.
+        // a turn takes its notification. Of a job Claude Code ended itself no turn begins:
+        // the window is at rest, the job still counted (T-814's two field records).
         let mut waiting = turn_leaving(JOB);
         waiting.push(queue("enqueue", json!(said)));
-        assert_eq!(
-            once_says(&waiting),
-            (Settlement::InFlight, 1),
-            "{status}, only queued"
-        );
+        let turn = match status {
+            "killed" => Settlement::Settled,
+            _ => Settlement::InFlight,
+        };
+        assert_eq!(once_says(&waiting), (turn, 1), "{status}, only queued");
     }
+}
+
+#[test]
+fn the_notification_of_a_job_claude_code_ended_itself_taken_after_the_turn_holds_no_turn() {
+    // poker-lab's chief, 2026-10-15 (T-814): its turn over, the job's `killed` notification
+    // queued and taken, and no turn after it for the 53 s until the Close.
+    let said = notice(JOB, "killed");
+    let mut records = turn_leaving(JOB);
+    records.extend([queue("enqueue", json!(said)), queue("dequeue", Value::Null)]);
+    assert_eq!(once_says(&records), (Settlement::Settled, 1));
+
+    // And the next message the window takes is the turn's, as any is.
+    records.extend([
+        queue("enqueue", json!("Next")),
+        queue("dequeue", Value::Null),
+        user("u3", json!("d1"), json!("Next")),
+        reporting("a3", "u3"),
+        summary("s2", "a3"),
+    ]);
+    assert_eq!(once_says(&records), (Settlement::Settled, 1));
 }
 
 #[test]

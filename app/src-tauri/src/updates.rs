@@ -315,7 +315,7 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
             Ok(Ok(_permit)) => {
                 // Admission stays closed through restart. The daemon has exited;
                 // a stalled bridge drain cannot keep the old process alive.
-                app.restart();
+                restart_swept(|| -> Value { app.restart() })
             }
             Ok(Err(error)) => command_error(&app, error),
             Err(error) => {
@@ -329,6 +329,25 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
             }
         }
     }
+}
+
+/// Starts the app an update installed, by `restart` (Tauri's, which starts it with a bare
+/// `Command` and never returns), once every descriptor of this app's is close-on-exec, which a
+/// descriptor left inheritable would otherwise be the new app's for as long as it runs. Called
+/// off the main thread, as the install is, Tauri's restart only asks the event loop to end, and
+/// starts the new app on the main thread after the app's last code, which marks them all again
+/// (`at_exit`, lib.rs): that is the sweep the restart relies on. This one is for the two ways
+/// Tauri starts the new app without that: a restart called on the main thread, and one whose
+/// request to end the loop failed. The app is ending, and its own programs are started holding
+/// only their streams, so nothing here needs a descriptor passed on.
+#[cfg(target_os = "macos")]
+fn restart_swept<T>(restart: impl FnOnce() -> T) -> T {
+    if let Err(failed) = cf_process::close_all_on_exec() {
+        eprintln!(
+            "ConsensFlow restarts holding descriptors it could not mark close-on-exec: {failed}"
+        );
+    }
+    restart()
 }
 
 fn preferences_directory(home: &Path, configured: Option<PathBuf>) -> PathBuf {
@@ -953,7 +972,7 @@ mod tests {
     fn real_updater_verifies_download_and_rejects_tampering_before_ready() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
-        use std::process::{Command, Stdio};
+        use std::process::Stdio;
         use tauri_plugin_updater::UpdaterExt;
         let dir = tempfile::tempdir().unwrap();
         let key = dir.path().join("test.key");
@@ -961,7 +980,7 @@ mod tests {
         let bytes = b"signed test archive bytes";
         std::fs::write(&archive, bytes).unwrap();
         let signer = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../node_modules/.bin/tauri");
-        assert!(Command::new(&signer)
+        assert!(crate::testing::command(&signer)
             .args([
                 "signer",
                 "generate",
@@ -976,7 +995,7 @@ mod tests {
             .status()
             .unwrap()
             .success());
-        assert!(Command::new(&signer)
+        assert!(crate::testing::command(&signer)
             .args(["signer", "sign", "--password", "", "--private-key-path"])
             .arg(&key)
             .arg(&archive)
@@ -1059,5 +1078,47 @@ mod tests {
             });
             server.join().unwrap();
         }
+    }
+
+    /// Tauri's restart starts the new app with a bare `Command`: everything of this app's that
+    /// is not close-on-exec as it does would be the new app's for as long as it runs. Here a
+    /// descriptor is left open and not close-on-exec, and the restart (a stand-in, which
+    /// answers what it found where Tauri's never returns) looks at it. The sweep is for the whole
+    /// process, so the test runs in one of its own, its binary run again.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_app_restarts_with_every_descriptor_close_on_exec() {
+        const SWEPT: &str = "CONSENSFLOW_TEST_RESTART_SWEPT";
+        if std::env::var_os(SWEPT).is_some() {
+            use std::os::fd::AsRawFd;
+
+            let stray = std::fs::File::open("/dev/null").expect("a file");
+            let fd = stray.as_raw_fd();
+            // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+            assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+            let flags = restart_swept(|| {
+                // SAFETY: `fcntl` is asked the flags of a descriptor this test holds.
+                unsafe { libc::fcntl(fd, libc::F_GETFD) }
+            });
+            assert_ne!(flags & libc::FD_CLOEXEC, 0, "left inheritable");
+            return;
+        }
+        let ran = crate::testing::command(std::env::current_exe().expect("the test binary"))
+            .args([
+                "--exact",
+                "updates::tests::the_app_restarts_with_every_descriptor_close_on_exec",
+                "--nocapture",
+            ])
+            .env(SWEPT, "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("run the test in a child");
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&ran.stdout),
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        assert!(ran.status.success(), "{said}");
+        assert!(said.contains("1 passed"), "the test did not run: {said}");
     }
 }

@@ -556,7 +556,7 @@ mod tests {
         closed: Box<dyn Fn() + Send + Sync>,
     ) -> Result<StartedDaemon, DaemonFailure> {
         let handle = r#"printf '%s\n' '{"url":"http://localhost:1/","token":"t"}'; "#;
-        let mut command = Command::new("/bin/sh");
+        let mut command = crate::testing::command("/bin/sh");
         command
             .arg("-c")
             .arg(format!("{}{then}", if ready { handle } else { "" }));
@@ -627,7 +627,7 @@ mod tests {
             if counted.fetch_add(1, Ordering::SeqCst) > 0 {
                 return stand_in_core(true, "while read -r line; do :; done", closed);
             }
-            let mut command = Command::new("/bin/sh");
+            let mut command = crate::testing::command("/bin/sh");
             command.arg("-c").arg(format!(
                 "echo $$ > '{}'; exec /bin/sleep 60",
                 hung.display()

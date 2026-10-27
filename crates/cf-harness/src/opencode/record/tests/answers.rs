@@ -3,7 +3,7 @@
 //! a reply streaming or cut at its length, and a part of another session.
 
 use super::*;
-use crate::shared::record::reading::Role;
+use crate::shared::record::reading::{Item, Role};
 
 #[test]
 fn a_reply_that_stopped_is_settled_and_one_streaming_or_cut_is_not_complete() {
@@ -383,6 +383,81 @@ fn a_time_of_a_column_the_store_has_not_is_left_out_as_json_leaves_it() {
 }
 
 #[test]
+fn anthropics_400_for_spent_extra_usage_is_a_refusal_for_quota_that_names_no_reset() {
+    // Anthropic's spent extra usage is a 400 that says so: a refusal for quota
+    // that names no reset (the words of Pi's sessions on this Mac; T-88).
+    let staged = Staged::new();
+    staged.conversation(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 1_790_000_000_000_i64 },
+        "finish": "stop",
+        "error": {
+            "name": "APIError",
+            "data": {
+                "message": "You're out of extra usage. Add more at claude.ai/settings/usage and keep going.",
+                "statusCode": 400,
+            },
+        },
+    }));
+    assert_eq!(
+        read_once(&staged),
+        format!(
+            r#"{{"items":{},"inFlight":false,"asking":false,"failed":true,"quota":{{"state":"exhausted","at":"2026-09-21T14:13:20.000Z","resetsAt":null}},"settlement":"settled"}}"#,
+            conversation_items(false, 1_790_000_000_000)
+        )
+    );
+}
+
+#[test]
+fn a_failed_reply_keeps_the_words_of_its_error() {
+    let failure_of = |reply: &Value| {
+        let staged = Staged::new();
+        staged.conversation(reply);
+        match &*look(&mut staged.reader()) {
+            Reading::Known(record) => (record.failed, record.failure.clone()),
+            Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
+        }
+    };
+    let said = failure_of(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 9 },
+        "error": { "name": "ProviderModelNotFoundError", "data": { "message": "Model not found: nonesuch/gpt-0" } },
+    }));
+    assert_eq!(
+        said,
+        (true, Some("Model not found: nonesuch/gpt-0".to_owned()))
+    );
+    // No message: what it is, its name and its response's status, and never the
+    // response's body or headers an SDK's error keeps beside them.
+    let named = failure_of(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 9 },
+        "error": {
+            "name": "APIError",
+            "data": {
+                "statusCode": 500,
+                "isRetryable": false,
+                "responseBody": "{\"error\":{\"message\":\"upstream body\"}}",
+                "responseHeaders": { "set-cookie": "session=abc123def456", "x-request-id": "req_1" },
+            },
+        },
+    }));
+    assert_eq!(named, (true, Some("APIError (status 500)".to_owned())));
+    let bare = failure_of(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 9 },
+        "error": { "name": "UnknownError" },
+    }));
+    assert_eq!(bare, (true, Some("UnknownError".to_owned())));
+    let fine = failure_of(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 9 },
+        "finish": "stop",
+    }));
+    assert_eq!(fine, (false, None));
+}
+
+#[test]
 fn the_summary_a_compaction_writes_is_marked_so_and_the_answer_before_it_is_not() {
     // OpenCode 1.19.3 writes a compaction's summary as an assistant's message of its own,
     // `summary: true`, its mode and agent `compaction`, which stops as any reply does
@@ -439,4 +514,79 @@ fn the_summary_a_compaction_writes_is_marked_so_and_the_answer_before_it_is_not(
             ("Summary of the conversation so far", true),
         ]
     );
+}
+
+/// The last item a look reads of a reply to the user's message, `reply` its message's
+/// data and `parts` the data of its parts.
+fn reply_read(reply: &Value, parts: &[Value]) -> Item {
+    let staged = Staged::new();
+    staged.message(
+        "m1",
+        1,
+        &json!({ "role": "user", "time": { "created": 1 } }),
+    );
+    staged.part(
+        "p1",
+        "m1",
+        2,
+        &json!({ "type": "text", "text": "Review T-1" }),
+    );
+    staged.event(1, "message.updated.1", &info("m1", None));
+    staged.event(2, "message.part.updated.1", &part_of("p1", "m1"));
+    staged.message("m2", 3, reply);
+    staged.event(3, "message.updated.1", &info("m2", None));
+    let mut n = 4;
+    for part in parts {
+        let id = format!("p{n}");
+        staged.part(&id, "m2", n, part);
+        staged.event(n, "message.part.updated.1", &part_of(&id, "m2"));
+        n += 1;
+    }
+    if let Some(time) = reply
+        .get("time")
+        .filter(|time| time.get("completed").is_some())
+    {
+        staged.event(n, "message.updated.1", &info("m2", Some(time)));
+    }
+    match &*look(&mut staged.reader()) {
+        Reading::Known(record) => record.items.last().unwrap().clone(),
+        reading => panic!("{reading:?}"),
+    }
+}
+
+#[test]
+fn a_reply_with_nothing_of_the_models_in_it_is_synthetic_and_one_the_model_began_is_not() {
+    // T-530: OpenCode makes the assistant's message before the model replies, and keeps
+    // it when the request fails or is aborted before a token (seen on this Mac's
+    // store: rows of no part, `MessageAbortedError` and `APIError` rows of none, an
+    // `UnknownError` row of its `step-start` alone). No turn got through any of them.
+    let begun = json!({ "role": "assistant", "time": { "created": 3 } });
+    let failed = |name: &str| {
+        json!({ "role": "assistant", "time": { "created": 3, "completed": 4 },
+            "error": { "name": name, "data": { "message": "failed" } } })
+    };
+    let step = json!({ "type": "step-start" });
+    for (reply, parts) in [
+        (begun.clone(), vec![]),
+        (begun.clone(), vec![step.clone()]),
+        (failed("MessageAbortedError"), vec![]),
+        (failed("APIError"), vec![]),
+        (failed("UnknownError"), vec![step.clone()]),
+        (begun.clone(), vec![json!({ "type": "text", "text": " " })]),
+    ] {
+        let item = reply_read(&reply, &parts);
+        assert_eq!(
+            (item.role, item.synthetic),
+            (Role::Assistant, true),
+            "{reply} {parts:?}"
+        );
+    }
+    for part in [
+        json!({ "type": "text", "text": "Reading the" }),
+        json!({ "type": "reasoning", "text": "The user wants" }),
+        json!({ "type": "tool", "tool": "read", "callID": "c1", "state": { "status": "running" } }),
+    ] {
+        let item = reply_read(&begun, &[step.clone(), part.clone()]);
+        assert!(!item.synthetic, "{part}");
+    }
 }

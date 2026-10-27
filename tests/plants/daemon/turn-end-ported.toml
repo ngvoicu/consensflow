@@ -108,7 +108,7 @@ replace = "      return task.state === 'working' && lane.held"
 
 [[plant]]
 name = "turn end finish page: a paused task is said to wait"
-meant = "says nothing of waiting on a task that is paused, though its lane is held for it, and offers no Finish"
+meant = "says nothing of waiting on a task that is paused, though its lane is held for it, and offers Finish, which takes what its worker said last"
 runs = ["tep-turn-end-finish-page-finish"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
@@ -130,7 +130,7 @@ replace = ""
 
 [[plant]]
 name = "turn end finish page: a lane of a paused task is said idle"
-meant = "says nothing of waiting on a task that is paused, though its lane is held for it, and offers no Finish"
+meant = "says nothing of waiting on a task that is paused, though its lane is held for it, and offers Finish, which takes what its worker said last"
 runs = ["tep-turn-end-finish-page-finish"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
@@ -174,7 +174,7 @@ replace = "  if (agents === 0) return 'a background job'"
 
 [[plant]]
 name = "turn end finish page: Finish is offered for a task the lane is held for though it is paused"
-meant = "says nothing of waiting on a task that is paused, though its lane is held for it, and offers no Finish"
+meant = "says nothing of waiting on a task that is paused, though its lane is held for it, and offers Finish, which takes what its worker said last"
 runs = ["tep-turn-end-finish-page-finish"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 

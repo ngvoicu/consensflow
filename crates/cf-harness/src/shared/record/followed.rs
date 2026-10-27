@@ -4,10 +4,10 @@
 //! from where the last look stopped into the state its parser makes, and
 //! says whether it read anything. A transcript that is not the one read so
 //! far, or whose parser asked for it again (`Stop::Reread`), is read again
-//! from its start, into a fresh state. One that could not be read is not
+//! from its start, into a fresh state, made for the file it reads. One that could not be read is not
 //! read again until it changes.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use cf_base::file::{settled, stat, Stat};
@@ -49,10 +49,13 @@ pub(crate) trait Parser {
 /// be looked for.
 pub(crate) type Locate = Box<dyn FnMut() -> Result<Option<PathBuf>, String> + Send>;
 
+/// How a fresh state is made, for the file it reads.
+pub(crate) type Fresh<P> = Box<dyn FnMut(&Path) -> P + Send>;
+
 /// A transcript followed from look to look.
 pub(crate) struct Followed<P> {
     locate: Locate,
-    parse: Box<dyn FnMut() -> P + Send>,
+    parse: Fresh<P>,
     file: Option<PathBuf>,
     seen: Option<Seen>,
     state: Option<P>,
@@ -69,10 +72,13 @@ pub(crate) struct Read<'a, P> {
     pub(crate) file: PathBuf,
     /// Whether the look read anything since the last.
     pub(crate) changed: bool,
+    /// The torn lines passed over so far, each by the place among the records
+    /// it stood at.
+    pub(crate) lost: Vec<usize>,
 }
 
 impl<P: Parser> Followed<P> {
-    pub(crate) fn new(locate: Locate, parse: Box<dyn FnMut() -> P + Send>) -> Self {
+    pub(crate) fn new(locate: Locate, parse: Fresh<P>) -> Self {
         Self {
             locate,
             parse,
@@ -110,7 +116,7 @@ impl<P: Parser> Followed<P> {
         }
         self.broken = None;
         loop {
-            let state = self.state.get_or_insert_with(|| (self.parse)());
+            let state = self.state.get_or_insert_with(|| (self.parse)(&file));
             let looked = read_on_with(
                 &file,
                 self.seen.as_ref(),
@@ -129,10 +135,16 @@ impl<P: Parser> Followed<P> {
                     if let Looked::Held(seen) | Looked::Read(seen) = looked {
                         self.seen = Some(seen);
                     }
+                    let lost = self
+                        .seen
+                        .as_ref()
+                        .map(|seen| seen.passed_over().to_vec())
+                        .unwrap_or_default();
                     return Ok(Some(Read {
-                        state: self.state.get_or_insert_with(|| (self.parse)()),
+                        state: self.state.get_or_insert_with(|| (self.parse)(&file)),
                         file,
                         changed,
+                        lost,
                     }));
                 }
                 // Another file, or a parser that wants every record again: the
@@ -177,14 +189,20 @@ impl<P> TranscriptReader<P> {
         }
     }
 
-    /// Tells the state read so far, if there is one, what `tell` tells it, and
-    /// has the next look answer anew: from that state where `tell` says it
-    /// took it, else from the transcript read again from its start into a
-    /// fresh state.
-    pub(crate) fn retell(&mut self, tell: impl FnOnce(&mut P) -> bool) {
+    /// The transcript the reader read last, once it found one.
+    pub(crate) fn file(&self) -> Option<&Path> {
+        self.transcript.file.as_deref()
+    }
+
+    /// Tells the state read so far, if there is one, what `tell` tells it of
+    /// the file it read, and has the next look answer anew: from that state
+    /// where `tell` says it took it, else from the transcript read again from
+    /// its start into a fresh state.
+    pub(crate) fn retell(&mut self, tell: impl FnOnce(&mut P, &Path) -> bool) {
         self.answer = None;
-        if let Some(state) = self.transcript.state.as_mut() {
-            if !tell(state) {
+        let transcript = &mut self.transcript;
+        if let (Some(state), Some(file)) = (transcript.state.as_mut(), transcript.file.as_deref()) {
+            if !tell(state, file) {
                 self.transcript.seen = None;
                 self.transcript.state = None;
             }
@@ -200,14 +218,15 @@ impl<P: Parser + Answer> Look for TranscriptReader<P> {
             // A thread with no transcript yet is unknown: missing history alone proves nothing.
             Ok(None) => {
                 self.answer = None;
-                Arc::new(Reading::unreadable(&format!("no {}", self.missing)))
+                Arc::new(Reading::missing(&self.missing))
             }
             Ok(Some(read)) => {
                 if let (false, Some(answer)) = (read.changed, &self.answer) {
                     return Arc::clone(answer);
                 }
                 match read.state.result() {
-                    Ok(record) => {
+                    Ok(mut record) => {
+                        record.lines.lost = read.lost;
                         let answer = Arc::new(Reading::Known(record));
                         self.answer = Some(Arc::clone(&answer));
                         answer
@@ -247,21 +266,24 @@ mod tests {
     fn a_transcript_that_could_not_be_read_is_not_read_again_until_it_changes() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("t.jsonl");
-        fs::write(&file, "{\"a\":1}\n{bad}\n").unwrap();
+        fs::write(&file, "{\"a\":1}\n{\"x\":1e400}\n").unwrap();
         let made = Arc::new(AtomicUsize::new(0));
         let visits = Arc::new(AtomicUsize::new(0));
         let located = file.clone();
         let (making, visiting) = (Arc::clone(&made), Arc::clone(&visits));
         let mut followed = Followed::new(
             Box::new(move || Ok(Some(located.clone()))),
-            Box::new(move || {
+            Box::new(move |_: &Path| {
                 making.fetch_add(1, Ordering::Relaxed);
                 Counting(Arc::clone(&visiting))
             }),
         );
         let counts = || (made.load(Ordering::Relaxed), visits.load(Ordering::Relaxed));
         let failed = followed.read(LONG_AFTER_MS).err().unwrap().reason();
-        assert_eq!(failed, "malformed JSONL at record 1");
+        assert!(
+            failed.starts_with("JSON this build cannot hold at record 1"),
+            "{failed}"
+        );
         assert_eq!(counts(), (1, 1));
         assert_eq!(followed.read(LONG_AFTER_MS).err().unwrap().reason(), failed);
         assert_eq!(
@@ -273,6 +295,44 @@ mod tests {
         std::io::Write::write_all(&mut appended, b"{\"b\":2}\n").unwrap();
         assert_eq!(followed.read(LONG_AFTER_MS).err().unwrap().reason(), failed);
         assert_eq!(counts(), (2, 2), "changed: read again from its start");
+    }
+
+    #[test]
+    fn a_torn_line_breaks_nothing_the_state_goes_on_and_reads_the_records_after_it() {
+        // A short write left part of a record, and the next append made one line of
+        // it and itself: the state read so far is kept, and given what comes after.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("t.jsonl");
+        fs::write(&file, "{\"a\":1}\n{\"a\":2,\"b\":\"cut sh").unwrap();
+        let made = Arc::new(AtomicUsize::new(0));
+        let visits = Arc::new(AtomicUsize::new(0));
+        let located = file.clone();
+        let (making, visiting) = (Arc::clone(&made), Arc::clone(&visits));
+        let mut followed = Followed::new(
+            Box::new(move || Ok(Some(located.clone()))),
+            Box::new(move |_: &Path| {
+                making.fetch_add(1, Ordering::Relaxed);
+                Counting(Arc::clone(&visiting))
+            }),
+        );
+        let counts = || (made.load(Ordering::Relaxed), visits.load(Ordering::Relaxed));
+        let append = |text: &str| {
+            let mut appended = fs::OpenOptions::new().append(true).open(&file).unwrap();
+            std::io::Write::write_all(&mut appended, text.as_bytes()).unwrap();
+        };
+        assert!(followed.read(LONG_AFTER_MS).is_ok());
+        assert_eq!(counts(), (1, 1), "the piece waits");
+        append("{\"a\":3}\n");
+        assert!(followed.read(LONG_AFTER_MS).is_ok(), "torn: it waits");
+        assert_eq!(counts(), (1, 1));
+        append("{\"a\":4}\n");
+        assert!(followed.read(LONG_AFTER_MS).unwrap().unwrap().changed);
+        assert_eq!(
+            counts(),
+            (1, 2),
+            "the same state, given the record after it"
+        );
+        assert!(followed.broken.is_none());
     }
 
     /// Writes `text` to `file`, last written at `at_ms` whatever the file system's clock.
@@ -295,13 +355,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("t.jsonl");
         let looked = EPOCH_MS;
-        let (broken, mended) = ("{\"a\":1}\n{\"b\":!}\n", "{\"a\":1}\n{\"b\":2}\n");
+        let (broken, mended) = ("{\"a\":1}\n{\"b\":1e999}\n", "{\"a\":1}\n{\"b\":22222}\n");
         assert_eq!(broken.len(), mended.len());
         write_at(&file, broken, looked - 1_000);
         let located = file.clone();
         let mut followed = Followed::new(
             Box::new(move || Ok(Some(located.clone()))),
-            Box::new(|| Counting(Arc::new(AtomicUsize::new(0)))),
+            Box::new(|_: &Path| Counting(Arc::new(AtomicUsize::new(0)))),
         );
         assert!(followed.read(looked).is_err());
         write_at(&file, mended, looked - 1_000);
@@ -327,7 +387,7 @@ mod tests {
         let (located, visiting) = (file.clone(), Arc::clone(&visits));
         let mut followed = Followed::new(
             Box::new(move || Ok(Some(located.clone()))),
-            Box::new(move || Counting(Arc::clone(&visiting))),
+            Box::new(move |_: &Path| Counting(Arc::clone(&visiting))),
         );
         let mut look = |at: i64| followed.read(written + at).unwrap().unwrap().changed;
         assert!(look(500));
@@ -366,7 +426,7 @@ mod tests {
         let located = file.clone();
         let followed = Followed::new(
             Box::new(move || Ok(Some(located.clone()))),
-            Box::new(move || Rereading {
+            Box::new(move |_: &Path| Rereading {
                 number: made.fetch_add(1, Ordering::Relaxed) + 1,
                 visited: Vec::new(),
                 asks_at,

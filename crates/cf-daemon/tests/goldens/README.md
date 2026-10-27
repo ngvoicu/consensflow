@@ -17,7 +17,7 @@ traces, for the players that read them (`../api/`, `../page/`, `../screens/`,
 |---|---|
 | `<suite>-<NNN>.json.gz` | one trace per test that reached a surface |
 | `pages/agents.html`, `pages/harnesses.html` | the two pages the screens served, `$TOKEN` and `$VERSION` where the token and the version go |
-| `operations.json`, `daemon.json`, `files.json` | the page's operations (Node's 28 and the ones added since: `wakeup.get`, `wakeup.set`, `project.specs`, `project.rename`, `project.describe`, `specs.get`, `specs.set`, `specs.tree`, `specs.file`, `specs.present`, `specs.open`, `history.get`, `history.part`), the daemon's handle line and start and stop lines, and its log and trace line formats |
+| `operations.json`, `daemon.json`, `files.json` | the page's operations (Node's 28 and the ones added since: `wakeup.get`, `wakeup.set`, `project.specs`, `project.rename`, `project.describe`, `specs.get`, `specs.set`, `specs.tree`, `specs.file`, `specs.present`, `specs.open`, `history.get`, `history.part`, `computer_use.get`, `computer_use.open`), the daemon's handle line and start and stop lines, and its log and trace line formats |
 
 ## Changed after Node
 
@@ -67,6 +67,13 @@ the commands that take one says `(task add, reopen, resume, edit and tell)`, and
 `Those five say how many characters went`, in `cf-board-028`: those words alone. Where
 both sides had changed `cf-board-022`, `-028` and `-029`, each side's hand changes were
 put together, word for word, and nothing else moved.
+
+`cf tell` to a task still open (board task T-543, 3.0.6; the tester's T-534): the board no
+longer refuses it with `T-n has no window to tell: it is open`, its words are added to the
+task's brief. `cf-board-004`, whose run 4 is that refusal, departs (`tests/api/main.rs`);
+the trace itself is as it was recorded. The usage line of `cf tell` says `(queued or open: …)`
+now, in `crates/cf/src/board/usage.txt` and the crates' own goldens; `cf-board-028` and `-029`,
+which depart already, still hold the older line.
 
 `cf task list` with idle sessions (board task T-261, 3.0.6) moved the usage `cf` prints once
 more: its line reads `cf task list [--all]` and says what the flag adds, in every print of it

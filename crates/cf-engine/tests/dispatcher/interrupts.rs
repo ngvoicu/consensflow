@@ -5,6 +5,7 @@
 
 use std::time::Duration;
 
+use cf_engine::steps::STEP_WAIT;
 use cf_engine::testing::Context;
 use cf_engine::ActivityState;
 use cf_harness::contract::{Interrupt, Pane};
@@ -269,7 +270,10 @@ fn presses_one_escape_more_a_moment_later_for_a_harness_whose_two_can_open_a_dia
         .iter()
         .filter_map(|event| match event["seam"].as_str()? {
             "host" if event["args"][0] == "pane.input" => Some("pane.input".to_owned()),
-            "time" => Some(format!("sleep {}", event["args"][0])),
+            // The pass's own wait for its steps is no pause of the adapter's.
+            "time" if event["args"][0] != json!(STEP_WAIT.as_millis()) => {
+                Some(format!("sleep {}", event["args"][0]))
+            }
             _ => None,
         })
         .collect();

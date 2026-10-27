@@ -14,7 +14,7 @@ use cf_e2e::rig::{write_staff, Project, Rig};
 use regex::Regex;
 use serde_json::{json, Value};
 
-use crate::{after, config, rig, secs, Outcome};
+use crate::{after, config, first_told, on_command_line, rig, secs, session_of, Outcome};
 
 /// Whether the lane's `pane` is there and null: the window is closed. A lane
 /// that is not there, or has no `pane`, is not.
@@ -156,13 +156,15 @@ fn a_test_is_a_task_the_chief_puts_on_the_board_a_tester_of_its_tier_takes_it_in
         argv.iter().any(|word| word == "bypassPermissions"),
         "{argv:?}"
     );
-    // ...and the brief the chief wrote, as the message it was launched with.
-    let brief = argv.last().and_then(Value::as_str).unwrap_or_default();
+    // ...and the brief the chief wrote, as the first message it was given once up, on no
+    // word of its command line (T-432).
+    assert!(!on_command_line(&window, "TESTS_OK"), "{argv:?}");
+    let brief = first_told(&rig, &session_of(&window));
     assert!(
         Regex::new(
             r"^\[ConsensFlow m-\d+ · T-1 · task from @chief\]\nSLEEP 3 Reply with exactly: TESTS_OK$"
         )?
-        .is_match(brief),
+        .is_match(&brief),
         "{brief:?}"
     );
 
@@ -241,8 +243,10 @@ fn each_task_runs_in_its_own_worker_session_the_window_closes_with_the_task_the_
 }
 
 #[test]
-fn a_worker_refused_by_its_provider_mid_task_loses_the_task_to_the_other_worker_of_its_tier(
+fn a_worker_refused_by_its_provider_mid_task_keeps_the_task_in_its_window_though_the_other_worker_of_its_tier_is_free(
 ) -> Outcome {
+    // A quota wait never gives the work away (dip-agentos, 2026-10-19): only the
+    // human or the chief moves a task from the window its work is in.
     let rig = Rig::start(config().var("CF_TEST_QUOTA_OUT", "worker"))?;
     let p = project_of(&rig, None, &[("worker", "worker"), ("worker2", "worker")])?;
     let tiers = p.tiers()?;
@@ -253,55 +257,67 @@ fn a_worker_refused_by_its_provider_mid_task_loses_the_task_to_the_other_worker_
             tier(&tiers, "worker")
         ),
     )?;
-    rig.wait_for("the task to be done", secs(90), || {
-        Ok(p.task(1)?["state"] == "done")
+    rig.wait_for("the task to wait", secs(90), || {
+        Ok(p.task(1)?["state"] == "paused")
     })?;
-    let done = p.task(1)?;
-    let assignee = done["assignee"].as_str().unwrap_or_default();
+    let held = p.task(1)?;
+    let assignee = held["assignee"].as_str().unwrap_or_default();
     assert!(
-        assignee.starts_with("worker2-"),
-        "a session of the other worker: {assignee}"
+        assignee.starts_with("worker-"),
+        "a session of the worker that ran out: {assignee}"
     );
-    let body = done["body"].as_str().unwrap_or_default();
-    assert!(
-        Regex::new(r"Reassigned from @worker-[a-z]+-[a-z]+ \(ran out of quota after starting\)")?
-            .is_match(body),
-        "{body}"
-    );
-    // Quota is the member's: the member row says it is out, not a session.
-    let board = p.board()?;
-    let out = board["lanes"]
-        .as_array()
-        .and_then(|lanes| {
-            lanes
-                .iter()
-                .find(|l| l["participant"]["handle"] == "worker")
-        })
-        .map_or(Value::Null, |lane| lane["participant"].clone());
-    let until = out["outUntil"]
+    let until = held["heldUntil"]
         .as_str()
         .and_then(|at| at.parse::<jiff::Timestamp>().ok());
     assert!(
         until.is_some_and(|until| until > jiff::Timestamp::now()),
-        "the first worker is out: {}",
-        out["outUntil"]
+        "held until the reset: {held}"
     );
-    let taken_back = Regex::new(
-        r"^T-1 was taken back from @worker-[a-z]+-[a-z]+ \(ran out of quota after starting\)",
-    )?;
+    let body = held["body"].as_str().unwrap_or_default();
+    assert!(!body.contains("Reassigned"), "{body}");
+    // Quota is the member's: the member row was marked out, not a session. The
+    // other worker's turn on the same account brought it back since (Claude
+    // Code's windows share one account, T-295), and its row keeps when it was
+    // last marked.
+    let board = p.board()?;
+    let row = |handle: &dyn Fn(&str) -> bool| {
+        board["lanes"]
+            .as_array()
+            .and_then(|lanes| {
+                lanes
+                    .iter()
+                    .find(|l| handle(l["participant"]["handle"].as_str().unwrap_or_default()))
+            })
+            .map_or(Value::Null, |lane| lane["participant"].clone())
+    };
+    let member = row(&|handle| handle == "worker");
     assert!(
-        p.inbox("chief")?.iter().any(|m| {
-            m["kind"] == "note" && taken_back.is_match(m["body"].as_str().unwrap_or_default())
-        }),
-        "the requester was told"
+        member["outSince"].is_string(),
+        "the first worker was marked out: {member}"
     );
-    let second = p.lane("worker2")?["tasks"][0].clone();
-    assert_eq!(second["number"], 1);
-    rig.wait_for("the result to be delivered", secs(60), || {
-        Ok(p.inbox("chief")?.iter().any(|m| {
-            m["kind"] == "result" && m["body"] == "WORKER_OK" && m["state"] == "delivered"
-        }))
+    let session = row(&|handle| handle.starts_with("worker-"));
+    assert!(
+        session["outSince"].is_null(),
+        "its session was not: {session}"
+    );
+    let waits = Regex::new(&format!(
+        r"^T-1 waits with @{assignee}: out of quota until "
+    ))?;
+    rig.wait_for("the requester to be told it waits", secs(30), || {
+        Ok(p.inbox("chief")?
+            .iter()
+            .any(|m| m["kind"] == "note" && waits.is_match(m["body"].as_str().unwrap_or_default())))
     })?;
+    // A few passes later, the other worker still has nothing.
+    thread::sleep(Duration::from_secs(3));
+    assert!(
+        p.lane("worker2")?["tasks"]
+            .as_array()
+            .is_none_or(Vec::is_empty),
+        "{}",
+        p.lane("worker2")?
+    );
+    assert_eq!(p.task(1)?["assignee"], held["assignee"]);
     rig.close()?;
     Ok(())
 }

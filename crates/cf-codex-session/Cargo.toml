@@ -30,5 +30,9 @@ uuid.workspace = true
 cf-board = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 
+[target.'cfg(unix)'.dev-dependencies]
+# A descriptor left open and not close-on-exec, for a test of what Codex's programs hold.
+nix = { workspace = true, features = ["fs"] }
+
 [lints]
 workspace = true

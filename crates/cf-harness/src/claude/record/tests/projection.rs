@@ -189,6 +189,15 @@ fn made() -> Vec<Value> {
             json!([tool_result(json!("t1"), json!("out"))]),
         ),
         hook(json!(["context", "more"]), Some("h1")),
+        // The record beside a message, that says where its image came from.
+        having(
+            user(
+                "c2",
+                json!("u1"),
+                json!([text(json!("[Image: source: /pictures/desk.png]"))]),
+            ),
+            json!({ "isMeta": true, "turnCompanion": true }),
+        ),
         closed("c1", "u1"),
         attachment("at1", "u1"),
         brought_in(),
@@ -441,13 +450,10 @@ fn what_replay_fails_on_fails_the_look_after_every_line_is_read_and_in_the_order
     for (record, said) in failures {
         stage.write(&[hello(), record]);
         assert_eq!(stage.look(), format!("unknown: unreadable: {said}"));
-        // A line after it that cannot be read is the look's failure, for the
-        // look reads every line before it replays any.
+        // A torn line after it is passed over, and the record is the look's
+        // failure still.
         append_raw(&stage, "{\"type\":\n");
-        assert_eq!(
-            stage.look(),
-            "unknown: unreadable: malformed JSONL at record 2"
-        );
+        assert_eq!(stage.look(), format!("unknown: unreadable: {said}"));
         // And so is a line too deep for a value, in a part nobody reads.
         stage.write(&[hello(), failures_record()]);
         let deep = format!(

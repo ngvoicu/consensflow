@@ -15,7 +15,13 @@ use crate::shared::quota::Quota;
 /// the reason (`{unknown: true, reason}`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Reading {
+    /// The look could not read the record (it failed, or never answered): what
+    /// the record holds is not known.
     Unknown(String),
+    /// The record is not there: a conversation its harness has written nothing of
+    /// yet. It was read, and holds nothing. Said as an unknown one is, its reason
+    /// as written.
+    Missing(String),
     Known(Record),
 }
 
@@ -24,12 +30,31 @@ impl Reading {
     pub(crate) fn unreadable(reason: &str) -> Self {
         Reading::Unknown(format!("unreadable: {reason}"))
     }
+
+    /// The reading of a record that is not there, said `unreadable: no <what>`.
+    pub(crate) fn missing(what: &str) -> Self {
+        Reading::Missing(format!("unreadable: no {what}"))
+    }
+
+    /// Whether the look could not read the record at all, so what it holds is not
+    /// known. A record that is not there ([`Reading::Missing`]) was read.
+    pub fn read_failed(&self) -> bool {
+        matches!(self, Reading::Unknown(_))
+    }
+
+    /// Why the record was not read, where it was not.
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            Reading::Unknown(reason) | Reading::Missing(reason) => Some(reason),
+            Reading::Known(_) => None,
+        }
+    }
 }
 
 impl Serialize for Reading {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Reading::Unknown(reason) => {
+            Reading::Unknown(reason) | Reading::Missing(reason) => {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("unknown", &true)?;
                 map.serialize_entry("reason", reason)?;
@@ -51,6 +76,12 @@ pub struct Record {
     /// Its own question dialog is open: the window waits for the human's answer.
     pub asking: bool,
     pub failed: bool,
+    /// Why the turn failed, in the harness's own words where its record has
+    /// them (an API's error, a provider's message): the reason the engine's
+    /// note gives. None where the record says no more than that it failed. No
+    /// reading Node wrote has it.
+    #[serde(skip)]
+    pub failure: Option<String>,
     pub quota: Option<Arc<Quota>>,
     pub settlement: Settlement,
     /// What the settled turn left running that its harness wakes its agent for as
@@ -61,6 +92,35 @@ pub struct Record {
     /// Code's): said only where there are any, and no reading Node wrote has them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub monitors: Vec<Monitor>,
+    /// Where the record's lines stand: those torn and passed over, the record each item
+    /// began in, and what the last of them leave in the harness's input box. Never said:
+    /// no reading Node wrote has it.
+    #[serde(skip)]
+    pub lines: Box<Lines>,
+}
+
+/// Where a record's lines stand, as its reader read them (T-223, T-290, T-483). Behind a box in
+/// [`Record`], which a reader's `Err` holds too ([`crate::records::Open`]): a reading stays
+/// as small as one without them (the merge with turn-end, T-494).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Lines {
+    /// The lines of the record that were torn and passed over, each by the
+    /// place among the records it stood at, in order: records lost, which the
+    /// items miss.
+    pub lost: Vec<usize>,
+    /// The place among the records of the record each item began in, one an
+    /// item, which [`Lines::lost`] is counted in: none where the harness's
+    /// items are not its record's lines (Devin's, from its store).
+    pub places: Option<Vec<usize>>,
+    /// The turn is over, and its harness put the command it began with back in its
+    /// input box, where what is pasted next goes in after it: Claude Code's compaction
+    /// cancelled with Escape (its reader, T-483).
+    pub put_back: bool,
+    /// The turn reads in flight only for the harness's own notices of background work it
+    /// queued after the turn ended, with nothing of a turn for them begun (Claude Code's
+    /// notifications, its reader): a turn is to begin for each while its program runs,
+    /// and none began where it no longer does (T-814).
+    pub held_by_notices: bool,
 }
 
 /// A monitor a turn armed that its harness has said no end of: its task's id, what its
@@ -182,10 +242,12 @@ impl Record {
             in_flight: false,
             asking: false,
             failed: false,
+            failure: None,
             quota: None,
             settlement: Settlement::Unknown,
             pending: Pending::default(),
             monitors: Vec::new(),
+            lines: Box::default(),
         }
     }
 }
@@ -238,6 +300,11 @@ pub struct Item {
     pub at: Option<Value>,
     /// A progress note, as Codex marks one: said only when true.
     pub commentary: bool,
+    /// An assistant's item with nothing of the model's in it: Claude Code's close
+    /// of a turn it found cut, the step Pi writes of a run that failed or was aborted
+    /// before the model's first token, a message OpenCode made before the reply. No
+    /// turn got through it. Never said: a reading is the one Node wrote.
+    pub synthetic: bool,
     /// The summary a compaction writes in the user's place (Claude Code's
     /// `isCompactSummary`): the harness's own, and no message of the user's. Never
     /// said: a reading is the one Node wrote, which read it as the user's.
@@ -327,6 +394,7 @@ mod tests {
             complete: true,
             at: Some(json!("2026-09-06T17:27:06.000Z")),
             commentary: false,
+            synthetic: false,
             compaction: false,
         });
         record.items.push(Item {
@@ -336,6 +404,7 @@ mod tests {
             complete: false,
             at: None,
             commentary: true,
+            synthetic: false,
             compaction: false,
         });
         // A compaction's summary is the user's item it was to Node.
@@ -346,6 +415,7 @@ mod tests {
             complete: true,
             at: None,
             commentary: false,
+            synthetic: false,
             compaction: true,
         });
         record.settlement = Settlement::InFlight;
@@ -382,6 +452,23 @@ mod tests {
             serde_json::to_string(&Reading::unreadable("no codex rollout for s")).unwrap(),
             r#"{"unknown":true,"reason":"unreadable: no codex rollout for s"}"#
         );
+    }
+
+    #[test]
+    fn a_record_that_is_not_there_was_read_and_one_that_could_not_be_read_failed() {
+        let missing = Reading::missing("claude transcript for s");
+        assert_eq!(
+            serde_json::to_string(&missing).unwrap(),
+            r#"{"unknown":true,"reason":"unreadable: no claude transcript for s"}"#,
+            "said as it was before it had a name of its own"
+        );
+        assert!(!missing.read_failed());
+        assert!(Reading::unreadable("the records thread ended").read_failed());
+        // A failure whose words begin as a missing record's do is a failure still:
+        // SQLite's own, in OpenCode's store.
+        assert!(Reading::unreadable("no such column: id").read_failed());
+        assert!(Reading::Unknown("missing session id".to_owned()).read_failed());
+        assert!(!Reading::Known(Record::new()).read_failed());
     }
 
     #[test]

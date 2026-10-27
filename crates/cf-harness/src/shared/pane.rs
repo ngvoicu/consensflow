@@ -3,6 +3,8 @@
 
 use serde_json::{json, Value};
 
+use cf_proto::panes::BOTTOM_LINES;
+
 use crate::contract::{HostError, Pane, PaneHost, NOT_ADMITTED};
 use crate::shared::admission::Sent;
 
@@ -16,13 +18,24 @@ fn named(pane: &Pane) -> Value {
 /// some; an answer that never came (the bridge ended) or did not say (its
 /// deadline passed) may have been written: uncertain, never a refusal. A
 /// paste the host does not admit as it is asked for, after every wait of the
-/// adapter's before it, is refused unwritten ([`PaneHost::admits`]).
-pub(crate) async fn write_paste(host: &dyn PaneHost, pane: &Pane, body: &str) -> Sent {
+/// adapter's before it, is refused unwritten ([`PaneHost::admits`]). With
+/// `read_empty`, the input box read empty at that count of the human's keys
+/// ([`super::input_box::Unsent::ReadEmpty`]), and the paste goes in over the
+/// count unless a key came since.
+pub(crate) async fn write_paste(
+    host: &dyn PaneHost,
+    pane: &Pane,
+    body: &str,
+    read_empty: Option<u64>,
+) -> Sent {
     if !host.admits() {
         return not_admitted();
     }
     let mut request = named(pane);
     request["body"] = json!(body);
+    if let Some(typed) = read_empty {
+        request["readEmpty"] = json!(typed);
+    }
     match host.request("pane.write_paste", request).await {
         Ok(answer) => Sent::from_reply(&answer),
         Err(HostError { error, message }) => Sent {
@@ -63,6 +76,14 @@ pub(crate) async fn write_keys(
 /// What the pane host says of a window now (`pane.snapshot`).
 pub(crate) async fn snapshot(host: &dyn PaneHost, pane: &Pane) -> Result<Value, HostError> {
     host.request("pane.snapshot", named(pane)).await
+}
+
+/// [`snapshot`], with the screen's last lines as drawn (`bottom`), where an
+/// adapter reads its harness's input box.
+pub(crate) async fn snapshot_drawn(host: &dyn PaneHost, pane: &Pane) -> Result<Value, HostError> {
+    let mut request = named(pane);
+    request["bottom"] = json!(BOTTOM_LINES);
+    host.request("pane.snapshot", request).await
 }
 
 /// Asks the pane host to admit a native send (`claim`): the pane is current,

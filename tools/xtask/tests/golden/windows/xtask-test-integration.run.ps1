@@ -28,15 +28,29 @@ public static class CfJob {
   if ($made -eq [IntPtr]::Zero) { throw [CfJob]::Why }
   $job = $made
 } catch { Write-Output "== no job: $($_.Exception.Message), so a stop will not end at once what this run starts" }
+if ($null -ne $job) {
+  try { Add-Content -LiteralPath $owner -Value 'job' } catch { Write-Output "== no job record: $($_.Exception.Message), so a stop will walk this run's tree" }
+}
 $env:Path = "C:\Program Files\nodejs;$env:USERPROFILE\.cargo\bin;" + $env:Path
 $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorAction SilentlyContinue).Target
 if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
 Set-Location $dir
 $ErrorActionPreference = 'Continue'
+$env:CARGO_BUILD_JOBS = '4'
+$env:RUST_TEST_THREADS = '4'
+Write-Output "== limits: CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 (what this machine takes at once)"
 foreach ($step in @()) {
   Write-Output "== $step"
   cmd /c "$step 2>&1"
   if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
+}
+foreach ($step in @('cargo fetch --locked --offline >nul 2>&1 || cargo fetch --locked', 'cargo xtask conpty --into app/src-tauri/target/debug', 'cargo xtask conpty --into app/src-tauri/target/release')) {
+  Write-Output "== $step"
+  cmd /c "$step 2>&1"
+  if ($LASTEXITCODE -ne 0) {
+    Write-Output "== the run needs what '$step' makes there, and it could not be made (status $LASTEXITCODE): the command is not run on what happens to be on the machine"
+    Exit-Run $LASTEXITCODE
+  }
 }
 Set-Location (Join-Path $dir '.')
 $run = Join-Path $dir '.windows-run.cmd'

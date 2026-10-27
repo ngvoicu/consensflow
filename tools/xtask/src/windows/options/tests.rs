@@ -14,14 +14,41 @@ fn a_host_and_a_command_are_all_a_run_needs_and_the_rest_is_the_usual() {
     assert_eq!(
         run("--host zeewin -- npm run live:paste"),
         Ok(Options {
-            machine: Some(Machine::at("zeewin")),
+            machine: Machine::named("zeewin"),
             build: false,
             dir: "consensflow-build".into(),
             inside: ".".into(),
             env: vec![],
             command: strings(&["npm", "run", "live:paste"]),
+            wait: 60,
         })
     );
+}
+
+/// A run waits for its turn at a busy machine, an hour unless told otherwise, and 0 asks once.
+#[test]
+fn a_run_waits_for_its_turn_an_hour_unless_told_how_long_and_zero_is_not_to_wait() {
+    assert_eq!(run("-- cargo test").unwrap().wait, 60);
+    assert_eq!(run("--wait 5 -- cargo test").unwrap().wait, 5);
+    assert_eq!(run("--wait=0 -- cargo test").unwrap().wait, 0);
+    assert_eq!(run("--wait 1440 -- cargo test").unwrap().wait, 1440);
+    for line in [
+        "--wait 1441",
+        "--wait soon",
+        "--wait -1",
+        "--wait 2.5",
+        "--wait=",
+    ] {
+        let said = run(&format!("{line} -- cargo test")).unwrap_err();
+        assert!(
+            said.starts_with("--wait is the minutes to wait for a turn, 0 to 1440")
+                || said.starts_with("--wait takes a value"),
+            "{line}: {said}"
+        );
+    }
+    assert_eq!(matrix("--scenario s --pair a:b").unwrap().wait, 60);
+    assert_eq!(matrix("--wait 0 --scenario s --pair a:b").unwrap().wait, 0);
+    assert!(matrix("--wait many --scenario s --pair a:b").is_err());
 }
 
 #[test]
@@ -31,13 +58,43 @@ fn a_machine_is_named_or_a_host_given_and_with_neither_the_default_is_chosen_whe
     assert!(named.machine.and_then(|machine| machine.shared).is_some());
     assert_eq!(
         run("--machine=zeewin -- x").unwrap().machine,
-        Some(Machine::at("zeewin"))
+        Machine::named("zeewin")
     );
     assert_eq!(run("-- npm test").unwrap().machine, None);
     assert_eq!(run("--build npm test").unwrap().machine, None);
     let options = matrix("--machine zeewin2 --scenario s --pair a:b").unwrap();
     assert_eq!(options.machine, Machine::named("zeewin2"));
     assert_eq!(matrix("--scenario s --pair a:b").unwrap().machine, None);
+}
+
+#[test]
+fn a_host_that_is_a_machines_name_is_that_machine_with_its_guards_and_its_node() {
+    // `--host zeewin2` once skipped poker-lab's lock, the disk floor and CI's Node (T-610).
+    for line in [
+        "--host zeewin2 -- cargo test",
+        "--host=zeewin2 -- cargo test",
+        "--machine=zeewin2 -- cargo test",
+    ] {
+        let machine = run(line).unwrap().machine.unwrap();
+        assert_eq!(Some(machine.clone()), Machine::named("zeewin2"), "{line}");
+        assert!(machine.shared.is_some(), "{line}");
+        assert_eq!(machine.node, r"$env:USERPROFILE\cf-tools\node", "{line}");
+    }
+    assert_eq!(
+        matrix("--host zeewin2 --scenario s --pair a:b")
+            .unwrap()
+            .machine,
+        Machine::named("zeewin2")
+    );
+    // zeewin is the same machine whichever way it is named; any other host is reached as it is.
+    assert_eq!(
+        run("--host zeewin -- x").unwrap().machine,
+        Machine::named("zeewin")
+    );
+    assert_eq!(
+        run("--host box -- x").unwrap().machine,
+        Some(Machine::at("box"))
+    );
 }
 
 #[test]
@@ -48,7 +105,7 @@ fn every_option_is_read_by_name_with_its_value_after_it_or_after_an_equals_sign(
     .unwrap();
     assert_eq!(
         (options.machine.clone(), options.build),
-        (Some(Machine::at("zeewin")), true),
+        (Machine::named("zeewin"), true),
         "{options:?}"
     );
     assert_eq!(options.dir, "build-2");
@@ -184,7 +241,7 @@ fn a_matrix_is_a_host_scenarios_and_pairs_each_as_many_as_there_are() {
     assert_eq!(
         options,
         MatrixOptions {
-            machine: Some(Machine::at("zeewin")),
+            machine: Machine::named("zeewin"),
             build: true,
             env: vec![("CONSENSFLOW_TEST_DAEMON".into(), "native".into())],
             scenarios: strings(&["round-trip", "question-trip"]),
@@ -200,6 +257,7 @@ fn a_matrix_is_a_host_scenarios_and_pairs_each_as_many_as_there_are() {
             ],
             claude_model: Some("claude-sonnet-5".into()),
             pi_model: Some("openai/gpt-5.6-luna".into()),
+            wait: 60,
         }
     );
 }

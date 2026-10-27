@@ -1,0 +1,490 @@
+# A message the chief took, typed into its window again when the Mac was loaded (2026-10-22,
+# ConsensFlow 3.0.5, T-269): the pane host answered nothing in time for three minutes, the
+# chief's record and status read at rest, and the arrival window ran on through the stalls, so
+# the brief was pasted again and both copies reached the chief. The case is
+# `crates/cf-e2e/tests/regressions/a_message_the_chief_took_was_typed_in_again_under_load.rs`:
+# the rig's router holds the paste and every frame between the daemon and the pane host for
+# 200 s, or until the daemon pastes it again (so a red case ends at about 165 s, inside the kit's
+# five minutes a run; the runner has no limit of a plant's own), and the result must be pasted
+# once, and the stall leave its lines in the daemon's log.
+#
+# What stands against it (`cf-engine`'s `arrival`, its tests in
+# `crates/cf-engine/tests/dispatcher/unknown_looks.rs`): a read of the window that fails or comes
+# too late is unknown, counts no rest and decides nothing; before a paste goes again the window is
+# read once more, the host first (nothing going in, and no paste written into the window for a
+# whole arrival window), then the record; and a pass waits for its steps 5 s at most, so one
+# window's stuck read holds no other window's delivery. Each read that comes to nothing, and each
+# pass that goes on without a step, is a line in the daemon's log, at most once a minute.
+
+[run]
+engine-unknown-looks = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unknown_looks::"]
+harness-devin-rows = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record::tests::rows::"]
+panes-lib-snapshot = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "a_snapshot_says"]
+panes-lib-handlers = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::"]
+e2e-lib-route = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::route::"]
+harness-reading = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::reading::"]
+engine-resume-close-look = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::a_window_that_asks_and_ends_by_itself_while_the_close_looks_past"]
+e2e-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger::"]
+harness-contract = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "contract::tests::"]
+rig-regression-load-retype = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_message_the_chief_took_was_typed_in_again_under_load::"]
+
+# The case of the rig. Its plant takes the whole host check out of the look once more, as
+# 3.0.5 had none: the in-flight word and the time since the host's last paste.
+
+[[plant]]
+name = "load retype: a paste the record never showed goes again without the pane host asked once more, inside a stall of the host's (3.0.5's shape)"
+meant = "a_result_handed_to_a_claude_chief_while_its_pane_host_answers_nothing_is_pasted_once"
+runs = ["rig-regression-load-retype"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''
+        let Some(snapshot) = self.snapshot_now(&pane).await else {
+            self.unknown(record, NO_ANSWER);
+            return Ok(false);
+        };
+        if js::truthy(snapshot.get("pasteInFlight")) {
+            self.unknown(record, "its pane host is writing a paste into it still");
+            return Ok(false);
+        }'''
+replace = '''
+        let snapshot = json!({});'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if let Some(pasted) = pasted.filter(|&pasted| pasted < self.seams.limits.arrival_ms as f64)"
+replace = "        if let Some(pasted) = pasted.filter(|_| false)"
+
+# The engine's.
+
+[[plant]]
+name = "load retype: a look that could not read the record is a look at rest that showed nothing"
+meant = "never_pastes_again_a_message_while_every_look_cannot_read_its_record"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''
+        // A look that could not read the record says nothing of the paste.
+        if observed
+            .reading
+            .as_deref()
+            .is_some_and(Reading::read_failed)
+        {
+            self.unknown(record, "its record could not be read");
+            return Ok(());
+        }'''
+replace = ""
+
+[[plant]]
+name = "load retype: the rest before a snapshot for the Enter that failed still counts"
+meant = "counts_no_rest_before_a_snapshot_for_the_enter_that_failed"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''
+            self.entered_again(record, message, false);
+            self.unknown(record, NO_ANSWER);
+            return Ok(());'''
+replace = '''
+            self.entered_again(record, message, false);
+            return Ok(());'''
+
+[[plant]]
+name = "load retype: a snapshot that comes long after it was asked says what the window does now"
+meant = "pastes_nothing_again_while_the_pane_host_answers_too_late_and_confirms_what_the_window_ran_when_it_comes_back"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        let in_time = self.now() - asked <= SLOW_READ_MS;"
+replace = "        let in_time = asked <= self.now();"
+
+[[plant]]
+name = "load retype: the host's word that a paste is still going in does not hold the paste from going again"
+meant = "pastes_nothing_again_while_the_pane_host_says_a_paste_is_still_going_in"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if js::truthy(snapshot.get(\"pasteInFlight\")) {"
+replace = "        if false {"
+
+[[plant]]
+name = "load retype: the window is not asked of the pane host once more before a paste goes again"
+meant = "presses_no_enter_and_pastes_nothing_again_while_the_pane_host_cannot_say_what_the_window_does"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''
+        let Some(snapshot) = self.snapshot_now(&pane).await else {
+            self.unknown(record, NO_ANSWER);
+            return Ok(false);
+        };
+        if js::truthy(snapshot.get("pasteInFlight")) {
+            self.unknown(record, "its pane host is writing a paste into it still");
+            return Ok(false);
+        }'''
+replace = '''
+        let snapshot = json!({});'''
+
+[[plant]]
+name = "load retype: a record that cannot be read as the window is read once more lets the paste go again"
+meant = "pastes_nothing_again_when_the_record_cannot_be_read_as_the_window_is_read_once_more"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''
+        if looked.reading.as_deref().is_some_and(Reading::read_failed) {
+            self.unknown(record, "its record could not be read");
+            return Ok(false);
+        }'''
+replace = ""
+
+[[plant]]
+name = "load retype: a record that shows the paste as the window is read once more does not confirm it"
+meant = "confirms_a_paste_its_record_shows_when_it_is_read_once_more_before_it_would_go_again"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if self.confirm_arrival(record, &looked)? {"
+replace = "        if false && self.confirm_arrival(record, &looked)? {"
+
+[[plant]]
+name = "load retype: a window found in a turn as it is read once more is pasted into"
+meant = "pastes_nothing_again_into_a_window_found_in_a_turn_as_it_is_read_once_more"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if !(looked.settled && looked.waiting.is_none()) {"
+replace = "        if false {"
+
+[[plant]]
+name = "load retype: the window is not read once more before a paste goes again"
+meant = "confirms_a_paste_its_record_shows_when_it_is_read_once_more_before_it_would_go_again"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''
+        if !self.read_once_more(record, delivering.message).await? {
+            return Ok(());
+        }'''
+replace = ""
+
+[[plant]]
+name = "load retype: the rest before a look that failed still counts"
+meant = "counts_no_rest_before_a_look_that_failed"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+                    // A look that failed says nothing of what is on its way in (`arrival`).
+                    self.unknown(record, "a look at it failed");'''
+replace = ""
+
+[[plant]]
+name = "load retype: a pass waits for every step, however long one waits on its window"
+meant = "a_pass_leaves_a_window_whose_look_hangs_to_it_and_serves_the_others"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/steps.rs"
+find = "                        timer = Some(self.seams.time.sleep(STEP_WAIT));"
+replace = "                        timer = Some(Box::pin(std::future::pending::<()>()));"
+
+[[plant]]
+name = "load retype: a step that fails after its pass went on is lost"
+meant = "writes_down_a_step_that_fails_after_its_pass_went_on"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/steps.rs"
+find = """                if let Err(cause) = answer {
+                    this.seams.log.error("a step failed", &cause.to_string());
+                }"""
+replace = """                let _ = answer;"""
+
+[[plant]]
+name = "load retype: the steps still going on when a pass fails at its first are dropped, and a failure of theirs lost (round 2, Calliope's P3)"
+meant = "writes_down_every_step_that_fails_after_its_pass_ended_at_the_first"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/steps.rs"
+find = "                    self.go_on_without(waiting, &[], began);"
+replace = "                    drop(waiting);"
+
+# The harness's.
+
+[[plant]]
+name = "load retype: a record that is not there is taken for one that could not be read"
+meant = "a_record_that_is_not_there_was_read_and_one_that_could_not_be_read_failed"
+runs = ["harness-reading"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/reading.rs"
+find = "        matches!(self, Reading::Unknown(_))"
+replace = "        matches!(self, Reading::Unknown(_) | Reading::Missing(_))"
+
+[[plant]]
+name = "load retype: a failed read and a missing record told apart by the words they begin with, as round 1 did (a SQLite \"no such column\" reads as missing)"
+meant = "a_record_that_is_not_there_was_read_and_one_that_could_not_be_read_failed"
+runs = ["harness-reading"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/reading.rs"
+find = "        matches!(self, Reading::Unknown(_))"
+replace = "        matches!(self, Reading::Unknown(reason) if !reason.starts_with(\"unreadable: no \"))"
+
+[[plant]]
+name = "load retype: a Devin session the store has no row of yet is a read that failed"
+meant = "a_session_the_store_has_no_row_of_yet_is_missing_and_a_store_that_fails_is_unread"
+runs = ["harness-devin-rows"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record.rs"
+find = "            Arc::new(if reason == MISSING_SESSION {"
+replace = "            Arc::new(if reason == MISSING_SESSION && false {"
+
+# The rig's.
+
+[[plant]]
+name = "load retype: a rig stall waits out its time though the daemon pasted the same words again"
+meant = "a_stall_ends_at_a_second_paste_of_its_words_which_it_holds_with_the_rest"
+runs = ["e2e-lib-route"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = "        if stall.holding && stall.holding_for.as_deref().is_some_and(holds) {"
+replace = "        if stall.holding && stall.holding_for.as_deref().is_some_and(holds) && false {"
+
+# Round 2 (Calliope's review, T-335): the host's word on its last paste, and the stall's trace.
+
+[[plant]]
+name = "load retype: a paste the pane host held while it was slow, written only as the window is read once more, goes again (Calliope's P2)"
+meant = "confirms_a_paste_the_pane_host_wrote_only_as_the_window_is_read_once_more_when_the_record_shows_it_a_look_later"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if let Some(pasted) = pasted.filter(|&pasted| pasted < self.seams.limits.arrival_ms as f64)"
+replace = "        if let Some(pasted) = pasted.filter(|_| false)"
+
+[[plant]]
+name = "load retype: a paste written only as the window is read once more has its record's time counted from before the write"
+meant = "pastes_nothing_again_that_the_pane_host_wrote_only_as_the_window_is_read_once_more"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "                delivering.rested_since = Some(written);"
+replace = "                delivering.rested_since = Some(written - 25_000);"
+
+[[plant]]
+name = "load retype: the pane host never says when it last wrote a paste into a pane"
+meant = "a_snapshot_says_how_long_since_a_paste_was_written_into_the_pane"
+runs = ["panes-lib-snapshot"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """            if pasted {
+                state.pasted = Some(Instant::now());
+            }"""
+replace = ""
+
+[[plant]]
+name = "load retype: the pane host's snapshot leaves out when it last wrote a paste"
+meant = "the_daemons_own_keys_hold_no_paste_and_no_claim"
+runs = ["panes-lib-handlers"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = """            "pasteQuietMs":snapshot.paste_quiet_ms,"""
+replace = ""
+
+[[plant]]
+name = "load retype: a read that comes to nothing leaves no line in the log (Calliope's P2)"
+meant = "says_in_the_log_at_most_once_a_minute_which_window_could_not_be_read_for_which_message"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = """            unread.told = Some(now);
+            (message, unread.reads, (now - unread.first) / 1000)"""
+replace = """            unread.told = Some(now);
+            if now > i64::MIN {
+                return;
+            }
+            (message, unread.reads, (now - unread.first) / 1000)"""
+
+[[plant]]
+name = "load retype: every read that comes to nothing is a line in the log"
+meant = "says_in_the_log_at_most_once_a_minute_which_window_could_not_be_read_for_which_message"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            if unread.told.is_some_and(|told| now - told < UNREAD_TOLD_MS) {"
+replace = "            if false {"
+
+[[plant]]
+name = "load retype: a pass that goes on without a step says nothing of it (Calliope's P2)"
+meant = "says_in_the_log_which_window_a_pass_went_on_without_and_how_long_its_step_took"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/steps.rs"
+find = "        let told = !left.is_empty() && self.tell_left(left);"
+replace = "        let told = false && self.tell_left(left);"
+
+[[plant]]
+name = "load retype: every pass that goes on without a step says so"
+meant = "says_in_the_log_which_window_a_pass_went_on_without_and_how_long_its_step_took"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/steps.rs"
+find = """            .is_some_and(|told| now - told < LEFT_TOLD_MS)"""
+replace = """            .is_some_and(|told| now - told < 0)"""
+
+[[plant]]
+name = "load retype: the stall on the rig leaves no line in the daemon's log"
+meant = "a_result_handed_to_a_claude_chief_while_its_pane_host_answers_nothing_is_pasted_once"
+runs = ["rig-regression-load-retype"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/steps.rs"
+find = "        let told = !left.is_empty() && self.tell_left(left);"
+replace = "        let told = false && self.tell_left(left);"
+
+# Where the retype rule meets turn-end (T-504, the merge of 3.0.6-alpha.3's batch): a task's
+# result is the final answer to its latest message, found after the item that message's
+# receipt names (`turn_end::delivered_at`).
+
+[[plant]]
+name = "load retype and turn-end: a task that waits for its answer, which the pane host holds, takes the words of the turn that asked as its result"
+meant = "an_answer_the_pane_host_held_goes_in_once_and_the_task_s_result_is_what_answers_it"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '        let Some(thread) = task.filter(|thread| thread.task.state == "working") else {'
+replace = '        let Some(thread) = task.filter(|thread| matches!(thread.task.state.as_str(), "working" | "waiting")) else {'
+
+[[plant]]
+name = "load retype and turn-end: an arrival confirmed as the window is read once more names no item of the record turn-end finds the answer after"
+meant = "an_answer_its_record_shows_as_the_window_is_read_once_more_is_what_the_result_follows"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '        let receipt = json!({ "item": &*arrived.id });'
+replace = '        let receipt = json!({});'
+
+[[plant]]
+name = "load retype and turn-end: a record that is not there says a job is left running"
+meant = "a_look_at_a_record_that_is_not_there_reads_no_items_nothing_left_running_and_no_monitor"
+runs = ["harness-contract"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = "            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => Pending::default(),"
+replace = '''            Some(Reading::Missing(_)) => Pending { jobs: 1, ..Pending::default() },
+            Some(Reading::Unknown(_)) | None => Pending::default(),'''
+
+# Calliope's re-check of the merge (T-505), its P3s 1, 2 and 6 (T-663). A Close's look at an
+# asking window's screen (`bank_yes_before_close`) runs inside pass steps too (an out chief's
+# switch, here), and outlasts the bound a pass waits for its steps: the step goes on apart,
+# holding the window's record. The result follows the item the latest message's receipt
+# names, with no paste found in its stead. And the rig's look at how its stranger ended waits
+# for no pipe a process the stranger left holds.
+
+[[plant]]
+name = "load retype: a Close looks at no asking window's screen, so no pass step is left on the look"
+meant = "a_switch_whose_close_looks_at_an_asking_chief_past_the_bound_holds_its_window_apart_until_it_ends"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "        if !asking {"
+replace = "        if !asking || true {"
+
+[[plant]]
+name = "load retype: a pass steps a window whose record a step left apart holds"
+meant = "a_switch_whose_close_looks_at_an_asking_chief_past_the_bound_holds_its_window_apart_until_it_ends"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/runtime.rs"
+find = """
+    ) -> Option<Begun<T>> {
+        if self.held() {
+            return None;
+        }
+        Some(self.hold_for(spawn, work).await)"""
+replace = """
+    ) -> Option<Begun<T>> {
+        if false && self.held() {
+            return None;
+        }
+        Some(self.hold_for(spawn, work).await)"""
+
+[[plant]]
+name = "load retype: the Close marks its kill after a look at an asking window's screen held past a pass's bound"
+meant = "a_window_that_asks_and_ends_by_itself_while_the_close_looks_past_a_passs_bound_and_whose_kill_fails_leaves_its_task_paused"
+runs = ["engine-resume-close-look"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+            record.window.borrow_mut().killing.push(Killing {
+                pane: pane.clone(),
+                paused: None,
+            });
+            // The exit is settled here, and says nothing of the screen the window ends
+            // with: where it was asking, the human's yes in it is read off the screen now.
+            self.bank_yes_before_close(record, pane).await;
+'''
+replace = '''
+            // The exit is settled here, and says nothing of the screen the window ends
+            // with: where it was asking, the human's yes in it is read off the screen now.
+            self.bank_yes_before_close(record, pane).await;
+            record.window.borrow_mut().killing.push(Killing {
+                pane: pane.clone(),
+                paused: None,
+            });
+'''
+
+[[plant]]
+name = "load retype and turn-end: the answer is looked for after neither the item the receipt names nor a paste of the message"
+meant = "an_answer_its_record_shows_as_the_window_is_read_once_more_is_what_the_result_follows"
+runs = ["engine-unknown-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '        let receipt = latest.receipt.get("item").and_then(Value::as_str);'
+replace = '        let receipt: Option<&str> = None;'
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                && is_paste_of(&item.text, latest.id, first.as_deref())"
+replace = "                && false && is_paste_of(&item.text, latest.id, first.as_deref())"
+
+[[plant]]
+name = "load retype: the rig's look at how its stranger ended waits for the pipe a process it left holds"
+meant = "a_look_at_how_a_stranger_ended_waits_for_no_pipe_a_process_it_left_holds"
+runs = ["e2e-lib-stranger"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/stranger.rs"
+find = "        let status = self.spawned.status()?;"
+replace = "        let status = self.spawned.wait(Duration::ZERO).ok().flatten()?;"

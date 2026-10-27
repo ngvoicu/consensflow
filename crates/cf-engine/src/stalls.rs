@@ -55,40 +55,129 @@ impl Drop for Burst<'_> {
 }
 
 impl Dispatcher {
-    /// A task whose window went away is paused, and its requester told: in a
-    /// note of its own, or in the one that told it of the stalls before this
-    /// one in the same burst, if its reader has not been given it yet.
-    /// `own` when the engine closed the window itself: the ledger takes the
-    /// pause for the suspension's where the project is suspended, for the human's
-    /// Resume to end.
+    /// A task whose window went away is paused, and its requester told
+    /// ([`Dispatcher::tell_stall`]). `own` when the engine closed the window
+    /// itself: the ledger takes the pause for the suspension's where the project
+    /// is suspended, for the human's Resume to end, and says which stop the pause is.
     pub(crate) fn stall(
         &self,
         project: &ProjectView,
         task: &TaskView,
         because: &str,
+        why: &str,
+        except: Option<i64>,
         own: bool,
+    ) -> Result<Option<i64>, EngineError> {
+        let stop = {
+            let mut ledger = self.seams.ledger.borrow_mut();
+            if own {
+                Some(
+                    ledger
+                        .pause_with_project(project.id, task.number, because)?
+                        .seq,
+                )
+            } else {
+                ledger.pause_task(project.id, task.number, None, Some(because))?;
+                None
+            }
+        };
+        self.tell_stall(project, task, because, why, except)?;
+        Ok(stop)
+    }
+
+    /// A task ConsensFlow paused as its window went away (`because`), its requester
+    /// told: in a note of its own, or in the one that told it of the stalls before
+    /// this one in the same burst, if its reader has not been given it yet. Words told
+    /// to the window that wait for it still are named in it, as waiting for the
+    /// resume (`why`), but `except`, the message a give-up that closed the window
+    /// settles and names itself, and the human hears of each once ([`Dispatcher::tell_kept`]),
+    /// however the window went (T-414 P3-2: a window that closed by itself left them
+    /// unnamed). A resume whose words never reached the window tells of its pause here
+    /// too, with the stalls it comes with (P3-5).
+    pub(crate) fn tell_stall(
+        &self,
+        project: &ProjectView,
+        task: &TaskView,
+        because: &str,
+        why: &str,
+        except: Option<i64>,
     ) -> Result<(), EngineError> {
-        let mut ledger = self.seams.ledger.borrow_mut();
-        if own {
-            ledger.pause_with_project(project.id, task.number, because)?;
-        } else {
-            ledger.pause_task(project.id, task.number, None, Some(because))?;
-        }
         let key = (project.id, task.requester.clone());
         let earlier = self.stalls.told.borrow().get(&key).copied();
-        if let Some(note) = earlier {
-            if ledger
-                .join_pause_note(note, task.number, because)?
-                .is_some()
-            {
-                return Ok(());
-            }
-        }
-        let note = ledger.note_pause(project.id, &task.requester, task.number, because)?;
+        let (note, kept) = self.seams.ledger.borrow_mut().note_stall(
+            project.id,
+            task.number,
+            because,
+            why,
+            earlier,
+            except,
+        )?;
         // A stall that comes alone leaves nothing to join: its note is its own.
         if self.stalls.bursts.get() > 0 {
             self.stalls.told.borrow_mut().insert(key, note.id);
         }
+        for message in &kept {
+            self.tell_kept(message, why)?;
+        }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use crate::testing::Context;
+
+    /// Zeus's T-1 and diana's T-2, both paused as their windows closed and both resumed,
+    /// and neither resume's window comes up, while a burst of stalls is under way: both
+    /// pauses are told in one note, the burst's, as the stalls of one burst are (T-414
+    /// P3-5: the ledger wrote each resume's note itself, past the joining). In the
+    /// product a launch given up runs apart from any pass, so no burst is under way then,
+    /// for a window's exit or for a resume alike; the burst is held here to show the
+    /// resume's note goes the way a stall's does.
+    #[test]
+    fn resumes_whose_windows_never_come_up_in_one_burst_are_told_in_one_note() {
+        let context = Context::new();
+        let project = context.with_staff(&["zeus", "diana"]);
+        context.give(project.id, "zeus", "Parser");
+        context.give(project.id, "diana", "Lexer");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        for member in ["zeus", "diana"] {
+            context.exit(member);
+        }
+        context.pass().unwrap();
+        for number in [1, 2] {
+            assert_eq!(context.task(project.id, number).task.state, "paused");
+        }
+
+        *context.adapter.started.borrow_mut() = Some(Rc::new(|| {
+            Err("the broker never named its thread".to_owned())
+        }));
+        context.resume_task(project.id, 1, "Carry on");
+        context.resume_task(project.id, 2, "Carry on too");
+        let burst = context.dispatcher.stalls.begin_burst();
+        context.pass().unwrap();
+        context.pass().unwrap();
+        drop(burst);
+
+        for number in [1, 2] {
+            assert_eq!(context.task(project.id, number).task.state, "paused");
+        }
+        let chief = context.id(project.id, "chief");
+        let again: Vec<String> = context
+            .inbox(chief)
+            .into_iter()
+            .map(|message| message.body)
+            .filter(|said| said.contains("the words that resumed it"))
+            .collect();
+        assert_eq!(again.len(), 1, "{again:#?}");
+        assert!(
+            again[0].starts_with("T-1 is paused: the words that resumed it")
+                && again[0].contains("\nT-2 is paused: the words that resumed it"),
+            "{}",
+            again[0]
+        );
     }
 }

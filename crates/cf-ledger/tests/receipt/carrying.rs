@@ -1,6 +1,7 @@
 //! What a pause keeps, and what rides in the paste of the words that resume:
 //! one carrier, a flat set, each payload once, the task moved only by receipt.
 
+use cf_ledger::GivenUp;
 use serde_json::json;
 
 use crate::fixture::{frozen_world, ids, world};
@@ -316,8 +317,11 @@ fn a_second_resume_carries_the_chiefs_own_earlier_words_as_a_row_among_the_rest(
     );
 }
 
+/// The words that resume a held task fail as they are pasted (their window closed): the
+/// task is paused again, never failed (T-77), and what they carried is kept, for the next
+/// resume to carry. Before, the task failed, and a reopening carried it.
 #[test]
-fn a_carrier_that_fails_lets_go_of_what_it_carried_and_the_reopening_carries_it_again() {
+fn a_resume_whose_words_fail_lets_go_of_what_they_carried_and_its_task_waits_paused_for_the_next() {
     let mut w = world();
     let created = w.give("zeus", "Parser");
     let (task, brief) = (created.task.number, created.message.expect("a brief").id);
@@ -327,15 +331,49 @@ fn a_carrier_that_fails_lets_go_of_what_it_carried_and_the_reopening_carries_it_
     w.hold(task);
     let carrier = w.daemon_resumes(task).message.expect("its words");
     w.begin(carrier.id);
-    w.ledger
-        .fail_delivery(carrier.id, "the window closed")
+    let (_, given_up) = w
+        .ledger
+        .give_up_delivery(carrier.id, "the window closed")
         .expect("the delivery is given up");
-    assert_eq!(w.state(task), "failed", "the task fails as it always did");
+    assert_eq!(given_up, GivenUp::Paused);
+    assert_eq!(w.state(task), "paused", "paused again, never failed");
     assert_eq!(
-        w.states(&[answer.id]),
-        ["queued"],
-        "what it carried stays kept"
+        w.states(&[carrier.id, answer.id]),
+        ["failed", "queued"],
+        "its words never went in; what they carried stays kept"
     );
+
+    let resumed = w.resume(task, "Try again").message.expect("its words");
+    let begun = w.deliver(resumed.id);
+    assert_eq!(ids(&begun.carried), [answer.id]);
+    assert_eq!(
+        w.state(task),
+        "working",
+        "its question has the answer it was sent"
+    );
+}
+
+/// A brief that fails as it is pasted fails its task, and lets go of the words told to
+/// its window that rode in it: they stay kept, and the reopening carries them.
+#[test]
+fn a_carrier_that_fails_lets_go_of_what_it_carried_and_the_reopening_carries_it_again() {
+    let mut w = world();
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.expect("a brief").id);
+    let told = w
+        .ledger
+        .tell_queued(w.project, task, "chief", "Use the v2 grammar")
+        .expect("told")
+        .id;
+    let begun = w.begin(brief);
+    assert_eq!(ids(&begun.carried), [told]);
+    let (_, given_up) = w
+        .ledger
+        .give_up_delivery(brief, "the window closed")
+        .expect("the delivery is given up");
+    assert_eq!(given_up, GivenUp::Failed);
+    assert_eq!(w.state(task), "failed", "the task fails as it always did");
+    assert_eq!(w.states(&[told]), ["queued"], "what it carried stays kept");
 
     let reopened = w
         .ledger
@@ -343,17 +381,9 @@ fn a_carrier_that_fails_lets_go_of_what_it_carried_and_the_reopening_carries_it_
         .expect("reopened")
         .message
         .expect("its words");
-    assert_eq!(
-        reopened.body, "Try again",
-        "the brief was received: it is not rebuilt"
-    );
     let begun = w.deliver(reopened.id);
-    assert_eq!(ids(&begun.carried), [answer.id]);
-    assert_eq!(
-        w.state(task),
-        "working",
-        "its question has the answer it was sent"
-    );
+    assert_eq!(ids(&begun.carried), [told]);
+    assert_eq!(w.state(task), "working");
 }
 
 /// T-202's shape, cut by a stop of the daemon: the words that resume the task are

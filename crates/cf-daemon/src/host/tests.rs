@@ -104,9 +104,11 @@ fn an_open_s_answer_is_read_as_the_dispatcher_read_it() {
         refused("no answer from the pane host")
     );
     assert_eq!(opened(&json!({ "error": 5 })), refused("5"));
+    // No answer by the open's deadline is no refusal: the host goes on with the open,
+    // and its window may start after (kluris, 2026-10-26).
     assert_eq!(
         opened(&json!({ "ok": false, "error": "deadline" })),
-        refused("deadline")
+        Opened::Unanswered
     );
 }
 
@@ -126,7 +128,7 @@ fn a_kill_s_answer_is_taken_or_the_words_the_host_gave() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_open_the_host_never_answers_is_refused_as_the_deadline_after_sixty_seconds() {
+async fn an_open_the_host_never_answers_is_unanswered_after_sixty_seconds_not_refused() {
     LocalSet::new()
         .run_until(async {
             let (daemon, app) = bridge_pair();
@@ -137,13 +139,25 @@ async fn an_open_the_host_never_answers_is_refused_as_the_deadline_after_sixty_s
             let host = host_over(&daemon);
             let started = tokio::time::Instant::now();
             let answer = host.open(open(&[])).await;
-            assert_eq!(
-                answer,
-                Ok(Opened::Refused {
-                    error: "deadline".to_owned()
-                })
-            );
+            assert_eq!(answer, Ok(Opened::Unanswered));
             assert_eq!(started.elapsed(), Duration::from_secs(60));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_open_waits_as_long_as_the_daemon_gives_the_host() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            app.on("pane.open", |_, _| async {
+                pending::<()>().await;
+                Ok(json!({}))
+            });
+            let host = host_over(&daemon).opening_within(Duration::from_secs(3));
+            let started = tokio::time::Instant::now();
+            assert_eq!(host.open(open(&[])).await, Ok(Opened::Unanswered));
+            assert_eq!(started.elapsed(), Duration::from_secs(3));
         })
         .await;
 }
@@ -391,6 +405,7 @@ async fn an_exit_tells_how_the_window_ended_and_what_its_screen_showed_where_the
                 signal: None,
                 tail: None,
                 background: Vec::new(),
+                possibly_left: Vec::new(),
                 survivor: None,
             };
             assert_eq!(
@@ -640,6 +655,70 @@ async fn a_look_at_a_windows_commands_that_no_host_answers_is_unanswered_and_kee
             );
             // A host that knows no `pane.rest` keeps none.
             assert_eq!(host.rest(&at, &[]).await, None);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_look_at_what_a_window_left_running_is_asked_by_its_pane_and_reads_what_may_be_its_own() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let heard = Rc::clone(&seen);
+            let answers = Rc::new(RefCell::new(vec![
+                json!({
+                    "ok": true,
+                    "total": 2,
+                    "processes": [{ "pid": 4711, "command": "bash retry.sh" }],
+                    "possiblyLeft": [{ "pid": 4242, "program": "sleep" }],
+                }),
+                json!({ "ok": true, "total": 0, "processes": [] }),
+                json!({ "ok": true }),
+            ]));
+            let next = Rc::clone(&answers);
+            app.on("pane.background", move |_, body| {
+                heard.borrow_mut().push(body);
+                let answer = next.borrow_mut().remove(0);
+                async move { Ok(answer) }
+            });
+            let host = host_over(&daemon);
+            let at = pane("p1-zeus", 2);
+            assert_eq!(
+                host.left_running(&at).await,
+                Some(Background {
+                    total: 2,
+                    processes: vec![cf_proto::panes::BackgroundProcess {
+                        pid: 4711,
+                        command: "bash retry.sh".to_owned(),
+                    }],
+                    possibly_left: vec![cf_proto::panes::PossiblyLeft {
+                        pid: 4242,
+                        program: "sleep".to_owned(),
+                    }],
+                })
+            );
+            // An older host names nothing outside the tree; one that says no look, nothing.
+            assert_eq!(host.left_running(&at).await, Some(Background::default()));
+            assert_eq!(host.left_running(&at).await, None);
+            assert_eq!(
+                serde_json::to_string(&seen.borrow()[0]).unwrap(),
+                r#"{"id":"p1-zeus","generation":2}"#
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_look_at_what_a_window_left_running_that_no_host_answers_names_nothing() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            app.on("pane.background", |_, _| async {
+                Err::<serde_json::Value, String>("no such pane".to_owned())
+            });
+            let host = host_over(&daemon);
+            assert_eq!(host.left_running(&pane("p1-zeus", 2)).await, None);
         })
         .await;
 }

@@ -83,6 +83,8 @@ path = "src/bin/smoke_paste_reader.rs"
 required-features = ["test-support"]
 
 [dependencies]
+# What a program the rig starts is left of its descriptors: its streams alone.
+cf-process.workspace = true
 # The time the stand-in agent writes in its records.
 jiff.workspace = true
 # The patterns the support and the stand-ins read text by.
@@ -108,6 +110,10 @@ uuid.workspace = true
 cf-e2e = { path = ".", features = ["test-support"] }
 # Node's `--import` takes a module as a file URL, on Windows as anywhere.
 url.workspace = true
+# The live parity case opens Claude Code in a terminal of ConsensFlow's own (a ConPTY on
+# Windows), plainly and as a member, with no daemon (`tests/live_parity/claude.rs`).
+cf-panes = { workspace = true, features = ["test-support"] }
+portable-pty.workspace = true
 
 # Signals by process id, whether a process is there, the group it is in, and the
 # terminal's raw mode, which std does not give (this crate allows unsafe code only in
@@ -116,6 +122,11 @@ url.workspace = true
 # `TIOCOUTQ`, what a terminal holds that its reader has not read.
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["process", "signal", "term"] }
+
+# A descriptor left open and not close-on-exec, for a test of what the programs a case starts
+# hold.
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true, features = ["fs"] }
 
 # The console's raw mode for the stand-in agent, which std does not give; and a handle
 # to a process a live check ends, on which its creation time is read and through which

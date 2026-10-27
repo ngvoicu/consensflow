@@ -18,9 +18,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use super::super::claude::{processes_with, Process};
-use super::descent::{
-    descending_from, end_chosen, holding, Ended, Identity, Machine, Running, ThisMachine,
-};
+use super::descent::{descending_from, end_chosen, Ended, Identity, Machine, Running, ThisMachine};
 use crate::{pattern, Result};
 
 /// A command that runs for a while, which a check finds by its mark.
@@ -70,15 +68,36 @@ impl LongCommand {
     pub fn in_window(&self, machine: &dyn Machine, window: Identity) -> Result<Vec<Running>> {
         Ok(descending_from(&machine.processes()?, window)
             .into_iter()
-            .filter(|process| process.command.contains(self.mark))
+            .filter(|process| self.is_run_by(&process.command))
             .collect())
+    }
+
+    /// Whether the command line `line` runs it: it ends with the mark. A line that holds
+    /// the mark further in only quotes it, as a Codex member's TUI does, whose first
+    /// message (the brief that names the command) is its last word (T-548: a check that
+    /// ended what held the mark in the window ended the window's TUI).
+    fn is_run_by(&self, line: &str) -> bool {
+        line.trim_end().ends_with(self.mark)
     }
 
     /// Its processes in the window whose own process is `window`, and what they started:
     /// what a check ends of it, now ([`LongCommand::end_in`]), or once the window is cut,
     /// which leaves what it ran with no window to descend from ([`end_chosen`]).
     pub fn chosen_in(&self, machine: &dyn Machine, window: Identity) -> Result<Vec<Running>> {
-        Ok(holding(&machine.processes()?, window, self.mark))
+        let all = machine.processes()?;
+        let mut chosen: Vec<Running> = Vec::new();
+        for process in descending_from(&all, window)
+            .into_iter()
+            .filter(|process| self.is_run_by(&process.command))
+        {
+            let under = descending_from(&all, process.identity);
+            for one in std::iter::once(process).chain(under) {
+                if !chosen.iter().any(|seen| seen.identity == one.identity) {
+                    chosen.push(one);
+                }
+            }
+        }
+        Ok(chosen)
     }
 
     /// Ends its processes in the window whose own process is `window`, and what they
@@ -252,6 +271,13 @@ mod tests {
             running(100, 10, 1, "devin --config /c/config.json"),
             running(101, 11, 100, "devin --config /c/config.json"),
             running(102, 12, 101, &format!("node -e \"x\" {mark}")),
+            // A TUI of the window whose first message, its last word, quotes the command.
+            running(
+                104,
+                14,
+                100,
+                &format!("codex --remote ws://127.0.0.1:1 Run node -e \"x\" {mark} and reply."),
+            ),
             running(103, 13, 102, "node worker"),
             running(
                 outsider.id(),

@@ -29,6 +29,14 @@
 mod a_brief_could_not_be_edited_once_added;
 #[path = "regressions/a_builds_daemon_held_a_workers_task.rs"]
 mod a_builds_daemon_held_a_workers_task;
+#[path = "regressions/a_cancelled_compact_held_the_chief_and_took_its_next_message.rs"]
+mod a_cancelled_compact_held_the_chief_and_took_its_next_message;
+#[cfg(unix)]
+#[path = "regressions/a_cf_a_build_took_away_left_a_window_none.rs"]
+mod a_cf_a_build_took_away_left_a_window_none;
+#[cfg(unix)]
+#[path = "regressions/a_close_waited_for_a_codex_chiefs_server_to_end.rs"]
+mod a_close_waited_for_a_codex_chiefs_server_to_end;
 #[path = "regressions/a_codex_chief_opened_again_after_a_restart_read_starting_for_good.rs"]
 mod a_codex_chief_opened_again_after_a_restart_read_starting_for_good;
 #[cfg(unix)]
@@ -40,32 +48,66 @@ mod a_command_that_never_exits_held_a_workers_result;
 mod a_compact_typed_into_an_idle_chief_held_a_workers_result;
 #[path = "regressions/a_compaction_written_beside_an_answer_tore_its_line.rs"]
 mod a_compaction_written_beside_an_answer_tore_its_line;
+#[path = "regressions/a_failure_said_no_reason.rs"]
+mod a_failure_said_no_reason;
+#[path = "regressions/a_final_answer_written_in_a_tells_turn_reached_nobody.rs"]
+mod a_final_answer_written_in_a_tells_turn_reached_nobody;
+#[path = "regressions/a_follow_up_after_a_restart_lost_its_windows_conversation.rs"]
+mod a_follow_up_after_a_restart_lost_its_windows_conversation;
 #[path = "regressions/a_follow_up_could_not_be_queued_behind_its_windows_own_work.rs"]
 mod a_follow_up_could_not_be_queued_behind_its_windows_own_work;
 #[path = "regressions/a_job_that_still_ran_was_taken_for_ended.rs"]
 mod a_job_that_still_ran_was_taken_for_ended;
+#[path = "regressions/a_message_the_chief_took_was_typed_in_again_under_load.rs"]
+mod a_message_the_chief_took_was_typed_in_again_under_load;
+#[path = "regressions/a_paste_devin_held_pasted_again_after_a_switch_and_a_restart.rs"]
+mod a_paste_devin_held_pasted_again_after_a_switch_and_a_restart;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
 mod a_pause_a_hung_worker_ignored_stranded_its_task;
+#[path = "regressions/a_question_the_chief_answered_was_typed_in_later.rs"]
+mod a_question_the_chief_answered_was_typed_in_later;
+#[path = "regressions/a_quota_wait_ended_failed.rs"]
+mod a_quota_wait_ended_failed;
+#[path = "regressions/a_reopened_window_with_no_task_read_working_for_good.rs"]
+mod a_reopened_window_with_no_task_read_working_for_good;
 #[path = "regressions/a_result_delivered_twice_to_a_devin_chief.rs"]
 mod a_result_delivered_twice_to_a_devin_chief;
 #[path = "regressions/a_result_pasted_again_after_its_window_went.rs"]
 mod a_result_pasted_again_after_its_window_went;
+#[path = "regressions/a_result_that_starts_with_an_image_path_was_pasted_three_times.rs"]
+mod a_result_that_starts_with_an_image_path_was_pasted_three_times;
 #[path = "regressions/a_resumed_devin_worker_skipped_every_call.rs"]
 mod a_resumed_devin_worker_skipped_every_call;
 #[path = "regressions/a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task.rs"]
 mod a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task;
+#[path = "regressions/a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed.rs"]
+mod a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed;
 #[path = "regressions/a_task_stuck_working_after_its_window_was_resumed.rs"]
 mod a_task_stuck_working_after_its_window_was_resumed;
 #[path = "regressions/a_task_waiting_on_a_cancelled_task_stayed_blocked_for_good.rs"]
 mod a_task_waiting_on_a_cancelled_task_stayed_blocked_for_good;
 #[path = "regressions/a_task_waiting_on_a_job_that_never_ends_was_finished_by_the_chief.rs"]
 mod a_task_waiting_on_a_job_that_never_ends_was_finished_by_the_chief;
+#[path = "regressions/a_terminals_environment_reached_the_daemon_and_no_window.rs"]
+mod a_terminals_environment_reached_the_daemon_and_no_window;
+#[path = "regressions/a_torn_record_line_hid_the_rest_of_a_conversation.rs"]
+mod a_torn_record_line_hid_the_rest_of_a_conversation;
 #[path = "regressions/a_trust_question_after_git_init_stopped_every_launch.rs"]
 mod a_trust_question_after_git_init_stopped_every_launch;
+#[path = "regressions/a_window_whose_open_missed_its_deadline_worked_on_unseen.rs"]
+mod a_window_whose_open_missed_its_deadline_worked_on_unseen;
+#[path = "regressions/a_window_with_nothing_to_stop_was_closed_and_its_work_ended.rs"]
+mod a_window_with_nothing_to_stop_was_closed_and_its_work_ended;
+#[path = "regressions/a_windows_first_message_was_on_its_command_line.rs"]
+mod a_windows_first_message_was_on_its_command_line;
 #[path = "regressions/a_worker_that_waited_on_its_run_with_monitor_lost_it.rs"]
 mod a_worker_that_waited_on_its_run_with_monitor_lost_it;
 #[path = "regressions/a_workers_still_going_was_given_as_its_result.rs"]
 mod a_workers_still_going_was_given_as_its_result;
+#[path = "regressions/an_idle_quit_with_a_message_queued_read_as_a_cut_turn.rs"]
+mod an_idle_quit_with_a_message_queued_read_as_a_cut_turn;
+#[path = "regressions/claude_continues_by_itself_after_its_limit.rs"]
+mod claude_continues_by_itself_after_its_limit;
 // The stand-in's status line is a `bash`.
 #[cfg(unix)]
 #[path = "regressions/claude_status_line_taken_for_background_work.rs"]
@@ -88,6 +130,8 @@ mod devin_window_closed_mid_task;
 mod follow_up_refused_behind_a_waiting_follow_up;
 #[path = "regressions/idle_compaction_read_as_a_cut_turn.rs"]
 mod idle_compaction_read_as_a_cut_turn;
+#[path = "regressions/keys_cleared_with_escape_held_every_delivery.rs"]
+mod keys_cleared_with_escape_held_every_delivery;
 // Windows keeps the limit the report documents (a job object has no process
 // groups or parents to look at), so there is nothing there to assert.
 #[cfg(unix)]
@@ -95,6 +139,8 @@ mod idle_compaction_read_as_a_cut_turn;
 mod mcp_servers_held_a_workers_result;
 #[path = "regressions/opencode_updated_itself_to_2.rs"]
 mod opencode_updated_itself_to_2;
+#[path = "regressions/results_stay_queued_after_a_quota_pause.rs"]
+mod results_stay_queued_after_a_quota_pause;
 #[path = "regressions/results_that_began_with_the_workers_progress.rs"]
 mod results_that_began_with_the_workers_progress;
 #[path = "regressions/resume_of_a_chief_with_no_turn.rs"]
@@ -107,6 +153,8 @@ mod rows_a_paste_carried_pasted_again_after_a_restart;
 mod tasks_left_paused_by_a_close_and_resume;
 #[path = "regressions/tell_refused_for_a_queued_task.rs"]
 mod tell_refused_for_a_queued_task;
+#[path = "regressions/the_finished_column_could_not_be_cleared_while_its_tasks_were_needed.rs"]
+mod the_finished_column_could_not_be_cleared_while_its_tasks_were_needed;
 #[cfg(unix)]
 #[path = "regressions/whole_history_across_a_compaction_and_a_switch.rs"]
 mod whole_history_across_a_compaction_and_a_switch;

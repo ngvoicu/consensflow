@@ -9,7 +9,7 @@
 //! its close ended: …`, [`CLOSE_NOTE_SAYS`]) and is written once the task has ended, by a
 //! result, a Finish, a cancel or a failure: a close note while its task is still queued,
 //! working or waiting, with no end before it, is a break. The pause note of a window that
-//! closed under a working task ("is paused: … with background work still running") is a
+//! closed under a working task ("is paused: @worker's window closed with background work …") is a
 //! pause and no ending; the sentence a result finished at someone's word holds is part of
 //! that result. Whose window a close note is the log does not say, so the task's own moves
 //! are the evidence: a task reassigned since it was created may have the earlier worker's
@@ -39,9 +39,10 @@ use crate::long_run::ledger::{Event, Item, Ledger, Message};
 use crate::long_run::look::Look;
 use crate::long_run::mask::{cut, Names};
 
-/// What the note of a window's close says (turn-end, `tell_left_running`): `T-14's window
-/// closed with background work running, which its close ended: …`. The pause note of a
-/// window that closed under a working task says "still running" and is not it.
+/// What the note of a window's close says (turn-end, `tell_left_running`), right after the task it
+/// names: `T-14's window closed with background work running, which its close ended: …`
+/// ([`is_close_note`]). The pause note of a window that closed under a working task says the same
+/// of the window's work, after `T-14 is paused: @worker`, and is not it.
 pub const CLOSE_NOTE_SAYS: &str =
     "'s window closed with background work running, which its close ended";
 
@@ -82,15 +83,22 @@ enum Standing {
     Neither,
 }
 
+/// Whether `body` is a close note's: it opens with the task it names, `T-14`, and [`CLOSE_NOTE_SAYS`]
+/// follows it at once. A pause note opens with the task too, then `is paused: @worker`, and says the
+/// words of the close of the worker's window after that.
+fn is_close_note(body: &str) -> bool {
+    body.strip_prefix("T-")
+        .map(|rest| rest.trim_start_matches(|c: char| c.is_ascii_digit()))
+        .is_some_and(|rest| rest.starts_with(CLOSE_NOTE_SAYS))
+}
+
 /// The close notes of the ledger's tasks: each with its task's row and number.
 fn notices(ledger: &Ledger) -> impl Iterator<Item = (&Message, i64, i64)> {
     ledger
         .messages
         .iter()
         .filter(|message| {
-            message.sender.is_none()
-                && message.kind == "note"
-                && message.body.contains(CLOSE_NOTE_SAYS)
+            message.sender.is_none() && message.kind == "note" && is_close_note(&message.body)
         })
         .filter_map(|notice| {
             let task = notice.task?;

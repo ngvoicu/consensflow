@@ -224,17 +224,6 @@ fn what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is_and_n
     assert_eq!(finished(window.ready(&host, &pane())), Ok(Readiness::Ready));
     assert!(pastes(&host.asked).is_empty());
 
-    // They began a turn: it is waited for, and nothing goes into it.
-    let wire = dir.path().join("turn.jsonl");
-    fs::write(&wire, configured("mild-coin", "normal")).unwrap();
-    let window = super::window(&fakes, &wire, Some("mild-coin"));
-    let host = host_while(wire.clone(), asks("mild-coin", "look at this first"));
-    assert_eq!(
-        finished(window.ready(&host, &pane())),
-        Ok(Readiness::Held(Held::Unsaid))
-    );
-    assert_eq!((pastes(&host.asked).len(), enters(&host.asked)), (0, 0));
-
     // They opened another conversation: the window shows another.
     let wire = dir.path().join("another.jsonl");
     fs::write(&wire, configured("mild-coin", "normal")).unwrap();
@@ -245,31 +234,6 @@ fn what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is_and_n
         Ok(Readiness::Held(Held::ShowsAnother))
     );
     assert!(pastes(&host.asked).is_empty());
-}
-
-#[test]
-fn a_turn_begun_after_the_engines_look_found_the_window_at_rest_holds_it_though_its_prompt_was_there_at_the_first_read(
-) {
-    // The human sent a message after the engine's look and before readiness read the wire:
-    // both reads held its prompt, and /bypass went into the turn (Astra on the B1 fix, the
-    // second look).
-    let dir = tempfile::tempdir().unwrap();
-    let wire = dir.path().join("wire.jsonl");
-    fs::write(&wire, configured("mild-coin", "normal")).unwrap();
-    let fakes = Fakes::new(&Env::default());
-    let window = window(&fakes, &wire, Some("mild-coin"));
-    let host = host(Rc::new(Cell::new(2_000.0)), Rc::new(Cell::new(false)));
-    finished(window.observe()).unwrap();
-    append(&wire, &asks("mild-coin", "look at this first"));
-    assert_eq!(
-        finished(window.ready(&host, &pane())),
-        Ok(Readiness::Held(Held::Unsaid))
-    );
-    assert_eq!((pastes(&host.asked).len(), enters(&host.asked)), (0, 0));
-    // The engine's next look has seen it: readiness goes on as before.
-    finished(window.observe()).unwrap();
-    assert_eq!(finished(window.ready(&host, &pane())), Ok(switching()));
-    assert_eq!(pastes(&host.asked), ["/bypass"]);
 }
 
 #[test]

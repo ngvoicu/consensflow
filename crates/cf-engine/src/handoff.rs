@@ -31,7 +31,7 @@ use serde::Serialize;
 
 use entries::entries_of;
 use pages::paginate;
-use text::{defuse, delivered, first_line, name_of, Shown};
+use text::{defuse, delivered, first_line, name_of, typed_before, Shown};
 pub use viewer::{
     whole_history_page, Delivery, Openings, ShownConversation, ShownItem, WholeHistoryPage,
     HISTORY_ROOM, SHOWN_FIELD,
@@ -217,7 +217,7 @@ pub fn last_words(conversations: &[ChiefConversation]) -> Option<LastWords> {
             }
             let said = match delivered(&item.text) {
                 None => item.text.as_str(),
-                Some(header) => &item.text[..header.at],
+                Some(header) => typed_before(&item.text, &header),
             };
             let text = js::trim(said);
             if text.is_empty() {

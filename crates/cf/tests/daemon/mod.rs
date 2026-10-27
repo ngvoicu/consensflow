@@ -48,7 +48,8 @@ impl Root {
     /// A `claude` that never answers: it writes its pid to a file beside it,
     /// starts a helper that sleeps, as an installer starts programs of its own,
     /// writes the helper's pid to another file, and waits for it, two minutes
-    /// at most. The two files are what this gives: the program's and its
+    /// at most and for as long as the daemon that started it is there (the helper
+    /// is ended with it). The two files are what this gives: the program's and its
     /// helper's. The daemon runs a CLI in the environment's `HOME`, which is
     /// made here: a program whose folder is not there does not start. And a run
     /// that never gets its version never asks a release feed.
@@ -57,7 +58,7 @@ impl Root {
         std::fs::create_dir_all(self.dir.path().join("home")).expect("a home folder");
         std::fs::write(
             self.bin().join("claude"),
-            "#!/bin/sh\necho $$ > \"${0%/*}/asked\"\n/bin/sleep 120 &\necho $! > \"${0%/*}/helper\"\nwait\n",
+            "#!/bin/sh\necho $$ > \"${0%/*}/asked\"\n/bin/sleep 120 &\nhelper=$!\necho $helper > \"${0%/*}/helper\"\nwhile kill -0 $helper 2>/dev/null && kill -0 $PPID 2>/dev/null; do sleep 0.2; done\nkill $helper 2>/dev/null\n",
         )
         .expect("a stand-in claude");
         (self.bin().join("asked"), self.bin().join("helper"))
@@ -169,6 +170,8 @@ impl Daemon {
                 }
             }
         }
+        // It runs as long as the test, beside the others: what it was left of theirs it would hold.
+        cf_process::hold_only_the_streams(&mut command);
         let mut child = command.spawn().expect("cf ui starts");
         let errors = Arc::new(Mutex::new(String::new()));
         let mut stderr = child.stderr.take().expect("its error output");
@@ -257,15 +260,15 @@ impl Daemon {
         self.stdin = None;
     }
 
-    /// SIGTERM, with its input left open.
+    /// SIGTERM, with its input left open: sent by this process, as the app
+    /// sends it. (`kill` run as a program would put the start of a program in
+    /// the time a stop is counted from.) A signal that is not delivered is
+    /// said here, and not as a daemon that did not stop.
     #[cfg(unix)]
     pub fn terminate(&self) {
-        let pid = self.child.id().to_string();
-        let sent = Command::new("kill").args(["-TERM", &pid]).status();
-        assert!(
-            sent.is_ok_and(|status| status.success()),
-            "kill -TERM {pid}"
-        );
+        let pid = nix::unistd::Pid::from_raw(i32::try_from(self.child.id()).expect("a pid"));
+        nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM)
+            .unwrap_or_else(|failed| panic!("SIGTERM was not delivered to {pid}: {failed}"));
     }
 
     /// Waits for it to exit: its code and how long it took from `since`.

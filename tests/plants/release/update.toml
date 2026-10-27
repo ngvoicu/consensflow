@@ -451,9 +451,11 @@ runs = ["release-tool"]
 [[plant.edit]]
 file = ".github/workflows/release.yml"
 find = '''
+      # lockfile names with the key in reach. --locked: the lockfile's build, or none.
       - name: Build the release tool
         run: cargo build'''
 replace = '''
+      # lockfile names with the key in reach. --locked: the lockfile's build, or none.
       - name: Build the release tool
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -466,5 +468,11 @@ runs = ["release-tool"]
 
 [[plant.edit]]
 file = ".github/workflows/release.yml"
-find = "cargo build --release --locked -p cf-release"
-replace = "cargo build --release -p cf-release"
+find = '''
+      # lockfile names with the key in reach. --locked: the lockfile's build, or none.
+      - name: Build the release tool
+        run: cargo build --release --locked -p cf-release'''
+replace = '''
+      # lockfile names with the key in reach. --locked: the lockfile's build, or none.
+      - name: Build the release tool
+        run: cargo build --release -p cf-release'''

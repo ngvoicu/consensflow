@@ -30,7 +30,7 @@ use jiff::tz::TimeZone;
 use serde_json::Value;
 
 use crate::contract::{HostError, PaneHost, Records, Work};
-use crate::records::{self, Cache, Options, Reading, IDLE_MS};
+use crate::records::{self, Boundary, Cache, Options, Reading, IDLE_MS};
 use crate::seams::{Bundle, Entropy, Loopback, Ports, Probes, Processes, Services, Time};
 
 mod admin;
@@ -388,12 +388,20 @@ impl Records for LocalRecords {
         Box::pin(async move { records::has_transcript(harness, session, &self.env) })
     }
 
-    fn transcript_length<'a>(
+    fn transcript_boundary<'a>(
         &'a self,
         harness: Harness,
         session: &'a str,
-    ) -> Work<'a, Result<Option<u64>, String>> {
-        Box::pin(async move { records::transcript_length(harness, session, &self.env) })
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
+        Box::pin(async move { records::transcript_boundary(harness, session, &self.env) })
+    }
+
+    fn transcript_left<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
+        Box::pin(async move { records::transcript_left(harness, session, &self.env) })
     }
 }
 
@@ -784,17 +792,25 @@ pub fn npm_shim_stand_in(file: &Path) -> PathBuf {
 pub struct OtherProcess(std::process::Child);
 
 impl OtherProcess {
-    #[allow(clippy::disallowed_methods)] // A test starts what it ends.
+    /// Started as every program here is, holding nothing of the test's but its streams: a
+    /// test that opens a socket on another thread meanwhile is not left it for ten minutes.
     pub fn start() -> Self {
-        let child = if cfg!(windows) {
-            std::process::Command::new("ping")
-                .args(["-n", "600", "127.0.0.1"])
-                .stdout(std::process::Stdio::null())
-                .spawn()
+        let (program, args) = if cfg!(windows) {
+            ("ping", vec!["-n", "600", "127.0.0.1"])
         } else {
-            std::process::Command::new("sleep").arg("600").spawn()
+            ("sleep", vec!["600"])
         };
-        Self(child.expect("a second process started"))
+        let run = cf_process::Run {
+            program: program.into(),
+            args: args.into_iter().map(Into::into).collect(),
+            verbatim: false,
+        };
+        let mut command = run.command();
+        cf_process::hold_only_the_streams(&mut command);
+        command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null());
+        Self(command.spawn().expect("a second process started"))
     }
 
     pub fn pid(&self) -> u32 {

@@ -69,18 +69,21 @@ enum Outcome {
 /// the 23 that name `RESULT_ACCEPTED`, `RESULT_SENT_BACK` or
 /// `DECIDED_BEFORE_PASTED`, which the withdrawal of a decided task's result
 /// moved: Node leaves it queued, and its dispatcher pastes it after the
-/// decision it asked for; and the 7 that name `TAKEN_BEFORE_GIVEN`,
-/// `LEFT_THE_PAUSE`, `WAIT_NOTE_TAKEN` or `GOES_ON`, which the notes of a
-/// task's wait moved: Node leaves one queued when another member takes the
-/// task or it is taken back, and tells its requester nothing when a hold ends;
-/// and the 4 that name `UNREACHED` or say `reached`, which the transcript of a
-/// task that reached no window moved: Node gave it the whole copy of the window
-/// its brief waited for; and the 4 that name `WAITED_FOR`, which the refusal of
-/// a cancel moved: Node cancels a task that open tasks wait for, and they stay
-/// blocked for good; and the one that names `FOLLOW_UP_BEHIND_WORK`, which the
-/// follow-up queued behind a window's work moved: Node refuses it; and the one
-/// that names `REMOVAL_CANCELS_WAITING`, which the removal's cancel of the tasks
-/// waiting for a member moved.
+/// decision it asked for; and the 5 that name `TAKEN_BEFORE_GIVEN`,
+/// `LEFT_THE_PAUSE` or `WAIT_NOTE_TAKEN`, which the notes of a task's wait
+/// moved: Node leaves one queued when another member takes the task or it is
+/// taken back (a hold's end tells the requester nothing here either, as Node's
+/// did: it is told the task goes on once a turn of its window gets through,
+/// T-96, which no recording reaches); and the 4 that name `UNREACHED` or say
+/// `reached`, which the transcript of a task that reached no window moved: Node
+/// gave it the whole copy of the window its brief waited for; and the 4 that
+/// name `WAITED_FOR`, which the refusal of a cancel moved: Node cancels a task
+/// that open tasks wait for, and they stay blocked for good; and the one that
+/// names `FOLLOW_UP_BEHIND_WORK`, which the follow-up queued behind a window's
+/// work moved: Node refuses it; and the one that names
+/// `REMOVAL_CANCELS_WAITING`, which the removal's cancel of the tasks waiting
+/// for a member moved; and the 4 that name `ANSWERED_AS_IT_WAITED`, which
+/// the settling of a question answered as it waited moved (T-260).
 /// Departed traces that Node's suite recorded only off Windows: the test
 /// that wrote `home-copies-004` was skipped there, as Windows holds an open
 /// ledger's files. Elsewhere each must be there.
@@ -88,6 +91,7 @@ const RECORDED_OFF_WINDOWS: &[&str] = &["home-copies-004"];
 
 const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-api-003", 19, RESULT_ACCEPTED),
+    ("core-api-005", 17, ANSWERED_AS_IT_WAITED),
     ("core-api-006", 15, "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
     ("core-dispatcher-010", 121, REASON_PAUSE),
     ("core-dispatcher-042", 72, "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, so the chief has no message waiting (`withWork`), where Node's has the note"),
@@ -97,8 +101,6 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-dispatcher-058", 78, LEFT_THE_PAUSE),
     ("core-dispatcher-060", 236, WAIT_NOTE_TAKEN),
     ("core-dispatcher-065", 147, KEPT_IN_BRIEF),
-    ("core-dispatcher-067", 129, GOES_ON),
-    ("core-dispatcher-071", 157, GOES_ON),
     ("core-dispatcher-074", 294, "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn (`task`), where Node leaves it queued"),
     ("core-dispatcher-081", 91, DECIDED_BEFORE_PASTED),
     ("core-dispatcher-089", 95, DECIDED_BEFORE_PASTED),
@@ -128,8 +130,11 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-messages-013", 10, READ_AT_ONCE),
     ("ledger-messages-014", 10, READ_AT_ONCE),
     ("ledger-messages-015", 11, READ_AT_ONCE),
+    ("ledger-messages-016", 12, ANSWERED_AS_IT_WAITED),
     ("ledger-messages-017", 10, DOOR_READ),
     ("ledger-messages-022", 12, DOOR_READ),
+    ("ledger-page-reads-004", 8, ANSWERED_AS_IT_WAITED),
+    ("ledger-page-reads-005", 9, ANSWERED_AS_IT_WAITED),
     ("ledger-page-reads-009", 41, REMOVAL_CANCELS_WAITING),
     ("ledger-projects-002", 14, KEPT_IN_BRIEF),
     ("ledger-projects-011", 8, NO_MARK_TO_FORGET),
@@ -209,9 +214,6 @@ const TAKEN_BEFORE_GIVEN: &str =
 /// A release leaves the wait a task was in: what its requester was told of it goes.
 const LEFT_THE_PAUSE: &str =
     "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`cancelled`, with the reason `T-1 was taken back`), where Node leaves it `queued`";
-/// A requester who was given the note that a task is held is told when it goes on.
-const GOES_ON: &str =
-    "the daemon resumes T-1, and its requester, who was given the note that T-1 waits, is told it goes on (`T-1 goes on: its account has quota again.`), a note more and the clock read for it, where Node tells it nothing";
 /// The door's poll is a write now, `claim_answer`; `answerTo`, its read, went.
 const DOOR_READ: &str =
     "the door's read `answerTo` is gone: a poll claims the answer with `claim_answer`";
@@ -243,6 +245,10 @@ const STOP_IN_EVENT: &str =
 const UNREACHED: &str =
     "a task whose brief reached no window has no transcript of its own: the copy of the window its brief waits for, which shows none of its headers, is none of its, and it says so (`reached: false`), where Node gave the window's whole copy";
 /// The reason a release gives what the old window still held for the human.
+/// A question its recipient answered while it still waited in the queue is
+/// never typed in after (T-260).
+const ANSWERED_AS_IT_WAITED: &str =
+    "the chief answers a question still queued for it: the question is `read`, its receipt naming the answer and its time the answer's, so it is never typed in after, where Node leaves it `queued` to be pasted";
 const WINDOW_ENDED: &str =
     "a release withdraws what the old window still held for the human with the reason `withdrawn: @x's window ended first`; Node gave none";
 

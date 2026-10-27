@@ -5,7 +5,7 @@ use cf_base::js;
 use cf_base::refusal::Refusal;
 use cf_proto::ledger::{ChiefConversation, HistoryItem};
 
-use super::text::{defuse, delivered, first_line, name_of, Shown};
+use super::text::{defuse, delivered, first_line, name_of, typed_before, Shown};
 use super::{Gist, Lookup};
 
 /// Past this a number is no id the ledger could hold: 2^63.
@@ -92,7 +92,7 @@ fn render(
         return Ok(Some(format!("{who}: {}", defuse(text))));
     };
     // What the human had typed before a delivery went in with it.
-    let before = js::trim(&text[..header.at]);
+    let before = js::trim(typed_before(text, &header));
     let outcome = delivery_line(header.id, message)?;
     Ok(Some(if before.is_empty() {
         outcome

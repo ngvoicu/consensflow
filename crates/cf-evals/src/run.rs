@@ -31,6 +31,7 @@ mod alone;
 pub(crate) mod card;
 pub(crate) mod chief;
 pub(crate) mod floor;
+pub(crate) mod login;
 pub(crate) mod machine;
 mod options;
 pub(crate) mod owner;
@@ -85,7 +86,15 @@ pub fn command(words: &[String], out: &mut dyn Write) -> Result<i32> {
         options.chief_effort(),
     );
     let crew = options.crew();
-    let machine = Machine::of(&crew)?;
+    // The windows of a real Claude Code run on a throwaway config folder with a copy of the
+    // machine's login, which must last as long as the plays of this command can: every repeat
+    // at its time limit (a login that would end before is refused when the first workspace is
+    // made, before anything is spent).
+    let login = login::throwaway(
+        login::real_claude(&options.chief, &chief.model, &staff),
+        options.planned(),
+    );
+    let machine = Machine::of(&crew, login)?;
     let wrappers = wrappers::write(&machine, &crew, &chief)?;
     let plan = Plan {
         options: &options,

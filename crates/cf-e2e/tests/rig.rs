@@ -18,6 +18,10 @@
 //! window opened as the app opens one, the harness code asked as a process).
 //! So is `devin_bypass_first`: a resumed Devin worker's first message behind
 //! `/bypass`, received once however Devin stores the command.
+//! So is `devin_compaction`: a Devin worker's answer from the chief, given once
+//! into the same window after Devin's compactor cut the user's message out of the
+//! turn's chain (T-655). So is `devin_stamped`: a Devin window that writes its wire log
+//! as Devin 3000.11 does is at work for as long as its turn is (T-660).
 //! So is `live_member`: a Devin member's window as `live_devin_resume` opens
 //! one, whole as the adapter prepares it, cut, and opened again on its
 //! conversation with the note in its launch.
@@ -89,10 +93,17 @@ mod decided_result;
 mod described;
 #[path = "rig/devin_bypass_first.rs"]
 mod devin_bypass_first;
+#[path = "rig/devin_compaction.rs"]
+mod devin_compaction;
+#[path = "rig/devin_stamped.rs"]
+mod devin_stamped;
 #[path = "rig/help.rs"]
 mod help;
 #[path = "rig/homes.rs"]
 mod homes;
+#[cfg(unix)]
+#[path = "rig/kept_config.rs"]
+mod kept_config;
 #[path = "rig/last_exits.rs"]
 mod last_exits;
 #[path = "rig/live_base.rs"]
@@ -105,6 +116,8 @@ mod live_members;
 mod live_support;
 #[path = "rig/pending_agents.rs"]
 mod pending_agents;
+#[path = "rig/printed_output.rs"]
+mod printed_output;
 #[path = "rig/reports.rs"]
 mod reports;
 #[path = "rig/specs.rs"]
@@ -158,6 +171,36 @@ fn config() -> Config {
 /// `n` seconds.
 fn secs(n: u64) -> Duration {
     Duration::from_secs(n)
+}
+
+/// What the window of the conversation `session` was told first, as the stand-in
+/// recorded it: the text of the first user message of its record, waited for up to
+/// 30 s. A window is given its first message once it is up, on no word of its command
+/// line (T-432).
+fn first_told(rig: &cf_e2e::rig::Rig, session: &str) -> String {
+    let read = || {
+        rig.transcript(session)
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .find(|row| row["type"] == "user")
+            .and_then(|row| row["message"]["content"].as_str().map(str::to_owned))
+    };
+    let _ = rig.wait_for(
+        "the window's record to hold its first message",
+        secs(30),
+        || Ok(read().is_some()),
+    );
+    read().unwrap_or_default()
+}
+
+/// Whether a word of the command line of the window `frame` opened holds `text`.
+fn on_command_line(frame: &serde_json::Value, text: &str) -> bool {
+    frame["argv"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .any(|word| word.contains(text))
 }
 
 /// The conversation a window was launched with: the word after `--session-id`

@@ -386,10 +386,10 @@ runs = ["tem-engine-turn-end"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.total() > 0 {'''
 replace = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.total() > 0 && false {'''
 
 [[plant]]
@@ -401,10 +401,10 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.total() > 0 {'''
 replace = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.total() > 0 && false {'''
 
 [[plant]]
@@ -415,10 +415,10 @@ runs = ["tem-engine-pending"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.total() > 0 {'''
 replace = '''
-        let words = words_of(&answers.final_run);
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.jobs > 0 {'''
 
 [[plant]]
@@ -541,10 +541,10 @@ runs = ["tem-engine-pending"]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
         if observed.failed {
-            let because = format!("@{}'s harness reported a failure", participant.handle);'''
+            // A failed turn holds its task for nothing it left (T-532's P3-3).'''
 replace = '''
         if observed.failed && false {
-            let because = format!("@{}'s harness reported a failure", participant.handle);'''
+            // A failed turn holds its task for nothing it left (T-532's P3-3).'''
 
 [[plant]]
 name = "turn-end-min finish: a task whose reader says its turn is on is refused"
@@ -589,8 +589,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '        if thread.task.state != "working" {'
-replace = '        if thread.task.state != "working" && thread.task.state != "done" {'
+find = '        if !matches!(thread.task.state.as_str(), "working" | "paused") {'
+replace = '        if !matches!(thread.task.state.as_str(), "working" | "paused" | "done") {'
 
 [[plant]]
 name = "turn-end-min finish: the result says nothing of what still runs"
@@ -661,8 +661,8 @@ runs = ["tem-page-finish"]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = '''    if (task.state === 'working' && task.assignee !== null && task.assignee !== 'chief') {'''
-replace = '''    if (this.#held !== null && task.state === 'working' && task.assignee !== null && task.assignee !== 'chief') {'''
+find = '''    if (FINISHABLE.includes(task.state) && task.assignee !== null && task.assignee !== 'chief') {'''
+replace = '''    if (this.#held !== null && FINISHABLE.includes(task.state) && task.assignee !== null && task.assignee !== 'chief') {'''
 
 [[plant]]
 name = "turn-end-min cf: `cf task finish` is no command"
@@ -817,17 +817,9 @@ replace = '''
             return Ok(Some(conversation));
         }'''
 
-[[plant]]
-name = "turn-end-min ownership: a session the human deleted forgets how its window ended"
-meant = "brings_a_deleted_session_back_when_a_follow_up_comes_with_after_its_window_opens_on_its_own_conversation_and_a_busy_session_still_refuses"
-runs = ["tem-engine-deleted"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '''
-                    record.window.borrow_mut().last_exit =
-                        self.left_exits.borrow_mut().remove(&participant);'''
-replace = '                    let _ = self.left_exits.borrow_mut().remove(&participant);'
+# A session the human deleted keeps how its window ended: since T-541 the ledger keeps it on the
+# session's conversation, and the plant that made the record forget it is `exit-proof.toml`'s
+# "a deleted session's window ... is not kept".
 
 [[plant]]
 name = "turn-end-min: a window that closes keeps what its task was held for"
@@ -846,8 +838,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '        let way = if thread.task.requester == "human" {'
-replace = '        let way = if false {'
+find = '    if thread.task.requester == "human" {'
+replace = '    if false {'
 
 [[plant]]
 name = "turn-end-min reader: OpenCode's compaction summary is a reply of the member's"
@@ -868,8 +860,8 @@ runs = ["tem-engine-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/background.rs"
-find = '''"T-{number}'s window closed with background work running, which its close ended: {}",'''
-replace = '''"T-{number}'s window closed with background work still running: {}",'''
+find = '''            " with background work running, which its close ended: {}",'''
+replace = '''            " with background work still running: {}",'''
 
 [[plant]]
 name = "turn-end-min ownership: a window knows no task of the message its launch began with"
@@ -1015,8 +1007,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '        if watching == Watching::Seen(CommandsSeen::Running(0)) {'
-replace = '        if matches!(watching, Watching::Seen(CommandsSeen::Running(0) | CommandsSeen::Untold)) {'
+find = '    if watching == Watching::Seen(CommandsSeen::Running(0)) {'
+replace = '    if matches!(watching, Watching::Seen(CommandsSeen::Running(0) | CommandsSeen::Untold)) {'
 
 [[plant]]
 name = "turn-end-min engine: a held task is not told again when its monitor's notice comes"
@@ -1286,8 +1278,11 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '        record.held.borrow_mut().rests.pasted();'
-replace = ''
+find = '''
+        self.mark_turn(record, &pane).await;
+        record.held.borrow_mut().rests.pasted();'''
+replace = '''
+        self.mark_turn(record, &pane).await;'''
 
 [[plant]]
 name = "turn-end-min engine: a window idle after its result takes a rest at every pass"
@@ -1297,11 +1292,8 @@ runs = ["tem-engine-turn-end"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-        let rests = std::mem::take(&mut self.rests);
-        *self = HeldPart {
-            rests,
-            ..HeldPart::default()
-        };'''
+        self.holding = None;
+        self.told = None;'''
 replace = '''
         *self = HeldPart::default();'''
 
@@ -1547,8 +1539,8 @@ runs = ["tem-e2e-machine"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = '                Some(folder) => config.var("CLAUDE_CONFIG_DIR", folder.clone()),'
-replace = '                Some(_) => config.unset("CLAUDE_CONFIG_DIR"),'
+find = '                (Some(folder), _) => config.var("CLAUDE_CONFIG_DIR", folder.clone()),'
+replace = '                (Some(_), _) => config.unset("CLAUDE_CONFIG_DIR"),'
 
 [[plant]]
 name = "turn-end-min live monitor-wait: its looks leave out what began before the first call itself"
@@ -1857,9 +1849,9 @@ meant = "finish_of_a_task_the_resume_brought_back_waits_for_the_answer_to_its_co
 runs = ["tem-engine-resume"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '                item.role == Role::User'
-replace = '                false && item.role == Role::User'
+file = "crates/cf-engine/src/turn_end.rs"
+find = '                    item.role == Role::User'
+replace = '                    false && item.role == Role::User'
 
 [[plant]]
 name = "turn-end-min engine: a held task whose jobs the Resume retired has its result say nothing of them"
@@ -1900,9 +1892,9 @@ meant = "finish_takes_no_word_a_session_gave_its_role_for_an_answer_to_the_task"
 runs = ["tem-engine-role-members"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '                    && header_id(&item.text).is_some_and(|id| !replacements.contains(&id))'
-replace = '                    && header_id(&item.text).is_some()'
+file = "crates/cf-engine/src/turn_end.rs"
+find = '                        && header_id(&item.text).is_some_and(|id| !replacements.contains(&id))'
+replace = '                        && header_id(&item.text).is_some()'
 
 [[plant]]
 name = "turn-end-min engine: Finish takes a compaction summary that quotes a header for a message pasted since"
@@ -1910,12 +1902,12 @@ meant = "finish_takes_the_answer_of_a_held_task_whose_worker_compacted_after_it_
 runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/turn_end/finish.rs"
+file = "crates/cf-engine/src/turn_end.rs"
 find = """
-                    && !item.compaction
-                    && header_id"""
+                        && !item.compaction
+                        && header_id"""
 replace = """
-                    && header_id"""
+                        && header_id"""
 
 # The fix-forward of turn-end's landing (T-371): the stand-in's monitor ends once the case lets
 # it, after the chief was told the monitor alone runs.

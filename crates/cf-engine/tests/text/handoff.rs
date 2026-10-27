@@ -195,6 +195,66 @@ fn names_a_compaction_s_summary_as_one_never_as_the_human_s_words_nor_their_last
 }
 
 #[test]
+fn names_what_claude_put_ahead_of_a_delivery_as_neither_the_human_s_words_nor_their_last() {
+    // A Claude chief given a designer's result that starts with the paths of two pictures:
+    // the item begins with a placeholder for each, then the header, and the sources of the
+    // pictures are an item of the harness's own after it. A longer result is wrapped, the
+    // wrapper's opening line after the placeholders.
+    let wrapped = "[Image #3]\n\n<pasted_content id=\"f920\">\n[ConsensFlow m-5 · T-1 · result from @zeus]\nParser done\n</pasted_content id=\"f920\">\n";
+    let history = [conversation(
+        1,
+        "claude-code",
+        [
+            ("user", "Ship the parser"),
+            ("assistant", "On it"),
+            (
+                "user",
+                "[Image #1] [Image #2][ConsensFlow m-5 · T-1 · result from @zeus]\nParser done",
+            ),
+            (
+                "custom",
+                "[Image: source: /pictures/desk.png]\n[Image: source: /pictures/hero.png]",
+            ),
+            ("user", wrapped),
+            ("custom", "[Image: source: /pictures/icon.png]"),
+        ],
+    )];
+    let text = &all(&history)[0].text;
+    assert!(!text.contains("Human: [Image"), "{text}");
+    assert!(!text.contains("pasted_content"), "{text}");
+    assert_eq!(
+        text.matches("· m-5: @zeus's result on T-1 (cf task get T-1)")
+            .count(),
+        2,
+        "{text}"
+    );
+    assert_eq!(
+        last_words(&history),
+        Some(LastWords {
+            text: "Ship the parser".to_owned(),
+            answered: true,
+        })
+    );
+    // The human's own words ahead of a delivery are theirs, a placeholder among them: only
+    // what Claude puts there is not.
+    let typed = [conversation(
+        1,
+        "claude-code",
+        [(
+            "user",
+            "[Image #1]look at this[ConsensFlow m-5 · T-1 · result from @zeus]\nParser done",
+        )],
+    )];
+    assert!(all(&typed)[0]
+        .text
+        .contains("Human: [Image #1]look at this\n"));
+    assert_eq!(
+        last_words(&typed).map(|last| last.text),
+        Some("[Image #1]look at this".to_owned())
+    );
+}
+
+#[test]
 fn leaves_a_tool_s_output_out_unless_asked_and_searches() {
     let conversations = [
         conversation(

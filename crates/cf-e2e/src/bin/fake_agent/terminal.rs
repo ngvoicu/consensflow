@@ -3,7 +3,7 @@
 //! followed by Enter is one message. Escape, alone, is an event of its own (what
 //! it does is the window's: Claude's stops the turn at work, Devin's does so when
 //! it comes twice); the first Control-C clears what is typed, as Claude's does,
-//! and a second one in a row ends the window.
+//! and a second one in a row ends the window; Control-U clears it too.
 
 use std::io::{self, Read};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -104,6 +104,27 @@ impl Keys {
         given
     }
 
+    /// What is typed and not sent: the input box's text.
+    // The stand-in Devin, which reads its terminal here too, draws no input box.
+    #[allow(dead_code)]
+    pub fn typed(&self) -> &str {
+        &self.input.buffer
+    }
+
+    /// Drops what is typed: a picker that took it closed.
+    #[allow(dead_code)]
+    pub fn clear(&mut self) {
+        self.input.buffer.clear();
+    }
+
+    /// Puts `text` back in front of what is typed, as Claude Code puts a cancelled
+    /// command back in its input box: what is pasted or typed next goes after it.
+    // The stand-in Devin, which reads its terminal here too, cancels no command.
+    #[allow(dead_code)]
+    pub fn put_back(&mut self, text: &str) {
+        self.input.buffer.insert_str(0, text);
+    }
+
     /// What the terminal gave since the last call, as events, waiting a moment
     /// for it (an Escape that nothing follows in that moment is the key). None
     /// when the terminal is gone.
@@ -179,6 +200,8 @@ impl Input {
                             events.push(Event::Submit(std::mem::take(&mut self.buffer)));
                         }
                     }
+                    // Ctrl+U clears what is typed, as Claude's does.
+                    '\u{15}' if !self.pasting => self.buffer.clear(),
                     '\u{3}' => {
                         self.buffer.clear();
                         if std::mem::replace(&mut self.armed, true) {

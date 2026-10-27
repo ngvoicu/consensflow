@@ -85,13 +85,14 @@ fn withdraws_the_note_that_says_a_task_was_taken_back_when_another_member_takes_
         ("working", Some("zeus-amber-pine"))
     );
 
-    // The chief is in the middle of a turn when zeus runs out of quota, its
-    // reset far enough that diana, who is free, takes the task.
+    // The chief is in the middle of a turn when the human gives the task back
+    // to the board, and diana, who is free, takes it.
     context.adapter.busy("chief");
     context
-        .adapter
-        .quota("zeus", Some(exhausted(None, Some(&soon(&context, 2)))));
-    context.pass().unwrap();
+        .ledger
+        .borrow_mut()
+        .release_task(1, 1, "by @human")
+        .unwrap();
     let notes = notes_saying(&context, &tiers, "was taken back");
     assert_eq!(
         notes.len(),
@@ -134,10 +135,20 @@ fn leaves_the_note_that_says_a_task_was_taken_back_once_its_reader_has_been_give
     tiers.open();
     context.pass().unwrap();
     context.pass().unwrap();
+    // Nobody is free when the human gives the task back to the board.
+    for member in ["zeus", "diana"] {
+        let id = tiers.id(member);
+        context
+            .ledger
+            .borrow_mut()
+            .mark_out(id, &soon(&context, 2), "out of quota")
+            .unwrap();
+    }
     context
-        .adapter
-        .quota("zeus", Some(exhausted(None, Some(&soon(&context, 2)))));
-    context.pass().unwrap();
+        .ledger
+        .borrow_mut()
+        .release_task(1, 1, "by @human")
+        .unwrap();
     let notes = notes_saying(&context, &tiers, "was taken back");
     assert_eq!(notes.len(), 1);
 
@@ -150,6 +161,8 @@ fn leaves_the_note_that_says_a_task_was_taken_back_once_its_reader_has_been_give
         "delivered",
         "the chief was given it"
     );
+    context.back_from_quota(tiers.project.id, "diana").unwrap();
+    context.pass().unwrap();
     assert_eq!(
         tiers.task(1).task.assignee.as_deref(),
         Some("diana-brisk-birch")
@@ -258,6 +271,12 @@ fn tells_a_requester_it_was_told_a_task_waits_that_the_task_goes_on_when_the_acc
 
     switches_account(&context, &tiers);
     assert_eq!(tiers.task(1).task.state, "working");
+    // The words that resume it go in; it is told it goes on once a turn gets through.
+    assert!(notes_saying(&context, &tiers, GOES_ON).is_empty());
+    context
+        .adapter
+        .answer("zeus", "Picking the lexer up again.");
+    context.pass().unwrap();
     assert_eq!(
         fate(&context, &notes[0]),
         ("delivered".to_owned(), None),
@@ -301,6 +320,11 @@ fn tells_a_requester_it_was_told_a_task_waits_that_the_task_goes_on_when_the_res
         context.pass().unwrap();
     }
     assert_eq!(tiers.task(1).task.state, "working");
+    assert!(notes_saying(&context, &tiers, GOES_ON).is_empty());
+    context
+        .adapter
+        .answer("zeus", "Picking the lexer up again.");
+    context.pass().unwrap();
     let told: Vec<String> = notes_saying(&context, &tiers, GOES_ON)
         .into_iter()
         .map(|note| note.body)

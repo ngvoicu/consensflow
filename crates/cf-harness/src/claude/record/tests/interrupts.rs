@@ -46,7 +46,7 @@ fn looked_at(records: &[Value]) -> Record {
     stage.write(records);
     match &*stage.reader.look(&Options::default(), 0) {
         Reading::Known(record) => record.clone(),
-        Reading::Unknown(reason) => panic!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
     }
 }
 

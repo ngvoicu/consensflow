@@ -131,7 +131,7 @@ replace = "pub const MAX_TEXT_UNITS: usize = 128 * 1024;"
 
 [[plant]]
 name = "constant: the open deadline is ten minutes"
-meant = "an_open_the_host_never_answers_is_refused_as_the_deadline_after_sixty_seconds"
+meant = "an_open_the_host_never_answers_is_unanswered_after_sixty_seconds_not_refused"
 runs = ["daemon-lib-host"]
 
 [[plant.edit]]

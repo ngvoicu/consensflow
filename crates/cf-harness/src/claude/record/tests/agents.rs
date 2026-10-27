@@ -51,7 +51,7 @@ fn woken(uuid: &str, parent: &str) -> Value {
 fn read(stage: &mut Stage) -> Record {
     match &*stage.reader.look(&Options::default(), 0) {
         Reading::Known(record) => record.clone(),
-        Reading::Unknown(reason) => panic!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
     }
 }
 

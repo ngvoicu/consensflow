@@ -114,8 +114,8 @@ runs = ["harness-contract"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/contract.rs"
-find = '''                    Settlement::InFlight => Some(true),'''
-replace = '''                    Settlement::InFlight => Some(false),'''
+find = '''                    Settlement::InFlight => Some(TurnLeft::Cut(Opening::of(&record.items))),'''
+replace = '''                    Settlement::InFlight => Some(TurnLeft::AtRest),'''
 
 [[plant]]
 name = "start suspended: a record settled on the message it was given is taken for one at rest"
@@ -124,8 +124,8 @@ runs = ["harness-contract"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/contract.rs"
-find = '''        .is_some_and(|item| item.role == Role::Assistant)'''
-replace = '''        .is_some_and(|_| true)'''
+find = '''    last_word(&record.items).is_some_and(|item| item.role == Role::Assistant)'''
+replace = '''    last_word(&record.items).is_some_and(|_| true)'''
 
 # --- the engine: a start ---
 
@@ -137,12 +137,14 @@ runs = ["engine-resume"]
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
 find = '''
-        let arrived = self.arrived(message).await?;
+            None => self.took_with_no_window(message, pasted.as_deref()).await?,
+        };
         let Some(message) = self.still_delivering(message.id)? else {
             return Ok(());
         };'''
 replace = '''
-        let arrived = self.arrived(message).await?;'''
+            None => self.took_with_no_window(message, pasted.as_deref()).await?,
+        };'''
 
 [[plant]]
 name = "start suspended: one message the start fails to settle ends the settle for the rest"
@@ -284,8 +286,8 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            Some(cut) => cut,'''
-replace = '''            Some(_) => true,'''
+find = '''            Some(TurnLeft::AtRest) => None,'''
+replace = '''            Some(TurnLeft::AtRest) => Some(coming.words(None)),'''
 
 [[plant]]
 name = "start suspended: a window the quit cut is told nothing"
@@ -294,8 +296,8 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        if !cut || '''
-replace = '''        if true || '''
+find = '''            Some(TurnLeft::Cut(opening)) => Some(coming.words(opening.as_ref())),'''
+replace = '''            Some(TurnLeft::Cut(_)) => None,'''
 
 [[plant]]
 name = "start suspended: a member whose record cannot tell a cut is told nothing"
@@ -304,8 +306,8 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            None => matches!(coming, Coming::Member { .. }),'''
-replace = '''            None => false,'''
+find = '''            None => matches!(coming, Coming::Member { .. }).then(|| coming.words(None)),'''
+replace = '''            None => None,'''
 
 [[plant]]
 name = "start suspended: a chief whose record cannot tell a cut is told its turn was"
@@ -314,8 +316,8 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            None => matches!(coming, Coming::Member { .. }),'''
-replace = '''            None => true,'''
+find = '''            None => matches!(coming, Coming::Member { .. }).then(|| coming.words(None)),'''
+replace = '''            None => Some(coming.words(None)),'''
 
 [[plant]]
 name = "start suspended: a note that waits for a window is written again"
@@ -324,11 +326,8 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        if told.is_some() {
-            return Ok(told);
-        }
-'''
-replace = ""
+find = '''            if kept.is_none() && words.as_deref() == Some(message.body.as_str()) {'''
+replace = '''            if false {'''
 
 [[plant]]
 name = "start suspended: the chief is not given the note as its first message"
@@ -357,10 +356,7 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        if waiting
-            .iter()
-            .any(|message| is_handoff(message) && message.state == "queued")
-        {
+find = '''        if handed_again {
             return Ok(None);
         }
 '''
@@ -432,8 +428,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        if !cut || '''
-replace = '''        if true || '''
+find = '''        let Some(words) = words.filter(|_| kept.is_none()) else {'''
+replace = '''        let Some(words) = words.filter(|_| false) else {'''
 
 # --- the page ---
 

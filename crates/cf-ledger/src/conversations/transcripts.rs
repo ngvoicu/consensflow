@@ -32,7 +32,10 @@ const HEADER: &str = "[ConsensFlow m-";
 /// its time is kept as a store keeps one ([`time::canonical`]), none where it
 /// is no time. An item that says it is a
 /// compaction's summary (`compaction: true`) is marked so when it is first
-/// copied; one copied before the mark stays as it was. What the history viewer
+/// copied; one copied before the mark stays as it was. An item whose role is
+/// another than it was copied with (a record a daemon read as the user's, which a
+/// later one reads as the harness's own: Claude Code's companion, T-296) is
+/// brought to the role it has, as an item whose text changed is. What the history viewer
 /// reads of an item besides its text is written with its row ([`write_head`]),
 /// and its text in parts where it is long ([`write_parts`]); an item written
 /// again changed is its next revision. How many rows changed.
@@ -49,9 +52,10 @@ pub(crate) fn copy_transcript(
             "INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at, compaction)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (conversation_id, item_id) DO UPDATE
-         SET seq = excluded.seq, text = excluded.text, complete = excluded.complete,
-             at = excluded.at, copied_at = excluded.copied_at
+         SET seq = excluded.seq, role = excluded.role, text = excluded.text,
+             complete = excluded.complete, at = excluded.at, copied_at = excluded.copied_at
          WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete
+            OR transcript.role != excluded.role
        RETURNING rowid, compaction",
         )?;
         let mut written = 0;
@@ -145,9 +149,9 @@ struct Head<'a> {
     compaction: i64,
 }
 
-/// Writes `head`, with its row: its role, its id as a page shows it and its
-/// mark of a compaction's summary as they were when it was first copied, which
-/// they stay, as its row's do; its text's size, how many parts it is kept in,
+/// Writes `head`, with its row: its id as a page shows it and its mark of a
+/// compaction's summary as they were when it was first copied, which they stay,
+/// as its row's do; its role, its text's size, how many parts it is kept in,
 /// whether it is complete and its time as they are now; and the next revision
 /// of it where it was written before.
 fn write_head(db: &Connection, head: &Head<'_>) -> rusqlite::Result<()> {
@@ -155,8 +159,9 @@ fn write_head(db: &Connection, head: &Head<'_>) -> rusqlite::Result<()> {
         "INSERT INTO transcript_head (item, conversation_id, role, bytes, parts, id_shown, complete, at, compaction)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (item) DO UPDATE
-         SET bytes = excluded.bytes, parts = excluded.parts, complete = excluded.complete,
-             at = excluded.at, revision = transcript_head.revision + 1",
+         SET role = excluded.role, bytes = excluded.bytes, parts = excluded.parts,
+             complete = excluded.complete, at = excluded.at,
+             revision = transcript_head.revision + 1",
     )?
     .execute(params![
         head.item,

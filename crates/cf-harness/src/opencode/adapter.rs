@@ -51,11 +51,11 @@ use super::child_env::{child_env, Declared};
 use super::install::prepare_extension;
 use super::paths;
 use super::quota::retry_quota;
-use super::role::configure;
+use super::role::{configure, configured_paths};
 use super::version;
 use crate::contract::{
-    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
-    Skill, Window, Work,
+    Adapter, Admission, FirstMessage, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
+    Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
@@ -120,12 +120,15 @@ impl Adapter for OpenCodeAdapter {
             // skill written where it is kept for every launch, and the skills
             // folder of that copy is one more of those OpenCode is told to read.
             let copy = specmint::write_own(Harness::Opencode, &self.env, launch)?;
+            let configured =
+                configured_paths(&self.processes, &self.env, &executable, launch.directory).await;
             let role = configure(
                 &self.env,
                 launch.id,
                 launch.role,
                 launch.instructions,
                 copy.as_ref().map(OwnCopy::skills),
+                &configured,
             )?;
             let launched = launch_configuration(
                 &self.env,
@@ -219,8 +222,8 @@ impl Adapter for OpenCodeAdapter {
     }
 
     /// Its first message is posted to its server once the window is up (`seed`).
-    fn first_message_once_up(&self) -> bool {
-        true
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Started
     }
 }
 

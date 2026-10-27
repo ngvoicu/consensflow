@@ -9,6 +9,8 @@ use crate::updater_smoke::bundle::{cf_of, digest_manifest, verify_seal};
 use crate::updater_smoke::case::{
     blocked_evidence, boot_evidence, held_evidence, release_panes, staging_left, Case,
 };
+#[cfg(unix)]
+use crate::updater_smoke::descriptors::{compare, held_by, Left, NOT_MARKED};
 use crate::updater_smoke::evidence::{app_log, assert_started_daemon, Kind};
 use crate::updater_smoke::launchers::{assert_repaired, plant_commands, Repaired};
 use crate::updater_smoke::ledger::{assert_projects, assert_sound, assert_traced, traced_events};
@@ -40,10 +42,20 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
         fs::write(&way_back_file, "").map_err(files("write", &way_back_file))?;
     }
     offer_update(kase, None)?;
+    // Two descriptors a program that starts the app may leave it, which the app started again
+    // after the update must not hold (see `descriptors`).
+    #[cfg(unix)]
+    let mut left = Left::make(&kase.sandbox.root)?;
+    #[cfg(unix)]
+    left.leave()?;
     let app = kase.start_app(&inputs.to.version, &[])?;
+    #[cfg(unix)]
+    left.given();
 
     // The installed app: its process, its daemon, ready, and holding the ledger.
     let first = boot_evidence(kase, &app, &inputs.from.version, None)?;
+    #[cfg(unix)]
+    let first_held = held_by(first.app)?;
     let expected = if way_back {
         Kind::Node
     } else {
@@ -102,6 +114,33 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
         .until("the first daemon exits and lets go of the ledger", || {
             Ok(gone(first.daemon.pid).then_some(()))
         })?;
+    // The new app holds nothing of the old one's but its streams.
+    #[cfg(unix)]
+    {
+        let (faults, notes) = compare(&first_held, &held_by(second.app)?, &left);
+        for note in notes {
+            kase.note(note);
+        }
+        ensure!(
+            faults.is_empty(),
+            "the app started again holds what the installed app held:\n{}",
+            faults.join("\n")
+        );
+        left.closed_everywhere(&kase.waits)?;
+        let log = app_log(&kase.sandbox);
+        ensure!(
+            !log.contains(NOT_MARKED),
+            "the installed app's log says it {NOT_MARKED}: {}",
+            log.lines()
+                .filter(|line| line.contains(NOT_MARKED))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        kase.note(format!(
+            "the app started again holds nothing of the installed app's: neither the file it was left at fd {1} nor the pipe at fd {0}, which no process holds, and nothing it could not mark",
+            left.pipe, left.file_fd
+        ));
+    }
     // The page read the board of the update's daemon: it is ready, and has the ledger.
     held_evidence(kase)?;
 

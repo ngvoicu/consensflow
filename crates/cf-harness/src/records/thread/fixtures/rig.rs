@@ -143,7 +143,13 @@ impl Rig {
         let clock: Rc<dyn Time> = Rc::clone(&time) as Rc<dyn Time>;
         Self {
             name: name.to_owned(),
-            through: Thread::new(env.clone(), TimeZone::UTC, Rc::clone(&clock)).unwrap(),
+            through: Thread::new(
+                env.clone(),
+                TimeZone::UTC,
+                Rc::clone(&clock),
+                Box::new(|_| {}),
+            )
+            .unwrap(),
             beside: LocalRecords::new(env, clock),
             root,
             time,

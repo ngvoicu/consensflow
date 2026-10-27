@@ -360,6 +360,8 @@ fn command(plan: &Plan<'_>, args: &[OsString]) -> Result<(Command, String), Stri
     let run = runnable(plan.executable, args, plan.env)?;
     let program = run.program.display().to_string();
     let mut command = Command::from(run.command());
+    // Both run for as long as the window does.
+    cf_process::hold_only_the_streams(command.as_std_mut());
     command.env_remove("OPENAI_API_KEY").kill_on_drop(true);
     Ok((command, program))
 }
@@ -390,10 +392,16 @@ async fn read_all(mut stderr: ChildStderr, tail: &RefCell<Tail>) {
     }
 }
 
-/// The signals that close a window: SIGTERM and SIGINT, and Ctrl-C on Windows.
+/// The signals that close a window: SIGTERM, SIGHUP and SIGINT, and Ctrl-C on Windows.
+/// The pane host closes one with SIGTERM and then SIGHUP at once, as a terminal hangs
+/// up: a SIGHUP left to its default ended the supervisor before it had ended Codex's
+/// server, which then took as long as its own shutdown did to go (10 s and more on
+/// Codex 0.164 closed soon after it started), and the Close waited for it (T-542).
 struct Signals {
     #[cfg(unix)]
     terminate: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    hangup: tokio::signal::unix::Signal,
     #[cfg(unix)]
     interrupt: tokio::signal::unix::Signal,
     #[cfg(windows)]
@@ -407,6 +415,7 @@ impl Signals {
             use tokio::signal::unix::{signal, SignalKind};
             Ok(Self {
                 terminate: signal(SignalKind::terminate())?,
+                hangup: signal(SignalKind::hangup())?,
                 interrupt: signal(SignalKind::interrupt())?,
             })
         }
@@ -423,6 +432,7 @@ impl Signals {
         #[cfg(unix)]
         tokio::select! {
             _ = self.terminate.recv() => {}
+            _ = self.hangup.recv() => {}
             _ = self.interrupt.recv() => {}
         }
         #[cfg(windows)]

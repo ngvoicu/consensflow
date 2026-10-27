@@ -143,6 +143,7 @@ fn a_short_name_given_by_hand_is_no_name_the_folder_holds() {
         ("assets/.secret.css", "SS.CSS"),
         (".hidden", "OPEN"),
     ] {
+        // Bare: a Windows test, and Windows hands a program no descriptor it is not asked to.
         let given = std::process::Command::new("fsutil")
             .args(["file", "setshortname"])
             .arg(specs_folder.join(long))

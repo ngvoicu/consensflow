@@ -12,7 +12,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use cf_proto::panes::{Ending, Servers};
+use cf_proto::panes::Servers;
 use portable_pty::PtySize;
 use serde_json::Value;
 
@@ -87,7 +87,7 @@ pub(super) fn harness_programs() -> PathBuf {
     )
     .expect("the source of the harness's programs");
     let helper = dir.join("codex-code-mode-host");
-    let made = std::process::Command::new("cc")
+    let made = crate::testing::command("cc")
         .arg(&source)
         .arg("-o")
         .arg(&helper)
@@ -182,18 +182,6 @@ pub(super) fn listed(table: &PaneTable, key: &PaneKey) -> Vec<u32> {
         .collect();
     left.sort_unstable();
     left
-}
-
-/// The numbers an ending names as ended, in order.
-pub(super) fn ended_pids(ending: &Ending) -> Vec<u32> {
-    let mut pids: Vec<u32> = ending
-        .ended
-        .processes
-        .iter()
-        .map(|process| process.pid)
-        .collect();
-    pids.sort_unstable();
-    pids
 }
 
 /// The numbers `pids` names for `names`, in order.

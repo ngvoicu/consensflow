@@ -117,16 +117,45 @@ struct Other(std::process::Child);
 impl Other {
     #[allow(clippy::disallowed_methods)] // The test starts what it ends.
     fn start() -> Self {
-        let child = if cfg!(windows) {
-            std::process::Command::new("ping")
-                .args(["-n", "60", "127.0.0.1"])
-                .stdout(std::process::Stdio::null())
-                .spawn()
+        let mut command = if cfg!(windows) {
+            let mut ping = std::process::Command::new("ping");
+            ping.args(["-n", "60", "127.0.0.1"])
+                .stdout(std::process::Stdio::null());
+            ping
         } else {
-            std::process::Command::new("sleep").arg("60").spawn()
+            let mut sleep = std::process::Command::new("sleep");
+            sleep.arg("60");
+            sleep
         };
-        Self(child.unwrap())
+        // It lives beside the other tests, which open sockets and pipes: what it was left of
+        // theirs it would hold for its minute.
+        cf_process::hold_only_the_streams(&mut command);
+        Self(command.spawn().unwrap())
     }
+}
+
+/// The process of the test's own holds nothing of the test's but its streams: a descriptor left
+/// open and not close-on-exec as it starts is not among its own, as `lsof` says.
+#[cfg(target_os = "macos")]
+#[test]
+#[allow(clippy::disallowed_methods)] // `lsof`, asked what it holds.
+fn a_process_of_the_tests_own_holds_nothing_of_the_tests_but_its_streams() {
+    use std::os::fd::AsRawFd;
+
+    use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+
+    let stray = fs::File::open("/dev/null").unwrap();
+    let fd = stray.as_raw_fd();
+    fcntl(fd, FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
+    let other = Other::start();
+    let held = std::process::Command::new("/usr/sbin/lsof")
+        .args(["-a", "-p", &other.0.id().to_string(), "-d", &fd.to_string()])
+        .output()
+        .unwrap();
+    assert!(
+        !String::from_utf8_lossy(&held.stdout).contains("/dev/null"),
+        "it holds it"
+    );
 }
 
 impl Drop for Other {
@@ -159,4 +188,38 @@ fn only_a_file_named_by_digits_is_read_and_a_process_keeps_its_first_place() {
         [(me(), "third".to_owned()), (other.0.id(), "second".to_owned())],
         "a process keeps the place its first file gave it, with its last file's status, as a Map sets a key"
     );
+}
+
+#[test]
+fn the_holders_of_a_conversation_are_the_live_claudes_that_show_it_but_a_parked_job() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().to_string_lossy().into_owned();
+    let pid = me();
+    assert_eq!(holders(&folder, "S"), Some(Vec::new()), "none yet");
+    write(
+        dir.path(),
+        "1.json",
+        &json!({ "pid": pid, "sessionId": "S", "status": "busy" }),
+    );
+    write(
+        dir.path(),
+        "2.json",
+        &json!({ "pid": pid, "sessionId": "T", "status": "idle" }),
+    );
+    assert_eq!(holders(&folder, "S"), Some(vec![pid]));
+    assert_eq!(holders(&folder, "U"), Some(Vec::new()));
+    write(
+        dir.path(),
+        "1.json",
+        &json!({ "pid": pid, "sessionId": "S", "status": "busy", "parkedJobId": "job-1" }),
+    );
+    assert_eq!(holders(&folder, "S"), Some(Vec::new()), "a parked job");
+    write(
+        dir.path(),
+        "1.json",
+        &json!({ "pid": u32::MAX - 1, "sessionId": "S", "status": "busy" }),
+    );
+    assert_eq!(holders(&folder, "S"), Some(Vec::new()), "a process gone");
+    let missing = dir.path().join("none").to_string_lossy().into_owned();
+    assert_eq!(holders(&missing, "S"), None, "no folder to read");
 }

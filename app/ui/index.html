@@ -106,10 +106,12 @@
   <dialog id="delete-tasks-dialog" class="settings" aria-labelledby="delete-tasks-title">
     <form class="dialog-form" method="dialog">
       <h2 id="delete-tasks-title">Delete these tasks?</h2>
-      <p class="dialog-help">A deleted task leaves the board and cf task list for good. The ledger keeps it: the chief can still read it, its brief, result and thread, with cf task get. This cannot be undone.</p>
+      <p class="dialog-help" id="delete-tasks-help">A deleted task leaves the board and cf task list for good. The ledger keeps it: the chief can still read it, its brief, result and thread, with cf task get. This cannot be undone.</p>
+      <p class="dialog-note" id="delete-tasks-nothing" hidden>Nothing is deleted. A failed task stays on the board while a task not yet finished needs it: the chief can reopen it, and once it is accepted those tasks go on. It can go when they are finished or cancelled.</p>
+      <p class="dialog-note" id="delete-tasks-going" hidden></p>
       <ul class="dialog-kept" id="delete-tasks-kept" aria-label="Kept on the board" hidden></ul>
       <div class="dialog-actions">
-        <button class="quiet-button" type="submit" value="keep">Keep</button>
+        <button class="quiet-button" type="submit" value="keep" id="delete-tasks-keep">Keep</button>
         <button class="danger-button" type="button" id="delete-tasks-confirm">Delete for good</button>
       </div>
     </form>
@@ -251,6 +253,7 @@
     <form class="dialog-form">
       <h2 id="switch-chief-title">Switch the chief</h2>
       <p class="dialog-help">The chief goes on in a new window on the saved agent you pick, with its harness, model and effort. Its first message is the handoff: what you and the chiefs before it said, and what waits on the board. The staff keeps working.</p>
+      <p class="dialog-help chief-gone" role="status" hidden></p>
       <label>The chief runs on
         <select name="chief" required></select>
       </label>
@@ -298,6 +301,20 @@
         </fieldset>
       </fieldset>
       <div data-project-sections></div>
+      <!-- Computer use (core/computer-use.js): a part for each harness of the project's with a
+           computer use of its own, shown only while one of its members runs on it, and
+           ConsensFlow's macOS permissions once for the parts that work through them. -->
+      <fieldset class="project-section computer-use" hidden>
+        <legend>Computer use</legend>
+        <p class="dialog-help">Lets an agent see and control the screen.</p>
+        <div class="computer-use-harnesses"></div>
+        <div class="computer-use-permissions" hidden>
+          <h3 class="computer-use-head">ConsensFlow's permissions, for every project</h3>
+          <p class="computer-use-line computer-use-grants-of" hidden></p>
+          <ul class="computer-use-grants"></ul>
+          <p class="dialog-help">A permission you change in System Settings may need ConsensFlow to be quit and opened again.</p>
+        </div>
+      </fieldset>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Close</button>
       </div>

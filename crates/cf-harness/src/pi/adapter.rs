@@ -29,8 +29,8 @@ use super::install::prepare_extension;
 use super::paths;
 use super::record::evidence::working;
 use crate::contract::{
-    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
-    Skill, Window, Work,
+    Adapter, Admission, FirstMessage, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
+    Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, PiSettlement};
@@ -86,7 +86,6 @@ impl Adapter for PiAdapter {
                     format!("cf-{}-{}-{}", launch.project, launch.handle, hex(&drawn))
                 }
             };
-            let message = launch.message.map(window_text);
             let open = if launch.resume.is_none() {
                 window_args::start
             } else {
@@ -94,13 +93,12 @@ impl Adapter for PiAdapter {
             };
             let agent = launch.agent.unwrap_or_default();
             // None only for a conversation of an empty id, which no ledger holds.
-            let invocation = open(Harness::Pi, agent, Some(&session), message.as_deref())
+            let invocation = open(Harness::Pi, agent, Some(&session), None)
                 .ok_or_else(|| "a Pi window opens on a session id".to_owned())?;
             // What the record holds before this window exists is the old
-            // process's: a turn it left open, which a window with no message to
-            // begin one is told apart from by what the record holds later. A
-            // window given a message begins its own turn.
-            let left_open = if launch.resume.is_some() && launch.message.is_none() {
+            // process's: a turn it left open, which the window is told apart from
+            // by what the record holds later, until it is delivered a message.
+            let left_open = if launch.resume.is_some() {
                 let options = Options {
                     pi_settlement: Some(PiSettlement {
                         directory: Some(configuration.channel.settled.clone()),
@@ -120,16 +118,23 @@ impl Adapter for PiAdapter {
             let specmint = specmint::write_own(Harness::Pi, &self.env, launch)?;
             let mut argv = vec![executable];
             argv.extend(configuration.args);
-            argv.extend(["--skill".to_owned(), role.file]);
+            argv.extend(["--skill".to_owned(), role.file.clone()]);
             argv.extend(
                 specmint
                     .into_iter()
                     .flat_map(|copy| ["--skill".to_owned(), copy.file()]),
             );
-            argv.extend([
-                "--append-system-prompt".to_owned(),
-                launch.instructions.to_owned(),
-            ]);
+            // Given an `--append-system-prompt`, Pi appends no file of the
+            // user's own: the one it would have is given first. The role's text by its
+            // file, which Pi reads where the path names one (`resolvePromptInput`, pi
+            // 1.4.0): no role text is an argument, which every process on the machine reads.
+            let appended = paths::append_system_prompt(&self.env, launch.directory);
+            argv.extend(
+                appended
+                    .into_iter()
+                    .chain([role.file])
+                    .flat_map(|file| ["--append-system-prompt".to_owned(), file]),
+            );
             argv.extend(invocation.args);
             Ok(Prepared {
                 argv,
@@ -173,6 +178,14 @@ impl Adapter for PiAdapter {
         } else {
             Servers::InGroup
         }
+    }
+
+    /// Through the extension's inbox once the window shows its session, as every
+    /// later message is: the extension's `pi.sendUserMessage` records the same user
+    /// message the command line's would (both end in `_startRun` with the text as
+    /// given, pi 1.4.0; only a leading `/` is expanded, which a header never has).
+    fn first_message(&self) -> FirstMessage {
+        FirstMessage::Delivered
     }
 
     fn specmint(&self, variant: Variant) -> Result<Skill, String> {

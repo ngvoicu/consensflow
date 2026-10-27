@@ -44,20 +44,26 @@
 //! is known of the work the record no longer waits on, and how much of it is not known
 //! to have ended, is said in the result itself ([`leftovers`]).
 //!
+//! **A tell's turn on a paused task** (T-442): a task paused by `cf tell` takes no result,
+//! but the complete answer its window's turn ends with, after answering the tell, is not
+//! lost: whoever gave the task is told it once, with the words, and Finish takes it as the
+//! result ([`paused`]).
+//!
 //! **A window has one task** (`ownership`): no other task's message goes into a window
 //! once one task's has, whatever ended that task; so no later task's turn is woken by
 //! what an earlier one left, and no later task is given an earlier task's words.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 
-use cf_base::js;
+use cf_base::{js, time};
 use cf_harness::contract::Observed;
 use cf_harness::records::{End, Item, Monitor, Pending, Reading, Role, Source};
 use cf_ledger::{NewNote, ParticipantView, ProjectView, TaskThread};
 use serde_json::Value;
 
-use crate::delivery_text::is_paste_of;
+use crate::delivery_text::{header_id, is_paste_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
@@ -95,6 +101,9 @@ pub(crate) struct HeldPart {
     /// What the task's requester was told it is held for ([`Told`]): told again when that
     /// changes, whatever its turns say on the way.
     told: Option<Told>,
+    /// The line of the window's record lost in the task's turn that its requester was told
+    /// of, by a note of the hold or of a turn that may have lost its last line: told once.
+    lost_said: Option<usize>,
     /// How many monitors that said they ended the last pass found where only they were
     /// pending ([`Dispatcher::watch_monitors`]).
     noticed: usize,
@@ -106,6 +115,14 @@ pub(crate) struct HeldPart {
     /// How many looks in a row found a command still running: the first is told nothing
     /// (Calliope on 136a7158: Claude Code's kill can take a second or more).
     running_looks: u32,
+    /// The task whose turn first looked finished, and when ([`Dispatcher::looks_finished`]),
+    /// while it does.
+    quiet: Option<(i64, i64)>,
+    /// The task whose requester was told its turn looks finished: told once.
+    told_finished: Option<i64>,
+    /// The task whose requester was told another program shows its window's
+    /// conversation ([`Dispatcher::shared`]): told once.
+    told_shared: Option<i64>,
     /// The window's rests, which outlive the task's hold: they are the window's, and go
     /// with it, or with the conversation it shows ([`HeldPart::reset`]).
     pub(crate) rests: Rests,
@@ -124,6 +141,21 @@ pub(crate) struct Rests {
 }
 
 impl HeldPart {
+    /// What a window keeps once its task is no longer one it works on (paused, queued for a
+    /// resume): not the hold, nor what the requester was told of it. The look at its monitors
+    /// is kept: `watch_monitors` keeps it itself (it clears it at a pass that has no monitor
+    /// to decide), and a paused task's turn that ended with a monitor that said it ended is
+    /// told only once a look found its command over (T-442, Calliope's P2 on round 2).
+    /// Nor whether its turn looked finished, or the note that said so: a resumed task that
+    /// sits finished again is told again (the chief's call at 3.0.6-alpha.3's integration B).
+    pub(crate) fn drop_hold(&mut self) {
+        self.holding = None;
+        self.told = None;
+        self.quiet = None;
+        self.told_finished = None;
+        self.told_shared = None;
+    }
+
     /// What a window keeps of its task's hold once no task of its is working: nothing of
     /// the hold, and its rests, which a window idle between its result and its close does
     /// not take again at every pass (Calliope on 136a7158).
@@ -174,6 +206,12 @@ const LOOKS_APART_MS: i64 = 60_000;
 /// none before.
 const CALL_MARGIN_MS: i64 = 1_000;
 
+/// How long a turn that looks finished ([`Dispatcher::looks_finished`]) has to look so before
+/// its requester is told: the wait between two looks that end nothing ([`LOOKS_APART_MS`]).
+/// Claude Code writes a turn's end within a moment of its answer, so a window that waits at
+/// its prompt that long with no end written has none to come.
+const LOOKS_FINISHED_MS: i64 = LOOKS_APART_MS;
+
 /// What a pass makes of the monitors that said they ended ([`Dispatcher::watch_monitors`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Watching {
@@ -185,17 +223,35 @@ pub(crate) enum Watching {
     Seen(CommandsSeen),
 }
 
+/// Whether `record`'s window has still to show its launch's first message: owed it until
+/// it is up ([`Dispatcher::hand_first`]), or handed it and its record not showing it yet.
+/// Such a window has not begun the turn that message begins, and what its record holds
+/// after the latest message delivered answers one before it: a window the Resume opened
+/// again on its conversation, read at rest before its words to go on are in, ends on the
+/// answer written before the Close (T-405's L10; the sweep of T-523, Calliope's P3-4 on
+/// T-432). It is no result, at the turn's end nor for Finish.
+pub(crate) fn first_on_its_way(record: &Record) -> bool {
+    record
+        .delivery
+        .borrow()
+        .delivering
+        .as_ref()
+        .is_some_and(|delivering| delivering.launch)
+}
+
 impl Dispatcher {
     /// A worker's turn, looked at: whether it is over with an answer to its task's latest
     /// message, and what that comes to ([`Turn`]). A turn that failed is its task's
-    /// failure, whatever it left running; one that ended with its answer and nothing
+    /// failure, whatever it left running, with why ([`Dispatcher::why_it_failed`]); one
+    /// that failed while its task was not working is told whoever gave the task, once
+    /// ([`Dispatcher::tell_failed_turn`]). One that ended with its answer and nothing
     /// pending is its result, recorded now, before anything else is asked of anyone: what
     /// follows (a close, its note) can no longer lose it.
-    pub(crate) fn collect(
+    pub(crate) async fn collect(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
-        record: &Record,
+        record: &Rc<Record>,
         observed: &Observed,
         watching: Watching,
     ) -> Result<Turn, EngineError> {
@@ -205,19 +261,55 @@ impl Dispatcher {
             .borrow()
             .active_task(participant.id, false)?;
         let Some(thread) = task.filter(|thread| thread.task.state == "working") else {
-            record.held.borrow_mut().reset();
+            record.held.borrow_mut().drop_hold();
+            if observed.failed {
+                self.tell_failed_turn(project, participant, record, observed)
+                    .await?;
+            }
+            self.tell_paused_answer(project, participant, observed, watching)?;
             return Ok(Turn::Open);
         };
+        if first_on_its_way(record) {
+            return Ok(Turn::Open);
+        }
         let items = observed.items();
         let Some(start) = self.delivered_at(participant.id, &thread, items)? else {
             return Ok(Turn::Open);
         };
-        if observed.failed {
-            let because = format!("@{}'s harness reported a failure", participant.handle);
-            self.fail_task(project, &thread.task, &because)?;
+        if observed.shared {
+            self.shared(project, participant, record, &thread)?;
             return Ok(Turn::Open);
         }
+        if observed.failed {
+            // A failed turn holds its task for nothing it left (T-532's P3-3).
+            record.held.borrow_mut().reset();
+            let because = self
+                .why_it_failed(participant, record, observed)
+                .await?
+                .said;
+            // The task may have moved on while the window was looked at.
+            let still = self
+                .seams
+                .ledger
+                .borrow()
+                .active_task(participant.id, false)?
+                .is_some_and(|now| now.task.id == thread.task.id && now.task.state == "working");
+            if still && !self.forgotten(record) {
+                self.fail_task(project, &thread.task, &because)?;
+            }
+            return Ok(Turn::Open);
+        }
+        let lost = lost_in_turn(record, observed, Some(start));
         if !observed.settled {
+            self.tell_lost(project, participant, record, &thread, lost)?;
+            self.looks_finished(
+                project,
+                participant,
+                record,
+                &thread,
+                observed,
+                &items[start + 1..],
+            )?;
             return Ok(Turn::Open);
         }
         // Words told to the window before it was up are on their way to it (the brief was
@@ -236,15 +328,13 @@ impl Dispatcher {
         let Some(answers) = answers_to_the_task(&items[start + 1..], &replacements)
             .filter(|answers| answers.last.is_some_and(|last| last.complete))
         else {
+            self.tell_lost(project, participant, record, &thread, lost)?;
             return Ok(Turn::Open);
         };
-        let mut pending = observed.pending();
-        // The monitors that said they ended are over where a look found no command.
-        if watching == Watching::Seen(CommandsSeen::Running(0)) {
-            pending.jobs = pending.jobs.saturating_sub(pending.noticed);
-            pending.noticed = 0;
-        }
-        let words = words_of(&answers.final_run);
+        let pending = pending_after_look(observed, watching);
+        // A line lost in the turn is said with its words, held or not: the hold's note is
+        // where the requester chooses between waiting and Finish (Calliope's P3 (b), T-624).
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
         if pending.total() > 0 {
             let hold = Hold {
                 task: thread.task.number,
@@ -277,7 +367,9 @@ impl Dispatcher {
                     seen,
                 };
                 self.tell_it_goes_on(project, participant, &thread, &said, &words)?;
-                record.held.borrow_mut().told = Some(now);
+                let mut held = record.held.borrow_mut();
+                held.told = Some(now);
+                held.lost_said = held.lost_said.or(lost);
             }
             return Ok(Turn::Held);
         }
@@ -289,6 +381,136 @@ impl Dispatcher {
             .record_result(project.id, thread.task.number, &body)?;
         self.changed();
         Ok(Turn::Answered)
+    }
+
+    /// A worker's window whose conversation another program of its harness's has shown
+    /// since the window opened (`Observed::shared`): a Claude Code the human started
+    /// outside ConsensFlow on it, or the program of an earlier window that the host could
+    /// not end. That one's turns are written into the same record, in
+    /// records no different from the window's, so the record's answer after the task's
+    /// message may be that one's: it is never the task's result. Its requester is told
+    /// once how to take the answer they choose to; nothing is recorded and nothing ends.
+    fn shared(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        thread: &TaskThread,
+    ) -> Result<(), EngineError> {
+        let number = thread.task.number;
+        {
+            let mut held = record.held.borrow_mut();
+            if held.told_shared == Some(number) {
+                return Ok(());
+            }
+            held.told_shared = Some(number);
+        }
+        let way = match thread.task.requester.as_str() {
+            "human" => "Finish in the task's drawer takes the last answer".to_owned(),
+            _ => format!("`cf task finish T-{number}` takes the last answer"),
+        };
+        let body = format!(
+            "T-{number}: another Claude than @{}'s window has shown its conversation (one started outside ConsensFlow, or an earlier window's that never ended). Its turns are written into the same record, and nothing tells them from the window's, so no answer there is taken for T-{number}'s result. {way}.",
+            participant.handle,
+        );
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: thread.task.requester.clone(),
+                task: Some(number),
+                body,
+            },
+        )?;
+        self.changed();
+        Ok(())
+    }
+
+    /// A turn whose record never reads it as over, though it looks finished: the window
+    /// opened on a conversation whose last program the host never proved gone
+    /// (`WindowPart::unproven`), its harness says it waits at its prompt, nothing it left
+    /// runs that wakes its agent, and its answer to the task's latest message is complete.
+    /// T-526 (2026-10-25): the program before had queued and taken a notification that no
+    /// turn began, which Claude Code's reader, told no relaunch, read as a turn still to
+    /// come, and the task stayed working four hours after its answer, nobody told. Its
+    /// requester is told once, after it has looked so for [`LOOKS_FINISHED_MS`], how to
+    /// take the answer; nothing is recorded and nothing ends: the record's word stands,
+    /// and Finish is the requester's. `said` is the record after the task's message.
+    ///
+    /// Words told to the window that wait to go in (`told_waiting`) tell nothing: Finish
+    /// refuses then (`words-on-their-way`), and their own path speaks for them (the
+    /// chief's call on Calliope's P3-6, T-621). A job still running is no finished turn,
+    /// though Claude Code says it waits at its prompt (its `shell` status reads idle):
+    /// the count of what the turn left running stands between them (her P3-5).
+    fn looks_finished(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        thread: &TaskThread,
+        observed: &Observed,
+        said: &[Item],
+    ) -> Result<(), EngineError> {
+        let number = thread.task.number;
+        let looks = record.window.borrow().unproven
+            && observed.at_prompt
+            && observed.waiting.is_none()
+            && observed.pending().total() == 0
+            && {
+                let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
+                answers_to_the_task(said, &replacements)
+                    .is_some_and(|answers| answers.last.is_some_and(|last| last.complete))
+            }
+            && !self
+                .seams
+                .ledger
+                .borrow()
+                .told_waiting(participant.id, thread.task.id)?;
+        let since = {
+            let mut held = record.held.borrow_mut();
+            if !looks {
+                held.quiet = None;
+                return Ok(());
+            }
+            let now = self.now();
+            let since = match held.quiet {
+                Some((task, since)) if task == number => since,
+                _ => {
+                    held.quiet = Some((number, now));
+                    now
+                }
+            };
+            if now - since < LOOKS_FINISHED_MS || held.told_finished == Some(number) {
+                return Ok(());
+            }
+            held.told_finished = Some(number);
+            since
+        };
+        let way = match thread.task.requester.as_str() {
+            "human" => "Finish in the task's drawer takes that answer".to_owned(),
+            _ => format!("`cf task finish T-{number}` takes that answer"),
+        };
+        // The time the engine first saw the turn look finished (`quiet`), the pass that
+        // first found it so: not Claude Code's own time of its status, which the look does
+        // not carry. The engine knows no zone of the human's: it is said in UTC, as its
+        // notes' times are.
+        let at = time::iso(since);
+        let body = format!(
+            "T-{number} looks finished: its last answer is complete and @{}'s window has been idle since {} UTC, but its turn never read as over. {way}.",
+            participant.handle,
+            at.get(11..16).unwrap_or(&at),
+        );
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: thread.task.requester.clone(),
+                task: Some(number),
+                body,
+            },
+        )?;
+        self.changed();
+        Ok(())
     }
 
     /// The place among `items`, the window's record, of the latest message of the task
@@ -330,6 +552,36 @@ impl Dispatcher {
                 && !item.compaction
                 && is_paste_of(&item.text, latest.id, first.as_deref())
         }))
+    }
+
+    /// The place among `items` of the latest message about the task that was pasted into
+    /// the window: [`Dispatcher::delivered_at`]'s, or a later one ConsensFlow pasted since
+    /// (the Resume's word to go on, a question the chief put to the window), which no start is
+    /// taken from at a turn's end and is answered by what follows it. The harness's own
+    /// notifications, which wake a held task's turns, are none, nor is the note that says
+    /// the role (`replacements`, whose word is the role's), nor a compaction summary that
+    /// restates a header (the merge with Resume after Close, T-405's L10, and Calliope's P2
+    /// on it, T-444). None where `delivered_at` finds none.
+    pub(crate) fn latest_message_at(
+        &self,
+        thread: &TaskThread,
+        participant: &ParticipantView,
+        items: &[Item],
+        replacements: &[i64],
+    ) -> Result<Option<usize>, EngineError> {
+        let Some(start) = self.delivered_at(participant.id, thread, items)? else {
+            return Ok(None);
+        };
+        Ok(Some(
+            items[start + 1..]
+                .iter()
+                .rposition(|item| {
+                    item.role == Role::User
+                        && !item.compaction
+                        && header_id(&item.text).is_some_and(|id| !replacements.contains(&id))
+                })
+                .map_or(start, |later| start + 1 + later),
+        ))
     }
 
     /// What the monitors a worker's turn left that said they ended come to, at this pass
@@ -455,8 +707,11 @@ impl Dispatcher {
             return Watching::Undecided;
         }
         if noticed > seen {
-            // Another said it ended: the next pass looks, whatever the wait was.
+            // Another said it ended: the next pass looks, whatever the wait was, and what the
+            // last look found says nothing of its command (a look kept through a pause is of
+            // the monitors there were, T-442).
             let mut held = record.held.borrow_mut();
+            held.seen = None;
             held.wait_ms = 0;
             held.next_look_ms = 0;
             held.running_looks = 0;
@@ -507,13 +762,7 @@ impl Dispatcher {
             1 => "it",
             _ => "them",
         };
-        // The human finishes a task from its drawer; the chief, or a member that gave the
-        // task, with `cf` (Calliope on 0eec91d2).
-        let way = if thread.task.requester == "human" {
-            "Finish in the task's drawer".to_owned()
-        } else {
-            format!("cf task finish T-{number}")
-        };
+        let way = way_to_finish(thread);
         let handle = &participant.handle;
         let body = format!(
             "T-{number} goes on in the background: @{handle} ended its turn with {}.{} Its result comes when a turn of its ends with none left: to wait for it, do nothing. If its work is done, take what it said last as the result now: {way}, which does not end {what}. What it said:\n\n{words}",
@@ -531,6 +780,55 @@ impl Dispatcher {
         )?;
         self.changed();
         Ok(())
+    }
+
+    /// Whoever gave the task is told, once, that a line of the window's record was lost in a
+    /// turn that has come to no result (`lost`, where one was): the line may have been the
+    /// turn's final answer, or the record that says the turn ended, and then nothing of the
+    /// turn ever ends it (Calliope's P3 (a), T-624). Said on the first look that finds it,
+    /// while the turn may still be under way: no reading says the window has gone quiet.
+    fn tell_lost(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        thread: &TaskThread,
+        lost: Option<usize>,
+    ) -> Result<(), EngineError> {
+        let Some(line) = lost else {
+            return Ok(());
+        };
+        if record.held.borrow().lost_said == Some(line) {
+            return Ok(());
+        }
+        let number = thread.task.number;
+        let handle = &participant.handle;
+        let body = format!(
+            "T-{number}'s turn may have lost its last line: a line of @{handle}'s record was lost (record {line}) in the turn, and its record has not said the turn ended with an answer. The line may have been its final answer, or the record that ends its turn. To wait for its answer, do nothing. If @{handle} is done, take its last complete answer as the result: {}; where it wrote none, send it a message about the task, or cancel it.",
+            way_to_finish(thread)
+        );
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: thread.task.requester.clone(),
+                task: Some(number),
+                body,
+            },
+        )?;
+        record.held.borrow_mut().lost_said = Some(line);
+        self.changed();
+        Ok(())
+    }
+}
+
+/// How the requester of `thread`'s task finishes it: the human from the task's drawer; the
+/// chief, or a member that gave the task, with `cf` (Calliope on 0eec91d2).
+fn way_to_finish(thread: &TaskThread) -> String {
+    if thread.task.requester == "human" {
+        "Finish in the task's drawer".to_owned()
+    } else {
+        format!("cf task finish T-{}", thread.task.number)
     }
 }
 
@@ -744,6 +1042,58 @@ pub(crate) fn with_leftovers(words: String, said: &str) -> String {
     }
 }
 
+/// The first line of the window's record lost in its turn, by the place among
+/// the records it stood at. The turn is what follows the paste that began it,
+/// the item `pasted`: where the reading says the record each item is of, a line
+/// past that paste's own record is the turn's, and nothing is kept, so a
+/// restart or a resume loses nothing; a record with no paste in it has no turn
+/// to mark. A line lost there may have been the final answer itself, or a word
+/// that a job it waits on ended: the result is marked whatever the turn came to.
+/// Devin's reading cannot say (its items are its store's, its lost lines its
+/// wire log's): the count taken at the last hand-over stands in, and where there
+/// is none (the daemon started since) every line counts, so a result is marked
+/// rather than taken whole in silence.
+pub(crate) fn lost_in_turn(
+    record: &Record,
+    observed: &Observed,
+    pasted: Option<usize>,
+) -> Option<usize> {
+    let lost = observed.lost();
+    let Some(places) = observed.places() else {
+        let before = record
+            .delivery
+            .borrow()
+            .lost_before
+            .map_or(0, |(_, lost)| lost);
+        return lost.get(before).copied();
+    };
+    let began = *places.get(pasted?)?;
+    lost.iter().copied().find(|&line| line > began)
+}
+
+/// The item of the last paste the window's record shows: where its latest turn
+/// of ConsensFlow's began. A compaction's summary that quotes a header is none, as
+/// [`Dispatcher::delivered_at`] reads it (Calliope's P3 (e), T-624).
+pub(crate) fn last_paste(observed: &Observed) -> Option<usize> {
+    observed.items().iter().rposition(|item| {
+        item.role == Role::User
+            && !item.compaction
+            && header_id(&item.text).is_some_and(|id| is_paste_of(&item.text, id, None))
+    })
+}
+
+/// `words`, and after them the line that says a line of the record of `handle`'s window
+/// was lost in the turn (`lost`, its record): the result may have a hole. Ahead of what
+/// ConsensFlow says of the leftovers ([`with_leftovers`]).
+pub(crate) fn with_lost(words: String, handle: &str, lost: Option<usize>) -> String {
+    match lost {
+        Some(lost) => format!(
+            "{words}\n\nA line of @{handle}'s record was lost (record {lost}); this result may miss part of the turn."
+        ),
+        None => words,
+    }
+}
+
 /// The words of a final answer, in the items it was written in: each trimmed, a blank
 /// line between, what a harness marks as its progress left out. Where the member wrote
 /// none, what says so.
@@ -761,7 +1111,20 @@ pub(crate) fn words_of(final_run: &[&Item]) -> String {
     }
 }
 
+/// What a worker's turn left pending, as a pass takes it: the monitors that said they ended
+/// are over where a look found no command in their window ([`Watching`]). A working task's
+/// turn ([`Dispatcher::collect`]) and a paused task's ([`paused`]) are held by the same count.
+pub(crate) fn pending_after_look(observed: &Observed, watching: Watching) -> Pending {
+    let mut pending = observed.pending();
+    if watching == Watching::Seen(CommandsSeen::Running(0)) {
+        pending.jobs = pending.jobs.saturating_sub(pending.noticed);
+        pending.noticed = 0;
+    }
+    pending
+}
+
 mod finish;
+mod paused;
 
 pub use finish::Finished;
 

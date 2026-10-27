@@ -253,11 +253,29 @@ impl Context {
 
     /// The human deletes a session (`endSession`).
     pub fn end_session(&self, project: i64, handle: &str) -> Result<ProjectView, EngineError> {
+        self.run(self.ending_session(project, handle))
+    }
+
+    /// The human deletes a session, begun where it is called: its window's close may
+    /// wait on the test.
+    pub fn begin_end_session(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Answer<Result<ProjectView, EngineError>> {
+        self.executor
+            .start_now(self.ending_session(project, handle))
+    }
+
+    fn ending_session(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> impl Future<Output = Result<ProjectView, EngineError>> + 'static {
         let (dispatcher, handle) = (Rc::clone(&self.dispatcher), handle.to_owned());
-        let ending = self.operation("endSession", json!([project, handle]), answer, async move {
+        self.operation("endSession", json!([project, handle]), answer, async move {
             dispatcher.end_session(project, &handle).await
-        });
-        self.run(ending)
+        })
     }
 
     /// The human says a member out of quota is back (`backFromQuota`).
@@ -464,5 +482,19 @@ impl Restarted<'_> {
             .operation("resumeProject", json!([project]), answer, async move {
                 engine.resume_project(project).await
             })
+    }
+
+    /// The human's Close, of a project this engine resumed, begun where it is called.
+    pub fn begin_close_project(
+        &self,
+        project: i64,
+    ) -> Answer<Result<Option<ProjectView>, EngineError>> {
+        let engine = self.engine();
+        let closing =
+            self.context
+                .operation("closeProject", json!([project]), answer, async move {
+                    engine.close_project(project).await
+                });
+        self.context.executor.start_now(closing)
     }
 }

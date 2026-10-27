@@ -18,7 +18,9 @@ mod tests;
 mod version;
 
 // What the admin judges a Devin by: the rule a launch holds to.
-pub(crate) use version::{minimum as minimum_version, supported as supported_version};
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use config::native as native_config;
+pub(crate) use version::{at_least, minimum as minimum_version, supported as supported_version};
 
 use std::fs;
 use std::path::Path;
@@ -43,6 +45,8 @@ pub(super) struct Integration {
     pub(super) env: Vec<(String, String)>,
     /// Devin's wire log of this launch, which its adapter follows.
     pub(super) wire: String,
+    /// What Devin said to `--version`, asked at the launch.
+    pub(super) version: String,
     /// The launch's own folder.
     root: String,
 }
@@ -178,6 +182,7 @@ pub(super) async fn integration(
         args: vec!["--config".to_owned(), file],
         env: vec![("CHISEL_PURE_ACP_WIRE_LOG".to_owned(), wire.clone())],
         wire,
+        version: answered.stdout,
         root,
     })
 }

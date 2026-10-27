@@ -1,8 +1,8 @@
 //! Receipt: what makes a message received, and what that does to its task.
 //! A message is received when its window's record shows its marker, when
 //! the paste that carried it was confirmed, when a door handed an answer to
-//! its harness and said so, or when `cf` served an answer's whole body to
-//! the one it was for. Withdrawing a message never resolves what it obliged:
+//! its harness and said so, or when `cf` served its whole body to the one it
+//! was for ([`Read::receives`]). Withdrawing a message never resolves what it obliged:
 //! only receipt does. A task moves between `queued`, `working` and `waiting`
 //! in one place, [`reconcile`], after each receipt.
 //!
@@ -21,7 +21,7 @@ use crate::model::LedgerError;
 use crate::store::Store;
 use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
-/// How `cf` served an answer whole: to its recipient's `cf inbox read`, or in
+/// How `cf` served a message whole: to its recipient's `cf inbox read`, or in
 /// the thread `cf task get` printed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Read {
@@ -34,6 +34,22 @@ impl Read {
         match self {
             Read::Inbox => "inbox",
             Read::Task => "task",
+        }
+    }
+
+    /// Whether a message served whole this way is received by it:
+    /// - by `cf inbox read`, any message but a task's words and a note that
+    ///   says a conversation its role. A question, a result, a note or an
+    ///   answer read there is the reader's, and is never typed in after it
+    ///   (T-260). A task's words send its window on, and only their paste
+    ///   proves them; a role is ConsensFlow's word to the conversation, which
+    ///   records it told only when it is pasted (`confirm_delivery_telling`);
+    /// - in the thread `cf task get` printed, an answer only: the thread is
+    ///   the task's, and the rest of it is not the reader's to receive one by one.
+    fn receives(self, message: &MessageView, says_a_role: bool) -> bool {
+        match self {
+            Read::Inbox => message.kind != "task" && !says_a_role,
+            Read::Task => message.kind == "answer",
         }
     }
 }
@@ -301,29 +317,34 @@ pub(crate) fn settle_claim(
     })
 }
 
-/// An answer served whole to the one it was for by `cf`, whichever way: the
-/// answers among `ids` that are still `queued` for `recipient`, a carried or
-/// claimed one included (its claim is given up), are `read`, each with its
-/// receipt, and their tasks reconciled, once each. What is not an answer for
-/// them, or has been received, is left as it is.
+/// Messages served whole to the one they were for by `cf`, whichever way:
+/// those among `ids` that are still `queued` for `recipient`, a carried or
+/// claimed one included (its claim is given up), and that the way they were
+/// served receives ([`Read::receives`]), are `read`, each with its receipt,
+/// and their tasks reconciled, once each. The rest are left as they are. How
+/// many were received.
 pub(crate) fn receive_read(
     store: &mut Store,
     recipient: i64,
     ids: &[i64],
     via: Read,
-) -> Result<(), LedgerError> {
+) -> Result<usize, LedgerError> {
     store.write(|store| {
+        let mut received = 0;
         let mut tasks = Vec::new();
         for id in ids {
-            let Some(answer) = store.message(*id)?.filter(|answer| {
-                answer.kind == "answer"
-                    && answer.recipient_id == recipient
-                    && answer.state == "queued"
-            }) else {
+            let Some(message) = store
+                .message(*id)?
+                .filter(|message| message.recipient_id == recipient && message.state == "queued")
+            else {
                 continue;
             };
-            received_as(store, &answer, &json!({ "read": via.word() }))?;
-            if let Some(task) = message_task(store, answer.id)? {
+            if !via.receives(&message, says_a_role(store, message.id)?) {
+                continue;
+            }
+            received_as(store, &message, &json!({ "read": via.word() }))?;
+            received += 1;
+            if let Some(task) = message_task(store, message.id)? {
                 if !tasks.contains(&task.id) {
                     tasks.push(task.id);
                 }
@@ -332,26 +353,35 @@ pub(crate) fn receive_read(
         for task in tasks {
             reconcile(store, task)?;
         }
-        Ok(())
+        Ok(received)
     })
 }
 
-/// The answer is `read`: when, and the proof, its claim given up.
+/// Whether a message says its recipient's conversation a role: a note the
+/// ledger holds the role text of.
+fn says_a_role(store: &Store, message_id: i64) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare("SELECT 1 FROM message WHERE id = ? AND role_text IS NOT NULL")?
+        .exists([message_id])?)
+}
+
+/// The message is `read`: when, and the proof, its claim given up.
 fn received_as(
     store: &mut Store,
-    answer: &MessageView,
+    message: &MessageView,
     receipt: &Value,
 ) -> Result<(), LedgerError> {
     let at = store.at();
     store.db.execute(
         "UPDATE message SET state = 'read', delivered_at = ?, receipt = ?, claimed_at = NULL
          WHERE id = ?",
-        params![at, receipt.to_string(), answer.id],
+        params![at, receipt.to_string(), message.id],
     )?;
     store.log(
-        answer.project_id,
+        message.project_id,
         "message.read",
-        json!({ "message": answer.id, "receipt": receipt }),
+        json!({ "message": message.id, "receipt": receipt }),
     )
 }
 

@@ -82,16 +82,24 @@ impl Dispatcher {
         record: &Record,
         session: &str,
     ) -> Result<(), EngineError> {
-        self.seams.ledger.borrow_mut().follow_conversation(
+        let followed = self.seams.ledger.borrow_mut().follow_conversation(
             participant.id,
             participant.harness.as_deref().unwrap_or_default(),
             session,
         )?;
+        // Its program writes to that one now: its end is kept there (`ownership`).
+        record.window.borrow_mut().conversation = Some(followed.id);
         let window = record.window.borrow().window.clone();
         if let Some(window) = window {
             window.follow(session);
         }
         *record.copied.borrow_mut() = None;
+        // Another conversation's record: what the last one lost is not this one's.
+        {
+            let mut delivery = record.delivery.borrow_mut();
+            delivery.lost = 0;
+            delivery.lost_before = None;
+        }
         // The rests were the other conversation's: a monitor of this one was never seen
         // missing at them (Calliope on 136a7158).
         record.held.borrow_mut().rests = Rests::default();

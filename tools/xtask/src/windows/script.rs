@@ -29,6 +29,8 @@ use std::hash::{BuildHasher, Hasher};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
+use super::machine::Limits;
+
 /// What the line that ends the script's output begins with: the number is the
 /// status the command ended with (`== exit 7`), a signed decimal as PowerShell
 /// writes an `[int]`. It is a line of its own, as `== env NAME=VALUE` and
@@ -52,9 +54,14 @@ pub const RUNNING: &str = ".windows-run.pid";
 pub const LOCK: &str = ".windows-run.lock";
 
 /// The id of the run ([`run_id`]) that holds the lock and the process it is, there, beside
-/// it (two lines: the id, the process), so that a run that is ended there ends its own and
-/// no other, and that process and no other.
+/// it (two lines: the id, the process, and a third, [`IN_JOB`], once the run has put itself
+/// in its job), so that a run that is ended there ends its own and no other, and that
+/// process and no other.
 pub const OWNER: &str = ".windows-run.id";
+
+/// The third line of the owner file ([`OWNER`]): the run is in its job ([`RUN_TEMPLATE`]), so
+/// that ending its process ends every program it started, and a stop needs to end no other.
+pub const IN_JOB: &str = "job";
 
 /// The tree's identity ([`crate::windows::tree::identity`]), kept beside the files in the
 /// tarball: the script says it once the tarball is unpacked, as the line `== tree <identity>`
@@ -141,6 +148,28 @@ pub const BUILD_STEPS: [&str; 6] = [
     "cargo xtask stage",
     "npm run build:bridge",
     // The console host the app ships, beside the pane host, as the app has it.
+    "cargo xtask conpty --into app/src-tauri/target/release",
+];
+
+/// What every run makes sure of on the machine, after `--build`'s steps and before its command,
+/// whether or not it was asked to build (T-627 and T-487, 2026-10-26): a copy that nobody has built
+/// in is not left to run on what happens to be there. Each is idempotent, and a run ends with the
+/// step's status, saying what it needs, if one cannot be made.
+///
+/// - **The crates** every offline command wants (`cargo test --offline`, and nextest's own `cargo
+///   metadata --offline`): `cargo fetch --locked --offline` says whether the registry holds the
+///   lockfile's, and only if it does not is the network asked. A copy that had only built what
+///   its tests compile lacked the optional crates, and nextest ended at once with 102 and no
+///   report (zeewin2, the plant runner of T-627).
+/// - **The console host**, `conpty.dll` and `OpenConsole.exe`, beside the builds the tests run
+///   from. A test program finds the host in the folder cargo puts on its PATH, the profile's
+///   folder: `debug` for `cargo test`, `release` for the programs the black-box suites build.
+///   Only `--build` put it in `release`, and nothing in `debug`, so on a machine where nobody had
+///   done that by hand the panes ran on Windows' own console host, and a test of the keys read
+///   Alt as key 18 (`pty::keys::conpty`, zeewin2).
+pub const PREPARE_STEPS: [&str; 3] = [
+    "cargo fetch --locked --offline >nul 2>&1 || cargo fetch --locked",
+    "cargo xtask conpty --into app/src-tauri/target/debug",
     "cargo xtask conpty --into app/src-tauri/target/release",
 ];
 
@@ -240,7 +269,24 @@ fn is_name(name: &str) -> bool {
 
 /// `text` as PowerShell takes it between single quotes.
 fn quoted(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "''"))
+    format!("'{}'", single_quoted(text))
+}
+
+/// The quotes PowerShell ends a single-quoted string at: the apostrophe and the four
+/// typographic single quotes, which it reads as one (a plant's name "a worker’s turn" ended
+/// the run's command there, integration B round 2, T-800).
+const SINGLE_QUOTES: [char; 5] = ['\'', '\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'];
+
+/// `text` as it goes between PowerShell's single quotes: each quote said twice.
+fn single_quoted(text: &str) -> String {
+    let mut said = String::with_capacity(text.len());
+    for c in text.chars() {
+        if SINGLE_QUOTES.contains(&c) {
+            said.push(c);
+        }
+        said.push(c);
+    }
+    said
 }
 
 /// The script as `powershell -EncodedCommand` takes it, or the refusal that says it will not fit.
@@ -287,6 +333,8 @@ pub struct Script<'a> {
     /// The folder of the Node the run puts first on its PATH, in PowerShell's words
     /// ([`super::machine::Machine::node`]).
     pub node: &'a str,
+    /// What the machine takes at once, if less than all it has ([`Limits`]).
+    pub limits: Option<Limits>,
 }
 
 /// The bootstrap: the run's own tarball ([`upload_name`]) unpacked into `dir` under the
@@ -346,6 +394,10 @@ pub fn run_script(script: &Script) -> String {
         .iter()
         .map(|step| format!("'{step}'"))
         .collect();
+    let prepare: Vec<String> = PREPARE_STEPS
+        .iter()
+        .map(|step| format!("'{step}'"))
+        .collect();
     let given: String = script
         .env
         .iter()
@@ -361,13 +413,33 @@ pub fn run_script(script: &Script) -> String {
         &[
             ("job", JOB_SOURCE),
             ("node", script.node),
+            ("in_job", IN_JOB),
             ("command_file", COMMAND_FILE),
+            ("limits", &limits_of(script.limits)),
             ("steps", &steps.join(", ")),
+            ("prepare", &prepare.join(", ")),
             ("given", &given),
             ("inside", script.inside),
-            ("command", &script.command.replace('\'', "''")),
+            ("command", &single_quoted(script.command)),
             ("crlf", "\r\n"),
         ],
+    )
+}
+
+/// The lines of the run script that give the process what the machine takes at once: the jobs of
+/// the builds and the threads of the tests, said in the output, before any step or command. A
+/// variable the run names (`--env`) is given after them, and is the command's.
+fn limits_of(limits: Option<Limits>) -> String {
+    let Some(Limits {
+        build_jobs,
+        test_threads,
+    }) = limits
+    else {
+        return String::new();
+    };
+    format!(
+        "$env:CARGO_BUILD_JOBS = '{build_jobs}'\n$env:RUST_TEST_THREADS = '{test_threads}'\n\
+         Write-Output \"== limits: CARGO_BUILD_JOBS={build_jobs} RUST_TEST_THREADS={test_threads} (what this machine takes at once)\"\n"
     )
 }
 
@@ -439,16 +511,36 @@ pub fn sweep_script() -> String {
     )
 }
 
-/// What ends the run `id` that goes on there: its whole tree ended, its record taken
-/// away, and its tarball. Sent when the run is stopped here, which Windows' SSH server
-/// does not pass on. Only the run the lock's owner file ([`OWNER`]) names is ended, and
-/// the process it names (not the one in the older file, which another script may have
-/// written over): a run that was stopped before its script had the lock (or that the
-/// lock refused) must not end the one that holds it. The stop says nothing, and ends
-/// with 0 whether or not there was a run, a process or a tarball left to end: it ended
-/// with the status of its last command, so that a stop of a run whose tarball was gone
-/// already (the run had ended) ended with 1, which the Mac took for a run that may still
-/// be going on the machine.
+/// What ends the run `id` that goes on there: its process ended, and with it everything it
+/// started, its record taken away, and its tarball. Sent when the run is stopped here,
+/// which Windows' SSH server does not pass on. Only the run the lock's owner file
+/// ([`OWNER`]) names is ended, and the process it names (not the one in the older file,
+/// which another script may have written over): a run that was stopped before its script
+/// had the lock (or that the lock refused) must not end the one that holds it. The stop
+/// says nothing, and ends with 0 whether or not there was a run, a process or a tarball
+/// left to end: it ended with the status of its last command, so that a stop of a run
+/// whose tarball was gone already (the run had ended) ended with 1, which the Mac took
+/// for a run that may still be going on the machine.
+///
+/// - The process is ended only if it is still the run's: a PowerShell that was started
+///   before the owner file was last written. A process id is given again to the next
+///   program that starts once its program has ended, so one that is not (the record of a
+///   run that had ended, which a stop that landed as it ended leaves) names whatever
+///   program has it now, and ending it ends that.
+/// - Its records are taken away without a word if they cannot be: the run that ends by
+///   itself takes them away too, and one that lands between the stop's reading of the owner
+///   file and its removal made PowerShell say "Cannot find path" (the stop's contract is that
+///   it says nothing).
+/// - A run that is in its job ([`IN_JOB`] in the owner file) is ended by its process alone:
+///   the system ends the job's programs, every one of them, with it. The tree is not read
+///   and walked as `taskkill /T` does (leaves first, about 7 ms a program, so that the
+///   walk of a run that has started hundreds goes on for seconds): a program of the
+///   walk's list that has ended since has its process id given to a program that has
+///   not, and the walk ends that one, whose it is (CI, 2026-10-24: two PowerShells of
+///   other cases of the Windows runner's tests were ended, in their first seconds, by
+///   the stop of a case that had a run starting programs; each ended with 1 and what a
+///   PowerShell has written by then, `#< CLIXML`). A run that is not in its job yet, or
+///   cannot be put in one, is ended with its tree, as before.
 pub fn stop_script(dir: &str, id: &str) -> String {
     fill(
         STOP,
@@ -458,6 +550,7 @@ pub fn stop_script(dir: &str, id: &str) -> String {
             ("tarball", &upload_name(dir, id)),
             ("running", RUNNING),
             ("owner", OWNER),
+            ("in_job", IN_JOB),
         ],
     )
 }
@@ -527,7 +620,6 @@ $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) } catch {}
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
-function Exit-Run([int]$code) { Write-Output "`n«exit»$code"; exit $code }
 $dir = Join-Path $env:USERPROFILE '«dir»'
 $tarball = Join-Path $env:USERPROFILE '«tarball»'
 $running = Join-Path $dir '«running»'
@@ -535,6 +627,15 @@ $owner = Join-Path $dir '«owner»'
 $held = $false
 $lock = $null
 $job = $null
+function Free-Machine {
+  if ($script:held) {
+    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue
+    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }
+    $script:held = $false
+  }
+  if ($script:lock) { $script:lock.Dispose(); $script:lock = $null }
+}
+function Exit-Run([int]$code) { Free-Machine; Write-Output "`n«exit»$code"; exit $code }
 try {
 New-Item -ItemType Directory -Force $dir | Out-Null
 try { $lock = [IO.File]::Open((Join-Path $dir '«lock»'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {} catch { $why = $_.Exception.Message }
@@ -554,12 +655,8 @@ Write-Output "«tree_mark»$(Get-Content -LiteralPath (Join-Path $dir '«tree_fi
 . ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '«run»'))))
 } finally {
   if ($null -ne $job) { [CfJob]::Release($job) }
+  Free-Machine
   Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue
-  if ($held) {
-    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue
-    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }
-  }
-  if ($lock) { $lock.Dispose() }
 }
 "##;
 
@@ -576,8 +673,16 @@ Write-Output "«tree_mark»$(Get-Content -LiteralPath (Join-Path $dir '«tree_fi
 ///   them running every time, and a single `ping -n 60` was left 7 times in 142 stops, for
 ///   its whole 60 seconds; with the job, 0 in 142). A run that cannot be put in a job is said (`== no job`) and goes on as it
 ///   did before: its stop is the one that walks the tree.
+/// - Once it is in the job it says so in the owner file ([`OWNER`], a third line,
+///   [`IN_JOB`]), which is how a stop knows that ending the run's process ends all it
+///   started and walks no tree ([`stop_script`]). A run that cannot say it is ended with its
+///   tree, as one that is not in the job.
 /// - Codex's own PATH entry is a junction an SSH session may not cross ("an untrusted
 ///   mount point"): its release folder is named outright.
+/// - After the build's steps, if there were any, the steps of [`PREPARE_STEPS`] make sure of
+///   what the tests of the copy run on (the crates, the console host), and a run that cannot
+///   have them ends with that step's status and says what it needed, before its command, which
+///   is never run on what happens to be there.
 const RUN_TEMPLATE: &str = r##"
 $job = $null
 try {
@@ -588,15 +693,26 @@ try {
   if ($made -eq [IntPtr]::Zero) { throw [CfJob]::Why }
   $job = $made
 } catch { Write-Output "== no job: $($_.Exception.Message), so a stop will not end at once what this run starts" }
+if ($null -ne $job) {
+  try { Add-Content -LiteralPath $owner -Value '«in_job»' } catch { Write-Output "== no job record: $($_.Exception.Message), so a stop will walk this run's tree" }
+}
 $env:Path = "«node»;$env:USERPROFILE\.cargo\bin;" + $env:Path
 $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorAction SilentlyContinue).Target
 if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
 Set-Location $dir
 $ErrorActionPreference = 'Continue'
-foreach ($step in @(«steps»)) {
+«limits»foreach ($step in @(«steps»)) {
   Write-Output "== $step"
   cmd /c "$step 2>&1"
   if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
+}
+foreach ($step in @(«prepare»)) {
+  Write-Output "== $step"
+  cmd /c "$step 2>&1"
+  if ($LASTEXITCODE -ne 0) {
+    Write-Output "== the run needs what '$step' makes there, and it could not be made (status $LASTEXITCODE): the command is not run on what happens to be on the machine"
+    Exit-Run $LASTEXITCODE
+  }
 }
 «given»Set-Location (Join-Path $dir '«inside»')
 $run = Join-Path $dir '«command_file»'
@@ -765,7 +881,12 @@ $dir = Join-Path $env:USERPROFILE '«dir»'
 $running = Join-Path $dir '«running»'
 $owner = Join-Path $dir '«owner»'
 $of = @(Get-Content $owner -ErrorAction SilentlyContinue)
-if ($of[0] -eq '«id»') { taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null; Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force } }
+if ($of[0] -eq '«id»') {
+  $run = try { Get-Process -Id $of[1] -ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime } } catch {}
+  $ends = @('/PID', $of[1], '/F'); if ($of[2] -ne '«in_job»') { $ends += '/T' }
+  if ($run) { taskkill @ends 2>&1 | Out-Null }
+  Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }
+}
 Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '«tarball»') -Force -ErrorAction SilentlyContinue
 exit 0
 "##;

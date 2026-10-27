@@ -1,91 +1,14 @@
 //! What a tree selects of the system's table of processes: the processes that are the
-//! pane's (the whole of its tree, which a close ends) and the turn's lineage (what an
-//! ending of a turn ends), and the members the daemon is told them by. It reads the whole
+//! pane's (the whole of its tree, which a close ends), and the members the daemon is told
+//! them by. It reads the whole
 //! table, and what it names is a choice that can be wrong: it signals nothing, and what
 //! it names is signalled only through [`super::bound`], which shares none of this code.
 
 use std::collections::{HashMap, HashSet};
 
 use super::native::{command_line, exe_of, has_marker, procargs};
-use super::{key_of, Identity, Process, ProcessTree, Subject};
-use crate::background::{steady, Member, ProcessKey};
-
-/// The turn's work as it was when its ending began, chosen once: each process by
-/// identity (its number, when it began and the identifier the system gives it, which no
-/// later process takes), and the members the daemon is told it by. What an ending of the
-/// turn goes on to end is these and what they started, found by the identifier of the
-/// process that started it, which names a parent that has gone as it does one that
-/// runs: for a while. The system usually keeps it for the children of a process that
-/// has run a moment, and often names launchd as the parent of those of one that has run
-/// for seconds once it has ended (seen on Darwin 25.5, by a shell given the request to
-/// end at different ages), so what such a process started as it ended is then no process
-/// of the lineage, and is left running, not named. What the chain of processes proved
-/// the turn's and the bound refused (nothing shows it is the window's) is none of these,
-/// and is kept apart: it is not signalled, and an ending names it as left, unverified,
-/// where it still runs.
-#[derive(Debug)]
-pub(crate) struct Lineage {
-    pub(super) identities: Vec<Identity>,
-    pub(super) members: Vec<Member>,
-    pub(super) unverified: Vec<Member>,
-}
-
-impl Lineage {
-    /// Whether it names nothing: no process to end and none to name as left.
-    pub(super) fn is_empty(&self) -> bool {
-        self.identities.is_empty() && self.members.is_empty() && self.unverified.is_empty()
-    }
-
-    /// What it names that `earlier`, the lineage of a look a moment before, named too:
-    /// the processes that were there at both looks and were the turn's at both, by
-    /// identity. What ended between them, and what began between them (the next run of
-    /// a status line is another process), is none of it. What the bound refused at one
-    /// look and allowed at the other is kept as the second says it.
-    pub(super) fn steady_since(self, earlier: &Lineage) -> Self {
-        let named: Vec<Member> = earlier
-            .members
-            .iter()
-            .chain(&earlier.unverified)
-            .cloned()
-            .collect();
-        let members = steady(&named, self.members);
-        let kept: HashSet<ProcessKey> = members.iter().map(|member| member.key).collect();
-        Self {
-            identities: self
-                .identities
-                .into_iter()
-                .filter(|identity| kept.contains(&key_of(*identity)))
-                .collect(),
-            members,
-            unverified: steady(&named, self.unverified),
-        }
-    }
-
-    /// What of `snapshot` is the lineage's: its processes that run, by identity, those
-    /// of `known` (what was found under it before, which may have gone), and
-    /// whatever descends from any of them, by the process each was started by.
-    pub(super) fn found(
-        &self,
-        snapshot: &[Process],
-        known: &HashMap<i32, Identity>,
-    ) -> HashMap<i32, Identity> {
-        let roots: HashMap<i32, Identity> = snapshot
-            .iter()
-            .filter(|p| {
-                self.identities.contains(&p.identity)
-                    || known.get(&p.identity.pid) == Some(&p.identity)
-            })
-            .map(|p| (p.identity.pid, p.identity))
-            .collect();
-        let parents: HashSet<u64> = self
-            .identities
-            .iter()
-            .chain(known.values())
-            .map(|identity| identity.unique)
-            .collect();
-        descendants(snapshot, roots, &parents)
-    }
-}
+use super::{key_of, Identity, Process, ProcessTree};
+use crate::background::{Member, ProcessKey};
 
 impl ProcessTree {
     /// The processes of `snapshot` that are the pane's: the root, its children, what
@@ -94,10 +17,12 @@ impl ProcessTree {
     /// descendant of those, by the parent each was started by. A system binary
     /// (`sleep`, `bash`, `tail`) shows no environment to anyone, so it carries no
     /// marker to be found by, and one whose parent has gone is found by the parent it
-    /// was started by only where the system still names it (an earlier look found it
-    /// naming launchd once launchd had taken the job, a `sleep` that `sh` left behind;
-    /// a later one, on Darwin 25.5 (macOS 26.5), found it naming the process that
-    /// started it for as long as it was watched, which `members` says). What the
+    /// was started by only where the system still names it (it names the starter if the
+    /// job had exec'd before the starter ended, and launchd if it exec'd after, T-384: an
+    /// earlier look found a `sleep` that `sh` left behind naming launchd, a later one, on
+    /// Darwin 25.5 (macOS 26.5), found it naming the process that started it for as long as
+    /// it was watched, which `members` says; which is told by when the job exec'd, not by
+    /// how long its starter had run). What the
     /// session holds is found whichever the system does: a process stays in the
     /// session its parent started it in, and a parent that goes changes nothing of it.
     /// The session is the pane's while its number is nobody else's: when the pane's
@@ -128,21 +53,6 @@ impl ProcessTree {
         }
         let parents: HashSet<u64> = owned.values().map(|identity| identity.unique).collect();
         descendants(snapshot, selected, &parents)
-    }
-
-    /// What `subject` names of `snapshot`, each told by when it began and not by its
-    /// number alone: the pane's whole tree, or the turn's lineage; `known` is what
-    /// was found before, which may have gone.
-    pub(super) fn chosen(
-        &self,
-        subject: Subject<'_>,
-        snapshot: &[Process],
-        known: &HashMap<i32, Identity>,
-    ) -> HashMap<i32, Identity> {
-        match subject {
-            Subject::Whole => self.select(snapshot, known),
-            Subject::Lineage(lineage) => lineage.found(snapshot, known),
-        }
     }
 
     /// The members of `snapshot` that `tree` holds.

@@ -128,7 +128,10 @@ const BOARD: [(&[&str], &str); 19] = [
     ),
     (
         &["task", "pause"],
-        "  cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait\n",
+        concat!(
+            "  cf task pause T-3                 stop a worker's task: the agent stops and its window waits;\n",
+            "                                    what it left running in the background runs on\n",
+        ),
     ),
     (
         &["task", "resume"],
@@ -137,8 +140,8 @@ const BOARD: [(&[&str], &str); 19] = [
     (
         &["task", "finish"],
         concat!(
-            "  cf task finish T-3                take what a working task's worker said last as its result;\n",
-            "                                    what its turn left running is not ended\n",
+            "  cf task finish T-3                take what a working or paused task's worker said last as its\n",
+            "                                    result; what its turn left running is not ended\n",
         ),
     ),
     (
@@ -146,7 +149,7 @@ const BOARD: [(&[&str], &str); 19] = [
         concat!(
             "  cf tell T-3 \"…\"                   stop T-3 and put this to its window: its answer arrives as\n",
             "                                    a message; then cf task resume T-3 \"…\"\n",
-            "                                    (queued: kept for its window, to go in after its brief)\n",
+            "                                    (queued or open: kept for its window, to go in with or after its brief)\n",
         ),
     ),
     (

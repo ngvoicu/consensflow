@@ -179,3 +179,25 @@ fn a_program_the_system_refuses_to_start_is_told_in_the_systems_words() {
         )
     );
 }
+
+/// A program a test starts holds nothing of the test's but its streams: a shell started as the
+/// tests start programs says whether it has a descriptor left open and not close-on-exec.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_program_a_test_starts_holds_nothing_of_the_tests_but_its_streams() {
+    use std::os::fd::AsRawFd;
+
+    use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+
+    let stray = std::fs::File::open("/dev/null").unwrap();
+    fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
+    let said = common::command("/bin/sh")
+        .arg("-c")
+        .arg(format!(
+            "if [ -e /dev/fd/{} ]; then echo held; else echo clear; fi",
+            stray.as_raw_fd()
+        ))
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&said.stdout), "clear\n");
+}

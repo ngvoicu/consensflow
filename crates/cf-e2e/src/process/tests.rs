@@ -20,6 +20,38 @@ fn a_program_that_cannot_be_started_is_an_error_that_names_it() {
     ));
 }
 
+/// The rig starts daemons, hosts and stand-ins that run for a whole case, while other cases'
+/// threads open sockets and pipes. On macOS std makes each close-on-exec in a second step, and a
+/// program started between the two holds it to its end: a pipe another case closed would not be
+/// at its end, a listener would go on answering. Here a descriptor is left in that moment while
+/// a program starts, both ways the rig starts one, and the program says whether it has it.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_program_a_case_starts_holds_nothing_of_the_rigs_but_its_streams() {
+    use std::os::fd::AsRawFd;
+
+    use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+
+    let stray = std::fs::File::open("/dev/null").unwrap();
+    fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
+    let asking = || {
+        Run::new("/bin/sh").args([
+            "-c".to_owned(),
+            format!(
+                "if [ -e /dev/fd/{} ]; then echo held; else echo clear; fi",
+                stray.as_raw_fd()
+            ),
+        ])
+    };
+    let ran = asking().run().unwrap();
+    assert_eq!(ran.stdout, "clear\n");
+    let mut spawned = asking().closed_input().spawn().unwrap();
+    let mut said = String::new();
+    std::io::BufRead::read_line(&mut spawned.take_output().unwrap(), &mut said).unwrap();
+    spawned.wait(Duration::from_secs(60)).unwrap();
+    assert_eq!(said, "clear\n");
+}
+
 #[test]
 fn windows_is_given_what_it_needs_of_the_tests_where_the_case_names_none_and_others_nothing() {
     let names = |vars: &[(OsString, OsString)], finding_programs| -> Vec<&'static str> {
@@ -96,6 +128,58 @@ fn the_tests_own_variable_is_read_here_and_one_that_is_not_there_is_none() {
         Some(env!("CARGO_MANIFEST_DIR"))
     );
     assert_eq!(own_var("CF_E2E_NO_SUCH_VARIABLE"), None);
+}
+
+/// The variable that makes the test binary the programs the test below starts, and
+/// which of them.
+const SETTLE: &str = "CF_E2E_SETTLE_TEST";
+
+/// The name the test binary is asked to run, to be those programs.
+const SETTLE_PROGRAMS: &str = "process::tests::the_programs_the_settle_test_starts";
+
+/// Not a test of its own: the test binary again, started by the test below as two programs
+/// where there is no shell to do it with (on Windows). The first starts the second and ends
+/// at once, the second says its piece on the error output they share 300 ms later and ends.
+/// Run as a test it does nothing.
+#[test]
+// The first program is not to wait for the second: it ends first, and that is the case.
+#[allow(clippy::zombie_processes)]
+fn the_programs_the_settle_test_starts() {
+    match own_var(SETTLE).as_deref() {
+        Some("first") => {
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", SETTLE_PROGRAMS, "--nocapture"])
+                .env(SETTLE, "second")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap();
+        }
+        Some("second") => {
+            thread::sleep(Duration::from_millis(300));
+            writeln!(std::io::stderr(), "cf: it is refused").unwrap();
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output_wherever_it_runs() {
+    // The daemon's refused second start ended with 1, its sentence on the pipe, and a case
+    // that read its error output the moment it was gone found none (2026-10-23). Here the
+    // first program ends before the sentence is all in: the second says it a moment later.
+    let mut program = Run::new(std::env::current_exe().unwrap())
+        .args(["--exact", SETTLE_PROGRAMS, "--nocapture"])
+        .var(SETTLE, "first")
+        .spawn()
+        .unwrap();
+    let status = program.wait(Duration::from_secs(30)).unwrap();
+    assert_eq!(status.and_then(|status| status.code()), Some(0));
+    assert!(
+        program.errors().contains("cf: it is refused\n"),
+        "{:?}",
+        program.errors()
+    );
 }
 
 /// The runs that need a shell to be told what to do.
@@ -261,7 +345,66 @@ mod shell {
         program.end_input();
         let status = program.wait(Duration::from_secs(10)).unwrap();
         assert_eq!(status.and_then(|status| status.code()), Some(0));
+        // What it wrote is read on a thread of its own, which may not have run yet when the
+        // program has ended: the wait has waited for it to the end of the stream (T-643, on
+        // merge-flakes' settle).
         assert_eq!(program.errors(), "queued twice");
+    }
+
+    #[test]
+    fn a_spawned_program_that_has_ended_has_said_all_it_said_on_its_error_output() {
+        // The daemon's refused second start ended with 1, its sentence on the pipe, and
+        // a case that read its error output the moment it was gone found none, the
+        // thread that keeps it not having run yet (2026-10-23). Here the program ends
+        // before the sentence is all in: a helper it left says it a moment later.
+        let mut program = sh("(sleep 0.3; printf 'cf: it is refused\\n' >&2) & exit 0")
+            .spawn()
+            .unwrap();
+        let status = program.wait(Duration::from_secs(10)).unwrap();
+        assert_eq!(status.and_then(|status| status.code()), Some(0));
+        assert_eq!(program.errors(), "cf: it is refused\n");
+    }
+
+    #[test]
+    fn a_spawned_programs_status_is_looked_at_and_not_waited_for_though_a_process_it_left_holds_its_error_output(
+    ) {
+        let mut program = sh("printf 'said\\n' >&2; sleep 20 & exit 0")
+            .spawn()
+            .unwrap();
+        let started = Instant::now();
+        let status = loop {
+            if let Some(status) = program.status() {
+                break status;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "it never ended"
+            );
+            thread::sleep(Duration::from_millis(2));
+        };
+        assert_eq!(status.code(), Some(0));
+        assert!(program.has_exited());
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_spawned_program_that_left_a_process_holding_its_error_output_is_waited_for_a_while() {
+        let started = Instant::now();
+        let mut program = sh("printf 'said\\n' >&2; sleep 20 & exit 0")
+            .spawn()
+            .unwrap();
+        let status = program.wait(Duration::from_secs(10)).unwrap();
+        assert_eq!(status.and_then(|status| status.code()), Some(0));
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(program.errors(), "said\n");
     }
 
     #[test]
@@ -418,12 +561,15 @@ mod shell {
     fn the_group_of_a_process_is_the_one_it_was_started_in_and_one_that_is_gone_has_none() {
         use std::os::unix::process::CommandExt;
 
-        let mut leader = Command::new("sleep")
-            .arg("30")
-            .process_group(0)
-            .spawn()
-            .unwrap();
-        let mut follower = Command::new("sleep").arg("30").spawn().unwrap();
+        // Both sleep beside the other tests: what they were left of theirs they would hold.
+        let sleep = || {
+            let mut sleep = Command::new("sleep");
+            sleep.arg("30");
+            cf_process::hold_only_the_streams(&mut sleep);
+            sleep
+        };
+        let mut leader = sleep().process_group(0).spawn().unwrap();
+        let mut follower = sleep().spawn().unwrap();
         assert_eq!(group_of(leader.id()), Some(leader.id()), "it leads its own");
         assert_eq!(
             group_of(follower.id()),

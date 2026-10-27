@@ -86,12 +86,12 @@ find = '''
 Some("medium") => WorkTier::Standard,
                     _ => WorkTier::Light,
                 },
-                "claude-opus-5.5"'''
+                // Opus 4.8, Sonnet 5'''
 replace = '''
 Some("medium") => WorkTier::Standard,
                     _ => WorkTier::Standard,
                 },
-                "claude-opus-5.5"'''
+                // Opus 4.8, Sonnet 5'''
 
 [[plant]]
 name = "agents, native: the screens open to an empty token"

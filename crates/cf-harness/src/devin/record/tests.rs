@@ -3,9 +3,12 @@
 //! as `show` writes one; a failure V8 threw is said here in words of its own.
 
 mod cells;
+mod compaction;
 mod logs;
 mod messages;
 mod rows;
+mod stamped;
+mod turns;
 
 use std::fs;
 use std::path::PathBuf;
@@ -138,7 +141,7 @@ fn look(reader: &mut Box<dyn Look + Send>) -> Arc<Reading> {
 /// what they say of the turn.
 fn show(reading: &Reading) -> String {
     let record = match reading {
-        Reading::Unknown(reason) => return format!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => return format!("unknown: {reason}"),
         Reading::Known(record) => record,
     };
     let items: Vec<Value> = record

@@ -7,7 +7,6 @@
 mod common;
 
 use std::fs;
-use std::process::Command;
 
 use common::{checkout, cwds, err, out, programs, xtask};
 use xtask::process::Invocation;
@@ -281,7 +280,7 @@ fn cargo_finds_the_xtask_alias_from_the_root_and_from_app() {
     let missing =
         format!(".cargo/config.toml needs, beside its [build] table:\n\n[alias]\n{ALIAS}\n");
     for cwd in [checkout(), checkout().join("app")] {
-        let ran = Command::new(env!("CARGO"))
+        let ran = common::command(env!("CARGO"))
             .args(["help", "xtask"])
             .current_dir(&cwd)
             .output()

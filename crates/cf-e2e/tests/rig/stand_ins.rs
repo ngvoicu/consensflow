@@ -120,7 +120,7 @@ pub(crate) fn until_there(file: &Path) -> bool {
 /// The process the file `file` holds once it holds a whole one, waited for up to ten
 /// seconds: a program that writes its process in place makes the file before it writes
 /// into it, and a file that is there is not one that is written. The stand-ins write
-/// theirs whole (`background::say_its_process`), and this waits for a number all the same.
+/// theirs whole (`cf_e2e::files::say_its_process`), and this waits for a number all the same.
 /// Where none comes, it says what the file held. The job's own case asks it on every system.
 pub(crate) fn pid_in(file: &Path) -> Result<u32, String> {
     let started = Instant::now();

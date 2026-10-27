@@ -3,17 +3,21 @@
 //! those harnesses run in, on the user's own logins.
 //!
 //! A run's windows get the user's own home, never this shell's session identity
-//! and none of the test pane host's sandbox (with `CLAUDE_CONFIG_DIR` set, Claude
-//! finds no completed onboarding and opens on its first-run dialog). The wrappers
-//! the run writes (`~/.consensflow-candidate/evals/bin`) are first on the `PATH`.
+//! and none of the test pane host's sandbox. Its Claude Code windows run on a
+//! config folder of the run's own, with a copy of the machine's login
+//! ([`super::login`]), never on the user's `~/.claude`: the rig starts the daemon and
+//! every window on it, and the folder goes with the run. The wrappers the run writes
+//! (`~/.consensflow-candidate/evals/bin`) are first on the `PATH`.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use cf_e2e::live::{self, Harness, Installed};
 use cf_e2e::process::own_var;
-use cf_e2e::rig::Config;
+use cf_e2e::rig::{ClaudeConfig, Config};
 use cf_e2e::{checkout, Error, Result as Support};
 
+use super::login::Throwaway;
 use super::options::Crew;
 use crate::plan::ChiefSetup;
 
@@ -42,13 +46,19 @@ pub struct Machine {
     /// The folder of Node, which a harness that npm installed needs on the `PATH`
     /// to start, and the wrappers on Windows run on.
     pub node: Option<PathBuf>,
+    /// The Claude config folder the run's Claude Code windows run on: a copy of the
+    /// machine's login in a folder of the run's own. None where the run has no real
+    /// Claude Code (the dry runs) and where the machine has no login to copy (Windows):
+    /// its Claude is as it was.
+    pub login: Option<Arc<Throwaway>>,
 }
 
 impl Machine {
     /// The machine's harnesses of this run: each found as a shell finds it. One
     /// that is not on the `PATH` is an error that says so; its login is the
     /// window's to ask for (a login page shows on the chief's screen in the report).
-    pub fn of(crew: &Crew) -> Support<Self> {
+    /// The windows of Claude Code run on `login`, where there is one.
+    pub fn of(crew: &Crew, login: Option<Arc<Throwaway>>) -> Support<Self> {
         let home = live::machine::home()?;
         let mut names: Vec<&str> = vec![crew.chief.as_str()];
         names.extend(crew.staff.iter().map(String::as_str));
@@ -63,7 +73,7 @@ impl Machine {
             if installs.iter().any(|install| install.harness() == harness) {
                 continue;
             }
-            let install = Installed::at(harness, live::command(name)?, login_of(harness, &home));
+            let install = installed(harness, live::command(name)?, &home, login.as_ref());
             installs.push(match &node {
                 Some(node) => install.with_node(node),
                 None => install,
@@ -73,7 +83,36 @@ impl Machine {
             home,
             installs,
             node,
+            login,
         })
+    }
+
+    /// The folder the run's Claude Code windows keep their records in, made if it is
+    /// not (the login is refused here, before the run spends anything, if it would end
+    /// before the run does): the run's own where it has a login, the user's `.claude` where
+    /// Claude Code is as it was, and none where Claude Code has no window in the run.
+    pub fn claude_config(&self) -> Support<Option<PathBuf>> {
+        if self.install("claude").is_err() {
+            return Ok(None);
+        }
+        match &self.login {
+            Some(login) => login.folder().map(Some),
+            None => Ok(Some(self.home.join(".claude"))),
+        }
+    }
+
+    /// Where the run's Claude Code windows keep their records: the folder of [`Self::claude_config`],
+    /// or the user's `.claude` for a run that has no Claude Code (nothing reads it then).
+    pub fn claude_records(&self) -> Support<PathBuf> {
+        Ok(self
+            .claude_config()?
+            .unwrap_or_else(|| self.home.join(".claude")))
+    }
+
+    /// What the run did to the user's Claude setup or to the copy of the login, if it did
+    /// anything, once its rig has ended.
+    pub fn login_findings(&self) -> Option<String> {
+        self.login.as_ref().and_then(|login| login.findings())
     }
 
     /// The harness `name` of the run.
@@ -143,7 +182,6 @@ impl Machine {
                 "CODEX_HOME",
                 codex_home(&self.home).to_string_lossy().into_owned(),
             )
-            .unset("CLAUDE_CONFIG_DIR")
             .var("PATH", self.path());
         if cfg!(windows) {
             config = config.var("USERPROFILE", &home);
@@ -160,6 +198,23 @@ impl Machine {
             config = config.var(name, value);
         }
         config
+    }
+}
+
+/// The harness `harness` at `command` as the run's windows start it: the user's home for its
+/// login, and for Claude Code, where the run has a throwaway login, the config folder of it.
+fn installed(
+    harness: Harness,
+    command: PathBuf,
+    home: &Path,
+    login: Option<&Arc<Throwaway>>,
+) -> Installed {
+    let install = Installed::at(harness, command, login_of(harness, home));
+    match login {
+        Some(login) if harness == Harness::Claude => {
+            install.with_claude_config(Arc::clone(login) as Arc<dyn ClaudeConfig>)
+        }
+        _ => install,
     }
 }
 

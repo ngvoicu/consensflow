@@ -84,7 +84,7 @@ pub fn stored_fault(messages: &[Message], header: &str) -> Option<String> {
         .iter()
         .find(|message| message.role == "user" && message.text.contains(header))
     else {
-        return Some("the daemon's reader has the note, Devin's store has it nowhere".to_owned());
+        return Some("Devin's store has the note nowhere".to_owned());
     };
     let text = message.text.trim_start();
     if text.starts_with(header) {

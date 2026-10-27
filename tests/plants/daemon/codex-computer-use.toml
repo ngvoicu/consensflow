@@ -1,0 +1,116 @@
+# Codex's computer use in Project settings (T-548, the owner's decision of 2026-10-25): Codex has
+# it from the ChatGPT app, for every folder, and a member gets the same tools as Codex in a
+# terminal (Codex 0.164.0, probed). The harness reads whether it is set up from Codex's own
+# configuration and never writes it: the `unified-computer-use@openai-bundled` plugin on in
+# `config.toml`, an installed version of it naming a program that is there (the ChatGPT app's
+# Node), and `Codex Computer Use.app` beside them; never the `[mcp_servers.computer-use]` entry the
+# app also writes, which fails in every Codex but the app's own. The daemon says it beside Claude
+# Code's word (`computer_use.get`, `harnesses.codex.setUp`), and the page shows Codex's part while
+# the project has a Codex member: set up or where to set it up, "none on Windows", and the two
+# Privacy panes where the human allows Codex Computer Use, whose permissions are its own app's and
+# not ConsensFlow's, so ConsensFlow's are shown only for a part that works through them. One plant
+# takes one rule out; a test of it fails. Every name holds `codex computer use`.
+
+[run]
+# The harness's read: set up only with all three, the home, a read writes nothing.
+harness-codex-computer-use = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::computer_use"]
+# The daemon's answer to the page.
+daemon-computer-use = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use"]
+# The row, in the browser Playwright keeps.
+page-computer-use = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "computer use|computer-use|another app|omputer use|both parts"]
+
+# --- what the harness reads ---
+
+[[plant]]
+name = "codex computer use: the plugin's switch is not read"
+meant = "not_set_up_where_the_plugin_is_off_or_unnamed_whatever_the_server_entry_says"
+runs = ["harness-codex-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/computer_use.rs"
+find = "        plugin_on(&home)\n"
+replace = "        (plugin_on(&home) || true)\n"
+
+[[plant]]
+name = "codex computer use: the plugin's program is not looked for"
+meant = "not_set_up_where_the_plugins_program_or_the_service_app_is_missing"
+runs = ["harness-codex-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/computer_use.rs"
+find = "            && program_installed(&home)\n"
+replace = "            && (program_installed(&home) || true)\n"
+
+[[plant]]
+name = "codex computer use: the service's app is not looked for"
+meant = "not_set_up_where_the_plugins_program_or_the_service_app_is_missing"
+runs = ["harness-codex-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/computer_use.rs"
+find = ".is_dir()\n    });"
+replace = ".is_dir()\n            || true\n    });"
+
+[[plant]]
+name = "codex computer use: the dead server entry is taken for the plugin"
+meant = "not_set_up_where_the_plugin_is_off_or_unnamed_whatever_the_server_entry_says"
+runs = ["harness-codex-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/computer_use.rs"
+find = "                .get(\"plugins\")?\n                .get(PLUGIN)?\n"
+replace = "                .get(\"mcp_servers\")?\n                .get(\"computer-use\")?\n"
+
+# --- what the daemon says ---
+
+[[plant]]
+name = "codex computer use: the daemon never says Codex's is set up"
+meant = "the_row_is_told_the_system_the_grants_claudes_word_for_the_folder_and_whether_codexs_is_set_up"
+runs = ["daemon-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/computer_use.rs"
+find = "\"codex\": { \"setUp\": codex.set_up },"
+replace = "\"codex\": { \"setUp\": false },"
+
+# --- what the page shows ---
+
+[[plant]]
+name = "codex computer use: the page says not set up whatever the daemon says"
+meant = "Project settings: Codex's computer use says whether the ChatGPT app set it up, and leads to Codex Computer Use's own permissions"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = "        ...(said.setUp\n"
+replace = "        ...(false\n"
+
+[[plant]]
+name = "codex computer use: Codex's part has no buttons for its own app's permissions"
+meant = "Project settings: Codex's computer use says whether the ChatGPT app set it up, and leads to Codex Computer Use's own permissions"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = "        if (part.own && said.system === 'macos') {"
+replace = "        if (false) {"
+
+[[plant]]
+name = "codex computer use: ConsensFlow's permissions are shown for Codex alone"
+meant = "Project settings: Codex's computer use says whether the ChatGPT app set it up, and leads to Codex Computer Use's own permissions"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = "this.#permissions.hidden = !parts.some(([, part]) => part.ours) || permissions === null"
+replace = "this.#permissions.hidden = parts.length === 0 || permissions === null"
+
+[[plant]]
+name = "codex computer use: Windows is told how to set it up"
+meant = "Project settings: Codex's computer use says whether the ChatGPT app set it up, and leads to Codex Computer Use's own permissions"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = "      if (system === 'windows') return ['Codex has no computer use on Windows.']\n"
+replace = ""

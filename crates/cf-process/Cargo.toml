@@ -6,6 +6,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+# What other crates' tests share of this crate's (`test_support`): it is on for their tests alone.
+[features]
+test-support = []
+
 [dependencies]
 cf-base.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "time"] }
@@ -19,8 +23,13 @@ nix = { workspace = true, features = ["fs"] }
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
 
 [dev-dependencies]
+cf-process = { path = ".", features = ["test-support"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# `setrlimit`, for a test that crowds its process's descriptor table.
+nix = { workspace = true, features = ["fs", "resource"] }
 
 [lints]
 workspace = true

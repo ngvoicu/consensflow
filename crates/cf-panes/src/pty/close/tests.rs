@@ -156,10 +156,7 @@ mod unix {
         let _serial = serial_pty_test();
         let mut outsider = Sentinel::start();
         let table = PaneTable::closing_within(GRACE);
-        let OpenedPane { key, mut reader } = open(
-            &table,
-            "trap '' TERM HUP; printf ready; while :; do sleep 1; done",
-        );
+        let OpenedPane { key, mut reader } = open(&table, &deaf());
         until_shown(&mut reader, "ready");
         let group = table.process_group_id(&key).expect("the pane's group");
 
@@ -197,8 +194,11 @@ mod unix {
         assert!(outsider.runs(), "a process outside the window");
     }
 
-    /// A program that ignores the request to end and runs on.
-    const DEAF: &str = "trap '' TERM HUP; printf ready; while :; do sleep 1; done";
+    /// A program that ignores the request to end and runs on, as long as the test that opened
+    /// its window is there.
+    fn deaf() -> String {
+        cf_base::fixture::deaf("TERM HUP", "printf ready")
+    }
 
     #[test]
     fn a_table_that_goes_asks_every_window_to_end_before_it_waits_on_any() {
@@ -207,7 +207,7 @@ mod unix {
         let table = PaneTable::closing_within(GRACE);
         let mut readers = Vec::new();
         for _ in 0..2 {
-            let OpenedPane { mut reader, .. } = open(&table, DEAF);
+            let OpenedPane { mut reader, .. } = open(&table, &deaf());
             until_shown(&mut reader, "ready");
             readers.push(reader);
         }
@@ -230,7 +230,7 @@ mod unix {
         let table = PaneTable::closing_within(GRACE);
         let mut readers = Vec::new();
         for _ in 0..2 {
-            let OpenedPane { mut reader, .. } = open(&table, DEAF);
+            let OpenedPane { mut reader, .. } = open(&table, &deaf());
             until_shown(&mut reader, "ready");
             readers.push(reader);
         }
@@ -305,6 +305,48 @@ mod unix {
         let _ = fs::remove_file(&started);
         let _ = fs::remove_file(&released);
     }
+
+    /// How long a kill takes with the real grace ([`PaneTable::new`]), which is how
+    /// long the pane host takes to answer `pane.kill` (`pane_handlers`): what a member's
+    /// give-up waits for, no longer than the engine's `KILL_ANSWER_WAIT` (T-77). A window
+    /// whose program ends when asked, one that leaves a job that ends when asked, and one
+    /// that leaves a job that ignores the request, which is ended after the grace. Ignored:
+    /// it measures, and the last waits out the grace. Run with
+    /// `cargo test -p cf-panes --lib kill_answer -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "measures how long a kill is answered in (T-77); the last case waits out the grace"]
+    fn kill_answer_times_with_the_real_grace() {
+        let _serial = serial_pty_test();
+        let table = PaneTable::new();
+        let cases = [
+            ("ends when asked", "printf ready; exec sleep 300"),
+            (
+                "leaves a job that ends when asked",
+                "sleep 300 & printf ready; wait",
+            ),
+            (
+                "leaves a job that ignores the request",
+                "trap '' TERM HUP; (while kill -0 $PPID 2>/dev/null; do sleep 0.2; done) & printf ready; wait",
+            ),
+        ];
+        for (case, script) in cases {
+            let mut took = Vec::new();
+            for _ in 0..3 {
+                let OpenedPane { key, mut reader } = open(&table, script);
+                until_shown(&mut reader, "ready");
+                let closing = Instant::now();
+                table.kill(&key).expect("close the pane");
+                took.push(closing.elapsed());
+            }
+            took.sort();
+            println!("kill answered, a window that {case}: {took:?}");
+            assert!(
+                took.iter()
+                    .all(|took| *took < crate::pty::CLOSE_GRACE + Duration::from_secs(5)),
+                "{case}: {took:?}"
+            );
+        }
+    }
 }
 
 /// The same on Windows, where a window is ended at once and what ends it is the
@@ -367,5 +409,65 @@ mod windows {
             "nothing was waited for: the job ended the tree ({closed_in:?})"
         );
         assert!(table.list().expect("list the panes").is_empty());
+    }
+
+    /// How long a kill takes, which is how long the pane host takes to answer
+    /// `pane.kill`: what a member's give-up waits for, no longer than the engine's
+    /// `KILL_ANSWER_WAIT` (T-77). A window behind a `.cmd` shim, as a harness is, and
+    /// PowerShell opened itself. Ignored: it measures. Run with
+    /// `cargo test -p cf-panes --lib kill_answer -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "measures how long a kill is answered in (T-77)"]
+    fn kill_answer_times_with_the_real_grace() {
+        let _pty_guard = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let name = format!("cf-shim-timing-{}.cmd", std::process::id());
+        let shim = std::env::temp_dir().join(&name);
+        let powershell = system(r"WindowsPowerShell\v1.0\powershell.exe");
+        fs::write(
+            &shim,
+            format!(
+                "@echo off\r\n\"{powershell}\" -NoProfile -Command \"Write-Output 'READY#'; Start-Sleep 1000\"\r\n"
+            ),
+        )
+        .expect("write the shim");
+        let cases = [
+            (
+                "behind a .cmd shim",
+                vec![
+                    system("cmd.exe"),
+                    "/d".into(),
+                    "/s".into(),
+                    "/c".into(),
+                    name.clone(),
+                ],
+            ),
+            (
+                "of PowerShell",
+                vec![
+                    powershell.clone(),
+                    "-NoProfile".into(),
+                    "-Command".into(),
+                    "Write-Output 'READY#'; Start-Sleep 1000".into(),
+                ],
+            ),
+        ];
+        for (case, argv) in cases {
+            let mut took = Vec::new();
+            for _ in 0..3 {
+                let (key, output) = open(&table, &argv, &HashMap::new(), 1 << 20);
+                read_until(&table, &key, &output, "READY#");
+                let closing = Instant::now();
+                table.kill(&key).expect("close the pane");
+                took.push(closing.elapsed());
+            }
+            took.sort();
+            println!("kill answered, a window {case}: {took:?}");
+            assert!(
+                took.iter().all(|took| *took < Duration::from_secs(10)),
+                "{case}: {took:?}"
+            );
+        }
+        let _ = fs::remove_file(&shim);
     }
 }

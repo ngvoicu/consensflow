@@ -15,14 +15,25 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Admission, Held, Observed, Pane, PaneHost, Readiness, Waiting, Window, Work, NOT_ADMITTED,
+    Admission, Held, Observed, Over, Pane, PaneHost, Question, Readiness, Trusts, Waiting, Window,
+    Work, NOT_ADMITTED,
 };
-use cf_harness::records::{Item, Reading, Record, Role, Settlement};
+use cf_harness::records::{Item, Lines, Reading, Record, Role, Settlement};
 use serde_json::{json, Value};
 
 use super::adapter::{FakeAdapter, FakeAgent, Taking};
 use super::holds::Wrapped;
 use crate::runtime::next_turn;
+
+/// What a screen holds that is the question about trusting the folder, for a
+/// window whose adapter asks one ([`FakeAdapter::asks_to_trust`]), and what it holds
+/// that is the harness's prompt, once it is past the question.
+pub const TRUST_QUESTION: &str = "Do you trust this folder? (a test's question)";
+pub const TRUST_PROMPT: &str = "Ready for work (a test's prompt)";
+/// The question with its choice where the reader cannot place it, and a line that
+/// names the question's choices without asking it: a conversation that quotes them.
+pub const TRUST_UNPLACED: &str = "Do you trust this folder? (a test's question, its choice lost)";
+pub const TRUST_QUOTED: &str = "Yes, I trust this folder / No, exit (a test's quote of them)";
 
 pub(super) struct FakeWindow {
     seam: String,
@@ -30,6 +41,8 @@ pub(super) struct FakeWindow {
     session: RefCell<String>,
     pid: Cell<Option<u32>>,
     fake: Rc<FakeAdapter>,
+    /// What a yes to its question would trust, where its adapter asks one.
+    trusts: Option<Trusts>,
     /// The first message it takes once it is up, where its adapter's windows
     /// seed it so (`FakeAdapter::seeds`), not with the launch.
     first: Option<String>,
@@ -43,12 +56,14 @@ impl FakeWindow {
         fake: Rc<FakeAdapter>,
         first: Option<String>,
     ) -> Self {
+        let trusts = fake.trusts.borrow().clone();
         Self {
             seam,
             launch,
             session: RefCell::new(session),
             pid: Cell::new(None),
             fake,
+            trusts,
             first,
         }
     }
@@ -77,9 +92,42 @@ impl FakeWindow {
     }
 }
 
+/// Whether some line of `screen` holds `words`.
+fn holds(screen: &[String], words: &str) -> bool {
+    screen.iter().any(|line| line.contains(words))
+}
+
 impl Window for FakeWindow {
     fn opened(&self, pid: Option<u32>) {
         self.pid.set(pid);
+    }
+
+    fn trusts(&self) -> Option<&Trusts> {
+        self.trusts.as_ref()
+    }
+
+    /// Down is the key toward a yes, whatever the screen: it is only asked where
+    /// the question is.
+    fn toward_trust(&self, screen: &[String]) -> Option<Question> {
+        self.trusts.as_ref()?;
+        if holds(screen, TRUST_QUESTION) {
+            Some(Question::Toward(b"\x1b[B"))
+        } else if holds(screen, TRUST_UNPLACED) {
+            Some(Question::Unplaced)
+        } else {
+            None
+        }
+    }
+
+    fn shows_prompt(&self, screen: &[String]) -> bool {
+        self.trusts.is_some() && holds(screen, TRUST_PROMPT) && self.toward_trust(screen).is_none()
+    }
+
+    fn names_trust_choices(&self, screen: &[String]) -> bool {
+        self.trusts.is_some()
+            && [TRUST_QUESTION, TRUST_UNPLACED, TRUST_QUOTED]
+                .iter()
+                .any(|words| holds(screen, words))
     }
 
     fn follow(&self, session: &str) {
@@ -295,6 +343,9 @@ impl Window for FakeWindow {
                 agent.settled = true;
                 agent.took_back = agent.takes_back;
             }
+            if agent.busy_when_interrupted {
+                agent.over = Over::Held;
+            }
         });
     }
 }
@@ -302,20 +353,25 @@ impl Window for FakeWindow {
 /// What a look at `agent`'s window finds, its launch on `session`.
 fn looked(agent: &FakeAgent, session: &str) -> Observed {
     let reading = |items: Vec<Item>| {
-        if agent.unread {
-            return Some(Arc::new(Reading::Unknown(
-                "the transcript could not be read".to_owned(),
-            )));
+        if let Some(reason) = &agent.unreadable {
+            return Some(Arc::new(Reading::Unknown(reason.clone())));
         }
+        let places = agent.says_places.then(|| (0..items.len()).collect());
         Some(Arc::new(Reading::Known(Record {
             items,
             in_flight: false,
             asking: false,
             failed: false,
+            failure: agent.failure.clone(),
             quota: None,
             settlement: Settlement::Unknown,
             pending: agent.pending,
             monitors: agent.monitors.clone(),
+            lines: Box::new(Lines {
+                lost: agent.lost.clone(),
+                places,
+                ..Lines::default()
+            }),
         })))
     };
     // A window that shows another conversation than its launch's: that
@@ -324,12 +380,15 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
         return Observed {
             reading: reading(agent.records.get(session).cloned().unwrap_or_default()),
             settled: false,
+            over: Over::No,
             waiting: None,
             failed: agent.failed,
             quota: agent.quota.clone(),
             switched: Some(shows.clone()),
             unnamed: false,
             took_back: false,
+            at_prompt: false,
+            shared: false,
         };
     }
     let waiting = match &agent.unnamed {
@@ -341,12 +400,15 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
     Observed {
         reading: reading(agent.items.clone()),
         settled: agent.settled,
+        over: agent.over,
         waiting,
         failed: agent.failed,
         quota: agent.quota.clone(),
         switched: None,
         unnamed: agent.unnamed.is_some(),
         took_back: agent.took_back,
+        at_prompt: agent.at_prompt,
+        shared: agent.shared,
     }
 }
 
@@ -367,6 +429,10 @@ fn observed_json(observed: &Observed) -> Value {
     }
     if observed.took_back {
         written["tookBack"] = json!(true);
+    }
+    // No trace of Node's has it: written only where it is said.
+    if observed.at_prompt {
+        written["atPrompt"] = json!(true);
     }
     written
 }

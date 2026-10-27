@@ -35,6 +35,11 @@
 //!   `pretool` or `prompt`): the stop the daemon could take for ignored. When Claude
 //!   stopped, the resume of the task, and its result.
 //!
+//! - `tell`      The chief's `cf tell` into Claude inside a long command while two
+//!   background agents it started run (T-604): one Escape stops the turn, the window
+//!   stays open with its agents and nobody is told it did not stop, and the tell's
+//!   words go into the same window once it rests, which answers them (T-551).
+//!
 //! Any harness (`--harness`, or its name):
 //!
 //! - `stuck`     A window that may not stop, pressed through every round and closed if
@@ -91,6 +96,8 @@ mod slow;
 mod stop;
 #[path = "live_stops/stuck.rs"]
 mod stuck;
+#[path = "live_stops/tell.rs"]
+mod tell;
 #[path = "live_stops/watch.rs"]
 mod watch;
 
@@ -204,6 +211,7 @@ fn run(case: Case, harness: Harness, options: &Options, log: &Log) -> Result<Acc
         Case::Stuck => stuck::run(&ctx, &mut account, harness.name()),
         Case::MidTurn => midturn::run(&ctx, &mut account, harness),
         Case::MidTool => midturn::tool::run(&ctx, &mut account, harness),
+        Case::Tell => tell::tell(&ctx, &mut account),
     };
     if let Some(folder) = &options.transcripts {
         for file in keep_transcripts(&members, &agent, folder)? {

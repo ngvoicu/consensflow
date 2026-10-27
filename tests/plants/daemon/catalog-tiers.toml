@@ -1,0 +1,231 @@
+# The catalog's tiers and Devin's models, and the order the agent pickers offer them in (T-553,
+# 2026-10-25, Gabriel: "move opus medium to standard work... add from devin all models it has...
+# the dropdown list split by tier, harness and also order by max, xhigh, …"). Opus 5.5 at medium
+# is standard work; every model Devin lists is a preset at each of its levels from low to max, or
+# by its plain id, at the tiers Gabriel decided; Kimi K3.1 Pro and Gemini 4 Argon have rules of
+# their own; Devin's Claude and GPT agents are hidden with the others when the human keeps those
+# models to their own harnesses; the staff's and the chief's pick lists group by tier, then
+# harness, then effort, and so does the Agents page grouped by tier. One plant takes one rule out;
+# a test of it fails. Every name holds `catalog tiers`, so `npm run plants:daemon -- "catalog
+# tiers"` runs them all.
+
+[run]
+tiers-catalog = ["cargo", "test", "--offline", "-p", "cf-catalog", "--test", "catalog"]
+tiers-preferences = ["cargo", "test", "--offline", "-p", "cf-catalog", "--lib", "roster::preferences"]
+# The two pick lists, in the browser.
+tiers-page-pickers = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "pick list orders|pick list groups"]
+# Khnum, which left the catalog, in the engine, the daemon's board and the page.
+tiers-engine-retired = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "retired_agents::"]
+tiers-daemon-board = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::reading"]
+tiers-page-khnum = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "staffed with Khnum|its agent gone, it says so"]
+tiers-catalog-lib = ["cargo", "test", "--offline", "-p", "cf-catalog", "--test", "catalog", "offers_devin_s_swe_1_6"]
+# The Agents page is the daemon's, built into `cf`: built again from the sources as planted.
+tiers-agents-checkbox = { command = ["node", "tests/agents-page-built.mjs", "a checkbox keeps Claude and OpenAI"], builds = true }
+tiers-agents-page = { command = ["node", "tests/agents-page-built.mjs", "grouped by work tier"], builds = true }
+
+# --- the tiers ---
+
+[[plant]]
+name = "catalog tiers: Opus 5.5 at medium is complex work again"
+meant = "assigns_four_work_tiers_by_model_and_effort_across_routes_without_agent_name_rules"
+runs = ["tiers-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/profile.rs"
+find = '''                "gpt-6-astra" | "claude-fable-5.1" | "claude-opus-5.5" => match effort {'''
+replace = '''                "claude-opus-5.5" => match effort {
+                    Some("max") => WorkTier::Critical,
+                    Some("low") => WorkTier::Light,
+                    _ => WorkTier::Complex,
+                },
+                "gpt-6-astra" | "claude-fable-5.1" => match effort {'''
+
+[[plant]]
+name = "catalog tiers: Gemini 4 Argon at high is standard work, as first proposed"
+meant = "gemini_4_argon_is_complex_at_high_standard_at_medium_and_light_at_low_on_devin_and_pi"
+runs = ["tiers-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/profile.rs"
+find = '''                    Some("high") => WorkTier::Complex,
+                    Some("medium") => WorkTier::Standard,'''
+replace = '''                    Some("high") => WorkTier::Standard,
+                    Some("medium") => WorkTier::Light,'''
+
+[[plant]]
+name = "catalog tiers: Kimi K3.1 Pro has no rule of its own and is light work at every level"
+meant = "kimi_k3_1_pro_is_complex_at_max_standard_at_high_and_light_at_low_where_kimi_k3_stays_complex"
+runs = ["tiers-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/profile.rs"
+find = '''                "kimi-k3.1-pro" => match effort {'''
+replace = '''                "kimi-k3.1-pro-never" => match effort {'''
+
+[[plant]]
+name = "catalog tiers: Kimi K3.1 Pro is complex at every level, taken for Kimi K3"
+meant = "kimi_k3_1_pro_is_complex_at_max_standard_at_high_and_light_at_low_where_kimi_k3_stays_complex"
+runs = ["tiers-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/profile.rs"
+find = '''        let tier = if known && profile.model_key.ends_with("kimi-k3") {'''
+replace = '''        let tier = if known && profile.model_key.contains("kimi-k3") {'''
+
+[[plant]]
+name = "catalog tiers: Fable 5 and Opus 5 on Devin take no ladder of their own"
+meant = "devin_s_models_take_the_tiers_gabriel_decided"
+runs = ["tiers-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/profile.rs"
+find = '''                "claude-sonnet-5.5" | "claude-fable-5" | "claude-opus-5" => match effort {'''
+replace = '''                "claude-sonnet-5.5" => match effort {'''
+
+# --- Devin's models ---
+
+[[plant]]
+name = "catalog tiers: a level Devin lists is no preset"
+meant = "every_family_devin_lists_is_a_preset_at_each_of_its_levels_from_low_to_max_or_by_its_plain_id"
+runs = ["tiers-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/data/presets.json"
+find = '''      "label": "Devin Claude Opus 5 MAX",
+      "description": "Complex debugging, architecture and detailed review.",
+      "kind": "devin",
+      "model": "claude-opus-5",
+      "effort": "max"'''
+replace = '''      "label": "Devin Claude Opus 5 MAX",
+      "description": "Complex debugging, architecture and detailed review.",
+      "kind": "devin",
+      "model": "claude-opus-5"'''
+
+[[plant]]
+name = "catalog tiers: Devin's dashed versions keep their own keys"
+meant = "offers_devin_s_models_as_presets_each_on_its_twin_s_tier"
+runs = ["tiers-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/profile.rs"
+find = '''    if let Some(dotted) = devin_version_dotted(&key) {'''
+replace = '''    if let Some(dotted) = devin_version_dotted(&key).filter(|_| false) {'''
+
+# --- the box that keeps Claude and OpenAI models to their own harnesses ---
+
+[[plant]]
+name = "catalog tiers: Devin's Claude and GPT agents stay in the list with the box checked"
+meant = "on_devin_the_box_hides_every_claude_and_openai_agent_and_nothing_else"
+runs = ["tiers-preferences", "tiers-agents-checkbox"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/preferences.rs"
+find = '''const RELAYED: [&str; 3] = ["pi", "opencode", "devin"];'''
+replace = '''const RELAYED: [&str; 2] = ["pi", "opencode"];'''
+
+# --- the order of the pick lists and of the Agents page by tier ---
+
+[[plant]]
+name = "catalog tiers: a pick list orders a harness's agents by name, not effort"
+meant = "the staff's pick list orders a tier's agents by harness, then by effort from max down to none, then by name"
+runs = ["tiers-page-pickers"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''  rank(EFFORT_ORDER, a.effort) - rank(EFFORT_ORDER, b.effort) ||
+'''
+replace = ""
+
+[[plant]]
+name = "catalog tiers: the chief's pick list groups by harness again"
+meant = "the chief's pick list groups as the staff's does, by tier, then harness and effort, in New project and Switch chief"
+runs = ["tiers-page-pickers"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''  const groups = tierGroups(runsHere, (agent) => {'''
+replace = '''  const groups = tierGroups(runsHere.map((agent) => ({ ...agent, profile: { workTier: agent.harness } })), (agent) => {'''
+
+[[plant]]
+name = "catalog tiers: the Agents page grouped by tier orders its rows by model"
+meant = "grouped by work tier, a tier lists its agents as the pickers offer them: by harness, then effort from max down, then name"
+runs = ["tiers-agents-page"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/pages/agents.html"
+find = '''    group.rows.sort(by === 'tier' ? compareInTier : compareAgents);'''
+replace = '''    group.rows.sort(compareAgents);'''
+
+# --- Khnum, which left the catalog ---
+
+[[plant]]
+name = "catalog tiers: the catalog forgets why Khnum went"
+meant = "offers_devin_s_swe_1_6_by_name_and_no_agent_on_devin_s_own_setting"
+runs = ["tiers-catalog-lib"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/lib.rs"
+find = """        catalog.retired = data.retired;"""
+replace = """        let _ = data.retired;"""
+
+[[plant]]
+name = "catalog tiers: a task taken from a member whose agent left the catalog says only that it is no longer among your agents"
+meant = "a_task_khnum_held_before_the_release_goes_back_to_the_board_saying_it_left_the_catalog"
+runs = ["tiers-engine-retired"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = """            Some(why) => format!("{agent} left the catalog: {why}"),"""
+replace = """            Some(_) => format!("{agent} is no longer among your agents"),"""
+
+[[plant]]
+name = "catalog tiers: a chief whose agent left the catalog is told to add it back"
+meant = "a_chief_on_an_agent_the_catalog_dropped_stays_closed_and_the_human_is_told_to_switch_it"
+runs = ["tiers-engine-retired"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_switch.rs"
+find = """                body: match self.seams.roster.retired(agent) {"""
+replace = """                body: match None::<String> {"""
+
+[[plant]]
+name = "catalog tiers: a member whose agent left the catalog is told to define it"
+meant = "a_member_on_an_agent_the_catalog_dropped_takes_no_work_and_the_chief_hears_it_left_and_to_pick_another"
+runs = ["tiers-engine-retired"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = """                return Some(match self.seams.roster.retired(agent) {"""
+replace = """                return Some(match None::<String> {"""
+
+[[plant]]
+name = "catalog tiers: the board says nothing of why an agent left the catalog"
+meant = "a_project_staffed_with_khnum_after_the_release_that_dropped_it_says_why_on_its_lanes"
+runs = ["tiers-daemon-board"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/board.rs"
+find = """            .filter(|_| missing)"""
+replace = """            .filter(|_| false)"""
+
+[[plant]]
+name = "catalog tiers: the page tells the human to define again an agent that left the catalog"
+meant = "a project staffed with Khnum after the release that dropped it says it left the catalog, and offers other agents"
+runs = ["tiers-page-khnum"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = """    if (lane.agentRetired) {"""
+replace = """    if (lane.agentRetired && false) {"""
+
+[[plant]]
+name = "catalog tiers: Switch chief says nothing of a chief whose agent is gone"
+meant = "keeps the chief's card in the dock while its window is down: its agent gone, it says so, and Switch chief is the way on"
+runs = ["tiers-page-khnum"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = """    gone.hidden = gone.textContent === ''"""
+replace = """    gone.hidden = true"""

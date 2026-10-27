@@ -11,11 +11,11 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::Value;
 
-use super::forget::Forget;
 use super::install::{environment, var, write_fake_install, write_roster};
 use super::route::Shared;
 use super::stranger::Stranger;
 use super::{Config, Rig};
+use crate::bundle;
 use crate::daemon::Daemon;
 use crate::daemon_log::{self, errors_with_cause, lines_of, StartLine};
 use crate::outcome::Verdict;
@@ -49,6 +49,12 @@ impl Rig {
                 .to_owned()
         });
         let turn = serial::turn();
+        // A Claude config folder of the case's own is made (or refused) before
+        // anything else is: nothing is spent on a login that cannot be used.
+        let claude_config = match &config.claude_config {
+            Some(claude_config) => Some((claude_config.folder()?, Arc::clone(claude_config))),
+            None => None,
+        };
         // A home of its own, which goes if the rig never starts; or the one it is
         // to resume on. In the machine's temp folder, whatever the rig is built for: the
         // real harnesses' windows open in no git repository there, where a home under the
@@ -76,7 +82,12 @@ impl Rig {
         let workspace = root.join("workspace");
         files::make_dir(&workspace)?;
         let fake_bin = write_fake_install(&root, &config)?;
-        let env = environment(&root, &fake_bin, &config);
+        let env = environment(
+            &root,
+            &fake_bin,
+            &config,
+            claude_config.as_ref().map(|(folder, _)| folder.as_path()),
+        );
         // A restart over the same home keeps its roster, as the app's does: the
         // agents a case wrote are still the ones its chief and staff run on.
         if config.existing_root.is_none() {
@@ -85,8 +96,17 @@ impl Rig {
 
         // Beside the pane host, before any window: none of theirs.
         let stranger = Stranger::start()?;
-        let (mut daemon, start_line) = start_daemon(&config, &env)?;
-        let (mut host, host_output) = start_host(&env)?;
+        let copies = bundle::folder(&root);
+        let cf = bundle::copy_of(
+            match &config.cf {
+                Some(program) => program,
+                None => cf::binary()?,
+            },
+            &copies,
+        )?;
+        let pane_host = bundle::copy_of(cf::pane_host()?, &copies)?;
+        let (mut daemon, start_line) = start_daemon(&config, &cf, &env)?;
+        let (mut host, host_output) = start_host(&pane_host, &env)?;
         let shared = route(&mut daemon, &mut host, host_output)?;
 
         // The rig owns its home from here on: it goes with it.
@@ -101,8 +121,10 @@ impl Rig {
             shared,
             daemon,
             host,
+            cf,
             stranger,
-            forget: config.stand_in_records.map(Forget::new),
+            claude_config: claude_config.map(|(_, claude_config)| claude_config),
+            claude_config_finished: false,
             masker: config.masker,
             reports: config.reports,
             case,
@@ -111,6 +133,7 @@ impl Rig {
             closed: false,
             close_failed: false,
             close_expected_to_fail: AtomicBool::new(false),
+            dropped_on_purpose: false,
             _turn: turn,
         })
     }
@@ -118,14 +141,20 @@ impl Rig {
 
 /// The daemon under test, started and held to being the native one: its handle
 /// line read, and its start line in its log, which says what runtime it is.
-fn start_daemon(config: &Config, env: &[(String, String)]) -> Result<(Daemon, StartLine)> {
+fn start_daemon(
+    config: &Config,
+    cf: &Path,
+    env: &[(String, String)],
+) -> Result<(Daemon, StartLine)> {
+    let mut env = env.to_vec();
+    for (name, value) in &config.daemon_vars {
+        env.retain(|(held, _)| held != name);
+        env.push((name.clone(), value.clone()));
+    }
+    let env = env.as_slice();
     let mut daemon = match &config.daemon {
         Some(program) => Daemon::run(program, [] as [&str; 0], env.iter().cloned())?,
-        None => Daemon::run(
-            cf::binary()?,
-            ["ui", "--json", "--no-open"],
-            env.iter().cloned(),
-        )?,
+        None => Daemon::run(cf, ["ui", "--json", "--no-open"], env.iter().cloned())?,
     };
     let log = Path::new(var(env, "CONSENSFLOW_HOME")).join("daemon.log");
     let handle = daemon.handle(READY).map_err(|failed| {
@@ -154,11 +183,20 @@ fn start_daemon(config: &Config, env: &[(String, String)]) -> Result<(Daemon, St
     Ok((daemon, start_line))
 }
 
+/// The variable that has the pane host take the human's keys (`pane.typed`), as
+/// the app's page types them: the rig's ([`Rig::types`]), never the bundled host's
+/// (`cf_panes::headless::HUMAN_KEYS`).
+const HUMAN_KEYS: &str = "CONSENSFLOW_TEST_HUMAN_KEYS";
+
 /// The pane host, started: its handle line read, and what it goes on to say
 /// kept for the routers.
-fn start_host(env: &[(String, String)]) -> Result<(Spawned, BufReader<ChildStdout>)> {
-    let mut host = Run::new(cf::pane_host()?)
+fn start_host(
+    pane_host: &Path,
+    env: &[(String, String)],
+) -> Result<(Spawned, BufReader<ChildStdout>)> {
+    let mut host = Run::new(pane_host)
         .vars(env.iter().map(|(name, value)| (name, value)))
+        .var(HUMAN_KEYS, "1")
         .finding_programs()
         .cwd(checkout::root())
         .spawn()?;
@@ -209,10 +247,11 @@ fn route(
     };
     let shared = Arc::new(Shared::default());
     {
-        let (shared, to_host) = (Arc::clone(&shared), to_host.clone());
+        let (shared, to_host, to_daemon) =
+            (Arc::clone(&shared), to_host.clone(), to_daemon.clone());
         daemon.read_each(
             move |line| {
-                shared.route_daemon(&line, &to_host);
+                shared.route_daemon(&line, &to_host, &to_daemon);
                 true
             },
             || {},

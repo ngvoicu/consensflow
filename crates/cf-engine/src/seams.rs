@@ -13,7 +13,7 @@ use cf_base::refusal::Refusal;
 use cf_harness::contract::{Adapter, Agent, LaunchId, Pane, Records, Work};
 use cf_harness::seams::Time;
 use cf_ledger::{Ledger, LedgerError, ParticipantView, ProjectView};
-use cf_proto::panes::Servers;
+use cf_proto::panes::{Background, Servers};
 use cf_proto::specs::AppSpecs;
 use cf_proto::trace::TraceLine;
 
@@ -115,6 +115,14 @@ impl SavedAgent {
 pub trait Roster {
     fn agent(&self, name: &str) -> Result<Option<SavedAgent>, Refusal>;
 
+    /// Why the ready-made agent `name` went from the catalog (its harness no
+    /// longer offers its model), when it is one that did: a member or a chief
+    /// still on it is told so, and to pick another agent rather than define
+    /// it again. None for any other name, and where nothing says.
+    fn retired(&self, _name: &str) -> Option<String> {
+        None
+    }
+
     /// What the human says of specs for every project, as the agents file keeps
     /// it (the app's setting a project may say otherwise of): whether they are
     /// on, and the folder and the variant a project uses when it names none.
@@ -145,6 +153,39 @@ pub trait PaneEnv {
     fn env(&self, participant: &ParticipantView, project: &ProjectView) -> Vec<(String, String)>;
 }
 
+/// What ConsensFlow's own macOS permissions are: whether it may control the
+/// computer (Accessibility) and see the screen (Screen & System Audio
+/// Recording), which a program in its panes is given as its own (a pane's
+/// Claude Code is attributed to ConsensFlow, as a terminal's is to the terminal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScreenPermissions {
+    pub accessibility: bool,
+    pub screen_recording: bool,
+}
+
+impl ScreenPermissions {
+    /// Whether both are given.
+    pub fn all(self) -> bool {
+        self.accessibility && self.screen_recording
+    }
+}
+
+/// What the machine says of a harness's computer use for the project's
+/// windows: ConsensFlow's permissions, whether Claude Code's computer use is on
+/// for a folder, and whether Codex's is set up (each read from the harness's own
+/// configuration, never written).
+pub trait ComputerUse {
+    /// ConsensFlow's permissions; none on a system where no harness's computer
+    /// use runs (Claude Code has none outside macOS).
+    fn permissions(&self) -> Option<ScreenPermissions>;
+    /// Whether Claude Code's computer use is on for a window opened in
+    /// `directory`, and the folder it is kept under.
+    fn claude(&self, directory: &str) -> cf_harness::claude::computer_use::ComputerUse;
+    /// Whether Codex's computer use is set up on the machine (the ChatGPT app's
+    /// plugin, for every folder; its grants are its own app's).
+    fn codex(&self) -> cf_harness::codex::computer_use::ComputerUse;
+}
+
 /// The adapter for a harness's windows, by the word the ledger names the
 /// harness with: none for one this build opens no windows of.
 pub trait Adapters {
@@ -165,6 +206,10 @@ pub struct Limits {
     /// (`Launch::first_message_ms`): what its window waits for before that
     /// message can show ends by it.
     pub launch_ms: i64,
+    /// For the pane host to answer a window's open (`pane.open`'s deadline on the
+    /// daemon's bridge): an open it has not answered by then may still start its
+    /// program, and the window is ended (`windows`).
+    pub open_ms: i64,
     /// Attempts at a delivery before it fails.
     pub max_attempts: u32,
 }
@@ -175,6 +220,7 @@ impl Default for Limits {
         Self {
             arrival_ms: 60_000,
             launch_ms: 180_000,
+            open_ms: 60_000,
             max_attempts: 3,
         }
     }
@@ -191,6 +237,11 @@ pub const LAUNCH_MS_VARIABLE: &str = "CONSENSFLOW_LAUNCH_TIMEOUT_MS";
 /// it, each such case takes minutes; nothing in a person's environment sets it.
 pub const ARRIVAL_MS_VARIABLE: &str = "CONSENSFLOW_ARRIVAL_TIMEOUT_MS";
 
+/// The variable that sets how long the pane host has to answer a window's open, in
+/// milliseconds. A test of an open the host answers late would otherwise hold it a
+/// minute in each case; nothing in a person's environment sets it.
+pub const OPEN_MS_VARIABLE: &str = "CONSENSFLOW_OPEN_DEADLINE_MS";
+
 impl Limits {
     /// The daemon's limits, with the launch's wait and the arrival's what `env`
     /// says they are ([`LAUNCH_MS_VARIABLE`], [`ARRIVAL_MS_VARIABLE`]) where it
@@ -205,6 +256,7 @@ impl Limits {
         Self {
             arrival_ms: named(ARRIVAL_MS_VARIABLE).unwrap_or(default.arrival_ms),
             launch_ms: named(LAUNCH_MS_VARIABLE).unwrap_or(default.launch_ms),
+            open_ms: named(OPEN_MS_VARIABLE).unwrap_or(default.open_ms),
             ..default
         }
     }
@@ -227,6 +279,7 @@ impl Limits {
                 default.launch_ms,
                 LAUNCH_MS_VARIABLE,
             ),
+            ("open wait", self.open_ms, default.open_ms, OPEN_MS_VARIABLE),
         ]
         .into_iter()
         .filter(|(_, now, was, _)| now != was)
@@ -266,6 +319,11 @@ pub trait BackgroundWork {
     /// The rests `keep` names, which monitors that run are left, are kept however many
     /// come after them.
     fn rest<'a>(&'a self, pane: &'a Pane, keep: &'a [u64]) -> Work<'a, Option<u64>>;
+
+    /// What `pane`'s tree runs now that its turn left running, and what may be the window's
+    /// outside its tree (`pane.background`), for a pause to name: none where the host gave
+    /// no answer.
+    fn left_running<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Background>>;
 }
 
 /// What a look at the commands of a window's harness found (`pane.commands`).
@@ -307,12 +365,39 @@ pub struct Seams {
     pub log: Rc<dyn Log>,
     pub launch_files: Rc<dyn LaunchFiles>,
     pub spawn: Rc<dyn Spawn>,
+    pub computer_use: Rc<dyn ComputerUse>,
     pub limits: Limits,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_open_wait_is_a_minute_unless_the_environment_names_a_number_of_milliseconds() {
+        // The variable's name is written out, so that a rename shows here.
+        let wait = |value: &str| {
+            Limits::of(&Env::from_vars([("CONSENSFLOW_OPEN_DEADLINE_MS", value)])).open_ms
+        };
+        assert_eq!(OPEN_MS_VARIABLE, "CONSENSFLOW_OPEN_DEADLINE_MS");
+        assert_eq!(wait("3000"), 3_000);
+        for refused in ["", "0", "-5", "soon", "1.5", "2s"] {
+            assert_eq!(wait(refused), 60_000, "{refused:?}");
+        }
+        let named = Limits::of(&Env::from_vars([(OPEN_MS_VARIABLE, "3000")]));
+        assert_eq!(
+            named,
+            Limits {
+                open_ms: 3_000,
+                ..Limits::default()
+            },
+            "the rest is as it was"
+        );
+        assert_eq!(
+            named.cut_by_the_environment().as_deref(),
+            Some("limits set by the environment: open wait 3000 ms, not 60000 (CONSENSFLOW_OPEN_DEADLINE_MS)")
+        );
+    }
 
     #[test]
     fn the_launch_wait_is_three_minutes_unless_the_environment_names_a_number_of_milliseconds() {
@@ -351,6 +436,7 @@ mod tests {
             Limits {
                 arrival_ms: 15_000,
                 launch_ms: 1_500,
+                open_ms: 60_000,
                 max_attempts: 3,
             },
             "each variable sets its own wait and nothing else"

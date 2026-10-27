@@ -37,16 +37,19 @@ use cf_ledger::{
 use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
-use crate::background::quote;
+use crate::background::leaving;
 use crate::chief_switch::SwitchTo;
+use crate::computer_use::ComputerUseState;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
-use crate::scheduler::SchedulerState;
+use crate::scheduler::{News, SchedulerState};
 use crate::seams::{EngineError, Seams};
 use crate::shown::Shown;
 use crate::stalls::StallsState;
+use crate::steps::{Step, StepsState};
 use crate::trust::{self, TrustState, Trusting};
+use crate::turn_end::{last_paste, lost_in_turn};
 use crate::windows::{Activity, ActivityState, WindowsState};
 
 /// When a Switch chief goes: now, or once the chief's turn ends.
@@ -87,10 +90,12 @@ pub struct Dispatcher {
     /// The records of participants forgotten while their window was still
     /// open, until it exits.
     leaving: RefCell<Vec<Rc<Record>>>,
-    /// The last exit of each participant forgotten since, and whether the host proved its
-    /// program gone: a session the human deleted, brought back for a follow-up, opens
-    /// on its conversation by that word (`ownership`), in a record of its own.
-    left_exits: RefCell<HashMap<i64, (Pane, Option<bool>)>>,
+    /// The pane of the last window of each participant forgotten since, and the
+    /// conversation it wrote to: the host's word on it, which may come after, is kept on
+    /// that conversation all the same ([`Dispatcher::heard_exit`]), and a session the
+    /// human deleted, brought back for a follow-up, opens on that conversation by it
+    /// (`ownership`), in a record of its own.
+    left_exits: RefCell<HashMap<i64, (Pane, Option<i64>)>>,
     listeners: RefCell<Vec<Rc<dyn Fn()>>>,
     transcript_listeners: RefCell<Vec<Rc<dyn Fn()>>>,
     /// What the windows keep across records (`windows`).
@@ -105,6 +110,10 @@ pub struct Dispatcher {
     pub(crate) resumes: ResumeState,
     /// What the questions of windows about trusting their folder were said of (`trust`).
     pub(crate) trust: TrustState,
+    /// The missing permissions each project's notes spoke of already (`computer_use`).
+    pub(crate) computer_use: ComputerUseState,
+    /// What the passes keep of the steps they went on without (`steps`).
+    pub(crate) steps: StepsState,
 }
 
 impl Dispatcher {
@@ -122,6 +131,8 @@ impl Dispatcher {
             closings: Closings::default(),
             resumes: ResumeState::default(),
             trust: TrustState::default(),
+            computer_use: ComputerUseState::default(),
+            steps: StepsState::default(),
         })
     }
 
@@ -180,6 +191,13 @@ impl Dispatcher {
     pub fn pane(&self, participant: i64) -> Option<Pane> {
         self.record(participant)
             .and_then(|record| record.window.borrow().pane.clone())
+    }
+
+    /// Whether the participant has a window whose open went unanswered and which the
+    /// host has not said it ended ([`crate::windows::WindowPart::abandoned`]).
+    fn abandoned(&self, participant: i64) -> bool {
+        self.record(participant)
+            .is_some_and(|record| record.window.borrow().abandoned.is_some())
     }
 
     /// Refuses a harness ConsensFlow has no adapter for.
@@ -417,6 +435,7 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .mark_back(member.id, "by @human")?;
+        self.back_on_its_account(project, &member, &News::Human)?;
         self.changed();
         Ok(back)
     }
@@ -616,6 +635,7 @@ impl Dispatcher {
     /// tasks it gives out is read again, so their sessions open this pass.
     /// It answers at the first step that fails, the others going on. The
     /// tasks whose windows are gone are told to their requesters together.
+    /// It waits for its steps [`STEP_WAIT`] at most (`steps`).
     pub async fn pass(self: &Rc<Self>) -> Result<(), EngineError> {
         let _burst = self.stalls.begin_burst();
         self.resume_held()?;
@@ -628,7 +648,7 @@ impl Dispatcher {
                 projects.push(project);
             }
         }
-        let mut steps: Vec<Begun<Result<(), EngineError>>> = Vec::new();
+        let mut steps = Vec::new();
         for project in projects {
             // One with no window and nothing on its way or in its hands is not stepped.
             let working = self.seams.ledger.borrow().with_work(project.id)?;
@@ -639,7 +659,8 @@ impl Dispatcher {
                 }
                 let idle = participant.member_id.is_some()
                     && !working.contains(&participant.id)
-                    && self.pane(participant.id).is_none();
+                    && self.pane(participant.id).is_none()
+                    && !self.abandoned(participant.id);
                 if idle {
                     continue;
                 }
@@ -648,11 +669,16 @@ impl Dispatcher {
                 // Boxed where it is made: a step holds every wait below it, and
                 // moved by value through the hold it filled the stack.
                 let step = Box::pin(async move { this.step(&at, &who).await });
-                steps.extend(self.try_exclusive(&record, step).await);
+                if let Some(begun) = self.try_exclusive(&record, step).await {
+                    steps.push(Step {
+                        handle: participant.handle.clone(),
+                        record,
+                        begun,
+                    });
+                }
             }
         }
-        all(steps).await?;
-        Ok(())
+        self.wait_for_steps(steps).await
     }
 
     /// A window ended (`pane.exit` from the pane host), told where the
@@ -708,18 +734,21 @@ impl Dispatcher {
         };
         let Some(record) = record else {
             // The host's word on a window the engine's own close settled already.
-            self.heard_exit(pane, &shown);
-            return Ok(());
+            return self.heard_exit(pane, &shown);
         };
-        // Whether its program is gone, for the next launch on its conversation
-        // (`Launch::previous_gone`).
-        record.window.borrow_mut().last_exit = Some((pane.clone(), shown.gone()));
+        let conversation = record.window.borrow().conversation;
+        record.window.borrow_mut().last_exit = Some((pane.clone(), conversation));
         // Still opening: its launch takes the exit once it has the window.
         if !ended(record.window.borrow().pane.as_ref()) {
             if let Some(opening) = record.window.borrow_mut().opening.as_mut() {
                 opening.exited = Some(shown);
             }
             return Ok(());
+        }
+        // Whether its program is gone, kept on the conversation it wrote to for the next
+        // launch on it, after a restart too (`ownership`, `Launch::previous_gone`).
+        if let (Some(gone), Some(conversation)) = (shown.gone(), conversation) {
+            self.keep_proof(record.id, conversation, gone, Some(&record))?;
         }
         let delivering = record.delivery.borrow_mut().delivering.take();
         // What a launch that was to say the role first still owed the window
@@ -728,6 +757,7 @@ impl Dispatcher {
         record.delivery.borrow_mut().prelude = None;
         // The task the window was given, whose requester hears what its close ended.
         let owner = record.window.borrow().owner;
+        let said_yes = trust::yes_at_exit(&record, &shown);
         self.closed(&record);
         // No door survives its window: what one claimed and none acknowledged is the ledger's again.
         self.seams
@@ -759,6 +789,11 @@ impl Dispatcher {
         else {
             return Ok(());
         };
+        // The human's yes in a window that was gone before the watch looked again is still
+        // theirs for the project's other windows that ask (`trust::yes_at_exit`).
+        if let Some((folder, sure)) = said_yes {
+            self.trust.said_yes(project.id, &folder, sure);
+        }
         // A launch the exit ended says what its window showed.
         let at_launch = owed.is_some()
             || delivering
@@ -778,11 +813,19 @@ impl Dispatcher {
             None => project,
             Some(delivering) => {
                 let launches = record.window.borrow().launches;
+                // A first message the window was to be handed once up, which its record
+                // does not show (`settle_gone`), owed it still or pasted a moment before,
+                // reached no conversation when the window closed with its project: it
+                // waits for the Resume, as one turned away at its hand-over does
+                // (`hand_first`). One whose window ended by itself in an open project
+                // fails, as a launch that did not come up does.
+                let closed_with_project = project.state != "open";
                 // A paste its harness's record shows it took is confirmed (`in_flight`).
                 let (this, told) = (Rc::clone(self), because.clone());
                 self.settle_gone(delivering, move |delivering| {
+                    let once_up = delivering.owed.is_some() || delivering.late;
                     // A chief's first message (a handoff, most often) waits for its next window.
-                    if delivering.chief {
+                    if delivering.chief || (once_up && closed_with_project) {
                         this.give_back(delivering.message, &told)
                     } else {
                         let retry = !delivering.launch;
@@ -813,13 +856,22 @@ impl Dispatcher {
         };
         let launch_owed = owed.is_some();
         if let Some(prelude) = owed {
-            self.settle_exited_launch(&record, &project, &participant, &prelude, &because)?;
+            let own = record.window.borrow().own_exit_of(pane).is_some();
+            self.settle_exited_launch(&record, &project, &participant, &prelude, &because, own)?;
         }
         if participant.role == "chief" {
+            // What the chief's window left running is the human's to know: no task's giver
+            // is there to tell.
+            self.tell_human_left_running(
+                &project,
+                &participant,
+                shown.left_running(),
+                shown.possibly_left(),
+            )?;
             // The chief's own exit closes the project as Close does, but for the
             // window of a launch that was to say the role: it did not come up, and
             // is tried again (`settle_exited_launch`).
-            let own = record.window.borrow().own_exit;
+            let own = record.window.borrow().own_exit_of(pane).is_some();
             if project.state == "open" && !own && !launch_owed {
                 self.seams
                     .ledger
@@ -862,46 +914,63 @@ impl Dispatcher {
             let left = shown.left_running();
             if let Some(thread) = task {
                 // The pause note says how the window ended and what it showed last, as
-                // far as the host said, and what the close ended, where there was any:
-                // a harness that crashed under its task says why on its screen. A window
-                // the engine closed says why it did, where it was not the human's Close,
-                // and nothing of its end, which was the kill's (the host's exit can come
-                // while the kill is answered).
-                let besides = if left.is_empty() {
-                    String::new()
-                } else {
-                    format!(" with background work still running: {}", quote(left))
-                };
+                // far as the host said, and what the close ended, where there was any, in
+                // the words of every close note: a harness that crashed under its task says
+                // why on its screen. A window the engine closed says why it did, where it
+                // was not the human's Close, and nothing of its end, which was the kill's
+                // (the host's exit can come while the kill is answered).
+                let besides = leaving(left, shown.possibly_left());
                 // A window the engine closed itself: in a suspended project it closed
                 // with the project (the human's Close, or the chief's window ending),
                 // and the ledger marks the pause for the human's Resume to end. One
                 // that closed by itself stays paused.
                 let (own, with) = {
                     let window = record.window.borrow();
-                    (window.own_exit, window.closed_with.clone())
+                    (
+                        window.own_exit_of(pane).cloned(),
+                        window.closed_with.clone(),
+                    )
                 };
                 let closed = match with {
                     Some(with) => format!("@{}'s window closed {with}", participant.handle),
                     None => format!("@{}'s window closed", participant.handle),
                 };
-                let because = if own {
+                let because = if own.is_some() {
                     let outlived = shown.outlived().unwrap_or_default();
                     format!("{closed}{outlived}{besides}")
                 } else {
                     shown.after_with(&closed, &besides)
                 };
-                self.stall(&project, &thread.task, &because, own)?;
-                // Told while the engine's kill waits for its answer, which decides
-                // whether this exit was the kill's (`close_own`).
-                if let Some(killing) = record.window.borrow_mut().killing.as_mut() {
-                    killing.paused = Some((project.id, thread.task.number));
+                // The words told to the window that wait for it still wait for the resume,
+                // for why a give-up closed it where one did.
+                let is_own = own.is_some();
+                let (why, except) = match own {
+                    Some(own) => (own.why.unwrap_or_else(|| because.clone()), own.settling),
+                    None => (because.clone(), None),
+                };
+                let stop = self.stall(&project, &thread.task, &because, &why, except, is_own)?;
+                // Told while the engine's kill of this window waits for its answer, which
+                // decides whether this exit was the kill's (`close_own`): the pause of an
+                // own exit, by its stop, which a refusal takes back only while it is that
+                // pause (Calliope's P3-2 of T-510). An earlier window's kill, answered late,
+                // is no answer of this one's (T-509), and a pause made in an open project
+                // holds no mark to take back.
+                if let Some((stop, killing)) = stop.zip(
+                    record
+                        .window
+                        .borrow_mut()
+                        .killing
+                        .iter_mut()
+                        .find(|killing| killing.pane == *pane),
+                ) {
+                    killing.paused = Some((project.id, thread.task.number, stop));
                 }
             } else {
                 let given = match owner {
                     Some(number) => self.seams.ledger.borrow().task(project.id, number)?,
                     None => None,
                 };
-                self.tell_left_running(&project, given.as_ref(), left)?;
+                self.tell_left_running(&project, given.as_ref(), left, shown.possibly_left())?;
             }
         }
         self.changed();
@@ -909,26 +978,73 @@ impl Dispatcher {
     }
 
     /// What the host said of the end of `pane`, where its window was settled
-    /// before (the engine's own close, which knows nothing of how it ended): its
-    /// record learns whether the program is gone, where the host said.
-    fn heard_exit(&self, pane: &Pane, shown: &Shown) {
+    /// before (the engine's own close, which knows nothing of how it ended): the
+    /// conversation that window wrote to keeps whether its program is gone, where
+    /// the host said ([`Dispatcher::keep_proof`]).
+    fn heard_exit(&self, pane: &Pane, shown: &Shown) -> Result<(), EngineError> {
         let Some(gone) = shown.gone() else {
-            return;
+            return Ok(());
         };
-        for (last, said) in self.left_exits.borrow_mut().values_mut() {
-            if last == pane {
-                *said = Some(gone);
+        let mut whose: Vec<(i64, Option<i64>)> = self
+            .left_exits
+            .borrow()
+            .iter()
+            .filter(|(_, (last, _))| last == pane)
+            .map(|(id, (_, conversation))| (*id, *conversation))
+            .collect();
+        whose.extend(self.records.borrow().values().filter_map(|record| {
+            let window = record.window.borrow();
+            let (last, conversation) = window.last_exit.as_ref()?;
+            (last == pane).then_some((record.id, *conversation))
+        }));
+        for (id, conversation) in whose {
+            if let Some(conversation) = conversation {
+                self.keep_proof(id, conversation, gone, None)?;
             }
         }
-        let records = self.records.borrow();
-        for record in records.values() {
-            let mut window = record.window.borrow_mut();
-            if let Some((last, said)) = window.last_exit.as_mut() {
-                if last == pane {
-                    *said = Some(gone);
-                }
-            }
+        Ok(())
+    }
+
+    /// Whether the program of a window of participant `id` that ended is gone, kept on
+    /// `conversation`, the one it wrote to. Not where another window of that
+    /// participant has opened, or is opening, on that conversation since (`ended` is the
+    /// record of the one that ended, which still holds its pane): that window's program
+    /// may write to it now, and its own exit says whether it is gone (Calliope's P3-1 on
+    /// 0181cd9a). A window on another conversation writes nothing to this one (her P3-1 on
+    /// 46664f52: a session brought back on a new conversation lost its own window's proof
+    /// while the deleted session's window still waited for its kill).
+    fn keep_proof(
+        &self,
+        id: i64,
+        conversation: i64,
+        gone: bool,
+        ended: Option<&Rc<Record>>,
+    ) -> Result<(), EngineError> {
+        let windowed = {
+            let records = self.records.borrow();
+            let leaving = self.leaving.borrow();
+            records
+                .values()
+                .chain(leaving.iter())
+                .filter(|record| record.id == id)
+                .filter(|record| ended.is_none_or(|ended| !Rc::ptr_eq(record, ended)))
+                .any(|record| {
+                    let window = record.window.borrow();
+                    let on = Some(conversation);
+                    (window.pane.is_some() && window.conversation == on)
+                        || window
+                            .opening
+                            .as_ref()
+                            .is_some_and(|opening| opening.conversation == on)
+                })
+        };
+        if !windowed {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .set_program_gone(conversation, gone)?;
         }
+        Ok(())
     }
 
     /// One participant's step.
@@ -940,6 +1056,11 @@ impl Dispatcher {
         let record = self.record_of(participant.id);
         if record.window.borrow().pane.is_some() {
             return self.step_open(project, participant, &record).await;
+        }
+        // A window whose open went unanswered is asked to end again at each step until
+        // the host says it has: a member with nothing more for it is still stepped.
+        if !self.end_abandoned(&record).await? {
+            return Ok(());
         }
         if project.state != "open" {
             return Ok(());
@@ -1001,7 +1122,7 @@ impl Dispatcher {
             .active_task(participant.id, false)?;
         if let Some(thread) = task {
             let because = format!("@{}'s window is gone", participant.handle);
-            self.stall(project, &thread.task, &because, false)?;
+            self.stall(project, &thread.task, &because, &because, None, false)?;
             self.changed();
         }
         Ok(())
@@ -1013,19 +1134,23 @@ impl Dispatcher {
         participant: &ParticipantView,
         record: &Rc<Record>,
     ) -> Result<(), EngineError> {
+        // A window on its way out is not looked at; one whose exit is overdue is settled.
         if record.window.borrow().retiring {
-            return Ok(());
+            return self.exit_overdue(record).await;
         }
         // A participant forgotten while the step waits is done with.
         let observed = match returning(self.observe(participant, record)).await {
             Ok(observed) => observed,
             Err(reason) => {
                 if !self.forgotten(record) {
+                    // A look that failed says nothing of what is on its way in (`arrival`).
+                    self.unknown(record, "a look at it failed");
                     self.set_activity(record, Activity::because(ActivityState::Unknown, reason))?;
                 }
                 return Ok(());
             }
         };
+        record.delivery.borrow_mut().lost = observed.lost().len();
         // Quota belongs to the member: a session that runs out takes its member out.
         let owner = self.member_of(project, participant);
         // A window with nothing in its record may still be drawing its screen.
@@ -1046,8 +1171,11 @@ impl Dispatcher {
         // An out member's window says so, and nothing else, until the reset.
         if !self.is_out(&owner) {
             // The reason is given once the question is on its screen.
-            let activity = if record.window.borrow().trust == Trusting::Asked {
+            let trusting = record.window.borrow().trust;
+            let activity = if trusting == Trusting::Asked {
                 Activity::because(ActivityState::Starting, trust::HELD)
+            } else if trusting == Trusting::AskedServers {
+                Activity::because(ActivityState::Starting, trust::HELD_SERVERS)
             } else if starting {
                 Activity::of(ActivityState::Starting)
             } else if let Some(waiting) = &observed.waiting {
@@ -1055,10 +1183,23 @@ impl Dispatcher {
                     state: ActivityState::Waiting,
                     reason: waiting.reason.clone(),
                 }
-            } else if observed.settled {
-                Activity::of(ActivityState::Idle)
             } else {
-                Activity::of(ActivityState::Working)
+                let state = if observed.settled {
+                    ActivityState::Idle
+                } else {
+                    ActivityState::Working
+                };
+                // A line of the record lost in the turn is said while the turn is the last.
+                match lost_in_turn(record, &observed, last_paste(&observed)) {
+                    Some(lost) => Activity::because(
+                        state,
+                        format!(
+                            "a line of @{}'s record was lost (record {lost})",
+                            participant.handle
+                        ),
+                    ),
+                    None => Activity::of(state),
+                }
             };
             self.set_activity(record, activity)?;
         }
@@ -1068,23 +1209,42 @@ impl Dispatcher {
             if record.delivery.borrow().delivering.is_some() {
                 self.confirm_arrival(record, &observed)?;
             }
+            // What is on its way still went into the conversation left: its rest is that
+            // record's from the next look (`arrival`).
+            let mut part = record.delivery.borrow_mut();
+            if let Some(delivering) = part.delivering.as_mut() {
+                delivering.rested_since = None;
+            }
+            part.left_at_work = None;
+            drop(part);
             return self.follow(participant, record, session);
         }
         self.record_quota(record, &owner, observed.quota.clone());
         if self.refused_here(record, &owner) {
             return self
-                .out_of_quota(project, participant, record, &owner)
+                .out_of_quota(project, participant, record, &owner, &observed)
                 .await;
         }
         let mut out = self.is_out(&owner);
+        let mut returned = None;
         // A window that got a turn through after its member was marked out says the quota is back.
         if out && self.answered_since(&owner, &observed) {
             self.seams
                 .ledger
                 .borrow_mut()
                 .mark_back(owner.id, &format!("@{} answered again", participant.handle))?;
+            returned.clone_from(&owner.out_until);
             self.changed();
             out = false;
+        }
+        // A turn that got through is its account's news: whoever else is out on it is back.
+        if !out {
+            let news = News::Turn {
+                record,
+                observed: &observed,
+                returned,
+            };
+            self.back_on_its_account(project.id, &owner, &news)?;
         }
         if out {
             return self
@@ -1103,11 +1263,17 @@ impl Dispatcher {
         if record.window.borrow().retiring {
             return Ok(());
         }
+        // A turn that ended with the window's answer ends the outage its last failure told of.
+        self.answered_again(record, &observed);
         if participant.role != "chief" {
             returning(self.settle_stop(project, participant, record, &observed, starting)).await?;
             if self.forgotten(record) {
                 return Ok(());
             }
+            // A held task's window that went on with it by itself: its task goes on.
+            self.went_on_by_itself(project, participant, &observed)?;
+            // A task the daemon resumed whose turn got through: its requester hears it goes on.
+            self.tell_it_went_on(project, participant, record, &observed)?;
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
             if self.cut_short(&observed) {
                 self.go_on(project, participant)?;
@@ -1116,11 +1282,34 @@ impl Dispatcher {
                 // left work running that wakes its agent: then the task goes on. Nothing the
                 // turn left is ended; the window closes below if it is free (`turn_end`).
                 let watching = self.watch_monitors(participant, record, &observed).await;
-                self.collect(project, participant, record, &observed, watching)?;
+                self.collect(project, participant, record, &observed, watching)
+                    .await?;
             }
             if self.close_if_free(record).await? {
                 return Ok(());
             }
+        } else if observed.failed && !self.cut_short(&observed) {
+            // A refusal for quota is the quota's to say; any other failure is the human's to hear.
+            self.tell_chief_failed(project, participant, record, &observed)
+                .await?;
+        }
+        // A launch's first message that its window is delivered once it is up goes
+        // in as soon as the window is past any question of trusting its folder, has
+        // drawn and is at rest, its project open (`hand_first`).
+        let owed = record
+            .delivery
+            .borrow()
+            .delivering
+            .as_ref()
+            .is_some_and(|delivering| delivering.owed.is_some());
+        if owed {
+            if !drawing && observed.settled && observed.waiting.is_none() && project.state == "open"
+            {
+                let (this, held) = (Rc::clone(self), Rc::clone(record));
+                self.act(record, async move { this.hand_first(&held).await })
+                    .await;
+            }
+            return Ok(());
         }
         let free = record.delivery.borrow().delivering.is_none()
             && observed.settled
@@ -1195,6 +1384,14 @@ impl Dispatcher {
             record,
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
         )?;
+        // A refusal of its own, dated before its member was marked out, holds the
+        // window's work as the first did, with no note of its own.
+        if participant.role != "chief" && self.refused_unhandled(record) {
+            self.handled(record);
+            self.hold_work(project, participant, owner, &until, None)?;
+            self.changed();
+        }
+        self.tell_what_waits(project, participant, record, owner)?;
         // The time a launch waits while its member is out is no slowness of its
         // window: the role it was to say first is told when the quota is back.
         if let Some(prelude) = record.delivery.borrow_mut().prelude.as_mut() {
@@ -1236,9 +1433,11 @@ impl Dispatcher {
             require_open(&now)?;
             let open = held.window.borrow().pane.is_some();
             if open && !this.is_out(&chief) && (when == SwitchWhen::Turn || note) {
-                return this.after_turn(project, &held, to, note);
+                return this.after_turn(&held, to, note);
             }
-            this.perform_switch(&found, &chief, &held, to).await?;
+            // On the heap, as the dispatcher's other big steps are: inline it took the
+            // switch's future past its budget (3.0.6-alpha.3's integration B, T-664).
+            Box::pin(this.perform_switch(&found, &chief, &held, to)).await?;
             // One deleted while the old window was looked at or closed stopped the switch there.
             if this.forgotten(&held) {
                 return Err(EngineError::said(
@@ -1259,16 +1458,21 @@ impl Dispatcher {
     }
 
     /// A window whose harness just refused it: its member is out until the
-    /// reset; what the window was receiving is queued again, its work goes
-    /// back to the board or waits with it.
+    /// reset; what the window was receiving arrived if its record shows it
+    /// (the refusal answered it), else it is queued again with its attempt,
+    /// and its work waits with it.
     async fn out_of_quota(
         self: &Rc<Self>,
         project: &ProjectView,
         participant: &ParticipantView,
         record: &Rc<Record>,
         owner: &ParticipantView,
+        observed: &Observed,
     ) -> Result<(), EngineError> {
         self.handled(record);
+        // A refused turn leaves nothing running that wakes its agent: its task waits for
+        // the quota now, not for a job of an earlier turn (`turn_end`).
+        record.held.borrow_mut().reset();
         let reported = record.quota.borrow().reported.clone();
         let reset = self.reset_of(reported.as_deref());
         let marked = self
@@ -1281,11 +1485,13 @@ impl Dispatcher {
             record,
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
         )?;
+        self.confirm_arrival(record, observed)?;
         let delivering = record.delivery.borrow_mut().delivering.take();
         if let Some(delivering) = delivering {
-            self.settle_failure(delivering, "the harness ran out of quota", true)?;
+            self.give_back(delivering.message, "the harness ran out of quota")?;
         }
-        self.hold_or_release(project, participant, owner, &until)?;
+        let refused_at = self.refused_at(reported.as_deref());
+        self.hold_work(project, participant, owner, &until, Some(refused_at))?;
         if participant.role != "chief" {
             self.close_if_free(record).await?;
         }

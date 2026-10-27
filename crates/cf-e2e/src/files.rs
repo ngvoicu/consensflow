@@ -21,6 +21,25 @@ pub fn write(path: &Path, contents: impl AsRef<[u8]>) -> Result {
     fs::write(path, contents).map_err(Error::file("write", path))
 }
 
+/// Writes `text` to the file `file` whole or not at all, for a program to say something to
+/// a case that waits for the file and reads it at once: under another name, then renamed
+/// into place. `fs::write` makes the file before it writes into it, and what a case reads
+/// in that moment is nothing, which is no pid.
+pub fn write_whole(file: &Path, text: &str) -> io::Result<()> {
+    let mut writing = file.as_os_str().to_owned();
+    writing.push(".writing");
+    fs::write(&writing, text)?;
+    fs::rename(writing, file)
+}
+
+/// Writes the process id of this program to `<file>.pid`, whole ([`write_whole`]): the
+/// file in which a stand-in tells a case which process it is.
+pub fn say_its_process(file: &Path) -> io::Result<()> {
+    let mut named = file.as_os_str().to_owned();
+    named.push(".pid");
+    write_whole(Path::new(&named), &std::process::id().to_string())
+}
+
 /// Writes `contents` to the file `path` as [`write`] does, and makes it a
 /// program a system will start: executable on Unix, where a script is no
 /// program without that. Windows starts a file by its name's extension.
@@ -228,5 +247,53 @@ mod tests {
         write(&not_text, [255, 254]).unwrap();
         assert!(read_string(&not_text).is_err());
         assert!(copy(&missing, &root.path().join("to")).is_err());
+    }
+
+    /// A file written whole is not there while it is being written: the write is held half
+    /// way (its first name is a pipe nobody reads yet), and the file is not there; it is there
+    /// once the write is done. `fs::write` to the file itself makes it at once, and a case
+    /// that looks for the file finds it before it holds what was meant.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_written_whole_is_not_there_until_it_is_written() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("said");
+        let mut writing = file.as_os_str().to_owned();
+        writing.push(".writing");
+        let made = crate::process::Run::new("mkfifo")
+            .arg(&writing)
+            .inheriting_env()
+            .run()
+            .unwrap();
+        assert_eq!(made.code, Some(0), "{made}");
+        let (starting, started) = std::sync::mpsc::channel();
+        let writer = {
+            let file = file.clone();
+            std::thread::spawn(move || {
+                starting.send(()).unwrap();
+                write_whole(&file, "written")
+            })
+        };
+        started.recv().unwrap();
+        // Long enough for a write that was not held to be done: this is the check that
+        // goes red when the file is written in place.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!file.exists(), "the file was there before it was written");
+        // The reader of the pipe lets the write through, and the file is there.
+        assert_eq!(fs::read_to_string(Path::new(&writing)).unwrap(), "written");
+        writer.join().unwrap().unwrap();
+        assert!(file.exists());
+    }
+
+    #[test]
+    fn a_program_says_its_process_in_the_file_beside_its_name() {
+        let root = tempfile::tempdir().unwrap();
+        let named = root.path().join("job-1-1");
+        say_its_process(&named).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.path().join("job-1-1.pid")).unwrap(),
+            std::process::id().to_string()
+        );
+        assert!(!root.path().join("job-1-1.pid.writing").exists());
     }
 }

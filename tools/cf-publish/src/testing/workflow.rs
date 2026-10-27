@@ -304,6 +304,7 @@ pub fn bash(script: &str, cwd: &Path, env: &[(&str, &str)], path_first: &[&Path]
     dirs.extend(find_program("node"));
     dirs.extend([PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
     let path: OsString = std::env::join_paths(dirs).expect("a PATH");
+    // Bare, as this crate's tests start every program (see `testing`'s words: no dependency here).
     let output = Command::new("bash")
         .arg(&file)
         .current_dir(cwd)
@@ -326,6 +327,7 @@ pub fn bash(script: &str, cwd: &Path, env: &[(&str, &str)], path_first: &[&Path]
 /// script parses alike everywhere, and the Mac's run of these tests checks it.
 #[allow(clippy::disallowed_methods)] // The test starts what it tests.
 pub fn has_bash() -> bool {
+    // Bare, as this crate's tests start every program (see `testing`'s words: no dependency here).
     cfg!(unix) && Command::new("bash").arg("--version").output().is_ok()
 }
 
@@ -335,6 +337,7 @@ pub fn parses_as_bash(script: &str) -> Result<(), String> {
     let root = TempDir::new("parse");
     let file = root.path().join("step.sh");
     fs::write(&file, script).expect("the script");
+    // Bare, as this crate's tests start every program (see `testing`'s words: no dependency here).
     let checked = Command::new("bash")
         .arg("-n")
         .arg(&file)

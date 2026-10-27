@@ -221,8 +221,13 @@ runs = ["harness-opencode", "harness-launch-opencode-versions"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/opencode/role.rs"
-find = "    not_to_update(&mut configuration);"
-replace = ""
+find = '''
+    let mut configuration = merged(current.as_deref().unwrap_or("{}"), &folders, &written.file)?;
+    not_to_update(&mut configuration);
+'''
+replace = '''
+    let mut configuration = merged(current.as_deref().unwrap_or("{}"), &folders, &written.file)?;
+'''
 
 [[plant]]
 name = "opencode 2: what the human says of updates is overwritten"
@@ -328,8 +333,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "                self.tell_requester(&project, &thread.task, &because)?;"
-replace = "                let _ = &because;"
+find = "                self.tell_failed(&project, task, &task.requester, &because, &told, None)?;"
+replace = "                let _ = (&because, &told);"
 
 [[plant]]
 name = "opencode 2: the words of the refusal end with a full stop of their own, and the board's follow with another"

@@ -2,7 +2,13 @@
 //!
 //! A reply is complete only when it is its request's last, and either Devin
 //! stored it as the turn's end (`finish_reason` stop) or the wire saw that
-//! request complete with the stored text streamed. A window reopened on the
+//! request complete with the stored text streamed. Devin 3000.11 stores no
+//! `finish_reason` at all (none of the 574 replies of T-652's store), so the
+//! wire is what proves a reply whole. Where Devin's async compactor left no
+//! user's message on the chain, a reply answers no request the chain names:
+//! it is then its model request's (`metadata.request_id`), which the wire
+//! names as the turn ends (T-652: the chief's answer to a waiting task stayed
+//! queued for good). A window reopened on the
 //! conversation replays its history with no turn end, so only the store
 //! tells that turn ended. Whether Devin is still on a turn is judged by the
 //! launch whose wire was written last (a resume opens a new one). A user's
@@ -12,9 +18,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::chain::Chain;
+use super::chain::{Chain, Entry};
 use super::comparable::comparable;
-use super::wires::{Cause, Wires};
+use super::wires::{Cause, Outcome, Wires};
 use crate::devin::adapter::BYPASS;
 use crate::shared::record::key::Key;
 use crate::shared::record::reading::{Record, Role, Settlement};
@@ -22,14 +28,15 @@ use crate::shared::record::reading::{Record, Role, Settlement};
 /// The reading of `chain`, with what the wire logs say of its requests.
 pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
     let working = wires.working();
-    let mut finals: HashMap<&Key, &str> = HashMap::new();
+    let mut finals: HashMap<Request<'_>, &str> = HashMap::new();
     for entry in &chain.entries {
         if entry.item.role == Role::Assistant {
-            finals.insert(&entry.request, &entry.item.id);
+            finals.insert(Request::of(entry), &entry.item.id);
         }
     }
     let mut record = Record::new();
     record.asking = chain.asking;
+    record.lines.lost = wires.lost();
     record.items = chain
         .entries
         .iter()
@@ -41,9 +48,9 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
                 }
             }
             if item.role == Role::Assistant {
-                let outcome = wires.outcome(&entry.request);
+                let outcome = Request::of(entry).outcome(wires);
                 // The same text needs no comparing, which every look would do again.
-                item.complete = finals.get(&entry.request) == Some(&&*item.id)
+                item.complete = finals.get(&Request::of(entry)) == Some(&&*item.id)
                     && (entry.stopped
                         || outcome.is_some_and(|outcome| {
                             outcome.cause == Cause::Complete
@@ -58,7 +65,7 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
         .entries
         .iter()
         .rposition(|entry| entry.item.role != Role::Custom);
-    let outcome = last.and_then(|at| wires.outcome(&chain.entries[at].request));
+    let outcome = last.and_then(|at| Request::of(&chain.entries[at]).outcome(wires));
     let cancelled = outcome
         .is_some_and(|outcome| matches!(outcome.cause, Cause::Cancelled | Cause::QuotaExhausted));
     let failed = outcome.is_some_and(|outcome| outcome.cause == Cause::Error);
@@ -70,6 +77,9 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
         )
     });
     record.failed = failed;
+    record.failure = outcome
+        .filter(|_| failed)
+        .and_then(|outcome| outcome.error.clone());
     record.in_flight = working || (last_open && !cancelled && !failed);
     record.settlement = if working {
         Settlement::InFlight
@@ -79,6 +89,33 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
         Settlement::Unknown
     };
     record
+}
+
+/// What tells which turn a message of the chain is of: the request it answers, or,
+/// where the chain names none (a compaction left no user's message on it), the
+/// model's request it is of.
+#[derive(PartialEq, Eq, Hash)]
+enum Request<'a> {
+    Answered(&'a Key),
+    Native(&'a Key),
+}
+
+impl<'a> Request<'a> {
+    fn of(entry: &'a Entry) -> Self {
+        if entry.request == Key::Null {
+            Request::Native(&entry.native)
+        } else {
+            Request::Answered(&entry.request)
+        }
+    }
+
+    /// How its turn ended, if a log said so.
+    fn outcome(self, wires: &Wires) -> Option<&Outcome> {
+        match self {
+            Request::Answered(request) => wires.outcome(request),
+            Request::Native(native) => wires.native_outcome(native),
+        }
+    }
 }
 
 /// The prompt a user's message ran under `/bypass`, where it is, whole, what

@@ -1,4 +1,4 @@
-//! A member's Devin window whole, asked of the adapter: `start` answers the flags
+//! A member's Devin or Pi window whole, asked of the adapter: `start` answers the flags
 //! of a bare window, and the window the daemon opens for a member has more. Its
 //! `--config` is the owner's with ConsensFlow's hooks, its first message is in a
 //! prompt file, and its launch adds the variables that name its wire log and its
@@ -35,11 +35,48 @@ pub fn devin_ready(wire: &Path) -> Result<DevinReady> {
     })
 }
 
+/// What the daemon reads of a paste in Devin's store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DevinTook {
+    /// The TUI took the paste (`Window::took`): a history row of it, written since.
+    pub took: bool,
+    /// How many history rows the session has.
+    pub prompts: u64,
+}
+
+/// What Devin's store, in the places `env` names, says of `pasted`, the text a window on
+/// `session` was given as it was pasted at `at_ms`, as the daemon reads the window after
+/// a paste.
+pub fn devin_took(
+    env: &[(String, String)],
+    session: &str,
+    pasted: &str,
+    at_ms: i64,
+) -> Result<DevinTook> {
+    let answer = question(&json!({
+        "op": "devin_took", "env": env_object(env), "session": session,
+        "pasted": pasted, "atMs": at_ms,
+    }))?;
+    match (answer["took"].as_bool(), answer["prompts"].as_u64()) {
+        (Some(took), Some(prompts)) => Ok(DevinTook { took, prompts }),
+        _ => Err(Error::Daemon(format!(
+            "harness-ask said nothing of a paste taken: {answer}"
+        ))),
+    }
+}
+
 /// The hooks ConsensFlow adds to the owner's in a Devin launch (`member`'s, or the
 /// chief's), its session hook run by `cf`: each event with the entries added, as the
 /// launch's config has them written.
 pub fn devin_hooks(cf: &Path, member: bool) -> Result<Value> {
     question(&json!({ "op": "devin_hooks", "cf": cf, "member": member }))
+}
+
+/// The owner's own config of Devin, as the adapter reads it for a launch, in the config
+/// folder `env` names: its comments and trailing commas left out, and an empty one where
+/// there is none.
+pub fn devin_config(env: &[(String, String)]) -> Result<Value> {
+    question(&json!({ "op": "devin_config", "env": env_object(env) }))
 }
 
 /// What the adapter is asked to prepare a member's Devin window from.
@@ -94,6 +131,54 @@ pub fn devin_launch(launch: &DevinLaunch) -> Result<Start> {
         .ok_or_else(|| Error::Daemon(format!("harness-ask prepared no Devin window: {answer}")))
 }
 
+/// What the adapter is asked to prepare a member's Pi window from.
+#[derive(Debug, Clone, Copy)]
+pub struct PiLaunch<'a> {
+    /// The launch's id, a lowercase uuid, as [`DevinLaunch::id`].
+    pub id: &'a str,
+    /// What the window is of: `worker`, `reviewer`…
+    pub role: &'a str,
+    /// The folder it opens in, where Pi finds the project's own files.
+    pub directory: &'a Path,
+    /// The conversation it goes on with, where it is opened again.
+    pub resume: Option<&'a str>,
+    /// Its first message, the last word of its command line.
+    pub message: Option<&'a str>,
+    /// The agent it runs (`kind`, `model`, `thinking`).
+    pub agent: &'a Value,
+    /// The role's text: its skill, and appended to Pi's system prompt.
+    pub instructions: &'a str,
+    /// The environment the launch is prepared in: the ConsensFlow home, and the
+    /// home whose Pi folder the adapter reads, among it.
+    pub env: &'a [(String, String)],
+}
+
+impl PiLaunch<'_> {
+    /// The question as `harness-ask` is asked it.
+    fn question(&self) -> Value {
+        json!({
+            "op": "pi_launch",
+            "launch": self.id,
+            "role": self.role,
+            "directory": self.directory,
+            "resume": self.resume,
+            "message": self.message,
+            "agent": self.agent,
+            "instructions": self.instructions,
+            "env": env_object(self.env),
+        })
+    }
+}
+
+/// The Pi window the adapter prepares, as [`devin_launch`] answers Devin's: its
+/// extension and role skill are written under the ConsensFlow home, so each
+/// window is asked for with an id of its own.
+pub fn pi_launch(launch: &PiLaunch) -> Result<Start> {
+    let answer = question(&launch.question())?;
+    start_of(&answer)
+        .ok_or_else(|| Error::Daemon(format!("harness-ask prepared no Pi window: {answer}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,6 +210,36 @@ mod tests {
                 "agent": { "kind": "devin", "model": "swe-2", "effort": "medium" },
                 "instructions": "# worker",
                 "cf": "/bundle/cf",
+                "env": { "HOME": "/h" },
+            })
+        );
+    }
+
+    #[test]
+    fn the_adapter_is_asked_for_a_pi_members_launch_with_its_folder_and_its_thinking() {
+        let agent = json!({ "kind": "pi", "model": "openrouter/x", "thinking": "low" });
+        let env = [("HOME".to_owned(), "/h".to_owned())];
+        let launch = PiLaunch {
+            id: "11111111-1111-4111-8111-111111111111",
+            role: "worker",
+            directory: Path::new("/work"),
+            resume: None,
+            message: Some("the task"),
+            agent: &agent,
+            instructions: "# worker",
+            env: &env,
+        };
+        assert_eq!(
+            launch.question(),
+            json!({
+                "op": "pi_launch",
+                "launch": "11111111-1111-4111-8111-111111111111",
+                "role": "worker",
+                "directory": "/work",
+                "resume": null,
+                "message": "the task",
+                "agent": { "kind": "pi", "model": "openrouter/x", "thinking": "low" },
+                "instructions": "# worker",
                 "env": { "HOME": "/h" },
             })
         );

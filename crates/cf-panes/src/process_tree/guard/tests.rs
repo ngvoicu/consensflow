@@ -4,7 +4,7 @@
 
 use std::os::unix::process::CommandExt;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 
 use super::*;
 use crate::process_tree::native;
@@ -24,7 +24,7 @@ fn panic_of(step: impl FnOnce()) -> Option<String> {
 /// A process the test starts, which sleeps: its child.
 #[allow(clippy::disallowed_methods)] // A test's own programs.
 fn sleeper() -> Child {
-    Command::new("/bin/sleep")
+    crate::testing::command("/bin/sleep")
         .arg("30")
         .stdin(Stdio::null())
         .spawn()
@@ -63,7 +63,7 @@ enum Told {
 fn a_job_its_shell_left(told: Told) -> (i32, i32) {
     use std::io::{BufRead, BufReader};
 
-    let mut command = Command::new("/bin/sh");
+    let mut command = crate::testing::command("/bin/sh");
     command
         .args(["-c", "/bin/sleep 30 & echo $!; read nothing"])
         .stdin(Stdio::piped())
@@ -101,7 +101,7 @@ fn a_child_of_the_test_and_its_child_are_allowed() {
     let child = sleeper();
     assert_eq!(refusal(i32::try_from(child.id()).unwrap()), None);
 
-    let mut shell = Command::new("/bin/sh")
+    let mut shell = crate::testing::command("/bin/sh")
         .args(["-c", "/bin/sleep 30 & echo $!; wait"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -205,7 +205,7 @@ fn the_group_of_the_test_is_refused_whole_for_what_is_in_it_that_is_not_the_test
 #[test]
 #[allow(clippy::disallowed_methods)] // A test's own programs.
 fn a_group_of_processes_of_the_tests_is_allowed_whole() {
-    let mut command = Command::new("/bin/sleep");
+    let mut command = crate::testing::command("/bin/sleep");
     command.arg("30").stdin(Stdio::null()).process_group(0);
     let child = command.spawn().unwrap();
     let group = i32::try_from(child.id()).unwrap();

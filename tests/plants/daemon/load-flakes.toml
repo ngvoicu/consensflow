@@ -1,0 +1,238 @@
+# The tests that failed now and then under load (T-133, 3.0.6), each held by the test written for
+# its cause; one plant takes one rule out and a test fails.
+#
+# - a free port of loopback may be held a few milliseconds by a program being started when its
+#   listener closed: it is bound again for ten seconds at the most
+#   (`crates/cf-harness/src/seams/mod.rs`);
+# - a program's error output is read to its end before `Spawned::wait` answers that it ended
+#   (`crates/cf-e2e/src/process/spawned.rs`);
+# - a file a stand-in says its process in is there whole or not at all
+#   (`cf_e2e::files::write_whole`);
+# - the rig names what it found left behind, and takes a program that began after the last window
+#   was noted for none of the windows (`crates/cf-e2e/src/rig/left.rs`);
+# - the rig's stranger, dropped with its handle, is ended and waited for, not left to the system
+#   (`crates/cf-e2e/src/process/spawned.rs`; the plant of `long run:` that edits the same drop names
+#   a test of `process::` (T-407), and this one names the stranger's own);
+# - a chief's turn has ended when its record says so, not when the word its prompt held is there
+#   (`tests/regressions/idle_compaction_read_as_a_cut_turn.rs`, whose chief answers three seconds
+#   late), and the line a `node` writes is waited for whole
+#   (`codex_in_homebrew_taken_for_not_installed.rs`);
+# - the windows of the headless host are given a minute to print (`cf-panes/tests/headless.rs`);
+# - a program asked to end with its streams closed meets a closed pipe: the test runs in a process
+#   of its own, where no program of another test can hold a copy of the pipe that would let the
+#   program answer (`crates/cf-process/src/execute.rs`, held by `capture`'s order in `capture.rs`;
+#   T-183, T-190).
+#
+# Every name holds `load flakes`, so `npm run plants:daemon -- "load flakes"` runs them all.
+
+[run]
+harness-seams = ["cargo", "test", "--offline", "-p", "cf-harness", "--features", "test-support", "--lib", "seams::"]
+process-closed-stream-stress = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "--", "--ignored", "whatever_other_tests_start"]
+rig-lib-spawned = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::spawned"]
+rig-lib-files = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "files::"]
+rig-lib-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::left"]
+rig-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger"]
+rig-stand-ins = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stand_ins::the_stand_in_agents_job_writes"]
+regressions-idle = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "--", "idle_compaction_read_as_a_cut_turn"]
+regressions-finder = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "--", "a_window_of_a_daemon_on_the_finders_path"]
+panes-headless-eof = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "stdin_eof_reaps_every_spawned_process"]
+process-execute = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "execute::tests::a_program_out_of_time_that_writes"]
+
+[[plant]]
+name = "load flakes: a free port of loopback is not let go"
+meant = "a_free_port_on_loopback_is_one_a_listener_may_take"
+runs = ["harness-seams"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/mod.rs"
+find = '''
+        return Err("could not choose a loopback port".to_owned());
+    }
+    Ok(port)
+'''
+replace = '''
+        return Err("could not choose a loopback port".to_owned());
+    }
+    std::mem::forget(listener);
+    Ok(port)
+'''
+
+[[plant]]
+name = "load flakes: a port held for a moment is not waited for"
+meant = "a_port_held_for_a_moment_is_refused_at_once_and_bound_once_it_is_let_go"
+runs = ["harness-seams"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/mod.rs"
+find = '''
+                        && Instant::now() < until =>
+'''
+replace = '''
+                        && false =>
+'''
+
+[[plant]]
+name = "load flakes: a program that has ended is answered before its error output is read"
+meant = "what_a_program_said_on_its_error_output_is_all_there_once_it_has_ended_though_the_reader_is_slow"
+runs = ["rig-lib-spawned"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/spawned.rs"
+find = '''                    self.settle_errors();
+'''
+replace = ''''''
+
+[[plant]]
+name = "load flakes: a file said whole is written in place"
+meant = "a_file_written_whole_is_not_there_until_it_is_written"
+runs = ["rig-lib-files"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/files.rs"
+find = '''
+    let mut writing = file.as_os_str().to_owned();
+    writing.push(".writing");
+    fs::write(&writing, text)?;
+    fs::rename(writing, file)
+'''
+replace = '''
+    fs::write(file, text)
+'''
+
+[[plant]]
+name = "load flakes: the stand-in agent's job makes its file before it writes into it"
+meant = "the_stand_in_agents_job_writes_its_process_whole_or_not_at_all"
+runs = ["rig-stand-ins"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/background.rs"
+find = '''
+        cf_e2e::files::say_its_process(&self.file).map_err(|failed| failed.to_string())?;
+'''
+replace = '''
+        {
+            let file = self.beside("pid");
+            fs::write(&file, "").map_err(|failed| failed.to_string())?;
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            fs::write(&file, std::process::id().to_string()).map_err(|failed| failed.to_string())?;
+        }
+'''
+
+[[plant]]
+name = "load flakes: a program that began after the last window was noted is taken for a window"
+meant = "a_program_that_began_after_the_last_note_is_none_of_the_windows"
+runs = ["rig-lib-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = "(Some(ran_for), Some(written_ago)) => ran_for + SLACK < written_ago,"
+replace = "(Some(_), Some(_)) => false,"
+
+[[plant]]
+name = "load flakes: a window that is still there is not said"
+meant = "a_window_still_there_is_said_with_what_it_is"
+runs = ["rig-lib-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = "if wait::until(within, || !process::is_alive(pid)) {"
+replace = "if wait::until(within, || true) {"
+
+[[plant]]
+name = "load flakes: the idle-compaction case waits for the word its prompt held, and its chief answers late"
+meant = "a_claude_chief_whose_conversation_was_compacted_while_idle_is_given_no_note_at_a_resume"
+runs = ["regressions-idle"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/regressions/idle_compaction_read_as_a_cut_turn.rs"
+find = '''
+    wait_for_the_turn_to_end(&rig, &session, "Reply with exactly: HELLO")?;
+'''
+replace = '''
+    rig.wait_for("the word", secs(60), || {
+        Ok(rig.transcript(&session).contains("HELLO"))
+    })?;
+'''
+
+[[plant]]
+name = "load flakes: the file a node writes is read as soon as it is there"
+meant = "a_window_of_a_daemon_on_the_finders_path_finds_a_program_in_the_systems_folder"
+runs = ["regressions-finder"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/regressions/codex_in_homebrew_taken_for_not_installed.rs"
+find = '''        Ok(!files::read_finished_lines(&found)
+            .unwrap_or_default()
+            .is_empty())'''
+replace = '''        Ok(files::read_string(&found).is_ok())'''
+
+[[plant]]
+name = "load flakes: the windows of the headless host are given a second to print"
+meant = "stdin_eof_reaps_every_spawned_process"
+runs = ["panes-headless-eof"]
+# Not Windows': its meant test is in cf-panes' tests/headless.rs, which is Unix's (`#![cfg(unix)]`); sent there, it ran no test (integration B round 2, T-800).
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/tests/headless.rs"
+find = "let printed_by = Instant::now() + Duration::from_secs(60);"
+replace = "let printed_by = Instant::now() + Duration::from_secs(1);"
+
+[[plant]]
+name = "load flakes: a program out of time is asked to end with its streams still open"
+meant = "a_program_out_of_time_that_writes_once_asked_dies_of_its_closed_stream"
+runs = ["process-execute"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = '''
+    // answer back, then the program asked to end, and the group it leads with it.
+    drop((stdout, stderr));
+'''
+replace = '''
+    // answer back, then the program asked to end, and the group it leads with it.
+    let _held = (&stdout, &stderr);
+'''
+
+[[plant]]
+name = "load flakes: the closed-pipe test runs beside the other tests"
+meant = "a_program_out_of_time_dies_of_its_closed_stream_whatever_other_tests_start"
+runs = ["process-closed-stream-stress"]
+# Not Windows': its meant test is `#[cfg(unix)]`; sent there, it ran no test (integration B round 2, T-800).
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/execute.rs"
+find = '''
+        crate::testing::alone(&[], "execute::tests::the_closed_stream_alone");
+'''
+replace = '''
+        the_closed_stream_alone();
+'''
+
+[[plant.edit]]
+file = "crates/cf-process/src/execute.rs"
+find = '''
+        if !crate::testing::is_alone() {
+            return;
+        }
+        let _ran = crate::testing::Ran;
+        // Probed on Node v26.8.1: the streams are closed before the program is
+'''
+replace = '''
+        // Probed on Node v26.8.1: the streams are closed before the program is
+'''
+
+[[plant]]
+name = "load flakes: the rig's stranger, dropped with its handle, is left running and never waited for"
+meant = "a_stranger_dropped_is_ended_through_its_handle"
+runs = ["rig-lib-stranger"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/spawned.rs"
+find = """
+    fn drop(&mut self) {
+        self.kill();
+    }"""
+replace = """
+    fn drop(&mut self) {}"""

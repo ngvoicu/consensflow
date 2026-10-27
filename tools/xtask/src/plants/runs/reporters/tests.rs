@@ -180,9 +180,19 @@ fn a_suite_of_xtask_s_is_the_cargo_test_it_runs_under_nextest_in_its_folder_with
     if cfg!(target_os = "macos") {
         let (words, cwd, vars) =
             under_nextest_for(&["cargo", "xtask", "smoke", "--app", "a.app"], &context);
+        // Its cases one at a time, as nextest is told it: the smoke's own threads.
         assert_eq!(
             words,
-            ["-p", "cf-e2e", "--test", "smoke", "--", "--ignored"]
+            [
+                "-p",
+                "cf-e2e",
+                "--test",
+                "smoke",
+                "--test-threads",
+                "1",
+                "--",
+                "--ignored"
+            ]
         );
         assert_eq!(cwd, Path::new("/checkout"));
         let app = Path::new("/checkout").join("a.app");
@@ -703,6 +713,36 @@ fn each_option_of_cargo_test_is_given_to_nextest_as_it_names_what_cargo_means_or
     ] {
         assert_eq!(given(cargo).unwrap(), nextest, "{cargo:?}");
     }
+    // libtest's threads, after the `--`, are nextest's own option before it: nextest takes
+    // no `--test-threads` there, and the packaged smoke's cases run one at a time.
+    for (cargo, nextest) in [
+        (
+            &["--", "--ignored", "--test-threads=1"][..],
+            &["--test-threads", "1", "--", "--ignored"][..],
+        ),
+        (
+            &[
+                "--test",
+                "smoke",
+                "--",
+                "--test-threads",
+                "2",
+                "--skip",
+                "b",
+            ],
+            &[
+                "--test",
+                "smoke",
+                "--test-threads",
+                "2",
+                "--",
+                "--skip",
+                "b",
+            ],
+        ),
+    ] {
+        assert_eq!(given(cargo).unwrap(), nextest, "{cargo:?}");
+    }
     // Refused, and why.
     for (cargo, why) in [
         (&["--doc"][..], "cargo test --doc: nextest runs no doctest"),
@@ -729,6 +769,10 @@ fn each_option_of_cargo_test_is_given_to_nextest_as_it_names_what_cargo_means_or
         (
             &["-p", "--lib"],
             "cargo test -p: --package is given no value",
+        ),
+        (
+            &["--", "--test-threads"],
+            "cargo test -- --test-threads: --test-threads is given no value",
         ),
     ] {
         assert_eq!(given(cargo).unwrap_err(), why, "{cargo:?}");
@@ -830,5 +874,65 @@ fn the_folder_of_nextest_s_store_is_written_with_forward_slashes() {
         config
             .starts_with("[store]\ndir = \"C:/checkout/app/src-tauri/target/plants-runs/run-1\"\n"),
         "{config}"
+    );
+}
+
+/// The memory limit a machine is given for its tests (`RUST_TEST_THREADS`, libtest's) reaches
+/// nextest, which does not read it: a plant table on zeewin ran 12 processes wide, as before the
+/// limit (T-777, P2-3). The command's own `--test-threads` is what the person asked for, and wins.
+#[test]
+fn the_threads_libtest_is_told_by_the_environment_are_the_threads_nextest_is_given_unless_the_command_names_its_own(
+) {
+    let with = |threads: &str| Context {
+        root: PathBuf::from("/checkout"),
+        env: Env::from_vars([("RUST_TEST_THREADS", threads)]),
+    };
+    let ran = |command: &[&str], context: &Context| under_nextest_for(command, context).0;
+    assert_eq!(
+        ran(&["cargo", "test", "-p", "x"], &with("4")),
+        ["-p", "x", "--test-threads", "4"]
+    );
+    // Before the `--`, where nextest takes it.
+    assert_eq!(
+        ran(&["cargo", "test", "-p", "x", "--", "--ignored"], &with("3")),
+        ["-p", "x", "--test-threads", "3", "--", "--ignored"]
+    );
+    // The command's own, either way it is written.
+    assert_eq!(
+        ran(
+            &["cargo", "test", "-p", "x", "--", "--test-threads=1"],
+            &with("4")
+        ),
+        ["-p", "x", "--test-threads", "1", "--"]
+    );
+    if cfg!(target_os = "macos") {
+        assert_eq!(
+            ran(&["cargo", "xtask", "smoke", "--app", "a.app"], &with("4")),
+            [
+                "-p",
+                "cf-e2e",
+                "--test",
+                "smoke",
+                "--test-threads",
+                "1",
+                "--",
+                "--ignored"
+            ]
+        );
+    }
+    // A variable that is no number of threads is none; and none is as it was.
+    for threads in ["", "many", "0", "-2", "4 "] {
+        assert_eq!(
+            ran(&["cargo", "test", "-p", "x"], &with(threads)),
+            ["-p", "x"],
+            "{threads:?}"
+        );
+    }
+    assert_eq!(
+        ran(
+            &["cargo", "test", "-p", "x"],
+            &checkout(Path::new("/checkout"))
+        ),
+        ["-p", "x"]
     );
 }

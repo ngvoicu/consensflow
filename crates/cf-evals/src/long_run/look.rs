@@ -56,7 +56,9 @@ pub enum ClosedBy {
     /// The daemon asked the pane host to (`pane.kill`): a result taken, a cancel,
     /// a pause, a quit.
     Daemon,
-    /// The run did, as a disruption.
+    /// The run did, as a disruption: it had the pane host end the window (a crash), or
+    /// the app quit (a restart, the run's own end), and the host ended its windows as it
+    /// stopped.
     Run,
     /// Nobody asked: the program ended, or crashed.
     Itself,

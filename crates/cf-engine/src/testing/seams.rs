@@ -5,7 +5,7 @@
 //! Node traces' shape.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use cf_base::refusal::Refusal;
@@ -61,6 +61,43 @@ impl Credentials for FakeCredentials {
     fn revoke(&self, token: &str) {
         self.recorder
             .called("credentials", Some("revoke"), json!([token]), Value::Null);
+    }
+}
+
+/// The machine's computer use as a test says it is: by default a system where no
+/// harness's computer use runs, so no launch is told of it.
+#[derive(Default)]
+pub struct FakeComputerUse {
+    /// ConsensFlow's permissions; none where the system has no computer use.
+    pub permissions: Cell<Option<crate::seams::ScreenPermissions>>,
+    /// The folders where Claude Code's computer use is on.
+    pub on_in: RefCell<HashSet<String>>,
+    /// Whether Codex's computer use is set up.
+    pub codex_set_up: Cell<bool>,
+    /// How often each was asked of, permissions first.
+    pub asked: Cell<(u32, u32)>,
+}
+
+impl crate::seams::ComputerUse for FakeComputerUse {
+    fn permissions(&self) -> Option<crate::seams::ScreenPermissions> {
+        let (permissions, claude) = self.asked.get();
+        self.asked.set((permissions + 1, claude));
+        self.permissions.get()
+    }
+
+    fn claude(&self, directory: &str) -> cf_harness::claude::computer_use::ComputerUse {
+        let (permissions, claude) = self.asked.get();
+        self.asked.set((permissions, claude + 1));
+        cf_harness::claude::computer_use::ComputerUse {
+            folder: directory.to_owned(),
+            on: self.on_in.borrow().contains(directory),
+        }
+    }
+
+    fn codex(&self) -> cf_harness::codex::computer_use::ComputerUse {
+        cf_harness::codex::computer_use::ComputerUse {
+            set_up: self.codex_set_up.get(),
+        }
     }
 }
 
@@ -132,6 +169,9 @@ pub struct FakeRoster {
     pub(crate) recorder: Recorder,
     /// Agents the human deleted.
     pub gone: RefCell<HashSet<String>>,
+    /// Ready-made agents a release took out of the catalog, and why: a call of
+    /// it is no call Node's roster had, so none is written down.
+    pub retired: RefCell<HashMap<String, String>>,
     /// Agents that are image agents.
     pub designers: RefCell<HashSet<String>>,
     /// The agents file cannot be read.
@@ -180,6 +220,10 @@ impl Roster for FakeRoster {
             thinking: None,
             designer,
         }))
+    }
+
+    fn retired(&self, name: &str) -> Option<String> {
+        self.retired.borrow().get(name).cloned()
     }
 
     fn app_specs(&self) -> AppSpecs {

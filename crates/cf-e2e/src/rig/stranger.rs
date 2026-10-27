@@ -83,7 +83,7 @@ impl Stranger {
     /// How something else ended it, where something did: none while it runs, and none
     /// where it left of itself.
     pub(super) fn ended_by_another(&mut self) -> Option<String> {
-        let status = self.spawned.wait(Duration::ZERO).ok().flatten()?;
+        let status = self.spawned.status()?;
         #[cfg(unix)]
         let signal = std::os::unix::process::ExitStatusExt::signal(&status);
         #[cfg(windows)]
@@ -179,6 +179,22 @@ mod tests {
         );
     }
 
+    /// A rig dropped (a test that failed, or one that never asked) takes its stranger with it:
+    /// the handle ends it and waits for it, so nothing of it is left, not even an exit no one
+    /// collected. Its input closes with the handle too, and it would leave of itself, but as a
+    /// process no one waited for, which the system still answers for.
+    #[test]
+    fn a_stranger_dropped_is_ended_through_its_handle() {
+        let stranger = Stranger::start().unwrap();
+        let id = stranger.spawned.id();
+        assert!(is_alive(id));
+        drop(stranger);
+        assert!(
+            wait::until(Duration::from_secs(5), || !is_alive(id)),
+            "the stranger {id} is still there"
+        );
+    }
+
     #[test]
     fn a_stranger_whose_input_ends_leaves_of_itself_and_is_not_said_to_have_been_ended() {
         let mut stranger = Stranger::start().unwrap();
@@ -188,14 +204,42 @@ mod tests {
         assert!(is_alive(id));
         stranger.release();
         assert!(
-            wait::until(Duration::from_secs(10), || stranger
-                .spawned
-                .wait(Duration::ZERO)
-                .ok()
-                .flatten()
-                .is_some()),
+            wait::until(Duration::from_secs(10), || stranger.spawned.has_exited()),
             "it left once its input ended"
         );
         assert_eq!(stranger.ended_by_another(), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_look_at_how_a_stranger_ended_waits_for_no_pipe_a_process_it_left_holds() {
+        // Calliope on T-504 (T-505, T-438's P3 5): the look polled with `wait(ZERO)`, which
+        // waits once for the error output's end, held open here by a process the stranger
+        // left. A look waits for nothing: it ends before that process does.
+        let mut stranger = Stranger {
+            spawned: Run::new("/bin/sh")
+                .args(["-c", "printf said >&2; sleep 4 & exit 0"])
+                .spawn()
+                .unwrap(),
+            released: false,
+        };
+        let started = std::time::Instant::now();
+        let mut said = None;
+        assert!(
+            wait::until(Duration::from_secs(10), || {
+                said = stranger.ended_by_another();
+                said.is_some()
+            }),
+            "it ended"
+        );
+        assert_eq!(
+            said.as_deref(),
+            Some("before its input ended, with the code 0")
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
     }
 }

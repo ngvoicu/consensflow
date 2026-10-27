@@ -79,13 +79,16 @@ fn child() {
 }
 
 fn spawn_child(what: &str, file: &Path) -> Child {
-    Command::new(std::env::current_exe().expect("this test binary"))
+    let mut child = Command::new(std::env::current_exe().expect("this test binary"));
+    child
         .args(["--exact", "child", "--nocapture", "--test-threads=1"])
         .env(CHILD, format!("{what}:{}", file.display()))
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("the child starts")
+        .stderr(Stdio::null());
+    // A child that holds the ledger runs until it is ended, beside the other tests: what it was
+    // left of theirs it would hold.
+    cf_process::hold_only_the_streams(&mut child);
+    child.spawn().expect("the child starts")
 }
 
 /// The first thing the child said.
@@ -261,4 +264,18 @@ fn names_a_file_that_is_not_a_ledger_instead_of_failing_somewhere_inside_sqlite(
             )
         )
     );
+}
+
+/// The child a test starts holds nothing of the test's but its streams.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_child_a_test_starts_holds_nothing_of_the_tests_but_its_streams() {
+    let folder = tempfile::tempdir().expect("a folder");
+    let stray = cf_process::test_support::stray();
+    let mut child = spawn_child("hold", &folder.path().join("consensflow.db"));
+    assert_eq!(said(&mut child), "ready");
+    let held = stray.held_by(child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(!held, "the child holds it");
 }

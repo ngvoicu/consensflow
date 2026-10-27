@@ -26,9 +26,9 @@ use crate::{config, rig, secs, session_of, Outcome};
 /// What Claude writes of a turn it was interrupted in.
 const INTERRUPTED: &str = "[Request interrupted by user]";
 
-/// What the chief is told when the app quit in the middle of its turn.
-const CHIEF_CUT: &str =
-    "ConsensFlow stopped in the middle of your turn, which was cut. Go on where you stopped.";
+/// How the chief's note begins when the app quit in the middle of its turn: what
+/// follows names the turn, by the message that began it (T-814).
+const CHIEF_CUT: &str = "ConsensFlow stopped in the middle of your turn, which was cut";
 
 /// A project with a chief and one worker, whose human approves every hand-off.
 fn gated_project(rig: &Rig) -> cf_e2e::Result<Project<'_>> {
@@ -413,13 +413,15 @@ fn a_result_the_human_passed_on_while_the_chief_was_in_a_turn_is_withdrawn_when_
     let result = passed_on_in_the_chiefs_turn(&rig, &project)?;
     let id = result["id"].as_i64().unwrap_or_default();
 
-    // In its turn the chief reads it whole, which receives nothing, and accepts the task.
-    let read = cf(&rig, &chief, &["inbox", "read", &format!("m-{id}")])?;
+    // In its turn the chief reads it whole in the task's thread, which receives no
+    // result, and accepts the task. (Read with `cf inbox read`, it would be the
+    // chief's at once, and never typed in: T-260's case in the regressions.)
+    let read = cf(&rig, &chief, &["task", "get", "T-1"])?;
     assert!(read.contains("ONE_DONE"), "{read}");
     assert_eq!(
         the_result(&project)?["state"],
         "queued",
-        "a read receives nothing"
+        "a thread's read receives no result"
     );
     cf(&rig, &chief, &["task", "accept", "T-1"])?;
     let withdrawn = the_result(&project)?;

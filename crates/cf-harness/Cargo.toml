@@ -36,6 +36,8 @@ sha2.workspace = true
 # The engine's timer, which a window's waits sleep on, and its sockets; and
 # the channels between the engine's thread and the records thread.
 tokio = { workspace = true, features = ["net", "sync", "time"] }
+# Codex's `config.toml`, read for whether its computer use is set up.
+toml.workspace = true
 url.workspace = true
 uuid.workspace = true
 
@@ -72,6 +74,8 @@ required-features = ["test-support"]
 
 [dev-dependencies]
 cf-harness = { path = ".", features = ["test-support"] }
+# What a program a test starts holds.
+cf-process = { workspace = true, features = ["test-support"] }
 flate2.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt"] }

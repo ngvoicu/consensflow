@@ -12,7 +12,7 @@ use super::*;
 
 fn said(reading: &Reading) -> String {
     match reading {
-        Reading::Unknown(reason) => reason.clone(),
+        Reading::Unknown(reason) | Reading::Missing(reason) => reason.clone(),
         Reading::Known(record) => format!("known: {} items", record.items.len()),
     }
 }
@@ -83,7 +83,7 @@ fn a_reset_that_names_no_zone_is_read_in_the_zone_the_switch_is_given() {
     fs::write(folder.join("s.jsonl"), format!("{refused}\n")).unwrap();
     let resets = |reading: &Reading| match reading {
         Reading::Known(record) => serde_json::to_value(&record.quota).unwrap()["resetsAt"].clone(),
-        Reading::Unknown(reason) => panic!("{reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => panic!("{reason}"),
     };
     let los_angeles = TimeZoneDatabase::bundled()
         .get("America/Los_Angeles")

@@ -33,6 +33,11 @@ pub fn fail_next_write(context: &Context) {
     fail_next(context, "pause_task", "the ledger could not be written");
 }
 
+/// The ledger's writing of a note fails once, the next time one is written.
+pub fn fail_next_note(context: &Context) {
+    fail_next(context, "note", "the ledger could not be written");
+}
+
 /// The ledger's taking back of a message fails once, the next time it is
 /// written: the stop whose look told it stays owed.
 pub fn fail_next_take_back(context: &Context) {

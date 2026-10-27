@@ -3,7 +3,7 @@
 # chief's reopen opened it again on its conversation, and the reopen's turn never read as over, since
 # the record still had that message to come. ConsensFlow knows where the new process began: the Claude
 # adapter takes the transcript's length when it prepares a window on a conversation that already
-# was, every look of the window says it (`Options::relaunched_at`), and Claude's reader empties the
+# was, every look of the window says it (`Options::relaunched`, the length and the bytes before it), and Claude's reader empties the
 # queue there, keeping what the new process queued after it
 # (`crates/cf-harness/src/claude/record.rs`, `crates/cf-harness/src/claude/adapter.rs`, the length
 # from the records seam: `crates/cf-harness/src/records/thread.rs`,
@@ -23,10 +23,11 @@ lost-queue-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", 
 lost-queue-adapter = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::relaunched"]
 lost-queue-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "windows::"]
 lost-queue-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_stuck_working_after_its_window_was_resumed::"]
+lost-queue-looks = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "looks_finished::"]
 
 # Round 4 (Astra's review of round 2): the length is taken only where the pane host proved the
-# window's program gone (`Launch::previous_gone`, from the engine's record of the last exit), and the
-# old turn's answer is no candidate past the relaunch.
+# window's program gone (`Launch::previous_gone`, from the proof the ledger keeps on the conversation,
+# `exit-proof.toml`), and the old turn's answer is no candidate past the relaunch.
 
 [[plant]]
 name = "lost-queue: the adapter takes the length though the program before may still run"
@@ -35,7 +36,7 @@ runs = ["lost-queue-adapter"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            let relaunched = if resumable && launch.previous_gone {"
+find = "            let relaunched = if resumable && gone {"
 replace = "            let relaunched = if resumable {"
 
 [[plant]]
@@ -65,8 +66,8 @@ runs = ["lost-queue-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "            self.heard_exit(pane, &shown);\n"
-replace = ""
+find = "            return self.heard_exit(pane, &shown);"
+replace = "            return Ok(());"
 
 [[plant]]
 name = "lost-queue: no launch is told its window before was gone, and the answer to a reopen of a window that closed at rest with a notification queued is never the result"
@@ -76,8 +77,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "            .is_some_and(|(_, gone)| *gone == Some(true));"
-replace = "            .is_some_and(|_| false);"
+find = "            Some(conversation) => self.seams.ledger.borrow().program_gone(conversation.id)?,"
+replace = "            Some(_) => false,"
 
 [[plant]]
 name = "lost-queue: the old turn's answer stays the candidate past the relaunch"
@@ -143,14 +144,8 @@ runs = ["lost-queue-adapter", "lost-queue-reader"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
 find = '''
-        if let Some(at) = options
-            .relaunched_at
-            .filter(|at| *at > self.at.load(Ordering::Relaxed))
-        {
-            self.at.store(at, Ordering::Relaxed);
-            self.reader.retell(|state| state.relaunched(at));
-        }'''
-replace = ""
+        if let Some(boundary) = options.relaunched.as_ref() {'''
+replace = "        if let Some(boundary) = options.relaunched.as_ref().filter(|_| false) {"
 
 [[plant]]
 name = "lost-queue: a look's relaunch reaches no reader, and the answer to a reopen of a window that closed at rest with a notification queued is never the result"
@@ -161,14 +156,8 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
 find = '''
-        if let Some(at) = options
-            .relaunched_at
-            .filter(|at| *at > self.at.load(Ordering::Relaxed))
-        {
-            self.at.store(at, Ordering::Relaxed);
-            self.reader.retell(|state| state.relaunched(at));
-        }'''
-replace = ""
+        if let Some(boundary) = options.relaunched.as_ref() {'''
+replace = "        if let Some(boundary) = options.relaunched.as_ref().filter(|_| false) {"
 
 [[plant]]
 name = "lost-queue: the reader empties the queue at every look that tells no relaunch"
@@ -221,8 +210,8 @@ runs = ["lost-queue-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
-find = "            .filter(|at| *at > self.at.load(Ordering::Relaxed))"
-replace = "            .filter(|at| *at != self.at.load(Ordering::Relaxed))"
+find = "                Some(known) => boundary.at > known.at || !self.reader.holds(known),"
+replace = "                Some(known) => boundary.at != known.at || !self.reader.holds(known),"
 
 [[plant]]
 name = "lost-queue: the adapter takes no length of the transcript it opens a window again on"
@@ -231,18 +220,27 @@ runs = ["lost-queue-adapter"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "                length.map(|at| (session.clone(), at))"
-replace = "                length.and(None)"
+find = "                boundary.map(|boundary| (session.clone(), boundary))"
+replace = "                boundary.and(None)"
 
 [[plant]]
-name = "lost-queue: the window's looks tell no relaunch"
+name = "lost-queue: the window's looks tell no relaunch, nor the turn the old process left open"
 meant = "a_window_opened_again_reads_its_own_turn_at_rest_though_the_closed_process_had_a_message_queued"
 runs = ["lost-queue-adapter"]
 
+# Since T-432 a Claude window is never launched with a message: one opened again reads
+# the turn the old process left open as well (`left_open`), which sets its queued
+# message aside as the relaunch's reading does. Either alone keeps the window's turn
+# its own, so the plant takes both away (each alone: 7 of 7 cases pass; both: 3 fail).
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
 find = "            let options = told(self.relaunched.as_ref(), &session);"
 replace = "            let options = Options::default();"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            let left_open = if resumable {"
+replace = "            let left_open = if false {"
 
 [[plant]]
 name = "lost-queue: the window tells its relaunch to a conversation it was followed to"
@@ -252,11 +250,11 @@ runs = ["lost-queue-adapter"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
 find = '''
-        relaunched_at: relaunched
+        relaunched: relaunched
             .filter(|(on, _)| on == session)
-            .map(|(_, at)| *at),'''
+            .map(|(_, boundary)| boundary.clone()),'''
 replace = '''
-        relaunched_at: relaunched.map(|(_, at)| *at),'''
+        relaunched: relaunched.map(|(_, boundary)| boundary.clone()),'''
 
 [[plant]]
 name = "lost-queue: the daemon's records seam tells no transcript's length, and the answer to a reopen is never the result"
@@ -268,13 +266,13 @@ builds = true
 file = "crates/cf-daemon/src/seams/boundary.rs"
 find = '''
 
-    fn transcript_length<'a>(
+    fn transcript_boundary<'a>(
         &'a self,
         harness: Harness,
         session: &'a str,
-    ) -> Work<'a, Result<Option<u64>, String>> {
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
         self.spawn
-            .arrival(self.records.transcript_length(harness, session))
+            .arrival(self.records.transcript_boundary(harness, session))
     }'''
 replace = ""
 
@@ -311,6 +309,165 @@ runs = ["lost-queue-reader"]
 file = "crates/cf-harness/src/claude/record/replay.rs"
 find = '''
         if record.closes_a_cut_turn {
-            self.items.commentary(item);
+            self.items.synthetic(item);
         }'''
 replace = ""
+
+# T-526 (the consensflow board, 3.0.5 then 3.0.6-alpha.2, Claude Code 2.1.310, 2026-10-25): the same
+# shape with an update's restart between the close and the reopen, whose proof T-541 keeps on the
+# conversation (`exit-proof.toml`). Where a window opens again on a conversation with no proof that the
+# program before was gone, what that program queued may hold its turns for good: the reader stays in
+# flight with nothing pending. A window that then waits at its prompt with a complete answer for a
+# minute is told to the task's requester once (`crates/cf-engine/src/turn_end.rs`'s `looks_finished`,
+# the window's `unproven` in `crates/cf-engine/src/windows.rs`, Claude's `Observed::at_prompt` in
+# `crates/cf-harness/src/claude/adapter.rs`). The tests are
+# `crates/cf-engine/tests/dispatcher/looks_finished.rs`, the adapter's `relaunched.rs`, and the reader's
+# on T-526's records (`restart.rs`).
+
+[[plant]]
+name = "lost-queue: a window opened again with no proof is never marked so, and a turn that looks finished is told to nobody"
+meant = "a_reopened_turn_that_looks_finished_and_never_reads_as_over_is_told_once_after_a_minute"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            part.unproven = resumed_on.is_some() && !proven;"
+replace = "            part.unproven = false;"
+
+[[plant]]
+name = "lost-queue: a window opened again on a proof that the program before was gone is marked as one without"
+meant = "a_turn_in_a_window_opened_on_a_proof_that_the_program_before_was_gone_is_told_nothing"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            part.unproven = resumed_on.is_some() && !proven;"
+replace = "            part.unproven = resumed_on.is_some();"
+
+[[plant]]
+name = "lost-queue: a turn whose harness says it is at work is told as finished"
+meant = "a_reopened_turn_whose_harness_says_it_is_at_work_is_told_nothing"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            && observed.at_prompt\n"
+replace = ""
+
+[[plant]]
+name = "lost-queue: a window at its prompt with no answer is told as finished"
+meant = "a_reopened_window_at_its_prompt_with_no_answer_yet_is_told_nothing"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                    .is_some_and(|answers| answers.last.is_some_and(|last| last.complete))"
+replace = "                    .is_some_and(|_| true) || true"
+
+[[plant]]
+name = "lost-queue: a turn that looks finished is told at once"
+meant = "a_reopened_turn_that_looks_finished_and_never_reads_as_over_is_told_once_after_a_minute"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            if now - since < LOOKS_FINISHED_MS || held.told_finished == Some(number) {"
+replace = "            if held.told_finished == Some(number) {"
+
+[[plant]]
+name = "lost-queue: a turn that looks finished is told at every pass"
+meant = "a_reopened_turn_that_looks_finished_and_never_reads_as_over_is_told_once_after_a_minute"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            if now - since < LOOKS_FINISHED_MS || held.told_finished == Some(number) {"
+replace = "            if now - since < LOOKS_FINISHED_MS {"
+
+[[plant]]
+name = "lost-queue: Claude's window never says it waits at its prompt apart from its record"
+meant = "a_window_opened_again_without_a_proof_is_at_its_prompt_though_the_closed_process_had_a_message_queued"
+runs = ["lost-queue-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''observed(at_rest, over, waiting, by_press, at_prompt)'''
+replace = '''observed(at_rest, over, waiting, by_press, false)'''
+
+[[plant]]
+name = "lost-queue: a relaunch empties what was queued but keeps what the closing process took"
+meant = "a_notification_the_closing_process_took_and_never_began_holds_no_turn_after_the_relaunch"
+runs = ["lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/queues.rs"
+find = '''
+    pub(super) fn restart(&mut self) {
+        self.queued.clear();
+        self.dequeued.clear();'''
+replace = '''
+    pub(super) fn restart(&mut self) {
+        self.queued.clear();'''
+
+[[plant]]
+name = "lost-queue: a window that opens on a conversation leaves the proof of the program before it, for a restart to find"
+meant = "the_proof_a_restart_finds_is_spent_by_the_window_that_opened_after_it"
+runs = ["lost-queue-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            self.seams.ledger.borrow_mut().set_program_gone(id, false)?;"
+replace = "            let _ = id;"
+
+# 3.0.6-alpha.3's integration B (T-664): tell-then-done's `drop_hold` keeps the window's look through a
+# pause, and the chief's call is that it drops whether the turn looked finished and the note that said so,
+# so a resumed task that sits finished again is told again.
+
+[[plant]]
+name = "lost-queue: a pause keeps the note a turn looked finished, and the resumed task is never told again"
+meant = "a_task_resumed_after_it_was_told_it_looks_finished_is_told_again_once_it_looks_finished_again"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        self.told_finished = None;\n"
+replace = ""
+# Calliope's P3-5 and P3-6 on 5c223bc8 (T-621, T-646): a dialog up or a job still running is no finished
+# turn (Claude Code's `shell` status reads idle while a job runs), and words told to the window that wait
+# to go in hold the note back, as they hold Finish back (`words-on-their-way`).
+
+[[plant]]
+name = "lost-queue: a turn with its dialog open is told as finished"
+meant = "a_reopened_turn_with_its_dialog_open_is_told_nothing"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            && observed.waiting.is_none()\n"
+replace = ""
+
+[[plant]]
+name = "lost-queue: a turn with a job still running is told as finished"
+meant = "a_reopened_turn_with_a_job_still_running_is_told_nothing"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            && observed.pending().total() == 0\n"
+replace = ""
+
+[[plant]]
+name = "lost-queue: a turn whose told words wait to go in is told to be finished, which Finish refuses"
+meant = "a_reopened_turn_that_looks_finished_with_words_told_on_their_way_is_told_nothing"
+runs = ["lost-queue-looks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+            && !self
+                .seams
+                .ledger
+                .borrow()
+                .told_waiting(participant.id, thread.task.id)?;'''
+replace = ";"
+

@@ -197,7 +197,7 @@ fn texts(staged: &Staged) -> Vec<String> {
             .iter()
             .map(|item| item.text.to_string())
             .collect(),
-        Reading::Unknown(reason) => panic!("unread: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unread: {reason}"),
     }
 }
 

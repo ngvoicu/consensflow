@@ -111,20 +111,20 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/transcripts.rs"
-find = "SET seq = excluded.seq, text = excluded.text, complete = excluded.complete,"
-replace = "SET seq = excluded.seq, text = excluded.text, complete = excluded.complete, compaction = excluded.compaction,"
+find = "SET seq = excluded.seq, role = excluded.role, text = excluded.text,"
+replace = "SET seq = excluded.seq, role = excluded.role, text = excluded.text, compaction = excluded.compaction,"
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/transcripts.rs"
-find = '''OR transcript.complete != excluded.complete
+find = '''            OR transcript.role != excluded.role
        RETURNING rowid, compaction",'''
-replace = '''OR transcript.complete != excluded.complete OR transcript.compaction != excluded.compaction
+replace = '''            OR transcript.role != excluded.role OR transcript.compaction != excluded.compaction
        RETURNING rowid, compaction",'''
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/transcripts.rs"
-find = '''             at = excluded.at, revision = transcript_head.revision + 1",'''
-replace = '''             at = excluded.at, compaction = excluded.compaction, revision = transcript_head.revision + 1",'''
+find = '''             revision = transcript_head.revision + 1",'''
+replace = '''             compaction = excluded.compaction, revision = transcript_head.revision + 1",'''
 
 [[plant]]
 name = "session viewer: the history heads the ended conversations alone, never the current one"
@@ -1209,8 +1209,9 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/transcripts.rs"
-find = '''             at = excluded.at, revision = transcript_head.revision + 1",'''
-replace = '''             at = excluded.at",'''
+find = '''             complete = excluded.complete, at = excluded.at,
+             revision = transcript_head.revision + 1",'''
+replace = '''             complete = excluded.complete, at = excluded.at",'''
 
 [[plant]]
 name = "session viewer: a long item's part reads the item's whole text for its revision"

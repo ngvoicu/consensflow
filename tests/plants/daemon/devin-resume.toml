@@ -114,6 +114,7 @@ replace = '''            .is_none();'''
 
 # Round 4 (Astra and Sol on the fix): an Enter goes in before /bypass is pasted again, as
 # the engine's Enter again for a delivery has it, or a missed Enter makes /bypass/bypass.
+
 [[plant]]
 name = "devin resume: /bypass is pasted again with no Enter before it"
 meant = "while_the_wire_says_the_normal_mode_enter_goes_in_again_before_bypass_is_pasted_again_and_a_paste_written_nowhere_is_no_paste"
@@ -136,6 +137,7 @@ replace = '''                if pane::write_keys(host, pane, &[ENTER]).await.is_
 
 # The window as it is once the host answered the look at its screen: what the human did
 # meanwhile is what it is.
+
 [[plant]]
 name = "devin resume: the mode read before the look at the screen decides"
 meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is_and_nothing_goes_in_for_what_it_was"
@@ -146,27 +148,8 @@ file = "crates/cf-harness/src/devin/adapter.rs"
 find = '''            if wants_bypass(now.mode.as_deref()) {'''
 replace = '''            if wants_bypass(said.mode.as_deref()) {'''
 
-[[plant]]
-name = "devin resume: a turn begun while the screen was looked at is given /bypass"
-meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is_and_nothing_goes_in_for_what_it_was"
-runs = ["harness-lib-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''            if now.prompts > since {'''
-replace = '''            if false {'''
-
 # Round 5 (Astra 4): a prompt already on the wire at readiness's first read, read since
 # the engine's look found the window at rest.
-[[plant]]
-name = "devin resume: a turn begun before readiness's first read is given /bypass"
-meant = "a_turn_begun_after_the_engines_look_found_the_window_at_rest_holds_it_though_its_prompt_was_there_at_the_first_read"
-runs = ["harness-lib-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''            let since = self.looked.get().unwrap_or(said.prompts);'''
-replace = '''            let since = said.prompts;'''
 
 [[plant]]
 name = "devin resume: another conversation opened while the screen was looked at is not seen"
@@ -189,6 +172,7 @@ find = '''        if known.as_deref() != Some(session) {'''
 replace = '''        if false {'''
 
 # A wire log replaced: read again from its start, the mode of the one before forgotten.
+
 [[plant]]
 name = "devin resume: a log replaced keeps the mode of the one before"
 meant = "a_log_replaced_by_one_as_long_says_the_mode_the_new_one_says_and_no_mode_of_the_old_one"
@@ -216,6 +200,7 @@ replace = '''        if let Some(written) = written {
 # settled, older than the look that found it by more than a file time's step (git's
 # racily clean entry); otherwise the bytes tell. The same in the shared JSONL reader the
 # Claude, Codex, Pi and Devin records follow, and in a followed transcript's failure.
+
 [[plant]]
 name = "devin resume: a log's time is trusted however near the look that found it"
 meant = "a_log_replaced_by_one_as_long_says_the_mode_the_new_one_says_and_no_mode_of_the_old_one"
@@ -358,6 +343,7 @@ replace = '''                    self.broken = Some((current, 0, stop.reason()))
 
 # Round 5 (Astra and Sol): a log rewritten past its first kilobyte and grown kept its
 # old mode; and a log another file was renamed over is told by which file it is.
+
 [[plant]]
 name = "devin resume: a log rewritten and grown is the one read before"
 meant = "a_log_rewritten_past_its_first_kilobyte_and_grown_says_the_mode_the_rewrite_says"
@@ -389,6 +375,7 @@ find = '''            state.offset = 0;'''
 replace = ""
 
 # A window that never draws: asked before it draws where its harness bounds its readiness.
+
 [[plant]]
 name = "devin resume: a Devin window is asked whether it is ready only once it has drawn"
 meant = "a_window_that_never_draws_is_asked_as_it_draws_and_its_time_runs_all_the_same"
@@ -415,6 +402,7 @@ replace = '''        } else if false && free && self.ready_while_drawing(record)
 
 # An unfit member whose launch was to say its role first (Astra 1): the follow-up the role
 # went ahead of fails, and no launch follows.
+
 [[plant]]
 name = "devin resume: an unfit member that was to say its role fails the note of the role, and is launched for again"
 meant = "a_members_window_unfit_for_work_before_the_role_was_told_fails_the_follow_up_it_went_ahead_of_once_and_no_launch_follows"
@@ -426,6 +414,7 @@ find = '''        if self.owed(record)?.is_some() {'''
 replace = '''        if false && self.owed(record)?.is_some() {'''
 
 # A chief that stays unfit (Sol 5): its count of failures goes until a window is ready.
+
 [[plant]]
 name = "devin resume: a chief's count of failures is cleared as its window starts"
 meant = "a_chief_whose_windows_stay_unfit_is_tried_again_ever_more_slowly_and_the_human_is_told_once_until_one_is_ready"
@@ -449,6 +438,7 @@ replace = '''        if false && record.delivery.borrow().prelude.is_none() {'''
 
 # The rig's readiness check drives the product's own (Astra and Sol): one that pasted the
 # command itself passed whatever the product did.
+
 [[plant]]
 name = "devin resume: the daemon's readiness pastes no /bypass"
 meant = "a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_readiness_switches_it"
@@ -457,10 +447,13 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''                    channel::send(host, pane, self.wire.path(), session.as_deref(), BYPASS).await;'''
-replace = '''                    channel::send(host, pane, self.wire.path(), session.as_deref().filter(|_| false), BYPASS).await;'''
+find = '''                    session.as_deref(),
+                    BYPASS,'''
+replace = '''                    session.as_deref().filter(|_| false),
+                    BYPASS,'''
 
 # The diagnostic launch without the owner's hooks (Sol 6): hook by hook, not entry by entry.
+
 [[plant]]
 name = "devin resume: an owner's hook that says the words of ConsensFlow's stays in a launch without the owner's"
 meant = "only_the_hooks_consensflow_added_stay_when_a_launch_is_to_have_none_of_the_owners"
@@ -477,6 +470,7 @@ replace = '''        entries.retain(|entry| ours.contains(entry) || entry.to_str
 # nothing on Windows, which has no `ps` (zeewin, 2026-10-16: every case failed at its
 # setup while Devin ran the command). The plants take the old way back; the outsider of
 # each test holds a mark of its own, which nothing else on the machine says.
+
 [[plant]]
 name = "devin resume: the check ends every process that says the mark, outside the window too"
 meant = "the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_that_says_the_same"
@@ -484,8 +478,13 @@ runs = ["rig-live-member-work", "e2e-lib-command"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/command.rs"
-find = '''        Ok(holding(&machine.processes()?, window, self.mark))'''
-replace = '''        Ok(machine.processes()?.into_iter().filter(|process| process.command.contains(self.mark)).collect())'''
+find = """        for process in descending_from(&all, window)
+            .into_iter()
+            .filter(|process| self.is_run_by(&process.command))"""
+replace = """        for process in all
+            .clone()
+            .into_iter()
+            .filter(|process| process.command.contains(self.mark))"""
 
 [[plant]]
 name = "devin resume: the check finds the command by the mark across the machine"
@@ -500,6 +499,7 @@ replace = '''        Ok(machine.processes()?.into_iter().chain(descending_from(&
 # Round 5 (Astra and Sol, P1): a process is known by its number and when it began. A
 # check that went by numbers alone could end a process that took a number the tree had,
 # or take for the tree's one whose parent's number the window's program had taken since.
+
 [[plant]]
 name = "devin resume: a process that names the window's number and began before it is taken for its child"
 meant = "what_descends_from_a_process_is_what_it_started_and_began_after_it_and_not_itself"
@@ -533,6 +533,7 @@ replace = '''        Ok(Some(_)) => match held.end() {'''
 
 # Round 5 (Astra, P1): Windows' process table is read as JSON, where a command line of
 # many lines is one string; read as lines, an argument made up a process of the window.
+
 [[plant]]
 name = "devin resume: Windows' process table is read as lines"
 meant = "windows_process_table_is_read_as_json_and_a_command_line_of_many_lines_is_one_process"
@@ -554,6 +555,7 @@ find = '''                command: entry["command"].as_str().unwrap_or_default()
 replace = '''                command: entry["command"].as_str().unwrap_or_default().lines().next().unwrap_or_default().to_owned(),'''
 
 # Round 5 (Astra 5): the relay waits on the helper only until its deadline.
+
 [[plant]]
 name = "devin resume: the relay waits on a stalled helper for ever"
 meant = "a_helper_that_stalls_is_ended_at_its_deadline_and_the_question_fails"
@@ -567,6 +569,7 @@ replace = '''        let line = match read.recv().map_err(|_| std::sync::mpsc::R
 # Round 5 (zeewin's after-note): an ask is made only once the window has been at rest for
 # a while. Round 6 (the lead): the long command ends by itself in a minute, and a run of it
 # is waited for: an interrupt for it cancelled the turn of the ask (after-note's shell ask).
+
 [[plant]]
 name = "devin resume: an ask goes in while the long command runs"
 meant = "an_ask_waits_for_a_run_of_the_long_command_to_end_by_itself_and_the_window_to_be_still"
@@ -610,6 +613,7 @@ replace = '''            (_, true) => {'''
 # Round 6 (the lead): no live suite ends a process by a mark across the machine. A guard
 # reads the live checks, their support and their suites for a signal or a program that
 # ends processes; the plants put the old way back, in a suite and in the support.
+
 [[plant]]
 name = "devin resume: a live suite ends what says its mark across the machine again"
 meant = "no_live_check_ends_a_process_but_through_the_descent"
@@ -643,6 +647,7 @@ replace = '''    /// Ends every process that says its mark.
 # `live_finish`'s leaving: what the run ends at its end is what it saw of the command in
 # the worker's window, and the jobs the rig's stand-in wrote it started. Round 7 (Astra and
 # Sol on round 6): a job is the process of its number that holds its own file, taken once.
+
 [[plant]]
 name = "devin resume: the leaving run takes the process of a job's number for the job, whatever its command line"
 meant = "a_stand_in_job_is_taken_by_its_own_file_at_the_first_look_and_its_number_never_again"
@@ -664,6 +669,7 @@ find = '''            if self.jobs.contains(file) {'''
 replace = '''            if false {'''
 
 # Round 7 (Astra on round 6): what the turn left is looked for whatever came of the task.
+
 [[plant]]
 name = "devin resume: the leaving run looks for what a turn left only once its task is done"
 meant = "what_a_task_left_is_looked_for_whatever_came_of_it"
@@ -678,6 +684,7 @@ replace = '''    if left.state == "done" {
 
 # Round 7 (Astra and Sol on round 6): a failure that leaves a process running is said in the
 # case's verdict, never dropped.
+
 [[plant]]
 name = "devin resume: a process that could not be ended is taken for one that had gone"
 meant = "a_process_is_ended_only_while_it_is_still_the_one_chosen_and_what_could_not_be_ended_is_said"
@@ -710,6 +717,7 @@ replace = '''        _ if true => None,'''
 
 # Round 7 (Astra and Sol on round 6): the window's process is read once, as the pane host
 # answers its open, and kept; a later look never reads its number again.
+
 [[plant]]
 name = "devin resume: a window's process is read again by its number at each look"
 meant = "a_windows_process_is_the_one_read_as_the_host_answered_its_open_and_never_read_again"
@@ -741,6 +749,7 @@ replace = '''        let root = root_of(&frame, |_| None);'''
 # Round 7 (Astra and Sol on round 6): when a process began is read where it is held, to the
 # microsecond on macOS and to the 100 ns on Windows' handle, and a listed process whose
 # number changed hands is not listed.
+
 [[plant]]
 name = "devin resume: a Mac says when a process began to the second"
 meant = "a_mac_says_when_a_process_began_to_the_microsecond"
@@ -773,6 +782,7 @@ replace = '''            Ok(Some(created)) => {'''
 
 # Round 7 (Astra and Sol on round 6): the guard refuses the machine's own end and a `kill`
 # program started by its name.
+
 [[plant]]
 name = "devin resume: the guard lets a check call the machine's own end"
 meant = "no_live_check_ends_a_process_but_through_the_descent"
@@ -795,6 +805,7 @@ replace = '''    (program.is_match(code) && false)'''
 
 # `live_stops`' stuck: the command is chosen in the window's own tree, and known from then
 # on by which process it is.
+
 [[plant]]
 name = "devin resume: the stuck case chooses the command across the machine"
 meant = "the_command_is_chosen_in_the_window_and_known_by_which_process_it_is_wherever_it_goes"

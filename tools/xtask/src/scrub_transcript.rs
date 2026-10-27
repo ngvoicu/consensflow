@@ -16,7 +16,10 @@
 //! - what an attachment carried (a hook's command and output, the skills, the
 //!   environment, the instructions, the e-mail address of the user): only its type,
 //!   and a hook's name, event, exit code and duration, are kept;
-//! - the request ids the API gave, and the signature of a thinking block.
+//! - the request ids the API gave, and the signature of a thinking block;
+//! - what Claude Code 2.1.310 keeps of each request it made to the API
+//!   (`api-request`, `api-request-shape`, `api-request-blob`: the instructions, the
+//!   environment and the folders it ran in): only the record's type and its session.
 //!
 //! The records a message is made of (the user's words, the assistant's, its model
 //! and usage) stay as Claude wrote them, in the order and the spelling it wrote
@@ -169,6 +172,13 @@ fn scrub(transcript: &str) -> Result<Fixture, Error> {
 
 /// A record without what is personal in it, as the text of a line.
 fn scrubbed(mut record: Map<String, Value>) -> String {
+    if record
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind.starts_with("api-request"))
+    {
+        record.retain(|name, _| name == "type" || name == "sessionId");
+    }
     let replace = |record: &mut Map<String, Value>, name: &str, with: Value| {
         if let Some(value) = record.get_mut(name) {
             *value = with;

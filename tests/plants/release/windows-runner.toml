@@ -52,6 +52,7 @@
 
 [run]
 xtask-lib-windows = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "windows::"]
+xtask-test-windows = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "windows"]
 
 # What the copy keeps.
 
@@ -114,8 +115,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/tree.rs"
-find = "        .chain([SYNCED, TREE, SWEEP, RUN])"
-replace = "        .chain([SYNCED, TREE, RUN])"
+find = "        (SWEEP, sweep_script()),\n"
+replace = ""
 
 # Folders.
 
@@ -266,8 +267,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($held)"
-replace = "  if ($held)"
+find = "  Free-Machine\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n}"
+replace = "  Free-Machine\n}"
 
 [[plant]]
 name = "windows runner: a refused run takes the lock of the run that refused it"
@@ -276,7 +277,7 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "  if ($held) {\n    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue\n"
+find = "  if ($script:held) {\n    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue\n"
 replace = "  if ($true) {\n    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue\n"
 
 [[plant]]
@@ -369,8 +370,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/tree.rs"
-find = "        .chain([SYNCED, TREE, SWEEP, RUN])"
-replace = "        .chain([SYNCED, SWEEP, RUN])"
+find = "        (TREE, format!(\"{identity}\\n\")),\n"
+replace = ""
 
 [[plant]]
 name = "windows runner: the script says no tree"
@@ -483,7 +484,7 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "  if ($lock) { $lock.Dispose() }\n"
+find = "  if ($script:lock) { $script:lock.Dispose(); $script:lock = $null }\n"
 replace = ""
 
 [[plant]]
@@ -557,8 +558,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/tree.rs"
-find = "        .chain([SYNCED, TREE, SWEEP, RUN])"
-replace = "        .chain([SYNCED, TREE, SWEEP])"
+find = "        (RUN, run.to_owned()),\n"
+replace = ""
 
 [[plant]]
 name = "windows runner: the sweep removes the run script"
@@ -607,8 +608,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "taskkill /PID ($of[1]) /T /F"
-replace = "taskkill /PID (Get-Content $running) /T /F"
+find = "$ends = @('/PID', $of[1], '/F'); "
+replace = "$ends = @('/PID', (Get-Content $running), '/F'); "
 
 [[plant]]
 name = "windows runner: a stop takes the older file whoever's it is"
@@ -617,8 +618,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force }"
-replace = "Remove-Item -LiteralPath $running -Force"
+find = "if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }"
+replace = "Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue"
 
 [[plant]]
 name = "windows runner: the end of a run takes the older file whoever's it is"
@@ -789,7 +790,9 @@ runs = ["xtask-lib-windows"]
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
 find = "if (!AssignProcessToJobObject(job, GetCurrentProcess()))"
-replace = "if (false)"
+# Not `if (false)`: Add-Type takes the compiler's warning of unreachable code for an error, and the run is
+# then in no job at all (a stop walks its tree), which is another plant.
+replace = "if (job == IntPtr.Zero)"
 
 [[plant]]
 name = "windows runner: the run is not put in the job that was made (on the machine)"
@@ -800,7 +803,9 @@ platforms = ["windows"]
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
 find = "if (!AssignProcessToJobObject(job, GetCurrentProcess()))"
-replace = "if (false)"
+# Not `if (false)`: Add-Type takes the compiler's warning of unreachable code for an error, and the run is
+# then in no job at all (a stop walks its tree), which is another plant.
+replace = "if (job == IntPtr.Zero)"
 
 [[plant]]
 name = "windows runner: a run that cannot be put in a job ends without its exit line"
@@ -855,18 +860,18 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "  if ($null -ne $job) { [CfJob]::Release($job) }\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n"
-replace = "  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($null -ne $job) { [CfJob]::Release($job) }\n"
+find = "  if ($null -ne $job) { [CfJob]::Release($job) }\n  Free-Machine\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n"
+replace = "  Free-Machine\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($null -ne $job) { [CfJob]::Release($job) }\n"
 
 [[plant]]
-name = "windows runner: the stop does not end the tree it reads"
-meant = "the_job_is_released_where_a_run_ends_by_itself_and_not_where_it_is_killed"
+name = "windows runner: the stop does not end the tree of a run that is not in its job"
+meant = "a_run_that_is_in_its_job_is_ended_by_its_process_alone_and_the_tree_is_walked_only_for_one_that_is_not"
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "taskkill /PID ($of[1]) /T /F"
-replace = "taskkill /PID ($of[1]) /F"
+find = "if ($of[2] -ne '«in_job»') { $ends += '/T' }"
+replace = ""
 
 [[plant]]
 name = "windows runner: the stop lets taskkill say what it could not end"
@@ -875,19 +880,11 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null;"
-replace = "taskkill /PID ($of[1]) /T /F | Out-Null;"
+find = "taskkill @ends 2>&1 | Out-Null"
+replace = "taskkill @ends | Out-Null"
 
-[[plant]]
-name = "windows runner: the stop lets taskkill say what it could not end (on the machine)"
-meant = "a_stop_of_a_run_that_has_already_ended_says_nothing_and_takes_its_records_away"
-runs = ["xtask-lib-windows"]
-platforms = ["windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null;"
-replace = "taskkill /PID ($of[1]) /T /F | Out-Null;"
+# There is no plant for it on the machine: `taskkill` now ends a process only if it is the run's, and
+# says something on its error stream only when part of a tree it walks cannot be ended, by chance.
 
 [[plant]]
 name = "windows runner: the stop ends with the status of its last command"
@@ -909,6 +906,143 @@ platforms = ["windows"]
 file = "tools/xtask/src/windows/script.rs"
 find = "-ErrorAction SilentlyContinue\nexit 0\n\"##;"
 replace = "-ErrorAction SilentlyContinue\n\"##;"
+
+# A stop ends the run's process alone when the run is in its job, and only if that process is still
+# the run's (T-545): the walk of a run's tree ended, by process id, programs that had ended since it
+# read the list, and the ids had been given to other programs: two PowerShells of other cases of
+# these tests, in their first seconds, were ended by a stop in CI (2026-10-24, run 40132724600:
+# "the runs were never ready", and a sweep that ended with 1 and `#< CLIXML`). The walk is plant
+# "a stop walks the tree of a run that is in its job", by its text; there is none for it on the
+# machine, for the case that shows it (bystanders ended by a walk of a long tree) goes red by
+# chance only (1 run of 20 under load, zeewin, 2026-10-25).
+
+[[plant]]
+name = "windows runner: a stop walks the tree of a run that is in its job"
+meant = "a_run_that_is_in_its_job_is_ended_by_its_process_alone_and_the_tree_is_walked_only_for_one_that_is_not"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if ($of[2] -ne '«in_job»') { $ends += '/T' }"
+replace = "$ends += '/T'"
+
+[[plant]]
+name = "windows runner: a run does not say it is in its job"
+meant = "a_run_that_is_in_its_job_is_ended_by_its_process_alone_and_the_tree_is_walked_only_for_one_that_is_not"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  try { Add-Content -LiteralPath $owner -Value '«in_job»' } catch {"
+replace = "  try { } catch {"
+
+[[plant]]
+name = "windows runner: a run does not say it is in its job (on the machine)"
+meant = "a_stop_of_a_run_that_is_starting_programs_ends_no_program_that_is_not_the_runs"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  try { Add-Content -LiteralPath $owner -Value '«in_job»' } catch {"
+replace = "  try { } catch {"
+
+[[plant]]
+name = "windows runner: a stop ends the process whatever it is"
+meant = "a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($run) { taskkill @ends"
+replace = "  if ($true) { taskkill @ends"
+
+[[plant]]
+name = "windows runner: a stop ends the process whatever it is (on the machine)"
+meant = "a_stop_ends_the_process_the_owner_file_names_only_if_it_is_a_powershell_older_than_the_file"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($run) { taskkill @ends"
+replace = "  if ($true) { taskkill @ends"
+
+[[plant]]
+name = "windows runner: a stop takes any program for a PowerShell"
+meant = "a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "-ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner)"
+replace = "-ErrorAction Stop | Where-Object { $_.StartTime -le (Get-Item -LiteralPath $owner)"
+
+[[plant]]
+name = "windows runner: a stop takes any program for a PowerShell (on the machine)"
+meant = "a_stop_ends_the_process_the_owner_file_names_only_if_it_is_a_powershell_older_than_the_file"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "-ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner)"
+replace = "-ErrorAction Stop | Where-Object { $_.StartTime -le (Get-Item -LiteralPath $owner)"
+
+[[plant]]
+name = "windows runner: a stop takes a PowerShell started after the record for the run"
+meant = "a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = " -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime"
+replace = ""
+
+[[plant]]
+name = "windows runner: a stop takes a PowerShell started after the record for the run (on the machine)"
+meant = "a_stop_ends_the_process_the_owner_file_names_only_if_it_is_a_powershell_older_than_the_file"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = " -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime"
+replace = ""
+
+# A stop says nothing of its records (T-545): a run that ends by itself takes them away too, and the stop
+# that read them before it did said PowerShell's "Cannot find path" (zeewin under load, 2026-10-25).
+
+[[plant]]
+name = "windows runner: the stop lets Remove-Item say what it could not take away"
+meant = "the_script_that_ends_a_run_there_ends_the_run_the_lock_names_and_takes_its_tarball_away"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if"
+replace = "  Remove-Item -LiteralPath $owner -Force; if"
+
+[[plant]]
+name = "windows runner: the stop lets Remove-Item say what it could not take away (on the machine)"
+meant = "a_stop_that_cannot_take_the_records_away_says_nothing_of_it"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if"
+replace = "  Remove-Item -LiteralPath $owner -Force; if"
+
+[[plant]]
+name = "windows runner: the stop lets Remove-Item say what it could not take away of the older file"
+meant = "the_script_that_ends_a_run_there_ends_the_run_the_lock_names_and_takes_its_tarball_away"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "{ Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n}\n"
+replace = "{ Remove-Item -LiteralPath $running -Force }\n}\n"
 
 # What the reports a run left keep (`script::REPORTS_KEPT_DAYS`, T-34 P3-6): older than the limit
 # is removed by the sweep, in that folder alone, and nothing newer is touched.
@@ -1222,8 +1356,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/machine.rs"
-find = "        Ok(answer) => Lock::NoAnswer(format!("
-replace = "        Ok(answer) if answer.code == 255 => Lock::Held,\n        Ok(answer) => Lock::NoAnswer(format!("
+find = "                Lock::NotRunning(why)\n            } else {"
+replace = "                Lock::Held\n            } else {"
 
 [[plant]]
 name = "windows runner: zeelin is asked of the lock's folder, not its owner file"
@@ -1262,8 +1396,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/run.rs"
-find = "            return Ok(Outcome::Exited(REFUSED));"
-replace = "            let _ = REFUSED;"
+find = "            return Ok(Outcome::Refused(why));"
+replace = "            let _ = why;\n            None"
 
 [[plant]]
 name = "windows runner: zeewin2 runs the Node in Program Files"
@@ -1292,8 +1426,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/machine.rs"
-find = "(Join-Path $env:USERPROFILE '{dir}') '{OWNER}')"
-replace = "(Join-Path $env:USERPROFILE '{dir}') '.windows-run.lock')"
+find = "(Join-Path $env:USERPROFILE '{dir}') '{OWNER}'"
+replace = "(Join-Path $env:USERPROFILE '{dir}') '.windows-run.lock'"
 
 [[plant]]
 name = "windows runner: the default takes zeewin2 whoever holds it"
@@ -1302,8 +1436,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/machine.rs"
-find = "    let (machine, why) = match first.free(context, dir) {"
-replace = "    let _ = Machine::free;\n    let (machine, why) = match Free::Yes {"
+find = "    let free = first.free(context, dir);"
+replace = "    let _ = Machine::free;\n    let free = Free::Yes;"
 
 [[plant]]
 name = "windows runner: the default does not see a run on zeewin2"
@@ -1312,8 +1446,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/machine.rs"
-find = '''            Ok((Ready::Go(_), true)) => Free::No("a run goes on there".into()),'''
-replace = '''            Ok((Ready::Go(_), true)) => Free::Yes,'''
+find = '''            Ok((Ready::Go(_), Busy::Run)) => Free::No("a run goes on there".into()),'''
+replace = '''            Ok((Ready::Go(_), Busy::Run)) => Free::Yes,'''
 
 [[plant]]
 name = "windows runner: --machine and --host together are taken"
@@ -1324,3 +1458,516 @@ runs = ["xtask-lib-windows"]
 file = "tools/xtask/src/windows/options.rs"
 find = '''        (Some(_), Some(_)) => Err("--machine and --host name the same thing: give one".into()),'''
 replace = '''        (Some(name), Some(_)) => Ok(Machine::named(name)),'''
+
+# T-610 (2026-10-26), Calliope's findings on the two machines (T-600).
+#
+# - `--host zeewin2` is the laptop with its guards: poker-lab's lock, the disk floor, CI's Node.
+# - A run goes on there only if the process the owner file names is alive (a stale file, left by a
+#   reboot, a battery or a BSOD, is no run); the tests of this are the machine's own PowerShell's
+#   (`(on the machine)`, `platforms = ["windows"]`) and the script's text.
+# - Both probes of the laptop are bounded alike (ConnectTimeout, BatchMode, ServerAlive).
+# - A zeelin that cannot be connected to is an Ubuntu that is not running (a port nothing listens on
+#   times out on the laptop, 2026-10-26, and port 22 with WSL stopped is one: its firewall blocks inbound
+#   by default and its sshd rule is off); one that connected and cannot say may be running poker-lab's
+#   job, and the run is refused.
+# - The disk script ends with `exit 0`: with no owner file `Get-Content` fails, `$?` stays false, and the
+#   script's last statement (an `if` that runs nothing) left the exit status 1 (the live run on zeewin2).
+# - A Ctrl-C ends the probes with the program: a stop, not a zeelin that did not answer; a refused
+#   run asks nothing more of the machine, and stops a matrix, whose later evals are `not run`.
+
+[[plant]]
+name = "windows runner: --host zeewin2 is reached as any host, without the laptop's guards"
+meant = "a_host_that_is_a_machines_name_is_that_machine_with_its_guards_and_its_node"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/options.rs"
+find = "            Machine::named(host).unwrap_or_else(|| Machine::at(host)),"
+replace = "            Machine::at(host),"
+
+[[plant]]
+name = "windows runner: --host zeewin2 sends the tree while poker-lab holds the laptop"
+meant = "a_run_on_zeewin2_while_poker_lab_holds_it_ends_with_75_having_sent_nothing_by_either_name"
+runs = ["xtask-test-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/options.rs"
+find = "            Machine::named(host).unwrap_or_else(|| Machine::at(host)),"
+replace = "            Machine::at(host),"
+
+[[plant]]
+name = "windows runner: a refused run ends with 1"
+meant = "a_run_on_zeewin2_while_poker_lab_holds_it_ends_with_75_having_sent_nothing_by_either_name"
+runs = ["xtask-test-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows.rs"
+find = "        Ok(Outcome::Refused(_)) => Ok(run::REFUSED),"
+replace = "        Ok(Outcome::Refused(_)) => Ok(1),"
+
+[[plant]]
+name = "windows runner: the owner file alone is a run"
+meant = "a_run_goes_on_there_only_if_the_process_the_owner_file_names_is_a_powershell_older_than_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = " -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime"
+replace = ""
+
+[[plant]]
+name = "windows runner: a process that is no PowerShell is a run (on the machine)"
+meant = "the_disk_script_says_the_free_disk_and_a_run_in_the_machines_own_powershell"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "($_.Name -in @('powershell', 'pwsh')) -and "
+replace = ""
+
+[[plant]]
+name = "windows runner: a file naming a dead process is a run (on the machine)"
+meant = "the_disk_script_says_the_free_disk_and_a_run_in_the_machines_own_powershell"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "$run = if ($of.Count -ge 2) {{ try {{ Get-Process -Id ([int]$of[1]) -ErrorAction Stop | Where-Object {{ ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime }} }} catch {{}} }}"
+replace = "$run = if ($of.Count -ge 1) {{ 'x' }}"
+
+[[plant]]
+name = "windows runner: zeewin2's disk is asked without the probe's bounds"
+meant = "both_probes_of_the_laptop_are_bounded_alike"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "        let asked = probe(context, &self.host).arg(line);"
+replace = '''        let asked = Invocation::new("ssh", &context.root)
+            .arg(&self.host)
+            .arg(line);'''
+
+[[plant]]
+name = "windows runner: the probes may ask for a password"
+meant = "both_probes_of_the_laptop_are_bounded_alike"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''        .args(["-o", &timeout, "-o", "BatchMode=yes"])'''
+replace = '''        .args(["-o", &timeout])'''
+
+[[plant]]
+name = "windows runner: the probes wait for a silent peer for ever"
+meant = "both_probes_of_the_laptop_are_bounded_alike"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''        .args(["-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=1"])'''
+replace = ""
+
+[[plant]]
+name = "windows runner: a zeelin that connected and cannot say is taken for not running"
+meant = "a_zeelin_that_connected_and_cannot_say_leaves_the_laptop_unsent_a_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''            if answer.stderr.contains("ssh: connect to host") {'''
+replace = "            if true {"
+
+[[plant]]
+name = "windows runner: a zeelin nobody connects to is taken for one that cannot say"
+meant = "a_zeelin_nobody_connects_to_holds_no_lock_and_is_said"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''            if answer.stderr.contains("ssh: connect to host") {'''
+replace = "            if false {"
+
+[[plant]]
+name = "windows runner: words in place of zeelin's answer are taken for a free lock"
+meant = "a_zeelin_that_connected_and_cannot_say_leaves_the_laptop_unsent_a_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''            said => Lock::Unknown(format!("it said {said:?}")),'''
+replace = "            _ => Lock::Free,"
+
+[[plant]]
+name = "windows runner: a zeelin that cannot be asked at all is taken for a free lock"
+meant = "a_laptop_whose_ssh_cannot_be_started_cannot_be_sent_a_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "        Err(failure) => Lock::Unknown(failure.to_string()),"
+replace = "        Err(_) => Lock::Free,"
+
+[[plant]]
+name = "windows runner: a zeelin that cannot say lets the run go on"
+meant = "a_zeelin_that_connected_and_cannot_say_leaves_the_laptop_unsent_a_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''                        self.name, shared.linux
+                    );
+                    return Ok((Ready::Refused(why), Busy::No));'''
+replace = '''                        self.name, shared.linux
+                    );
+                    said.push(why);'''
+
+[[plant]]
+name = "windows runner: a stop heard while the laptop is asked is read as what the probes came to"
+meant = "a_stop_heard_while_the_laptop_is_asked_is_a_stop_and_nothing_is_said_of_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "            if !matches!(asked, Ok(Ready::Go(_))) && pace.stopped_after_failure() {"
+replace = "            if false {"
+
+[[plant]]
+name = "windows runner: a stop heard while the default is chosen is read as zeewin2 not free"
+meant = "a_stop_heard_while_the_default_is_chosen_chooses_nothing_and_says_nothing"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "    if matches!(free, Free::No(_)) && interrupt.heard_after_failure() {"
+replace = "    if false {"
+
+[[plant]]
+name = "windows runner: the matrix goes on after a refused run"
+meant = "a_run_the_machine_refuses_stops_the_matrix_and_the_rest_are_not_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/matrix.rs"
+find = "                    refused = Some(why);"
+replace = "                    let _ = why;"
+
+[[plant]]
+name = "windows runner: a matrix a machine stopped answers 1"
+meant = "a_run_the_machine_refuses_stops_the_matrix_and_the_rest_are_not_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/matrix.rs"
+find = "        return Ok(REFUSED);"
+replace = "        return Ok(1);"
+
+[[plant]]
+name = "windows runner: a refused run brings the reports back"
+meant = "a_run_the_machine_was_refused_asks_nothing_of_it_after_the_refusal"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = "    if let Outcome::Exited(_) = ended {"
+replace = "    if let Outcome::Exited(_) | Outcome::Refused(_) = ended {"
+
+[[plant]]
+name = "windows runner: the disk script ends with the status of its last command"
+meant = "a_run_goes_on_there_only_if_the_process_the_owner_file_names_is_a_powershell_older_than_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''         exit 0\n"'''
+replace = '''         \n"'''
+
+[[plant]]
+name = "windows runner: the disk script ends with the status of its last command (on the machine)"
+meant = "the_disk_script_says_the_free_disk_and_a_run_in_the_machines_own_powershell"
+runs = ["xtask-lib-windows"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''         exit 0\n"'''
+replace = '''         \n"'''
+
+# T-701: one tree for both machines, what every run makes sure of, the queue, the limits.
+
+[[plant]]
+name = "windows runner: a run's own files are written in the checkout it packs"
+meant = "a_run_writes_nothing_into_the_checkout_it_packs"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/tree.rs"
+find = "    let state = scratch.join(\"state\");"
+replace = "    let state = context.root.clone();"
+
+[[plant]]
+name = "windows runner: a run is not made sure of the crates and the console host"
+meant = "every_run_makes_sure_of_the_crates_and_the_console_host_before_its_command"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "            (\"prepare\", &prepare.join(\", \")),"
+replace = "            (\"prepare\", \"\"),"
+
+[[plant]]
+name = "windows runner: the console host is staged beside the release build only"
+meant = "the_console_host_is_staged_beside_the_debug_and_the_release_builds"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "    \"cargo xtask conpty --into app/src-tauri/target/debug\",\n"
+replace = "    \"cargo xtask conpty --into app/src-tauri/target/release\",\n"
+
+[[plant]]
+name = "windows runner: a run that cannot be made ready goes on to its command"
+meant = "a_run_whose_preparation_fails_ends_with_its_status_before_the_command"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "    Exit-Run $LASTEXITCODE\n  }\n}\n«given»"
+replace = "  }\n}\n«given»"
+
+[[plant]]
+name = "windows runner: the exit line is written before the machine is freed"
+meant = "every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "function Exit-Run([int]$code) { Free-Machine; Write-Output"
+replace = "function Exit-Run([int]$code) { Write-Output"
+
+[[plant]]
+name = "windows runner: a machine that takes less at once is given all it has"
+meant = "a_machine_that_takes_less_at_once_has_its_limits_given_before_the_steps_and_the_command"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "            (\"limits\", &limits_of(script.limits)),"
+replace = "            (\"limits\", \"\"),"
+
+[[plant]]
+name = "windows runner: zeewin is not asked for less than it has"
+meant = "the_names_are_the_two_machines_and_a_host_is_reached_as_zeewin_is"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "                limits: Some(ZEEWIN_LIMITS),"
+replace = "                limits: None,"
+
+[[plant]]
+name = "windows runner: a run named by --env gives way to the machine's limits"
+meant = "a_machine_that_takes_less_at_once_has_its_limits_given_before_the_steps_and_the_command"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "«limits»foreach ($step in @(«steps»)) {"
+replace = "foreach ($step in @(«steps»)) {"
+
+[[plant]]
+name = "windows runner: a run goes ahead of the runs that came before it"
+meant = "runs_for_one_busy_machine_from_two_trees_go_in_the_order_they_came"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "        let _ = touch_if_gone(&self.path, &self.text, now_ms);\n        let Some(folder)"
+replace = "        if now_ms > 0 {\n            return Vec::new();\n        }\n        let _ = touch_if_gone(&self.path, &self.text, now_ms);\n        let Some(folder)"
+
+[[plant]]
+name = "windows runner: the ticket of a run that was killed holds the runs behind it"
+meant = "a_ticket_nobody_touches_is_a_run_that_was_killed_and_holds_no_one_back"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "const DEAD_AFTER_MS: i64 = 30_000;"
+replace = "const DEAD_AFTER_MS: i64 = i64::MAX / 2;"
+
+[[plant]]
+name = "windows runner: a run told not to wait waits"
+meant = "a_run_told_not_to_wait_asks_once_takes_no_ticket_and_refuses_as_it_did"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "        if minutes == 0 {\n            return Ok(Waited::Refused(shown));\n        }\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: a run waits for ever"
+meant = "a_run_whose_machine_stays_busy_ends_when_its_time_is_up_saying_how_long_it_waited_and_why"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "        if waited >= limit_ms {"
+replace = "        if waited < 0 {"
+
+[[plant]]
+name = "windows runner: a lock held by a program that is no run is not seen"
+meant = "zeewin2_is_refused_while_a_run_goes_on_there_or_a_program_holds_its_run_lock"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "        } else if state.held {\n            Busy::Lock\n"
+replace = "        } else if false {\n            Busy::Lock\n"
+
+[[plant]]
+name = "windows runner: a ticket is kept by a run that is queued for the default machine"
+meant = "the_default_is_zeewin_while_runs_are_queued_for_zeewin2_and_says_how_many"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "        if queued > 0 {"
+replace = "        if queued > 1000 {"
+
+[[plant]]
+name = "windows runner: a queue that cannot be kept stops the run"
+meant = "a_queue_that_cannot_be_kept_is_said_and_the_run_waits_for_the_machine_alone"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "waiting for the machine alone\"\n                ))\n                .map_err(Error::Output)?;\n                None"
+replace = "waiting for the machine alone\"\n                ))\n                .map_err(Error::Output)?;\n                return Err(Error::Output(cause));"
+
+# T-778: Calliope's review of T-701 (T-777).
+
+[[plant]]
+name = "windows runner: a machine the runner does not share is not asked what holds its copy"
+meant = "a_machine_the_runner_does_not_share_is_asked_what_holds_its_copy_and_nothing_of_poker_lab_nor_its_disk"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "        let state = self.state(context, dir)?;\n        if let Some(shared)"
+replace = "        if self.shared.is_none() {\n            return Ok((Ready::Go(said), Busy::No));\n        }\n        let state = self.state(context, dir)?;\n        if let Some(shared)"
+
+[[plant]]
+name = "windows runner: the head of zeewin's queue sends its tree into a holder outside the queue"
+meant = "a_run_for_zeewin_waits_while_a_program_outside_the_queue_holds_it_and_sends_nothing"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "        let state = self.state(context, dir)?;\n        if let Some(shared)"
+replace = "        if self.shared.is_none() {\n            return Ok((Ready::Go(said), Busy::No));\n        }\n        let state = self.state(context, dir)?;\n        if let Some(shared)"
+
+[[plant]]
+name = "windows runner: a run told not to wait goes behind the runs queued for the machine"
+meant = "a_run_told_not_to_wait_is_refused_while_runs_are_queued_for_the_machine_and_never_asks_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "        if queued > 0 {\n            return Ok(Waited::Refused("
+replace = "        if queued > 1_000_000 {\n            return Ok(Waited::Refused("
+
+[[plant]]
+name = "windows runner: a run told not to wait is sent ahead of the runs queued for the machine"
+meant = "a_run_told_not_to_wait_is_refused_while_a_run_is_queued_for_the_machine_and_sends_nothing"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "        if queued > 0 {\n            return Ok(Waited::Refused("
+replace = "        if queued > 1_000_000 {\n            return Ok(Waited::Refused("
+
+[[plant]]
+name = "windows runner: the seconds the run ahead has been there are news at every look"
+meant = "a_run_behind_another_says_where_it_stands_once_in_the_first_minute_whatever_the_seconds_the_other_has_been_there"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "|(was, _)| *was != blocked"
+replace = "|(was, _)| *was != shown"
+
+[[plant]]
+name = "windows runner: a ticket is named by a clock that was set back"
+meant = "a_run_that_comes_after_the_clock_was_set_back_is_still_behind_the_runs_that_were_there"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "        let mut at = newest.map_or(now_ms, |newest| now_ms.max(newest + 1));"
+replace = "        let _ = newest;\n        let mut at = now_ms;"
+
+[[plant]]
+name = "windows runner: a ticket touched in the future is a run's"
+meant = "a_ticket_touched_in_the_future_is_a_run_killed_before_the_clock_was_set_back"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "touched - now_ms <= AHEAD_MS && "
+replace = ""
+
+[[plant]]
+name = "windows runner: a machine that cannot be read ends a wait that is on"
+meant = "a_machine_that_cannot_be_read_once_the_wait_is_on_does_not_end_it_and_is_said"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "Err(why) if !looked || minutes == 0 => return Err(Error::Unready(why)),"
+replace = "Err(why) => return Err(Error::Unready(why)),"
+
+[[plant]]
+name = "windows runner: a machine that cannot be read at the first look is waited for"
+meant = "a_machine_that_cannot_be_asked_is_the_error_it_was"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "Err(why) if !looked || minutes == 0 => return Err(Error::Unready(why)),"
+replace = "Err(why) if looked && minutes == 0 => return Err(Error::Unready(why)),"
+
+[[plant]]
+name = "windows runner: a wait that ended on a machine it could not read says it was busy"
+meant = "a_machine_that_cannot_be_read_all_the_wait_ends_it_with_the_error_when_the_time_is_up"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "            if let Some(why) = unread {"
+replace = "            if let Some(why) = unread.filter(|_| false) {"
+
+[[plant]]
+name = "windows runner: the head looks at a busy machine as often as at the queue"
+meant = "a_run_ahead_of_the_queue_looks_at_a_busy_machine_every_half_minute_then_every_minute"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/queue.rs"
+find = "            Some(before) => MACHINE_LOOK_MS[before.min(1)],"
+replace = "            Some(_) => LOOK_MS,"
+
+
+# Integration B round 2 (T-800): PowerShell ends a single-quoted string at a typographic single quote too; a
+# plant's name with one ("a worker’s turn") ended the run's command there, on zeewin2.
+
+[[plant]]
+name = "windows runner: a typographic quote in the command is said once, and ends PowerShell's string"
+meant = "a_typographic_quote_in_the_command_is_said_again_as_an_apostrophe_is"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "            (\"command\", &single_quoted(script.command)),"
+replace = "            (\"command\", &script.command.replace('\\'', \"''\")),"

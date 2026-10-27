@@ -24,8 +24,6 @@ cf-native = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "cf_
 clis = { command = ["cargo", "xtask", "test", "clis", "--offline"], builds = true }
 # A Codex window's supervisor, which refuses a Codex it has no Node to run.
 codex-session = ["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "supervisor"]
-# The page's console text, held to the table the Rust one is held to.
-console-text = ["node", "--test", "tests/console-text.test.mjs"]
 # The recording replayed against the native `cf`, case by case.
 goldens = ["cargo", "test", "--offline", "-p", "cf", "--test", "cli_goldens"]
 # What the repair leaves as it is, and says (cargo stops at the first test binary that fails, so the whole crate may not reach it).

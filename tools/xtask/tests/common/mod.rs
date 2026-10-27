@@ -20,12 +20,26 @@ pub fn checkout() -> PathBuf {
         .to_path_buf()
 }
 
+/// The command a test starts `program` with, holding nothing of the test's but its streams: the
+/// tests run side by side, and a program one starts (an xtask that runs on, a fake `ssh` that
+/// sleeps) would hold what another closed.
+pub fn command(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    cf_process::hold_only_the_streams(&mut command);
+    command
+}
+
 /// xtask run in `cwd` with `args`, finding programs in `path` alone, and the
 /// fake child's instructions in `vars`.
 pub fn xtask(cwd: &Path, path: &Path, vars: &[(&str, &str)], args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_xtask"))
+    // The queue of the Windows runner is a folder every runner on the machine shares, and a run
+    // of these cases that joined it would wait behind the others (and behind a developer's own
+    // runs): each has a folder of its own (T-701).
+    let queues = tempfile::tempdir().unwrap();
+    command(env!("CARGO_BIN_EXE_xtask"))
         .current_dir(cwd)
         .env("PATH", path)
+        .env("CF_WINDOWS_QUEUES", queues.path())
         .envs(vars.iter().copied())
         .args(args)
         .output()

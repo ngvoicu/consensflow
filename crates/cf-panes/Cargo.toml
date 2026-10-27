@@ -15,14 +15,22 @@ publish = false
 # test's own panics and is not sent). The app turns it on for its tests alone:
 # it must stay off in what ships.
 [features]
-test-support = []
+test-support = ["dep:cf-process"]
 
-# The helper's own tests (tests/headless.rs) start a sentinel too.
+# The helper's own tests (tests/headless.rs) start a sentinel too, and start the helper holding
+# only its streams.
 [dev-dependencies]
 cf-panes = { path = ".", features = ["test-support"] }
+cf-process = { workspace = true, features = ["test-support"] }
 
 [dependencies]
+# The environment, read once in the bridge's main (`Env`); the programs the tests start that end
+# with the test (src/pty/sentinel.rs and the tests of the crate); on Windows also cygwin.rs, `ps -W`'s
+# parent.
+cf-base.workspace = true
 cf-bridge.workspace = true
+# The sentinel holds only its streams (test-support alone).
+cf-process = { workspace = true, optional = true }
 cf-proto.workspace = true
 futures-channel.workspace = true
 futures-executor.workspace = true
@@ -45,8 +53,7 @@ anyhow.workspace = true
 portable-pty = { workspace = true, features = ["serde_support"] }
 # `ps -W` of Git Bash says the parent of a program of its own kind whose parent has gone
 # (src/cygwin.rs): started through cf-process, the one place a process starts, on a runtime
-# of its own for the moment it takes.
-cf-base.workspace = true
+# of its own for the moment it takes (cf-base is every platform's, above).
 cf-process.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "time"] }
 windows-sys = { workspace = true, features = [

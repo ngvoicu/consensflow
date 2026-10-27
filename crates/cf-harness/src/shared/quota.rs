@@ -33,7 +33,7 @@ use jiff::tz::TimeZone;
 use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
 
-use patterns::REFUSED;
+use patterns::{REFUSED, SPENT};
 
 /// What a record says of the account's quota.
 #[derive(Debug, Clone, PartialEq)]
@@ -137,11 +137,20 @@ pub(crate) fn quota_status(status: f64) -> bool {
 }
 
 /// Whether a provider's error text opens on a quota status: "429: …", or
-/// "OpenAI API error (429): …", Pi's two shapes (seen on Pi, 2026-09).
+/// "OpenAI API error (429): …", Pi's two shapes (seen on Pi, 2026-09); or says
+/// Anthropic's extra usage is spent, whatever its status (a 400, 2026-10).
 pub(crate) fn refused_for_quota(text: &str) -> bool {
     REFUSED
         .captures(text)
         .is_some_and(|found| quota_status(js::number(&found[1])))
+        || spent_extra_usage(text)
+}
+
+/// Whether a provider's words say Anthropic's extra usage is spent, which it
+/// answers with a 400 (Pi's sessions on this Mac, 2026-10): a refusal for quota
+/// whatever the status, in any harness's words.
+pub(crate) fn spent_extra_usage(text: &str) -> bool {
+    SPENT.is_match(text)
 }
 
 /// A refused request: exhausted, with the reset the text names when it names

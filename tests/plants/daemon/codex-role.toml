@@ -141,8 +141,8 @@ runs = ["ledger-lib", "ledger-replay"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/testing.rs"
-find = '''                *sql = sql.replace(role_text::COLUMN_LINES, "");'''
-replace = '''                *sql = sql.replace(role_text::COLUMN_LINES, " ");'''
+find = '''                    .replace(role_text::COLUMN_LINES, "")'''
+replace = '''                    .replace(role_text::COLUMN_LINES, " ")'''
 
 [[plant]]
 name = "codex role: a note is confirmed and the role recorded in two writes, and one that fails leaves the other made"
@@ -504,14 +504,25 @@ find = '''        *self.left_open.borrow_mut() = None;
 replace = ''
 
 [[plant]]
-name = "codex role: a Codex window opened with a message of its own is read at rest by the turn the quit cut"
-meant = "codex::resumed::a_window_opened_with_a_message_of_its_own_is_not_read_at_rest_by_the_turn_the_quit_cut"
+name = "codex role: a Codex window opened for a message the broker gives it once up reads the turn the quit cut as its own (T-432)"
+meant = "codex::resumed::a_window_opened_for_a_message_it_is_given_once_up_is_read_at_rest_by_the_turn_the_quit_cut"
 runs = ["harness-codex-resumed"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/adapter.rs"
-find = '''                Some(thread) if launch.message.is_none() => {'''
-replace = '''                Some(thread) => {'''
+find = '''            let left_open = match launch.resume {
+                Some(thread) => {'''
+replace = '''            let left_open = match launch.resume {
+                Some(thread) if launch.message.is_none() => {'''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''                    LeftOpen::of(&before)
+                }
+                None => None,'''
+replace = '''                    LeftOpen::of(&before)
+                }
+                _ => None,'''
 
 # --- the engine ---
 
@@ -911,8 +922,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = '''                item.role == Role::User && is_paste_of(&item.text, message, first.as_deref())'''
-replace = '''                item.role == Role::User && item.text.contains("[ConsensFlow m-")'''
+find = '''        .find(|item| item.role == Role::User && is_paste_of(&item.text, message, first))'''
+replace = '''        .find(|item| item.role == Role::User && item.text.contains("[ConsensFlow m-"))'''
 
 [[plant]]
 name = "codex role: a replacement found in the record is not taken out of the launch's first message, which is told it again"
@@ -998,12 +1009,14 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''        let delivering = delivering.filter(|_| {
-            prelude
-                .as_ref()
-                .is_none_or(|prelude| prelude.displaced.is_none())
-        });'''
-replace = '''        let delivering = delivering;'''
+find = '''        let delivering = delivering
+            .filter(|_| {
+                prelude
+                    .as_ref()
+                    .is_none_or(|prelude| prelude.displaced.is_none())
+            })
+            .map(|delivering| owe(delivering, &planned));'''
+replace = '''        let delivering = delivering.map(|delivering| owe(delivering, &planned));'''
 
 [[plant]]
 name = "codex role: what a launch puts ahead of its queue is not carried from its plan to its window"
@@ -1161,7 +1174,8 @@ runs = ["engine-role-change"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''        if let Some(prelude) = owed {
-            self.settle_exited_launch(&record, &project, &participant, &prelude, &because)?;
+            let own = record.window.borrow().own_exit_of(pane).is_some();
+            self.settle_exited_launch(&record, &project, &participant, &prelude, &because, own)?;
         }'''
 replace = '''        let _ = owed;'''
 
@@ -1212,8 +1226,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change/prelude.rs"
-find = '''            let went_by_itself = project.state == "open" && !record.window.borrow().own_exit;'''
-replace = '''            let went_by_itself = false;'''
+find = '''            let went_by_itself = project.state == "open" && !own;'''
+replace = '''            let went_by_itself = !own && false;'''
 
 [[plant]]
 name = "codex role: a chief's window that went by itself after its project was closed is a launch that failed"
@@ -1222,8 +1236,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change/prelude.rs"
-find = '''            let went_by_itself = project.state == "open" && !record.window.borrow().own_exit;'''
-replace = '''            let went_by_itself = !record.window.borrow().own_exit;'''
+find = '''            let went_by_itself = project.state == "open" && !own;'''
+replace = '''            let went_by_itself = !own;'''
 
 [[plant]]
 name = "codex role: a member's window that exits with the role on its way is no launch that failed"
@@ -1334,12 +1348,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change/prelude.rs"
-find = '''        let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;'''
-replace = '''        let closing = begin(&*self.seams.spawn, async move {
-            let _ = (&this, &held);
-            Ok::<bool, EngineError>(true)
-        })
-        .await;'''
+find = '''            self.close_own_within(record, pane, &said, settling).await?;'''
+replace = '''            let _ = (pane, settling);'''
 
 [[plant]]
 name = "codex role: a chief's window of a launch given up is left open"
@@ -1394,8 +1404,8 @@ file = "crates/cf-engine/src/arrival.rs"
 find = '''        if delivering.chief {
             return Ok(());
         }
-        record.delivery.borrow_mut().delivering = None;'''
-replace = '''        record.delivery.borrow_mut().delivering = None;'''
+        if !self.read_once_more('''
+replace = '''        if !self.read_once_more('''
 
 [[plant]]
 name = "codex role: what goes into a chief's window after its launch's role is not its first message"

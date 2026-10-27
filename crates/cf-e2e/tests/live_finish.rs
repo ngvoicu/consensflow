@@ -94,6 +94,8 @@
 // beside it, where each would be a suite of its own.
 #[path = "live_finish/check.rs"]
 mod check;
+#[path = "live_finish/compacted.rs"]
+mod compacted;
 #[path = "live_finish/leaving.rs"]
 mod leaving;
 #[path = "live_finish/stand_in.rs"]
@@ -119,6 +121,9 @@ const CHECKED: &str = "result reaches the chief, nothing of its own ended";
 
 /// What the line of each worker in the table says the second step checked.
 const CHECKED_LEAVING: &str = "command left running ended by the window's close, chief told";
+
+/// What the line of the worker in the table says the third step checked.
+const CHECKED_COMPACTED: &str = "turn compacted by Devin, result reaches the chief";
 
 /// The workers the words of the command line name, or Claude where it names none.
 fn workers(named: &[String]) -> Result<Vec<Who>> {
@@ -175,6 +180,38 @@ fn a_worker_that_leaves_a_long_command_running_and_answers_has_its_task_done_the
     each(&log, CHECKED_LEAVING, |who| {
         leaving::run(who, &leaving::plan(who), Path::new(FAKE_AGENT), &log)
     })
+}
+
+#[test]
+#[ignore = "opt-in: spends the machine's quota on one task of Devin's that its compactor compacts; cargo xtask live finish devin -- a_devin_worker_whose (npm run live:finish)"]
+fn a_devin_worker_whose_turn_devin_compacts_finishes_its_task_and_its_result_reaches_the_chief(
+) -> Result {
+    let log = Log::begin("live finish (a turn Devin compacts)")?;
+    // Devin's alone: a run that names other workers and not Devin runs none of it.
+    let named = live::list("harness");
+    if !named.is_empty() && !named.iter().any(|word| word == "devin") {
+        log.say("no Devin worker is named: this step is Devin's alone");
+        return Ok(());
+    }
+    let who = Who::Harness(Harness::Devin);
+    let before = who.version();
+    let finished = compacted::run(Path::new(FAKE_AGENT), &log).unwrap_or_else(Finished::failed);
+    let version = between(before, who.version());
+    log.block(
+        &format!(
+            "== devin {version}: {}",
+            if finished.case.held() { "ok" } else { "FAILED" }
+        ),
+        &finished.case.text(),
+    );
+    let checks = [Check::new(
+        "devin",
+        CHECKED_COMPACTED,
+        finished.case.held(),
+        format!("{version}: {}", finished.summary),
+    )];
+    log.report("what the worker came to", &report::table(&checks));
+    report::verdict(&checks)
 }
 
 #[cfg(test)]

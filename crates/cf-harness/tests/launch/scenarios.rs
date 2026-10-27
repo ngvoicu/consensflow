@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use cf_base::env::Env;
+use cf_base::text::window_text;
 use cf_base::{js, path};
 use cf_harness::contract::{
     Adapter, Admission, Agent, Held, HostError, Launch, LaunchId, Observed, Pane, Readiness, Window,
@@ -190,26 +191,35 @@ impl Names {
     }
 
     /// What a step recorded, with the root and the live processes written
-    /// as the scenario writes them (`written`).
-    fn written(&self, value: &Value) -> Value {
+    /// as the scenario writes them (`written`): `key` is the field the value
+    /// stands under, none at the top or in a list's items.
+    fn written(&self, value: &Value, key: Option<&str>) -> Value {
         match value {
-            Value::Array(items) => items.iter().map(|item| self.written(item)).collect(),
+            Value::Array(items) => items.iter().map(|item| self.written(item, None)).collect(),
             // A key beginning with `$` gets another, as Node's runner
             // writes it: the runner's own (`$utf16`) stand apart.
             Value::Object(fields) => Value::Object(
                 fields
                     .iter()
                     .map(|(key, item)| {
-                        let key = if key.starts_with('$') {
-                            format!("${key}")
-                        } else {
-                            key.clone()
-                        };
-                        (key, self.written(item))
+                        (
+                            if key.starts_with('$') {
+                                format!("${key}")
+                            } else {
+                                key.clone()
+                            },
+                            self.written(item, Some(key.as_str())),
+                        )
                     })
                     .collect(),
             ),
             Value::Number(number) => {
+                // A process id stands under `pid`, and only there: a timer of
+                // 250 ms is no process, whatever process id this run happens
+                // to have.
+                if key != Some("pid") {
+                    return value.clone();
+                }
                 let live = self.pids().into_iter().find(|&(name, pid)| {
                     name != "$DEAD" && number.as_u64() == Some(u64::from(pid))
                 });
@@ -701,8 +711,43 @@ fn a_key_beginning_with_a_dollar_is_written_with_another_as_node_s_runner_writes
     };
     let names = Names::new(root.to_owned(), None);
     assert_eq!(
-        names.written(&json!({"$utf16": [97], "plain": {"$ROOT": "$ROOT"}})),
+        names.written(&json!({"$utf16": [97], "plain": {"$ROOT": "$ROOT"}}), None),
         json!({"$$utf16": [97], "plain": {"$$ROOT": "$ROOT"}})
+    );
+}
+
+/// A live process's id is written by its name only where the key holds one
+/// (`pid`), as Node's runner wrote it: a number anywhere else stays one.
+/// Codex's and Devin's poll timers are 250 ms, so when a run's own id was
+/// 250 every `{"timer": 250}` was written `"$PID"` where Node's record has
+/// `250` — the "23 differ" flake of T-361's gate.
+#[test]
+fn a_number_is_named_a_live_process_only_under_pid() {
+    let root = if cfg!(windows) {
+        r"C:\nowhere"
+    } else {
+        "/nowhere"
+    };
+    let names = Names::new(root.to_owned(), Some(987_654));
+    let pid = u64::from(std::process::id());
+    assert_eq!(
+        names.written(
+            &json!({
+                "pending": [{ "op": 2, "waits": [{ "timer": pid }] }],
+                "opened": { "pid": pid },
+                "asked": [{ "op": "kill", "body": { "pid": 987_654, "timer": pid } }],
+                "still": { "pid": DEAD },
+                "limits": [pid, 3],
+            }),
+            None
+        ),
+        json!({
+            "pending": [{ "op": 2, "waits": [{ "timer": pid }] }],
+            "opened": { "pid": "$PID" },
+            "asked": [{ "op": "kill", "body": { "pid": "$OTHER", "timer": pid } }],
+            "still": { "pid": DEAD },
+            "limits": [pid, 3],
+        })
     );
 }
 
@@ -710,7 +755,7 @@ fn a_key_beginning_with_a_dollar_is_written_with_another_as_node_s_runner_writes
 #[test]
 fn the_root_is_named_by_how_a_record_spells_it_and_each_bundle_hash_by_its_order() {
     let names = Names::new("/tmp/cf-launch-golden-X y's".to_owned(), None);
-    let written = |text: &str| names.written(&json!(text));
+    let written = |text: &str| names.written(&json!(text), None);
     assert_eq!(
         written("/tmp/cf-launch-golden-X y's/home"),
         json!("$ROOT/home")
@@ -1166,7 +1211,7 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
     }
     fields.insert("draws".to_owned(), json!(played.fakes.entropy.take_draws()));
     fields.insert("tree".to_owned(), changes(&before, &tree(&root)));
-    played.names.written(&Value::Object(fields))
+    played.names.written(&Value::Object(fields), None)
 }
 
 /// The adapter a scenario plays against.
@@ -1272,10 +1317,13 @@ fn differs(step: &Value, index: u64, record: &Value, node: &Value) -> Option<Str
     let Some(kept) = step.get("kept") else {
         return (record != node).then(|| format!("\n  rust {record}\n  node {node}"));
     };
+    // The step whose operation it settles, where that is another's (a wait the
+    // clock ends settles the operation that began it).
+    let op = kept["op"].as_u64().unwrap_or(index);
     let own = |record: &Value| {
         record["settled"]
             .as_array()
-            .and_then(|settled| settled.iter().find(|entry| entry["op"] == json!(index)))
+            .and_then(|settled| settled.iter().find(|entry| entry["op"] == json!(op)))
             .cloned()
     };
     let (Some(rust), Some(node_own)) = (own(record), own(node)) else {
@@ -1284,7 +1332,7 @@ fn differs(step: &Value, index: u64, record: &Value, node: &Value) -> Option<Str
         ));
     };
     let mut held = kept["answer"].clone();
-    held["op"] = json!(index);
+    held["op"] = json!(op);
     if rust != held {
         return Some(format!(" (kept: {}):\n  rust {rust}", kept["why"]));
     }
@@ -1297,7 +1345,7 @@ fn differs(step: &Value, index: u64, record: &Value, node: &Value) -> Option<Str
             .as_array()
             .unwrap()
             .iter()
-            .filter(|entry| entry["op"] != json!(index))
+            .filter(|entry| entry["op"] != json!(op))
             .cloned()
             .collect::<Vec<_>>());
         record
@@ -1345,5 +1393,89 @@ fn every_scenario_plays_as_node_played_it() {
         "{} differ:\n{}",
         differ.len(),
         differ.join("\n")
+    );
+}
+
+/// The first message of each launch a scenario prepares, by the step that prepares
+/// it, where it names one.
+fn first_messages(scenario: &Value) -> HashMap<u64, String> {
+    scenario["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, step)| {
+            let message = step["prepare"]["message"].as_str()?;
+            (!message.is_empty()).then(|| (u64::try_from(index).unwrap(), message.to_owned()))
+        })
+        .collect()
+}
+
+/// The words of the command lines `records` settled launches with that hold a first
+/// message of `scenario`: the message whole, as given or as a window takes it, or its
+/// first line.
+fn on_command_lines(scenario: &Value, records: &[Value]) -> Vec<String> {
+    let messages = first_messages(scenario);
+    let name = scenario["name"].as_str().unwrap();
+    let mut found = Vec::new();
+    for settled in records
+        .iter()
+        .flat_map(|record| record["settled"].as_array().unwrap())
+    {
+        let (Some(message), Some(argv)) = (
+            settled["op"].as_u64().and_then(|op| messages.get(&op)),
+            settled["answer"]["argv"].as_array(),
+        ) else {
+            continue;
+        };
+        let first_line = message.lines().find(|line| !line.trim().is_empty());
+        let marks = [
+            Some(message.as_str()),
+            Some(&*window_text(message)),
+            first_line,
+        ];
+        for word in argv.iter().filter_map(Value::as_str) {
+            if marks.iter().flatten().any(|mark| word.contains(mark)) {
+                found.push(format!("{name}: {word:?}"));
+            }
+        }
+    }
+    found
+}
+
+/// No window's first message is on its command line, for any harness (T-432): what
+/// is there every process on the machine reads (`ps` is set-uid root on macOS), and a
+/// kill or wait by pattern whose words a message holds matches the window (a SIGINT
+/// to "xtask plants" closed two workers' Claude windows, 2026-10-24). Held as both
+/// platforms' recordings hold the launches, and as the adapters prepare them here.
+#[test]
+fn no_launch_puts_its_first_message_on_its_command_line() {
+    let mut found = Vec::new();
+    for recorded_on in ["darwin", "win32"] {
+        let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("tests/goldens/launch/scenarios.{recorded_on}.json"));
+        let scenarios: Vec<Value> =
+            serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        let launching = scenarios
+            .iter()
+            .filter(|scenario| !first_messages(scenario).is_empty())
+            .count();
+        assert!(
+            launching > 0,
+            "{recorded_on}: no scenario launches with a message"
+        );
+        for scenario in &scenarios {
+            let recorded = scenario["records"].as_array().unwrap();
+            found.extend(on_command_lines(scenario, recorded));
+            if recorded_on == platform() {
+                found.extend(on_command_lines(scenario, &play(scenario)));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "{} first messages on a command line:\n{}",
+        found.len(),
+        found.join("\n")
     );
 }

@@ -17,6 +17,7 @@ use jiff::Timestamp;
 use serde_json::{json, Value};
 
 use super::floor::{settled, Floor};
+use super::login;
 use super::owner::{Owner, Seen, Step};
 use super::report::{keep, Bare, Said};
 use super::{start, Plan};
@@ -152,7 +153,8 @@ pub fn play(plan: &Plan, index: u32, out: &mut dyn Write) -> Result<bool> {
         files_read: ended(&workspace, &begun)?,
         ..bare_metrics(&items, changed(&fixture, &workspace)?, &ends)
     };
-    let checks = scenario.verdict(&metrics);
+    let mut checks = scenario.verdict(&metrics);
+    checks.extend(login::left_as_it_was(plan.machine, &mut floor)?);
     let kept = Bare {
         options,
         scenario,

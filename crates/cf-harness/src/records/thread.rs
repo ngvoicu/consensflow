@@ -23,6 +23,8 @@
 //! - The queue is bounded: a look asked when it is full waits for room.
 //! - A reader that panics fails its look, as any other record that cannot be
 //!   read does, and not the worker (see [`reopening`]).
+//! - What a reader passes over, a torn line of a record, it says where the
+//!   thread was told to (`say`): the daemon's log.
 //!
 //! Dropping the [`Thread`] closes the queue: the worker reads what was asked,
 //! and ends.
@@ -38,9 +40,13 @@ use cf_proto::agents::Harness;
 use jiff::tz::TimeZone;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{has_transcript, open, transcript_length, Cache, Open, Options, Reading, IDLE_MS};
+use super::{
+    has_transcript, open, took, transcript_boundary, transcript_left, Boundary, Cache, Open,
+    Options, Reading, IDLE_MS,
+};
 use crate::contract::{Records, Work};
 use crate::seams::Time;
+use crate::shared::record::torn::{say_with, Say};
 use reopening::Reopening;
 
 mod reopening;
@@ -86,10 +92,22 @@ enum Ask {
         session: String,
         answer: oneshot::Sender<Result<bool, String>>,
     },
-    TranscriptLength {
+    TranscriptBoundary {
         harness: Harness,
         session: String,
-        answer: oneshot::Sender<Result<Option<u64>, String>>,
+        answer: oneshot::Sender<Result<Option<Boundary>, String>>,
+    },
+    TranscriptLeft {
+        harness: Harness,
+        session: String,
+        answer: oneshot::Sender<Result<Option<Boundary>, String>>,
+    },
+    Took {
+        harness: Harness,
+        session: String,
+        pasted: String,
+        at_ms: i64,
+        answer: oneshot::Sender<Option<bool>>,
     },
 }
 
@@ -97,27 +115,32 @@ impl Thread {
     /// The records of the places `env` names, read on a thread of their own,
     /// at the times `time` says. A reset that names a time of day in no zone
     /// is read in `zone`, the machine's own. The caches begin when this is
-    /// called, as the clock reads then.
+    /// called, as the clock reads then. What a reader passes over it says
+    /// with `say`.
     ///
     /// Fails where the system will not start the thread.
-    pub fn new(env: Env, zone: TimeZone, time: Rc<dyn Time>) -> io::Result<Self> {
-        Self::start(env, time, QUEUE, move || open(zone.clone()))
+    pub fn new(env: Env, zone: TimeZone, time: Rc<dyn Time>, say: Say) -> io::Result<Self> {
+        Self::start(env, time, QUEUE, move || open(zone.clone()), say)
     }
 
-    /// A thread whose queue holds `queue` asks, and whose readers `opens`
-    /// opens.
+    /// A thread whose queue holds `queue` asks, whose readers `opens` opens,
+    /// and that says what they pass over with `say`.
     fn start(
         env: Env,
         time: Rc<dyn Time>,
         queue: usize,
         opens: impl Fn() -> Open + Send + Sync + 'static,
+        say: Say,
     ) -> io::Result<Self> {
         let opens: Opens = Arc::new(opens);
         let caches = Caches::new(&opens, time.wall_ms());
         let (asks, waiting) = mpsc::channel(queue);
         std::thread::Builder::new()
             .name("records".to_owned())
-            .spawn(move || serve(waiting, &env, caches))?;
+            .spawn(move || {
+                say_with(say);
+                serve(waiting, &env, caches);
+            })?;
         Ok(Self { time, asks })
     }
 
@@ -166,18 +189,52 @@ impl Records for Thread {
         })
     }
 
-    fn transcript_length<'a>(
+    fn transcript_boundary<'a>(
         &'a self,
         harness: Harness,
         session: &'a str,
-    ) -> Work<'a, Result<Option<u64>, String>> {
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
         Box::pin(async move {
-            let asked = self.ask(|answer| Ask::TranscriptLength {
+            let asked = self.ask(|answer| Ask::TranscriptBoundary {
                 harness,
                 session: session.to_owned(),
                 answer,
             });
             asked.await.unwrap_or_else(|| Err(ENDED.to_owned()))
+        })
+    }
+
+    fn transcript_left<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
+        Box::pin(async move {
+            let asked = self.ask(|answer| Ask::TranscriptLeft {
+                harness,
+                session: session.to_owned(),
+                answer,
+            });
+            asked.await.unwrap_or_else(|| Err(ENDED.to_owned()))
+        })
+    }
+
+    fn took<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+        pasted: &'a str,
+        at_ms: i64,
+    ) -> Work<'a, Option<bool>> {
+        Box::pin(async move {
+            let asked = self.ask(|answer| Ask::Took {
+                harness,
+                session: session.to_owned(),
+                pasted: pasted.to_owned(),
+                at_ms,
+                answer,
+            });
+            asked.await.flatten()
         })
     }
 }
@@ -193,6 +250,9 @@ struct Caches {
 
 impl Caches {
     /// Caches that begin at `now_ms`, each opening its readers with `opens`.
+    // Its error is only ever `Reading::Unknown` or `Reading::Missing`, a reason string, never a
+    // record (3.0.6-alpha.3's integration B, T-664; the openers are to return the reason itself).
+    #[allow(clippy::result_large_err)]
     fn new(opens: &Opens, now_ms: i64) -> Self {
         let cache = || {
             let opens = Arc::clone(opens);
@@ -261,16 +321,40 @@ fn serve(mut waiting: mpsc::Receiver<Ask>, env: &Env, mut caches: Caches) {
                     });
                 let _ = answer.send(found);
             }
-            Ask::TranscriptLength {
+            Ask::TranscriptBoundary {
                 harness,
                 session,
                 answer,
             } => {
-                let length = panics_to_text(|| transcript_length(harness, &session, env))
+                let boundary = panics_to_text(|| transcript_boundary(harness, &session, env))
                     .unwrap_or_else(|panicked| {
-                        Err(format!("the transcript's length panicked: {panicked}"))
+                        Err(format!("the transcript's boundary panicked: {panicked}"))
                     });
-                let _ = answer.send(length);
+                let _ = answer.send(boundary);
+            }
+            Ask::TranscriptLeft {
+                harness,
+                session,
+                answer,
+            } => {
+                let boundary = panics_to_text(|| transcript_left(harness, &session, env))
+                    .unwrap_or_else(|panicked| {
+                        Err(format!("the transcript's boundary panicked: {panicked}"))
+                    });
+                let _ = answer.send(boundary);
+            }
+            Ask::Took {
+                harness,
+                session,
+                pasted,
+                at_ms,
+                answer,
+            } => {
+                // A store that cannot be read, or a reader that panicked, cannot tell.
+                let took = panics_to_text(|| took(harness, &session, &pasted, at_ms, env))
+                    .ok()
+                    .flatten();
+                let _ = answer.send(took);
             }
         }
     }

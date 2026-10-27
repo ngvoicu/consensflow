@@ -7,7 +7,8 @@
 #![allow(clippy::expect_used)]
 
 use cf_ledger::{
-    open_ledger, Ledger, MessageView, NewChief, NewMember, NewNote, NewProject, NewTask, Options,
+    open_ledger, Ledger, MessageView, NewChief, NewMember, NewNote, NewProject, NewQuestion,
+    NewTask, Options,
 };
 
 /// A project whose chief has given T-1, T-2 and T-3 to three workers, each
@@ -355,4 +356,272 @@ fn a_task_called_off_leaves_the_note_of_several_and_a_refused_resume_withdraws_n
         (kept.state.as_str(), kept.task_number, kept.reason),
         ("queued", Some(2), None)
     );
+}
+
+/// What the note of the last complete answer of T-1's window says while T-1 is paused, and
+/// once it has moved on (`words` is that answer; the turn was on the tell m-5).
+fn paused_answer(words: &str) -> String {
+    format!("T-1 is paused, and @zeus's turn on the words put to its window (m-5) is over. What it said last:\n\n{words}\n\nIf that is the result, take it: cf task finish T-1. To send it on: cf task resume T-1 \"…\".")
+}
+
+fn moved_answer(words: &str) -> String {
+    format!("T-1, paused when @zeus's turn on the words put to its window (m-5) began, has moved on since (resumed, or back on the board): its result will be its next complete answer, not this. What that turn ended with:\n\n{words}")
+}
+
+#[test]
+fn the_answer_of_a_paused_tasks_window_is_noted_once_for_each_tell() {
+    let mut world = world();
+    world.pause(1);
+    let first = world
+        .ledger
+        .note_paused_answer(world.project, 1, "zeus", 5, "Parser done")
+        .expect("the ledger")
+        .expect("a note");
+    assert_eq!(first.body, paused_answer("Parser done"));
+    assert_eq!((first.kind.as_str(), first.task_number), ("note", Some(1)));
+    assert_eq!(first.sender, None, "ConsensFlow's own");
+    // Asked again for the same tell, whatever the words: none.
+    for words in ["Parser done", "Parser done, and docs"] {
+        let again = world
+            .ledger
+            .note_paused_answer(world.project, 1, "zeus", 5, words)
+            .expect("the ledger");
+        assert!(again.is_none(), "{words}");
+    }
+    // Withdrawn, it is no new reason to tell again.
+    world
+        .ledger
+        .cancel_message(first.id, "withdrawn")
+        .expect("cancelled");
+    assert!(world
+        .ledger
+        .note_paused_answer(world.project, 1, "zeus", 5, "Parser done")
+        .expect("the ledger")
+        .is_none());
+    // Another tell is another note.
+    let next = world
+        .ledger
+        .note_paused_answer(world.project, 1, "zeus", 6, "Lexer done")
+        .expect("the ledger")
+        .expect("a note");
+    assert!(next.body.contains("(m-6)"));
+}
+
+#[test]
+fn a_resume_keeps_the_answer_of_a_paused_tasks_window_in_words_true_of_a_task_that_moved_on_for_a_reader_not_yet_given_it(
+) {
+    let mut world = world();
+    let stall = world.stall(1);
+    let queued = world
+        .ledger
+        .note_paused_answer(world.project, 1, "zeus", 5, "Parser done")
+        .expect("the ledger")
+        .expect("a note");
+    let given = world
+        .ledger
+        .note_paused_answer(world.project, 1, "zeus", 4, "Earlier")
+        .expect("the ledger")
+        .expect("a note");
+    world.ledger.begin_delivery(given.id).expect("begun");
+    world
+        .ledger
+        .confirm_delivery(given.id, None)
+        .expect("confirmed");
+
+    world.resume(1);
+    assert_eq!(
+        world.message(stall.id).state,
+        "cancelled",
+        "the pause note goes"
+    );
+    let kept = world.message(queued.id);
+    assert_eq!(
+        (kept.state.as_str(), kept.body),
+        ("queued", moved_answer("Parser done"))
+    );
+    let read = world.message(given.id);
+    assert_eq!(
+        (read.state.as_str(), read.body),
+        (
+            "delivered",
+            paused_answer("Earlier").replace("(m-5)", "(m-4)")
+        ),
+        "what was read stays as it was"
+    );
+    // Paused again and resumed again, it is not withdrawn by the second resume either.
+    world.pause(1);
+    world.resume(1);
+    assert_eq!(world.message(queued.id).state, "queued");
+}
+
+#[test]
+fn a_held_tasks_window_that_goes_on_by_itself_keeps_its_answer_in_words_true_of_a_task_that_moved_on(
+) {
+    // 3.0.6-alpha.3's integration B (T-664): failure-reasons' `go_on_in_window` meets
+    // tell-then-done's kept answers. A task held for its member's quota whose window went
+    // on by itself leaves its wait and goes on, as a resumed one does.
+    let mut world = world();
+    world
+        .ledger
+        .hold_task(
+            world.project,
+            1,
+            "2026-10-26T12:00:00.000Z",
+            "@zeus is out of quota",
+        )
+        .expect("held");
+    let kept = world
+        .ledger
+        .note_paused_answer(world.project, 1, "zeus", 5, "Parser done")
+        .expect("the ledger")
+        .expect("a note");
+    assert_eq!(kept.body, paused_answer("Parser done"));
+
+    let task = world
+        .ledger
+        .go_on_in_window(world.project, 1)
+        .expect("it went on");
+    assert_eq!(task.state, "queued");
+    let kept = world.message(kept.id);
+    assert_eq!(
+        (kept.state.as_str(), kept.body),
+        ("queued", moved_answer("Parser done"))
+    );
+}
+
+#[test]
+fn finishing_a_paused_task_withdraws_what_its_requester_was_told_of_the_pause_and_the_answer_not_yet_given(
+) {
+    let mut world = world();
+    let stall = world.stall(1);
+    let queued = world
+        .ledger
+        .note_paused_answer(world.project, 1, "zeus", 5, "Parser done")
+        .expect("the ledger")
+        .expect("a note");
+    let given = world
+        .ledger
+        .note_paused_answer(world.project, 1, "zeus", 4, "Earlier")
+        .expect("the ledger")
+        .expect("a note");
+    world.ledger.begin_delivery(given.id).expect("begun");
+    world
+        .ledger
+        .confirm_delivery(given.id, None)
+        .expect("confirmed");
+
+    let finished = world
+        .ledger
+        .record_finished(world.project, 1, "Parser done")
+        .expect("finished");
+    assert_eq!(finished.task.state, "done");
+    for id in [stall.id, queued.id] {
+        let message = world.message(id);
+        assert_eq!(
+            (message.state.as_str(), message.reason.as_deref()),
+            ("cancelled", Some("T-1 finished")),
+            "m-{id}"
+        );
+    }
+    assert_eq!(
+        world.message(given.id).state,
+        "delivered",
+        "what was read stays"
+    );
+}
+
+impl World {
+    /// The chief tells the window of T-1 `Stop`: the message that puts it (the task is paused
+    /// for it), and the ids of T-1 and of its window, as `Ledger::tell_on_its_way` is asked.
+    fn tell(&mut self) -> (MessageView, i64, i64) {
+        let thread = self
+            .ledger
+            .task(self.project, 1)
+            .expect("a read")
+            .expect("T-1");
+        let window = thread.task.assignee.clone().expect("its window");
+        let told = self
+            .ledger
+            .ask(
+                self.project,
+                &NewQuestion {
+                    from: Some("chief".into()),
+                    to: window.clone(),
+                    body: Some("Stop".into()),
+                    task: Some(1),
+                    urgent: true,
+                    ..NewQuestion::default()
+                },
+            )
+            .expect("the tell");
+        let participant = self
+            .ledger
+            .project(self.project)
+            .expect("a read")
+            .expect("the project")
+            .participants
+            .into_iter()
+            .find(|participant| participant.handle == window)
+            .expect("its window's participant")
+            .id;
+        (told, thread.task.id, participant)
+    }
+}
+
+#[test]
+fn a_tell_is_on_its_way_while_it_is_queued_held_at_the_gate_or_being_pasted_and_not_after() {
+    // Finish refuses a paused task while a tell to its window is on its way (T-442, Calliope's
+    // P3 on round 2): the record holds the turn from before the tell until it is pasted.
+    for gated in [false, true] {
+        let mut world = world();
+        world
+            .ledger
+            .set_gate(world.project, gated)
+            .expect("the gate");
+        let (told, task, window) = world.tell();
+        let on_its_way = |world: &World| {
+            world
+                .ledger
+                .tell_on_its_way(window, task)
+                .expect("the ledger")
+        };
+        assert_eq!(told.state, if gated { "gated" } else { "queued" });
+        assert!(on_its_way(&world), "{} as it is made", told.state);
+        if gated {
+            world
+                .ledger
+                .approve_message(told.id, "human")
+                .expect("passed on");
+            assert!(on_its_way(&world), "queued once the human passed it on");
+        }
+        world.ledger.begin_delivery(told.id).expect("on its way");
+        assert!(on_its_way(&world), "being pasted");
+        world
+            .ledger
+            .confirm_delivery(told.id, None)
+            .expect("pasted");
+        assert!(!on_its_way(&world), "pasted: the window has it");
+    }
+}
+
+#[test]
+fn a_tell_withdrawn_with_its_cancelled_task_is_on_its_way_no_more() {
+    let mut world = world();
+    world
+        .ledger
+        .set_gate(world.project, true)
+        .expect("the gate");
+    let (_, task, window) = world.tell();
+    assert!(world
+        .ledger
+        .tell_on_its_way(window, task)
+        .expect("the ledger"));
+    world
+        .ledger
+        .cancel_task(world.project, 1, "chief")
+        .expect("called off");
+    assert!(!world
+        .ledger
+        .tell_on_its_way(window, task)
+        .expect("the ledger"));
 }

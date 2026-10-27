@@ -1,8 +1,7 @@
-//! What the tree is of the processes there are: the lineage of a turn and the session of a
-//! pane, told on a table written out, and the tree's look at real processes the tests
-//! start. What the tree signals, on a machine made up, is in `machine_tests`.
+//! What the tree is of the processes there are: the session of a pane, told on a table
+//! written out, and the tree's look at real processes the tests start. What the tree signals, on a machine made up, is in `machine_tests`.
 
-use super::machine_tests::every_process;
+use super::machine_tests::{every_process, STRANGERS};
 use super::testing::{listed, Machine};
 use super::*;
 
@@ -11,51 +10,6 @@ fn pids(found: &HashMap<i32, Identity>) -> Vec<i32> {
     let mut pids: Vec<i32> = found.keys().copied().collect();
     pids.sort_unstable();
     pids
-}
-
-#[test]
-fn a_lineage_is_its_processes_that_run_and_what_descends_from_them_or_from_one_that_has_gone() {
-    let lineage = Lineage {
-        identities: vec![
-            // A shell that runs, and one that has gone.
-            listed(40, 400, 1).identity,
-            listed(41, 410, 1).identity,
-        ],
-        members: Vec::new(),
-        unverified: Vec::new(),
-    };
-    let snapshot = [
-        listed(40, 400, 1),
-        // What the shell that runs started, and what that started.
-        listed(50, 500, 400),
-        listed(51, 510, 500),
-        // What the shell that has gone started, still parented by its identifier.
-        listed(52, 520, 410),
-        // The window's own new work: a shell its program started, and what that runs.
-        listed(60, 600, 1),
-        listed(61, 610, 600),
-        // A process that took the number of the one that has gone.
-        listed(41, 411, 1),
-    ];
-    assert_eq!(
-        pids(&lineage.found(&snapshot, &HashMap::new())),
-        [40, 50, 51, 52],
-        "the new work is no part of it, though a look of the tree would call it the turn's"
-    );
-}
-
-#[test]
-fn what_a_process_the_ending_found_started_is_found_whether_or_not_that_process_runs() {
-    let lineage = Lineage {
-        identities: vec![listed(40, 400, 1).identity],
-        members: Vec::new(),
-        unverified: Vec::new(),
-    };
-    // A handler of the shell's started a process and went; the ending knows it by
-    // the identity it found, and what that started is the lineage's too.
-    let found_before: HashMap<i32, Identity> = HashMap::from([(70, listed(70, 700, 400).identity)]);
-    let snapshot = [listed(71, 710, 700), listed(72, 720, 999)];
-    assert_eq!(pids(&lineage.found(&snapshot, &found_before)), [71]);
 }
 
 #[test]
@@ -108,18 +62,20 @@ const PARENT: &str = "import subprocess, sys; \
     print(child.pid, flush=True); input()";
 
 /// The incident, replayed on this machine's own table with the signals only recorded: a
-/// selection that names every process there is, and a window of two real processes
-/// among the hundreds that are not its own (the build this test runs in, the shell that
-/// started it, the user's programs). Only the window's two would be signalled.
+/// selection that names every process there is (a close's ask, whose selection takes every
+/// process but the window's for the window's session, and its force, given them all as found
+/// before), and a window of two real processes among the hundreds that are not its own (the
+/// build this test runs in, the shell that started it, the user's programs). Only the
+/// window's two would be signalled.
 #[cfg(target_os = "macos")]
 #[allow(clippy::disallowed_methods)] // A test's own programs.
 #[test]
 fn a_selection_of_every_process_of_this_machine_would_signal_only_the_windows_own() {
     use std::io::{BufRead, BufReader, Write};
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let mut tree = ProcessTree::new();
-    let mut program = Command::new("/usr/bin/python3")
+    let mut program = crate::testing::command("/usr/bin/python3")
         .args(["-c", PARENT])
         .env(OWNER_ENV, &tree.marker)
         .stdin(Stdio::piped())
@@ -134,26 +90,47 @@ fn a_selection_of_every_process_of_this_machine_would_signal_only_the_windows_ow
         .expect("the child's number");
     let child: i32 = line.trim().parse().expect("a process number");
 
-    let machine = Machine::new(native::processes().expect("this machine's processes"));
+    // Every process but the window's two is put in a session nobody leads, which the
+    // selection then takes for the window's: the bound keeps the session the program was
+    // attached with.
+    let strangers: Vec<Process> = native::processes()
+        .expect("this machine's processes")
+        .into_iter()
+        .map(|process| {
+            if [program_pid, child].contains(&process.identity.pid) {
+                process
+            } else {
+                Process {
+                    session: Some(STRANGERS),
+                    ..process
+                }
+            }
+        })
+        .collect();
+    let machine = Machine::new(strangers);
     let table = machine.processes().expect("the table");
+    tree.session = Some(STRANGERS);
     assert!(
         table.len() > 10,
         "the machine has strangers to be told from: {}",
         table.len()
     );
     let wrong = every_process(&table);
+    assert!(
+        tree.select(&table, &HashMap::new()).len() > 10,
+        "the selection names the strangers"
+    );
     let ours = {
         let mut ours = vec![program_pid, child];
         ours.sort_unstable();
         ours
     };
 
-    tree.ask_by(&machine, Subject::Lineage(&wrong), None)
-        .expect("asked");
-    let forced = tree.force_by(&machine, Subject::Lineage(&wrong), &[]);
-    tree.force_by(&machine, Subject::Whole, &[]);
+    tree.ask_by(&machine, None).expect("asked");
+    let failure = tree.force_by(&machine, &wrong);
+    tree.force_by(&machine, &[]);
 
-    assert!(forced.failure.is_none(), "{:?}", forced.failure);
+    assert!(failure.is_none(), "{failure:?}");
     for signal in [libc::SIGTERM, libc::SIGHUP, libc::SIGSTOP, libc::SIGKILL] {
         assert_eq!(machine.sent(signal), ours, "signal {signal}");
     }
@@ -176,10 +153,10 @@ fn a_selection_of_every_process_of_this_machine_would_signal_only_the_windows_ow
 #[test]
 fn a_process_has_the_process_that_started_it_as_its_parent_until_that_has_gone() {
     use std::io::{BufRead, BufReader, Write};
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let mut tree = ProcessTree::new();
-    let mut parent = Command::new("/usr/bin/python3")
+    let mut parent = crate::testing::command("/usr/bin/python3")
         .args(["-c", PARENT])
         .env(OWNER_ENV, &tree.marker)
         .stdin(Stdio::piped())
@@ -244,10 +221,10 @@ const LEADER: &str = "import subprocess; \
 fn a_job_whose_shell_has_gone_is_in_the_tree_by_the_session_it_kept_and_has_no_parent() {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::process::CommandExt;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let mut tree = ProcessTree::new();
-    let mut command = Command::new("/usr/bin/python3");
+    let mut command = crate::testing::command("/usr/bin/python3");
     command
         .args(["-c", LEADER])
         .env(OWNER_ENV, &tree.marker)

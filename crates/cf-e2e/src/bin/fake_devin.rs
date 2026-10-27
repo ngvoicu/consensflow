@@ -21,10 +21,10 @@
 //! rows between the replies of `tests/engine/fixtures/completion/devin/
 //! native-tui.json`, each named on the wire by the step that runs it; a live run
 //! of 2026-10-13, Devin 3000.11.3: a note pasted a second after another showed
-//! in the record 63 s later, when the turn before it ended). A turn's prompt is
-//! on the wire as a request of the TUI when the message is run. Whether a real
-//! Devin's TUI puts a message typed in a turn to its agent at once is not
-//! recorded: `cargo xtask live notes devin` shows it.
+//! in the record 63 s later, when the turn before it ended). Its history row is
+//! written at the Enter, before then (`store::submitted`), as Devin 3000.11.92 writes
+//! it. A turn's prompt is on the wire as a request of the TUI when the message is run,
+//! which no real Devin writes (T-102): the daemon reads none.
 //!
 //! A turn can leave a command running (`BACKGROUND <seconds> <words>`: `command`):
 //! its agent runs it as a tool once it has thought, answers, and the turn ends; the
@@ -32,9 +32,19 @@
 //! tool does whose turn has ended. And a turn can end the window's program under it
 //! (`EXIT <code> <words>`: `crash`), as a harness that crashes does.
 //!
+//! Where `FAKE_DEVIN_STAMPS` is set, its wire log is written as Devin 3000.11 writes one
+//! (`wire`): its work stamped with its time, its turns begun and ended by its word on them,
+//! no request of its TUI's, and a window opened again replaying its last turn.
+//!
 //! A window can do wrong once, as Devin has (`faults`): drop a paste, as a TUI that
 //! never took it (`FAKE_DEVIN_DROP`), or end as its agent takes a message, once the
 //! message is recorded (`FAKE_DEVIN_CRASH`).
+//!
+//! `/new` opens a new conversation: the window shows it at once (its wire says so, and
+//! its store has the session), and the turns after the ones queued go into it. The turn
+//! at work and the messages queued behind it run on in the conversation left, so a case
+//! can stop the daemon with a paste on its way there; Devin's own `/new` waits for the
+//! turn to end before it shows the new one (T-107, probed once), which no case can time.
 //!
 //! It is in the permission mode Devin is in (`permission`): full permission where it
 //! was opened with `--permission-mode dangerous`, but a session resumed after a quit
@@ -100,9 +110,25 @@ use terminal::{Event, Keys};
 use turn::{Pace, Window};
 use wire::Wire;
 
-/// What Devin says to `--version`: a version the daemon takes for one that records
-/// complete worker replies.
-const VERSION: &str = "devin 3000.11.0 (stand-in)";
+/// The command that opens a new conversation.
+const NEW: &str = "/new";
+
+/// What the turns' thread is given, in the order it came.
+enum Given {
+    /// A message, and whether it is the first of the launch, in its prompt file.
+    Message(String, bool),
+    /// The conversation `/new` opened, which the turns after it go into.
+    New(String),
+}
+
+/// What makes the window write its wire log as Devin 3000.11 does (`Wire::stamped`): its
+/// work stamped, its turns begun and ended by its word on them, a window opened again
+/// replaying its last turn. Nothing in a person's environment sets it.
+const STAMPS_VARIABLE: &str = "FAKE_DEVIN_STAMPS";
+
+/// What Devin says to `--version`: the Devin whose store and TUI it plays, which writes a
+/// prompt's history row at its Enter (`store::submitted`).
+const VERSION: &str = "devin 3000.11.92 (stand-in)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -156,7 +182,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
         own_var("APPDATA").as_deref(),
         own_var("XDG_DATA_HOME").as_deref(),
     );
-    let session = launch
+    let mut session = launch
         .resume
         .clone()
         .unwrap_or_else(|| format!("fake-devin-{}", std::process::id()));
@@ -166,8 +192,17 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     let asked_full = launch.permission_mode.as_deref() == Some("dangerous");
     let cut_in_its_first_turn = launch.resume.is_some() && !store.finished_a_turn();
     let permission = Arc::new(Permission::new(asked_full && !cut_in_its_first_turn));
-    let mut wire = Wire::open(Path::new(&wire_log), &session).map_err(said)?;
+    let stamped = own_var(STAMPS_VARIABLE).is_some_and(|stamps| !stamps.is_empty());
+    let mut wire = Wire::open(Path::new(&wire_log), &session)
+        .map_err(said)?
+        .stamped(stamped);
+    let mut opened = 0;
     wire.announce(permission.mode()).map_err(said)?;
+    if launch.resume.is_some() {
+        let (user, answer) = store.last_turn()?;
+        wire.replayed(user.as_deref(), answer.as_deref())
+            .map_err(said)?;
+    }
     signals::leave_on(signals, || leave(0));
     say(&format!("fake devin started on {session}\n")).map_err(said)?;
 
@@ -176,8 +211,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
         own_var(turn::FIRST_WORD_VARIABLE).as_deref(),
         own_var(turn::WORK_VARIABLE).as_deref(),
     );
-    // Each message, and whether it is the first of the launch, in its prompt file.
-    let (turns, queued) = mpsc::channel::<(String, bool)>();
+    let (turns, queued) = mpsc::channel::<Given>();
     // The jobs of a window are in `jobs/` beside the daemon's home, where the rig looks.
     let jobs = own_var("CONSENSFLOW_HOME")
         .and_then(|home| Path::new(&home).parent().map(|folder| folder.join("jobs")));
@@ -192,6 +226,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
         own_var(turn::STORES_COMMANDS_VARIABLE).is_some_and(|stores| !stores.is_empty());
     {
         let (stop, permission) = (Arc::clone(&stop), Arc::clone(&permission));
+        let file = file.clone();
         thread::spawn(move || {
             let mut window = Window::new(store, wire, stop, io::stdout(), pace)
                 .in_mode(permission, folder)
@@ -201,8 +236,14 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
                 window = window.leaving_jobs_in(folder, std::process::id(), command::THINKING);
             }
             // One turn at a time, in the order the messages came.
-            for (text, prompt_file) in queued {
-                if let Err(failed) = window.take_message(&text, prompt_file) {
+            for given in queued {
+                let done = match given {
+                    Given::Message(text, prompt_file) => window.take_message(&text, prompt_file),
+                    Given::New(session) => {
+                        Store::open(&file, &session).map(|store| window.switch(store, &session))
+                    }
+                };
+                if let Err(failed) = done {
                     let _ = writeln!(io::stderr(), "fake-devin: {failed}");
                     leave(1);
                 }
@@ -211,7 +252,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     }
     if let Some(file) = &launch.prompt_file {
         let first = std::fs::read_to_string(file).map_err(|failed| format!("{file}: {failed}"))?;
-        let _ = turns.send((first, true));
+        let _ = turns.send(Given::Message(first, true));
     }
 
     // Raw input, like a real TUI: a bracketed paste is text, Enter outside one
@@ -227,8 +268,20 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
                 Event::Submit(text) if dropping.meets(&text) => {}
                 // Enter at a dialog takes its first option; anywhere else it submits.
                 Event::Submit(text) => {
-                    if !permission.answer(Answer::Approved) {
-                        let _ = turns.send((text, false));
+                    if permission.answer(Answer::Approved) {
+                    } else if text.trim() == NEW {
+                        opened += 1;
+                        session = format!("fake-devin-{}-new-{opened}", std::process::id());
+                        Store::open(&file, &session)?;
+                        Wire::open(Path::new(&wire_log), &session)
+                            .and_then(|mut shown| shown.announce(permission.mode()))
+                            .map_err(said)?;
+                        let _ = turns.send(Given::New(session.clone()));
+                    } else {
+                        if let Err(failed) = store::submitted(Path::new(&file), &session, &text) {
+                            let _ = writeln!(io::stderr(), "fake-devin: {failed}");
+                        }
+                        let _ = turns.send(Given::Message(text, false));
                     }
                 }
                 // A real TUI draws what was pasted, and a paste's Enter waits for that.

@@ -318,6 +318,161 @@ fn each_command_whose_output_the_system_writes_is_at_rest_after_it_and_one_it_wr
     assert_eq!(settlement_of(&dismissed), Settlement::Settled);
 }
 
+/// What one look at a transcript of `records` reads.
+fn record_of(records: &[Value]) -> Record {
+    let mut stage = Stage::new();
+    stage.write(records);
+    match &*stage.reader.look(&Options::default(), 0) {
+        Reading::Known(record) => record.clone(),
+        Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
+    }
+}
+
+/// A compaction cancelled with Escape, as Claude Code 2.1.304 writes it (the live suite
+/// `commands-at-rest`, `cancelled`, 2026-10-20): the bare `/compact` as it was typed, and at
+/// the Escape the words before a command, a sibling of it (the same parent), and nothing
+/// more. Claude puts the `/compact` back in its input box, which the reading says.
+#[test]
+fn a_compaction_cancelled_with_escape_is_at_rest_at_the_words_before_a_command_beside_it() {
+    let mut records = at_rest();
+    records.extend([own("file-history-snapshot"), bare("c0", "d1", "/compact")]);
+    records.extend(bookkeeping());
+    let compacting = record_of(&records);
+    assert_eq!(
+        compacting.settlement,
+        Settlement::InFlight,
+        "the compaction runs"
+    );
+    assert!(!compacting.lines.put_back);
+    records.push(caveat("k1", "d1"));
+    let cancelled = record_of(&records);
+    assert_eq!(
+        cancelled.settlement,
+        Settlement::Settled,
+        "it was cancelled"
+    );
+    assert!(
+        cancelled.lines.put_back,
+        "the `/compact` is back in the box"
+    );
+    // What the human sends next is a prompt, the `/compact` Claude put back with it.
+    records.extend([
+        own("file-history-snapshot"),
+        bare("c1", "k1", "/compact keep the plan"),
+    ]);
+    let sent = record_of(&records);
+    assert_eq!(sent.settlement, Settlement::InFlight);
+    assert!(!sent.lines.put_back);
+    // A message the human sends instead, answered: its turn put nothing back.
+    let mut answered = at_rest();
+    answered.extend([bare("c0", "d1", "/compact"), caveat("k1", "d1")]);
+    answered.extend([
+        user("u2", json!("k1"), json!("Hello again")),
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([text(json!("Hi again"))]),
+            json!("end_turn"),
+        ),
+        summary("h2", "a2"),
+        duration("d2", "h2"),
+    ]);
+    let read = record_of(&answered);
+    assert_eq!(read.settlement, Settlement::Settled);
+    assert!(!read.lines.put_back, "the box Claude put back was sent");
+    // The human sends what the box holds, and it compacts: its turn ends at what the command
+    // printed, with no answer, and put nothing back.
+    let (typed, done) = compact_typed();
+    let mut compacted = at_rest();
+    compacted.extend([bare("x0", "d1", "/compact"), caveat("x1", "d1")]);
+    compacted.extend(typed);
+    compacted.extend(done);
+    let read = record_of(&compacted);
+    assert_eq!(read.settlement, Settlement::Settled);
+    assert!(!read.lines.put_back, "the /compact the box held was sent");
+    // A message sent instead and stopped with Escape before a word of it: the interrupt ends
+    // its turn, and put nothing back that is still there.
+    let mut stopped = at_rest();
+    stopped.extend([
+        bare("c0", "d1", "/compact"),
+        caveat("k1", "d1"),
+        user("u2", json!("k1"), json!("Hello again")),
+        having(
+            user(
+                "u3",
+                json!("u2"),
+                json!([text(json!("[Request interrupted by user]"))]),
+            ),
+            json!({ "interruptedMessageId": "m2" }),
+        ),
+    ]);
+    let read = record_of(&stopped);
+    assert_eq!(read.settlement, Settlement::Settled);
+    assert!(!read.lines.put_back, "a turn since the cancel");
+}
+
+#[test]
+fn a_compaction_at_work_or_one_that_finished_is_never_read_cancelled() {
+    let typed = || {
+        let mut records = at_rest();
+        records.push(bare("c0", "d1", "/compact"));
+        records.extend(bookkeeping());
+        records
+    };
+    let with = |more: Vec<Value>| {
+        let mut records = typed();
+        records.extend(more);
+        record_of(&records)
+    };
+    let not_meta = lacking(caveat("k1", "d1"), "isMeta");
+    for (why, more) in [
+        (
+            "the words, a child of the bare command",
+            vec![caveat("k1", "c0")],
+        ),
+        ("words that are no meta record", vec![not_meta]),
+        (
+            "the words of another session",
+            vec![having(caveat("k1", "d1"), json!({ "sessionId": "other" }))],
+        ),
+        (
+            "a prompt between",
+            vec![user("u2", json!("d1"), json!("Hello")), caveat("k1", "d1")],
+        ),
+        (
+            "the model between",
+            vec![
+                assistant(
+                    "a2",
+                    "c0",
+                    json!("m2"),
+                    json!([text(json!("Compacting"))]),
+                    Value::Null,
+                ),
+                caveat("k1", "d1"),
+            ],
+        ),
+    ] {
+        let read = with(more);
+        assert_eq!(read.settlement, Settlement::InFlight, "{why}");
+        assert!(!read.lines.put_back, "{why}");
+    }
+    // A compaction that finished writes the words after its boundary and summary, their
+    // child: it ends at what the command printed, and puts nothing back.
+    let finished = with(vec![
+        compacted("b1", "c0"),
+        compact_summary("s1", "b1"),
+        caveat("k1", "s1"),
+    ]);
+    assert_eq!(finished.settlement, Settlement::InFlight, "not yet printed");
+    assert!(!finished.lines.put_back);
+    // A command that only begins as `/compact` is none.
+    let mut other = at_rest();
+    other.extend([bare("c0", "d1", "/compacted"), caveat("k1", "d1")]);
+    assert_eq!(settlement_of(&other), Settlement::InFlight);
+}
+
 /// A command that goes on to ask the model what it printed, as 2.1.303's `/plan
 /// <description>` does (Sol's look at round 1): the command, what it printed, and
 /// then the model's turn, whose end ends it. Any command but the ones Claude does

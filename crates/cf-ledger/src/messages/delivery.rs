@@ -6,7 +6,7 @@
 
 use cf_base::json::js_order;
 use cf_proto::ledger::{Begun, MessageView};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
 use super::again::tell_failed_answer;
@@ -15,11 +15,11 @@ use super::continuations::{withdraw_stale_among, withdrawn_if_stale};
 use super::pauses::withdrawn_on_its_way;
 use super::receipt::reconcile;
 use super::told::{arrived_after_all, behind_held_words, fail_for, kept_for_resume, told};
-use super::{known_message, message_task, messages, require_message};
+use super::{known_message, message_task, messages, require_message, settle_answered};
 use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
-use crate::tasks::{release_ready, withdrawn_late};
+use crate::tasks::{pause_again, release_ready, withdrawn_late};
 use crate::views::MESSAGE_SELECT;
 
 /// The participants something waits on: a message on its way to them, or a
@@ -148,6 +148,72 @@ pub(crate) fn last_pasted(
     )?
     .into_iter()
     .next())
+}
+
+/// The newest message a participant's window was given and its record showed
+/// (`delivered`, or `read` since): none where it was given none. One still on
+/// its way (`delivering`) is not given yet.
+pub(crate) fn last_given(store: &Store, participant_id: i64) -> Result<Option<i64>, LedgerError> {
+    Ok(store.db.query_row(
+        "SELECT MAX(id) FROM message WHERE recipient_id = ? AND state IN ('delivered', 'read')",
+        [participant_id],
+        |row| row.get(0),
+    )?)
+}
+
+/// The `limit` messages last pasted into a participant's window, newest first,
+/// each with the rows its paste carried: what its screen can show of
+/// ConsensFlow's own. A message on its way is pasted already (its record may
+/// show it later); one still queued is not. Known limit (P3-2 of Calliope's
+/// re-check T-305, filed as its own task): newest by id, which is not the order a
+/// member's window took them in. The rows a paste carried stay
+/// `queued` while it is on its way (`begin_delivery` moves the carrier alone),
+/// and were typed with it all the same.
+pub(crate) fn last_pastes(
+    store: &Store,
+    participant_id: i64,
+    limit: i64,
+) -> Result<Vec<Begun>, LedgerError> {
+    let pasted = messages(
+        store,
+        &format!(
+            "{MESSAGE_SELECT} WHERE m.recipient_id = ?
+         AND m.state IN ('delivering', 'delivered', 'read') AND m.carried_by IS NULL
+       ORDER BY m.id DESC LIMIT ?"
+        ),
+        params![participant_id, limit],
+    )?;
+    pasted
+        .into_iter()
+        .map(|message| {
+            let carried = messages(
+                store,
+                &format!(
+                    "{MESSAGE_SELECT} WHERE m.recipient_id = ?
+                 AND m.state IN ('queued', 'delivering', 'delivered', 'read') AND m.carried_by = ?
+               ORDER BY m.id"
+                ),
+                params![participant_id, message.id],
+            )?;
+            Ok(Begun { message, carried })
+        })
+        .collect()
+}
+
+/// The newest note the engine wrote a participant after the message `after`
+/// whose words hold `words`, of whatever state.
+pub(crate) fn note_since(
+    store: &Store,
+    recipient_id: i64,
+    after: i64,
+    words: &str,
+) -> Result<Option<i64>, LedgerError> {
+    Ok(store.db.query_row(
+        "SELECT MAX(id) FROM message WHERE recipient_id = ? AND id > ? AND kind = 'note'
+       AND sender_id IS NULL AND instr(body, ?) > 0",
+        params![recipient_id, after, words],
+        |row| row.get(0),
+    )?)
 }
 
 /// The first task message a participant's window received about a task that
@@ -597,8 +663,9 @@ pub(crate) fn cancel_message(
 }
 
 /// Queued again; `refund` gives back the attempt when the window went before
-/// it could land. It joins the task message that waits for its window, if one
-/// does: a resume that came while it was on its way. A row that was left
+/// it could land. A question answered while it was being pasted is not: the
+/// one asked has it (`settle_answered`). It joins the task message that waits
+/// for its window, if one does: a resume that came while it was on its way. A row that was left
 /// under a carrier that cannot carry it any more (the Node daemon was pasting
 /// it on its own when it stopped, which `release_stranded` leaves to the
 /// delivery that settles it) is let go of that carrier first: carried, it
@@ -668,6 +735,7 @@ pub(crate) fn retry_delivery(
             [message_id],
         )?;
         adopt(store, message_id)?;
+        settle_answered(store, message_id)?;
         known_message(store, message_id)
     })
 }
@@ -675,8 +743,9 @@ pub(crate) fn retry_delivery(
 /// A delivery given up: a task it carried, still queued, fails with it, and
 /// what it carried is its own again, for the reopening to take. Words told to
 /// the window fail their task too (`told`), but while it is paused, when they
-/// are kept for its resume; and a brief of the chief's own step done while it
-/// was on its way is withdrawn (`withdrawn_late`). Neither is failed. A pause
+/// are kept for its resume; a brief of the chief's own step done while it
+/// was on its way is withdrawn (`withdrawn_late`); and the words that resume a
+/// paused task pause it again (`pause_again`). None of these is failed. A pause
 /// note whose task was cancelled while it was on its way is withdrawn instead,
 /// and says its warning again in a note of its own, which has its own attempts
 /// (`withdrawn_on_its_way`). A continuation whose task is no longer at work in
@@ -705,6 +774,10 @@ pub enum GivenUp {
     /// (`withdrawn_on_its_way`), or a continuation whose task is no longer at
     /// work in its window (`continuations`).
     Withdrawn,
+    /// The words that resume a paused task, which never reached its window
+    /// (`pause_again`): they failed, and the task is paused again, its requester
+    /// told why in the note of the pause.
+    Paused,
 }
 
 /// [`fail_delivery`], saying what it did ([`GivenUp`]).
@@ -722,6 +795,9 @@ pub(crate) fn give_up_delivery(
             }
             if kept_for_resume(store, &message, &task, reason)? {
                 return Ok((known_message(store, message_id)?, GivenUp::Kept));
+            }
+            if pause_again(store, &message, &task, reason)? {
+                return Ok((known_message(store, message_id)?, GivenUp::Paused));
             }
         }
         if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
@@ -749,6 +825,85 @@ pub(crate) fn give_up_delivery(
         }
         Ok((known_message(store, message_id)?, GivenUp::Failed))
     })
+}
+
+/// Message `message_id`, on its way, goes into the conversation `conversation_id` of an
+/// open window (`pasted_into`, which a trigger clears once it is on its way no more). A
+/// launch's first message is not: its window's conversation is made after it is begun.
+pub(crate) fn paste_into(
+    store: &mut Store,
+    message_id: i64,
+    conversation_id: i64,
+) -> Result<(), LedgerError> {
+    store.write(|store| {
+        store.db.execute(
+            "UPDATE message SET pasted_into = ? WHERE id = ? AND state = 'delivering'",
+            [conversation_id, message_id],
+        )?;
+        Ok(())
+    })
+}
+
+/// The native session of the conversation message `message_id` was pasted into, while
+/// it is on its way (the trigger clears it after) and that conversation has one: none
+/// otherwise.
+pub(crate) fn pasted_into(store: &Store, message_id: i64) -> Result<Option<String>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT c.native_session FROM message m JOIN conversation c ON c.id = m.pasted_into
+              WHERE m.id = ?",
+            [message_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten()
+        .filter(|session| !session.is_empty()))
+}
+
+/// When the attempt of message `message_id` on its way now began (its latest
+/// `delivery.begun`: a start's give-back does not count the attempt, so its number comes
+/// again), to the second, in milliseconds of the ledger's clock: none where it is not on
+/// its way. A start asks a harness that keeps its own word of what its window took for
+/// one written since (Devin's history row): an earlier attempt's is no word of this one.
+pub(crate) fn delivery_begun_ms(
+    store: &Store,
+    message_id: i64,
+) -> Result<Option<i64>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT CAST(strftime('%s', e.at) AS INTEGER) * 1000 FROM message m
+               JOIN event e ON e.project_id = m.project_id AND e.kind = 'delivery.begun'
+                AND json_extract(e.data, '$.message') = m.id
+              WHERE m.id = ? AND m.state = 'delivering'
+              ORDER BY e.id DESC LIMIT 1",
+            [message_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+/// Whether message `message_id` was ever given back to its queue for `reason` (a
+/// `delivery.retried` that says it), whatever gave it back after. The engine words a
+/// paste by it: one a start gave back though its window took it is sent again saying
+/// so, every time it goes, since that first copy may be there still.
+pub(crate) fn given_back_because(
+    store: &Store,
+    message_id: i64,
+    reason: &str,
+) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM message m
+               JOIN event e ON e.project_id = m.project_id AND e.kind = 'delivery.retried'
+                AND json_extract(e.data, '$.message') = m.id
+                AND json_extract(e.data, '$.reason') = ?2
+              WHERE m.id = ?1",
+        )?
+        .exists(params![message_id, reason])?)
 }
 
 /// Every message on its way to a window, oldest first. At start none of

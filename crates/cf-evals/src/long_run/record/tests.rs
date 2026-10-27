@@ -333,6 +333,59 @@ fn compact_typed(printed: String) -> Vec<String> {
     ]
 }
 
+/// A command the system writes whole, its own record and what it printed (2.1.282's
+/// `/plugin`, `/mcp` dismissed), `name` and `parent` the command's.
+fn written_whole(second: u32, name: &str, parent: &str) -> [String; 2] {
+    let system = |uuid: &str, parent: &str, content: &str| {
+        line(
+            second,
+            json!({ "type": "system", "subtype": "local_command", "uuid": uuid,
+                "parentUuid": parent, "isMeta": false, "level": "info", "isSidechain": false,
+                "content": content }),
+        )
+    };
+    [
+        system(
+            "w1",
+            parent,
+            &format!("<command-name>/{name}</command-name>"),
+        ),
+        system(
+            "w2",
+            "w1",
+            "<local-command-stdout>Dialog dismissed</local-command-stdout>",
+        ),
+    ]
+}
+
+#[test]
+fn a_command_the_system_writes_whole_after_a_compaction_opens_no_turn_and_the_record_ends_in_it() {
+    // Astra's look at compact-rest round 2: its output, unmatched, read as a prompt, a
+    // phantom turn.
+    let printed = said_by_claude(
+        150,
+        "o1",
+        "n1",
+        "<local-command-stdout>Compacted</local-command-stdout>",
+        json!({}),
+    );
+    let mut lines = compact_typed(printed);
+    lines.extend(written_whole(200, "mcp", "t1"));
+    let read = record(&lines);
+    assert_eq!(read.stood_at(at(300)).unwrap().0, Stood::AtRest);
+    assert!(read.ends_in_compaction());
+    // And with no compaction before it, a turn that ended stays at rest.
+    let mut answered = vec![
+        prompt(0, "Plan it."),
+        answer(10, "Planned.", "end_turn"),
+        duration(11),
+    ];
+    answered.extend(written_whole(20, "plugin", "d1"));
+    let read = record(&answered);
+    assert_eq!(read.stood_at(at(30)).unwrap().0, Stood::AtRest);
+    assert!(!read.ends_in_compaction());
+}
+
 #[test]
 fn a_compact_typed_at_the_prompt_ends_at_what_it_printed_and_the_record_ends_in_its_compaction() {
     let printed = |parent: &str, text: &str| said_by_claude(150, "o1", parent, text, json!({}));
@@ -432,7 +485,7 @@ fn a_compact_that_found_nothing_to_compact_ends_at_what_the_system_says_it_print
     assert_eq!(read.stood_at(at(35)).unwrap().0, Stood::InFlight, "it runs");
     let (stood, last) = read.stood_at(at(60)).unwrap();
     assert_eq!(stood, Stood::AtRest, "{last:?}");
-    assert_eq!(last.kind, Kind::Output);
+    assert_eq!(last.kind, Kind::Printed);
     assert!(!read.ends_in_compaction(), "nothing was compacted");
     // A system record of another kind, a meta one, or one that printed no output ends nothing.
     for (why, fields) in [
@@ -735,4 +788,63 @@ fn the_agents_a_turn_left_are_that_turns_and_the_next_turn_counts_none_of_them()
     assert_eq!(record(&lines).agents_pending_at(at(50)), 0);
     // While it ran, before its end, none were its own either.
     assert_eq!(record(&lines).agents_pending_at(at(35)), 0);
+}
+
+#[test]
+fn what_a_process_proved_gone_had_queued_went_with_it_as_the_product_reads_a_relaunch() {
+    // T-139: the product's T-442 fixture (crates/cf-harness/tests/launch/claude/relaunched.rs).
+    // The worker's turn ended, a job's notification was queued, and its window closed before
+    // Claude took it; the window opened again on the conversation, and the new process took
+    // the message it was given and answered it. Both reviewers of round 14 (item 3): the
+    // replay kept the old process's queue, and read the new turn's end in flight.
+    let notification =
+        "<task-notification>\n<task-id>bjob00001</task-id>\n<status>failed</status>\n</task-notification>";
+    let reopened = "[ConsensFlow m-2 · T-1 · task from @chief]\nRun it once more";
+    let mut lines = vec![
+        prompt(1, "[ConsensFlow m-1 · T-1 · task from @chief]\nRun it"),
+        answer(2, "Done", "end_turn"),
+        duration(3),
+        queue(4, "enqueue", notification),
+        prompt(5, reopened),
+        answer(6, "Done again", "end_turn"),
+        duration(7),
+    ];
+    let mut relaunched = record(&lines);
+    assert_eq!(
+        relaunched.stood_at(at(10)).unwrap().0,
+        Stood::InFlight,
+        "no process is told gone: the queue holds"
+    );
+    // The host said the old window exited at second 4.5, naming nothing it could not end.
+    relaunched.gone_at(at(4) + 500);
+    assert_eq!(relaunched.stood_at(at(10)).unwrap().0, Stood::AtRest);
+    // Before the process went, its queue held the turn; once gone, nothing waits, though
+    // the new process has written nothing yet.
+    assert_eq!(relaunched.stood_at(at(4)).unwrap().0, Stood::InFlight);
+    assert_eq!(relaunched.stood_at(at(5) - 100).unwrap().0, Stood::AtRest);
+    // What the new process queues itself holds its turn as any.
+    lines.push(queue(8, "enqueue", notification));
+    let mut queued_again = record(&lines);
+    queued_again.gone_at(at(4) + 500);
+    assert_eq!(queued_again.stood_at(at(10)).unwrap().0, Stood::InFlight);
+}
+
+#[test]
+fn the_agents_a_process_proved_gone_left_running_went_with_it() {
+    // The product's T-442 case of a turn that ended with a background agent running: the
+    // agent went with its process.
+    let lines = vec![
+        prompt(0, "Run the audit."),
+        answer(10, "Agents started.", "end_turn"),
+        line(
+            11,
+            json!({ "type": "system", "subtype": "turn_duration", "isSidechain": false,
+                    "durationMs": 1000, "messageCount": 4, "pendingBackgroundAgentCount": 1 }),
+        ),
+    ];
+    let mut record = record(&lines);
+    assert_eq!(record.agents_pending_at(at(20)), 1);
+    record.gone_at(at(15));
+    assert_eq!(record.agents_pending_at(at(14)), 1, "before it went");
+    assert_eq!(record.agents_pending_at(at(20)), 0);
 }

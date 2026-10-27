@@ -4,7 +4,9 @@
 //! replaced is read again from its start. One rewritten in place before its
 //! last kilobyte, that kilobyte and its unterminated last line kept, is not
 //! seen to change, as Node did not see it either. A final unterminated JSONL
-//! append may be incomplete; a malformed whole line fails the look.
+//! append may be incomplete; a whole line that is not JSON is torn, and passed
+//! over once a record follows it or its wait is over, where Node failed the
+//! look (`shared::record::jsonl`).
 //!
 //! Each harness's reader is in its own module, and [`reader`] is the switch
 //! between them. The readers kept from look to look are a [`Cache`], which
@@ -27,16 +29,21 @@ use crate::{claude, codex, devin, opencode, pi};
 mod thread;
 
 pub use crate::shared::quota::{Level, Quota};
+pub use crate::shared::record::boundary::Boundary;
 pub use crate::shared::record::cache::{Cache, Look, Open, Options, PiSettlement, IDLE_MS};
 pub use crate::shared::record::reading::{
-    End, Item, Monitor, Notice, Pending, Reading, Record, Role, Settlement, Source,
+    End, Item, Lines, Monitor, Notice, Pending, Reading, Record, Role, Settlement, Source,
 };
+pub use crate::shared::record::torn::Say;
 pub use thread::Thread;
 
 /// The reader of the conversation `session` in `harness`'s record, in the
 /// places `env` names (`recordReader`): each look reads on from where the
 /// last one stopped. A conversation with no session has none: its reading
 /// is that the session is missing.
+// Its error is only ever `Reading::Unknown` or `Reading::Missing`, a reason string, never a
+// record (3.0.6-alpha.3's integration B, T-664; the openers are to return the reason itself).
+#[allow(clippy::result_large_err)]
 pub fn reader(
     harness: Harness,
     session: &str,
@@ -72,6 +79,9 @@ pub fn machine_zone() -> TimeZone {
 }
 
 /// How a [`Cache`] opens its readers: with [`reader`].
+// Its error is only ever `Reading::Unknown` or `Reading::Missing`, a reason string, never a
+// record (3.0.6-alpha.3's integration B, T-664; the openers are to return the reason itself).
+#[allow(clippy::result_large_err)]
 pub fn open(local: TimeZone) -> Open {
     Box::new(move |harness, session, env| reader(harness, session, env, &local))
 }
@@ -106,24 +116,50 @@ pub fn has_transcript(harness: Harness, session: &str, env: &Env) -> Result<bool
     }
 }
 
-/// How many bytes `harness`'s transcript of `session` holds now, where a reader
-/// of it reads a relaunch (Claude's alone): none where it keeps no transcript of
-/// it. A home the places are under, needed and missing, is the failure.
-pub fn transcript_length(
+/// Where `harness`'s transcript of `session` ends now, how many bytes it holds and
+/// the last of them, where a reader of it reads a relaunch (Claude's alone): none
+/// where it keeps no transcript of it. A home the places are under, needed and
+/// missing, is the failure.
+pub fn transcript_boundary(
     harness: Harness,
     session: &str,
     env: &Env,
-) -> Result<Option<u64>, String> {
+) -> Result<Option<Boundary>, String> {
     let file = match harness {
         Harness::Claude => claude::paths::transcript(session, env)?,
         Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin => None,
     };
-    file.map(|file| {
-        std::fs::metadata(&file)
-            .map(|found| found.len())
-            .map_err(|failed| format!("{}: {failed}", file.display()))
-    })
-    .transpose()
+    file.map(|file| Boundary::of(&file).map_err(|failed| format!("{}: {failed}", file.display())))
+        .transpose()
+}
+
+/// Where `harness`'s transcript of `session` ends now ([`transcript_boundary`]), where
+/// the harness's own word says no program of its writes it any more: Claude's, whose
+/// statuses say no Claude shows the conversation. None where one does, where they
+/// cannot say, and for every other harness.
+pub fn transcript_left(
+    harness: Harness,
+    session: &str,
+    env: &Env,
+) -> Result<Option<Boundary>, String> {
+    match harness {
+        Harness::Claude if claude::shown_by_none(session, env) => {
+            transcript_boundary(harness, session, env)
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Whether `harness`'s own store says, with no window open, that the window of
+/// `session` took a paste that begins with `pasted`, handed over at `at_ms` or later:
+/// none where it cannot tell. Devin's says, by its history row of what its TUI
+/// submitted (`devin::history`); no other harness keeps such a word apart from its
+/// record.
+pub fn took(harness: Harness, session: &str, pasted: &str, at_ms: i64, env: &Env) -> Option<bool> {
+    match harness {
+        Harness::Devin => devin::took(env, session, pasted, at_ms),
+        Harness::Claude | Harness::Codex | Harness::Pi | Harness::Opencode => None,
+    }
 }
 
 #[cfg(test)]

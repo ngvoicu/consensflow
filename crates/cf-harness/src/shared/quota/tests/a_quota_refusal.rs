@@ -113,6 +113,18 @@ fn names_no_reset_where_the_words_name_none_or_a_zone_nobody_knows() {
 }
 
 #[test]
+fn tells_anthropic_s_spent_extra_usage_a_400_for_a_refusal_for_quota() {
+    // Pi on an Anthropic subscription, its extra usage spent (this machine's Pi
+    // sessions, 2026-10): the task failed where it was to wait.
+    assert!(refused_for_quota(
+        r#"400 {"type":"error","error":{"type":"invalid_request_error","message":"You're out of extra usage. Add more at claude.ai/settings/usage and keep going."}}"#
+    ));
+    assert!(!refused_for_quota(
+        r#"400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long"}}"#
+    ));
+}
+
+#[test]
 fn tells_a_provider_s_quota_refusal_a_429_or_spent_credit_from_its_other_errors() {
     for text in [
         r#"429: {"message":"Provider returned error","code":429}"#,

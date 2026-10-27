@@ -18,6 +18,7 @@ use serde_json::{json, Value};
 
 use super::chief::{Chief, IDLE, READY};
 use super::floor::Floor;
+use super::login;
 use super::owner::{Owner, Seen, Step, KEY_PAUSE, QUESTION_PAUSE};
 use super::report::{file_name, keep, Card, Refused, Said};
 use super::workspace;
@@ -88,6 +89,7 @@ pub fn play(plan: &Plan, index: u32, out: &mut dyn Write) -> Result<bool> {
     )?;
     let checks = scenario.verdict(&metrics);
     let mut board = mechanics(&metrics.plumbing, scene.board_tasks);
+    board.extend(login::left_as_it_was(plan.machine, &mut floor)?);
     if options.gate {
         board.push(Check {
             name: format!(

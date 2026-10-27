@@ -47,6 +47,7 @@ use tokio::sync::watch;
 use crate::api;
 use crate::api::context::Context;
 use crate::api::credentials::{random_hex, Credentials};
+use crate::computer_use::{system_opener, MachineComputerUse};
 use crate::console::Console;
 use crate::errors::{contain, Errors};
 use crate::files::{Log, Trace};
@@ -333,8 +334,12 @@ async fn run(
     let zone = records::machine_zone();
     let records = Rc::new(DaemonRecords::new(
         Rc::new(
-            Thread::new(env.clone(), zone.clone(), Rc::clone(&time) as _)
-                .map_err(|failed| StartError::System(failed.to_string()))?,
+            Thread::new(env.clone(), zone.clone(), Rc::clone(&time) as _, {
+                // What a reader passes over, said on the records' own thread.
+                let said = Log::new(&home);
+                Box::new(move |line| said.warn(line, None))
+            })
+            .map_err(|failed| StartError::System(failed.to_string()))?,
         ),
         Rc::clone(&spawn),
     ));
@@ -352,7 +357,9 @@ async fn run(
     };
     // The pane host opens, kills and tells of windows, and says what a window's
     // turn left running: one end of the bridge for the engine's every word to it.
-    let host = Rc::new(BridgeHost::new(bridge.clone(), env.clone()));
+    let opening = Duration::from_millis(u64::try_from(limits.open_ms).unwrap_or_default());
+    let host = Rc::new(BridgeHost::new(bridge.clone(), env.clone()).opening_within(opening));
+    let computer_use = Rc::new(MachineComputerUse::new(env.clone()));
     let seams = Seams {
         ledger: Rc::clone(&ledger),
         host: Rc::clone(&host) as _,
@@ -373,6 +380,7 @@ async fn run(
         log: Rc::clone(&log) as _,
         launch_files: Rc::new(LaunchFolders::new(home.clone(), Rc::clone(&errors))),
         spawn: Rc::clone(&spawn) as _,
+        computer_use: Rc::clone(&computer_use) as _,
         limits,
     };
     let dispatcher = Dispatcher::new(seams);
@@ -453,6 +461,11 @@ async fn run(
         env: env.clone(),
         kick: Rc::clone(&kick),
         specs: page::Specs::new(),
+        computer_use: page::ComputerUsePage {
+            machine: computer_use,
+            open: system_opener(env.clone()),
+            grants_of: crate::computer_use::grants_of(&env),
+        },
     });
     page::register(&bridge, &page, &spawn);
     let exiting = Rc::clone(&dispatcher);

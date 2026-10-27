@@ -65,7 +65,8 @@
 //! Devin member's window opened again after a cut, asked to write, edit and run `cf`,
 //! `live_resume_fresh`
 //! a chief closed and resumed, whether it never had a turn or the human's typed
-//! turn was closed on at once, `live_bench` the
+//! turn was closed on at once, `live_reopened` a worker's window opened again
+//! with no task, which reads at rest until it has a turn of its own, `live_bench` the
 //! board between a real chief and real workers, `live_designer` a real Codex
 //! drawing an image, `live_approval` real harnesses in every seat of five
 //! projects sending what the human approves, behind the approval gate, and
@@ -75,7 +76,12 @@
 //! long command running that its answer ends, `live_specs` a real chief of each
 //! harness told of specs where its project has them on, planning one and
 //! carrying it to the board, and `live_notes` a real chief, Devin's or Claude's,
-//! in a turn when two notes come for it, handed each once). Run them with
+//! in a turn when two notes come for it, handed each once, `live_tell` a real worker
+//! of any harness told by the chief while inside a command, whose turn then ends with
+//! words the chief gets before any resume, and finishes the paused task with,
+//! `live_pi_parity` a Pi member's window holding all that bare Pi holds in the same
+//! folder, and `live_task_working` a real worker's task working before its window runs
+//! its command). Run them with
 //! `cargo xtask test clis`, `daemons`, `integration`,
 //! `regressions`, `agents` and `load`, and `cargo xtask smoke` (the `npm run`
 //! names are the same), a live one with `cargo xtask live <name>`, or one with
@@ -92,6 +98,7 @@
 #![deny(unsafe_code)]
 
 pub mod agents_proof;
+mod bundle;
 pub mod cf;
 pub mod checkout;
 pub mod daemon;

@@ -1,6 +1,13 @@
 //! What the window answers a message with. Every message is one turn.
 //!
 //! - `Reply with exactly: X` answers X.
+//! - A line `SAVED <file>[,<file>...] <words>` is an image designer's turn: it saves a
+//!   picture under each name in the window's folder and answers the absolute path of
+//!   each, a line apiece, and then the words, as the designer's role asks its result
+//!   to begin (`skill/core/staff.md`).
+//! - A line `LONG <characters>` is a worker whose result is a report of that many characters,
+//!   lines of a few dozen words as a worker's are, with no picture: a message that Claude
+//!   Code is given in pieces when the machine is loaded (T-763's live case).
 //! - A line `DISPATCH --tier standard <task>` (or `DISPATCH --review --tier
 //!   standard <task>`, and `--test` the same) runs `cf task add` with those
 //!   words and the task (`\n` in it becomes a line break), with this window's
@@ -22,6 +29,10 @@
 //!   nothing is delivered to. An Escape stops it, as it stops Claude's: the turn
 //!   ends there, and the window writes what Claude writes of a turn it was
 //!   interrupted in (`take_turn`).
+//! - A line `PRINT <bytes> <words>` is a turn that prints that many bytes of text to
+//!   its screen, as a harness does that streams its model's reasoning, then does what
+//!   the words say. A window whose terminal is not read on stops in the middle of it,
+//!   as a harness's write to its terminal does.
 //! - A line `HANG <seconds> <words>` is a turn hung that long, as a harness hung
 //!   in its model request is (Pi on zeewin's long run, 2026-10-19): an Escape does
 //!   nothing to it, and only the end of the window ends it before its time. Then it
@@ -51,7 +62,10 @@
 //!   that leaves some running and ends its turn: the turn's `turn_duration` says
 //!   how many are left, the window's status stays `busy` for them, and when they
 //!   end the window begins a turn of its own (`WOKEN <words>`, which answers
-//!   `woken: <words>`), as Claude Code does.
+//!   `woken: <words>`), as Claude Code does. `AGENTS --then <count> <seconds> <rest>`
+//!   starts them so and goes on with `rest` as the line it was given, as a turn does
+//!   that starts agents and works on (T-604's, 2026-10-25): an Escape or a refusal
+//!   then ends a turn whose agents still run, and whose record counts none of them.
 //! - A line `STEPS <n> <words>` is a turn that writes `n` lines of progress, each a
 //!   message that calls a tool, before its answer, and `CLAUDE-JOB [--silent] <seconds>
 //!   <words> :: <report>` a turn that starts a job in the background as Claude Code does,
@@ -60,16 +74,24 @@
 //!   window whose participant `CF_TEST_QUOTA_OUT` names, for as long as the
 //!   file `CF_TEST_QUOTA_FILE` names is there when it is set (taking it away is
 //!   the human logging the harness into another account).
+//! - Every message is refused so, whatever it says, by a window of a participant
+//!   `CF_TEST_QUOTA_SPENT` names (a comma between names), for as long as that
+//!   file is there: an account whose quota is spent refuses each turn of every
+//!   window logged into it, the chief's too. A turn that works first (`SLEEP`) is
+//!   refused when it asks again, after its work.
 //! - A line `ASK <questions JSON>` asks through Claude's question tool: the
 //!   PreToolUse hook of the settings file this window was launched with runs on
 //!   a synthetic AskUserQuestion event, and the turn answers with what the hook
 //!   handed back.
 //! - A question whose text says `REPLY <words>` is answered with `cf answer`.
+//! - `REPLY <words> THEN <line>` answers it so and goes on, in the same turn, with `line`
+//!   as the line it was given, and ends with what that answers: a window that answers
+//!   the chief's tell and carries on to its end (T-442).
 //! - Anything else is acknowledged.
 
 use std::path::Path;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -117,6 +139,12 @@ pub struct Window {
     pub wake: Sender<String>,
     /// The Escape that stops the turn at work.
     pub stop: Arc<Stop>,
+    /// The window's first message came with its launch, as an argument of the program, and
+    /// was no paste: Claude Code makes no attachment of the paths of images in it.
+    pub seeded: bool,
+    /// What a command cancelled put back in the input box, until the terminal's reader
+    /// takes it there.
+    pub put_back: Arc<Mutex<Option<String>>>,
 }
 
 /// What a turn answers.
@@ -228,13 +256,29 @@ fn shell(command: &str) -> Run {
         .raw_arg(format!("\"{command}\""))
 }
 
+/// Prints lines of text to the window's screen until they make `bytes`.
+fn print_lines(bytes: usize) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    let (mut printed, mut line) = (0, 0);
+    while printed < bytes {
+        line += 1;
+        let text = format!("reasoning, line {line:08}, as a harness streams its model's words\r\n");
+        out.write_all(text.as_bytes())?;
+        printed += text.len();
+    }
+    out.flush()
+}
+
 /// The answer to `text`.
 pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static SLEEP: OnceLock<Regex> = OnceLock::new();
     static HANG: OnceLock<Regex> = OnceLock::new();
+    static PRINT: OnceLock<Regex> = OnceLock::new();
     static JOB: OnceLock<Regex> = OnceLock::new();
     static BACKGROUND: OnceLock<Regex> = OnceLock::new();
     static AGENTS: OnceLock<Regex> = OnceLock::new();
+    static AGENTS_THEN: OnceLock<Regex> = OnceLock::new();
     static WOKEN: OnceLock<Regex> = OnceLock::new();
     static ASK: OnceLock<Regex> = OnceLock::new();
     static ASKED: OnceLock<Regex> = OnceLock::new();
@@ -242,9 +286,14 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static DISPATCH: OnceLock<Regex> = OnceLock::new();
     static VERB: OnceLock<Regex> = OnceLock::new();
     static REFUSED: OnceLock<Regex> = OnceLock::new();
+    static SAVED: OnceLock<Regex> = OnceLock::new();
+    static LONG: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
     static RESULTS: OnceLock<Regex> = OnceLock::new();
 
+    if spent(window) {
+        return Ok(Reply::Refused);
+    }
     let accepts = accepting(
         own_var("CF_TEST_ACCEPT_RESULTS").as_deref(),
         &window.participant,
@@ -262,6 +311,13 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
             return Ok(Reply::Stopped);
         }
         return reply_to(&slow[2], window);
+    }
+    if let Some(print) = pattern::once(&PRINT, r"(?m)^PRINT (\d+) (.+)$").captures(text) {
+        let bytes: usize = print[1]
+            .parse()
+            .map_err(|_| format!("PRINT {}", &print[1]))?;
+        print_lines(bytes).map_err(|failed| format!("PRINT {bytes}: {failed}"))?;
+        return reply_to(&print[2], window);
     }
     if let Some(hung) = pattern::once(&HANG, r"(?m)^HANG (\d+) (.+)$").captures(text) {
         let seconds: u64 = hung[1].parse().map_err(|_| format!("HANG {}", &hung[1]))?;
@@ -341,6 +397,21 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         });
         return Ok(Reply::Text(words));
     }
+    if let Some(agents) =
+        pattern::once(&AGENTS_THEN, r"(?m)^AGENTS --then (\d+) (\d+) (.+)$").captures(text)
+    {
+        let count: u64 = agents[1]
+            .parse()
+            .map_err(|_| format!("AGENTS --then {}", &agents[1]))?;
+        let seconds: u64 = agents[2]
+            .parse()
+            .map_err(|_| format!("AGENTS --then {} {}", &agents[1], &agents[2]))?;
+        let (wake, woken) = (window.wake.clone(), "WOKEN the agents ended".to_owned());
+        window.agents.start(count, seconds, move || {
+            let _ = wake.send(woken);
+        });
+        return reply_to(&agents[3], window);
+    }
     if let Some(woken) = pattern::once(&WOKEN, r"(?m)^WOKEN (.+)$").captures(text) {
         return Ok(Reply::Text(format!("woken: {}", &woken[1])));
     }
@@ -353,12 +424,20 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         pattern::once(&ASKED, r"(?m)^\[ConsensFlow m-(\d+)[^\]]*question from @").captures(text);
     let reply = pattern::once(&REPLY, r"(?m)REPLY (.+)$").captures(text);
     if let (Some(asked), Some(reply)) = (asked, reply) {
+        let (answer, goes_on) = match reply[1].split_once(" THEN ") {
+            Some((answer, line)) => (answer, Some(line)),
+            None => (&reply[1], None),
+        };
         let words = [
             "answer".to_owned(),
             format!("m-{}", &asked[1]),
-            reply[1].to_owned(),
+            answer.to_owned(),
         ];
-        return Ok(Reply::Text(format!("replied: {}", run_cf(&words))));
+        let replied = run_cf(&words);
+        return match goes_on {
+            Some(line) => reply_to(line, window),
+            None => Ok(Reply::Text(format!("replied: {replied}"))),
+        };
     }
     let dispatched: Vec<String> = dispatches(
         text,
@@ -393,6 +472,16 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     if refused(text, window, pattern::once(&REFUSED, "QUOTA-OUT")) {
         return Ok(Reply::Refused);
     }
+    if let Some(long) = pattern::once(&LONG, r"(?m)^LONG (\d+)$").captures(text) {
+        let length = long[1]
+            .parse::<usize>()
+            .map_err(|failed| failed.to_string())?;
+        return Ok(Reply::Text(a_report(length)));
+    }
+    if let Some(saved) = pattern::once(&SAVED, r"(?m)^SAVED (\S+) (.+)$").captures(text) {
+        let folder = std::env::current_dir().map_err(|failed| failed.to_string())?;
+        return saved_in(&folder, &saved[1], &saved[2]).map(Reply::Text);
+    }
     if let Some(exact) = pattern::once(&EXACT, r"Reply with exactly: (\S+)").captures(text) {
         return Ok(Reply::Text(exact[1].to_owned()));
     }
@@ -400,6 +489,36 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         "noted: {}",
         text.split('\n').next().unwrap_or_default()
     )))
+}
+
+/// A worker's report of at least `length` characters: numbered lines of words, whole lines, the
+/// last one ending the report.
+fn a_report(length: usize) -> String {
+    let mut lines = Vec::new();
+    let mut written = 0;
+    for section in 1.. {
+        let line = format!("{section}. Section {section} \u{2014} headings, links and the footer all match the page that was asked for.");
+        written += line.chars().count() + 1;
+        lines.push(line);
+        if written >= length {
+            break;
+        }
+    }
+    lines.join("\n")
+}
+
+/// An image designer's answer: a picture saved under each of `names` (a comma
+/// between) in `folder`, and then `words`, the paths first as its role asks.
+fn saved_in(folder: &Path, names: &str, words: &str) -> Result<String, String> {
+    let mut lines = Vec::new();
+    for name in names.split(',') {
+        let path = folder.join(name);
+        std::fs::write(&path, cf_e2e::png::SMALL)
+            .map_err(|failed| format!("SAVED {name}: {failed}"))?;
+        lines.push(path.display().to_string());
+    }
+    lines.push(words.to_owned());
+    Ok(lines.join("\n"))
 }
 
 /// The words of `cf task add` each `DISPATCH` line of `text` asks for, in the
@@ -451,6 +570,18 @@ fn refused(text: &str, window: &Window, quota_out: &Regex) -> bool {
         && is_session_of(&window.participant, &refusing)
 }
 
+/// Whether the provider refuses this window whatever it is given: the window is
+/// a session of a participant `CF_TEST_QUOTA_SPENT` names, and the account it
+/// shares with them is spent (`CF_TEST_QUOTA_FILE` is there).
+fn spent(window: &Window) -> bool {
+    let sharing = own_var("CF_TEST_QUOTA_SPENT").unwrap_or_default();
+    let spent = own_var("CF_TEST_QUOTA_FILE").is_some_and(|account| Path::new(&account).exists());
+    spent
+        && sharing
+            .split(',')
+            .any(|name| !name.is_empty() && is_session_of(&window.participant, name))
+}
+
 /// Whether `participant` is the member `member`, or a session of it
 /// (`member-amber-pine`).
 pub fn is_session_of(participant: &str, member: &str) -> bool {
@@ -472,6 +603,8 @@ mod tests {
             tasks: Tasks::default(),
             wake: std::sync::mpsc::channel().0,
             stop: Arc::new(Stop::default()),
+            seeded: false,
+            put_back: Arc::default(),
         }
     }
 
@@ -492,6 +625,53 @@ mod tests {
             &window(),
         );
         assert_eq!(text(reply), "ONE_DONE");
+    }
+
+    #[test]
+    fn a_designer_saves_its_pictures_and_answers_their_paths_before_its_words() {
+        let folder = tempfile::tempdir().unwrap();
+        let answer = saved_in(folder.path(), "desk.png,hero.png", "Warm editorial scene.").unwrap();
+        let (desk, hero) = (
+            folder.path().join("desk.png"),
+            folder.path().join("hero.png"),
+        );
+        assert_eq!(
+            answer,
+            format!(
+                "{}\n{}\nWarm editorial scene.",
+                desk.display(),
+                hero.display()
+            )
+        );
+        for picture in [desk, hero] {
+            let bytes = std::fs::read(picture).unwrap();
+            assert!(cf_e2e::png::inspect(&bytes).is_ok());
+        }
+        assert!(saved_in(&folder.path().join("none"), "a.png", "x")
+            .unwrap_err()
+            .starts_with("SAVED a.png: "));
+    }
+
+    #[test]
+    fn a_long_worker_answers_a_report_of_the_length_it_was_asked_for_in_whole_lines() {
+        let report = text(reply_to("LONG 12000", &window()));
+        let length = report.chars().count();
+        assert!(
+            (12_000..12_000 + 100).contains(&length),
+            "{length} characters"
+        );
+        assert!(report
+            .lines()
+            .all(|line| line.starts_with(|c: char| c.is_ascii_digit())));
+        assert!(report.lines().count() > 100);
+        assert!(!report.contains("[Image"), "no picture, so no attachment");
+        assert!(!report.contains('/'), "no path");
+        // Anywhere in the message, as a task delivered to a window has its header first.
+        let reply = reply_to(
+            "[ConsensFlow m-4 \u{b7} T-1 \u{b7} task from @chief]\nLONG 100",
+            &window(),
+        );
+        assert!(text(reply).starts_with("1. Section 1"));
     }
 
     #[test]
@@ -574,6 +754,14 @@ mod tests {
         let reply = reply_to("AGENTS 3 600 waiting on three", &window);
         assert_eq!(text(reply), "waiting on three");
         assert_eq!(window.agents.running(), 3);
+    }
+
+    #[test]
+    fn an_agents_then_line_starts_them_and_goes_on_with_the_rest_of_the_line() {
+        let window = window();
+        let reply = reply_to("AGENTS --then 2 600 Reply with exactly: SWEEPING", &window);
+        assert_eq!(text(reply), "SWEEPING", "the rest is the turn's");
+        assert_eq!(window.agents.running(), 2, "and they run on");
     }
 
     #[test]

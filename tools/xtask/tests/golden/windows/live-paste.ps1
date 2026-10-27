@@ -3,7 +3,6 @@ $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) } catch {}
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
-function Exit-Run([int]$code) { Write-Output "`n== exit $code"; exit $code }
 $dir = Join-Path $env:USERPROFILE 'consensflow-build'
 $tarball = Join-Path $env:USERPROFILE 'consensflow-build.0000abcd-12345678.tgz'
 $running = Join-Path $dir '.windows-run.pid'
@@ -11,6 +10,15 @@ $owner = Join-Path $dir '.windows-run.id'
 $held = $false
 $lock = $null
 $job = $null
+function Free-Machine {
+  if ($script:held) {
+    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue
+    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }
+    $script:held = $false
+  }
+  if ($script:lock) { $script:lock.Dispose(); $script:lock = $null }
+}
+function Exit-Run([int]$code) { Free-Machine; Write-Output "`n== exit $code"; exit $code }
 try {
 New-Item -ItemType Directory -Force $dir | Out-Null
 try { $lock = [IO.File]::Open((Join-Path $dir '.windows-run.lock'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {} catch { $why = $_.Exception.Message }
@@ -30,10 +38,6 @@ Write-Output "== tree $(Get-Content -LiteralPath (Join-Path $dir '.windows-tree'
 . ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '.windows-run.ps1'))))
 } finally {
   if ($null -ne $job) { [CfJob]::Release($job) }
+  Free-Machine
   Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue
-  if ($held) {
-    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue
-    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }
-  }
-  if ($lock) { $lock.Dispose() }
 }

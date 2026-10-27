@@ -5,7 +5,8 @@
 //! (`queue.rs`), what each kind of word does at the human's gate
 //! (`messages/gate.rs`), the notes of a task's wait that go when it moves on
 //! (`messages/pauses.rs`, `messages/holds.rs`), the pauses a project's
-//! suspension makes and its Resume ends (`suspended.rs`), and what a ledger Node wrote
+//! suspension makes and its Resume ends (`suspended.rs`), the proof that a window's
+//! program is gone, kept on its conversation (`program_gone.rs`), and what a ledger Node wrote
 //! means to this one (the
 //! rules are the docs of `messages/carrying.rs`, `messages/receipt.rs` and
 //! `tasks/pausing.rs`). Each test is a sequence of what the callers do, on a
@@ -28,9 +29,12 @@ mod gate;
 mod handed;
 mod legacy;
 mod open_questions;
+mod open_tells;
 mod pause_notes;
+mod program_gone;
 mod questions;
 mod queued_tells;
+mod read_in_the_inbox;
 mod self_steps;
 mod sessions;
 mod suspended;

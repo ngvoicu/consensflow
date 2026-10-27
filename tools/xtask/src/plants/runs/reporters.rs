@@ -144,6 +144,7 @@ impl Reporter {
             Self::Nextest => {
                 let tests = cargo_test(command, context);
                 let words = nextest_words(&tests.args).map_err(std::io::Error::other)?;
+                let words = with_the_threads_of_the_environment(words, context);
                 let config = dir.join("nextest.toml");
                 fs::write(&config, nextest_config(dir))?;
                 under_nextest(tests, words, nextest, &config)
@@ -411,9 +412,7 @@ fn nextest_words(args: &[OsString]) -> Result<Vec<OsString>, String> {
     while let Some(word) = rest.next() {
         let text = word.to_string_lossy();
         if text == "--" {
-            words.push(word.clone());
-            words.extend(rest.cloned());
-            break;
+            return after_the_dashes(words, rest.cloned());
         }
         if !text.starts_with('-') || text == "-" {
             words.push(word.clone());
@@ -445,6 +444,70 @@ fn nextest_words(args: &[OsString]) -> Result<Vec<OsString>, String> {
         }
         words.extend(next);
     }
+    Ok(words)
+}
+
+/// `words` (nextest's, as [`nextest_words`] makes them) with the threads libtest is told by
+/// the environment (`RUST_TEST_THREADS`) given to nextest as its own option, if the command
+/// names none: nextest does not read that variable, and a machine's limit on the tests it runs
+/// at once (zeewin's, 4: the run script sets it) did not reach the plants' runs, whose baseline
+/// suites ran as wide as the machine (T-777, P2-3). It goes before the `--`, where nextest takes
+/// it; a variable that is no number of threads, or 0, is none.
+fn with_the_threads_of_the_environment(
+    mut words: Vec<OsString>,
+    context: &Context,
+) -> Vec<OsString> {
+    let before = words
+        .iter()
+        .position(|word| word == "--")
+        .unwrap_or(words.len());
+    if words[..before].iter().any(|word| word == "--test-threads") {
+        return words;
+    }
+    let threads = context
+        .env
+        .text("RUST_TEST_THREADS")
+        .filter(|threads| threads.parse::<u32>().is_ok_and(|threads| threads > 0));
+    if let Some(threads) = threads {
+        words.splice(
+            before..before,
+            [OsString::from("--test-threads"), OsString::from(threads)],
+        );
+    }
+    words
+}
+
+/// The words of nextest's that `words` (the words before a `--`, as nextest names them)
+/// and `after` (libtest's, after it) are: libtest's threads (`--test-threads N` or
+/// `--test-threads=N`) are nextest's own option before the `--`, which nextest takes
+/// nowhere else (0.9.148 emulates `--ignored`, `--include-ignored`, `--skip`, `--exact`
+/// and `--nocapture` there), and the rest stays after it.
+fn after_the_dashes(
+    mut words: Vec<OsString>,
+    after: impl Iterator<Item = OsString>,
+) -> Result<Vec<OsString>, String> {
+    let mut libtest = Vec::new();
+    let mut after = after.peekable();
+    while let Some(word) = after.next() {
+        let text = word.to_string_lossy().into_owned();
+        let threads = match text.strip_prefix("--test-threads") {
+            Some("") => Some(
+                after
+                    .next_if(|value| !value.to_string_lossy().starts_with('-'))
+                    .ok_or_else(|| {
+                        "cargo test -- --test-threads: --test-threads is given no value".to_owned()
+                    })?,
+            ),
+            Some(joined) => joined.strip_prefix('=').map(OsString::from),
+            None => None,
+        };
+        match threads {
+            Some(threads) => words.extend([OsString::from("--test-threads"), threads]),
+            None => libtest.push(word),
+        }
+    }
+    words.push(OsString::from("--"));
+    words.extend(libtest);
     Ok(words)
 }
 

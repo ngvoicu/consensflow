@@ -13,8 +13,13 @@ use crate::fixtures::{assert_match, fail_next_take_back};
 
 /// A project with zeus at work on T-1, its brief (m-1, "Parser") received.
 fn working(context: &Context) -> i64 {
+    working_on(context, "Parser")
+}
+
+/// A project with zeus at work on T-1, its brief (m-1) saying `body`, received.
+fn working_on(context: &Context, body: &str) -> i64 {
     let project = context.with_staff(&["zeus"]);
-    context.give(project.id, "zeus", "Parser");
+    context.give(project.id, "zeus", body);
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(context.task(project.id, 1).task.state, "working");
@@ -80,6 +85,48 @@ fn a_stop_paid_at_rest_by_a_window_that_took_its_brief_back_keeps_the_brief_for_
     assert_eq!(thread.task.state, "done");
     let result = thread.messages.iter().find(|m| m.kind == "result").unwrap();
     assert_eq!(result.body, "Parser, finished");
+}
+
+#[test]
+fn a_stop_paid_at_rest_keeps_the_words_that_resumed_a_task_when_their_images_were_attached_the_sources_after_them_being_no_message_of_the_users(
+) {
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.attaches_images.set(true);
+    context.adapter.busy_until_interrupted("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    // Resumed with words that name a picture: the window's record keeps them behind a
+    // placeholder, and then the sources of the picture as the harness's own item (Claude
+    // Code's companion record).
+    context.resume_task(project, 1, "Carry on\n/work/images/desk.png");
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 1).task.state, "working");
+    let items = context.adapter.agent("zeus").items;
+    assert_eq!(
+        &*items.last().unwrap().text,
+        "[Image: source: /work/images/desk.png]"
+    );
+    // The turn those words began is stopped before a word of its answer: the window has
+    // them in its input box again, and the ledger keeps them for the window.
+    context.adapter.busy_until_taken_back("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let thread = context.task(project, 1);
+    let kept: Vec<_> = thread
+        .messages
+        .iter()
+        .filter(|message| message.state == "queued")
+        .collect();
+    assert_eq!(kept.len(), 1, "{:?}", thread.messages);
+    assert_eq!(
+        kept[0].reason.as_deref(),
+        Some("@zeus stopped before a word of its answer and took it back out of its conversation")
+    );
 }
 
 #[test]

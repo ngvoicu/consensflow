@@ -59,17 +59,6 @@ live-devin-resume-turn = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test"
 # The cases of the rig, each a version's shape.
 
 [[plant]]
-name = "results twice: a paste into a Devin turn whose agent says nothing past the gap is not held, and is pasted again after the daemon's arrival window of rest (3.0.4)"
-meant = "two_results_for_a_devin_chief_whose_turn_says_nothing_for_minutes_go_in_once_each_whole_and_apart"
-runs = ["rig-regression-results-silent"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "        state.into_a_turn = !state.asked.is_empty();"
-replace = "        state.into_a_turn = false;"
-
-[[plant]]
 name = "results twice: the record of the first result is late, the arrival window counted from the hand-over, turns or none (3.0.3)"
 meant = "two_results_for_a_devin_chief_whose_record_of_the_first_is_late_go_in_once_each_whole_and_apart"
 runs = ["rig-regression-results-late"]
@@ -89,6 +78,18 @@ replace = '''
             turned: false,
             ..self.rested(record, observed, self.held(record))
         };'''
+
+# Devin's store says it took a paste from its Enter on (3000.11.92, and the stand-in that
+# plays it), which keeps the note once whatever this rule does: it is taken out too (T-107).
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/history.rs"
+find = "                let took = seen.took || (pasted.is_some() && self.seen.get().took);"
+replace = "                let took = false;"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if !self.read_once_more(record, delivering.message).await? {"
+replace = "        if false && !self.read_once_more(record, delivering.message).await? {"
 
 [[plant]]
 name = "results twice: the chief at work when the second result comes, the arrival window counted from the hand-over, turns or none (3.0.3)"
@@ -111,16 +112,17 @@ replace = '''
             ..self.rested(record, observed, self.held(record))
         };'''
 
-[[plant]]
-name = "results twice: every paste is held, so a paste Devin's TUI dropped waits half an hour"
-meant = "two_results_for_a_devin_chief_whose_tui_dropped_the_first_paste_go_in_once_each_whole_and_apart"
-runs = ["rig-regression-results-dropped"]
-builds = true
-
 [[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "            held: self.into_a_turn && !self.asked.is_empty(),"
-replace = "            held: true,"
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if !self.read_once_more(record, delivering.message).await? {"
+replace = "        if false && !self.read_once_more(record, delivering.message).await? {"
+
+# Devin's store says it took a paste from its Enter on (3000.11.92, and the stand-in that
+# plays it), which keeps the note once whatever this rule does: it is taken out too (T-107).
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/history.rs"
+find = "                let took = seen.took || (pasted.is_some() && self.seen.get().took);"
+replace = "                let took = false;"
 
 # The engine's rule, on its fake windows.
 
@@ -163,8 +165,10 @@ runs = ["engine-slow-records"]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {'''
 replace = '''
+            delivering.turned = true;
             return Rest {'''
 
 [[plant]]
@@ -206,8 +210,10 @@ runs = ["engine-slow-records"]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.rested_since = None;
+            delivering.turned = true;
             Rest {'''
 replace = '''
+            delivering.turned = true;
             Rest {'''
 
 [[plant]]
@@ -223,195 +229,22 @@ replace = "        let free = delivering.free_since;"
 # Devin's adapter: what its wire log says of a paste.
 
 [[plant]]
-name = "results twice: a paste made while a prompt is asked is not held"
-meant = "a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_in_its_own_prompts_turn_and_no_other_after_it"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "        state.into_a_turn = !state.asked.is_empty();"
-replace = "        state.into_a_turn = false;"
-
-[[plant]]
-name = "results twice: a paste is held in the next turn after the one it went into ended"
-meant = "a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_in_its_own_prompts_turn_and_no_other_after_it"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '''
-        if self.asked.is_empty() {
-            self.into_a_turn = false;'''
-replace = '''
-        if self.asked.is_empty() {'''
-
-[[plant]]
-name = "results twice: a paste the TUI put to its agent is held for good, past the turn of its own prompt"
-meant = "a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_in_its_own_prompts_turn_and_no_other_after_it"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "            held: self.into_a_turn && !self.asked.is_empty(),"
-replace = "            held: self.sent || self.into_a_turn && !self.asked.is_empty(),"
-
-[[plant]]
-name = "results twice: the TUI's prompt of a paste holds it in no turn"
-meant = "the_message_last_pasted_is_held_in_the_turn_of_the_tuis_prompt_whose_words_begin_with_it_until_that_turn_ends"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "            if self.expected.is_some() && (pasted || (!self.sent && !self.turn_ended)) {"
-replace = "            if self.expected.is_some() && !self.sent && !self.turn_ended {"
-
-[[plant]]
-name = "results twice: words that quote a paste's line anywhere are its paste (round 5, the reviews of 2026-10-16)"
-meant = "a_prompt_that_quotes_the_header_of_a_paste_devin_dropped_holds_it_for_no_longer_than_its_own_turn"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "        Value::String(words) => words.trim_start().starts_with(text),"
-replace = "        Value::String(words) => words.contains(text),"
-
-[[plant]]
-name = "results twice: words that begin with a paste's line after a blank line are its paste"
-meant = "a_prompt_that_quotes_the_header_of_a_paste_devin_dropped_holds_it_for_no_longer_than_its_own_turn"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "        Value::String(words) => words.trim_start().starts_with(text),"
-replace = "        Value::String(words) => words.lines().any(|line| line.starts_with(text)),"
-
-[[plant]]
 name = "results twice: round 5's rule put back, the human's words that quote the header of a paste Devin dropped are Devin's word for good that it has the paste, and it never goes again (the reviews of 2026-10-16)"
 meant = "a_result_whose_paste_devins_tui_dropped_goes_again_after_the_humans_words_that_quote_its_header"
 runs = ["rig-regression-results-quoted"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "        Value::String(words) => words.trim_start().starts_with(text),"
-replace = "        Value::String(words) => words.contains(text),"
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "            held: self.into_a_turn && !self.asked.is_empty(),"
-replace = "            held: self.sent || self.into_a_turn && !self.asked.is_empty(),"
-
-[[plant]]
-name = "results twice: a prompt of the conversation the window showed is a turn of the one it shows now"
-meant = "a_prompt_of_the_conversation_the_window_showed_is_no_turn_of_the_one_it_shows_now"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '''
-            if self.shown.as_deref() != Some(shown) {
-                self.asked.clear();
-                self.mode = None;'''
-replace = '''
-            if self.shown.as_deref() != Some(shown) {
-                self.mode = None;'''
+file = "crates/cf-harness/src/devin/history.rs"
+find = "window_text(content).trim_start().starts_with(text.as_str())"
+replace = "window_text(content).contains(text.lines().next().unwrap_or_default())"
 
 # Main's B1 reads a log replaced in place (rewritten, renamed over) from its start: the
 # turns since the paste are read again from it, and none of the log before's is kept.
-[[plant]]
-name = "results twice: a log replaced keeps the turn the paste went into in the log before"
-meant = "a_log_that_was_replaced_says_the_turns_since_the_paste_as_the_new_one_has_them"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '''
-            state.into_a_turn = false;
-            state.turn_ended = false;'''
-replace = '''
-            state.turn_ended = false;'''
-
-[[plant]]
-name = "results twice: a log replaced keeps the turn's end since the paste the log before said"
-meant = "a_log_that_was_replaced_says_the_turns_since_the_paste_as_the_new_one_has_them"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '''
-            state.turn_ended = false;
-            state.mode = None;'''
-replace = '''
-            state.mode = None;'''
-
-[[plant]]
-name = "results twice: a paste a prompt was put to the agent ahead of, the prompt begun as the paste was handed over, is held by nothing (the reviews of 2026-10-16)"
-meant = "a_message_pasted_as_a_prompt_begins_while_it_is_handed_over_is_held_in_its_turn"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '''
-            if self.expected.is_some() && (pasted || (!self.sent && !self.turn_ended)) {
-                self.into_a_turn = true;
-            }'''
-replace = ""
-
-[[plant]]
-name = "results twice: a paste the TUI put to its agent is held in the turn of a prompt that came after it"
-meant = "a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_in_its_own_prompts_turn_and_no_other_after_it"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "            if self.expected.is_some() && (pasted || (!self.sent && !self.turn_ended)) {"
-replace = "            if self.expected.is_some() {"
-
-[[plant]]
-name = "results twice: a turn begun before anything was pasted holds a paste"
-meant = "a_prompt_read_after_a_paste_the_tui_has_not_put_to_its_agent_holds_the_paste_in_its_turn"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "            if self.expected.is_some() && (pasted || (!self.sent && !self.turn_ended)) {"
-replace = "            if pasted || (!self.sent && !self.turn_ended) {"
-
-[[plant]]
-name = "results twice: round 6's rule put back, a paste Devin's TUI dropped is held in every turn begun after the one it went into, and never goes again (the reviews of 2026-10-16)"
-meant = "a_paste_the_tui_dropped_is_held_in_no_turn_begun_after_the_one_it_went_into"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "            if self.expected.is_some() && (pasted || (!self.sent && !self.turn_ended)) {"
-replace = "            if self.expected.is_some() && (pasted || !self.sent) {"
-
-[[plant]]
-name = "results twice: a turn's end after a paste is never noted, so a paste Devin's TUI dropped is held in every turn begun after"
-meant = "a_paste_the_tui_dropped_is_held_in_no_turn_begun_after_the_one_it_went_into"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "            self.turn_ended |= asking;"
-replace = ""
-
-[[plant]]
-name = "results twice: a turn's end before a paste is kept past it, so the turn begun as the next paste is handed over holds nothing"
-meant = "a_prompt_read_after_a_paste_the_tui_has_not_put_to_its_agent_holds_the_paste_in_its_turn"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '''
-        state.into_a_turn = !state.asked.is_empty();
-        state.turn_ended = false;'''
-replace = '''
-        state.into_a_turn = !state.asked.is_empty();'''
 
 # The stand-in Devin's silence (`THINK`), and main's B1 turn that goes on after a quit cut
 # the one it was: that one takes the pace's time, to its first word as in its work.
+
 [[plant]]
 name = "results twice: a stand-in turn that goes on after a cut keeps the silence of the turn it was"
 meant = "a_file_line_has_the_turns_tool_make_the_file_and_a_turn_that_goes_on_takes_no_wait_of_its_own"
@@ -438,8 +271,10 @@ replace = "        Some(silent) => (pace.first_word, silent[2].to_owned()),"
 
 [[plant]]
 name = "results twice: main's rule, the window's harness never asked whether it holds the paste (half an hour and the arrival window from the hand-over)"
-meant = "never_pastes_again_a_message_whose_paste_the_window_did_not_drop_whatever_the_looks"
-runs = ["engine-schedules"]
+meant = "counts_no_rest_while_the_harness_holds_the_paste_in_the_turn_it_went_into_and_pastes_it_once"
+runs = ["engine-slow-records"]
+# On the schedules, Devin's store says it took a paste from its Enter on, which keeps
+# every paste once whatever this rule does: the rule shows on the fake windows (T-107).
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
@@ -453,8 +288,10 @@ replace = "        let free = Some(since);"
 
 [[plant]]
 name = "results twice: round 6's rule, a paste once held is held for good and never pasted again (no word that the agent has it, none asked at the hand-over)"
-meant = "pastes_again_within_41_minutes_a_paste_the_window_dropped_where_it_rests_every_5_minutes"
-runs = ["engine-schedules"]
+meant = "pastes_again_half_an_hour_after_the_turn_that_held_it_ended_a_paste_short_turns_keep_unshown"
+runs = ["engine-slow-records"]
+# On the schedules, Devin's store says it took a paste from its Enter on, which keeps
+# every paste once whatever this rule does: the rule shows on the fake windows (T-107).
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
@@ -473,8 +310,10 @@ replace = "        } = self.rested(record, observed, self.held(record) || delive
 
 [[plant]]
 name = "results twice: round 7's rule, the half hour from the last look that found the paste held (no word that the agent has it, none asked at the hand-over)"
-meant = "never_pastes_again_a_message_whose_paste_the_window_did_not_drop_whatever_the_looks"
-runs = ["engine-schedules"]
+meant = "pastes_again_half_an_hour_after_the_turn_that_held_it_ended_a_paste_short_turns_keep_unshown"
+runs = ["engine-slow-records"]
+# On the schedules, Devin's store says it took a paste from its Enter on, which keeps
+# every paste once whatever this rule does: the rule shows on the fake windows (T-107).
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
@@ -490,15 +329,19 @@ replace = "        let free = Some(since);"
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {'''
 replace = '''
             delivering.free_since = Some(now);
+            delivering.turned = true;
             return Rest {'''
 
 [[plant]]
 name = "results twice: round 8's rule, the half hour after a hold the rest between two looks in a row at rest (no word that the agent has it, none asked at the hand-over)"
-meant = "pastes_again_within_41_minutes_a_paste_the_window_dropped_where_it_rests_every_5_minutes"
-runs = ["engine-schedules"]
+meant = "pastes_again_at_its_next_rest_a_paste_never_shown_in_half_an_hour_of_short_turns"
+runs = ["engine-slow-records"]
+# On the schedules, Devin's store says it took a paste from its Enter on, which keeps
+# every paste once whatever this rule does: the rule shows on the fake windows (T-107).
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
@@ -564,6 +407,7 @@ find = '''
         let Rest {
             rested,
             turned,
+            read_again,
             free,
         } = self.rested(record, observed, self.held(record));
         let at_rest = observed.settled && observed.waiting.is_none();
@@ -573,6 +417,7 @@ replace = '''
         let Rest {
             rested,
             turned,
+            read_again,
             free,
         } = self.rested(record, observed, held);
         let at_rest = observed.settled && observed.waiting.is_none();
@@ -584,9 +429,11 @@ find = '''
         if held {
             delivering.rested_since = None;
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {
                 rested: 0,
                 turned: true,
+                read_again: false,
                 free: None,
             };
         }
@@ -595,14 +442,17 @@ find = '''
             let since = *delivering.rested_since.get_or_insert(now);
             Rest {
                 rested: now - since,
-                turned: since != delivering.since,
+                turned: delivering.turned,
+                read_again: since != delivering.since,
                 free,
             }
         } else {
             delivering.rested_since = None;
+            delivering.turned = true;
             Rest {
                 rested: 0,
                 turned: true,
+                read_again: false,
                 free,
             }
         }'''
@@ -620,23 +470,28 @@ replace = '''
             let since = *delivering.rested_since.get_or_insert(now);
             Rest {
                 rested: now - since,
-                turned: since != delivering.since,
+                turned: delivering.turned,
+                read_again: since != delivering.since,
                 free: delivering.rest_after_hold,
             }
         } else {
             delivering.rested_since = None;
             delivering.rested_last = None;
+            delivering.turned = true;
             Rest {
                 rested: 0,
                 turned: true,
+                read_again: false,
                 free: delivering.rest_after_hold,
             }
         }'''
 
 [[plant]]
 name = "results twice: no word of the harness's that its agent has the paste, and a paste Devin ran at once between two looks, its record late, goes again (a regression against main, Vali's schedules of 2026-10-17)"
-meant = "never_pastes_again_a_message_whose_paste_the_window_did_not_drop_whatever_the_looks"
-runs = ["engine-schedules"]
+meant = "waits_for_the_record_of_a_paste_its_harness_put_to_its_agent_however_late_it_shows"
+runs = ["engine-slow-records"]
+# On the schedules, Devin's store says it took a paste from its Enter on, which keeps
+# every paste once whatever this rule does: the rule shows on the fake windows (T-107).
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
@@ -655,8 +510,10 @@ replace = "        if false && self.took(record) {"
 
 [[plant]]
 name = "results twice: the harness is not asked at the hand-over whether the paste went into a turn, and looks that stop after it take the gap for rest (Astra's review of 2026-10-17)"
-meant = "never_pastes_again_a_message_whose_paste_the_window_did_not_drop_whatever_the_looks"
-runs = ["engine-schedules"]
+meant = "counts_no_rest_in_a_gap_in_the_looks_from_a_hand_over_into_a_turn_that_held_the_paste"
+runs = ["engine-slow-records"]
+# On the schedules, Devin's store says it took a paste from its Enter on, which keeps
+# every paste once whatever this rule does: the rule shows on the fake windows (T-107).
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
@@ -675,15 +532,19 @@ replace = "        let free = Some(since);"
 
 [[plant]]
 name = "results twice: a look that finds the paste held does not start its free time again, so the half hour runs from the hand-over through the hold"
-meant = "never_pastes_again_a_message_whose_paste_the_window_did_not_drop_whatever_the_looks"
-runs = ["engine-schedules"]
+meant = "counts_no_rest_in_a_gap_in_the_looks_that_began_in_the_turn_that_held_the_paste"
+runs = ["engine-slow-records"]
+# On the schedules, Devin's store says it took a paste from its Enter on, which keeps
+# every paste once whatever this rule does: the rule shows on the fake windows (T-107).
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {'''
 replace = '''
+            delivering.turned = true;
             return Rest {'''
 
 [[plant]]
@@ -695,14 +556,18 @@ runs = ["engine-slow-records"]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {'''
 replace = '''
+            delivering.turned = true;
             return Rest {'''
 
 [[plant]]
 name = "results twice: a look that finds the paste held does not stop the window's rest, which the turn that held it then counts"
-meant = "never_pastes_again_a_message_whose_paste_the_window_did_not_drop_whatever_the_looks"
-runs = ["engine-schedules"]
+meant = "counts_no_rest_while_the_harness_holds_the_paste_in_the_turn_it_went_into_and_pastes_it_once"
+runs = ["engine-slow-records"]
+# On the schedules, Devin's store says it took a paste from its Enter on, which keeps
+# every paste once whatever this rule does: the rule shows on the fake windows (T-107).
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
@@ -716,8 +581,10 @@ replace = '''
 
 [[plant]]
 name = "results twice: the half hour counts from the hand-over, not from the first look that found the paste free"
-meant = "never_pastes_again_a_message_whose_paste_the_window_did_not_drop_whatever_the_looks"
-runs = ["engine-schedules"]
+meant = "pastes_again_half_an_hour_after_the_turn_that_held_it_ended_a_paste_short_turns_keep_unshown"
+runs = ["engine-slow-records"]
+# On the schedules, Devin's store says it took a paste from its Enter on, which keeps
+# every paste once whatever this rule does: the rule shows on the fake windows (T-107).
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
@@ -725,19 +592,21 @@ find = "        let overdue = at_rest && free.is_some_and(|free| now - free > RE
 replace = "        let overdue = at_rest && free.is_some() && waited > RECONCILE_MS;"
 
 # Devin's adapter: its word that the TUI put the paste to its agent.
+
 [[plant]]
-name = "results twice: Devin's window never says its agent has the paste"
-meant = "the_agent_has_a_paste_once_the_tuis_prompt_its_line_begins_is_read_and_ever_after"
+name = "results twice: Devin's window never says its TUI has the paste"
+meant = "a_paste_its_store_took_is_taken_whether_its_record_shows_it_yet_or_not"
 runs = ["harness-devin"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = "            .is_ok_and(|wire| wire.sent)"
-replace = "            .is_ok_and(|wire| wire.sent && false)"
+file = "crates/cf-harness/src/devin/history.rs"
+find = "                let took = seen.took || (pasted.is_some() && self.seen.get().took);"
+replace = "                let took = false;"
 
 # A resumed window's first message behind /bypass, however Devin stores it (the reviews of
 # 2026-10-17): its record reads the prompt, its header first; and only what ConsensFlow gave
 # a launch of the session behind /bypass, whole (Astra's review of 2026-10-18).
+
 [[plant]]
 name = "results twice: Devin's record reads a message that ran under /bypass with the command in front, and the paste it is is taken for none"
 meant = "a_launchs_first_message_behind_bypass_is_read_as_the_prompt_it_ran_however_devin_stored_it"
@@ -857,6 +726,7 @@ replace = "        } else if turned && false {"
 # The live suite's guard of the limit beside behind_bypass (GPT-6-Astra on B5): its
 # Opening::Note cases fail on the note as Devin's store has it, not as the daemon's reader,
 # which takes a kept /bypass off while the launch folder lasts, reads it.
+
 [[plant]]
 name = "results twice: the live suite passes a product's first message Devin stored behind /bypass"
 meant = "the_products_first_message_stored_with_bypass_kept_fails_its_case_naming_the_limit"

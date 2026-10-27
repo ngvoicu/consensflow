@@ -48,7 +48,7 @@ pub(super) fn asked<'a, T: 'a>(mut work: Work<'a, T>) -> Work<'a, T> {
 /// What a scripted reading says; the scripted readers say nothing else.
 pub(super) fn said(reading: &Reading) -> &str {
     match reading {
-        Reading::Unknown(reason) => reason,
+        Reading::Unknown(reason) | Reading::Missing(reason) => reason,
         Reading::Known(_) => panic!("a known reading, where a scripted one was read"),
     }
 }
@@ -172,6 +172,9 @@ impl Drop for Scripted {
 }
 
 /// Opens that open scripted readers, numbered in the order they are opened.
+// Its error is only ever `Reading::Unknown` or `Reading::Missing`, a reason string, never a
+// record (3.0.6-alpha.3's integration B, T-664).
+#[allow(clippy::result_large_err)]
 fn opens(script: &Arc<Script>) -> impl Fn() -> Open + Send + Sync + 'static {
     let script = Arc::clone(script);
     move || {
@@ -195,7 +198,7 @@ fn opens(script: &Arc<Script>) -> impl Fn() -> Open + Send + Sync + 'static {
 /// test moves.
 pub(super) fn scripted_with(script: &Arc<Script>, time: &Rc<ManualTime>, queue: usize) -> Thread {
     let time: Rc<dyn Time> = Rc::clone(time) as Rc<dyn Time>;
-    Thread::start(Env::default(), time, queue, opens(script)).unwrap()
+    Thread::start(Env::default(), time, queue, opens(script), Box::new(|_| {})).unwrap()
 }
 
 pub(super) fn scripted(script: &Arc<Script>, time: &Rc<ManualTime>) -> Thread {

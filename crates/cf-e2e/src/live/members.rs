@@ -18,8 +18,9 @@
 //! stand-in's, but for the real harnesses of the roster; where one of those is
 //! Claude Code, its windows start through [`super::machine::rig_with_stand_ins`]'s
 //! shim, which has the stand-in play the windows whose agent's model is `fake` or
-//! `fake-chief`, and the rig takes away what the stand-ins wrote in the machine's
-//! Claude folder when it ends, and what a real Claude kept of the project's folder.
+//! `fake-chief`. Every Claude window, the stand-ins' and the real ones, keeps its
+//! records in the config folder the run made for them ([`super::login`]), which goes
+//! with the run: nothing of it is written in the person's `~/.claude`.
 //!
 //! A check says what it saw in an [`Account`], waits with [`find`] (which says
 //! what it waits for, and ends with what it found, none when the time ran out),
@@ -47,7 +48,7 @@ use tempfile::TempDir;
 
 use super::machine::{live_folder_in, Harness, Installed, ISOLATION};
 use super::window::trust_claude;
-use super::{agents, installed, last_lines, rig, rig_with_stand_ins, Log};
+use super::{agents, last_lines, rig, rig_with_stand_ins, Log};
 use crate::process::Run;
 use crate::rig::{Config, Project, Rig};
 use crate::{files, Error, Result};
@@ -82,9 +83,7 @@ const GONE: Duration = Duration::from_secs(10);
 /// The rig the real harnesses of `installs` need: where one of them is Claude Code,
 /// its windows start through the shim ([`rig_with_stand_ins`], made in `shims`),
 /// which plays the stand-in `stand_in` for the windows whose agent's model is
-/// `fake` or `fake-chief` and takes away what the stand-ins wrote in the machine's
-/// Claude folder and what a real Claude kept of the folders the run names; where
-/// none is, the stand-in is the Claude of every window.
+/// `fake` or `fake-chief`; where none is, the stand-in is the Claude of every window.
 pub fn rig_for(installs: &[Installed], shims: &Path, stand_in: &Path) -> Result<Config> {
     if installs
         .iter()
@@ -137,7 +136,7 @@ impl Members {
         let harnesses = plan.harnesses();
         let installs = harnesses
             .iter()
-            .map(|harness| found(*harness, log))
+            .map(|harness| log.found(*harness))
             .collect::<Result<Vec<_>>>()?;
         let shims = tempfile::tempdir().map_err(|source| Error::File {
             action: "make a folder in",
@@ -148,6 +147,12 @@ impl Members {
             rig_for(&installs, shims.path(), stand_in)?,
             |config, (name, value)| config.var(name, value),
         );
+        let config = plan
+            .daemon_vars
+            .iter()
+            .fold(config, |config, (name, value)| {
+                config.daemon_var(name, value)
+            });
         let mut rig = Rig::start(config.clone())?;
         if super::keep_requested() {
             log.say(format!(
@@ -158,7 +163,6 @@ impl Members {
         }
         agents::write_roster(&rig, &plan.roster, log)?;
         let folder = prepare(&rig, plan)?;
-        rig.forget_claude_memory_of(&folder);
         let trust = match installs
             .iter()
             .find(|install| install.harness() == Harness::Claude)
@@ -229,8 +233,7 @@ impl Members {
 
     /// The Claude config folder the project's Claude windows keep their sessions
     /// and transcripts in ([`super::claude`] reads them there): the
-    /// `CLAUDE_CONFIG_DIR` the rig gives them, and else `.claude` in its home,
-    /// which is the machine's where a real Claude runs.
+    /// `CLAUDE_CONFIG_DIR` the rig gives them, and else `.claude` in its home.
     pub fn claude_config(&self) -> PathBuf {
         let var = |name: &str| self.rig.var(name).filter(|value| !value.is_empty());
         match (var("CLAUDE_CONFIG_DIR"), var("HOME")) {
@@ -394,6 +397,15 @@ impl Members {
         )
     }
 
+    /// Ends the program of the window `pane`, with whatever turn it has at work, as the
+    /// app's quit does to every window (`pane.kill`): the daemon sees it exit.
+    pub fn cut(&self, pane: &Value) -> Result<Value> {
+        self.rig.host(
+            "pane.kill",
+            json!({ "id": pane["id"], "generation": pane["generation"] }),
+        )
+    }
+
     /// The human's Pause of the task, and when it was made.
     pub fn pause(&self, task: i64) -> Result<Paused> {
         let made_ms = jiff::Timestamp::now().as_millisecond();
@@ -452,7 +464,6 @@ impl Members {
         if super::keep_requested() {
             rig.keep_home();
         }
-        rig.forget_claude_memory_of(&folder);
         log.say("the app started again on the same home");
         Ok(Self {
             rig,
@@ -491,20 +502,6 @@ impl Members {
     ) -> Result {
         closing::end_after(self.rig, what, happened, within)
     }
-}
-
-/// The machine's `harness`, found, with its version and where its login is read
-/// from said.
-fn found(harness: Harness, log: &Log) -> Result<Installed> {
-    let found = installed(harness)?;
-    log.say(format!(
-        "{} is {} ({}); its login is read from {}",
-        harness.name(),
-        found.command().display(),
-        found.version(),
-        found.home().display()
-    ));
-    Ok(found)
 }
 
 /// The folder of the project, made in the live folders of the home the rig gives

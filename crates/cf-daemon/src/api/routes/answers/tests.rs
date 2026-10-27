@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use super::*;
 use crate::api::callers::caller_of;
 use crate::api::routes::tests::support::{
-    note_for_zeus, project_is, question_on, state_of, working_question, working_task,
+    api, note_for_zeus, project_is, question_on, state_of, working_question, working_task,
 };
 use crate::api::waits::WAITS;
 use crate::testing::{request, said, scene, Scene};
@@ -556,10 +556,150 @@ async fn a_result_named_in_a_read_is_left_queued_for_the_decision_that_ends_it()
     assert_eq!(
         scene.message(result.id).state,
         "queued",
-        "a read is no decision: the paste still reminds the chief that one is due"
+        "a thread's read is no decision: the paste still reminds the chief that one is due (a read in the inbox is another matter: T-260)"
     );
     assert_eq!(scene.logged("message.read"), 0);
     assert_eq!(scene.kicks.get(), 0);
+}
+
+/// What `cf inbox read` printed whole is the reader's, whatever its kind, and is
+/// never typed in after it (T-260): a question, a result or a note named by a read
+/// in the inbox is `read`, and the dispatcher is woken. A task's words are not:
+/// only their paste proves them, and nothing is woken for them.
+#[tokio::test]
+async fn a_question_a_result_or_a_note_named_in_a_read_of_the_inbox_is_received_and_a_tasks_words_are_not(
+) {
+    let scene = scene();
+    let task = working_task(&scene);
+    let result = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .record_result(scene.project.id, task, "Parser done")
+        .unwrap()
+        .message
+        .unwrap();
+    let chief = scene.id("chief");
+    let note = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .note(
+            scene.project.id,
+            &cf_ledger::NewNote {
+                from: Some("zeus".to_owned()),
+                to: "chief".to_owned(),
+                body: "The tests are slow".to_owned(),
+                task: Some(task),
+            },
+        )
+        .unwrap();
+    for (id, kind) in [
+        (scene.question.id, "question"),
+        (result.id, "result"),
+        (note.id, "note"),
+    ] {
+        assert_eq!(scene.message(id).state, "queued", "{kind}");
+        let kicks = scene.kicks.get();
+        let (status, said) = read_from(&scene, &scene.chief, &said_read(&[id], "inbox")).await;
+        assert_eq!((status, said), (200, json!({})), "{kind}");
+        let read = scene.message(id);
+        assert_eq!(read.state, "read", "{kind}");
+        assert_eq!(read.receipt, json!({ "read": "inbox" }), "{kind}");
+        assert_eq!(
+            scene.kicks.get(),
+            kicks + 1,
+            "{kind}: the dispatcher is woken"
+        );
+    }
+    assert_eq!(
+        scene.context.ledger.borrow().next_delivery(chief).unwrap(),
+        None,
+        "nothing the chief read is left to paste"
+    );
+
+    let brief = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .create_task(
+            scene.project.id,
+            &cf_ledger::NewTask {
+                from: "chief".to_owned(),
+                to: Some("zeus".to_owned()),
+                body: "Lexer".to_owned(),
+                ..cf_ledger::NewTask::default()
+            },
+        )
+        .unwrap()
+        .message
+        .unwrap();
+    let kicks = scene.kicks.get();
+    let (status, _) = read_from(&scene, &scene.zeus, &said_read(&[brief.id], "inbox")).await;
+    assert_eq!(status, 200);
+    assert_eq!(scene.message(brief.id).state, "queued");
+    assert_eq!(scene.kicks.get(), kicks, "nothing was read");
+}
+
+/// Where the read in the inbox (T-260) meets the Resume after the Close: a
+/// question or a result for the chief that no window was handed waits for the
+/// Resume, and `cf inbox read` is refused it (409 `waits`) with none of its
+/// text, so nothing of it is received. Once the project is open again it is
+/// served whole, and the read of it receives it, as any read in the inbox does.
+#[tokio::test]
+async fn a_question_or_a_result_that_waits_for_the_resume_is_received_by_a_read_in_the_inbox_only_once_it_is_served(
+) {
+    let scene = scene();
+    let task = working_task(&scene);
+    let result = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .record_result(scene.project.id, task, "Parser done")
+        .unwrap()
+        .message
+        .unwrap();
+    for (message, kind) in [(scene.question.clone(), "question"), (result, "result")] {
+        let reads = scene.logged("message.read");
+        let target = format!("/api/inbox/{}", message.id);
+        project_is(&scene, "suspended");
+        let (status, said) = api(&scene, Method::GET, &target, &scene.chief, "").await;
+        assert_eq!(
+            (status, &said["error"]),
+            (409, &json!("waits")),
+            "{kind}: {said}"
+        );
+        assert_eq!(
+            said["message"]
+                .as_str()
+                .map(|text| text.contains(&message.body)),
+            Some(false),
+            "{kind}"
+        );
+        assert_eq!(scene.message(message.id).state, "queued", "{kind}");
+        assert_eq!(
+            scene.logged("message.read"),
+            reads,
+            "{kind}: a refused read receives nothing"
+        );
+
+        project_is(&scene, "open");
+        let (status, said) = api(&scene, Method::GET, &target, &scene.chief, "").await;
+        assert_eq!(
+            (status, &said["message"]["body"]),
+            (200, &json!(message.body)),
+            "{kind}"
+        );
+        let (status, _) = read_from(&scene, &scene.chief, &said_read(&[message.id], "inbox")).await;
+        assert_eq!(status, 200, "{kind}");
+        let read = scene.message(message.id);
+        assert_eq!(
+            (read.state.as_str(), &read.receipt),
+            ("read", &json!({ "read": "inbox" })),
+            "{kind}"
+        );
+    }
+    assert_eq!(scene.logged("message.read"), 2);
 }
 
 #[tokio::test]

@@ -15,8 +15,9 @@
 //! started ends nothing there, for nothing has started.
 
 use super::interrupt::Interrupt;
-use super::machine::{Machine, Ready};
+use super::machine::Machine;
 use super::options::Options;
+use super::queue::{self, Queues, Waited, Who};
 use super::script::{
     command_line, encode_script, remote_script, run_id, run_script, stop_script, upload_name,
     Refusal, Script, BUILD_STEPS, TREE_MARK,
@@ -32,6 +33,9 @@ use crate::process::{self, Invocation};
 pub enum Outcome {
     /// The command ended there with this status, which is the run's own.
     Exited(i32),
+    /// The machine may not take a run now, and why (the person is told): nothing was sent,
+    /// and the run answers [`REFUSED`], as the machine's own lock refuses one.
+    Refused(String),
     /// This program was stopped, and the run was ended there as well.
     Stopped,
 }
@@ -63,6 +67,7 @@ impl Plan {
             command: &command,
             env: &options.env,
             node: &machine.node,
+            limits: machine.limits,
         };
         let upload = upload_name(&options.dir, id);
         Ok(Self {
@@ -83,7 +88,7 @@ pub(super) fn powershell(script: &str) -> Result<String, Refusal> {
 }
 
 /// The status of a run the machine could not take now, as its own lock refuses one.
-const REFUSED: i32 = 75;
+pub const REFUSED: i32 = 75;
 
 /// Whether the script a run makes can be sent: the refusal that says why not, before a run
 /// starts and before a machine is chosen. What goes on the line, the bootstrap and the stop, is
@@ -108,21 +113,37 @@ pub fn run(
 ) -> Result<Outcome, Error> {
     let id = run_id();
     let plan = Plan::new(machine, options, &id)?;
-    // A machine the runner shares is asked first, and a run it may not take now is not sent.
-    match machine
-        .ready(context, &options.dir)
-        .map_err(Error::Unready)?
-    {
-        Ready::Refused(why) => {
+    // The machine is waited for in its queue, every project's runs behind each other on this Mac, and
+    // asked (`Machine::ready`) when it is this run's turn: a run it may not take now is not sent.
+    // A Ctrl-C ends the probes with this program (they are in the terminal's group), so a stop is
+    // looked for before what they came to is read: a probe it ended is no zeelin that did not
+    // answer, no disk not said, and no refusal.
+    let queues = Queues::of(&context.env);
+    let who = Who::of(&context.root, &options.command);
+    let mut pace = queue::Real::new(interrupt, &context.env);
+    let waited = queue::wait(
+        queues.as_ref(),
+        &machine.name,
+        &who,
+        options.wait,
+        &mut || machine.ready(context, &options.dir),
+        &mut pace,
+        &mut |line| writeln!(console.err, "windows: {line}"),
+    )?;
+    // The ticket is the run's place, kept until the run is over.
+    let _turn = match waited {
+        Waited::Stopped => return Ok(Outcome::Stopped),
+        Waited::Refused(why) => {
             writeln!(console.out, "{why}").map_err(Error::Output)?;
-            return Ok(Outcome::Exited(REFUSED));
+            return Ok(Outcome::Refused(why));
         }
-        Ready::Go(said) => {
+        Waited::Go(said, turn) => {
             for line in said {
                 writeln!(console.err, "windows: {line}").map_err(Error::Output)?;
             }
+            turn
         }
-    }
+    };
     let scratch = tempfile::tempdir().map_err(Error::Scratch)?;
 
     // A stop is looked for after each step, before what it says is: a Ctrl-C ends

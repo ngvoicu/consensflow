@@ -109,11 +109,6 @@ runs = ["harness-launch-claude-stops"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''
-                        at_prompt && (settled || empty || left) || by_press,
-                        waiting,
-                        by_press,'''
-replace = '''
-                        at_prompt && (settled || empty || left) || by_press,
-                        waiting,
-                        false,'''
+find = 'observed(at_rest, over, waiting, by_press, at_prompt)'
+replace = 'observed(at_rest, over, waiting, false, at_prompt)'
+

@@ -10,7 +10,7 @@ mod common;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -30,7 +30,7 @@ fn tree(files: &[(&str, &str)]) -> tempfile::TempDir {
         fs::write(file, text).unwrap();
     }
     for words in [&["init", "-q"][..], &["add", "-A"]] {
-        let ran = Command::new("git")
+        let ran = common::command("git")
             .args(words)
             .current_dir(dir.path())
             .env_remove("GIT_DIR")
@@ -60,7 +60,7 @@ fn path_with(fakes: &Path) -> PathBuf {
 /// little-endian), its name, `file`, and its bytes. It is how the documentation of
 /// `windows` says a tree is told from another, written out here once more on purpose.
 fn tree_line(tree: &tempfile::TempDir) -> String {
-    let listing = Command::new("git")
+    let listing = common::command("git")
         .args(["ls-files", "-co", "--exclude-standard", "-z"])
         .current_dir(tree.path())
         .env_remove("GIT_DIR")
@@ -95,7 +95,7 @@ fn tree_line(tree: &tempfile::TempDir) -> String {
 /// The run script (`.windows-run.ps1`) in the tarball that the fake `scp` kept as number
 /// `n` (counting from 1), the file a run is asked for, in `keep`.
 fn run_script_kept(keep: &Path, n: usize) -> String {
-    let ran = Command::new("tar")
+    let ran = common::command("tar")
         .args(["-xzOf", &format!("{n}.tgz"), ".windows-run.ps1"])
         .current_dir(keep)
         .output()
@@ -128,7 +128,11 @@ fn id_in_script(script: &str) -> String {
 fn on(tree: &tempfile::TempDir, fakes: &Path, vars: &[(&str, &str)], args: &[&str]) -> Output {
     let manifest = tree.path().join("tools").join("xtask");
     let manifest = manifest.to_str().unwrap();
-    let mut all = vec![("CARGO_MANIFEST_DIR", manifest)];
+    // The machine's state, which a run asks before it sends (a free disk, nothing on the copy).
+    let mut all = vec![
+        ("CARGO_MANIFEST_DIR", manifest),
+        ("FAKE_CHILD_PROBE", "free 614"),
+    ];
     all.extend_from_slice(vars);
     xtask(tree.path(), &path_with(fakes), &all, args)
 }
@@ -169,12 +173,12 @@ fn the_commands_refuse_the_words_they_do_not_take_and_start_nothing() {
         (
             vec!["windows"],
             "xtask: windows takes the command to run there after a --: cargo xtask windows \
-             [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--env NAME=VALUE] -- <command>\n",
+             [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--wait MINUTES] [--env NAME=VALUE] -- <command>\n",
         ),
         (
             vec!["windows", "--host", "zeewin"],
             "xtask: windows takes the command to run there after a --: cargo xtask windows \
-             [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--env NAME=VALUE] -- <command>\n",
+             [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--wait MINUTES] [--env NAME=VALUE] -- <command>\n",
         ),
         (
             vec!["windows", "--host", "zeewin", "--nope", "--", "x"],
@@ -192,7 +196,7 @@ fn the_commands_refuse_the_words_they_do_not_take_and_start_nothing() {
             vec!["windows-matrix", "--host", "zeewin"],
             "xtask: windows-matrix takes a --scenario <name> and a --pair <chief>:<staff> (each \
              as many times as there are): cargo xtask windows-matrix [--machine zeewin2|zeewin | \
-             --host <ssh host>] [--env NAME=VALUE] --scenario <name>... --pair <chief>:<staff>...\n",
+             --host <ssh host>] [--wait MINUTES] [--env NAME=VALUE] --scenario <name>... --pair <chief>:<staff>...\n",
         ),
         (
             vec![
@@ -356,6 +360,53 @@ fn a_run_starts_no_ssh_when_the_tree_could_not_be_sent() {
     assert_eq!(out(&ran).matches("cwd: ").count(), 1, "{}", out(&ran));
 }
 
+/// A run on the laptop while poker-lab's job holds it, as a person starts it (`--machine zeewin2`,
+/// or `--host zeewin2`, which once skipped every guard, T-610): zeelin is asked, says `held`, and the
+/// run ends with 75 having started nothing else. The ssh and scp are scripts that write down
+/// what they are given.
+#[cfg(unix)]
+#[test]
+fn a_run_on_zeewin2_while_poker_lab_holds_it_ends_with_75_having_sent_nothing_by_either_name() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for on_zeewin2 in [["--machine", "zeewin2"], ["--host", "zeewin2"]] {
+        let fakes = tempfile::tempdir().unwrap();
+        let log = fakes.path().join("log");
+        for (name, answer) in [
+            ("ssh", "case \"$*\" in *zeelin*) echo held ;; esac"),
+            ("scp", ""),
+        ] {
+            let program = fakes.path().join(name);
+            fs::write(
+                &program,
+                format!(
+                    "#!/bin/sh\nprintf '{name} %s\\n' \"$*\" >> '{}'\n{answer}\n",
+                    log.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let tree = tree(&[("keep.txt", "kept")]);
+        // Told not to wait, as a person who wants the answer at once is: a run that waits for
+        // its turn (an hour, unless told) is the unit tests' (`windows::queue`, `windows::run`).
+        let mut words = vec!["windows", "--wait", "0"];
+        words.extend(on_zeewin2);
+        words.extend(["--", "cargo", "test"]);
+        let ran = on(&tree, fakes.path(), &[], &words);
+        assert_eq!(ran.status.code(), Some(75), "{on_zeewin2:?}: {}", err(&ran));
+        assert_eq!(
+            out(&ran),
+            "zeewin2 is busy: poker-lab's job holds it (~/.compile-lock/owner on zeelin), and no run goes while it does.\n",
+            "{on_zeewin2:?}"
+        );
+        let asked = fs::read_to_string(&log).unwrap();
+        assert_eq!(asked.lines().count(), 1, "{on_zeewin2:?}: {asked}");
+        assert!(asked.starts_with("ssh -o ConnectTimeout=5 "), "{asked}");
+        assert!(asked.contains(" zeelin "), "{asked}");
+    }
+}
+
 #[test]
 fn a_run_asks_for_the_folder_the_build_and_the_variables_it_was_given() {
     let fakes = programs(&["scp", "ssh"]);
@@ -484,6 +535,15 @@ fn script(folder: &Path, name: &str, body: &str) {
     use std::os::unix::fs::PermissionsExt;
 
     let path = folder.join(name);
+    // An ssh answers the machine's state first (the runner asks it of every machine before it
+    // sends a run, T-777), unless the case does: the laptop's zeelin is another question.
+    let body = if name == "ssh" && !body.contains("BatchMode") {
+        format!(
+            "case \"$*\" in *zeelin*) ;; *BatchMode=yes*) echo \"free 614\"; exit 0 ;; esac\n{body}"
+        )
+    } else {
+        body.to_owned()
+    };
     fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
 }
@@ -597,13 +657,21 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
     script(
         fakes.path(),
         "ssh",
-        r#"printf '%s\t%s\n' "$$" "$2" >> "$CF_LOG"; if [ -e "$CF_FIRST" ]; then exit 0; fi; : > "$CF_FIRST"; exec sleep 120"#,
+        &format!(
+            r#"case "$*" in *BatchMode=yes*) echo "free 614"; exit 0 ;; esac; printf '%s\t%s\n' "$$" "$2" >> "$CF_LOG"; if [ -e "$CF_FIRST" ]; then exit 0; fi; : > "$CF_FIRST"; while {}; do sleep 0.2; done"#,
+            // Its parent is the `xtask` the case starts, which waits for it: its owner is the test.
+            cf_base::fixture::owner_there(std::process::id())
+        ),
     );
     let tree = tree(&[("keep.txt", "kept")]);
     let manifest = tree.path().join("tools").join("xtask");
-    let mut xtask = Command::new(env!("CARGO_BIN_EXE_xtask"))
+    // Its own queue: a run that joined the one every runner on the machine shares would wait
+    // behind the real runs there (a plants run saw this case take two minutes, T-701).
+    let queues = tempfile::tempdir().unwrap();
+    let mut xtask = common::command(env!("CARGO_BIN_EXE_xtask"))
         .current_dir(tree.path())
         .env("PATH", path_with(fakes.path()))
+        .env("CF_WINDOWS_QUEUES", queues.path())
         .env("CARGO_MANIFEST_DIR", manifest)
         .env("CF_LOG", &log)
         .env("CF_FIRST", &first)
@@ -662,7 +730,12 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
              $running = Join-Path $dir '.windows-run.pid'\n\
              $owner = Join-Path $dir '.windows-run.id'\n\
              $of = @(Get-Content $owner -ErrorAction SilentlyContinue)\n\
-             if ($of[0] -eq '{id}') {{ taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null; Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) {{ Remove-Item -LiteralPath $running -Force }} }}\n\
+             if ($of[0] -eq '{id}') {{\n\
+             \x20 $run = try {{ Get-Process -Id $of[1] -ErrorAction Stop | Where-Object {{ ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime }} }} catch {{}}\n\
+             \x20 $ends = @('/PID', $of[1], '/F'); if ($of[2] -ne 'job') {{ $ends += '/T' }}\n\
+             \x20 if ($run) {{ taskkill @ends 2>&1 | Out-Null }}\n\
+             \x20 Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) {{ Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }}\n\
+             }}\n\
              Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.{id}.tgz') -Force -ErrorAction SilentlyContinue\n\
              exit 0\n"
         )
@@ -670,7 +743,8 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
 }
 
 /// The Windows machine the live case below runs on: `CF_WINDOWS_MACHINE` (zeewin2 or zeewin,
-/// as `--machine` names them), else the ssh host `CF_WINDOWS_HOST`, else zeewin.
+/// as `--machine` names them), else the ssh host `CF_WINDOWS_HOST` (a name of a machine there
+/// is that machine, as `--host` reads it), else zeewin.
 #[cfg(unix)]
 fn live_machine() -> Option<String> {
     std::env::var("CF_WINDOWS_MACHINE").ok()
@@ -706,7 +780,7 @@ fn live_tree(marker: &str) -> (tempfile::TempDir, String) {
         ),
     ]);
     let git = |words: &[&str]| {
-        let ran = Command::new("git")
+        let ran = common::command("git")
             .args(words)
             .current_dir(dir.path())
             .env_remove("GIT_DIR")
@@ -747,7 +821,7 @@ fn live_start(tree: &tempfile::TempDir, folder: &str, command: &[&str]) -> std::
         .collect();
     let program = std::env::var("CF_WINDOWS_XTASK")
         .unwrap_or_else(|_| env!("CARGO_BIN_EXE_xtask").to_owned());
-    let mut start = Command::new(program);
+    let mut start = common::command(program);
     start.env_clear();
     for (name, value) in own.iter() {
         let name = name.to_string_lossy();
@@ -788,7 +862,7 @@ fn live_start(tree: &tempfile::TempDir, folder: &str, command: &[&str]) -> std::
 /// `script` run on the machine, as the shell of its ssh server runs it (PowerShell).
 #[cfg(unix)]
 fn on_the_machine(script: &str) -> String {
-    let ran = Command::new("ssh")
+    let ran = common::command("ssh")
         .arg(live_host())
         .arg(script)
         .output()
@@ -806,7 +880,7 @@ struct Folder(String);
 impl Drop for Folder {
     fn drop(&mut self) {
         let folder = &self.0;
-        let _ = Command::new("ssh")
+        let _ = common::command("ssh")
             .arg(live_host())
             .arg(format!(
                 "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $env:USERPROFILE '{folder}'), (Join-Path $env:USERPROFILE '{folder}.*tgz')"

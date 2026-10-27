@@ -26,6 +26,30 @@ scenarios (`src/scenarios/`), the plan (`src/plan.rs`), the measure
 product's crates), the table (`src/results.rs`, `src/summarize.rs`) and
 `watch`. `cargo run -p cf-evals -- help` says what each command takes.
 
+**Claude Code never runs on the owner's `~/.claude`** (T-302 for the live suites, T-378 for
+these; decided 2026-10-22). A run with a real Claude Code runs its windows on a throwaway
+`CLAUDE_CONFIG_DIR` that holds a copy of the Keychain login (`claudeAiOauth` only), made by
+`cf_e2e::live::login::Login` (`cf-evals` depends on `cf-e2e`, so it is the kit's) and removed
+when the run is over, and is held to leaving `~/.claude/settings.json` as it was and
+`~/.claude.json`, `history.jsonl` and `projects` without anything of the evals' workspace:
+a run that did not fails, in its report, which it still keeps. The login must last the run:
+`--timeout-min` times `--repeat` (or `--hours`) and half an hour more, else the run is
+refused before it spends anything, saying how long it needs (Claude Code refreshes a token
+when five minutes of it are left, and a refresh in the copy leaves the owner's Keychain item
+with a refresh token that no longer works. Using Claude Code now does not refresh a token that
+has hours left: run again after the owner's own Claude Code has refreshed it, or make the run
+shorter (`--hours`, `--timeout-min`, `--repeat`); nothing refreshes it by hand, and nothing
+writes the Keychain). A token that ends in a run all the same is refreshed by Claude Code in the
+copy; the run goes on, and its report says the owner's login may be stale (and a Keychain item
+`Claude Code-credentials-<hash>` it left is named for the owner to delete; the kit never deletes
+it). The run says where its Claude records are (`claude config: …`); when the run's home is kept
+(the report's `home`, the rig's `CONSENSFLOW_HOME`, is `<root>/consensflow`) its conversations are
+copied beside it, into `<root>/home/.claude/projects` and `sessions` (never the login, nor the
+`.key` files of a session's socket); `cargo xtask watch --tokens --claude-config DIR` reads them in
+either, the live throwaway or the kept copy. The
+dry runs, on the stand-in's models, start no real Claude Code and have no such folder. A test
+holds `cf-evals` to never setting or clearing `CLAUDE_CONFIG_DIR` (`tests/claude_config.rs`).
+
 A run against the stand-in agent, which spends nothing, holds that a run gets to its
 end and says and keeps what it always does (the daemon it ran on, the verdict, a
 report), on a home of its own: `cargo test -p cf-evals --test dry_run -- --ignored
@@ -58,7 +82,7 @@ workers, an advisor and a reviewer on its cheap model (`crates/cf-evals/src/plan
 standard tier, so the daemon picks among them by its own rule and any of them
 may get any task. The scenario's fixture is copied into a fixed, trusted
 workspace under the Candidate's home (what Claude Code remembered about that
-folder from the last run is cleared first; a scenario with a change of the owner's
+folder from the last play of the run is cleared first, in the run's own config folder; a scenario with a change of the owner's
 not committed has the workspace made a git repository of the fixture, committed,
 and the change made after, a setup that takes nothing of the person's git: no
 global or system configuration, none the environment passes

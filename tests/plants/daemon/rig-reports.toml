@@ -50,11 +50,11 @@ runs = ["reports-closed"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
 find = """
-        if self.closed || failure_expected {
+        if self.closed || failure_expected || self.dropped_on_purpose {
             return DropSays::Nothing;
         }"""
 replace = """
-        if self.closed || failure_expected {
+        if self.closed || failure_expected || self.dropped_on_purpose {
             return DropSays::Now;
         }"""
 
@@ -327,7 +327,7 @@ find = '''
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: live-rig-reports-${{ matrix.os }}
+          name: live-rig-reports-${{ matrix.os }}-${{ strategy.job-index }}
           path: app/src-tauri/target/live-reports/consensflow-integration-*-left.txt
           if-no-files-found: ignore
           retention-days: 7
@@ -826,11 +826,26 @@ runs = ["reports-closes"]
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_folder_trust.rs"
 find = """
-        folders.push(path.to_string_lossy().into_owned());
-    }
-    rig.close()?;
-    Ok(checks)"""
+    // The rig is closed, not dropped: what the run did in the owner's setup fails it.
+    rig.close_within(CLOSES)?;
+    Ok(checks)
+}
+
+/// How a window of [`ends`] is ended."""
 replace = """
-        folders.push(path.to_string_lossy().into_owned());
-    }
-    Ok(checks)"""
+    Ok(checks)
+}
+
+/// How a window of [`ends`] is ended."""
+
+# T-558: the daemons' suites run in three shards a platform, and the action refuses a second
+# artifact of one name in a run: each shard's uploads are named for it.
+[[plant]]
+name = "rig reports: CI names the reports of every shard of a platform alike"
+meant = "ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file"
+runs = ["reports-ci"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "name: rig-reports-${{ matrix.os }}-${{ strategy.job-index }}"
+replace = "name: rig-reports-${{ matrix.os }}"

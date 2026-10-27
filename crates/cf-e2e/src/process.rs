@@ -44,9 +44,9 @@ use std::time::{Duration, Instant};
 use crate::{Error, Result};
 
 #[cfg(unix)]
-pub use pid::group_of;
-#[cfg(unix)]
 pub use pid::stall;
+#[cfg(unix)]
+pub use pid::{age, described, group_of};
 pub use pid::{alive_among, end_all, is_alive, signal, started, Signal};
 pub use spawned::{Sink, Spawned};
 
@@ -85,7 +85,7 @@ const PROGRAM_LOOKUP_ON_WINDOWS: [&str; 2] = ["COMSPEC", "PATHEXT"];
 /// The environment variable `name` of this process, or none when it is not set
 /// (or is not text). A stand-in program reads what the window it stands in for
 /// gave it, a suite its size, and a run the programs built for it before it
-/// (`cf::BUILT`), here and nowhere else.
+/// (`cf::BUILT`) or the id nextest gave it (`cf::RUN`), here and nowhere else.
 pub fn own_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
@@ -266,6 +266,9 @@ impl Run {
     /// The program's command, with everything but its streams.
     fn command(&self) -> Command {
         let mut command = Command::new(&self.program);
+        // Daemons, hosts and stand-ins run for a whole case while other cases open sockets and
+        // pipes: one left another's would hold it to its end.
+        cf_process::hold_only_the_streams(&mut command);
         if !self.inherit {
             command
                 .env_clear()
@@ -448,17 +451,24 @@ fn drain(pipe: Option<impl Read + Send + 'static>) -> Drain {
     Drain { read, thread }
 }
 
+/// Waits for `thread` to end, until `by` at most: whether it did. One that ended
+/// is joined; one that did not is left to end of itself.
+fn ended_by(thread: JoinHandle<()>, by: Instant) -> bool {
+    while !thread.is_finished() && Instant::now() < by {
+        thread::sleep(POLL);
+    }
+    let ended = thread.is_finished();
+    if ended {
+        let _ = thread.join();
+    }
+    ended
+}
+
 /// What a [`drain`] read, as text, waited for until `by` at most; and whether its
 /// pipe was still held open then (by a process the program left), so that what came
 /// after is not read. The thread is left to end when the pipe does.
 fn collected(drain: Drain, by: Instant) -> (String, bool) {
-    while !drain.thread.is_finished() && Instant::now() < by {
-        thread::sleep(POLL);
-    }
-    let held = !drain.thread.is_finished();
-    if !held {
-        let _ = drain.thread.join();
-    }
+    let held = !ended_by(drain.thread, by);
     let bytes = drain
         .read
         .lock()

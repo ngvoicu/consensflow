@@ -547,17 +547,21 @@ fn words_told_to_the_window_of_a_task_whose_member_the_human_removes_are_said_to
 fn words_still_on_their_way_when_the_harness_fails_the_task_wait_for_its_reopen() {
     let context = Context::new();
     let (tiers, session, told) = told_on_its_way(&context);
-    context.adapter.with("zeus", |agent| agent.failed = true);
+    context.adapter.with("zeus", |agent| {
+        agent.failed = true;
+        agent.failure = Some("The model is busy, try another.".to_owned());
+    });
     context.adapter.answer("zeus", "Parser, half done");
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "failed");
     // Kept for the reopen, as words a failed delivery leaves are (the chief's
-    // decision on Calliope's P3-4 of T-446); one note says why, which words wait
-    // and how to reopen it (her P3 of T-437: the words came in a note of their own).
+    // decision on Calliope's P3-4 of T-446); one note says why, in its harness's
+    // words (failure reasons, T-29), which words wait and how to reopen it (her
+    // P3 of T-437: the words came in a note of their own).
     assert_eq!(context.message(told).state, "queued");
     assert_eq!(
         tiers.notes("chief"),
-        [format!("T-1 failed: @{session}'s harness reported a failure; the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\"")]
+        [format!("T-1 failed: @{session}'s harness reported a failure; it said: \"The model is busy, try another.\"; the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\"")]
     );
 }
 
@@ -604,5 +608,148 @@ fn words_that_never_reach_the_window_are_told_to_whoever_told_them_as_to_the_req
         notes(&context, human).contains(&said),
         "{:?}",
         notes(&context, human)
+    );
+}
+
+/// Words told before the window opens, riding in its brief, when that window never
+/// comes up: the brief fails and T-1 with it, as a brief that never reaches its window
+/// fails its task, and the words wait under the failed task for the reopen, which
+/// carries them. Its requester is told which, in the note of the failure (T-414 P3-4:
+/// the note said nothing of them, where a cancel says which words went with it).
+#[test]
+fn words_told_before_a_window_that_never_comes_up_are_said_to_wait_for_the_reopen() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    *context.adapter.started.borrow_mut() = Some(std::rc::Rc::new(|| {
+        Err("Devin never said which session it opened".to_owned())
+    }));
+    context.give(project.id, "zeus", "Parser");
+    let told = tell(&context, project.id, 1, "Use the v2 grammar");
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    assert_eq!(context.task(project.id, 1).task.state, "failed");
+    assert_eq!(context.message(told).state, "queued", "kept for the reopen");
+    let failed: Vec<String> = notes(&context, context.id(project.id, "chief"))
+        .into_iter()
+        .filter(|said| said.starts_with("T-1 failed: "))
+        .collect();
+    assert_eq!(
+        failed,
+        [format!(
+            "T-1 failed: the window could not take its first message: Devin never said which session it opened; the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\""
+        )]
+    );
+}
+
+/// The same as the human's task whose chief's words never reach its window, with more
+/// words told after them, the chief's and the human's: the task fails with the first, and
+/// the rest wait under it for the reopen. Each hears which, as the ledger's give-up says
+/// them (one fate, the alpha.3 merge of wt/removal-tellers and wt/give-up-paths): the
+/// requester, the human, of all of them; the chief, who told the words that failed, of
+/// its own alone (it heard nothing of them).
+#[test]
+fn the_teller_of_words_that_never_reach_the_window_hears_which_of_its_own_wait_for_the_reopen() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.create_task(
+        project.id,
+        NewTask {
+            from: "human".to_owned(),
+            to: Some("zeus".to_owned()),
+            body: "Parser".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    context.pass().unwrap();
+    let told = tell(&context, project.id, 1, "Use the v2 grammar");
+    let more = tell(&context, project.id, 1, "And keep the old one");
+    let human_told = context
+        .ledger
+        .borrow_mut()
+        .tell_queued(project.id, 1, "human", "Name it parse_v2")
+        .unwrap()
+        .id;
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    context.adapter.answer("zeus", "Parser done");
+    context.adapter.with("zeus", |agent| agent.admit = false);
+    for _ in 0..5 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(told).state, "failed");
+    assert_eq!(context.task(project.id, 1).task.state, "failed");
+    for waiting in [more, human_told] {
+        assert_eq!(
+            context.message(waiting).state,
+            "queued",
+            "kept for the reopen"
+        );
+    }
+    let failed = |waiting: &str| {
+        format!(
+            "T-1 failed: what @chief told its window, m-{told}, did not reach it (refused by the test); the words told its window wait for the reopen: {waiting}. Reopen it with: cf task reopen T-1 \"…\""
+        )
+    };
+    let chief = context.id(project.id, "chief");
+    assert!(
+        notes(&context, chief).contains(&failed(&format!("m-{more}"))),
+        "{:?}",
+        notes(&context, chief)
+    );
+    let human = context.id(project.id, "human");
+    assert!(
+        notes(&context, human).contains(&failed(&format!("m-{more}, m-{human_told}"))),
+        "{:?}",
+        notes(&context, human)
+    );
+}
+
+/// The chief's task, its words never reaching the window, and the human's told after
+/// them, which stay queued: the human, who is not its requester, hears in its one note
+/// of what did not reach the window which of its own words wait for the reopen, in the
+/// ledger's words (Calliope's P3-1 of T-510: the note named only what failed, where the
+/// ledger's give-up tells each teller of its own).
+#[test]
+fn the_human_who_told_words_that_wait_hears_so_in_its_note_of_what_did_not_reach_the_window() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open_body("Parser");
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let told = tell(&context, tiers.project.id, 1, "Use the v2 grammar");
+    let human_told = context
+        .ledger
+        .borrow_mut()
+        .tell_queued(tiers.project.id, 1, "human", "Name it parse_v2")
+        .unwrap()
+        .id;
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    context.adapter.answer("zeus", "Parser done");
+    context.adapter.with("zeus", |agent| agent.admit = false);
+    for _ in 0..5 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(told).state, "failed");
+    assert_eq!(tiers.task(1).task.state, "failed");
+    assert_eq!(
+        context.message(human_told).state,
+        "queued",
+        "kept for the reopen"
+    );
+    let human = context.id(tiers.project.id, "human");
+    let said: Vec<String> = notes(&context, human)
+        .into_iter()
+        .filter(|note| note.starts_with(&format!("m-{told}, ")))
+        .collect();
+    assert_eq!(
+        said,
+        [format!(
+            "m-{told}, a note from @chief on T-1, did not reach @{session}: refused by the test; the words told its window wait for the reopen: m-{human_told}."
+        )],
+        "one note, naming both"
     );
 }

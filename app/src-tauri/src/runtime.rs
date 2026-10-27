@@ -200,7 +200,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::path::Path;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     use std::time::Instant;
 
     use portable_pty::PtySize;
@@ -385,7 +385,7 @@ mod tests {
                 &[
                     "/bin/sh".to_string(),
                     "-c".to_string(),
-                    "trap '' TERM HUP; printf ready; while :; do sleep 1; done".to_string(),
+                    cf_base::fixture::deaf("TERM HUP", "printf ready"),
                 ],
                 &HashMap::new(),
                 PtySize {
@@ -514,7 +514,7 @@ mod tests {
 
         // Stands in for `cf ui --json`: the handshake line, one launch request,
         // then a process that holds both pipes open until something kills it.
-        let mut daemon = Command::new("/bin/sh")
+        let mut daemon = crate::testing::command("/bin/sh")
             .arg("-c")
             .arg(concat!(
                 r#"printf '%s\n' '{"url":"http://localhost:1/","token":"test"}'; "#,
@@ -577,7 +577,7 @@ mod tests {
         let _ = std::fs::remove_file(&mark);
         let runtime_for = |script: String| {
             use std::io::{BufRead, BufReader};
-            let mut daemon = Command::new("/bin/sh")
+            let mut daemon = crate::testing::command("/bin/sh")
                 .arg("-c")
                 .arg(script)
                 .stdin(Stdio::piped())
@@ -677,7 +677,7 @@ mod tests {
         // Given a moment to be ended, as it would have been with the shell.
         thread::sleep(Duration::from_millis(200));
         let left = process_exists(agent);
-        let _ = Command::new("/bin/kill")
+        let _ = crate::testing::command("/bin/kill")
             .args(["-9", &agent.to_string()])
             .status();
         assert_eq!(ended.expect("the lookup ended with the quit"), None);

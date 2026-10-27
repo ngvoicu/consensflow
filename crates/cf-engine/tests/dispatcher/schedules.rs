@@ -7,17 +7,15 @@
 //! The model. A paste given while a turn runs waits in Devin's queue and begins as a
 //! turn of its own up to [`Q_MS`] after that turn ends; one given at rest begins at
 //! once; one the model drops is never run nor recorded. A turn waits for the one before
-//! it, the human's too. The record shows a turn's prompt when the turn ends, up to
-//! [`LAG_MS`] late. The adapter's word comes from Devin's wire log, whose lines carry
-//! no time of their own: a look reads what was written since the last, stamped with its
-//! own time. So the window reads busy while its agent works and for [`PROMPT_GAP_MS`]
-//! after a look first read a turn's prompt, and a silent turn reads at rest after that;
-//! and `held` is the wire log's rule: a paste given while a prompt was asked, or ahead of
-//! a prompt read before any turn ended since, or put to the agent in its own, is held
-//! while that prompt is asked; and `took`, that a prompt the paste's own words begin put
-//! it to the agent. The adapter is asked whether it holds the paste as it goes in, and a
-//! turn the human begins as a paste goes in, after the readiness read the wire (a moment
-//! the adapter's second read leaves), is known only when a look reads its prompt.
+//! it, the human's too. The record shows a turn's prompt as the turn begins, up to
+//! [`LAG_MS`] late. The adapter's word comes from Devin's store and record, as Devin
+//! 3000.11.92 writes them (T-102): the window reads busy while its agent works, and a
+//! silent turn for [`TAKEN_IN_MS`] from its beginning (a message of the user's its agent
+//! has not answered), at rest after that; `took` is the paste's history row, which the
+//! store has from the paste's Enter, a paste the model drops excepted; and `held` is the
+//! contract's own false, as Devin's adapter answers it: `took` reaches the engine first.
+//! A turn the human begins as a paste goes in, after the readiness looked, is known only
+//! when a look reads it.
 //!
 //! The schedules. Each seed makes looks in stretches of the daemon's second and of slow
 //! passes of 5 to 30 s, over 20 to 80 min; the human's turns of a second to 20 min and
@@ -29,7 +27,7 @@
 //! alignment of the hold's end with the looks after the hand-over, with no sleep or one.
 //!
 //! What holds. Never twice: once a paste the window did not drop is given, nothing more
-//! is pasted. Its record shows it at most [`LAG_MS`] after its turn ends, and the record
+//! is pasted. Its record shows it at most [`LAG_MS`] after its turn begins, and the record
 //! is read before anything goes again, so a later paste is always a second copy Devin
 //! runs: given while the first is queued (within Q of the end of the turn it waits
 //! behind), while it runs, or before its record showed it. Never for good: a paste the
@@ -56,11 +54,11 @@ const MINUTE: i64 = 60 * SECOND;
 const HOUR: i64 = 60 * MINUTE;
 /// The longest Devin takes to begin a paste it queued, once the turn before it ends.
 const Q_MS: i64 = 5 * SECOND;
-/// The latest a record shows a turn's prompt after the turn ends: under the arrival window.
+/// The latest a record shows a turn's prompt after the turn begins: under the arrival window.
 const LAG_MS: i64 = 29_900;
-/// How long after a look first read a prompt Devin's adapter reads its window as in that
-/// turn, its agent silent as it may be (the wire log's `PROMPT_GAP_MS`).
-const PROMPT_GAP_MS: i64 = 30 * SECOND;
+/// How long from a turn's beginning Devin's adapter reads its window as in that turn, its
+/// agent silent as it may be (the adapter's `TAKEN_IN_MS`).
+const TAKEN_IN_MS: i64 = 30 * SECOND;
 /// How soon a paste given at rest begins.
 const AT_ONCE_MS: i64 = 100;
 /// How soon the human's turn begins after the turn it waited for.
@@ -165,8 +163,14 @@ struct Schedule {
     turns: Vec<Planned>,
     handling: Vec<Handling>,
     /// A turn of the human's that begins as the first paste goes in, after the readiness
-    /// read the wire and before the paste did (the paste waits behind it): its end.
+    /// looked and before the paste went in (the paste waits behind it): its end.
     race: Option<i64>,
+    /// The human switches the window to a new conversation (`/new`) at the look after the
+    /// first that found the paste taken in: Devin switches once the turn at work ends, and
+    /// a paste queued behind it is taken in, runs and is answered in the conversation it
+    /// went into (T-107, probed live), whose record, no window showing it, reads at rest
+    /// but while it runs.
+    switch: bool,
 }
 
 /// A turn the window ran, or runs, or will run: the human's, or a paste's.
@@ -191,57 +195,12 @@ struct Paste {
     shown: Option<i64>,
 }
 
-/// What Devin's adapter has read of its wire log (`wire_log::State`), for the message pasted.
-#[derive(Clone, Copy, Debug, Default)]
-struct Wire {
-    expected: bool,
-    sent: bool,
-    into_a_turn: bool,
-    turn_ended: bool,
-    /// When a look first read the prompt asked still.
-    asked: Option<i64>,
-}
-
-impl Wire {
-    /// `WireLog::expect`, at a paste.
-    fn expect(&mut self) {
-        self.expected = true;
-        self.sent = false;
-        self.into_a_turn = self.asked.is_some();
-        self.turn_ended = false;
-    }
-
-    /// A prompt line, read at `at`: the paste's own words, or others.
-    fn prompt(&mut self, pasted: bool, at: i64) {
-        if pasted {
-            self.sent = true;
-        }
-        if self.expected && (pasted || (!self.sent && !self.turn_ended)) {
-            self.into_a_turn = true;
-        }
-        self.asked = Some(at);
-    }
-
-    /// A turn's end.
-    fn end(&mut self) {
-        let asking = self.asked.is_some();
-        self.asked = None;
-        self.into_a_turn = false;
-        self.turn_ended |= asking;
-    }
-
-    fn held(&self) -> bool {
-        self.into_a_turn && self.asked.is_some()
-    }
-}
-
 /// What a look at the window finds, as Devin's adapter reports it.
 #[derive(Clone, Copy, Debug)]
 struct Seen {
     busy: bool,
-    /// The TUI put the paste to its agent (`Window::took`).
+    /// The store has the paste's history row (`Window::took`).
     sent: bool,
-    held: bool,
     shown: bool,
 }
 
@@ -253,9 +212,6 @@ struct Window {
     handling: Vec<Handling>,
     turns: Vec<Turn>,
     pastes: Vec<Paste>,
-    wire: Wire,
-    /// The wire log's lines read: two a turn, its prompt and its end.
-    lines: usize,
     /// The end of the turn that begins as the first paste goes in (`Schedule::race`).
     race: Option<i64>,
 }
@@ -269,8 +225,6 @@ impl Window {
             handling: schedule.handling.clone(),
             turns: Vec::new(),
             pastes: Vec::new(),
-            wire: Wire::default(),
-            lines: 0,
             race: schedule.race,
         }
     }
@@ -296,47 +250,42 @@ impl Window {
         }
     }
 
-    /// A look at `at`: the wire log read as far as it is written.
+    /// A look at `at`: the record and the store as they are.
     fn look(&mut self, at: i64) -> Seen {
         self.begin_turns(at);
-        while let Some(turn) = self.turns.get(self.lines / 2).copied() {
-            let ends = self.lines % 2 == 1;
-            if (if ends { turn.end } else { turn.start }) > at {
-                break;
-            }
-            if ends {
-                self.wire.end();
-            } else {
-                self.wire.prompt(turn.paste.is_some(), at);
-            }
-            self.lines += 1;
-        }
-        let working = self
-            .turns
+        let busy = self.turns.iter().any(|turn| {
+            turn.start <= at && at < turn.end && (!turn.silent || at - turn.start < TAKEN_IN_MS)
+        });
+        let shown = self
+            .pastes
             .iter()
-            .any(|turn| turn.start <= at && at < turn.end && !turn.silent);
-        let prompted = self
-            .wire
-            .asked
-            .is_some_and(|read| at - read < PROMPT_GAP_MS);
+            .any(|paste| paste.shown.is_some_and(|shown| shown <= at));
+        // The store has the last paste's history row from its Enter on, one dropped excepted.
+        let took = self
+            .pastes
+            .last()
+            .is_some_and(|paste| !paste.dropped && paste.at < at);
         Seen {
-            busy: working || prompted,
-            sent: self.wire.sent,
-            held: self.wire.held(),
-            shown: self
-                .pastes
-                .iter()
-                .any(|paste| paste.shown.is_some_and(|shown| shown <= at)),
+            busy,
+            sent: took,
+            shown,
         }
+    }
+
+    /// Whether a paste's own turn runs at `at`: its record, read with no window open,
+    /// reads at work.
+    fn runs_a_paste(&self, at: i64) -> bool {
+        self.turns
+            .iter()
+            .any(|turn| turn.paste.is_some() && turn.start <= at && at < turn.end)
     }
 
     /// The dispatcher pastes at `at`.
     fn paste(&mut self, at: i64) {
         let index = self.pastes.len();
         let handling = self.handling[index.min(self.handling.len() - 1)];
-        self.wire.expect();
-        // The human's turn that began between the readiness and the paste, at rest: the
-        // wire said nothing of it when the paste went in, and the paste waits behind it.
+        // The human's turn that began between the readiness and the paste, at rest: no
+        // look saw it when the paste went in, and the paste waits behind it.
         if let Some(end) = self.race.take() {
             if self.turns.last().is_none_or(|turn| turn.end <= at) {
                 self.turns.push(Turn {
@@ -377,7 +326,7 @@ impl Window {
             dropped: handling.dropped,
             behind,
             turn,
-            shown: turn.map(|_| end + handling.lag),
+            shown: turn.map(|_| start + handling.lag),
         });
     }
 }
@@ -397,6 +346,8 @@ struct Outcome {
     turns: Vec<Turn>,
     pastes: Vec<Paste>,
     state: String,
+    /// When the human switched the window to a new conversation, where it did.
+    switched: Option<i64>,
 }
 
 /// The dispatcher looks at the window at each of `schedule`'s looks, a note from zeus to
@@ -411,14 +362,10 @@ fn run(schedule: &Schedule) -> Outcome {
     let adapter = Rc::downgrade(&context.adapter);
     *context.adapter.deliver.borrow_mut() = Some(Rc::new(move |taking| {
         pasting.borrow_mut().paste(at.get());
-        // The adapter's word on the paste as it goes in: held where it went into a
-        // turn, and not yet put to the agent.
-        let held = pasting.borrow().wire.held();
+        // The adapter's word on the paste as it goes in: its history row a moment behind,
+        // not taken yet.
         if let Some(adapter) = adapter.upgrade() {
-            adapter.with("chief", |agent| {
-                agent.held = held;
-                agent.took = false;
-            });
+            adapter.with("chief", |agent| agent.took = false);
         }
         Box::pin(async move { Ok(taking()) })
     }));
@@ -430,20 +377,50 @@ fn run(schedule: &Schedule) -> Outcome {
     let (mut clock, mut recorded) = (0, false);
     let mut rows = Vec::new();
     let mut state = note.state;
+    // The conversation the window was switched away from, and whether a look found the
+    // paste put to the agent.
+    let (mut left, mut taken, mut switched) = (None, false, None);
     for &look in &schedule.looks {
         context.advance(look - clock);
         clock = look;
         now.set(look);
+        if schedule.switch && taken && left.is_none() {
+            left = Some(context.adapter.with("chief", |agent| agent.native.clone()));
+            context.adapter.switch_to("chief", "native-new");
+            switched = Some(look);
+        }
         let seen = window.borrow_mut().look(look);
+        let running = window.borrow().runs_a_paste(look);
         context.adapter.with("chief", |agent| {
             agent.settled = !seen.busy;
             agent.took = seen.sent;
-            agent.held = seen.held;
-            if seen.shown && !recorded {
-                agent.items.push(item.clone());
+            match &left {
+                // The paste runs in the conversation it went into, and its record shows it.
+                Some(left) => {
+                    if seen.shown && !recorded {
+                        agent
+                            .records
+                            .entry(left.clone())
+                            .or_default()
+                            .push(item.clone());
+                    }
+                    agent.records_settled.insert(left.clone(), !running);
+                }
+                None => {
+                    if seen.shown && !recorded {
+                        agent.items.push(item.clone());
+                    }
+                }
             }
         });
         recorded |= seen.shown;
+        // Taken in: its own turn has begun.
+        taken |= window
+            .borrow()
+            .pastes
+            .last()
+            .and_then(|paste| paste.turn)
+            .is_some_and(|turn| window.borrow().turns[turn].start <= look);
         context.pass().unwrap();
         rows.push(Row { at: look, seen });
         state = context.message(note.id).state;
@@ -464,6 +441,7 @@ fn run(schedule: &Schedule) -> Outcome {
         turns: window.turns.clone(),
         pastes: window.pastes.clone(),
         state,
+        switched,
     }
 }
 
@@ -603,6 +581,7 @@ fn foreseen(looks: &[i64], turns: &[Planned], handling: &[Handling]) -> Option<(
         turns: turns.to_vec(),
         handling: handling.to_vec(),
         race: None,
+        switch: false,
     });
     for (index, &at) in looks.iter().enumerate() {
         if window.look(at).busy {
@@ -718,6 +697,7 @@ fn generated(seed: u64) -> Schedule {
         turns,
         handling,
         race: None,
+        switch: false,
     }
 }
 
@@ -749,8 +729,8 @@ enum Meets {
     Rest,
     /// A silent turn the paste waits behind.
     Queued,
-    /// A turn the human began between the window's readiness and the paste, which the
-    /// wire had not said when the paste went in (`Schedule::race`).
+    /// A turn the human began between the window's readiness and the paste, which no
+    /// look had seen when the paste went in (`Schedule::race`).
     Racing,
 }
 
@@ -759,20 +739,24 @@ enum Meets {
 /// 20 s in the hold; no sleep, or one from the hand-over or from the hold's last look;
 /// and the paste run, with Devin's latest start and a prompt record or its earliest and
 /// the latest record, the turn that holds it ending 0.3 s, 4.9 s or 20 s before the next
-/// look; or dropped, followed by rest, one look a rest, or short turns. A turn begun as
-/// the paste went in that no look sees before it ends is the limit `arrival` says, and
-/// none of the grid's: its sleep is from the hold.
+/// look, and the human's `/new` once the paste is taken or none; or dropped, followed by
+/// rest, one look a rest, or short turns. A turn begun as
+/// the paste went in that no look sees before it ends, a sleep from the hand-over, is the
+/// reviews' (2026-10-18): the look that wakes finds the paste taken (`took`).
 fn grid() -> Vec<Schedule> {
     let mut all = Vec::new();
     for meets in [Meets::Rest, Meets::Queued, Meets::Racing] {
         for every in [SECOND, 20 * SECOND] {
             for sleep in [Sleep::None, Sleep::AtTheHandOver, Sleep::InTheHold] {
-                if meets == Meets::Racing && matches!(sleep, Sleep::AtTheHandOver) {
-                    continue;
-                }
                 for before in [300, 4_900, 20_000] {
                     for handling in [(false, Q_MS, 0), (false, 100, LAG_MS)] {
-                        all.push(cell(meets, every, sleep, before, handling, After::Rests));
+                        let plain = cell(meets, every, sleep, before, handling, After::Rests);
+                        all.push(Schedule {
+                            name: format!("{}, and /new once it is taken", plain.name),
+                            switch: true,
+                            ..plain.clone()
+                        });
+                        all.push(plain);
                     }
                 }
                 // A dropped paste's runs are long: one alignment of the hold's end each.
@@ -921,6 +905,7 @@ fn cell(
         turns,
         handling: vec![first, then, then],
         race,
+        switch: false,
     }
 }
 
@@ -969,12 +954,12 @@ fn twice(outcome: &Outcome) -> Option<Breach> {
     let again = *outcome.pastes.get(first + 1)?;
     let look = outcome.rows.iter().position(|row| row.at == again.at)?;
     let slept = look > 0 && again.at - outcome.rows[look - 1].at > SLEEP_MS;
-    let held_before = outcome.rows[..look]
+    let taken_before = outcome.rows[..look]
         .iter()
-        .any(|row| row.at > landed.at && row.seen.held);
-    let looks = match (slept, held_before) {
-        (true, false) => "a sleep from before any look found the paste held",
-        (true, true) => "a sleep after a look found the paste held",
+        .any(|row| row.at > landed.at && row.seen.sent);
+    let looks = match (slept, taken_before) {
+        (true, false) => "a sleep from before any look found the paste taken",
+        (true, true) => "a sleep after a look found the paste taken",
         (false, _) => "no sleep",
     };
     let turn = outcome.turns[landed.turn?];
@@ -1035,7 +1020,7 @@ fn for_good(outcome: &Outcome) -> Option<Breach> {
             .rows
             .iter()
             .filter(|row| row.at >= from && again.is_none_or(|again| row.at < again))
-            .filter(|row| !row.seen.busy && !row.seen.held)
+            .filter(|row| !row.seen.busy)
             .collect();
         let (mut start, mut last) = (from, from);
         for row in rests {
@@ -1052,7 +1037,7 @@ fn for_good(outcome: &Outcome) -> Option<Breach> {
                 .filter(|seen| seen.at >= start && seen.at <= row.at)
                 .collect();
             // The rest between two looks in a row that found the window at rest.
-            let rest = |row: &Row| !row.seen.busy && !row.seen.held;
+            let rest = |row: &Row| !row.seen.busy;
             let between: i64 = span
                 .windows(2)
                 .filter(|pair| rest(pair[0]) && rest(pair[1]))
@@ -1081,6 +1066,37 @@ fn for_good(outcome: &Outcome) -> Option<Breach> {
         }
     }
     None
+}
+
+/// Never stuck: a message whose paste the record showed before the last look is
+/// confirmed, whatever conversation the window shows by then (the reviews of 2026-10-18:
+/// after a `/new`, the window was read for a paste its harness had queued in the
+/// conversation it left, and the queue waited behind it for good).
+fn stuck(outcome: &Outcome) -> Option<Breach> {
+    let last = outcome.rows.last()?.at;
+    let (index, paste) = outcome
+        .pastes
+        .iter()
+        .enumerate()
+        .find(|(_, paste)| paste.shown.is_some_and(|shown| shown < last))?;
+    if outcome.state == "delivered" {
+        return None;
+    }
+    let switched = if outcome.schedule.switch {
+        "the window switched to another conversation"
+    } else {
+        "the window on its conversation"
+    };
+    Some(Breach {
+        kind: format!("{switched}; the record showed the paste"),
+        what: format!(
+            "the record showed paste {} at {}, and the note was not confirmed by the last look, \
+             at {}",
+            index + 1,
+            clock(paste.shown?, &outcome.pastes),
+            clock(last, &outcome.pastes)
+        ),
+    })
 }
 
 /// `at`, from the hand-over.
@@ -1120,6 +1136,9 @@ fn timeline(outcome: &Outcome) -> String {
         lines.push((turn.start, 0, format!("{name} begins{quiet}")));
         lines.push((turn.end, 0, format!("{name} ends")));
     }
+    if let Some(at) = outcome.switched {
+        lines.push((at, 0, "the human runs /new in the window".to_owned()));
+    }
     for (index, paste) in pastes.iter().enumerate() {
         if let Some(shown) = paste.shown {
             lines.push((shown, 0, format!("the record shows paste {}", index + 1)));
@@ -1129,7 +1148,7 @@ fn timeline(outcome: &Outcome) -> String {
         let mut said = format!(
             "look: {}{}{}",
             if row.seen.busy { "busy" } else { "at rest" },
-            if row.seen.held { ", held" } else { "" },
+            if row.seen.sent { ", taken" } else { "" },
             if row.seen.shown { ", shown" } else { "" }
         );
         for (index, paste) in pastes
@@ -1316,6 +1335,12 @@ fn holds(name: &str, check: fn(&Outcome) -> Option<Breach>, fitting: fn(&Schedul
 fn never_pastes_again_a_message_whose_paste_the_window_did_not_drop_whatever_the_looks() {
     // A pass longer than the arrival window would be no schedule the generator makes.
     holds("never twice", twice, passes_and_sleeps);
+}
+
+#[test]
+fn confirms_a_message_whose_record_showed_its_paste_whatever_conversation_its_window_shows_by_then()
+{
+    holds("never stuck", stuck, any);
 }
 
 #[test]

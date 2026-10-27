@@ -42,6 +42,18 @@ impl Headless {
     }
 
     fn spawn_with_env(env: &[(&str, &str)]) -> Self {
+        Self::start(env, true)
+    }
+
+    /// The helper started as std starts a program, left whatever the test had open that was not
+    /// close-on-exec: the premise of the test of what a window is left, and no other's.
+    fn spawn_left_what_was_open() -> Self {
+        Self::start(&[], false)
+    }
+
+    /// The helper, holding only its streams when `streams_only` (as every test but one has it:
+    /// the tests run side by side, and one would hold what another closed).
+    fn start(env: &[(&str, &str)], streams_only: bool) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_consensflow-bridge"));
         command
             .stdin(Stdio::piped())
@@ -49,6 +61,9 @@ impl Headless {
             .stderr(Stdio::inherit());
         for (name, value) in env {
             command.env(name, value);
+        }
+        if streams_only {
+            cf_process::hold_only_the_streams(&mut command);
         }
         let mut child = command.spawn().expect("spawn consensflow-bridge");
         let input = child.stdin.take().expect("piped helper stdin");
@@ -408,6 +423,50 @@ fn a_claim_after_unsent_typing_is_admitted_and_writes_nothing() {
     helper.close_input_and_wait();
 }
 
+/// The human's keys over the bridge (`pane.typed`) are the rig's: a host started
+/// with `CONSENSFLOW_TEST_HUMAN_KEYS=1` takes them and counts what they leave
+/// unsent; the bundled host, started without it (or with any other value), knows
+/// no such request, and nothing is written (T-330).
+#[test]
+fn only_a_host_the_rig_starts_takes_the_humans_keys_over_the_bridge() {
+    let _pty_guard = serial_headless_test();
+    for (env, takes) in [
+        (&[][..], false),
+        (&[("CONSENSFLOW_TEST_HUMAN_KEYS", "0")][..], false),
+        (&[("CONSENSFLOW_TEST_HUMAN_KEYS", "1")][..], true),
+    ] {
+        let mut helper = Headless::spawn_with_env(env);
+        let mut events = Vec::new();
+        let opened = helper.request(
+            "pane.open",
+            open_body("/bin/stty raw -echo; printf ready; /bin/sleep 30", 1024),
+            &mut events,
+        );
+        let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+        let generation = opened["generation"].as_u64().expect("opened generation");
+        let _ = output_until(&helper, &mut events, &pane_id, generation, b"ready");
+        let typed = helper.request(
+            "pane.typed",
+            json!({"id":pane_id,"generation":generation,"bytes":[120]}),
+            &mut events,
+        );
+        let snapshot = helper.request(
+            "pane.snapshot",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events,
+        );
+        assert_eq!(typed["ok"] == true, takes, "{env:?}: {typed}");
+        assert_eq!(snapshot["unsent"], takes, "{env:?}: {snapshot}");
+        assert_eq!(snapshot["typed"], u64::from(takes), "{env:?}: {snapshot}");
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events,
+        );
+        helper.close_input_and_wait();
+    }
+}
+
 #[test]
 fn stdio_protocol_opens_pastes_lists_and_kills_a_raw_recorder() {
     let _pty_guard = serial_headless_test();
@@ -420,7 +479,7 @@ fn stdio_protocol_opens_pastes_lists_and_kills_a_raw_recorder() {
             "/bin/stty raw -echo; tree=/tmp/cf-tree-$$; \
              /bin/sh -c '/bin/sleep 1000 & grandchild=$!; \
              printf \"%s\n\" \"$grandchild\" >\"$1\"; wait' sh \"$tree\" & child=$!; \
-             while [ ! -s \"$tree\" ]; do :; done; grandchild=$(/bin/cat \"$tree\"); \
+             while [ ! -s \"$tree\" ] && kill -0 $PPID 2>/dev/null; do :; done; grandchild=$(/bin/cat \"$tree\"); \
              /bin/rm -f \"$tree\"; printf 'PIDS:%s,%s,%s\nready' \"$$\" \"$child\" \"$grandchild\"; \
              /usr/bin/od -An -tx1 -N 17; printf '\nRECORDER-DONE\n'; wait \"$child\"",
             4096,
@@ -692,6 +751,152 @@ fn parked_page_probe_stops_at_1024_then_drains_14400_bytes_via_wire_acks() {
     helper.close_input_and_wait();
 }
 
+/// A window whose page takes its output and never acknowledges it, as a page asleep
+/// behind a locked screen or a hidden window does, a crashed one that is not loaded again
+/// (Windows), or one that let go of a pane still open: its program goes on printing, and
+/// the screen the daemon reads keeps up with it. The window is opened as the daemon opens
+/// one, with the host's own backlog. The host stops reading a window once that backlog
+/// (1 MiB) is unacknowledged, and the program waits in its terminal's write for good.
+#[test]
+#[ignore = "known failure (T-454): the host stops reading a window once 1 MiB of its \
+            output is unacknowledged, and only the page acknowledges; issue page \
+            issues/a-window-stops-when-its-page-stops-acknowledging.md"]
+fn a_window_whose_page_never_acknowledges_goes_on_and_its_screen_keeps_up() {
+    const PRINTED: usize = 4 * 1024 * 1024;
+
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let done = std::env::temp_dir().join(format!("cf-unacked-{}", std::process::id()));
+    let _ = std::fs::remove_file(&done);
+    let script = format!(
+        "/usr/bin/head -c {PRINTED} /dev/zero | /usr/bin/tr '\\000' x; \
+         printf '\\nprinted all\\n'; : > '{}'; exec /bin/sleep 60",
+        done.display()
+    );
+    let opened = helper.request(
+        "pane.open",
+        json!({
+            "id":"pane-unacked",
+            "generation":1,
+            "cwd":"/tmp",
+            "argv":["/bin/sh","-c",script],
+            "env":{},
+            "size":{"rows":24,"cols":80},
+        }),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane = json!({"id":"pane-unacked","generation":1,"tail":2});
+
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut sent = 0;
+    let tail = loop {
+        let snapshot = helper.request("pane.snapshot", pane.clone(), &mut events);
+        sent += events
+            .drain(..)
+            .filter_map(|event| output_bytes(&event, "pane-unacked", 1))
+            .map(|(_, bytes)| bytes.len())
+            .sum::<usize>();
+        let tail = snapshot["tail"].clone();
+        let last = tail[1].as_str().unwrap_or_default();
+        if done.exists() && last == "printed all" {
+            break tail;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the program is still printing after 60 s with nothing acknowledged: \
+             {sent} bytes sent to the page, its mark {}, the screen's last line {} long",
+            if done.exists() { "made" } else { "not made" },
+            tail.as_array()
+                .and_then(|lines| lines.last())
+                .and_then(Value::as_str)
+                .map_or(0, str::len),
+        );
+        thread::sleep(Duration::from_millis(250));
+    };
+    assert_eq!(tail[1], "printed all", "{tail}");
+    let _ = std::fs::remove_file(&done);
+    helper.request(
+        "pane.kill",
+        json!({"id":"pane-unacked","generation":1}),
+        &mut events,
+    );
+    helper.close_input_and_wait();
+}
+
+/// Why a window that is no longer read stops its agent, not only its screen: Node, the
+/// runtime of Pi, stops dead once its terminal is not read. A program on a terminal that
+/// nobody reads ticks a file on a timer every 100 ms and writes 8 KiB to the terminal
+/// every 10 ms: once the terminal's buffer is full its writes block the event loop, and
+/// its timers stop with them, until the terminal is read again (T-454: 0 ticks in 8 s
+/// unread, on Node 24 on macOS). A probe of the harness's runtime, not of ConsensFlow:
+/// it passes, and is run by name (`cargo test -p cf-panes --test headless --
+/// --ignored a_node_program_stops_while_its_terminal_is_not_read`) with `node` on the
+/// PATH, beside the known failure above, whose program waits the same way.
+#[test]
+#[ignore = "a probe of Node on a terminal nobody reads (T-454), run by name with node on the PATH"]
+fn a_node_program_stops_while_its_terminal_is_not_read() {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+    let ticks = std::env::temp_dir().join(format!("cf-node-ticks-{}", std::process::id()));
+    let _ = std::fs::remove_file(&ticks);
+    let script = format!(
+        "const fs = require('fs'); let ticks = 0; \
+         setInterval(() => fs.writeFileSync({path:?}, String(++ticks)), 100); \
+         setInterval(() => process.stdout.write('x'.repeat(8191) + '\\n'), 10);",
+        path = ticks.display().to_string()
+    );
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+    let mut node = CommandBuilder::new("node");
+    node.args(["-e", &script]);
+    let mut child = match pair.slave.spawn_command(node) {
+        Ok(child) => child,
+        Err(error) => panic!("node could not be started (is it on the PATH?): {error}"),
+    };
+    drop(pair.slave);
+    let read = || {
+        std::fs::read_to_string(&ticks)
+            .ok()
+            .and_then(|said| said.trim().parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+
+    // Unread: a second for the buffer to fill, then seven more in which nothing ticks.
+    thread::sleep(Duration::from_secs(1));
+    let filled = read();
+    thread::sleep(Duration::from_secs(7));
+    let unread = read() - filled;
+
+    // Read: the program goes on.
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    thread::spawn(move || {
+        let mut buffer = [0u8; 65536];
+        while matches!(std::io::Read::read(&mut reader, &mut buffer), Ok(read) if read > 0) {}
+    });
+    thread::sleep(Duration::from_secs(4));
+    let after = read() - filled - unread;
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_file(&ticks);
+
+    assert!(
+        unread <= 1,
+        "node ticked {unread} times in 7 s on a terminal nobody read: its writes did not block"
+    );
+    assert!(
+        after >= 10,
+        "node ticked {after} times in the 4 s its terminal was read: it did not go on"
+    );
+}
+
 #[test]
 fn stdin_eof_reaps_every_spawned_process() {
     let _pty_guard = serial_headless_test();
@@ -703,10 +908,10 @@ fn stdin_eof_reaps_every_spawned_process() {
         let opened = helper.request(
             "pane.open",
             open_body(
-                "tree=/tmp/cf-eof-tree-$$; \
+                "/bin/sleep 4; tree=/tmp/cf-eof-tree-$$; \
                  /bin/sh -c '/bin/sleep 1000 & grandchild=$!; \
                  printf \"%s\\n\" \"$grandchild\" >\"$1\"; wait' sh \"$tree\" & child=$!; \
-                 while [ ! -s \"$tree\" ]; do :; done; grandchild=$(/bin/cat \"$tree\"); \
+                 while [ ! -s \"$tree\" ] && kill -0 $PPID 2>/dev/null; do :; done; grandchild=$(/bin/cat \"$tree\"); \
                  /bin/rm -f \"$tree\"; printf '%s,%s,%s\\n' \"$$\" \"$child\" \"$grandchild\"; wait \"$child\"",
                 1024,
             ),
@@ -719,9 +924,19 @@ fn stdin_eof_reaps_every_spawned_process() {
         ));
     }
 
+    // The programs start a shell that starts a shell that starts a sleep, and say nothing
+    // until the last has: how long that takes is the machine's (the four seconds before it
+    // are a loaded machine's), and a quiet host is not a hung one. A frame that comes is
+    // waited for until all of them have printed, up to a minute.
+    let printed_by = Instant::now() + Duration::from_secs(60);
     while panes.iter().any(|(_, _, bytes)| !bytes.contains(&b'\n')) {
         if events.is_empty() {
-            events.push(helper.receive());
+            let left = printed_by.saturating_duration_since(Instant::now());
+            events.push(
+                helper
+                    .receive_timeout(left)
+                    .expect("the windows printed their processes within a minute"),
+            );
         }
         for event in events.drain(..) {
             for (pane_id, generation, bytes) in &mut panes {
@@ -1093,7 +1308,9 @@ fn a_paste_answers_whether_anything_reached_the_window() {
 
 #[test]
 fn helper_is_inert_when_stdin_is_not_a_pipe() {
-    let output = Command::new(env!("CARGO_BIN_EXE_consensflow-bridge"))
+    let mut helper = Command::new(env!("CARGO_BIN_EXE_consensflow-bridge"));
+    cf_process::hold_only_the_streams(&mut helper);
+    let output = helper
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -1103,23 +1320,89 @@ fn helper_is_inert_when_stdin_is_not_a_pipe() {
     assert!(output.stdout.is_empty());
 }
 
-fn process_exists(pid: i32) -> bool {
-    unsafe extern "C" {
-        fn kill(pid: i32, signal: i32) -> i32;
-    }
+/// The helper a test starts runs beside the other tests, which open sockets and pipes: on macOS
+/// std makes each close-on-exec in a second step, and the helper started between the two would
+/// hold it for as long as it runs. Here a descriptor is left open and not close-on-exec as it
+/// starts, and `lsof` says the helper does not have it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_helper_a_test_starts_holds_nothing_of_the_tests_but_its_streams() {
+    let _pty_guard = serial_headless_test();
+    let stray = cf_process::test_support::stray();
+    let mut helper = Headless::spawn();
+    assert!(!stray.held_by(helper.child.id()), "the helper holds it");
+    helper.close_input_and_wait();
+}
 
+/// The host holds a descriptor it was left (the program that started it had one open that was
+/// not yet close-on-exec: on macOS std makes each socket and pipe so in a second step), and a
+/// window it opens holds nothing of it: portable-pty closes every descriptor above the standard
+/// streams in the window's program before it runs. The premise is looked at too, with `lsof`.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_holds_nothing_of_the_hosts_but_its_terminal_whatever_the_host_was_left() {
+    use std::os::fd::AsRawFd;
+
+    unsafe extern "C" {
+        fn fcntl(fd: i32, command: i32, argument: i32) -> i32;
+    }
+    const F_SETFD: i32 = 2;
+
+    let _pty_guard = serial_headless_test();
+    let stray = std::fs::File::open("/dev/null").expect("a file");
+    let fd = stray.as_raw_fd();
+    // SAFETY: `fcntl` clears the flags of a descriptor this test holds.
+    assert_eq!(unsafe { fcntl(fd, F_SETFD, 0) }, 0);
+    let mut helper = Headless::spawn_left_what_was_open();
+    let held = Command::new("/usr/sbin/lsof")
+        .args([
+            "-a",
+            "-p",
+            &helper.child.id().to_string(),
+            "-d",
+            &fd.to_string(),
+        ])
+        .output()
+        .expect("lsof");
+    assert!(
+        String::from_utf8_lossy(&held.stdout).contains("/dev/null"),
+        "the host was left the descriptor: {}",
+        String::from_utf8_lossy(&held.stdout)
+    );
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(
+            &format!("if [ -e /dev/fd/{fd} ]; then echo held; else echo clear; fi; sleep 1000"),
+            1024,
+        ),
+        &mut events,
+    );
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let said = output_until(&helper, &mut events, &pane_id, generation, b"clear");
+    assert!(
+        !String::from_utf8_lossy(&said).contains("held"),
+        "{}",
+        String::from_utf8_lossy(&said)
+    );
+    helper.request(
+        "pane.kill",
+        json!({"id":pane_id,"generation":generation}),
+        &mut events,
+    );
+    helper.close_input_and_wait();
+}
+
+fn process_exists(pid: i32) -> bool {
     // SAFETY: signal zero checks existence without delivering a signal.
-    (unsafe { kill(pid, 0) } == 0) || std::io::Error::last_os_error().raw_os_error() == Some(1)
+    (unsafe { libc::kill(pid, 0) } == 0)
+        || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 fn kill_process_group(process_group_id: i32) {
-    unsafe extern "C" {
-        fn kill(pid: i32, signal: i32) -> i32;
-    }
-
-    const SIGKILL: i32 = 9;
     // SAFETY: the PTY child is its process-group leader and this is test-only cleanup.
-    let _ = unsafe { kill(-process_group_id, SIGKILL) };
+    let _ = unsafe { libc::kill(-process_group_id, libc::SIGKILL) };
 }
 
 /// A window opens at the identity the daemon reserved for it, and only there:
@@ -1192,33 +1475,34 @@ fn a_pane_open_answers_the_process_id_of_the_windows_program() {
     helper.close_input_and_wait();
 }
 
-/// A window whose program exits while something it started still holds its
-/// terminal (a dev server deaf to the hangup) ends all the same, and what it
-/// left running ends with it. The program is its terminal's controlling
-/// process, and macOS revokes the terminal when it exits, so the output ends
-/// and `pane.exit` follows; Linux keeps the terminal open for the child, and
-/// would need an exit watcher as ConPTY does. The program exits on a line typed
-/// to it once the window is open: the host knows a program by what it read of it
-/// when the window opened, and on a loaded runner one that exits at once can be
-/// gone before that (then what it started is no window's, and is left running).
+/// The program of a window that exits on a line typed to it once the window is open, over a
+/// background child that deaf to the hangup holds its terminal (a dev server). It says the
+/// child's number.
 #[cfg(target_os = "macos")]
-#[test]
-fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_terminal() {
-    let _pty_guard = serial_headless_test();
-    let mut helper = Headless::spawn();
-    let mut events = Vec::new();
-    let opened = helper.request(
-        "pane.open",
-        open_body(
-            "trap '' HUP; /bin/sleep 1000 & printf 'CHILD %s END' \"$!\"; read _; exit 0",
-            1024,
-        ),
-        &mut events,
-    );
+const EXITS_OVER_A_BACKGROUND_CHILD: &str =
+    "trap '' HUP; (while kill -0 $PPID 2>/dev/null; do sleep 0.2; done) & printf 'CHILD %s END' \"$!\"; read _; exit 0";
+
+/// [`EXITS_OVER_A_BACKGROUND_CHILD`], with the child started by a subshell that ends at once, as a
+/// server that detaches itself is: the process that started the child has gone before the
+/// program does, and the window's program is not the one that did.
+#[cfg(target_os = "macos")]
+const EXITS_OVER_A_JOB_ITS_STARTER_LEFT: &str =
+    "trap '' HUP; ((while kill -0 $PPID 2>/dev/null; do sleep 0.2; done) & printf 'CHILD %s END' \"$!\"); read _; exit 0";
+
+/// Opens a window of `script` (one of the programs above), types the line that ends its
+/// program and waits for `pane.exit`: the background child's number, and when `pane.exit`
+/// came.
+#[cfg(target_os = "macos")]
+fn a_program_exits_over_a_background_child(
+    helper: &mut Headless,
+    events: &mut Vec<Value>,
+    script: &str,
+) -> (i32, Instant) {
+    let opened = helper.request("pane.open", open_body(script, 1024), events);
     assert_eq!(opened["ok"], true, "{opened}");
     let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
     let generation = opened["generation"].as_u64().expect("opened generation");
-    let printed = output_until(&helper, &mut events, &pane_id, generation, b" END");
+    let printed = output_until(helper, events, &pane_id, generation, b" END");
     let child = String::from_utf8_lossy(&printed)
         .trim_start_matches("CHILD ")
         .trim_end_matches(" END")
@@ -1228,7 +1512,7 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
         helper.request(
             "pane.input",
             json!({"id":pane_id,"generation":generation,"bytes":[10]}),
-            &mut events,
+            events,
         ),
         json!({"ok":true})
     );
@@ -1244,6 +1528,30 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
             Err(_) => panic!("no pane.exit while the background child holds the terminal"),
         }
     }
+    (child, Instant::now())
+}
+
+/// A window whose program exits while something it started still holds its
+/// terminal (a dev server deaf to the hangup) ends all the same, and what it
+/// left running ends with it. The program is its terminal's controlling
+/// process, and macOS revokes the terminal when it exits, so the output ends
+/// and `pane.exit` follows; Linux keeps the terminal open for the child, and
+/// would need an exit watcher as ConPTY does. The program exits on a line typed
+/// to it once the window is open: the host knows a program by what it read of it
+/// when the window opened, and on a loaded runner one that exits at once can be
+/// gone before that (then what it started is no window's, and is left running).
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_terminal() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let (child, _) = a_program_exits_over_a_background_child(
+        &mut helper,
+        &mut events,
+        EXITS_OVER_A_BACKGROUND_CHILD,
+    );
+
     let gone = Instant::now() + Duration::from_secs(2);
     while process_exists(child) && Instant::now() < gone {
         thread::sleep(Duration::from_millis(10));
@@ -1255,6 +1563,327 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
     helper.close_input_and_wait();
 }
 
+/// What a window's program left running in its session, which the process that started it
+/// left too, is ended with the window when the program exits: nothing says whose it is but
+/// the session, which the program led. The case above has that child started by the program
+/// itself, which the system names as the process that started it if the child had exec'd
+/// before the program exited and as init if it exec'd after (T-384; under load a process just
+/// forked waits for a processor, which is the flake of the case above, and no test could make
+/// it happen whenever it liked); here the process that started the child has gone before the
+/// program does, as a server that detaches itself does, and no load is needed.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_ends_when_its_program_exits_while_a_job_its_starter_left_holds_its_terminal() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let (child, _) = a_program_exits_over_a_background_child(
+        &mut helper,
+        &mut events,
+        EXITS_OVER_A_JOB_ITS_STARTER_LEFT,
+    );
+
+    let gone = Instant::now() + Duration::from_secs(5);
+    while process_exists(child) && Instant::now() < gone {
+        thread::sleep(Duration::from_millis(10));
+    }
+    let survived = process_exists(child).then(|| ps_line(child));
+    if survived.is_some() {
+        kill_process(child);
+    }
+    assert_eq!(survived, None, "what the window left running survived it");
+    helper.close_input_and_wait();
+}
+
+/// How many windows [`under_load_a_window_whose_program_exits_ends_the_background_child_it_left`]
+/// plays, if `CF_PANES_LOAD_ROUNDS` does not say.
+#[cfg(target_os = "macos")]
+const LOAD_ROUNDS: usize = 300;
+
+/// The value of `name` as a number, or `default`.
+#[cfg(target_os = "macos")]
+fn size_from_the_environment(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|given| given.parse().ok())
+        .unwrap_or(default)
+}
+
+/// Threads that compute until they are dropped: the load of a loaded runner or of a Mac with
+/// several builds on it, bounded by the test's own life.
+#[cfg(target_os = "macos")]
+struct Burners {
+    stop: Arc<AtomicBool>,
+    threads: Vec<thread::JoinHandle<()>>,
+}
+
+#[cfg(target_os = "macos")]
+impl Burners {
+    fn start(count: usize) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let threads = (0..count)
+            .map(|_| {
+                let stop = Arc::clone(&stop);
+                thread::spawn(move || {
+                    let mut x = 1u64;
+                    while !stop.load(Ordering::Relaxed) {
+                        for _ in 0..10_000 {
+                            x = std::hint::black_box(
+                                x.wrapping_mul(6364136223846793005).wrapping_add(1),
+                            );
+                        }
+                    }
+                })
+            })
+            .collect();
+        Self { stop, threads }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for Burners {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        for thread in self.threads.drain(..) {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// What `ps` says of `pid`, on one line: its parent, group, state and age.
+#[cfg(target_os = "macos")]
+fn ps_line(pid: i32) -> String {
+    let output = Command::new("/bin/ps")
+        .args([
+            "-o",
+            "pid=,ppid=,pgid=,stat=,etime=",
+            "-p",
+            &pid.to_string(),
+        ])
+        .output()
+        .expect("run ps");
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+/// The identifiers the system records for `pid` (`proc_pidinfo`'s unique-identifier flavor): its
+/// own, and the one of the process that started it.
+#[cfg(target_os = "macos")]
+fn recorded_identifiers(pid: i32) -> Option<(u64, u64)> {
+    #[repr(C)]
+    #[derive(Default)]
+    struct UniqueIdentifiers {
+        uuid: [u8; 16],
+        unique: u64,
+        parent: u64,
+        version: i32,
+        parent_version: i32,
+        reserved: [u64; 2],
+    }
+
+    /// `PROC_PIDUNIQIDENTIFIERINFO`.
+    const FLAVOR: i32 = 17;
+    let mut found = UniqueIdentifiers::default();
+    let size = std::mem::size_of_val(&found) as i32;
+    // SAFETY: the buffer is `found`, writable for the `size` bytes passed with it, and
+    // proc_pidinfo writes no more than that.
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            FLAVOR,
+            0,
+            (&mut found as *mut UniqueIdentifiers).cast(),
+            size,
+        )
+    };
+    (read == size).then_some((found.unique, found.parent))
+}
+
+/// The identifier the system records for the process that started `pid`: that of the process
+/// that was its parent at its fork or its last exec, which the system keeps after that process
+/// has gone, or `1`, which is init's.
+#[cfg(target_os = "macos")]
+fn recorded_parent(pid: i32) -> Option<u64> {
+    recorded_identifiers(pid).map(|(_, parent)| parent)
+}
+
+/// Waits until the program `pid` runs is `program` (its path ends with it): a process just forked
+/// runs its parent's program until it execs.
+#[cfg(target_os = "macos")]
+fn wait_until_it_runs(pid: i32, program: &str) {
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut path = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        // SAFETY: the buffer is `path`, writable for the size passed with it, and proc_pidpath
+        // writes no more than that.
+        let written =
+            unsafe { libc::proc_pidpath(pid, path.as_mut_ptr().cast(), path.len() as u32) };
+        let written = usize::try_from(written).unwrap_or(0);
+        if String::from_utf8_lossy(&path[..written]).ends_with(program) {
+            return;
+        }
+        assert!(
+            Instant::now() < until,
+            "the process {pid} never ran {program}"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// The line a background job's starter says: the job's number.
+#[cfg(target_os = "macos")]
+fn the_job_its_starter_names(starter: &mut Child) -> i32 {
+    let mut line = String::new();
+    BufReader::new(starter.stdout.as_mut().expect("the starter's output"))
+        .read_line(&mut line)
+        .expect("the job's number");
+    line.trim().parse().expect("a number")
+}
+
+/// What the system records as the process that started a job is the process that was its parent
+/// at its fork and again at each exec (found by T-384's probes, which this keeps; T-375 took it
+/// for the age of the parent, and for load). A job that has exec'd by the time its starter ends
+/// keeps naming the starter, through its end and its being reaped. One that execs after names
+/// init (`1`), however long the starter ran. Load only makes the starter's exit beat the job's
+/// exec more often, a process just forked waiting for a processor. The bound and the selection
+/// rest on it (`process_tree/bound.rs`, `process_tree/selection.rs`): a job whose starter has
+/// gone is the window's by its session, not by whom the system says started it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_identifier_recorded_for_the_process_that_started_a_job_is_its_parent_at_its_last_exec() {
+    let sh = |script: &str, argument: &str| {
+        Command::new("/bin/sh")
+            .args(["-c", script, argument])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start the starter")
+    };
+
+    // A job that has exec'd before its starter ends.
+    let mut starter = sh("/bin/sleep 30 & echo $!; read _; exit 0", "");
+    let job = the_job_its_starter_names(&mut starter);
+    wait_until_it_runs(job, "/sleep");
+    let (starter_id, _) = recorded_identifiers(starter.id() as i32).expect("the starter's own");
+    assert_eq!(recorded_parent(job), Some(starter_id), "while it runs");
+    drop(starter.stdin.take());
+    starter.wait().expect("the starter ends, and is reaped");
+    assert_eq!(
+        recorded_parent(job),
+        Some(starter_id),
+        "after its end and its being reaped"
+    );
+    kill_process(job);
+
+    // A job forked in the same way that execs only after its starter has ended and been reaped.
+    let fifo = std::env::temp_dir().join(format!("cf-panes-recorded-{}", std::process::id()));
+    let _ = std::fs::remove_file(&fifo);
+    let path = std::ffi::CString::new(fifo.to_str().expect("a path")).expect("a path");
+    // SAFETY: the path is a NUL-ended string that lives through the call.
+    let made = unsafe { libc::mkfifo(path.as_ptr(), 0o600) };
+    assert_eq!(made, 0, "make a fifo");
+    let mut starter = sh(
+        "( read x < \"$0\"; exec /bin/sleep 30 ) & echo $!; read _; exit 0",
+        fifo.to_str().expect("a path"),
+    );
+    let job = the_job_its_starter_names(&mut starter);
+    let (starter_id, _) = recorded_identifiers(starter.id() as i32).expect("the starter's own");
+    assert_eq!(recorded_parent(job), Some(starter_id), "forked, not exec'd");
+    drop(starter.stdin.take());
+    starter.wait().expect("the starter ends, and is reaped");
+    assert_eq!(
+        recorded_parent(job),
+        Some(starter_id),
+        "forked, not exec'd, its starter gone"
+    );
+    // Opened for both, so that it does not wait for the job's reading of it.
+    let mut go = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&fifo)
+        .expect("open the fifo");
+    go.write_all(b"go\n").expect("tell the job to exec");
+    wait_until_it_runs(job, "/sleep");
+    assert_eq!(
+        recorded_parent(job),
+        Some(1),
+        "exec'd after its starter had gone: init's"
+    );
+    kill_process(job);
+    let _ = std::fs::remove_file(&fifo);
+}
+
+#[cfg(target_os = "macos")]
+fn kill_process(pid: i32) {
+    // SAFETY: the number is a process this test started and found alive; this is test-only
+    // cleanup of a process that outlived its window.
+    let _ = unsafe { libc::kill(pid, libc::SIGKILL) };
+}
+
+/// The flake of `a_window_ends_when_its_program_exits_while_a_background_child_holds_its_terminal`
+/// (T-282 saw it once at a load average of 33 to 40), reproduced and kept (T-375): opt-in, because
+/// it plays hundreds of windows beside threads that compute on every core, and it needs a Mac.
+/// `cargo test -p cf-panes --test headless -- --ignored under_load`, with
+/// `CF_PANES_LOAD_ROUNDS` windows (300) and `CF_PANES_LOAD_BURNERS` computing threads (four for
+/// each core).
+///
+/// A window ends and its background child must be gone two seconds after `pane.exit`, as the
+/// case above asks. For a window that does not meet it the test writes what `ps` says of the
+/// child at that moment and ten seconds later, and the identifier the system records for the
+/// process that started it, and ends it. A child that is `S` at both, with init for its
+/// parent and `1` recorded, is alive and was never signalled: the pane host's bound refused it
+/// (the bound lets through what the system says the window's program started, and the system
+/// had named init, the child having exec'd after the shell had gone); one that is `Z` was
+/// signalled and not reaped; one that is gone by the
+/// second look was ended late. Before the bound let through the session of a program that had
+/// gone, 11 of 300 windows left their child (all `S`, init's, `1`), and none of 600 after.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "opt-in load reproduction of T-375: hundreds of windows beside computing threads; cargo test -p cf-panes --test headless -- --ignored under_load"]
+fn under_load_a_window_whose_program_exits_ends_the_background_child_it_left() {
+    let _pty_guard = serial_headless_test();
+    let cores = thread::available_parallelism().map_or(4, std::num::NonZero::get);
+    let _burners = Burners::start(size_from_the_environment(
+        "CF_PANES_LOAD_BURNERS",
+        4 * cores,
+    ));
+    let rounds = size_from_the_environment("CF_PANES_LOAD_ROUNDS", LOAD_ROUNDS);
+    let mut failures = Vec::new();
+    for round in 1..=rounds {
+        let mut helper = Headless::spawn();
+        let mut events = Vec::new();
+        let (child, exited) = a_program_exits_over_a_background_child(
+            &mut helper,
+            &mut events,
+            EXITS_OVER_A_BACKGROUND_CHILD,
+        );
+        let gone = exited + Duration::from_secs(2);
+        while process_exists(child) && Instant::now() < gone {
+            thread::sleep(Duration::from_millis(10));
+        }
+        if process_exists(child) {
+            let at_two_seconds = ps_line(child);
+            let later = Instant::now() + Duration::from_secs(10);
+            while process_exists(child) && Instant::now() < later {
+                thread::sleep(Duration::from_millis(100));
+            }
+            failures.push(format!(
+                "round {round}: child {child} at 2 s: [{at_two_seconds}], recorded parent {:?}, \
+                 at 12 s: [{}]",
+                recorded_parent(child),
+                ps_line(child)
+            ));
+            kill_process(child);
+        }
+        helper.close_input_and_wait();
+    }
+    eprintln!(
+        "{} of {rounds} windows left their background child running 2 s after they ended",
+        failures.len()
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// A program that lets go of its terminal and opens it again: it takes the terminal
 /// from everything that has it, itself included (`revoke`, which is what macOS does
 /// to a terminal whose controlling process exits), ignoring the hangup that sends, so
@@ -1264,6 +1893,7 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
 const OPENS_ITS_TERMINAL_AGAIN: &str = "exec /usr/bin/python3 -c '
 import ctypes, os, signal, time
 signal.signal(signal.SIGHUP, signal.SIG_IGN)
+parent = os.getppid()
 name = os.ttyname(0)
 print(\"PROGRAM %d END\" % os.getpid(), flush=True)
 libc = ctypes.CDLL(None, use_errno=True)
@@ -1271,7 +1901,7 @@ if libc.revoke(name.encode()) != 0:
     raise OSError(ctypes.get_errno(), \"revoke\")
 time.sleep(2)
 again = os.open(name, os.O_RDWR | os.O_NOCTTY)
-while True:
+while os.getppid() == parent:
     os.write(again, b\"BACK\\r\\n\")
     time.sleep(1)
 '";
@@ -1490,6 +2120,7 @@ fn a_program_that_exits_while_an_orphan_writes_on_to_its_terminal_is_told_closed
 #[cfg(target_os = "macos")]
 const CLEANS_UP_FOR_SIX_SECONDS: &str = "exec /usr/bin/python3 -c '
 import ctypes, os, signal, time
+parent = os.getppid()
 name = os.ttyname(0)
 def clean_up(number, frame):
     ctypes.CDLL(None).revoke(name.encode())
@@ -1498,7 +2129,8 @@ def clean_up(number, frame):
 signal.signal(signal.SIGHUP, signal.SIG_IGN)
 signal.signal(signal.SIGTERM, clean_up)
 print(\"PROGRAM %d END\" % os.getpid(), flush=True)
-time.sleep(1000)
+while os.getppid() == parent:
+    time.sleep(0.2)
 '";
 
 /// The daemon is told a window closed only on proof that its program has gone: a close
@@ -2315,15 +2947,14 @@ fn a_mark_that_says_the_servers_are_in_the_group_leaves_what_stays_in_it_out_of_
     let _ = std::fs::remove_file(&job);
 }
 
-/// The daemon asks the host to end what the turn left running, once it has taken
-/// the turn's answer for its result: the host ends what it proves the turn's (a
-/// command's shell and its job), says what it ended, and the window stays open, its
-/// program and what its harness keeps as they were, and with nothing left for its
-/// exit to list. A job detached from a shell that ended runs on, unnamed, until the
-/// window closes with it: it is in the session the window's program leads.
+/// The host ends no work a turn left running while its window is open (turn-end: a turn ends
+/// nothing it left running, and Finish ends no process): `pane.end_background`, which the daemon
+/// asked as a result was taken before turn-end, is a request it no longer knows, and asking it
+/// ends nothing. What the turn left runs on, and is listed, until the window's close ends what
+/// is the window's.
 #[cfg(target_os = "macos")]
 #[test]
-fn an_ending_asked_over_the_wire_ends_what_the_turn_left_and_the_window_stays_open() {
+fn the_host_ends_no_work_a_turn_left_while_its_window_is_open_and_its_close_ends_it() {
     let _pty_guard = serial_headless_test();
     let mut outsider = Sentinel::start();
     let mut helper = Headless::spawn();
@@ -2348,10 +2979,24 @@ fn an_ending_asked_over_the_wire_ends_what_the_turn_left_and_the_window_stays_op
     background_with(&mut helper, &mut events, &pane, "sleep 32");
     let detached = detached_job(&job);
 
-    let ended = helper.request("pane.end_background", pane.clone(), &mut events);
+    let asked = helper.request("pane.end_background", pane.clone(), &mut events);
 
-    assert_eq!(ended["ok"], true, "{ended}");
-    let said: Vec<&str> = ended["ended"]["processes"]
+    assert_eq!(
+        asked,
+        json!({"ok":false,"error":"unknown-op"}),
+        "no request ends a turn's work"
+    );
+    let left = background_with(&mut helper, &mut events, &pane, "sleep 32");
+    assert!(left["total"].as_u64() >= Some(2), "it runs on: {left}");
+    assert!(process_exists(detached), "the detached job runs on");
+    assert!(outsider.runs(), "a process outside the window");
+
+    assert_eq!(
+        helper.request("pane.kill", pane, &mut events),
+        json!({"ok":true})
+    );
+    let exit = exit_of(&helper, &mut events, &opened);
+    let listed: Vec<&str> = exit["background"]
         .as_array()
         .map(|work| {
             work.iter()
@@ -2360,37 +3005,8 @@ fn an_ending_asked_over_the_wire_ends_what_the_turn_left_and_the_window_stays_op
         })
         .unwrap_or_default();
     assert!(
-        said.iter().any(|command| command.contains("sleep 32")),
-        "{ended}"
-    );
-    for kept in ["sleep 31", "sleep 33"] {
-        assert!(
-            !said.iter().any(|command| command.contains(kept)),
-            "{kept} is not ended, nor named: {ended}"
-        );
-    }
-    assert_eq!(ended["left"]["total"], 0, "{ended}");
-    assert!(process_exists(detached), "the detached job runs on");
-    assert!(outsider.runs(), "a process outside the window");
-    assert_eq!(
-        helper.request("pane.background", pane.clone(), &mut events)["total"],
-        0,
-        "what was ended is not listed after"
-    );
-    let panes = helper.request("pane.list", json!({}), &mut events);
-    assert_eq!(
-        panes["panes"][0]["alive"], true,
-        "the window stays open: {panes}"
-    );
-
-    assert_eq!(
-        helper.request("pane.kill", pane, &mut events),
-        json!({"ok":true})
-    );
-    let exit = exit_of(&helper, &mut events, &opened);
-    assert!(
-        exit.get("background").is_none(),
-        "the close has nothing left to list: {exit}"
+        listed.iter().any(|command| command.contains("sleep 32")),
+        "the close ended it, and its exit says so: {exit}"
     );
     let deadline = Instant::now() + Duration::from_secs(5);
     while process_exists(detached) && Instant::now() < deadline {
@@ -2403,6 +3019,335 @@ fn an_ending_asked_over_the_wire_ends_what_the_turn_left_and_the_window_stays_op
     assert!(outsider.runs(), "nor a close's");
     helper.close_input_and_wait();
     let _ = std::fs::remove_file(&job);
+}
+
+/// The program of a window whose agent runs a command in a tool shell of a session of its
+/// own, as Claude Code's and Pi's Bash tools do (`setsid`), and goes on: the command, `$TOOL`,
+/// starts a server from a subshell that ends at once (`(server &)`), the server writes its
+/// number to the file `$JOB`, and the tool shell returns.
+#[cfg(target_os = "macos")]
+const A_TOOL_SHELL_DETACHES_A_SERVER: &str = "/usr/bin/python3 -c 'import os; os.setsid(); \
+     os.execv(\"/bin/sh\", [\"sh\", \"-c\", os.environ[\"TOOL\"]])'; printf started; read _";
+
+/// A server of Python's, which shows its environment as a Node server does: it writes each
+/// signal it is sent and can catch to the file `$SIGNALS`, and its number to `$JOB`, and
+/// sleeps. With `LEADS=server` it leads a session of its own (`setsid`) first; with
+/// `LEADS=job` it leads one, starts the job in it, which writes its number, and sleeps beside
+/// it. Detached, it has no parent to look at: it sleeps for as long as its owner, the test
+/// whose number is `$OWNER`, is there (T-693's rule, a fixture that ends with its owner).
+#[cfg(target_os = "macos")]
+const SERVER: &str = r#"import os, signal, time
+owner = int(os.environ["OWNER"])
+def owner_there():
+    try:
+        os.kill(owner, 0)
+        return True
+    except OSError:
+        return False
+def said(number, _):
+    with open(os.environ["SIGNALS"], "a") as file:
+        file.write("%d\n" % number)
+for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signal.SIGUSR1, signal.SIGUSR2, signal.SIGCONT):
+    signal.signal(number, said)
+if os.environ.get("LEADS"):
+    os.setsid()
+    if os.environ["LEADS"] == "job" and os.fork() != 0:
+        while owner_there():
+            time.sleep(1)
+with open(os.environ["JOB"] + ".part", "w") as file:
+    file.write(str(os.getpid()))
+os.rename(os.environ["JOB"] + ".part", os.environ["JOB"])
+while owner_there():
+    time.sleep(1)
+"#;
+
+/// The command of a tool shell that detaches [`SERVER`].
+#[cfg(target_os = "macos")]
+const DETACHES_THE_SERVER: &str = "(/usr/bin/python3 -c \"$PROG\" &)";
+
+/// What became of a job a window's tool shell detached, the window having been closed with
+/// nothing having looked at it.
+#[cfg(target_os = "macos")]
+struct Closed {
+    /// The window's program.
+    window: i32,
+    job: i32,
+    /// The session the job was in, and whether a process held its number, before the close.
+    session: i32,
+    leader_ran: bool,
+    /// The window's `pane.exit`.
+    exit: Value,
+    /// What `pane.background` answered before the close, where it was asked.
+    looked: Option<Value>,
+    /// What `ps` said of the job once the host had ended (empty where it had gone), and
+    /// the signals it wrote that it was sent.
+    after: String,
+    signals: String,
+}
+
+#[cfg(target_os = "macos")]
+impl Closed {
+    /// The numbers the exit names as possibly the window's and not ended.
+    fn possibly_left(&self) -> Vec<i64> {
+        self.exit["possiblyLeft"]
+            .as_array()
+            .map(|left| {
+                left.iter()
+                    .filter_map(|process| process["pid"].as_i64())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// Opens a window of [`A_TOOL_SHELL_DETACHES_A_SERVER`] whose tool shell runs `tool`, with
+/// `env` besides, closes it with nothing having looked at it (`pane.kill`), and lets the host
+/// end. `program` is how the job's program path ends, once it runs it. The job is left
+/// running, for the test to end.
+#[cfg(target_os = "macos")]
+fn a_window_closed_over_a_job_its_tool_shell_detached(
+    tool: &str,
+    env: Value,
+    program: &str,
+) -> Closed {
+    closed_over_a_detached_job(tool, env, program, false)
+}
+
+/// [`a_window_closed_over_a_job_its_tool_shell_detached`], the host asked what the window
+/// left running (`pane.background`, as a pause asks it) before the close where `look` says.
+#[cfg(target_os = "macos")]
+fn closed_over_a_detached_job(tool: &str, env: Value, program: &str, look: bool) -> Closed {
+    static MADE: AtomicU64 = AtomicU64::new(0);
+    let mut outsider = Sentinel::start();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let file = |what: &str| {
+        std::env::temp_dir().join(format!(
+            "cf-headless-tool-{what}-{}-{}",
+            std::process::id(),
+            MADE.fetch_add(1, Ordering::Relaxed)
+        ))
+    };
+    let (job_file, signals_file) = (file("job"), file("signals"));
+    let mut body = open_body(A_TOOL_SHELL_DETACHES_A_SERVER, 4096);
+    body["env"] = json!({
+        "JOB": job_file,
+        "SIGNALS": signals_file,
+        "TOOL": tool,
+        "PROG": SERVER,
+        "OWNER": std::process::id().to_string(),
+    });
+    for (name, value) in env.as_object().into_iter().flatten() {
+        body["env"][name] = value.clone();
+    }
+    let opened = helper.request("pane.open", body, &mut events);
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let window = opened["pid"].as_i64().expect("the program's number") as i32;
+    output_until(&helper, &mut events, &pane_id, generation, b"started");
+    let job = detached_job(&job_file);
+    wait_until_it_runs(job, program);
+    // SAFETY: getsid takes a number and reads no memory of ours.
+    let session = unsafe { libc::getsid(job) };
+    let leader_ran = process_exists(session);
+    let looked = look.then(|| {
+        helper.request(
+            "pane.background",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events,
+        )
+    });
+
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events
+        ),
+        json!({"ok":true})
+    );
+    let exit = exit_of(&helper, &mut events, &opened);
+    // The host ends once every close of it has: nothing of it signals after this.
+    helper.close_input_and_wait();
+    let after = ps_line(job);
+    let signals = std::fs::read_to_string(&signals_file).unwrap_or_default();
+    let _ = std::fs::remove_file(&job_file);
+    let _ = std::fs::remove_file(&signals_file);
+    assert!(outsider.runs(), "a process outside the window");
+    Closed {
+        window,
+        job,
+        session,
+        leader_ran,
+        exit,
+        looked,
+        after,
+        signals,
+    }
+}
+
+/// A server an agent's tool shell detached, which no look saw run, is named in the window's
+/// exit as possibly the window's, and is left running: no signal reaches it. It is in the
+/// session of a tool shell that has gone (not the window's), the system names init or the
+/// subshell that has gone as the process that started it, and only the marker it carries ties
+/// it to the window, which proves nothing (T-406: a server the window started can hand that
+/// environment on to the user's own work, Astraeus's review T-411), so the bound refuses it as
+/// it did. Before the exit named it, the window closed over it saying nothing.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_closed_names_a_server_its_agents_tool_shell_detached_and_leaves_it_running() {
+    let _pty_guard = serial_headless_test();
+    let closed = a_window_closed_over_a_job_its_tool_shell_detached(
+        DETACHES_THE_SERVER,
+        json!({}),
+        "/Python",
+    );
+    let job = closed.job;
+    let alive = process_exists(job);
+    kill_process(job);
+
+    // The shape: the tool shell has gone, its session is not the window's, and the system
+    // names no process of the window as the one that started the server.
+    assert!(
+        closed.session > 1 && closed.session != closed.window && closed.session != job,
+        "{}",
+        closed.session
+    );
+    assert!(!closed.leader_ran, "the tool shell has gone");
+    assert_eq!(
+        closed.possibly_left(),
+        [i64::from(job)],
+        "the exit names the server: {}",
+        closed.exit
+    );
+    assert!(
+        closed.exit["possiblyLeft"][0]["program"]
+            .as_str()
+            .is_some_and(|program| !program.is_empty()),
+        "{}",
+        closed.exit
+    );
+    assert!(alive, "the server runs on");
+    assert!(
+        closed
+            .after
+            .split_whitespace()
+            .nth(3)
+            .is_some_and(|state| state.starts_with('S')),
+        "the server sleeps, neither stopped nor a zombie: {}",
+        closed.after
+    );
+    assert_eq!(closed.signals, "", "no signal reached the server");
+}
+
+/// A look at what a window left running while it is open, as a pause's (T-487), names the
+/// server its agent's tool shell detached as the close's exit does, and signals it no more
+/// than the close does.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_look_at_what_a_window_left_names_a_server_its_agents_tool_shell_detached_and_signals_nothing()
+{
+    let _pty_guard = serial_headless_test();
+    let closed = closed_over_a_detached_job(DETACHES_THE_SERVER, json!({}), "/Python", true);
+    let job = closed.job;
+    let alive = process_exists(job);
+    kill_process(job);
+    let looked = closed.looked.clone().expect("asked");
+    assert_eq!(looked["ok"], true, "{looked}");
+    assert_eq!(
+        looked["possiblyLeft"][0]["pid"].as_i64(),
+        Some(i64::from(job)),
+        "the look names the server: {looked}"
+    );
+    assert!(
+        looked["possiblyLeft"][0]["program"]
+            .as_str()
+            .is_some_and(|program| !program.is_empty()),
+        "{looked}"
+    );
+    assert_eq!(closed.possibly_left(), [i64::from(job)], "{}", closed.exit);
+    assert!(alive, "the server runs on");
+    assert_eq!(closed.signals, "", "no signal reached the server");
+}
+
+/// A server a tool shell detached that leads a session of its own (`setsid`) is not named:
+/// its session's leader runs, itself.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_closed_does_not_name_a_marked_server_that_leads_its_own_session() {
+    let _pty_guard = serial_headless_test();
+    let closed = a_window_closed_over_a_job_its_tool_shell_detached(
+        DETACHES_THE_SERVER,
+        json!({"LEADS": "server"}),
+        "/Python",
+    );
+    kill_process(closed.job);
+    assert_eq!(closed.session, closed.job, "it leads its session");
+    assert_eq!(closed.possibly_left(), Vec::<i64>::new(), "{}", closed.exit);
+    assert!(!closed.after.is_empty(), "left running, as before");
+}
+
+/// A job in a session whose leader still runs is not named, nor the leader: a server that led
+/// a session of its own and started the job in it.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_closed_does_not_name_a_marked_job_whose_session_leader_runs() {
+    let _pty_guard = serial_headless_test();
+    let closed = a_window_closed_over_a_job_its_tool_shell_detached(
+        DETACHES_THE_SERVER,
+        json!({"LEADS": "job"}),
+        "/Python",
+    );
+    kill_process(closed.job);
+    let leader_runs = process_exists(closed.session);
+    if leader_runs {
+        kill_process(closed.session);
+    }
+    assert!(closed.leader_ran && closed.session != closed.job);
+    assert!(leader_runs, "its leader ran on past the close");
+    assert_eq!(closed.possibly_left(), Vec::<i64>::new(), "{}", closed.exit);
+}
+
+/// A job in a session whose leader has gone that carries another window's marker is not
+/// named: it began in this window's tool shell, which handed it another environment, as a
+/// job another window's server hands on would carry that window's.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_closed_does_not_name_a_leaderless_job_that_carries_another_windows_marker() {
+    let _pty_guard = serial_headless_test();
+    let closed = a_window_closed_over_a_job_its_tool_shell_detached(
+        "(CF_PANE_PROCESS_OWNER=00000000000000000000000000000000 /usr/bin/python3 -c \"$PROG\" &)",
+        json!({}),
+        "/Python",
+    );
+    kill_process(closed.job);
+    assert!(!closed.leader_ran, "its session's leader has gone");
+    assert_eq!(closed.possibly_left(), Vec::<i64>::new(), "{}", closed.exit);
+}
+
+/// [`a_window_closed_names_a_server_its_agents_tool_shell_detached_and_leaves_it_running`],
+/// with `/bin/sleep` for the server, as the issue has it: a system binary shows its
+/// environment to nobody, so nothing the system keeps of it once its tool shell has gone (its
+/// user, its session and group, whose leader has gone, when it began, init for its parent)
+/// ties it to the window, and it is not even named.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "written-down limit: /bin/sleep shows no environment, so not even its window's marker ties it to the window (issues/a-tool-shells-detached-job-outlives-its-window.md, T-406)"]
+fn a_window_closed_names_a_sleep_its_agents_tool_shell_detached() {
+    let _pty_guard = serial_headless_test();
+    let closed = a_window_closed_over_a_job_its_tool_shell_detached(
+        "(/bin/sleep 1000 & echo $! > \"$JOB\")",
+        json!({}),
+        "/sleep",
+    );
+    kill_process(closed.job);
+    assert_eq!(
+        closed.possibly_left(),
+        [i64::from(closed.job)],
+        "{}",
+        closed.exit
+    );
 }
 
 /// A folder, with a space in its name, holding the programs of a harness named
@@ -2429,7 +3374,9 @@ fn codex_programs() -> std::path::PathBuf {
     )
     .expect("the source of the harness's programs");
     let helper = dir.join("codex-code-mode-host");
-    let made = Command::new("cc")
+    let mut cc = Command::new("cc");
+    cf_process::hold_only_the_streams(&mut cc);
+    let made = cc
         .arg(&source)
         .arg("-o")
         .arg(&helper)
@@ -2460,7 +3407,7 @@ fn a_mark_that_names_the_harness_leaves_its_programs_and_what_they_run_out_of_wh
             // The helper, which began before the turn, waits for the window to say it
             // has begun and runs a shell, which says so once it runs a job; the window
             // says it started once it has.
-            r#""$BINS/codex" & "$BINS/codex-code-mode-host" 'while [ ! -e "$GO" ]; do sleep 0.05; done; /bin/sh -c "sleep 31 & echo inner-started; wait"' > "$SAID" & printf ready; read go; : > "$GO"; until [ -s "$SAID" ]; do sleep 0.05; done; printf started; wait"#,
+            r#""$BINS/codex" & "$BINS/codex-code-mode-host" 'while [ ! -e "$GO" ] && kill -0 $PPID 2>/dev/null; do sleep 0.05; done; /bin/sh -c "sleep 31 & echo inner-started; wait"' > "$SAID" & printf ready; read go; : > "$GO"; until [ -s "$SAID" ] || ! kill -0 $PPID 2>/dev/null; do sleep 0.05; done; printf started; wait"#,
             4096,
         );
         body["env"] = json!({"BINS": bins, "SAID": said, "GO": go});
@@ -2492,10 +3439,6 @@ fn a_mark_that_names_the_harness_leaves_its_programs_and_what_they_run_out_of_wh
                 0,
                 "the helper is the harness's, and so is the shell it runs"
             );
-            assert_eq!(
-                helper.request("pane.end_background", pane.clone(), &mut events)["ended"]["total"],
-                0
-            );
         } else {
             let left = background_with(&mut helper, &mut events, &pane, "sleep 31");
             assert!(left["total"].as_u64() >= Some(2), "{left}");
@@ -2508,41 +3451,6 @@ fn a_mark_that_names_the_harness_leaves_its_programs_and_what_they_run_out_of_wh
         assert!(outsider.runs(), "a process outside the window");
     }
     let _ = std::fs::remove_dir_all(&bins);
-}
-
-/// An ending names its pane and no process, which it chooses itself; one that does
-/// otherwise is refused as a request that is not one, and a window that is not open
-/// has nothing to end.
-#[test]
-fn an_ending_that_says_more_or_otherwise_than_what_it_asks_to_end_is_refused() {
-    let _pty_guard = serial_headless_test();
-    let mut helper = Headless::spawn();
-    let mut events = Vec::new();
-    for body in [
-        json!({"id":"nobody","generation":"1"}),
-        json!({"id":"nobody","generation":1,"pids":[1]}),
-        json!({"id":"nobody","generation":1,"all":true}),
-        json!({"generation":1}),
-    ] {
-        let refused = helper.request("pane.end_background", body.clone(), &mut events);
-        assert_eq!(refused["ok"], false, "{body}: {refused}");
-        assert!(
-            refused["error"]
-                .as_str()
-                .is_some_and(|error| error.contains("invalid")),
-            "it is the request that is refused: {refused}"
-        );
-    }
-    let nobody = json!({"id":"nobody","generation":1});
-    let refused = helper.request("pane.end_background", nobody, &mut events);
-    assert_eq!(refused["ok"], false, "{refused}");
-    assert!(
-        refused["error"]
-            .as_str()
-            .is_some_and(|error| !error.contains("invalid")),
-        "it is the pane that is not there: {refused}"
-    );
-    helper.close_input_and_wait();
 }
 
 /// A mark names its pane and says no more than how its harness keeps its servers,

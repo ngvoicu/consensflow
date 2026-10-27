@@ -356,10 +356,12 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         in_flight: false,
         asking: false,
         failed: false,
+        failure: None,
         quota,
         settlement,
         pending: Default::default(),
         monitors: Vec::new(),
+        lines: Box::default(),
     }))
 }
 
@@ -372,6 +374,7 @@ fn settled_record(thread: &str) -> Arc<Reading> {
         complete: true,
         at: None,
         commentary: false,
+        synthetic: false,
         compaction: false,
     };
     reading(vec![item], Settlement::Settled, None)

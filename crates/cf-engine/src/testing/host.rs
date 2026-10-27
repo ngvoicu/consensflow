@@ -11,7 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
-use cf_proto::panes::{BackgroundProcess, PaneExit};
+use cf_proto::panes::{BackgroundProcess, PaneExit, PossiblyLeft};
 use serde_json::{json, Map, Value};
 
 use super::executor::Gate;
@@ -32,6 +32,9 @@ pub struct FakeHost {
     requests: RefCell<Vec<(String, Value)>>,
     /// The next open is refused.
     pub refuse: Cell<bool>,
+    /// The next open is not answered by its deadline: its window opens all the same,
+    /// as a loaded host's does after the daemon stopped waiting.
+    pub unanswered: Cell<bool>,
     /// A kill is refused: the window stays, and no exit comes.
     pub refuse_kills: Cell<bool>,
     /// Keys (`pane.input`) are refused: they are asked, and none is taken.
@@ -44,6 +47,10 @@ pub struct FakeHost {
     /// A kill of the window of this generation waits for the gate, and is
     /// made once it opens.
     pub hold_kill: RefCell<Option<(u64, Gate)>>,
+    /// Kills held one by one, in the order they are asked: a kill of the window of a
+    /// generation takes the first of these of its generation, waits for its gate, and
+    /// is refused where it says `true` ([`FakeHost::hold_kills`]).
+    held_kills: RefCell<Vec<(u64, Gate, bool)>>,
     /// A kill's exit is held until the test sends it.
     pub hold_exits: Cell<bool>,
     /// What `pane.snapshot` answers besides `ok` ([`FakeHost::set_snapshot`]).
@@ -76,10 +83,26 @@ struct ExitSays {
     signal: Option<String>,
     tail: Option<Vec<String>>,
     background: Vec<BackgroundProcess>,
+    possibly_left: Vec<PossiblyLeft>,
     survivor: Option<u32>,
 }
 
 impl FakeHost {
+    /// The next kills of `pane`'s window, one gate each, in the order they are asked:
+    /// each waits for its gate, and is refused where its `refused` says so. Gives the gates.
+    pub fn hold_kills(&self, pane: &Pane, refused: &[bool]) -> Vec<Gate> {
+        refused
+            .iter()
+            .map(|refuse| {
+                let gate = Gate::default();
+                self.held_kills
+                    .borrow_mut()
+                    .push((pane.generation, gate.clone(), *refuse));
+                gate
+            })
+            .collect()
+    }
+
     pub fn new(recorder: Recorder) -> Rc<Self> {
         Rc::new(Self {
             recorder,
@@ -131,6 +154,19 @@ impl FakeHost {
             .collect();
     }
 
+    /// What every exit from now on names as possibly its window's and not ended: these
+    /// programs, by numbers of their own.
+    pub fn exits_possibly_leaving(&self, programs: &[&str]) {
+        self.exit_says.borrow_mut().possibly_left = programs
+            .iter()
+            .zip(1u32..)
+            .map(|(program, pid)| PossiblyLeft {
+                pid: 4000 + pid,
+                program: (*program).to_owned(),
+            })
+            .collect();
+    }
+
     /// The panes opened, in order.
     pub fn opened(&self) -> Vec<OpenPane> {
         self.opened.borrow().clone()
@@ -141,6 +177,16 @@ impl FakeHost {
         self.killed.borrow().clone()
     }
 
+    /// How many times a window was asked for its screen's last lines (a
+    /// `pane.snapshot` that asks for a tail).
+    pub fn tails_asked(&self) -> usize {
+        self.requests
+            .borrow()
+            .iter()
+            .filter(|(op, body)| op == "pane.snapshot" && body.get("tail").is_some())
+            .count()
+    }
+
     /// What was typed into panes, in order: the body of each `pane.input`.
     pub fn inputs(&self) -> Vec<Value> {
         self.requests
@@ -149,6 +195,15 @@ impl FakeHost {
             .filter(|(op, _)| op == "pane.input")
             .map(|(_, body)| body.clone())
             .collect()
+    }
+
+    /// How many `pane.snapshot` requests were made: the looks at a screen.
+    pub fn snapshots(&self) -> usize {
+        self.requests
+            .borrow()
+            .iter()
+            .filter(|(op, _)| op == "pane.snapshot")
+            .count()
     }
 
     /// The last pane opened for `handle`'s window: its own, or one of its sessions'.
@@ -185,6 +240,7 @@ impl FakeHost {
             signal: says.signal,
             tail: says.tail,
             background: says.background,
+            possibly_left: says.possibly_left,
             survivor: says.survivor,
         };
         for engine in engines {
@@ -235,6 +291,12 @@ impl FakeHost {
         }
         let pane = open.pane.clone();
         self.opened.borrow_mut().push(open);
+        if self.unanswered.replace(false) {
+            next_turn().await;
+            self.recorder
+                .answered(at, json!({ "ok": false, "error": "deadline" }));
+            return Ok(Opened::Unanswered);
+        }
         let pid = self.pid.get();
         let mut answer = json!({ "ok": true, "id": pane.id, "generation": pane.generation });
         if let Some(pid) = pid {
@@ -328,12 +390,26 @@ impl EngineHost for FakeHost {
         let at = self
             .recorder
             .call("host", Some("kill"), json!([pane_json(pane)]));
-        let held = self
-            .hold_kill
-            .borrow()
-            .clone()
-            .filter(|(generation, _)| *generation == pane.generation)
-            .map(|(_, gate)| gate);
+        let mut refused = false;
+        let one_by_one = {
+            let mut kills = self.held_kills.borrow_mut();
+            let at = kills
+                .iter()
+                .position(|(generation, _, _)| *generation == pane.generation);
+            at.map(|at| kills.remove(at))
+        };
+        let held = match one_by_one {
+            Some((_, gate, refuse)) => {
+                refused = refuse;
+                Some(gate)
+            }
+            None => self
+                .hold_kill
+                .borrow()
+                .clone()
+                .filter(|(generation, _)| *generation == pane.generation)
+                .map(|(_, gate)| gate),
+        };
         // What a kill does it does when called, unless the test holds it.
         if held.is_none() {
             self.killed.borrow_mut().push(pane.clone());
@@ -343,7 +419,7 @@ impl EngineHost for FakeHost {
                 gate.wait().await;
                 self.killed.borrow_mut().push(pane.clone());
             }
-            if self.refuse_kills.get() {
+            if refused || self.refuse_kills.get() {
                 next_turn().await;
                 let error = "refused by the test".to_owned();
                 self.recorder

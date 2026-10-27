@@ -236,6 +236,41 @@ fn says_a_delivery_to_this_participant_in_its_line_and_leaves_any_other_header_a
 }
 
 #[test]
+fn types_nothing_for_what_claude_put_ahead_of_a_delivery_and_keeps_the_words_a_human_typed() {
+    let message = "[ConsensFlow m-5 · T-1 · result from @zeus]\nParser done";
+    let wrapped = |ahead: &str| {
+        format!("{ahead}<pasted_content id=\"f920\">\n{message}\n</pasted_content id=\"f920\">\n")
+    };
+    let rows = vec![
+        // The placeholders of the images Claude attached to a result that starts with their
+        // paths, the header at once, or behind a blank line and the wrapper's opening.
+        row(1, 3, "user", &format!("[Image #1] [Image #2]{message}")),
+        row(1, 2, "user", &wrapped("[Image #3]\n\n")),
+        row(1, 1, "user", &wrapped("\n\n")),
+        // The human's own words, a placeholder among them, are what they typed.
+        row(1, 0, "user", &format!("[Image #1]look at this{message}")),
+    ];
+    let shown = page(
+        &read(
+            vec![heading(1, "claude-code", "chief", None, 0)],
+            rows,
+            None,
+        ),
+        HistoryFrom::Newest,
+    );
+    let at = |index: usize| {
+        shown.conversations[0].items[index]
+            .delivery
+            .as_ref()
+            .map(|d| d.at)
+    };
+    assert_eq!(
+        [at(0), at(1), at(2), at(3)],
+        [Some(22), Some(0), Some(0), Some(0)]
+    );
+}
+
+#[test]
 fn takes_rows_while_a_frame_has_room_and_says_where_the_next_pages_go_on_from() {
     // Five items of 200 KB, newest first: two fit a frame, and the rest are the next page's.
     let big = "x".repeat(200_000);

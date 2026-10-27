@@ -120,6 +120,13 @@ pub(super) fn prepare(
     fs::create_dir_all(into).map_err(files("make", into))?;
     for (named, contents) in unzipped {
         let path = into.join(named);
+        // A file that holds these bytes already is left as it is: Windows does not write one that
+        // is in use, and a program a run before left running holds `conpty.dll` loaded (the
+        // Windows runner stages the host before every run).
+        if fs::read(&path).is_ok_and(|held| held == contents) {
+            writeln!(out, "conpty: {} (as it was)", path.display())?;
+            continue;
+        }
         fs::write(&path, contents).map_err(files("write", &path))?;
         writeln!(out, "conpty: {}", path.display())?;
     }

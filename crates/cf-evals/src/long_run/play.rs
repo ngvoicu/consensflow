@@ -397,7 +397,11 @@ fn kill(hand: &mut Hand<'_>, handle: &str, task: Option<i64>, hold: Duration) ->
     let Some(number) = task else {
         return Ok(Outcome::Played(said));
     };
-    hand.wait(|hand| Ok(hand.stage.state_of(number)? != "working"))?;
+    // A task another resumed to working before any read of it is paused in the ledger: the
+    // wait for it to leave working ends there too, not when its time is up.
+    hand.wait(|hand| {
+        Ok(hand.stage.state_of(number)? != "working" || hand.paused_by(number, None, killed_at))
+    })?;
     let state = hand.stage.state_of(number)?;
     if state != "paused" && !hand.wait(|hand| Ok(hand.paused_by(number, None, killed_at)))? {
         return Ok(hand.failed(
@@ -875,7 +879,11 @@ impl Window {
                 self.handle
             )));
         }
-        let words = format!("{} T-{number}.", CUT[1]);
+        // The note's sentence ends after the task, or goes on to name the turn (T-814).
+        let words = [
+            format!("{} T-{number}.", CUT[1]),
+            format!("{} T-{number}, in the turn that began ", CUT[1]),
+        ];
         let cut_notes = |hand: &Hand<'_>| {
             hand.watch.last().map_or(0, |look| {
                 let Some(participant) = look.ledger.by_handle(&self.handle) else {
@@ -888,7 +896,7 @@ impl Window {
                         message.recipient == participant.id
                             && message.sender.is_none()
                             && message.kind == "note"
-                            && message.body.contains(&words)
+                            && words.iter().any(|said| message.body.contains(said))
                             && crate::clock::millis(&message.created_at)
                                 .is_some_and(|at| at >= since)
                     })

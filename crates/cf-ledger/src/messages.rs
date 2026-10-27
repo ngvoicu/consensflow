@@ -7,7 +7,9 @@
 //! word to another until the human passes it on or declines it (`gate`); the
 //! one asked, told to answer again when an answer did not stand (`again`); and
 //! the note that tells a requester its tasks stalled, one for the tasks of a
-//! pass, which goes when they are resumed (`pauses`); the note that tells
+//! pass, which goes when they are resumed (`pauses`); the note that gives it the
+//! last complete answer of a paused task's window, which a resume does not take
+//! back (`paused_answers`); the note that tells
 //! it a task is held for its member's quota, and that it goes on (`holds`); the
 //! note that says a conversation its role again, which the ledger knows for one
 //! (`roles`); and the words told to a task's window before the window has it,
@@ -19,6 +21,7 @@ mod continuations;
 mod delivery;
 mod gate;
 mod holds;
+mod paused_answers;
 mod pauses;
 mod receipt;
 mod roles;
@@ -40,23 +43,30 @@ pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{
     adopt, fold, reconcile_released, release_carried, release_stranded, transfer,
 };
-pub use continuations::{continuation, continuation_tasks};
+pub(crate) use continuations::withdraw_queued_note;
+pub use continuations::{continuation, continuation_in, continuation_tasks, cut_turn};
 pub(crate) use continuations::{withdraw_continuations, withdraw_stale};
 #[cfg(feature = "test-support")]
 pub(crate) use delivery::forget_receipt;
 pub use delivery::GivenUp;
 pub(crate) use delivery::{
     admit, begin_delivery, cancel_message, confirm_delivery, confirm_delivery_telling,
-    confirm_sent_by_hand, fail_delivery, first_received, give_up_delivery, handed_over, in_flight,
-    last_pasted, next_delivery, next_delivery_of, received_of, retry_delivery, with_work,
+    confirm_sent_by_hand, delivery_begun_ms, fail_delivery, first_received, give_up_delivery,
+    given_back_because, handed_over, in_flight, last_given, last_pasted, last_pastes,
+    next_delivery, next_delivery_of, note_since, paste_into, pasted_into, received_of,
+    retry_delivery, with_work,
 };
 pub use delivery::{HandOver, WITHDRAWN_AFTER_HANDED};
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub(crate) use holds::{note_hold, tell_goes_on};
+pub(crate) use paused_answers::{
+    note as note_paused_answer, put_back as put_back_paused_answers,
+    queued as queued_paused_answers, tell_on_its_way, withdraw as withdraw_paused_answers,
+};
 pub use pauses::MAY_STILL_RUN;
 pub(crate) use pauses::{
-    join_pause_note, leave_pause_notes, note_pause, say_again, warnings_on_their_way,
-    warnings_queued,
+    join_pause_note, leave_pause_notes, note_pause, note_stall, say_again, warnings_on_their_way,
+    warnings_queued, Afterwards,
 };
 pub use receipt::Read;
 pub(crate) use receipt::{
@@ -65,11 +75,11 @@ pub(crate) use receipt::{
 };
 pub(crate) use roles::{note_role, role_notes_to};
 pub(crate) use taken_back::take_back;
-pub use told::is_told;
 pub(crate) use told::{
     drop_queued_but_told, kept_through_leaving, launch_called_off, tell_queued, told_unreceived,
     told_waiting, Dropped,
 };
+pub use told::{is_told, waiting_for_the_reopen};
 
 /// A note: from a participant (ConsensFlow itself when none) to another,
 /// about one of the project's tasks or none.
@@ -207,7 +217,8 @@ pub(crate) fn ask(
 /// answer is read at once and never delivered, because the harness door
 /// that asked collects it and the tool call completes with it; the asker's
 /// task resumes here. A question on a task that is over (accepted, cancelled
-/// or failed) takes no answer, from either side: nobody waits for it. `from` is the answerer's participant
+/// or failed) takes no answer, from either side: nobody waits for it. A
+/// question answered is never typed in after (`settle_answered`). `from` is the answerer's participant
 /// id: handles repeat across projects (every chief is `chief`), ids never do.
 pub(crate) fn answer(
     store: &mut Store,
@@ -294,10 +305,13 @@ pub(crate) fn answer(
             "message.sent",
             json!({ "message": id, "kind": "answer", "from": answerer.handle, "to": question.sender }),
         )?;
-        // A question still gated is answered before the one asked saw it: it goes no further.
-        if question.state == "gated" {
+        // A question still gated is answered before the one asked saw it: it goes
+        // no further. So is one still queued that the asker's own window answered.
+        // One still queued that the one asked answered is theirs: they answered it.
+        if question.state == "gated" || (question.state == "queued" && from_window) {
             withdraw(store, question_id, &format!("answered by @{}", answerer.handle))?;
         }
+        settle_answered(store, question_id)?;
         let answer = known_message(store, id)?;
         // The asker's own window gave this one: it has it, and its task goes on.
         if answer.state == "read" {
@@ -339,12 +353,19 @@ fn finished_task_takes_no_answer(task: &TaskRow) -> LedgerError {
 /// that stands: one on its way, being delivered, delivered, read, or still held
 /// at the gate. One that was cancelled (declined, withdrawn, taken back with its
 /// task) or that failed to arrive is none: the question takes another. The one
-/// rule by which a second answer is refused (`answered`) and by which the
-/// chief's handoff lists what it has yet to answer (`chief_open_work`).
+/// rule by which a second answer is refused (`answered`), by which the
+/// chief's handoff lists what it has yet to answer (`chief_open_work`), and by
+/// which a question is never typed in once answered (`settle_answered`).
 pub(crate) fn has_standing_answer(question: &str) -> String {
+    format!("EXISTS ({})", standing_answers(question))
+}
+
+/// SQL that finds the ids of the answers that stand ([`has_standing_answer`])
+/// to the question called `question`.
+fn standing_answers(question: &str) -> String {
     format!(
-        "EXISTS (SELECT 1 FROM message a WHERE a.reply_to = {question}.id AND a.kind = 'answer'
-                   AND a.state NOT IN ('cancelled', 'failed'))"
+        "SELECT a.id FROM message a WHERE a.reply_to = {question}.id AND a.kind = 'answer'
+                   AND a.state NOT IN ('cancelled', 'failed')"
     )
 }
 
@@ -357,6 +378,49 @@ fn answered(store: &Store, question_id: i64) -> Result<bool, LedgerError> {
             has_standing_answer("q")
         ))?
         .exists([question_id])?)
+}
+
+/// A question that has an answer standing ([`has_standing_answer`]) is never
+/// typed into its recipient's window, however it was read (T-260): the one
+/// asked answered it, so it has it. Still `queued`, it is `read`, its receipt
+/// naming the answer, read when the answer was written, which is when the one
+/// asked had it: answered as it waited, or put back in the queue by a paste that
+/// was not proved after it was answered. Any other question, or one in any other
+/// state, is left as it is.
+///
+/// - No event is logged of it: the row says it, its receipt `{"answered": id}`
+///   and its `delivered_at`, the answer's `created_at`; the answer's own
+///   `message.sent` is the event, as it is of a question withdrawn at the gate
+///   by its answer, and the clock is not read again (which kept Node's
+///   recordings of the answer in place).
+/// - A question answered while its paste is in flight (`delivering`) is the
+///   paste's: confirmed, it is `delivered`, typed in with its "Run in your
+///   shell: cf answer m-…" line, and `cf answer` then refuses it
+///   (`already-answered`). Retried, it is settled here.
+pub(super) fn settle_answered(store: &mut Store, question_id: i64) -> Result<(), LedgerError> {
+    let question = known_message(store, question_id)?;
+    if question.kind != "question" || question.state != "queued" {
+        return Ok(());
+    }
+    let answer: Option<(i64, String)> = store
+        .db
+        .query_row(
+            &format!(
+                "SELECT id, created_at FROM message WHERE id = (
+                   SELECT ({} ORDER BY a.id LIMIT 1) FROM message q WHERE q.id = ?)",
+                standing_answers("q")
+            ),
+            [question_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if let Some((answer, at)) = answer {
+        store.db.execute(
+            "UPDATE message SET state = 'read', delivered_at = ?, receipt = ? WHERE id = ?",
+            params![at, json!({ "answered": answer }).to_string(), question_id],
+        )?;
+    }
+    Ok(())
 }
 
 /// What is on its way to a participant (queued, or being delivered), oldest first.
@@ -386,6 +450,25 @@ pub(crate) fn inbox(
         ),
         params![participant_id, limit],
     )
+}
+
+/// The newest note ConsensFlow itself left the participant (one with no sender) whose
+/// body opens with `opening`; none where it left none.
+pub(crate) fn newest_own_note(
+    store: &Store,
+    participant_id: i64,
+    opening: &str,
+) -> Result<Option<MessageView>, LedgerError> {
+    let length = i64::try_from(opening.chars().count()).unwrap_or(i64::MAX);
+    Ok(messages(
+        store,
+        &format!(
+            "{MESSAGE_SELECT} WHERE m.recipient_id = ? AND m.sender_id IS NULL AND m.kind = 'note' \
+             AND substr(m.body, 1, ?) = ? ORDER BY m.id DESC LIMIT 1"
+        ),
+        params![participant_id, length, opening],
+    )?
+    .pop())
 }
 
 /// The messages a `MESSAGE_SELECT` finds.

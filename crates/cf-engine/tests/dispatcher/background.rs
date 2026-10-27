@@ -305,10 +305,91 @@ fn a_window_that_goes_by_itself_with_the_work_running_says_so_in_the_pause_note(
         tiers.notes("chief").last().map(String::as_str),
         Some(
             format!(
-                "T-1 is paused: @{session}'s window closed with background work still running: {LOCK}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+                "T-1 is paused: @{session}'s window closed with background work running, which its close ended: {LOCK}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
             )
             .as_str()
         )
+    );
+}
+
+#[test]
+fn a_window_closed_with_a_process_that_may_be_its_own_names_it_to_whoever_gave_the_task() {
+    // The host names a process it did not end that may be the window's (a server a tool
+    // shell detached): its number and its program, and nothing proved it the window's.
+    let context = Context::new();
+    let tiers = working(&context);
+    context.host.exits_possibly_leaving(&["node"]);
+
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(tiers.project.id, 1, "human")
+        .unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    let told = tiers.notes("chief");
+    assert!(
+        told.contains(
+            &"T-1's window closed; pid 4001 (node) may be this window's and was not ended"
+                .to_owned()
+        ),
+        "{told:?}"
+    );
+}
+
+#[test]
+fn a_window_that_goes_by_itself_names_in_its_pause_note_what_may_be_its_own_after_its_work() {
+    let context = Context::new();
+    let tiers = working(&context);
+    context.host.exits_leaving(&[LOCK]);
+    context.host.exits_possibly_leaving(&["node", "Python"]);
+
+    context.exit("zeus");
+
+    let session = tiers.assignee(1);
+    assert_eq!(
+        tiers.notes("chief").last().map(String::as_str),
+        Some(
+            format!(
+                "T-1 is paused: @{session}'s window closed with background work running, which its close ended: {LOCK}; pid 4001 (node), pid 4002 (Python) may be this window's and were not ended. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+            )
+            .as_str()
+        )
+    );
+}
+
+#[test]
+fn a_chiefs_window_that_closes_tells_the_human_what_it_left_and_what_may_be_its_own() {
+    // The chief's window has no task whose giver a note could tell: the human is told, in the
+    // words a worker's close says it in (Calliope's review T-421).
+    let context = Context::new();
+    let tiers = working(&context);
+    context.host.exits_leaving(&[LOCK]);
+    context.host.exits_possibly_leaving(&["node"]);
+
+    context.exit("chief");
+
+    let told = tiers.notes("human");
+    assert!(
+        told.contains(&format!(
+            "@chief's window closed with background work running, which its close ended: {LOCK}; pid 4001 (node) may be this window's and was not ended"
+        )),
+        "{told:?}"
+    );
+}
+
+#[test]
+fn a_chiefs_window_that_closes_with_nothing_left_tells_the_human_nothing_of_it() {
+    let context = Context::new();
+    let tiers = working(&context);
+
+    context.exit("chief");
+
+    let told = tiers.notes("human");
+    assert!(
+        told.iter().all(|note| !note.contains("background work") && !note.contains("may be this window's")),
+        "{told:?}"
     );
 }
 

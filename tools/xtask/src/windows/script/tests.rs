@@ -7,6 +7,10 @@ mod golden;
 #[cfg(windows)]
 mod lock;
 mod reports;
+#[cfg(windows)]
+mod stage;
+#[cfg(windows)]
+mod stale;
 mod sweep;
 mod unpack;
 
@@ -29,6 +33,7 @@ fn script(steps: &[&str], command: &str, env: &[(String, String)]) -> String {
         command,
         env,
         node: r"C:\Program Files\nodejs",
+        limits: None,
     })
 }
 
@@ -55,6 +60,132 @@ fn given(text: &str) -> Vec<String> {
             (rest[name.len()..].starts_with(" = ") && name != "Path").then_some(name)
         })
         .collect()
+}
+
+/// What a PowerShell said on its error stream, as text. Started with `-EncodedCommand` and
+/// its error stream piped, it says the stream as CLIXML: `#< CLIXML`, then its objects, its
+/// error records among them as `<S S="Error">` strings whose line ends are `_x000D__x000A_`.
+/// Printed as it came, a failed case said `#< CLIXML` and no more (CI run 40132724600,
+/// 2026-10-24), and whether that was the whole of the stream or only what a reader skipped
+/// was not to be told. Each error text of it comes back on lines of its own; a stream that
+/// holds none says so; text that is no CLIXML comes back as it is.
+fn said_on_stderr(stderr: &str) -> String {
+    let Some(objects) = stderr.strip_prefix("#< CLIXML") else {
+        return stderr.to_owned();
+    };
+    let mut errors = Vec::new();
+    let mut rest = objects;
+    while let Some((_, after)) = rest.split_once("<S S=\"Error\">") {
+        let (text, tail) = after.split_once("</S>").unwrap_or((after, ""));
+        errors.push(clixml_text(text));
+        rest = tail;
+    }
+    if errors.is_empty() {
+        let kept = objects.trim();
+        if kept.is_empty() {
+            return "#< CLIXML, the header and no object after it".to_owned();
+        }
+        return format!("#< CLIXML, with no error text in it: {kept}");
+    }
+    errors.concat()
+}
+
+/// A string of a CLIXML stream as the text it stands for: its XML entities, then the
+/// `_x000D_` escapes it makes of what XML would not keep (the carriage returns go).
+fn clixml_text(escaped: &str) -> String {
+    let mut text = escaped.to_owned();
+    for (entity, plain) in [
+        ("&lt;", "<"),
+        ("&gt;", ">"),
+        ("&quot;", "\""),
+        ("&apos;", "'"),
+        ("&amp;", "&"),
+    ] {
+        text = text.replace(entity, plain);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    while let Some((before, after)) = rest.split_once("_x") {
+        out.push_str(before);
+        let coded = after
+            .get(..5)
+            .filter(|code| code.ends_with('_'))
+            .and_then(|code| u32::from_str_radix(&code[..4], 16).ok())
+            .and_then(char::from_u32);
+        match coded {
+            Some(character) => {
+                if character != '\r' {
+                    out.push(character);
+                }
+                rest = &after[5..];
+            }
+            None => {
+                out.push_str("_x");
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// What a program that ran to its end came to, for a case's failure to say: its code, what
+/// it wrote, and what PowerShell wrote on its error stream, as text.
+fn said(ran: &crate::process::Captured) -> String {
+    format!(
+        "exit {}\n--- its output\n{}\n--- its error stream\n{}",
+        ran.code,
+        ran.stdout,
+        said_on_stderr(&ran.stderr)
+    )
+}
+
+#[test]
+fn what_a_powershell_said_on_its_error_stream_is_read_as_text_and_a_stream_with_no_text_says_so() {
+    let error = |text: &str| format!("<S S=\"Error\">{text}</S>");
+    let stream = format!(
+        "#< CLIXML\r\n<Objs Version=\"1.1.0.1\" xmlns=\"http://schemas.microsoft.com/powershell/2004/04\">{}{}</Objs>",
+        error("Get-Content : The process cannot access the file &apos;C:\\a\\x_x005F_y&apos; because it is being used by another process._x000D__x000A_"),
+        error("At line:5 char:1 &lt;here&gt;_x000D__x000A_"),
+    );
+    assert_eq!(
+        said_on_stderr(&stream),
+        "Get-Content : The process cannot access the file 'C:\\a\\x_y' because it is being used by another process.\nAt line:5 char:1 <here>\n"
+    );
+    // What a case saw on 2026-10-24: the header, and nothing after it.
+    assert_eq!(
+        said_on_stderr("#< CLIXML\r\n"),
+        "#< CLIXML, the header and no object after it"
+    );
+    // Progress records are no error: they are shown, so that they are not taken for the cause.
+    let progress = "#< CLIXML\r\n<Objs Version=\"1.1.0.1\"><Obj S=\"progress\" RefId=\"0\"><MS><AV>Preparing modules for first use.</AV></MS></Obj></Objs>";
+    assert_eq!(
+        said_on_stderr(progress),
+        format!(
+            "#< CLIXML, with no error text in it: {}",
+            progress.strip_prefix("#< CLIXML").unwrap().trim()
+        )
+    );
+    // Text that is no CLIXML, a stream that is empty, and an escape that is none, as they are.
+    assert_eq!(said_on_stderr(""), "");
+    assert_eq!(
+        said_on_stderr("fatal: not a repository\n"),
+        "fatal: not a repository\n"
+    );
+    assert_eq!(
+        said_on_stderr(&format!("#< CLIXML\r\n{}", error("a_xZZZZ_b _x00 _x000A"))),
+        "a_xZZZZ_b _x00 _x000A"
+    );
+    // All three parts of a case's failure.
+    let ran = crate::process::Captured {
+        code: 1,
+        stdout: String::new(),
+        stderr: "#< CLIXML\r\n".to_owned(),
+    };
+    assert_eq!(
+        said(&ran),
+        "exit 1\n--- its output\n\n--- its error stream\n#< CLIXML, the header and no object after it"
+    );
 }
 
 #[test]
@@ -164,6 +295,28 @@ fn a_quote_in_a_value_is_said_again_and_everything_else_is_taken_as_it_is() {
     assert!(text.contains("$env:C = '$x `y` %z% \"q\" & |'\n"));
 }
 
+/// PowerShell reads the typographic single quotes as quotes too: a plant named "a worker’s
+/// turn" ended the run's command at its quote, on zeewin2 (integration B round 2, T-800). A
+/// variable's value is ASCII (`parse_env`), so the command is where one can come.
+#[test]
+fn a_typographic_quote_in_the_command_is_said_again_as_an_apostrophe_is() {
+    let text = script(
+        &[],
+        &command_line(&[
+            "cargo",
+            "xtask",
+            "plants",
+            "daemon",
+            "a worker\u{2019}s turn",
+        ]),
+        &[],
+    );
+    assert!(
+        text.contains("'cargo xtask plants daemon \"a worker\u{2019}\u{2019}s turn\"'"),
+        "{text}"
+    );
+}
+
 #[test]
 fn the_variables_keep_the_order_they_were_named_in() {
     let env = parse_env(&strings(&["Z=1", "A=2", "M=3"])).unwrap();
@@ -255,12 +408,15 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
         .collect();
     assert_eq!(
         leaving,
-        [r#"function Exit-Run([int]$code) { Write-Output "`n== exit $code"; exit $code }"#]
+        [
+            r#"function Exit-Run([int]$code) { Free-Machine; Write-Output "`n== exit $code"; exit $code }"#
+        ]
     );
     // And it is what the lock, a machine with no tar of its own, the unpacking and the
-    // sweep leave by (the bootstrap), and a step and the command (the run script).
+    // sweep leave by (the bootstrap), and a step, a preparation that could not be done and the
+    // command (the run script).
     assert_eq!(boot.matches("Exit-Run ").count(), 4, "{boot}");
-    assert_eq!(run.matches("Exit-Run ").count(), 2, "{run}");
+    assert_eq!(run.matches("Exit-Run ").count(), 3, "{run}");
     assert!(
         boot.contains("if ($failed.Count) { Exit-Run 1 }\n"),
         "{boot}"
@@ -275,11 +431,12 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
         "{run}"
     );
     // What the bootstrap does after it reads the run script takes away what the run leaves
-    // (its tarball, its records if they are its, its lock), which says nothing (so the
-    // line is the last).
+    // (the job's end-on-close, its records if they are its, its lock, its tarball), which says
+    // nothing (so the line is the last); the records and the lock went before the line, in
+    // `Exit-Run`.
     assert!(
         boot.contains(
-            "\n} finally {\n  if ($null -ne $job) { [CfJob]::Release($job) }\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($held) {\n    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue\n    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n  }\n  if ($lock) { $lock.Dispose() }\n}\n"
+            "\n} finally {\n  if ($null -ne $job) { [CfJob]::Release($job) }\n  Free-Machine\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n}\n"
         ),
         "{boot}"
     );
@@ -297,10 +454,15 @@ fn powershell_says_how_it_went_in_its_last_line_from_every_place_the_script_leav
     use crate::process::{self, Invocation};
 
     let text = bootstrap();
-    let function = text
-        .lines()
-        .find(|line| line.starts_with("function Exit-Run"))
-        .unwrap();
+    // The function and the one it calls first (`Free-Machine`, which holds nothing here), as the
+    // bootstrap has them.
+    let from = text.find("function Free-Machine").unwrap();
+    let to = text[from..].find("function Exit-Run").unwrap() + from;
+    let end_of_line = text[to..].find('\n').unwrap() + to;
+    let function = format!(
+        "$held = $false\n$lock = $null\n{}",
+        &text[from..end_of_line]
+    );
     let way_out = "try { %BODY% } finally { Remove-Item -LiteralPath (Join-Path $env:TEMP 'cf-nothing-here') -Force -ErrorAction SilentlyContinue }";
     for (body, status) in [
         // At the top, as the lock's.
@@ -331,11 +493,10 @@ fn powershell_says_how_it_went_in_its_last_line_from_every_place_the_script_leav
         assert_eq!(
             tail.last_line().as_deref().and_then(exit_said),
             Some(status),
-            "{body}\n{}{}",
-            ran.stdout,
-            ran.stderr
+            "{body}\n{}",
+            said(&ran)
         );
-        assert_eq!(ran.code, status, "{body}\n{}{}", ran.stdout, ran.stderr);
+        assert_eq!(ran.code, status, "{body}\n{}", said(&ran));
     }
 }
 
@@ -380,11 +541,10 @@ fn powershell_ends_the_line_a_command_left_unfinished_before_it_says_how_it_went
         assert_eq!(
             tail.last_line().as_deref().and_then(exit_said),
             Some(status),
-            "{body}\n{:?}{}",
-            ran.stdout,
-            ran.stderr
+            "{body}\n{}",
+            said(&ran)
         );
-        assert_eq!(ran.code, status, "{body}\n{}{}", ran.stdout, ran.stderr);
+        assert_eq!(ran.code, status, "{body}\n{}", said(&ran));
     }
 }
 
@@ -397,7 +557,12 @@ fn the_script_that_ends_a_run_there_ends_the_run_the_lock_names_and_takes_its_ta
          $running = Join-Path $dir '.windows-run.pid'\n\
          $owner = Join-Path $dir '.windows-run.id'\n\
          $of = @(Get-Content $owner -ErrorAction SilentlyContinue)\n\
-         if ($of[0] -eq '0000abcd-12345678') { taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null; Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force } }\n\
+         if ($of[0] -eq '0000abcd-12345678') {\n\
+         \x20 $run = try { Get-Process -Id $of[1] -ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime } } catch {}\n\
+         \x20 $ends = @('/PID', $of[1], '/F'); if ($of[2] -ne 'job') { $ends += '/T' }\n\
+         \x20 if ($run) { taskkill @ends 2>&1 | Out-Null }\n\
+         \x20 Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n\
+         }\n\
          Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.0000abcd-12345678.tgz') -Force -ErrorAction SilentlyContinue\n\
          exit 0\n"
     );
@@ -413,6 +578,7 @@ fn script_of_run(id: &str) -> String {
         command: "x",
         env: &[],
         node: r"C:\Program Files\nodejs",
+        limits: None,
     })
 }
 
@@ -496,11 +662,15 @@ fn a_run_removes_its_own_tarball_whichever_way_it_ends_and_the_lock_only_if_it_h
     );
     // The records are the run's own to take away only if it holds the lock, and the pid file
     // only if it still holds this run's process: a script of the older form may have
-    // written its own over it.
+    // written its own over it. They go first of what the run does to say it has ended
+    // (`Free-Machine`, which `Exit-Run` calls before it writes its line, and the `finally` again
+    // for a run that ends otherwise), so that the next run is never refused by this one's end.
     assert!(
-        finally.contains("  if ($held) {\n    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue\n    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n  }\n"),
-        "{finally}"
+        text.contains("function Free-Machine {\n  if ($script:held) {\n    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue\n    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n    $script:held = $false\n  }\n"),
+        "{text}"
     );
+    assert!(finally.contains("  Free-Machine\n"), "{finally}");
+    assert!(at("function Free-Machine") < at("function Exit-Run"));
     // Held from the line that writes the records, and from none before it.
     assert!(at("Set-Content -Path $running") < at("Set-Content -Path $owner"));
     assert!(at("Set-Content -Path $owner") < at("$held = $true\n"));
@@ -536,9 +706,10 @@ fn the_lock_is_a_file_opened_for_the_run_alone_before_anything_else_is_done_in_t
     // Closed when the run ends however it ends, a refusal too; the file stays in the folder.
     let finally = &text[at("} finally {\n")..];
     assert!(
-        finally.contains("  if ($lock) { $lock.Dispose() }\n"),
-        "{finally}"
+        text.contains("  if ($script:lock) { $script:lock.Dispose(); $script:lock = $null }\n}\n"),
+        "{text}"
     );
+    assert!(finally.contains("  Free-Machine\n"), "{finally}");
     assert!(!finally.contains("windows-run.lock"), "{finally}");
     assert_eq!(LOCK, ".windows-run.lock");
     assert!(
@@ -592,7 +763,7 @@ fn a_command_whose_last_output_has_no_line_end_still_passes() {
     let text = bootstrap();
     assert!(
         text.contains(
-            "function Exit-Run([int]$code) { Write-Output \"`n== exit $code\"; exit $code }\n"
+            "function Exit-Run([int]$code) { Free-Machine; Write-Output \"`n== exit $code\"; exit $code }\n"
         ),
         "{text}"
     );
@@ -616,27 +787,45 @@ fn a_command_whose_last_output_has_no_line_end_still_passes() {
 #[test]
 fn a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another() {
     let text = stop_script(DIR, ID);
-    // The process is killed only where the owner file names this run, and it is the process
+    // The process is ended only where the owner file names this run, and it is the process
     // the owner file names (the older file may have been written over by another script).
-    let guarded: Vec<&str> = text
-        .lines()
-        .filter(|line| line.contains("taskkill"))
-        .collect();
-    assert_eq!(guarded.len(), 1, "{text}");
     assert!(
-        guarded[0].starts_with(
-            "if ($of[0] -eq '0000abcd-12345678') { taskkill /PID ($of[1]) /T /F 2>&1 | Out-Null; "
-        ),
-        "{text}"
-    );
-    // Its records go with it: the owner file, and the older file only if it still holds the
-    // process that was ended.
-    assert!(
-        guarded[0].contains("Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force }"),
+        text.contains("if ($of[0] -eq '0000abcd-12345678') {\n"),
         "{text}"
     );
     assert!(
         text.contains("$of = @(Get-Content $owner -ErrorAction SilentlyContinue)\n"),
+        "{text}"
+    );
+    let ending: Vec<&str> = text
+        .lines()
+        .filter(|line| line.contains("taskkill"))
+        .collect();
+    assert_eq!(ending.len(), 1, "{text}");
+    assert_eq!(
+        ending[0], "  if ($run) { taskkill @ends 2>&1 | Out-Null }",
+        "{text}"
+    );
+    assert!(text.contains("taskkill @ends"), "{text}");
+    assert!(text.contains("$ends = @('/PID', $of[1], '/F'); "), "{text}");
+    // It is the run's: a PowerShell that was started before the owner file was last
+    // written. A process id that a program has been given since the run ended is no
+    // run, and ending it ends that program.
+    let run = text
+        .lines()
+        .find(|line| line.starts_with("  $run = "))
+        .unwrap_or_else(|| panic!("no line finds the run's process: {text}"));
+    assert!(
+        run.contains("Get-Process -Id $of[1] -ErrorAction Stop")
+            && run.contains("$_.Name -in @('powershell', 'pwsh')")
+            && run.contains("$_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime")
+            && run.ends_with("catch {}"),
+        "{run}"
+    );
+    // Its records go with it: the owner file, and the older file only if it still holds the
+    // process that was ended.
+    assert!(
+        text.contains("  Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n}\n"),
         "{text}"
     );
     // The run's own tarball goes whatever the lock says: it is the run's.
@@ -647,6 +836,47 @@ fn a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another() {
     );
     // Another run's stop names another run.
     assert!(!stop_script(DIR, "0000abce-9abcdef0").contains(ID));
+}
+
+#[test]
+fn a_run_that_is_in_its_job_is_ended_by_its_process_alone_and_the_tree_is_walked_only_for_one_that_is_not(
+) {
+    let stop = stop_script(DIR, ID);
+    // The tree is read and walked only when the owner file does not say the run is in its
+    // job: the walk ends what it read by process id, and an id that has been given again
+    // since is a program that is no part of the run (the stop's own text says how it was
+    // found).
+    assert!(
+        stop.contains(&format!("if ($of[2] -ne '{IN_JOB}') {{ $ends += '/T' }}\n")),
+        "{stop}"
+    );
+    assert_eq!(stop.matches("/T").count(), 1, "{stop}");
+    // The run says it, once it is in the job, in the owner file's third line, where the
+    // stop reads it: the run script appends it, and says if it could not.
+    let run = script(&[], "cmd /c exit 0", &[]);
+    let at = |what: &str| {
+        run.find(what)
+            .unwrap_or_else(|| panic!("{what} is not there: {run}"))
+    };
+    assert!(
+        run.contains(&format!(
+            "if ($null -ne $job) {{\n  try {{ Add-Content -LiteralPath $owner -Value '{IN_JOB}' }} catch {{ Write-Output \"== no job record: "
+        )),
+        "{run}"
+    );
+    // After the job is made and before any program of the run is started, so that a stop
+    // that finds the third line finds a run whose programs are all in the job.
+    assert!(at("$job = $made") < at("Add-Content -LiteralPath $owner"));
+    assert!(at("Add-Content -LiteralPath $owner") < at("Set-Location $dir"));
+    assert!(at("Add-Content -LiteralPath $owner") < at("foreach ($step in"));
+    // The bootstrap writes the first two lines and no third: a run that has not got so far
+    // is ended with its tree.
+    let boot = bootstrap();
+    assert!(
+        boot.contains("Set-Content -Path $owner -Value @('0000abcd-12345678', $PID)\n"),
+        "{boot}"
+    );
+    assert!(!boot.contains("Add-Content"), "{boot}");
 }
 
 #[test]
@@ -693,6 +923,7 @@ fn what_a_run_is_asked_for_is_in_the_run_script_and_the_bootstrap_does_not_depen
             command,
             env,
             node: r"C:\Program Files\nodejs",
+            limits: None,
         }
     }
     let (plain, heavy) = (
@@ -751,7 +982,7 @@ fn powershell_runs_the_finally_that_takes_the_tarball_away_when_the_script_leave
             &Env::from_process(),
         )
         .unwrap();
-        assert_eq!(ran.code, 75, "{}{}", ran.stdout, ran.stderr);
+        assert_eq!(ran.code, 75, "{}", said(&ran));
         assert!(!tarball.exists(), "the tarball stayed: {held}");
         assert_eq!(lock.exists(), lock_stays, "held {held}");
     }
@@ -827,9 +1058,8 @@ fn the_job_is_released_where_a_run_ends_by_itself_and_not_where_it_is_killed() {
         !boot.contains("Add-Type") && !boot.contains("CreateJobObject"),
         "{boot}"
     );
-    // The stop is the same as before the job: the system ends the programs of the run when the
-    // process the stop ends is gone.
-    assert!(stop_script(DIR, ID).contains("taskkill /PID ($of[1]) /T /F"));
+    // The stop ends that process, and the system ends the programs of the run when it is gone.
+    assert!(stop_script(DIR, ID).contains("taskkill @ends"));
 }
 
 #[test]
@@ -867,6 +1097,7 @@ fn longest(env: &[&str]) -> Script<'static> {
         pairs: Vec::new(),
         claude_model: Some("claude-sonnet-5".into()),
         pi_model: Some("openai/gpt-5.6-luna".into()),
+        wait: 0,
     };
     let pair = Pair {
         chief: "claude".into(),
@@ -884,6 +1115,7 @@ fn longest(env: &[&str]) -> Script<'static> {
         command,
         env,
         node: r"C:\Program Files\nodejs",
+        limits: None,
     }
 }
 
@@ -991,4 +1223,116 @@ fn each_step_of_the_build_is_a_line_the_machines_shell_reads_whole() {
         let words: Vec<&str> = step.split(' ').collect();
         assert_eq!(command_line(&words), step);
     }
+}
+
+/// What a machine takes at once: the run script gives the process the builds' jobs and the tests'
+/// threads that machine's memory carries, before the steps and the command (T-585: zeewin, with 7 GB
+/// and 12 threads, had 0 GB free in both of its workspace runs, one of them 1,396 s and two lock
+/// cases failed on its time). A machine that carries all it is given says nothing, and a variable
+/// the run names itself, which is given after, wins.
+#[test]
+fn a_machine_that_takes_less_at_once_has_its_limits_given_before_the_steps_and_the_command() {
+    let limited = run_script(&Script {
+        limits: Some(Limits {
+            build_jobs: 4,
+            test_threads: 3,
+        }),
+        ..longest(&["CARGO_BUILD_JOBS=2"])
+    });
+    let at = |needle: &str| {
+        limited
+            .find(needle)
+            .unwrap_or_else(|| panic!("no {needle:?} in\n{limited}"))
+    };
+    let jobs = at("$env:CARGO_BUILD_JOBS = '4'");
+    let threads = at("$env:RUST_TEST_THREADS = '3'");
+    assert!(
+        limited.contains("== limits: CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=3"),
+        "{limited}"
+    );
+    let steps = at("foreach ($step in @(");
+    assert!(jobs < steps && threads < steps, "before the steps");
+    // The run's own variable is given after, so it is the command's.
+    let given = at("$env:CARGO_BUILD_JOBS = '2'");
+    assert!(
+        jobs < given && given < at("cmd /c \"$run 2>&1\""),
+        "{limited}"
+    );
+    // A machine with no limits says nothing of them.
+    let free = run_script(&Script {
+        limits: None,
+        ..longest(&[])
+    });
+    assert!(
+        !free.contains("RUST_TEST_THREADS") && !free.contains("== limits"),
+        "{free}"
+    );
+}
+
+/// A run is sent the steps that make sure of what its tests run on, after the build's steps and
+/// before its command, whether or not it was asked to build: a copy where nobody had built was
+/// left to Windows' own console host (a test of the keys read Alt as key 18, zeewin2, T-487) and
+/// to a registry that lacked the optional crates (nextest ended at once, T-627).
+#[test]
+fn every_run_makes_sure_of_the_crates_and_the_console_host_before_its_command() {
+    for steps in [&[][..], &BUILD[..]] {
+        let run = script(steps, "cargo test -p cf-panes", &[]);
+        let at = |needle: &str| {
+            run.find(needle)
+                .unwrap_or_else(|| panic!("no {needle:?} in\n{run}"))
+        };
+        let command = at("cmd /c \"$run 2>&1\"");
+        let mut last = steps
+            .last()
+            .map_or(0, |step| at(&format!("'{step}'")) + step.len());
+        for step in PREPARE_STEPS {
+            let here = at(&format!("'{step}'"));
+            assert!(last <= here && here < command, "{step}: {run}");
+            last = here;
+        }
+    }
+}
+
+/// The console host goes beside the programs of both profiles: cargo puts the profile's folder
+/// on the PATH of the tests it runs, so `cargo test` finds `conpty.dll` in `debug`, and the
+/// programs the black-box suites build (`release`) find it there.
+#[test]
+fn the_console_host_is_staged_beside_the_debug_and_the_release_builds() {
+    for profile in ["debug", "release"] {
+        let step = format!("cargo xtask conpty --into app/src-tauri/target/{profile}");
+        assert!(PREPARE_STEPS.contains(&step.as_str()), "{step}");
+    }
+}
+
+/// The crates are asked of the network only when the registry lacks one: a machine offline
+/// with everything fetched is not refused.
+#[test]
+fn the_crates_are_fetched_only_when_the_registry_lacks_one() {
+    let step = PREPARE_STEPS[0];
+    let (offline, online) = step.split_once(" || ").unwrap();
+    assert!(
+        offline.starts_with("cargo fetch --locked --offline "),
+        "{step}"
+    );
+    assert_eq!(online, "cargo fetch --locked");
+}
+
+/// A step that cannot be done ends the run with its status, saying what the run needed, and the
+/// command after it is not run.
+#[test]
+fn a_run_whose_preparation_fails_ends_with_its_status_before_the_command() {
+    let run = script(&[], "cargo test", &[]);
+    let (_, after) = run.split_once("foreach ($step in @('cargo fetch").unwrap();
+    let (loop_body, _) = after
+        .split_once("Set-Location (Join-Path $dir '.')")
+        .unwrap();
+    assert!(
+        loop_body.contains("if ($LASTEXITCODE -ne 0)"),
+        "{loop_body}"
+    );
+    assert!(
+        loop_body.contains("the command is not run on what happens to be on the machine"),
+        "{loop_body}"
+    );
+    assert!(loop_body.contains("Exit-Run $LASTEXITCODE"), "{loop_body}");
 }

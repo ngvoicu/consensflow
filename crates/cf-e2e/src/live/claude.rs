@@ -6,8 +6,10 @@
 //! test reads both as the daemon does, and watches the status as it changes
 //! ([`Status`]), because what a test shows is when it read what.
 //!
-//! The config folder is `~/.claude` on the machine; a test is given it, never
-//! the `CLAUDE_CONFIG_DIR` of the shell it runs in.
+//! The config folder is the one the run's Claude windows run on (a folder of the
+//! run's own, with a copy of the machine's login: [`super::login`]); a test is
+//! given it, never the `CLAUDE_CONFIG_DIR` of the shell it runs in, and never the
+//! person's own `~/.claude`.
 
 #[cfg(test)]
 mod tests;
@@ -288,8 +290,12 @@ fn entry_of(line: &str) -> Option<Entry> {
         Value::Array(parts) => parts.clone(),
         _ => Vec::new(),
     };
-    let role = record["message"]["role"]
+    // A request Claude Code 2.1.310 keeps of what it sent the API carries the message it
+    // sent (`api-request-blob`), which is none of the conversation's: it is its type.
+    let role = record["type"]
         .as_str()
+        .filter(|kind| kind.starts_with("api-request"))
+        .or_else(|| record["message"]["role"].as_str())
         .or_else(|| record["type"].as_str())
         .unwrap_or("undefined");
     let kind = match record["subtype"].as_str() {

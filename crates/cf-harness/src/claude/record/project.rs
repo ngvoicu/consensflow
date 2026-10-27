@@ -18,9 +18,10 @@ use cf_base::{js, time};
 use serde_json::{Map, Value};
 
 use super::jobs::Watch;
-use super::patterns::OUTPUT;
+use super::patterns::{BARE_COMPACT, CAVEAT, OUTPUT};
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
+use crate::shared::quota::spent_extra_usage;
 use crate::shared::record::reading::Source;
 
 /// What Claude Code says, in a message of its own, as it closes the turn it
@@ -33,7 +34,8 @@ pub(super) enum Projected {
     /// A record replay passes over: of a type it does not read, or of one it
     /// reads that says nothing of the turn.
     Other,
-    /// What a `UserPromptSubmit` hook added to the prompt.
+    /// The harness's own words in the conversation: what a `UserPromptSubmit` hook added to
+    /// the prompt, and the companion of a turn (`turnCompanion`).
     Hook(Box<Hook>),
     /// Claude Code's own notification of a job's event or end, brought into a turn
     /// under way (an attachment, `queued_command` of
@@ -66,7 +68,8 @@ pub(super) struct Boundary {
     pub(super) agents: Option<usize>,
 }
 
-/// An attachment that holds a hook's context.
+/// The harness's own words, an item of its own and no user's: an attachment that holds a
+/// hook's context, or the companion of a turn.
 #[derive(Debug, PartialEq)]
 pub(super) struct Hook {
     pub(super) at: Option<Value>,
@@ -91,7 +94,8 @@ pub(super) struct Assistant {
     pub(super) closes_a_cut_turn: bool,
     /// The API refused the request (`isApiErrorMessage`).
     pub(super) refused: bool,
-    /// A refusal for quota: a status of 429, or the error `rate_limit`.
+    /// A refusal for quota: a status of 429, the error `rate_limit`, or words
+    /// that say the account's extra usage is spent.
     pub(super) rate_limited: bool,
 }
 
@@ -142,6 +146,12 @@ pub(super) struct User {
     /// conversation: Claude Code's own words, which end the command's turn
     /// where they follow it.
     pub(super) output_of: Option<Arc<str>>,
+    /// Where it is, of the main conversation, the bare `/compact` as it was
+    /// typed or the words Claude Code writes before a command (a meta record):
+    /// which, and the uuid of the record it is a child of. A compaction
+    /// cancelled with Escape writes the second as a sibling of the first, and
+    /// nothing more.
+    pub(super) compacting: Option<(Compacting, Arc<str>)>,
     /// The turn Claude Code begins by itself for a notification of a job's event or
     /// end: from the system (`promptSource`), for a notification (`turnOrigin`, and
     /// `origin.kind`; 2.1.241 has only the second, 2.1.277 on both).
@@ -157,6 +167,15 @@ pub(super) struct User {
     /// What a TaskStop result of the record says it stopped, of the main conversation:
     /// the call it answers, as the block says it, and the job's id.
     pub(super) stopped: Option<(Option<Value>, Arc<str>)>,
+}
+
+/// A user's record of a `/compact` typed at Claude's prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Compacting {
+    /// The command as it was typed (`BARE_COMPACT`), written the moment it is.
+    Typed,
+    /// The words Claude Code writes before a command (`CAVEAT`).
+    Caveat,
 }
 
 /// The record `record` of the session `session`, as replay reads it.
@@ -309,6 +328,8 @@ fn assistant(record: &Value, session: &str) -> Projected {
     let status = record.get("apiErrorStatus").and_then(Value::as_f64);
     let text = claude_text(content);
     let refused = record.get("isApiErrorMessage") == Some(&Value::Bool(true));
+    // Anthropic's spent extra usage is a 400 (`invalid_request`), its words the refusal.
+    let spent = spent_extra_usage(&text);
     // Claude Code writes it with the next message of a turn it was cut in
     // (T-442's record, 2.1.296; `quit-before-a-word-resumed.jsonl`), and still
     // does in 2.1.305, the newest seen (2026-10-21). A refusal for quota may
@@ -329,18 +350,39 @@ fn assistant(record: &Value, session: &str) -> Projected {
         closes_a_cut_turn,
         refused,
         rate_limited: status == Some(429.0)
-            || record.get("error").and_then(Value::as_str) == Some("rate_limit"),
+            || record.get("error").and_then(Value::as_str) == Some("rate_limit")
+            || spent,
     }))
 }
 
 fn user(record: &Value, session: &str) -> Projected {
     let content = field(record.get("message"), "content");
     let text = claude_text(content);
+    let holds_results = blocks(content)
+        .iter()
+        .any(|block| kind(block) == Some("tool_result"));
+    if is_companion(record) && !holds_results && !js::trim(&text).is_empty() {
+        return Projected::Hook(Box::new(Hook {
+            at: timestamp(record),
+            text,
+            uuid: text_id(record.get("uuid")),
+        }));
+    }
     let output_of = record
         .get("parentUuid")
         .and_then(Value::as_str)
         .filter(|_| of_main_conversation(record, session) && OUTPUT.is_match(&text))
         .map(Arc::from);
+    let meta = record.get("isMeta") == Some(&Value::Bool(true));
+    let compacting = if BARE_COMPACT.is_match(&text) && !meta {
+        Some(Compacting::Typed)
+    } else if CAVEAT.is_match(&text) && meta {
+        Some(Compacting::Caveat)
+    } else {
+        None
+    }
+    .filter(|_| of_main_conversation(record, session))
+    .and_then(|compacting| Some((compacting, text_id(record.get("parentUuid"))?)));
     Projected::User(Box::new(User {
         at: timestamp(record),
         uuid: text_id(record.get("uuid")),
@@ -354,6 +396,7 @@ fn user(record: &Value, session: &str) -> Projected {
         queued: record.get("promptSource").and_then(Value::as_str) == Some("queued"),
         summary: record.get("isCompactSummary") == Some(&Value::Bool(true)),
         output_of,
+        compacting,
         notification: is_notification(record),
         transcript_only: record.get("queueTranscriptOnly") == Some(&Value::Bool(true)),
         job: of_main_conversation(record, session)
@@ -364,6 +407,16 @@ fn user(record: &Value, session: &str) -> Projected {
             .then(|| stopped(record, content))
             .flatten(),
     }))
+}
+
+/// Whether the user's record is the companion of a turn: what Claude Code writes beside
+/// the message it was given, or a tool's call, and that is its own and no word of the
+/// user's (`turnCompanion`; 2.1.308 writes `[Image: source: <path>]`, a line for each
+/// picture it made an attachment of, after the message that named the paths). Claude Code
+/// takes it for no prompt of the user's itself. `isMeta` is on other records that are the
+/// user's turn all the same (the caveat of a command), and is no part of the test.
+fn is_companion(record: &Value) -> bool {
+    record.get("turnCompanion") == Some(&Value::Bool(true))
 }
 
 /// Whether a user's record is the turn Claude Code begins by itself for a notification

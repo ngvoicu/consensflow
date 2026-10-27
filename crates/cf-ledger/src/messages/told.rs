@@ -26,7 +26,7 @@ use serde_json::json;
 
 use super::carrying::{adopt, carried_into};
 use super::pauses::tell_kept;
-use super::{message_task, messages};
+use super::{known_message, message_task, messages};
 use crate::model::{self, LedgerError, HELD_TASK_STATES, MAX_BODY, MEMBER_ROLES};
 use crate::queue::{send, Sent};
 use crate::store::Store;
@@ -178,6 +178,56 @@ pub(super) fn kept_for_resume(
     adopt(store, message.id)?;
     tell_kept(store, task, message, reason)?;
     Ok(true)
+}
+
+/// Words told to the window of T-`number`, which ConsensFlow has just paused as its
+/// window went away (`why`), that still wait for it: queued, or held for the human
+/// (`gated`), in no paste under way (one on its way is settled by its delivery, kept
+/// for the resume as its paste fails: `kept_for_resume`). They wait for the resume, as
+/// those do, and the queued say so; its requester hears which, and why, in the note of
+/// the pause ([`tell_kept`]). Not `except`, which its caller names itself. Each of
+/// them, for the engine to tell the human; none where the task is not paused.
+pub(crate) fn keep_waiting(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    why: &str,
+    except: Option<i64>,
+) -> Result<Vec<MessageView>, LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        if task.state != "paused" {
+            return Ok(Vec::new());
+        }
+        let waiting = messages(
+            store,
+            &format!(
+                "{MESSAGE_SELECT} WHERE m.task_id = ?1 AND {told} AND m.recipient_id = ?2
+                   AND m.state IN ('queued', 'gated') AND m.id IS NOT ?3
+                   AND (m.carried_by IS NULL
+                        OR m.carried_by NOT IN (SELECT id FROM message WHERE state = 'delivering'))
+                 ORDER BY m.id",
+                told = told("m")
+            ),
+            params![task.id, task.assignee_id, except],
+        )?;
+        let mut kept = Vec::with_capacity(waiting.len());
+        for message in waiting {
+            // A row held for the human keeps the gate's own reason (none).
+            store.db.execute(
+                "UPDATE message SET reason = ? WHERE id = ? AND state = 'queued'",
+                params![format!("kept for T-{number}'s resume: {why}"), message.id],
+            )?;
+            store.log(
+                project_id,
+                "delivery.kept",
+                json!({ "message": message.id, "reason": why }),
+            )?;
+            tell_kept(store, &task, &message, why)?;
+            kept.push(known_message(store, message.id)?);
+        }
+        Ok(kept)
+    })
 }
 
 /// The words told to T-`number`'s windows that no window ever had, oldest first:
@@ -400,6 +450,27 @@ pub(super) fn arrived_after_all(
     Ok(())
 }
 
+/// What tells which of the words `told` a failed task's window wait for its reopen,
+/// queued or held for the human, of `handle`'s, or of anyone's when it is none:
+/// nothing when none do. One fate, said in these words wherever a task fails: the
+/// ledger's give-up ([`Dropped::waiting_for_the_reopen`]) and the engine's note of a
+/// delivery that failed its task (T-414 P3-4, T-446 P3-4).
+pub fn waiting_for_the_reopen(told: &[MessageView], handle: Option<&str>) -> String {
+    let ids: Vec<String> = told
+        .iter()
+        .filter(|told| matches!(told.state.as_str(), "queued" | "gated"))
+        .filter(|told| handle.is_none() || told.sender.as_deref() == handle)
+        .map(|told| format!("m-{}", told.id))
+        .collect();
+    if ids.is_empty() {
+        return String::new();
+    }
+    format!(
+        "; the words told its window wait for the reopen: {}",
+        ids.join(", ")
+    )
+}
+
 /// What a task called off took with it of the words told to its windows, which
 /// no window ever had.
 pub(crate) struct Dropped(Vec<MessageView>);
@@ -435,25 +506,10 @@ impl Dropped {
         }
     }
 
-    /// What tells which of the words wait for the task's reopen, queued or held
-    /// for the human, of `handle`'s, or of anyone's when it is none: nothing when
-    /// none do. Its words are those
-    /// of the engine's note of a failure (wt/give-up-paths).
+    /// What tells which of the words wait for the task's reopen, of `handle`'s, or of
+    /// anyone's when it is none ([`waiting_for_the_reopen`]).
     pub(crate) fn waiting_for_the_reopen(&self, handle: Option<&str>) -> String {
-        let ids: Vec<String> = self
-            .0
-            .iter()
-            .filter(|told| matches!(told.state.as_str(), "queued" | "gated"))
-            .filter(|told| handle.is_none() || told.sender.as_deref() == handle)
-            .map(|told| format!("m-{}", told.id))
-            .collect();
-        if ids.is_empty() {
-            return String::new();
-        }
-        format!(
-            "; the words told its window wait for the reopen: {}",
-            ids.join(", ")
-        )
+        waiting_for_the_reopen(&self.0, handle)
     }
 
     /// Tells each one who told words that went, but those `told` already (who

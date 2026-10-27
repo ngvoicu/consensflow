@@ -12,7 +12,7 @@
 //! <seconds> <file>`, which writes `<file>.pid` and runs that many seconds.
 //! `cf_e2e::rig::Rig::jobs` reads what they wrote: the servers are `plugin`, the
 //! workers `worker`. The process is in `<file>.pid` whole from the moment the file is
-//! there ([`say_its_process`]), for a case that waits for the file reads a number.
+//! there ([`cf_e2e::files::say_its_process`]), for a case that waits for the file reads a number.
 
 use std::fs;
 use std::io::{self, BufRead, Write};
@@ -95,7 +95,7 @@ pub fn serve(args: &[String]) -> ExitCode {
         return refuse(&format!("{SERVER} <file> <workers>"));
     };
     become_a_group_of_its_own();
-    if let Err(failed) = say_its_process(file) {
+    if let Err(failed) = cf_e2e::files::say_its_process(Path::new(file)) {
         return refuse(&failed.to_string());
     }
     let folder = Path::new(file).parent().unwrap_or(Path::new("."));
@@ -135,20 +135,11 @@ pub fn work(args: &[String]) -> ExitCode {
     ) else {
         return refuse(&format!("{WORKER} <seconds> <file>"));
     };
-    if let Err(failed) = say_its_process(file) {
+    if let Err(failed) = cf_e2e::files::say_its_process(Path::new(file)) {
         return refuse(&failed.to_string());
     }
     thread::sleep(Duration::from_secs(seconds));
     ExitCode::SUCCESS
-}
-
-/// Writes the process in `<file>.pid`, so that the file is never there empty: it is
-/// written under another name and renamed, for `fs::write` makes the file before it
-/// writes into it, and a case that waits for the file reads what is there at once.
-fn say_its_process(file: &str) -> io::Result<()> {
-    let writing = format!("{file}.pid.writing");
-    fs::write(&writing, std::process::id().to_string())?;
-    fs::rename(writing, format!("{file}.pid"))
 }
 
 /// In a session of its own, as Codex's plugins are in groups of their own: a

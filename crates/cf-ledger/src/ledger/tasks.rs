@@ -51,6 +51,17 @@ impl Ledger {
         tasks::record_result(&mut self.store, project_id, number, body)
     }
 
+    /// The chief or the human takes what the worker said last as the task's result: of a
+    /// task at work, or of a paused one.
+    pub fn record_finished(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        body: &str,
+    ) -> Result<TaskMoved, LedgerError> {
+        tasks::record_finished(&mut self.store, project_id, number, body)
+    }
+
     /// A coordinator accepts a task's result.
     pub fn accept_task(
         &mut self,
@@ -75,22 +86,29 @@ impl Ledger {
     }
 
     /// ConsensFlow pauses a worker's task whose window it closed itself; in a
-    /// suspended project, the human's Resume of the project resumes it.
+    /// suspended project, the human's Resume of the project resumes it. Says which
+    /// stop the pause is ([`Ledger::unmark_pause`]).
     pub fn pause_with_project(
         &mut self,
         project_id: i64,
         number: i64,
         because: &str,
-    ) -> Result<TaskView, LedgerError> {
+    ) -> Result<Stop, LedgerError> {
         #[cfg(feature = "test-support")]
         self.watched("pause_task", Some(number))?;
         tasks::pause_with_project(&mut self.store, project_id, number, because)
     }
 
     /// The window of a task the engine paused with its project ended by itself
-    /// after all (its kill was refused): no Resume of the project resumes it.
-    pub fn unmark_pause(&mut self, project_id: i64, number: i64) -> Result<(), LedgerError> {
-        tasks::unmark_pause(&mut self.store, project_id, number)
+    /// after all (its kill was refused): no Resume of the project resumes it. Only
+    /// the pause that is stop `stop` ([`Ledger::pause_with_project`]).
+    pub fn unmark_pause(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        stop: i64,
+    ) -> Result<(), LedgerError> {
+        tasks::unmark_pause(&mut self.store, project_id, number, stop)
     }
 
     /// The daemon holds a task while its member is out of quota, until `until`.
@@ -127,6 +145,17 @@ impl Ledger {
         tasks::stop_of(&self.store, participant_id)
     }
 
+    /// Who asked the stop `seq` of task `number`: the chief or the human whose
+    /// pause counted it, none where ConsensFlow asked it.
+    pub fn stop_asked_by(
+        &self,
+        project_id: i64,
+        number: i64,
+        seq: i64,
+    ) -> Result<Option<String>, LedgerError> {
+        tasks::stop_asked_by(&self.store, project_id, number, seq)
+    }
+
     /// The task a participant's window is on as far as what it sends goes: the
     /// one it holds, else its paused one. A member session holds one task at
     /// a time (`require_free`): this is it.
@@ -159,6 +188,25 @@ impl Ledger {
         tasks::resume_task(&mut self.store, project_id, number, by, body)
     }
 
+    /// A task its window went on with by itself, in a turn of its own that got
+    /// through: held for quota, it goes on with no words; resumed with the
+    /// daemon's bare words still queued, they are withdrawn. Anything else is
+    /// refused.
+    pub fn go_on_in_window(
+        &mut self,
+        project_id: i64,
+        number: i64,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::go_on_in_window(&mut self.store, project_id, number)
+    }
+
+    /// A task the daemon resumed went on: its window got a turn through after
+    /// the words that resumed it. Its requester, told it waits, is told once
+    /// that it goes on.
+    pub fn tell_it_goes_on(&mut self, project_id: i64, number: i64) -> Result<(), LedgerError> {
+        tasks::tell_it_goes_on(&mut self.store, project_id, number)
+    }
+
     /// A follow-up on a finished or failed task, back to its assignee. A
     /// question of the window's whose answer did not stand is still to be
     /// answered, and the one who was asked is told so.
@@ -182,6 +230,18 @@ impl Ledger {
         body: &str,
     ) -> Result<TaskView, LedgerError> {
         tasks::edit_task(&mut self.store, project_id, number, by, body)
+    }
+
+    /// `from` tells an open task `words`, which no window has yet: they are added
+    /// to its brief and go to whichever window takes the task, once, with it.
+    pub fn tell_open(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        from: &str,
+        words: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::tell_open(&mut self.store, project_id, number, from, words)
     }
 
     /// A task is called off, its requester told.

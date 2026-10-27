@@ -12,7 +12,8 @@
 //! the messages queued (`queues`) and a relaunch, which empties the queue
 //! (`restart`), the API's refusals (`refusals`), the output of a `/clear`
 //! (`clear`) and of the other commands typed at the prompt (`commands`), a
-//! compaction while idle (`compaction`), an interrupt (`interrupts`), and the
+//! compaction while idle (`compaction`), the record beside a message that says where
+//! its images came from (`companions`), an interrupt (`interrupts`), and the
 //! records read late
 //! (`ancestry`). What a record waits as, and the line it is
 //! built from, are held to what replay reads of a record: what nothing reads
@@ -26,6 +27,7 @@ mod boundaries;
 mod clear;
 mod commands;
 mod compaction;
+mod companions;
 mod fields;
 mod final_answer;
 mod interrupts;
@@ -39,6 +41,7 @@ mod restart;
 mod scale;
 mod synthetic;
 mod texts;
+mod torn;
 
 use std::fs;
 use std::path::PathBuf;
@@ -128,7 +131,7 @@ fn settlement_of(records: &[Value]) -> Settlement {
     stage.write(records);
     match &*stage.reader.look(&Options::default(), 0) {
         Reading::Known(record) => record.settlement,
-        Reading::Unknown(reason) => panic!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
     }
 }
 
@@ -156,7 +159,7 @@ fn looks(batches: &[&[Value]]) -> Vec<String> {
 /// harness's commentary (none of Node's was).
 fn show(reading: &Reading) -> String {
     let record = match reading {
-        Reading::Unknown(reason) => return format!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => return format!("unknown: {reason}"),
         Reading::Known(record) => record,
     };
     let items: Vec<Value> = record

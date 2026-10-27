@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::model::LedgerError;
 
-pub const MIGRATIONS: [&str; 22] = [
+pub const MIGRATIONS: [&str; 24] = [
     include_str!("../migrations/0001.sql"),
     include_str!("../migrations/0002.sql"),
     include_str!("../migrations/0003.sql"),
@@ -35,6 +35,8 @@ pub const MIGRATIONS: [&str; 22] = [
     include_str!("../migrations/0020.sql"),
     include_str!("../migrations/0021.sql"),
     include_str!("../migrations/0022.sql"),
+    include_str!("../migrations/0023.sql"),
+    include_str!("../migrations/0024.sql"),
 ];
 
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
@@ -133,7 +135,7 @@ mod tests {
     #[test]
     fn keeps_each_migration_byte_for_byte_as_it_shipped() {
         use sha2::{Digest, Sha256};
-        const SHIPPED: [&str; 22] = [
+        const SHIPPED: [&str; 24] = [
             "51006450d3168c24b6a42ce41afdcf525994957ea22161b4a82f12bf26b65c01",
             "2c6ed236d1829599fbb378164b0c830893fac89eb9780f634688f9ca40f7f0f0",
             "14165bc20e6cb9d4c3c46a81bee45a95b4962ab759f4622aa1cebb8f8edc1ff2",
@@ -156,6 +158,8 @@ mod tests {
             "48abbcf53e6f7360c0fff369b95b8173117294918ecd069405f039ef4ca024ec",
             "72820f35468b10169b5d0aa2eb9d7bfe7c9371eaf3b86170de02288694fedee0",
             "5fff27067cb3132252c5c8bfbb944b467fa87cca69c9cfabc8078753d24c323e",
+            "f95d1dfffd7f5285414c1a55f825c8ea1bb5f360204fc79f4afdaa12b9a6e5d7",
+            "a1f2833e8d267ce1c97290edde8f5ece4f1083bc67309ef28f2263b7d0ee97ab",
         ];
         for (at, (sql, shipped)) in MIGRATIONS.iter().zip(SHIPPED).enumerate() {
             let hash: String = Sha256::digest(sql.as_bytes())
@@ -169,6 +173,37 @@ mod tests {
                 at + 1
             );
         }
+    }
+
+    /// The ledger applies its migrations by their place in [`MIGRATIONS`], not by their
+    /// files' names, so each place must hold the file of its number, and the folder no
+    /// file the list leaves out (Calliope's look at the Devin arrival branch, T-275: a
+    /// branch's 0023 at place 21 would have been recorded as version 21, and Resume after
+    /// Close's 0021 never run). Two branches that each add a migration meet here.
+    #[test]
+    fn each_migration_is_the_file_of_its_place_and_the_folder_holds_no_other() {
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        for (at, sql) in MIGRATIONS.iter().enumerate() {
+            let name = format!("{:04}.sql", at + 1);
+            let file = std::fs::read_to_string(folder.join(&name))
+                .unwrap_or_else(|failed| panic!("place {} has no {name}: {failed}", at + 1));
+            assert_eq!(*sql, file, "place {} of MIGRATIONS is not {name}", at + 1);
+        }
+        let files = std::fs::read_dir(&folder)
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".sql")
+            })
+            .count();
+        assert_eq!(
+            files, SCHEMA_VERSION,
+            "the folder's migrations and the list's"
+        );
     }
 
     #[test]

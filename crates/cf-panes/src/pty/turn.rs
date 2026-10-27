@@ -1,45 +1,28 @@
 //! Where a pane's turn began, and what it started and left running (see
 //! [`crate::background`]). The daemon says a turn is about to begin
 //! (`pane.mark`: [`PaneTable::mark`]), how its harness keeps its servers and which
-//! harness it is, and asks, when the turn ends, what the pane's tree has running
-//! that the turn's work is told by ([`PaneTable::background`]), and to end it
-//! ([`PaneTable::end_background`]), the window staying open. A close lists the
-//! same for the exit it sends: what is about to be ended is what the window left
-//! running ([`Pane::keep_background`]). The window's group is the pane's own
-//! process group (`Pane::process_group_id`), which the close signals whole and an
-//! ending never does.
+//! harness it is, and asks what the pane's tree has running that the turn's work is told
+//! by ([`PaneTable::background`]). Nothing here ends it: a turn ends nothing it left
+//! running (turn-end), and the window's close ends what is the window's ([`super::close`]). A
+//! close lists what it is about to end for the exit it sends: what the window left
+//! running ([`Pane::keep_background`]). The window's group is the pane's own process
+//! group (`Pane::process_group_id`), which the close signals whole.
 //!
-//! An ending asks what it ends to end as a close does (TERM, then HUP, on Unix) and
-//! gives it the table's grace to do so, and what is left after is ended by force:
-//! the same asking, the same grace and the same ending of what is left as a close
-//! makes of a tree ([`close`]), of the turn's work where a close makes it of the
-//! whole tree and of the group. What the turn's work started while it was given the
-//! grace is found again before the force, whoever started it and wherever it went.
-//! On Windows they are ended at once: a job object ends all of its tree or none of
-//! it, and each process an ending chooses is ended by itself, and waited for.
-//!
-//! What a close, the exit of a window's program and an ending name as the turn's work
-//! is what the host finds at two looks, [`SETTLE`] apart: a short run of the harness's
-//! own, which the host cannot tell from the agent's, is no process at the second
+//! What a close and the exit of a window's program name as the turn's work is what the
+//! host finds at two looks, [`SETTLE`] apart: a short run of the harness's own, which the
+//! host cannot tell from the agent's, is no process at the second
 //! ([`crate::background`]). The look the daemon asks for while a turn runs is one look.
 
 use std::io;
 #[cfg(windows)]
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
-#[cfg(target_os = "macos")]
-use std::time::Instant;
 
-use cf_proto::panes::{Background, BackgroundProcess, CommandsAnswer, Ending, Servers};
+use cf_proto::panes::{Background, BackgroundProcess, CommandsAnswer, Servers};
 
-#[cfg(target_os = "macos")]
-use super::close;
 use super::{Pane, PaneError, PaneKey, PaneTable};
 use crate::background::{listed, steady, Baseline, Kept, Member, SETTLE};
 use crate::ended::EndedSlot;
-#[cfg(target_os = "macos")]
-use crate::process_tree::Subject;
 
 /// A pane's tree, held where the table's lock is not: looking at it walks the
 /// system's processes, which no lock of the table is held for.
@@ -99,6 +82,20 @@ impl Tree {
         }
     }
 
+    /// What may be the window's and runs outside its tree, which nothing signals
+    /// (`ProcessTree::possibly_left`): on macOS; elsewhere none, and on Windows the pane's
+    /// job holds what its processes start wherever it goes.
+    fn possibly_left(&self) -> Vec<cf_proto::panes::PossiblyLeft> {
+        #[cfg(target_os = "macos")]
+        {
+            self.tree.possibly_left()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Vec::new()
+        }
+    }
+
     /// The turn's work that `baseline` proves, and still is [`SETTLE`] after it was
     /// first found ([`steady`]): looked at again when the first look finds any, so that
     /// a run of the harness's own, which has ended by then, is none of it.
@@ -109,32 +106,6 @@ impl Tree {
         }
         thread::sleep(SETTLE);
         Ok(steady(&first, baseline.turn_work(&self.members()?)))
-    }
-
-    /// Ends the turn's work that `baseline` proves, and still is [`SETTLE`] after it was
-    /// first found, the rest of the tree staying as it is: where there is anyone to ask
-    /// they are asked to end and given `grace` to, and what is left after is ended by
-    /// force. What it ends is chosen once, at the second look, and is those processes
-    /// and what they start meanwhile: the window's new work, which a human typed in or
-    /// a message began while the grace went, is none of it. It says what it ended and
-    /// what it could not, told by looking at what it chose when it was done.
-    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-    fn end(&self, baseline: &Baseline, grace: Duration) -> io::Result<Ending> {
-        #[cfg(target_os = "macos")]
-        {
-            let lineage = self.tree.lineage(baseline, SETTLE)?;
-            let asked = self.tree.ask_to_exit(Subject::Lineage(&lineage), None)?;
-            close::wait_until_gone(Instant::now() + grace, || !asked.any_alive());
-            Ok(self.tree.finish(&lineage, asked))
-        }
-        #[cfg(windows)]
-        {
-            self.job.end(baseline, SETTLE)
-        }
-        #[cfg(not(any(target_os = "macos", windows)))]
-        {
-            Ok(Ending::default())
-        }
     }
 }
 
@@ -230,8 +201,9 @@ impl PaneTable {
         Ok(())
     }
 
-    /// What the pane's tree has running that is the turn's work, as it was marked.
-    /// A pane never marked has none.
+    /// What the pane's tree has running that is the turn's work, as it was marked
+    /// (a pane never marked has none), and what may be the window's and runs outside its
+    /// tree, marked or not.
     pub fn background(&self, key: &PaneKey) -> Result<Background, PaneError> {
         let (tree, baseline) = {
             let panes = self.lock_panes()?;
@@ -240,7 +212,9 @@ impl PaneTable {
                 .ok_or_else(|| PaneError::NotFound(key.clone()))?;
             (pane.tree(), pane.baseline.clone())
         };
-        Ok(looked_at(&baseline, &tree)?)
+        let mut background = looked_at(&baseline, &tree)?;
+        background.possibly_left = tree.possibly_left();
+        Ok(background)
     }
 
     /// The commands of the window's harness that run in the pane's tree now
@@ -336,26 +310,6 @@ impl PaneTable {
             .rest(&members, keep))
     }
 
-    /// Ends what the pane's turn left running, and nothing of the pane's own, the
-    /// window staying open: all of what the host tells for the turn's work with no
-    /// doubt ([`Baseline::turn_work`]), at two looks [`SETTLE`] apart, and what it
-    /// started. They are asked to end and given the table's grace, so this waits as
-    /// long as a close would, and the settle more. What it ended is said, and so is
-    /// what it chose and could not end. A pane never marked has none.
-    pub fn end_background(&self, key: &PaneKey) -> Result<Ending, PaneError> {
-        let (tree, baseline) = {
-            let panes = self.lock_panes()?;
-            let pane = panes
-                .get(key)
-                .ok_or_else(|| PaneError::NotFound(key.clone()))?;
-            (pane.tree(), pane.baseline.clone())
-        };
-        if !baseline.is_marked() {
-            return Ok(Ending::default());
-        }
-        Ok(tree.end(&baseline, self.close_grace)?)
-    }
-
     /// What the window left running when its program exited, for the exit that
     /// says so: what its close kept if a close ended it, else what its tree
     /// has at two looks, [`SETTLE`] apart, kept so that the close that follows does
@@ -385,7 +339,7 @@ impl PaneTable {
 }
 
 #[cfg(test)]
-mod ending_tests;
+mod leaving_tests;
 #[cfg(test)]
 mod second_look_tests;
 #[cfg(test)]

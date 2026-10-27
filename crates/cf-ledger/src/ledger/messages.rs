@@ -14,8 +14,22 @@ impl Ledger {
         self.store.message(id)
     }
 
+    /// Withdraws `message` where it is a note of ConsensFlow's own that is still
+    /// queued, with `reason`: whether it was. What a Resume wrote of a window's
+    /// state then, and its window never came to be given, is judged again at the next
+    /// Resume, and withdrawn where it no longer holds (T-814).
+    pub fn withdraw_note(
+        &mut self,
+        message: &MessageView,
+        reason: &str,
+    ) -> Result<bool, LedgerError> {
+        messages::withdraw_queued_note(&mut self.store, message, reason)
+    }
+
     /// A note from a participant, or from ConsensFlow itself.
     pub fn note(&mut self, project_id: i64, note: &NewNote) -> Result<MessageView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("note", None)?;
         messages::note(&mut self.store, project_id, note)
     }
 
@@ -100,6 +114,26 @@ impl Ledger {
         messages::tell_queued(&mut self.store, project_id, number, from, body)
     }
 
+    /// Tells T-`number`'s requester what the window of `handle` ended its turn on tell `tell`
+    /// with, while the task is paused: `words`, its last complete answer after the tell. A note
+    /// for each tell; none where there is one.
+    pub fn note_paused_answer(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        handle: &str,
+        tell: i64,
+        words: &str,
+    ) -> Result<Option<MessageView>, LedgerError> {
+        messages::note_paused_answer(&mut self.store, project_id, number, handle, tell, words)
+    }
+
+    /// Whether the chief's tell to a participant's window about a task is still on its way to
+    /// it: what the window said last is not the answer to it until it is in.
+    pub fn tell_on_its_way(&self, participant_id: i64, task_id: i64) -> Result<bool, LedgerError> {
+        messages::tell_on_its_way(&self.store, participant_id, task_id)
+    }
+
     /// Whether words told to a participant's window about a task are still on
     /// their way to it: its answer is not the task's result until they are in.
     pub fn told_waiting(&self, participant_id: i64, task_id: i64) -> Result<bool, LedgerError> {
@@ -151,13 +185,14 @@ impl Ledger {
         messages::settle_claim(&mut self.store, answer_id, recipient, received)
     }
 
-    /// Answers of `recipient` among `ids` that `cf` served whole are received.
+    /// Messages of `recipient` among `ids` that `cf` served whole are received,
+    /// as the way they were served receives them (`Read`): how many were.
     pub fn receive_read(
         &mut self,
         recipient: i64,
         ids: &[i64],
         via: Read,
-    ) -> Result<(), LedgerError> {
+    ) -> Result<usize, LedgerError> {
         messages::receive_read(&mut self.store, recipient, ids, via)
     }
 
@@ -211,6 +246,29 @@ impl Ledger {
         task_id: i64,
     ) -> Result<Option<MessageView>, LedgerError> {
         messages::last_pasted(&self.store, participant_id, task_id)
+    }
+
+    /// The id of the newest message a participant's window was given and its
+    /// record showed (`delivered` or `read`).
+    pub fn last_given(&self, participant_id: i64) -> Result<Option<i64>, LedgerError> {
+        messages::last_given(&self.store, participant_id)
+    }
+
+    /// The `limit` messages last pasted into a participant's window, newest first,
+    /// each with the rows its paste carried.
+    pub fn last_pastes(&self, participant_id: i64, limit: i64) -> Result<Vec<Begun>, LedgerError> {
+        messages::last_pastes(&self.store, participant_id, limit)
+    }
+
+    /// The id of the newest note the engine wrote `recipient_id` after the
+    /// message `after` whose words hold `words`.
+    pub fn note_since(
+        &self,
+        recipient_id: i64,
+        after: i64,
+        words: &str,
+    ) -> Result<Option<i64>, LedgerError> {
+        messages::note_since(&self.store, recipient_id, after, words)
     }
 
     /// The receipt of a delivered message is forgotten, as Node's ledger left one
@@ -335,6 +393,29 @@ impl Ledger {
         messages::fail_delivery(&mut self.store, message_id, reason)
     }
 
+    /// Message `message_id`, on its way, goes into the conversation `conversation_id`
+    /// of an open window: what a start reads for it, where the window is switched away.
+    pub fn paste_into(&mut self, message_id: i64, conversation_id: i64) -> Result<(), LedgerError> {
+        messages::paste_into(&mut self.store, message_id, conversation_id)
+    }
+
+    /// The native session of the conversation message `message_id` was pasted into,
+    /// while it is on its way: the one its window may have been switched away from.
+    pub fn pasted_into(&self, message_id: i64) -> Result<Option<String>, LedgerError> {
+        messages::pasted_into(&self.store, message_id)
+    }
+
+    /// When the attempt of message `message_id` on its way now began, to the second, in
+    /// milliseconds: none where it is not on its way.
+    pub fn delivery_begun_ms(&self, message_id: i64) -> Result<Option<i64>, LedgerError> {
+        messages::delivery_begun_ms(&self.store, message_id)
+    }
+
+    /// Whether message `message_id` was ever given back to its queue for `reason`.
+    pub fn given_back_because(&self, message_id: i64, reason: &str) -> Result<bool, LedgerError> {
+        messages::given_back_because(&self.store, message_id, reason)
+    }
+
     /// [`Ledger::fail_delivery`], saying what it did: failed, kept for the task's
     /// resume, or withdrawn ([`GivenUp`]).
     pub fn give_up_delivery(
@@ -343,6 +424,31 @@ impl Ledger {
         reason: &str,
     ) -> Result<(MessageView, GivenUp), LedgerError> {
         messages::give_up_delivery(&mut self.store, message_id, reason)
+    }
+
+    /// ConsensFlow paused T-`number` as its window went away (`because`): its
+    /// requester is told in a note of the pause, `join`'s where that can take it, and
+    /// the words told to the window that still wait for it are named in it as waiting
+    /// for the resume, `why` said once, but `except`, which the caller names itself. The
+    /// note, and the words named.
+    pub fn note_stall(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        because: &str,
+        why: &str,
+        join: Option<i64>,
+        except: Option<i64>,
+    ) -> Result<(MessageView, Vec<MessageView>), LedgerError> {
+        messages::note_stall(
+            &mut self.store,
+            project_id,
+            number,
+            because,
+            why,
+            join,
+            except,
+        )
     }
 
     /// Every message on its way to a window, oldest first.
@@ -376,6 +482,16 @@ impl Ledger {
         by: &str,
     ) -> Result<MessageView, LedgerError> {
         messages::decline_message(&mut self.store, message_id, by)
+    }
+
+    /// The newest note ConsensFlow itself left the participant whose body opens with
+    /// `opening`.
+    pub fn newest_own_note(
+        &self,
+        participant_id: i64,
+        opening: &str,
+    ) -> Result<Option<MessageView>, LedgerError> {
+        messages::newest_own_note(&self.store, participant_id, opening)
     }
 
     /// A participant's messages, newest first, at most `limit` (Node's default: 100).

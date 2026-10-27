@@ -87,8 +87,18 @@ mod apple_tools {
     }
 
     /// A bundle folder as Tauri leaves one: the app, with the release's two
-    /// Mach-Os, and a DMG of it. Returns the app.
+    /// Mach-Os, and a DMG of it, its `Info.plist` holding the usage keys Tauri
+    /// merges in from `app/src-tauri/Info.plist`. Returns the app.
     fn write_bundle(dir: &Path) -> PathBuf {
+        write_bundle_saying(dir, USAGE)
+    }
+
+    /// The usage keys of ConsensFlow's `Info.plist`, which a bundle Tauri built has.
+    const USAGE: &str = "<key>NSMicrophoneUsageDescription</key><string>mic</string>\
+                         <key>NSAppleEventsUsageDescription</key><string>events</string>";
+
+    /// [`write_bundle`], its `Info.plist` holding `usage` beside the bundle's keys.
+    fn write_bundle_saying(dir: &Path, usage: &str) -> PathBuf {
         let app = dir.join("macos").join("ConsensFlow.app");
         let contents = app.join("Contents");
         for folder in ["MacOS", "Resources/cli/bin"] {
@@ -100,7 +110,7 @@ mod apple_tools {
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
                  <key>CFBundleIdentifier</key><string>{ID}</string>\
                  <key>CFBundleExecutable</key><string>app</string>\
-                 <key>CFBundlePackageType</key><string>APPL</string></dict></plist>\n"
+                 <key>CFBundlePackageType</key><string>APPL</string>{usage}</dict></plist>\n"
             ),
         )
         .unwrap();
@@ -160,6 +170,30 @@ mod apple_tools {
     }
 
     #[test]
+    fn a_bundle_whose_info_plist_says_no_usage_is_refused_once_signed() {
+        let dir = tempfile::tempdir().unwrap();
+        let scratch_in = tempfile::tempdir().unwrap();
+        write_bundle_saying(dir.path(), "");
+        let env = env_without_an_identity(&[("TMPDIR", scratch_in.path().as_os_str())]);
+        let signed = cf_release(
+            &env,
+            &[
+                OsStr::new("sign-mac"),
+                OsStr::new("--bundle"),
+                dir.path().as_os_str(),
+                OsStr::new("--adhoc"),
+            ],
+        );
+        assert_eq!(signed.code, 1, "{signed:?}");
+        assert!(
+            signed
+                .stderr
+                .contains("ConsensFlow.app's Info.plist says no NSMicrophoneUsageDescription"),
+            "{signed:?}"
+        );
+    }
+
+    #[test]
     fn it_signs_every_mach_o_of_the_app_from_the_inside_out_then_makes_the_dmg_again_around_it() {
         let dir = tempfile::tempdir().unwrap();
         let scratch_in = tempfile::tempdir().unwrap();
@@ -197,7 +231,9 @@ mod apple_tools {
                     .any(|line| line == format!("Identifier={identifier}")),
                 "{name}: {said}"
             );
-            // None needs an entitlement: the JIT ones were the bundled Node's V8's.
+            // The bundle's own executable carries the bundle's entitlements, the
+            // devices and Apple Events a pane's program may ask for (T-540); no other
+            // code needs one: the JIT ones were the bundled Node's V8's.
             let entitled = words(
                 "codesign",
                 &[
@@ -208,7 +244,26 @@ mod apple_tools {
                     &file.to_string_lossy(),
                 ],
             );
-            assert_eq!(entitled.stdout, "", "{name}");
+            if name == "app" {
+                // Those two and no other: no harness asks for the camera (T-590).
+                let keys: Vec<&str> = entitled
+                    .stdout
+                    .split("<key>")
+                    .skip(1)
+                    .filter_map(|rest| rest.split_once("</key>").map(|(key, _)| key))
+                    .collect();
+                assert_eq!(
+                    keys,
+                    [
+                        "com.apple.security.automation.apple-events",
+                        "com.apple.security.device.audio-input",
+                    ],
+                    "{}",
+                    entitled.stdout
+                );
+            } else {
+                assert_eq!(entitled.stdout, "", "{name}");
+            }
         }
         succeeds(
             "codesign",

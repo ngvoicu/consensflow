@@ -18,7 +18,9 @@ use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
-use crate::records::{Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement};
+use crate::records::{
+    Boundary, Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement,
+};
 
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -90,14 +92,19 @@ pub trait Adapter {
         false
     }
 
-    /// Whether a window's first message goes in once the window is up, through
-    /// the harness's own server, which asks [`PaneHost::admits`] then
-    /// ([`Window::started`]): OpenCode's. Every other harness's goes in with the
-    /// command line its window opens with ([`Launch::message`]), handed over as
-    /// the window's pane is asked for.
-    fn first_message_once_up(&self) -> bool {
+    /// Whether every window of this harness is logged into the one account, so
+    /// that a window whose turn gets through after a refusal for quota says the
+    /// quota is back for every other window of it: a login in one is a login in
+    /// all, and a spent quota is spent for all. Not, where nobody has looked: Pi
+    /// and OpenCode log into a provider for each model, so two of their windows
+    /// may be on two accounts, and Codex and Devin have not been probed for a
+    /// login changed under a window that is open.
+    fn one_account(&self) -> bool {
         false
     }
+
+    /// How a window is given its first message ([`FirstMessage`]).
+    fn first_message(&self) -> FirstMessage;
 
     /// How its windows take the words they are handed: over a channel of the
     /// harness's own, or pasted into the window's input box ([`Input`]).
@@ -156,6 +163,27 @@ pub struct Interrupt {
     pub close_after: Option<Duration>,
 }
 
+/// How a window is given its first message. None is on its command line: what
+/// is there is read by every process on the machine (`ps` is set-uid root on
+/// macOS), and a kill or wait by pattern whose words a message holds matches the
+/// window (T-432: a SIGINT to "xtask plants" closed two workers' windows).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FirstMessage {
+    /// In a file of the launch's own that the command line names, read as the
+    /// window opens ([`Launch::message`]), and handed over as the window's pane is
+    /// asked for: Devin's `--prompt-file`.
+    Opened,
+    /// Posted through the harness's own server once the window is up, which asks
+    /// [`PaneHost::admits`] then ([`Window::started`]): OpenCode's.
+    Started,
+    /// Handed over as any later message is, by the window's own
+    /// [`Window::deliver`], once the window is past any question of trusting its
+    /// folder and has drawn its screen: Claude Code's pasted (its record wraps it
+    /// as it wraps every paste), Pi's through its extension's inbox, Codex's
+    /// through its broker. The launch is given no [`Launch::message`].
+    Delivered,
+}
+
 /// How a harness's windows take the words they are handed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Input {
@@ -189,7 +217,10 @@ pub struct Launch<'a> {
     /// window of a daemon before this one): what the record holds then may still
     /// be written to by a process ConsensFlow does not hold.
     pub previous_gone: bool,
-    /// The window's first message, as the engine wrote it.
+    /// The window's first message, as the engine wrote it, where its harness takes
+    /// it as its window opens or once it is up ([`FirstMessage::Opened`],
+    /// [`FirstMessage::Started`]): none for a harness whose windows are delivered
+    /// their first message.
     pub message: Option<&'a str>,
     /// The agent it runs on: none for a chief from before every chief had one.
     pub agent: Option<Agent<'a>>,
@@ -258,11 +289,64 @@ pub struct Prepared {
 
 /// What a yes to a harness's question about trusting a window's folder trusts: the
 /// folder, as the system names it, and whether it is the project's folder or one
-/// below it, which ConsensFlow answers for; one outside it is the human's.
+/// below it, which ConsensFlow answers for; one outside it is the human's. And the
+/// nearest folder above the project's whose `.mcp.json` Claude Code reads as well and
+/// names a server the project's settings neither use nor leave out, where there is one: its dialog of a new server asks of that file's servers as of
+/// the project's own, and they are the human's ([`Question::Servers`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Trusts {
     pub folder: String,
     pub inside: bool,
+    pub servers_above: Option<String>,
+}
+
+/// The servers of `.mcp.json` the settings of a window's folder say it uses, and those
+/// they say it leaves out, by name.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServersChosen {
+    pub used: Vec<String>,
+    pub left_out: Vec<String>,
+}
+
+/// Whether `key`, a key toward a yes ([`Question`]), may be pressed again into a screen
+/// that did not move after it: Down, which only moves a cursor. Enter answers whatever
+/// is under the cursor by then, the next question perhaps, and Up wraps from a
+/// dialog's first choice to its last (T-415).
+pub fn presses_again(key: &[u8]) -> bool {
+    key == crate::shared::trust::DOWN
+}
+
+/// Whether `key`, a key toward a yes ([`Question`]), answers the question: Enter.
+pub fn confirms(key: &[u8]) -> bool {
+    key == crate::shared::trust::ENTER
+}
+
+/// What a window's last lines show of its harness's question about trusting its
+/// folder, where they show it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Question {
+    /// The key a person presses next toward a yes: Down, or Enter once the choice is
+    /// on yes.
+    Toward(&'static [u8]),
+    /// The question, its choice drawn where the reader cannot place it (a cursor
+    /// drawn otherwise, or a redraw caught halfway): no key is known.
+    Unplaced,
+    /// The question asked of a folder whose trust is already accepted, by a folder
+    /// above it, where the folder's own settings grant more than trusting it does
+    /// (Claude Code 2.1.309: tools its `.claude/settings.json` pre-approves, folders it
+    /// adds, commands that mint the headers of `.mcp.json`'s servers), and the key a
+    /// person presses next toward its yes where its choice is placed. Its yes lets them
+    /// apply without asking, and records the folder [`Trusts`] names as trusted: it is
+    /// answered as the first question is, only where that folder is the project's.
+    Grants(Option<&'static [u8]>),
+    /// Claude Code's dialog of a server of `.mcp.json` it was never told to use, asked
+    /// once the folder is trusted (2.1.309, T-383), and the key a person presses next
+    /// toward using it where its choice is placed. Using one starts its command and is
+    /// kept in the local settings of the window's folder; ConsensFlow approves it where
+    /// the folder [`Trusts`] names is the project's and no folder above the project's
+    /// has servers of its own the project never settled (the owner's decision of
+    /// 2026-10-23).
+    Servers(Option<&'static [u8]>),
 }
 
 /// A window open on its harness.
@@ -294,15 +378,33 @@ pub trait Window {
     fn trusts(&self) -> Option<&Trusts> {
         None
     }
-    /// The key a person presses next to answer yes to that question, where the
-    /// window's last screen lines `screen` show it (Down, or Enter once the choice
-    /// is on yes); none where they show no such question.
-    fn toward_trust(&self, _screen: &[String]) -> Option<&'static [u8]> {
+    /// That question, where the window's last screen lines `screen` show it: the
+    /// key a person presses next to answer yes (Down, or Enter once the choice is on
+    /// yes), or that the reader cannot place its choice; none where they show no such
+    /// question.
+    fn toward_trust(&self, _screen: &[String]) -> Option<Question> {
         None
     }
     /// Whether `screen` (the window's last lines) is its harness's prompt: the
     /// window is past any question it asks as it starts.
     fn shows_prompt(&self, _screen: &[String]) -> bool {
+        false
+    }
+    /// The servers its harness's dialog of new servers on `screen` (the window's last
+    /// lines) would use, as its lines name them; none where they show none.
+    fn trust_servers(&self, _screen: &[String]) -> Vec<String> {
+        Vec::new()
+    }
+    /// The servers the settings of the window's folder say it uses and leaves out,
+    /// which its harness writes when its dialog of new servers is answered; none where
+    /// it keeps no such settings.
+    fn servers_chosen(&self) -> ServersChosen {
+        ServersChosen::default()
+    }
+    /// Whether `screen` (the window's last lines) names that question's choices, as
+    /// the question does and a conversation that quotes it may: a screen at its
+    /// prompt that still names them may never have shown the question itself.
+    fn names_trust_choices(&self, _screen: &[String]) -> bool {
         false
     }
     /// Whether a delivery may go in now, or why that could not be told.
@@ -336,7 +438,7 @@ pub trait Window {
     /// handed to it to its agent: its record shows it when it gets to it, however long
     /// that is. A harness that says so at the hand-over ([`Admission::Admitted`]'s
     /// `queued`) needs no answer here; one that can say it only later, by what it
-    /// writes (Devin's wire log), does. The engine asks at each look until the answer
+    /// writes (Devin's store), does. The engine asks at each look until the answer
     /// is yes.
     fn took(&self) -> bool {
         false
@@ -431,6 +533,26 @@ pub enum Readiness {
     Unfit(String),
 }
 
+/// Whether the turn a window was last in is over by its harness's own record,
+/// though its live status kept the look from reading it settled
+/// ([`Observed::over`]): nothing in it is then left for an interrupt to stop. Claude
+/// says it is busy for as long as a background agent runs, and a turn an interrupt or
+/// a refusal ended writes no count of them (T-604, 2026-10-25); and it says busy a
+/// moment before the message of a turn it begins is in its record, when the turn
+/// before still reads over (Calliope on T-551, T-644). So the record's word counts
+/// once it has stood a moment.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Over {
+    /// The record says no more than the look did.
+    #[default]
+    No,
+    /// The record says the turn is over, and has not said so long enough to count:
+    /// neither at rest nor at work yet.
+    Pending,
+    /// The record has said so a moment: the turn is over.
+    Held,
+}
+
 /// Why a delivery waits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Held {
@@ -479,6 +601,10 @@ pub struct Observed {
     /// None where the window has not named a conversation to read yet.
     pub reading: Option<Arc<Reading>>,
     pub settled: bool,
+    /// Whether the turn the window was last in is over by its harness's own
+    /// record, though its live status kept the look from reading it `settled`
+    /// ([`Over`]). A harness whose `settled` is its record's word says no.
+    pub over: Over,
     pub waiting: Option<Waiting>,
     pub failed: bool,
     pub quota: Option<Arc<Quota>>,
@@ -494,6 +620,18 @@ pub struct Observed {
     /// of the conversation the window answers from, though its record still
     /// shows it.
     pub took_back: bool,
+    /// The harness's own word that the window waits at its prompt, whatever its record
+    /// says of the turn (Claude Code's status): what tells a window at rest whose record
+    /// never reads its turn as over (T-526: a conversation opened again with no proof that
+    /// the program before was gone keeps what that program had queued) from one still at
+    /// work. False from a harness that says no such thing apart from its record.
+    pub at_prompt: bool,
+    /// Another program of the harness's, not the window's, has shown the window's
+    /// conversation since the window opened (a Claude Code the human started outside
+    /// ConsensFlow on it, `claude --resume <id>`): the record holds that one's turns
+    /// too, written as the window's are, and nothing in it tells them apart. False
+    /// from a harness that cannot tell.
+    pub shared: bool,
 }
 
 impl Observed {
@@ -501,7 +639,42 @@ impl Observed {
     pub fn items(&self) -> &[Item] {
         match self.reading.as_deref() {
             Some(Reading::Known(record)) => &record.items,
-            Some(Reading::Unknown(_)) | None => &[],
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => &[],
+        }
+    }
+
+    /// Why the look's turn failed, in its harness's own words where its record
+    /// has them: none where the turn did not fail, or its record says no more.
+    pub fn failure(&self) -> Option<&str> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) if self.failed => record.failure.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// The conversation's last word ([`last_word`]): none where its record says
+    /// nothing, or could not be read.
+    pub fn last_word(&self) -> Option<&Item> {
+        last_word(self.items())
+    }
+
+    /// The lines of the conversation's record that were torn and passed over,
+    /// each by the place among the records it stood at: none where its record
+    /// could not be read.
+    pub fn lost(&self) -> &[usize] {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => &record.lines.lost,
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => &[],
+        }
+    }
+
+    /// The place among the records of the record each item began in, where the
+    /// harness says it: none for Devin, whose items are its store's, and where
+    /// the record could not be read.
+    pub fn places(&self) -> Option<&[usize]> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => record.lines.places.as_deref(),
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => None,
         }
     }
 
@@ -510,7 +683,7 @@ impl Observed {
     pub fn pending(&self) -> Pending {
         match self.reading.as_deref() {
             Some(Reading::Known(record)) => record.pending,
-            Some(Reading::Unknown(_)) | None => Pending::default(),
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => Pending::default(),
         }
     }
 
@@ -519,7 +692,7 @@ impl Observed {
     pub fn monitors(&self) -> Vec<Monitor> {
         match self.reading.as_deref() {
             Some(Reading::Known(record)) => record.monitors.clone(),
-            Some(Reading::Unknown(_)) | None => Vec::new(),
+            Some(Reading::Unknown(_) | Reading::Missing(_)) | None => Vec::new(),
         }
     }
 
@@ -535,6 +708,59 @@ impl Observed {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Waiting {
     pub reason: Option<String>,
+}
+
+/// What a conversation's record, read with no window open, says of the turn its
+/// window was left in ([`Records::turn_cut`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TurnLeft {
+    /// Its last turn ended: whatever background work it left running, and whatever
+    /// the harness's own notices of it queued, the window was at rest.
+    AtRest,
+    /// It was in a turn with no end: the one the message there began, where the
+    /// record holds it.
+    Cut(Option<Opening>),
+}
+
+/// The message a turn began with, as its record holds it: when it came, where the
+/// record says a time, and its words, its whitespace made single spaces and cut short.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Opening {
+    /// `2026-10-15 20:41 UTC`.
+    pub at: Option<String>,
+    pub words: String,
+}
+
+/// How many characters of a turn's first message [`Opening`] keeps.
+const OPENING_WORDS: usize = 100;
+
+impl Opening {
+    /// The message the turn at the end of `items` began with: the last of the user's
+    /// (none of the harness's own, and no compaction's summary), if one is there. None
+    /// where the last word is a whole reply: that turn ended, and what holds the record
+    /// in flight is a message taken and not begun, which no item shows.
+    fn of(items: &[Item]) -> Option<Self> {
+        if last_word(items).is_some_and(|item| item.role == Role::Assistant && item.complete) {
+            return None;
+        }
+        let item = items
+            .iter()
+            .rev()
+            .find(|item| item.role == Role::User && !item.compaction)?;
+        let words: Vec<&str> = item.text.split_whitespace().collect();
+        let words = words.join(" ");
+        let mut kept: String = words.chars().take(OPENING_WORDS).collect();
+        if kept.len() < words.len() {
+            kept.push('…');
+        }
+        let at = item
+            .at
+            .as_ref()
+            .and_then(Value::as_str)
+            .and_then(|at| at.parse::<jiff::Timestamp>().ok())
+            .map(|at| at.strftime("%Y-%m-%d %H:%M UTC").to_string());
+        Some(Self { at, words: kept })
+    }
 }
 
 /// A harness's own record of a conversation, as the engine serves it to
@@ -556,30 +782,70 @@ pub trait Records {
         session: &'a str,
     ) -> Work<'a, Result<bool, String>>;
 
-    /// How many bytes `harness`'s transcript of `session` holds now, where a
-    /// reader of it reads a relaunch (`Options::relaunched_at`, Claude's
-    /// alone): none where it keeps no transcript of it, or a seam that keeps no
-    /// files says none.
-    fn transcript_length<'a>(
+    /// Where `harness`'s transcript of `session` ends now, how many bytes it
+    /// holds and the last of them, where a reader of it reads a relaunch
+    /// (`Options::relaunched`, Claude's alone): none where it keeps no
+    /// transcript of it, or a seam that keeps no files says none.
+    fn transcript_boundary<'a>(
         &'a self,
         _harness: Harness,
         _session: &'a str,
-    ) -> Work<'a, Result<Option<u64>, String>> {
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
         Box::pin(async { Ok(None) })
     }
 
+    /// Where `harness`'s transcript of `session` ends now, where the harness's own
+    /// word says no program of its writes it any more (Claude's statuses): what is
+    /// before it was written by programs that are gone, and what they had queued
+    /// went with them. None where one may, where it cannot say, or a seam that
+    /// keeps no files says none.
+    fn transcript_left<'a>(
+        &'a self,
+        _harness: Harness,
+        _session: &'a str,
+    ) -> Work<'a, Result<Option<Boundary>, String>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    /// Whether `harness`'s own store says, with no window open, that the window of
+    /// `session` took a paste that begins with `pasted`, handed over at `at_ms` or
+    /// later, though its record may not show it yet (Devin holds a paste queued behind
+    /// a turn, and writes it to the record when the turn takes it in): none where the
+    /// harness keeps no such word, as all but Devin.
+    fn took<'a>(
+        &'a self,
+        _harness: Harness,
+        _session: &'a str,
+        _pasted: &'a str,
+        _at_ms: i64,
+    ) -> Work<'a, Option<bool>> {
+        Box::pin(async { None })
+    }
+
     /// Whether `harness`'s record of `session`, read with no window open, ends in
-    /// a turn with no end (the turn the app's quit cut, or a Close): yes, or no
-    /// where it ends at rest, and none where the record cannot tell. Devin's
+    /// a turn with no end (the turn the app's quit cut, or a Close), with the message
+    /// that began it ([`TurnLeft::Cut`]); at rest where it ends at rest, or where all
+    /// that holds its turn is the harness's notices of background work
+    /// ([`Lines::held_by_notices`](crate::records::Lines)): background work is rest;
+    /// and none where the record cannot tell. Devin's
     /// cannot: it reads a turn as going on only while its window shows it working,
     /// and one whose last word is the message it was given as settled, which with
-    /// no window open is a turn never answered as much as one at rest.
-    fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<bool>> {
+    /// no window open is a turn never answered as much as one at rest. Where no
+    /// program writes the record any more ([`Records::transcript_left`]), what they
+    /// had queued and not begun went with them and is no turn: a Claude that quit
+    /// idle with a message queued leaves no sign of its quit in its record, and was
+    /// cut in nothing (T-442's three).
+    fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<TurnLeft>> {
         Box::pin(async move {
-            match &*self.look(harness, session, &Options::default()).await {
+            let options = Options {
+                relaunched: self.transcript_left(harness, session).await.ok().flatten(),
+                ..Options::default()
+            };
+            match &*self.look(harness, session, &options).await {
                 Reading::Known(record) => match record.settlement {
-                    Settlement::InFlight => Some(true),
-                    Settlement::Settled if ends_in_a_reply(record) => Some(false),
+                    Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),
+                    Settlement::InFlight => Some(TurnLeft::Cut(Opening::of(&record.items))),
+                    Settlement::Settled if ends_in_a_reply(record) => Some(TurnLeft::AtRest),
                     Settlement::Settled | Settlement::Unknown => None,
                 },
                 _ => None,
@@ -591,12 +857,20 @@ pub trait Records {
 /// Whether the last word of `record` (what the harness put in it itself aside)
 /// is the agent's reply: what a turn at rest ends in.
 fn ends_in_a_reply(record: &Record) -> bool {
-    record
-        .items
+    last_word(&record.items).is_some_and(|item| item.role == Role::Assistant)
+}
+
+/// The last word of a conversation's `items`: its last item but what the harness
+/// put in it itself (Devin's system and custom messages, Pi's extensions' messages,
+/// a hook's context, a compaction's summary), which can come after a reply. An idle
+/// compaction's summary is no word of the user's: a record that ends in one after a
+/// reply ends at rest (the sites chief's of 2026-10-23, T-814; a chief's undecided
+/// record was given no note, a member's was told its turn was cut).
+fn last_word(items: &[Item]) -> Option<&Item> {
+    items
         .iter()
         .rev()
-        .find(|item| item.role != Role::Custom)
-        .is_some_and(|item| item.role == Role::Assistant)
+        .find(|item| item.role != Role::Custom && !item.compaction)
 }
 
 #[cfg(test)]

@@ -97,6 +97,53 @@ fn stops_its_window_an_agent_at_work_on_it_is_interrupted_the_window_closes_and_
     );
 }
 
+/// Words that resume a task and name a picture by its path, on a line of their own.
+const WITH_A_PICTURE: &str = "Carry on\n/work/images/desk.png";
+
+#[test]
+fn interrupts_a_window_at_work_on_words_whose_images_were_attached_the_sources_after_them_being_no_message_of_the_users(
+) {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    // The window's record keeps the words that resume the task with a placeholder for the
+    // picture, and then the sources of the pictures as the harness's own item (Claude Code's
+    // companion record). The brief a window is launched with is no paste and has none.
+    context.adapter.attaches_images.set(true);
+    context.adapter.busy_until_interrupted("zeus");
+    context.pause_task(project.id, 1);
+    context.pass().unwrap();
+    context.resume_task(project.id, 1, WITH_A_PICTURE);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    let items = context.adapter.agent("zeus").items;
+    assert_eq!(
+        &*items.last().unwrap().text,
+        "[Image: source: /work/images/desk.png]"
+    );
+    let pane = context.host.last("zeus").unwrap().pane;
+    let begun = context.recorder.events().len();
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project.id, 1, "human")
+        .unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        steps(&context, begun),
+        [
+            json!(["keys", pane.generation, [27]]),
+            json!(["kill", pane.generation])
+        ],
+        "Escape is pressed into its turn before its window closes"
+    );
+}
+
 #[test]
 fn interrupts_a_window_the_human_opened_which_stays_and_lets_a_turn_the_human_began_there_since_go_on(
 ) {

@@ -41,7 +41,10 @@ replace = "const LOGIN_PATH_TIMEOUT: Duration = Duration::from_secs(5);"
 # The PATH the daemon is handed: the login shell's or the app's, as it is.
 [[plant]]
 name = "login path: the daemon's command is given no PATH"
-meant = "a_login_shell_slower_than_five_seconds_still_gives_its_path"
+# Since the daemon takes the interactive shell's whole environment (T-540), the PATH of a
+# shell that answers comes with it, and this line is the fallbacks': the login PATH, and the
+# app's own where no shell answers.
+meant = "a_login_shell_that_fails_or_hangs_leaves_the_apps_path_and_the_log_says_what_the_daemon_runs_on"
 runs = ["app-daemon-path"]
 
 [[plant.edit]]
@@ -134,16 +137,12 @@ replace = '''
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
 find = '''
-            if let Some(shell) = asking.shell.as_mut() {
-                let _ = shell.kill();
-            }
-            asking.shell.take()'''
+            at.map(|at| asking.shells.remove(at).1).map(|mut shell| {
+                let _ = shell.kill();'''
 replace = '''
-            if let Some(shell) = asking.shell.as_mut() {
+            at.map(|at| asking.shells.remove(at).1).map(|mut shell| {
                 unsafe { libc::killpg(shell.id() as i32, libc::SIGKILL) };
-                let _ = shell.kill();
-            }
-            asking.shell.take()'''
+                let _ = shell.kill();'''
 
 [[plant]]
 name = "login path: the app's quit ends what the login file started too"
@@ -160,11 +159,11 @@ replace = '''
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
 find = '''
-        if let Some(shell) = asking.shell.as_mut() {
+        for (_, shell) in &mut asking.shells {
             let _ = shell.kill();
 '''
 replace = '''
-        if let Some(shell) = asking.shell.as_mut() {
+        for (_, shell) in &mut asking.shells {
             unsafe { libc::killpg(shell.id() as i32, libc::SIGKILL) };
             let _ = shell.kill();
 '''
@@ -178,18 +177,16 @@ runs = ["app-daemon-path"]
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
 find = '''
-            let mut asking = self.lock();
-            if let Some(shell) = asking.shell.as_mut() {
+            at.map(|at| asking.shells.remove(at).1).map(|mut shell| {
                 let _ = shell.kill();
-            }
-            asking.shell.take()
+                shell
+            })
         };
         between();
         if let Some(mut shell) = shell {
             let _ = shell.wait();'''
 replace = '''
-            let mut asking = self.lock();
-            asking.shell.take()
+            at.map(|at| asking.shells.remove(at).1)
         };
         between();
         if let Some(mut shell) = shell {
@@ -232,7 +229,7 @@ runs = ["app-daemon-path"]
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
 find = '''
-        if let Some(shell) = asking.shell.as_mut() {
+        for (_, shell) in &mut asking.shells {
             let _ = shell.kill();
         }
 '''
@@ -350,3 +347,175 @@ find = '''
     command.env("CONSENSFLOW_TOOL_FOLDERS", "");
 '''
 replace = ""
+
+# The environment of the human's interactive login shell, a terminal's, reaches the daemon
+# and every pane (T-540): LANG, the rc's PATH and exports; the shell's place, depth, last
+# command and terminal are not taken; a shell whose rc hangs leaves the login PATH.
+[[plant]]
+name = "login path: only the PATH is taken of the interactive shell"
+meant = "a_variable_only_the_interactive_shell_sets_reaches_the_daemon_as_it_is_and_is_not_logged"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''            Some(shell) => login_environment_in(shell, timeout, lookup),'''
+replace = '''            Some(shell) => login_environment_in(shell, timeout, lookup).filter(|_| false),'''
+
+[[plant]]
+name = "login path: the shell's place, depth and terminal are taken too"
+meant = "the_shells_place_depth_last_command_and_terminal_are_not_taken"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''    matches!(&*name, "PWD" | "OLDPWD" | "SHLVL" | "_")
+        || ["TERM", "CONSENSFLOW_", "CF_", "DYLD_", "LD_"]'''
+replace = '''    name.is_empty()
+        || ["CONSENSFLOW_", "CF_", "DYLD_", "LD_"]'''
+
+[[plant]]
+name = "login path: a shell whose interactive rc hangs leaves no PATH"
+meant = "an_interactive_rc_that_hangs_falls_back_to_the_login_path_within_its_time"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        .or(login_path);'''
+replace = '''        .or(login_path.filter(|_| false));'''
+
+# On Windows, a terminal's PowerShell: PowerShell 7 where the PATH has it, and an
+# environment taken by its PATH whatever its case (Windows names it `Path`).
+[[plant]]
+name = "login path: Windows PowerShell is asked though the PATH has PowerShell 7"
+meant = "the_powershell_asked_is_pwsh_where_the_path_has_it_else_windows_powershell"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        .find(|pwsh| pwsh.is_file())'''
+replace = '''        .find(|pwsh| pwsh.is_file() && pwsh.as_os_str().is_empty())'''
+
+[[plant]]
+name = "login path: an environment that names its PATH Path is not taken"
+meant = "a_printed_environment_is_taken_by_its_path_whatever_its_case"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''    vars.iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+        .then_some(vars)'''
+replace = '''    vars.iter()
+        .any(|(name, _)| name == "PATH")
+        .then_some(vars)'''
+
+# Round 3 of T-540 (Calliope's review T-590): what the daemon takes of the terminal is
+# the app's to bound. ConsensFlow's own variables, the loader's and a Claude session's
+# identity are never taken; a harness home the app was started with stays; the daemon
+# is told the names it was given, for every window; one limit holds for both questions.
+[[plant]]
+name = "login path: ConsensFlow's own variables are taken from the rc"
+meant = "consensflows_own_the_loaders_and_a_claude_sessions_variables_are_never_taken_and_a_harness_home_is"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        || ["TERM", "CONSENSFLOW_", "CF_", "DYLD_", "LD_"]'''
+replace = '''        || ["TERM", "DYLD_", "LD_"]'''
+
+[[plant]]
+name = "login path: the loader's variables are taken from the rc"
+meant = "consensflows_own_the_loaders_and_a_claude_sessions_variables_are_never_taken_and_a_harness_home_is"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        || ["TERM", "CONSENSFLOW_", "CF_", "DYLD_", "LD_"]'''
+replace = '''        || ["TERM", "CONSENSFLOW_", "CF_"]'''
+
+[[plant]]
+name = "login path: a Claude session's identity is taken from the rc"
+meant = "consensflows_own_the_loaders_and_a_claude_sessions_variables_are_never_taken_and_a_harness_home_is"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        || crate::CLAUDE_SESSION_IDENTITY.contains(&&*name)'''
+replace = '''        || crate::CLAUDE_SESSION_IDENTITY.is_empty()'''
+
+[[plant]]
+name = "login path: the rc replaces the harness home a run started the app with"
+meant = "a_harness_home_the_app_was_started_with_is_kept_over_the_rcs"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        if kept_from_the_app(env, name) {'''
+replace = '''        if kept_from_the_app(env, name) && name.is_empty() {'''
+
+[[plant]]
+name = "login path: the daemon is not told the names it was given"
+meant = "the_daemon_is_told_the_names_it_was_given_and_never_their_values"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''    if !names.is_empty() {
+        command.env('''
+replace = '''    if names.is_empty() {
+        command.env('''
+
+[[plant]]
+name = "login path: the two questions are asked one after the other, each with the whole limit"
+meant = "a_shell_that_hangs_on_every_question_costs_the_start_one_limit"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        let path = both.spawn(|| shell.and_then(|shell| login_path_in(shell, timeout, lookup)));'''
+replace = '''        let path = shell.and_then(|shell| login_path_in(shell, timeout, lookup));
+        let _ = &both;'''
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        (path.join().unwrap_or_default(), taken)'''
+replace = '''        (path, taken)'''
+
+# T-657 (Calliope's re-check T-613, P3-6): the two questions are asked at once, so slow
+# login files, which both run, leave the interactive one its whole limit; the lookup
+# holds both shells, and the app's quit ends each.
+[[plant]]
+name = "login path: the interactive question waits for the login one and has what is left"
+meant = "slow_login_files_leave_the_interactive_question_its_whole_limit"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        let path = both.spawn(|| shell.and_then(|shell| login_path_in(shell, timeout, lookup)));
+        let taken = match shell {
+            Some(shell) => login_environment_in(shell, timeout, lookup),'''
+replace = '''        let deadline = Instant::now() + timeout;
+        let path = shell.and_then(|shell| login_path_in(shell, timeout, lookup));
+        let _ = &both;
+        let left = deadline.saturating_duration_since(Instant::now());
+        let taken = match shell {
+            Some(shell) if !left.is_zero() => login_environment_in(shell, left, lookup),'''
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''            None => None,
+        };
+        (path.join().unwrap_or_default(), taken)'''
+replace = '''            _ => None,
+        };
+        (path, taken)'''
+
+[[plant]]
+name = "login path: the app's quit ends only the first of the shells asked"
+meant = "ending_a_lookup_ends_both_shells_it_asks_at_once"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        for (_, shell) in &mut asking.shells {'''
+replace = '''        for (_, shell) in asking.shells.iter_mut().take(1) {'''

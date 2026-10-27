@@ -67,7 +67,7 @@ fn strip(source: &str) -> String {
 /// an object whose hooks, when it has any, are an object too. A config that
 /// cannot be read for any other reason than being missing says why, as
 /// Node's `fs` does.
-pub(super) fn native(env: &Env) -> Result<Map<String, Value>, String> {
+pub(crate) fn native(env: &Env) -> Result<Map<String, Value>, String> {
     let file = path::join(&[&paths::config(env)?, "config.json"]);
     let source = match read_file(Path::new(&file)) {
         Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),

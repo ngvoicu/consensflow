@@ -6,7 +6,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use cf_harness::contract::{Adapter, Records, Work};
+use cf_harness::contract::{Adapter, Records, TurnLeft, Work};
 use cf_harness::records::{Options, Reading, Record, Settlement};
 use cf_proto::agents::Harness;
 use serde_json::json;
@@ -78,6 +78,7 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
             in_flight: !settled,
             asking: false,
             failed: false,
+            failure: None,
             quota: None,
             settlement: if settled {
                 Settlement::Settled
@@ -86,6 +87,7 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
             },
             pending: Default::default(),
             monitors: Vec::new(),
+            lines: Box::default(),
         }),
     }
 }
@@ -113,7 +115,7 @@ impl Records for FakeRecords {
             wrapped.before().await;
             let reading = early.unwrap_or_else(|| record_of(fake, session));
             let written = match &reading {
-                Reading::Unknown(_) => json!({ "unknown": true }),
+                Reading::Unknown(_) | Reading::Missing(_) => json!({ "unknown": true }),
                 Reading::Known(record) => json!({ "items": record.items }),
             };
             fake.recorder.answered(at, written);
@@ -139,7 +141,7 @@ impl Records for FakeRecords {
     /// it is no call of the adapter in a trace. A read the test holds
     /// (`record_holds`, told `[{ conversation: { nativeSession } }, "cut"]`)
     /// answers once it is let go.
-    fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<bool>> {
+    fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<TurnLeft>> {
         let Some(fake) = self.adapters.fake(harness.kind()) else {
             return Box::pin(async { None });
         };
@@ -152,5 +154,22 @@ impl Records for FakeRecords {
             wrapped.after().await;
             cut
         })
+    }
+
+    /// What the store of `session` says its window took (`FakeAgent::stored`), and
+    /// none where the test gave it none. Asked where Node's dispatcher asked nothing,
+    /// so it is no call of the adapter in a trace.
+    fn took<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+        pasted: &'a str,
+        _at_ms: i64,
+    ) -> Work<'a, Option<bool>> {
+        let took = self
+            .adapters
+            .fake(harness.kind())
+            .and_then(|fake| fake.took_of(session, pasted));
+        Box::pin(async move { took })
     }
 }

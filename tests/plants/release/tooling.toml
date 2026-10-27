@@ -578,6 +578,16 @@ find = "            Self::Smoke(app) => crate::smoke::captured(context, app.as_d
 replace = "            Self::Smoke(app) => crate::smoke::invocation(context, app.as_deref()),"
 
 [[plant]]
+name = "tooling: libtest's threads are left after the dashes, where nextest takes none"
+meant = "each_option_of_cargo_test_is_given_to_nextest_as_it_names_what_cargo_means_or_refused"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = '            Some(threads) => words.extend([OsString::from("--test-threads"), threads]),'
+replace = '            Some(threads) => libtest.extend([OsString::from("--test-threads"), threads]),'
+
+[[plant]]
 name = "tooling: the plants' reporter of Node's tests says no file Node failed whole"
 meant = "node_s_report_names_each_test_as_written_and_a_file_that_ran_none_of_its_own"
 runs = ["xtask-lib-plants"]
@@ -1007,12 +1017,10 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver/confirm.rs"
-find = '''        Ok(Execution::Ended(Ran {
-            report: Some(Err(why)),
-            ..
-        })) => Err(format!("no report of its tests could be read: {why}")),
+find = '''            Some(said) => Err(said),
 '''
-replace = ""
+replace = '''            Some(_) => Ok(()),
+'''
 
 [[plant]]
 name = "tooling: a report of nextest's cut short is read as far as it goes"
@@ -1558,6 +1566,104 @@ file = "crates/cf-e2e/src/cf.rs"
 find = "    if built.is_file() {"
 replace = "    if true {"
 
+# The programs a run that built none before it (CF_E2E_BUILT) builds: once for the run, under a lock, by the first
+# process that asks (T-544).
+
+[[plant]]
+name = "tooling (cf-e2e): the processes of a run take no lock to build under, and each builds its own"
+meant = "the_processes_of_a_run_build_a_program_once_and_none_has_it_taken_from_under_it"
+runs = ["cf-e2e-lib-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/cf.rs"
+find = "        .and_then(|file| file.lock().map(|()| file))\n"
+replace = "        .map(|file| file)\n"
+
+[[plant]]
+name = "tooling (cf-e2e): a program built for the run is not taken, and each process of it builds again"
+meant = "the_processes_of_a_run_build_a_program_once_and_none_has_it_taken_from_under_it"
+runs = ["cf-e2e-lib-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/cf.rs"
+find = "is_ok_and(|said| said == run)"
+replace = "is_ok_and(|said| said != run)"
+
+[[plant]]
+name = "tooling (cf-e2e): the run a program was built for is not written down, and each process builds again"
+meant = "the_processes_of_a_run_build_a_program_once_and_none_has_it_taken_from_under_it"
+runs = ["cf-e2e-lib-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/cf.rs"
+find = "            files::write(&built_for, run).map_err(|cause| cause.to_string())?;\n"
+replace = "            let _ = run;\n"
+
+[[plant]]
+name = "tooling (cf-e2e): a program built for another run is taken for this one"
+meant = "a_program_built_for_another_run_is_built_again_and_one_built_for_this_one_is_not"
+runs = ["cf-e2e-lib-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/cf.rs"
+find = "is_ok_and(|said| said == run)"
+replace = "is_ok_and(|said| !said.is_empty())"
+
+[[plant]]
+name = "tooling (cf-e2e): a program the run built, and that is gone, is taken"
+meant = "a_program_the_run_built_and_that_is_gone_is_built_again"
+runs = ["cf-e2e-lib-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/cf.rs"
+find = "        built.is_file() && files::read_string(&built_for)"
+replace = "        files::read_string(&built_for)"
+
+[[plant]]
+name = "tooling (cf-e2e): a process that belongs to no run writes down a run for the program it built"
+meant = "processes_that_belong_to_no_run_each_build_their_own_and_write_down_nothing"
+runs = ["cf-e2e-lib-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/cf.rs"
+find = "        if let Some(run) = run {\n            files::write("
+replace = "        {\n            let run = run.unwrap_or(\"none\");\n            files::write("
+
+# A process of no run looks for the program between builds: the builds of the others make it again, and it is gone
+# for a moment as they do. A look half a second after its own build fell in a window of another's at a load of 25 to
+# 40 (4 of 5 gates of T-701; T-776), and the cargo of the case keeps it gone for a second, so that this look is caught
+# on any machine.
+
+[[plant]]
+name = "tooling (cf-e2e): a process that belongs to no run looks for the program half a second after its build, beside the builds of the others"
+meant = "processes_that_belong_to_no_run_each_build_their_own_and_write_down_nothing"
+runs = ["cf-e2e-lib-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/cf.rs"
+find = "                    taking_turns(&target(&root).join(BUILDS)).map(|_between| path.is_file())\n"
+replace = "                    std::thread::sleep(std::time::Duration::from_millis(500));\n                    Ok(path.is_file())\n"
+
+[[plant]]
+name = "tooling (cf-e2e): a build that did not succeed is passed over and written down as made for the run"
+meant = "a_build_that_did_not_succeed_is_not_written_down_as_made_for_the_run"
+runs = ["cf-e2e-lib-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/cf.rs"
+find = "        build(cargo, root, package, bin, more)?;\n        if let Some(run) = run {"
+replace = "        let _ = build(cargo, root, package, bin, more);\n        if let Some(run) = run {"
+
+[[plant]]
+name = "tooling (cf-e2e): the run is not read from the environment, and each process of it builds"
+meant = "the_processes_of_a_run_build_a_program_once_and_none_has_it_taken_from_under_it"
+runs = ["cf-e2e-lib-cf"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/cf.rs"
+find = "more, own_var(RUN).as_deref())"
+replace = "more, None)"
+
 # Each option of cargo test is given to nextest as nextest names what cargo means.
 
 [[plant]]
@@ -1707,8 +1813,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture.rs"
-find = "        group.end(Ending::Forced);\n        child.wait().await\n    }\n    #[cfg(not(unix))]"
-replace = "        if !group.ended() {\n            group.end(Ending::Forced);\n        }\n        child.wait().await\n    }\n    #[cfg(not(unix))]"
+find = "        group.end(Ending::Forced);\n        group.stragglers_forced().await;\n        child.wait().await\n    }\n    #[cfg(not(unix))]"
+replace = "        if !group.ended() {\n            group.end(Ending::Forced);\n            group.stragglers_forced().await;\n        }\n        child.wait().await\n    }\n    #[cfg(not(unix))]"
 
 [[plant]]
 name = "tooling: nextest is given the variables of its own this run was given, which win over its config"
@@ -3224,3 +3330,44 @@ platforms = ["windows"]
 file = "crates/cf-process/src/job.rs"
 find = "            Err(why) => Self::refused(why),"
 replace = "            Err(_) => Self::unheld(),"
+
+[[plant]]
+name = "tooling: a plant told nothing of how a nextest that wrote no report ended"
+meant = "a_run_that_left_no_report_is_told_by_how_it_ended_and_the_end_of_what_it_said"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "            format!(\"{said}; {}\", self.ended())"
+replace = "            said"
+
+[[plant]]
+name = "tooling: a build that failed is told by how the run ended as well"
+meant = "a_run_that_left_no_report_is_told_by_how_it_ended_and_the_end_of_what_it_said"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "        Some(if why.ends_with(NONE_RAN) {"
+replace = "        Some(if false {"
+
+[[plant]]
+name = "tooling: a machine's limit on the tests it runs does not reach nextest"
+meant = "the_threads_libtest_is_told_by_the_environment_are_the_threads_nextest_is_given_unless_the_command_names_its_own"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = "                let words = with_the_threads_of_the_environment(words, context);\n"
+replace = ""
+
+[[plant]]
+name = "tooling: the environment's threads win over the command's own"
+meant = "the_threads_libtest_is_told_by_the_environment_are_the_threads_nextest_is_given_unless_the_command_names_its_own"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = "    if words[..before].iter().any(|word| word == \"--test-threads\") {\n        return words;\n    }\n"
+replace = "    words.retain(|word| word != \"--test-threads\");\n"
+

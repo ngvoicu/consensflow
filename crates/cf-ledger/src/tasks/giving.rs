@@ -11,7 +11,7 @@ use super::{
     a_pool, delivery_body, m_list, pool_name, release_ready, require_task_state, task_by_id,
     task_row_by_id,
 };
-use crate::messages::{leave_pause_notes, transfer};
+use crate::messages::{leave_pause_notes, transfer, Afterwards};
 use crate::model::{
     self, title_of, LedgerError, ACTIVE_TASK_STATES, COORDINATOR_ROLES, MAX_BODY, POOLS, PURPOSES,
 };
@@ -147,7 +147,8 @@ fn distinct(numbers: &[u64], field: &str) -> Result<Vec<i64>, LedgerError> {
 /// task is still on its work, waits on the board for it to be accepted.
 /// Given a pool and tier instead, it opens for the daemon to assign to a
 /// member of that pool and tier. A task on the board may need other tasks:
-/// it waits until each is accepted. With `before`, tasks still on the board
+/// it waits until each is accepted, one the human cleared from the board
+/// included when it was accepted. With `before`, tasks still on the board
 /// wait for this one.
 pub(crate) fn create_task(
     store: &mut Store,
@@ -263,13 +264,20 @@ pub(crate) fn create_task(
         let task_id = store.db.last_insert_rowid();
         for number in &needed {
             let need = store.task_row(project_id, *number)?;
-            super::require_on_board(&need, "wait for")?;
+            // Never accepted, so it never releases what waits for it, deleted or not.
             if need.state == "cancelled" {
                 return Err(LedgerError::refused_with(
                     "need-cancelled",
                     format!("T-{number} is cancelled: nothing waits for it"),
                     409,
                 ));
+            }
+            // The human's delete only takes a task off the board: it keeps its state, and a
+            // waiter reads it as before (`blocked_by`, `release_ready`), so an accepted task the
+            // human cleared still releases a new one at once. Any other deleted task would leave
+            // its waiter blocked for good: a failed one is not reopened any more.
+            if need.state != "accepted" {
+                super::require_on_board(&need, "wait for")?;
             }
             store.db.execute(
                 "INSERT INTO task_need (task_id, needs_id) VALUES (?, ?)",
@@ -406,7 +414,12 @@ pub(crate) fn assign_task(
         }
         let pool = task.pool.as_deref().unwrap_or_default();
         let session = start_session(store, project_id, &member, pool)?;
-        leave_pause_notes(store, &task, &format!("was taken by @{}", member.handle))?;
+        leave_pause_notes(
+            store,
+            &task,
+            &format!("was taken by @{}", member.handle),
+            Afterwards::MovesOn,
+        )?;
         let at = store.at();
         store.db.execute(
             "UPDATE task SET assignee_id = ?, updated_at = ? WHERE id = ?",
@@ -459,7 +472,7 @@ pub(crate) fn release_task(
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
         require_releasable(&task)?;
-        leave_pause_notes(store, &task, "was taken back")?;
+        leave_pause_notes(store, &task, "was taken back", Afterwards::MovesOn)?;
         // A task paused before anyone took it has nobody to take it from.
         let member = task
             .assignee_id

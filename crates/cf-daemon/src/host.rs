@@ -2,9 +2,9 @@
 //! opened and killed by a request to the host, an adapter's own requests
 //! (`pane.snapshot`, `pane.input`, `pane.write_paste`, `pane.claim`) go
 //! straight through, where a window's turn begins is told to it and what the turn
-//! left running is ended by it (`pane.mark`, `pane.end_background`:
-//! [`BackgroundWork`]), and the host's `pane.exit` events are told to the engine
-//! where they are read.
+//! left running is asked of it (`pane.mark`, `pane.commands`,
+//! `pane.rest`: [`BackgroundWork`]; it ends none of it, a window's close does), and the
+//! host's `pane.exit` events are told to the engine where they are read.
 //!
 //! The protocol is the app's (`crates/cf-panes/src/pane_handlers.rs`); this
 //! adds no rules of its own, only the Windows shim a window's program may be
@@ -21,9 +21,9 @@ use cf_engine::host::{EngineHost, Killed, OpenPane, Opened};
 use cf_engine::runtime::LocalWork;
 use cf_engine::seams::{BackgroundWork, CommandsSeen};
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
-use cf_proto::bridge::Role;
+use cf_proto::bridge::{Role, DEADLINE};
 use cf_proto::panes::{
-    CommandsAnswer, CommandsRequest, MarkRequest, PaneExit, Rest, RestRequest, Servers,
+    Background, CommandsAnswer, CommandsRequest, MarkRequest, PaneExit, Rest, RestRequest, Servers,
 };
 use serde_json::{json, Map, Value};
 
@@ -31,20 +31,34 @@ use crate::errors::contain_now;
 use crate::seams::DaemonSpawn;
 
 /// How long the host has to open a window: the pane's program is started and
-/// watched before it answers (`deadlineMs: 60_000`).
+/// watched before it answers (`deadlineMs: 60_000`, the engine's
+/// `Limits::open_ms` unless the environment cut it).
 pub const OPEN_DEADLINE: Duration = Duration::from_secs(60);
 
 /// What the engine says to the host of the app, through its bridge.
 pub struct BridgeHost {
     bridge: Bridge,
     env: Env,
+    open_deadline: Duration,
 }
 
 impl BridgeHost {
     /// The host on the other end of `bridge`; `env` is the daemon's, which
-    /// finds the shim a window's program may be.
+    /// finds the shim a window's program may be. It has [`OPEN_DEADLINE`] to
+    /// answer an open.
     pub fn new(bridge: Bridge, env: Env) -> Self {
-        Self { bridge, env }
+        Self {
+            bridge,
+            env,
+            open_deadline: OPEN_DEADLINE,
+        }
+    }
+
+    /// The host, which has `deadline` to answer an open.
+    #[must_use]
+    pub fn opening_within(mut self, deadline: Duration) -> Self {
+        self.open_deadline = deadline;
+        self
     }
 }
 
@@ -84,7 +98,9 @@ impl EngineHost for BridgeHost {
             "env": env,
             "dropEnv": open.drop_env,
         });
-        let sent = self.bridge.request("pane.open", body, Some(OPEN_DEADLINE));
+        let sent = self
+            .bridge
+            .request("pane.open", body, Some(self.open_deadline));
         Box::pin(async move { sent.await.map(|answer| opened(&answer)).map_err(host_error) })
     }
 
@@ -157,6 +173,13 @@ impl BackgroundWork for BridgeHost {
             rest
         })
     }
+
+    fn left_running<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Background>> {
+        let body = json!({ "id": pane.id, "generation": pane.generation });
+        let sent = self.bridge.request("pane.background", body, None);
+        // A host that does not answer, or answers what is no look, has nothing to name.
+        Box::pin(async move { serde_json::from_value(sent.await.ok()?).ok() })
+    }
 }
 
 /// What `pane.commands`' answer says (none where no answer came): so many commands run,
@@ -205,7 +228,8 @@ fn host_error(error: BridgeError) -> HostError {
 }
 
 /// An open's answer: the pane is open (`ok: true`, its program's process id
-/// when the host knows it), or the host says why not, or says nothing of why.
+/// when the host knows it), or none came by the open's deadline, or the host says
+/// why not, or says nothing of why.
 fn opened(answer: &Value) -> Opened {
     if answer.get("ok") == Some(&Value::Bool(true)) {
         let pid = answer
@@ -218,6 +242,11 @@ fn opened(answer: &Value) -> Opened {
         None | Some(Value::Null) => "no answer from the pane host".to_owned(),
         said => js::text(said).into_owned(),
     };
+    // The bridge's own word for a request it stopped waiting for: the host never
+    // said no, and may still start the window.
+    if error == DEADLINE {
+        return Opened::Unanswered;
+    }
     Opened::Refused { error }
 }
 

@@ -19,12 +19,19 @@ mod daemon;
 mod daemon_command;
 mod file_drop;
 mod launcher;
+#[cfg(windows)]
+mod page_crash;
+// Only the Windows app loads a failed page again; tested everywhere.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod page_reloads;
 // Only the Windows app reads a runtime from its own exe; tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod portable;
 pub mod runtime;
 #[cfg(test)]
 mod test_manifest;
+#[cfg(test)]
+mod testing;
 #[cfg(target_os = "macos")]
 mod update_install;
 mod update_page;
@@ -256,7 +263,7 @@ fn isolated_home(
 /// socket and token reach into the parent session. Only this identity is
 /// removed; configuration such as `CLAUDE_CONFIG_DIR` or
 /// `CLAUDE_CODE_USE_BEDROCK` stays.
-const CLAUDE_SESSION_IDENTITY: [&str; 11] = [
+pub(crate) const CLAUDE_SESSION_IDENTITY: [&str; 11] = [
     "CLAUDECODE",
     "CLAUDE_CODE_ENTRYPOINT",
     "CLAUDE_CODE_SESSION_ID",
@@ -458,16 +465,26 @@ pub fn run() {
         updates::setup(app)?;
         // The product name, so a candidate's window never reads as the live app's.
         let title = app.package_info().name.clone();
+        // The page runs on while its window is hidden, minimised or behind a locked
+        // screen: it acknowledges the windows' output, and the pane host stops reading a
+        // window that is owed too much of it, its agent waiting on its terminal. WebKit's
+        // own policy throttles a page not shown to a turn every second or so (T-454).
+        // Only macOS has the setting; elsewhere it does nothing.
         let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
             .title(title)
             .inner_size(1280.0, 820.0)
             .min_inner_size(720.0, 520.0)
-            .maximized(true);
+            .maximized(true)
+            .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
         if let Some(config) = selftest::config() {
             window = window.initialization_script(selftest::initialization_script(&config));
             selftest::watch_for_quit(app.handle().clone());
         }
-        window.build()?;
+        let window = window.build()?;
+        #[cfg(windows)]
+        page_crash::load_again_when_it_fails(&window);
+        #[cfg(not(windows))]
+        let _ = window;
         Ok(())
     })
     .build(context)
@@ -475,9 +492,24 @@ pub fn run() {
 
     app.run(|handle, event| {
         if matches!(event, RunEvent::Exit) {
-            handle.state::<AppRuntime>().shutdown();
+            at_exit(|| handle.state::<AppRuntime>().shutdown());
         }
     });
+}
+
+/// The app's last code, on the main thread, as its event loop ends: `shutdown`, then every
+/// descriptor it holds made close-on-exec. After this Tauri ends the process, or starts the app an
+/// update installed: `app.restart()` called off the main thread (the update's install is an async
+/// command) only asks the loop to end, and Tauri starts the new app here, after this, with a bare
+/// `Command`. A descriptor of this app's that is not close-on-exec then (a socket or a pipe another
+/// thread made in std's two steps, a file a framework opened so) would be the new app's for as
+/// long as it runs. A quit that is no restart loses nothing by it: the process ends.
+fn at_exit(shutdown: impl FnOnce()) {
+    shutdown();
+    #[cfg(target_os = "macos")]
+    if let Err(failed) = cf_process::close_all_on_exec() {
+        eprintln!("ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}");
+    }
 }
 
 #[cfg(test)]
@@ -607,7 +639,7 @@ mod tests {
         }
         let home = tempfile::tempdir().expect("home");
         let log = home.path().join("app.log");
-        let status = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+        let status = crate::testing::command(std::env::current_exe().expect("the test binary"))
             .args([
                 "--exact",
                 "tests::the_hosts_own_errors_reach_the_error_log",
@@ -622,6 +654,49 @@ mod tests {
         assert!(std::fs::read_to_string(&log)
             .expect("the log")
             .contains("consensflow: the host's own error"));
+    }
+
+    /// The app's last code before Tauri starts the app an update installed (with a bare
+    /// `Command`, on the main thread, after the loop has ended) leaves it nothing: here a
+    /// descriptor is left open and not close-on-exec, the app's end is run, and the descriptor is
+    /// looked at after, where Tauri's start of the new app would be. The marking is for the whole
+    /// process, so the test runs in one of its own, its binary run again.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_apps_end_leaves_every_descriptor_close_on_exec_for_the_restart_after_it() {
+        const ENDED: &str = "CONSENSFLOW_TEST_AT_EXIT";
+        if std::env::var_os(ENDED).is_some() {
+            use std::os::fd::AsRawFd;
+
+            let stray = std::fs::File::open("/dev/null").expect("a file");
+            let fd = stray.as_raw_fd();
+            // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+            assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+            let mut shut_down = false;
+            at_exit(|| shut_down = true);
+            assert!(shut_down, "the runtime was not shut down");
+            // SAFETY: `fcntl` is asked the flags of a descriptor this test holds.
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+            assert_ne!(flags & libc::FD_CLOEXEC, 0, "left inheritable");
+            return;
+        }
+        let ran = crate::testing::command(std::env::current_exe().expect("the test binary"))
+            .args([
+                "--exact",
+                "tests::the_apps_end_leaves_every_descriptor_close_on_exec_for_the_restart_after_it",
+                "--nocapture",
+            ])
+            .env(ENDED, "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("run the test in a child");
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&ran.stdout),
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        assert!(ran.status.success(), "{said}");
+        assert!(said.contains("1 passed"), "the test did not run: {said}");
     }
 
     #[test]

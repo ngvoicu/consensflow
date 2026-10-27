@@ -132,7 +132,9 @@ fn every_fixture_reads_through_the_thread_as_it_reads_beside_it() {
 fn refusal(reading: &Reading) -> Arc<Quota> {
     match reading {
         Reading::Known(record) => Arc::clone(record.quota.as_ref().expect("a refusal")),
-        Reading::Unknown(reason) => panic!("no record was read: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => {
+            panic!("no record was read: {reason}")
+        }
     }
 }
 

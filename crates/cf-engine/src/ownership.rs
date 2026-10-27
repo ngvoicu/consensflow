@@ -19,10 +19,16 @@
 //! resume of the same task keep its window.
 //!
 //! The window that opens for the other task goes on with the session's conversation only
-//! where the host proved the program of the window before it gone (`last_exit`): Claude
-//! Code's record reader then takes what the old process queued and started as gone with
-//! it (`Launch::previous_gone`). Where it did not prove it (the window's exit said nothing,
-//! or said it ran on, or this daemon never saw it close: a restart), the other task opens
+//! where the host proved the program of the last window on it gone: Claude Code's record
+//! reader then takes what the old process queued and started as gone with it
+//! (`Launch::previous_gone`). The proof is kept on the conversation in the ledger
+//! (`program_gone`, migration 0024), so a restart keeps it: before, the daemon kept it in
+//! memory alone, and after a restart every follow-up of a window that had closed went to
+//! a new conversation (T-541). A window that opens on the conversation clears it before
+//! its program runs, and so does the human's switch of a window to it. Where the host did
+//! not prove it (the window's exit said nothing, or said it ran on, or this daemon never
+//! saw it close: a window open when the app quit, which the window's quit ends after the
+//! daemon has gone and tells no one, `cf_panes::headless::reap_all`), the other task opens
 //! a new conversation, as a session's first task does, and whoever gave it is told once
 //! that it does not go on in the earlier task's ([`Dispatcher::kept_apart`]).
 //!
@@ -139,13 +145,12 @@ impl Dispatcher {
     /// The conversation a member's window that opens for `first` goes on with: `found`,
     /// the session's, unless `first` is a message of another task than the one that
     /// conversation was last given (`before`) and the host did not prove the program of
-    /// the window before gone, in which case a new one (none), whoever gave `first`'s
-    /// task told once.
+    /// the last window on it gone, as the ledger keeps it, in which case a new one
+    /// (none), whoever gave `first`'s task told once.
     pub(crate) fn kept_apart(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
-        record: &Record,
         found: Option<ConversationView>,
         before: Option<&TaskThread>,
         first: Option<&MessageView>,
@@ -162,12 +167,7 @@ impl Dispatcher {
         let Some(number) = other else {
             return Ok(Some(conversation));
         };
-        let gone = record
-            .window
-            .borrow()
-            .last_exit
-            .as_ref()
-            .is_some_and(|(_, gone)| *gone == Some(true));
+        let gone = self.seams.ledger.borrow().program_gone(conversation.id)?;
         if gone {
             return Ok(Some(conversation));
         }

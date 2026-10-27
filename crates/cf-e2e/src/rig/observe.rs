@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde_json::{json, Map, Value};
 
 use super::report::plain;
-use super::route::Pasted;
+use super::route::{Held, Pasted};
 use super::{Project, Rig, IDLE};
 use crate::{files, Error, Result};
 
@@ -21,34 +21,113 @@ impl Rig {
         self.shared.catch_paste(words, pasted);
     }
 
+    /// From now on, while `refused`, every look the daemon asks of a window's screen
+    /// (`pane.snapshot`) is refused, not ok, as a host that could not read it answers.
+    pub fn refuse_snapshots(&self, refused: bool) {
+        self.shared.refuse_snapshots(refused);
+    }
+
+    /// When the daemon told the page the board moved, in milliseconds since the
+    /// epoch, oldest first: what the page reads the board again on.
+    pub fn board_moves(&self) -> Vec<i64> {
+        self.shared.seen().moves.clone()
+    }
+
     /// Whether the paste the case set out to catch was caught.
     pub fn paste_caught(&self) -> bool {
         self.shared.paste_caught()
     }
 
-    /// Everything the window `pane` printed so far, as the text on its screen:
-    /// control sequences stripped, and Windows' console host's cursor moves left
-    /// as the blanks and the line breaks they stand for, so that text reads the
-    /// same on every platform. Nothing of a window that printed nothing, or was
-    /// never opened. It is the whole of what was printed, not the screen as the
-    /// terminal now draws it: what was drawn over is still in it.
-    pub fn screen(&self, pane: &str) -> String {
-        let printed = self.shared.seen().printed.get(pane).cloned();
-        printed.map(|bytes| plain(&bytes)).unwrap_or_default()
+    /// The pane host stalls at the daemon's next paste that holds `words`, for
+    /// `lasting`: that paste and every frame between the daemon and the host after it,
+    /// both ways, wait in the rig, and go on in the order they came once it has lasted,
+    /// as with a host that answered nothing for that long and gave its window nothing
+    /// (the Mac under a load of 100, 2026-10-22). The daemon's requests meanwhile meet
+    /// their deadlines. A second paste of the same words ends it early, held with the
+    /// rest: a daemon that took the first for lost has done what the stall was for,
+    /// and the case need not wait out the rest. A stall set before and not yet begun
+    /// is replaced.
+    pub fn stall_host_at_paste(&self, words: &str, lasting: Duration) {
+        self.shared.stall_at_paste(words, lasting);
     }
 
-    /// Everything the window `pane` printed so far, as the bytes the pane host
-    /// gave and before anything is taken out of them: [`Rig::screen`] is these
-    /// with the control sequences cleaned away. What tells a window that printed
-    /// nothing from one that printed only what Windows' console host prints of its
-    /// own accord (a jump of the cursor, a title), which `screen` reads as blank.
-    /// Nothing of a window that printed nothing, or was never opened.
+    /// The daemon's next `pane.open` of a window whose id begins with `pane` is held
+    /// in the rig as `held` says (the request, before the pane host starts anything;
+    /// or the host's answer, once it has started the program), until the case lets it
+    /// go ([`Rig::let_open_go`]): an open that took longer than its deadline, as one did
+    /// on the Mac under a load of 100 (kluris, 2026-10-26), with every other frame
+    /// passing meanwhile. One set before and not yet begun is replaced.
+    pub fn hold_open(&self, pane: &str, held: Held) {
+        self.shared.hold_open(pane, held);
+    }
+
+    /// The window whose open is held (`id`, `generation`), while one is.
+    pub fn open_held(&self) -> Option<Value> {
+        self.shared.open_held()
+    }
+
+    /// The pane host's answer to the open held, once it came: its body (`ok`, the `pid`
+    /// it started, or the `error` it refused it with).
+    pub fn open_answer(&self) -> Option<Value> {
+        self.shared.open_answer()
+    }
+
+    /// Lets the open held go on: the request to the pane host, or its answer to the
+    /// daemon. Whether one was held.
+    pub fn let_open_go(&self) -> bool {
+        match (self.host.sink(), self.daemon.sink()) {
+            (Some(host), Some(daemon)) => self.shared.let_open_go(&host, &daemon),
+            _ => false,
+        }
+    }
+
+    /// Whether the stall set out held a paste and is over.
+    pub fn stall_over(&self) -> bool {
+        self.shared.stall_over()
+    }
+
+    /// What the window `pane` printed so far, as the text on its screen: control
+    /// sequences stripped, and Windows' console host's cursor moves left as the
+    /// blanks and the line breaks they stand for, so that text reads the same on
+    /// every platform. Nothing of a window that printed nothing, or was never
+    /// opened. It is what was printed, not the screen as the terminal now draws it:
+    /// what was drawn over is still in it. A window that printed more than the rig
+    /// keeps (8 MiB) has its last 8 MiB or so in it, from the start of a line
+    /// ([`Rig::screen_and_dropped`] counts what went before).
+    pub fn screen(&self, pane: &str) -> String {
+        let printed = self.printed(pane);
+        plain(&printed)
+    }
+
+    /// What [`Rig::screen`] says of the window `pane`, and how many characters of its
+    /// screen the rig let go of before it, its oldest: none until it printed more than
+    /// the rig keeps. Read together, where a count of a screen's characters marks a
+    /// place in it.
+    pub fn screen_and_dropped(&self, pane: &str) -> (String, usize) {
+        let (printed, dropped) = self
+            .shared
+            .seen()
+            .printed
+            .get(pane)
+            .map_or_else(Default::default, |printed| {
+                (printed.kept.clone(), printed.dropped)
+            });
+        (plain(&printed), dropped)
+    }
+
+    /// What the window `pane` printed so far, as the bytes the pane host gave and
+    /// before anything is taken out of them: [`Rig::screen`] is these with the
+    /// control sequences cleaned away. What tells a window that printed nothing
+    /// from one that printed only what Windows' console host prints of its own
+    /// accord (a jump of the cursor, a title), which `screen` reads as blank.
+    /// Nothing of a window that printed nothing, or was never opened. The last 8
+    /// MiB or so of it, as `screen`.
     pub fn printed(&self, pane: &str) -> Vec<u8> {
         self.shared
             .seen()
             .printed
             .get(pane)
-            .cloned()
+            .map(|printed| printed.kept.clone())
             .unwrap_or_default()
     }
 
@@ -133,6 +212,23 @@ impl Rig {
     /// is told it has.
     pub fn environment(&self) -> &[(String, String)] {
         &self.env
+    }
+
+    /// The human types `bytes` into the window `pane` (`{ id, generation }`, as
+    /// the board names it) as the app's page types them: the pane host takes
+    /// them as the human's (`pane.typed`), and counts what they leave unsent in
+    /// its input box. [`Rig::tell`] and [`Rig::host`]'s `pane.input` are keys the
+    /// host takes as the daemon's.
+    pub fn types(&self, pane: &Value, bytes: &[u8]) -> Result<()> {
+        let answer = self.host(
+            "pane.typed",
+            json!({ "id": pane["id"], "generation": pane["generation"], "bytes": bytes }),
+        )?;
+        if answer["ok"] == true {
+            Ok(())
+        } else {
+            Err(Error::Daemon(format!("pane.typed was refused: {answer}")))
+        }
     }
 
     /// The human types into the chief's terminal, the one way work reaches the

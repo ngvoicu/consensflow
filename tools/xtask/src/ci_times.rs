@@ -14,7 +14,8 @@
 //! cargo xtask ci-times [RUN]... [--last N] [--share PERCENT] [--step TEXT]... [--binaries]
 //! ```
 //!
-//! `RUN` is a run's id, of `ci.yml` or of a `release.yml` run that called it;
+//! `RUN` is a run's id, of `ci.yml` or of a `release.yml` run that called it
+//! (every release up to 3.0.6-alpha.2; since, the release checks CI's run instead);
 //! with none, the last N (5) runs of `ci.yml` on `main` that ended. `--step`
 //! keeps the steps whose name holds TEXT (`the job` names a job), to watch
 //! one: `--step "cargo test --workspace"`. `--binaries` reads the log of each

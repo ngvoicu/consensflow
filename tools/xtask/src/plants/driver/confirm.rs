@@ -247,12 +247,11 @@ pub(super) fn once(
             "{} did not end in its time, and was ended",
             command.join(" ")
         )),
-        Ok(Execution::Ended(Ran {
-            report: Some(Err(why)),
-            ..
-        })) => Err(format!("no report of its tests could be read: {why}")),
-        Ok(Execution::Ended(ran)) if ran.code == Some(0) => Ok(()),
-        Ok(Execution::Ended(ran)) => Err(report::tail(&ran.output, 1500).to_owned()),
+        Ok(Execution::Ended(ran)) => match ran.unread() {
+            Some(said) => Err(said),
+            None if ran.code == Some(0) => Ok(()),
+            None => Err(report::tail(&ran.output, 1500).to_owned()),
+        },
         Err(Error::Process(failure)) => Err(unstarted(command, &failure)),
         Err(other) => return Err(other),
     }))

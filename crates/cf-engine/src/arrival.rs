@@ -8,8 +8,8 @@
 //! and one the record never showed is pasted again, by this rule:
 //!
 //! - **Taken.** A harness that says its own queue has the message, at the hand-over
-//!   (`Admission::Admitted`'s `queued`) or after it (`Window::took`: Devin's TUI put
-//!   the paste to its agent), has it: the message is waited for until its record
+//!   (`Admission::Admitted`'s `queued`) or after it (`Window::took`: Devin's store
+//!   has the paste's history row, written at its Enter), has it: the message is waited for until its record
 //!   shows it or the window closes, and never pasted again.
 //! - **Held.** While the harness says the paste is in a turn it is in still
 //!   (`Window::held`: the turn it went into, or the one the harness began with it),
@@ -23,6 +23,30 @@
 //!   a turn starts that again: the turn may hold what it was given), or at the
 //!   window's first rest past [`RECONCILE_MS`] since then, however turns cut its
 //!   rest, so no turns hold the queue behind it for good.
+//! - **Left.** A paste whose window the human switched to another conversation
+//!   (`/new`, `/resume`, `/clear`) before its record showed it went into the one left
+//!   (`Delivering::session`): that record, read with no window open, confirms it, or
+//!   gives it back to its queue, with its attempt, once it has read at rest without it
+//!   for a whole arrival window (a record that cannot be read is at rest, as a look
+//!   reads one), or has read a turn at work, unchanged, for [`RECONCILE_MS`]: the
+//!   switch cut it, unless its harness said it took the paste. The harness's word on
+//!   its queue was that conversation's.
+//!
+//! - **Unknown.** A read of the window that fails, or answers too late to say what
+//!   the window does now ([`SLOW_READ_MS`]), is no look: what became of the paste
+//!   since the last look that read the window is not known. Its rest begins again at
+//!   the next look that reads the window at rest, and nothing is pressed or pasted
+//!   again on it: a look whose record could not be read, or a snapshot for the Enter
+//!   that failed or came late, or a host that says it is writing a paste still. Each
+//!   is said in the daemon's log, at most once a minute for a message
+//!   ([`UNREAD_TOLD_MS`]). Before a
+//!   paste goes again, the window is read once more: the pane host must answer at
+//!   once that nothing is going in, and that it wrote no paste into the window for a
+//!   whole arrival window (one it held while it was slow is written when it catches
+//!   up, and the record has had only that long to show it: its rest counts from
+//!   then); and the record read after it must still not show it (one that does
+//!   confirms it). Turn-end's rule for processes is the same
+//!   (unreadable is unknown, and holds).
 //!
 //! So a paste the window did not drop goes once: a turn that holds it ends, Devin
 //! runs it within seconds, and the first look after reads its prompt (taken), before
@@ -42,13 +66,20 @@
 //! before its prompt is read. A harness's word that its queue has the message is not
 //! withdrawn: one that then loses it leaves the message waited for until the window
 //! closes. A paste held in a turn that never ends waits with it, and the window's
-//! queue behind it, until the human stops the turn or closes the window. A turn that
-//! begins between the window's readiness and the paste is not known to hold it until
-//! a look reads its prompt; were it to end before the next look, and that look come a
-//! whole arrival window after the hand-over and within seconds of its end, the paste
-//! would go again while Devin had it queued. The one Enter is pressed whatever the
+//! queue behind it, until the human stops the turn or closes the window. The one Enter is pressed whatever the
 //! window shows (a quiet dialog may take it), and the screen is looked at apart from
-//! the press, so a human's typing in between can meet it.
+//! the press, so a human's typing in between can meet it. What the daemon's stop leaves
+//! on its way is settled at the start by the record alone (`in_flight`): one it does not
+//! show goes again, so a paste a window held queued when the daemon stopped, and ran
+//! later, is read twice. Where Devin's store says its TUI took it, the paste that goes
+//! again says in its header that it may be there already.
+//! A paste whose window can no longer be read waits with no bound: while every look fails
+//! or its pane host does not answer in time, no Enter is pressed, it is never pasted
+//! again, and no attempt is counted. What ends that is a look that reads the window
+//! again (then the arrival window of rest, or the half hour, as ever), the window's
+//! exit, the message leaving its way (its task cancelled, the window taken back), or
+//! the daemon's restart, which gives a message whose record cannot be read back to its
+//! queue (`in_flight`).
 //!
 //! What a hand-over is and how it fails are `deliveries`'; the wait is the part of
 //! the record's delivery part this owns.
@@ -56,12 +87,12 @@
 use std::rc::Rc;
 
 use cf_base::js;
-use cf_harness::contract::{Input, Observed};
-use cf_harness::records::Role;
+use cf_harness::contract::{Input, Observed, Pane};
+use cf_harness::records::{Reading, Role, Settlement};
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
-use crate::deliveries::{Enter, Uncleared};
+use crate::deliveries::{Delivering, Enter, Uncleared, Unread};
 use crate::delivery_text::is_paste_of;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -76,6 +107,14 @@ const ENTER_AGAIN_MS: i64 = 10_000;
 /// How long the window must have printed nothing first: one being typed into,
 /// or drawing, is left be.
 pub(crate) const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
+/// How long a read of the window may take and still say what the window does now:
+/// a pane host answers a snapshot at once, so one that took longer stalled, and what
+/// it says is as old as the stall.
+const SLOW_READ_MS: i64 = 5_000;
+/// Why a snapshot came to nothing.
+const NO_ANSWER: &str = "its pane host did not answer in time";
+/// How often at most the log says a message's window could not be read.
+const UNREAD_TOLD_MS: i64 = 60_000;
 /// How long after it was last found free (`Delivering::free_since`) a paste the
 /// record never showed is pasted again at the window's next rest, however its rest
 /// was cut by turns.
@@ -88,6 +127,9 @@ struct Rest {
     rested: i64,
     /// A turn was found since the hand-over.
     turned: bool,
+    /// The rest began again, with no turn, at a look after one that could not read
+    /// the window.
+    read_again: bool,
     /// Since when the paste has been free (`Delivering::free_since`): none while the
     /// harness holds it.
     free: Option<i64>,
@@ -124,6 +166,12 @@ impl Dispatcher {
         let Some(arrived) = arrived else {
             return Ok(false);
         };
+        // A paste the window's harness queued behind a turn that the app's Stop then
+        // cancelled is in its record all the same, and delivered: Devin keeps it in the
+        // conversation, unanswered and never run, and its agent reads it in the next
+        // turn (T-102, 3 of 3 runs on Devin 3000.11.92). The Stop is a pause, and every
+        // resume sends words, so the next turn comes for a task that goes on; giving it
+        // back would put it in the conversation twice.
         let receipt = json!({ "item": &*arrived.id });
         self.confirm_delivered(&message, &receipt)?;
         record.delivery.borrow_mut().delivering = None;
@@ -158,12 +206,26 @@ impl Dispatcher {
             return Ok(());
         };
         if delivering.launch {
-            // A first message waits as long as its window asks whether to trust its
-            // folder, and has its whole time once it is past that (`trust`).
-            if record.window.borrow().trust != Trusting::Past {
+            // A first message waits as long as its window asks one of the questions its
+            // harness asks as it starts (its folder's trust, its folder's grants, the
+            // project's new MCP servers), and has its whole time once it is past them
+            // (`trust`). One still owed to a window that has neither asked nor shown its
+            // prompt spends its time meanwhile: a window that shows neither is never ready
+            // for it.
+            let trust = record.window.borrow().trust;
+            if trust.asks() || (trust == Trusting::Looking && delivering.owed.is_none()) {
                 return Ok(());
             }
             let waited = self.now() - delivering.since;
+            // One handed over by a paste once its window was up is pressed Enter for
+            // once more, as any paste is; one its window read as it opened never is.
+            if delivering.late
+                && !delivering.entered_again
+                && waited > ENTER_AGAIN_MS
+                && self.pasted(record)
+            {
+                return self.enter_again(record, delivering.message).await;
+            }
             // The chief's window is the human's: however long it takes to
             // show its first message (the handoff), it is never closed for that.
             if delivering.chief || waited <= self.seams.limits.launch_ms {
@@ -178,7 +240,13 @@ impl Dispatcher {
             }
             let (this, held) = (Rc::clone(self), Rc::clone(record));
             let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
-            let because = "the window never showed its first message";
+            // A window delivered its first message once up that never took it was
+            // never ready for it (`hand_first`).
+            let because = if delivering.owed.is_some() {
+                "the window was never ready for its first message"
+            } else {
+                "the window never showed its first message"
+            };
             self.settle_failure(
                 delivering,
                 &self.unstarted_because(record, because, &shown),
@@ -186,6 +254,11 @@ impl Dispatcher {
             )?;
             closing.await?;
             return Ok(());
+        }
+        // The human switched the window away from the conversation it was pasted into:
+        // that conversation's record says what came of it, the queued one's too.
+        if let Some(left) = self.left(record, &delivering)? {
+            return self.watch_left(record, delivering, &left).await;
         }
         if delivering.queued {
             return Ok(());
@@ -195,11 +268,21 @@ impl Dispatcher {
             self.queued(record);
             return Ok(());
         }
+        // A look that could not read the record says nothing of the paste.
+        if observed
+            .reading
+            .as_deref()
+            .is_some_and(Reading::read_failed)
+        {
+            self.unknown(record, "its record could not be read");
+            return Ok(());
+        }
         let now = self.now();
         let waited = now - delivering.since;
         let Rest {
             rested,
             turned,
+            read_again,
             free,
         } = self.rested(record, observed, self.held(record));
         let at_rest = observed.settled && observed.waiting.is_none();
@@ -222,6 +305,9 @@ impl Dispatcher {
         if delivering.chief {
             return Ok(());
         }
+        if !self.read_once_more(record, delivering.message).await? {
+            return Ok(());
+        }
         record.delivery.borrow_mut().delivering = None;
         // A paste the harness record never showed after the whole window, the
         // window at rest all of it, did not land: sending it again is how it
@@ -242,10 +328,133 @@ impl Dispatcher {
                 "the harness record never showed it in the {} s its window was at rest since its last turn",
                 self.seams.limits.arrival_ms / 1000
             )
+        } else if read_again {
+            format!(
+                "the harness record never showed it in the {} s its window was at rest since it could be read again",
+                self.seams.limits.arrival_ms / 1000
+            )
         } else {
             "the harness record never showed it".to_owned()
         };
         self.settle_failure(delivering, &because, true)
+    }
+
+    /// The conversation the message on its way was pasted into, where the window is on
+    /// another now (the human ran `/new` or `/resume` in it, or `/clear`).
+    fn left(
+        &self,
+        record: &Record,
+        delivering: &Delivering,
+    ) -> Result<Option<String>, EngineError> {
+        let Some(pasted) = &delivering.session else {
+            return Ok(None);
+        };
+        let now = self
+            .seams
+            .ledger
+            .borrow()
+            .current_conversation(record.id)?
+            .and_then(|conversation| conversation.native_session);
+        Ok(now.filter(|now| now != pasted).map(|_| pasted.clone()))
+    }
+
+    /// The message on its way went into the conversation `left`, which its window
+    /// shows no longer: no look at the window reads its record again, and the harness's
+    /// word of its own queue was of that conversation. Its record, read with no window
+    /// open, confirms it where it shows it; one that has read at rest without it for a
+    /// whole arrival window gives it back to its queue, with its attempt, for the
+    /// conversation the window shows now (the reviews of 2026-10-18: a paste the
+    /// harness had queued was waited for in the new conversation's record, which never
+    /// shows it, and everything behind it waited for good). A record that cannot be
+    /// read is at rest, with nothing in it, as a look at a window reads one (the review
+    /// of c2e29f2d: Devin reads a session it holds no row of as unknown, and a paste into
+    /// a conversation the human left before it ran waited for good). One that reads a
+    /// turn at work is waited for, but no longer than [`RECONCILE_MS`] of reading the
+    /// same: a turn the switch cut, which no end will close. Unless its harness said it
+    /// took the paste (`queued`): Devin's `/new` cuts no turn, and runs the paste queued
+    /// behind it in the conversation left once the turn ends, however long its step (the
+    /// review of 6c8fc595), so its record is waited for as on the window's own path.
+    async fn watch_left(
+        &self,
+        record: &Record,
+        delivering: Delivering,
+        left: &str,
+    ) -> Result<(), EngineError> {
+        let reading = self.record_left(record.id, left).await?;
+        // The window may have gone, and another message gone on its way, while the
+        // record was read: this one is settled no more here.
+        let this = |record: &Record| {
+            record
+                .delivery
+                .borrow()
+                .delivering
+                .as_ref()
+                .is_some_and(|now| now.message == delivering.message)
+        };
+        if !this(record) {
+            return Ok(());
+        }
+        let Some(message) = self.seams.ledger.borrow().message(delivering.message)? else {
+            return Ok(());
+        };
+        if message.state != "delivering" {
+            return Ok(());
+        }
+        let found = match reading.as_deref() {
+            Some(Reading::Known(found)) => Some(found),
+            _ => None,
+        };
+        let arrived = found.and_then(|found| {
+            found
+                .items
+                .iter()
+                .find(|item| item.role == Role::User && is_paste_of(&item.text, message.id, None))
+        });
+        if let Some(arrived) = arrived {
+            self.confirm_delivered(&message, &json!({ "item": &*arrived.id }))?;
+            record.delivery.borrow_mut().delivering = None;
+            self.changed();
+            return Ok(());
+        }
+        let at_rest = found.is_none_or(|found| {
+            found.settlement == Settlement::Settled
+                || (found.settlement != Settlement::InFlight
+                    && found.items.is_empty()
+                    && !found.in_flight)
+        });
+        let items = found.map_or(0, |found| found.items.len());
+        let now = self.now();
+        let (rested, at_work) = {
+            let mut part = record.delivery.borrow_mut();
+            let held = part.left_at_work;
+            let Some(on_its_way) = part.delivering.as_mut() else {
+                return Ok(());
+            };
+            if at_rest {
+                let rested = now - *on_its_way.rested_since.get_or_insert(now);
+                part.left_at_work = None;
+                (rested, 0)
+            } else {
+                on_its_way.rested_since = None;
+                let since = match held {
+                    Some((of, seen, since)) if of == delivering.message && seen == items => since,
+                    _ => now,
+                };
+                part.left_at_work = Some((delivering.message, items, since));
+                (0, now - since)
+            }
+        };
+        let because = if rested > self.seams.limits.arrival_ms {
+            "its window was switched to another conversation, whose record never showed it"
+        } else if at_work > RECONCILE_MS && !delivering.queued {
+            "its window was switched to another conversation, whose record read a turn at work, unchanged, and never showed it"
+        } else {
+            return Ok(());
+        };
+        record.delivery.borrow_mut().delivering = None;
+        self.give_back(delivering.message, because)?;
+        self.changed();
+        Ok(())
     }
 
     /// Whether the window takes what it is handed pasted into its input box.
@@ -273,7 +482,8 @@ impl Dispatcher {
 
     /// How long the window has been at rest since the message on its way was
     /// handed over, or since its last turn ended: the time its record has had
-    /// to show it. A look that finds the window in a turn starts the count
+    /// to show it. A look after one that could not read the window starts the count
+    /// again too ([`Dispatcher::unknown`]). A look that finds the window in a turn starts the count
     /// again, whatever the harness does with what came in meanwhile: it may
     /// hold it until it runs it, which is the record's wait, not its failure. A
     /// window waiting on a dialog is in its turn still. One whose harness `held` the
@@ -289,9 +499,11 @@ impl Dispatcher {
         if held {
             delivering.rested_since = None;
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {
                 rested: 0,
                 turned: true,
+                read_again: false,
                 free: None,
             };
         }
@@ -300,14 +512,17 @@ impl Dispatcher {
             let since = *delivering.rested_since.get_or_insert(now);
             Rest {
                 rested: now - since,
-                turned: since != delivering.since,
+                turned: delivering.turned,
+                read_again: since != delivering.since,
                 free,
             }
         } else {
             delivering.rested_since = None;
+            delivering.turned = true;
             Rest {
                 rested: 0,
                 turned: true,
+                read_again: false,
                 free,
             }
         }
@@ -327,12 +542,13 @@ impl Dispatcher {
             return Ok(());
         };
         self.entered_again(record, message, true);
-        let body = json!({ "id": pane.id, "generation": pane.generation });
-        // `.catch(() => null)` made a promise of its own to wait on, a turn
-        // after the host's answer.
-        let snapshot = returning(self.seams.host.request("pane.snapshot", body))
-            .await
-            .ok();
+        // A host that cannot say what the window does now says nothing of the paste.
+        let Some(snapshot) = self.snapshot_now(&pane).await else {
+            self.entered_again(record, message, false);
+            self.unknown(record, NO_ANSWER);
+            return Ok(());
+        };
+        let snapshot = Some(snapshot);
         let quiet = snapshot
             .as_ref()
             .and_then(|snapshot| snapshot.get("outputQuietMs"))
@@ -385,6 +601,139 @@ impl Dispatcher {
         // Enter, if any: `.catch(() => {})` made a promise of its own to wait on.
         let _ = returning(self.seams.host.request("pane.input", input)).await;
         self.trace_window(record, WindowEvent::EnterAgain { message })
+    }
+
+    /// What became of the paste on its way since the window was last read is not
+    /// known: a read of it failed, or came too late to say what it says. The rest the
+    /// record has had to show it begins again at the next look that reads the window
+    /// at rest.
+    /// The daemon's log says so, `why` the read came to nothing, at most once in
+    /// [`UNREAD_TOLD_MS`] for a message: which window, which message, and how many
+    /// reads came to nothing in how long. Never what the window shows.
+    pub(crate) fn unknown(&self, record: &Record, why: &str) {
+        let now = self.now();
+        let told = {
+            let mut part = record.delivery.borrow_mut();
+            let Some(delivering) = part.delivering.as_mut() else {
+                return;
+            };
+            delivering.rested_since = None;
+            let message = delivering.message;
+            let unread = part
+                .unread
+                .take()
+                .filter(|unread| unread.message == message)
+                .unwrap_or(Unread {
+                    message,
+                    first: now,
+                    reads: 0,
+                    told: None,
+                });
+            let unread = part.unread.insert(Unread {
+                reads: unread.reads + 1,
+                ..unread
+            });
+            if unread.told.is_some_and(|told| now - told < UNREAD_TOLD_MS) {
+                return;
+            }
+            unread.told = Some(now);
+            (message, unread.reads, (now - unread.first) / 1000)
+        };
+        let (message, reads, secs) = told;
+        let window = record.window.borrow().pane.as_ref().map_or_else(
+            || "a window".to_owned(),
+            |pane| format!("the window {}", pane.id),
+        );
+        self.seams.log.warn(&format!(
+            "{window} could not be read ({why}): m-{message} waits, its rest begun again; \
+             {reads} reads of it came to nothing in {secs} s"
+        ));
+    }
+
+    /// The pane host's word on the window now: none where it failed, or came too late
+    /// ([`SLOW_READ_MS`]) to say what the window does now.
+    async fn snapshot_now(&self, pane: &Pane) -> Option<Value> {
+        let asked = self.now();
+        let body = json!({ "id": pane.id, "generation": pane.generation });
+        // `.catch(() => null)` made a promise of its own to wait on, a turn
+        // after the host's answer.
+        let snapshot = returning(self.seams.host.request("pane.snapshot", body))
+            .await
+            .ok()?;
+        let in_time = self.now() - asked <= SLOW_READ_MS;
+        (in_time && snapshot.get("ok") == Some(&Value::Bool(true))).then_some(snapshot)
+    }
+
+    /// Reads the window once more before `message`, which its record never showed,
+    /// is pasted again: whether it is to go. The pane host must say at once that no
+    /// paste is going in, and the record, read after that, must still not show it:
+    /// one that does confirms it. A read that fails or comes late is unknown, and so
+    /// is a host still writing a paste: the rest begins again, and nothing goes. So
+    /// does a window that is in a turn by then. One no longer on its way is done with.
+    async fn read_once_more(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        message: i64,
+    ) -> Result<bool, EngineError> {
+        let (window, pane) = {
+            let part = record.window.borrow();
+            (part.window.clone(), part.pane.clone())
+        };
+        let (Some(window), Some(pane)) = (window, pane) else {
+            return Ok(true);
+        };
+        let Some(snapshot) = self.snapshot_now(&pane).await else {
+            self.unknown(record, NO_ANSWER);
+            return Ok(false);
+        };
+        if js::truthy(snapshot.get("pasteInFlight")) {
+            self.unknown(record, "its pane host is writing a paste into it still");
+            return Ok(false);
+        }
+        // A paste the host held while it was slow, written only now: the record has
+        // its whole time from then.
+        let pasted = snapshot.get("pasteQuietMs").and_then(Value::as_f64);
+        if let Some(pasted) = pasted.filter(|&pasted| pasted < self.seams.limits.arrival_ms as f64)
+        {
+            let written = self.now() - pasted as i64;
+            if let Some(delivering) = record.delivery.borrow_mut().delivering.as_mut() {
+                delivering.rested_since = Some(written);
+            }
+            self.seams.log.warn(&format!(
+                "the window {} was written a paste {} ms ago, as m-{message} was to go again: \
+                 its record has its whole time from then",
+                pane.id, pasted as i64
+            ));
+            return Ok(false);
+        }
+        let Ok(looked) = returning(window.observe()).await else {
+            self.unknown(record, "a look at it failed");
+            return Ok(false);
+        };
+        let on_its_way = record
+            .delivery
+            .borrow()
+            .delivering
+            .as_ref()
+            .is_some_and(|delivering| delivering.message == message);
+        if self.forgotten(record) || !on_its_way {
+            return Ok(false);
+        }
+        if looked.reading.as_deref().is_some_and(Reading::read_failed) {
+            self.unknown(record, "its record could not be read");
+            return Ok(false);
+        }
+        if self.confirm_arrival(record, &looked)? {
+            return Ok(false);
+        }
+        if !(looked.settled && looked.waiting.is_none()) {
+            if let Some(delivering) = record.delivery.borrow_mut().delivering.as_mut() {
+                delivering.rested_since = None;
+                delivering.turned = true;
+            }
+            return Ok(false);
+        }
+        Ok(true)
     }
 
     /// Marks whether Enter was pressed again for `message`, while it is the one on its way.

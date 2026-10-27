@@ -3,6 +3,7 @@
 //! completion that names no answer, and the records Node's reader threw on.
 
 mod answers;
+mod refusals;
 mod twins;
 
 use super::*;
@@ -266,4 +267,23 @@ fn a_command_output_javascript_cannot_make_text_fails_the_look() {
     assert!(read(&[command(native.clone())]).is_err(), "{native}");
     let text = read(&[command(json!({ "type": "CommandExecution", "id": "c", "aggregated_output": [1, { "valueOf": 2 }] }))]).unwrap();
     assert_eq!(&*text.items[0].text, "1,[object Object]");
+}
+
+#[test]
+fn each_item_is_said_with_the_place_of_the_record_that_first_named_it() {
+    // What a lost line is counted against: the record a turn's paste is in.
+    let message = |id: &str, text: &str| {
+        response(json!({ "type": "message", "role": "assistant", "id": id,
+            "content": [{ "type": "output_text", "text": text }] }))
+    };
+    let read = read(&[
+        started(json!("t1")),
+        message("m1", "one"),
+        call("c1"),
+        message("m2", "two"),
+        message("m1", "one, again"),
+    ])
+    .unwrap();
+    assert_eq!(read.items.len(), 2);
+    assert_eq!(read.lines.places, Some(vec![1, 3]));
 }

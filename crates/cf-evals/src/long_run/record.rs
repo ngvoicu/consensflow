@@ -85,9 +85,15 @@ pub enum Kind {
     /// Claude Code compacted the conversation: no turn.
     Compaction,
     /// What a command typed at Claude's prompt printed (`<local-command-stdout>`,
-    /// `<local-command-stderr>`), as the user's record or the system's: the end,
-    /// natively, of the turn its command began, where it follows the command.
+    /// `<local-command-stderr>`), as the user's record: the end, natively, of the
+    /// turn its command began, where it follows the command; a prompt's words where
+    /// it does not, as the product reads them.
     Output,
+    /// The same, as the system's record (`local_command`): the end of its command's
+    /// turn where it follows the command, and nothing where it does not, as the
+    /// product reads it. A command the system writes whole (`/mcp`, `/plugin`) has
+    /// its own record the system's too, which is nothing, and began no turn.
+    Printed,
     /// How many background agents and workflows a root `turn_duration` says its turn
     /// left running (`pendingBackgroundAgentCount`, `pendingWorkflowCount`; none when
     /// it says none): Claude Code wakes the agent as each ends, and says the count again
@@ -236,6 +242,8 @@ pub struct Record {
     /// The uuids of the user's records Claude Code marks as its summary of a compaction
     /// (`isCompactSummary: true`): the product copies each as an item of that id.
     summaries: BTreeSet<String>,
+    /// When a process that wrote the record was proved gone, in milliseconds ([`Record::gone_at`]).
+    gone: BTreeSet<i64>,
 }
 
 impl Record {
@@ -271,6 +279,16 @@ impl Record {
     /// the later line's words under it).
     pub fn is_summary(&self, uuid: &str) -> bool {
         self.summaries.contains(uuid) && self.lookup(Some(uuid)).is_some()
+    }
+
+    /// The process that wrote the record was proved gone at `at`, in milliseconds: the pane
+    /// host said its window exited and named nothing of it that it could not end. What it had
+    /// queued in its memory and not begun went with it, and so did the background agents its
+    /// last turn left running, though no line says so: what the record says after `at` is a
+    /// later process's. The product's reader empties them where ConsensFlow proved the same
+    /// before it opened the window again (T-442, `crates/cf-harness/src/claude/record.rs`).
+    pub fn gone_at(&mut self, at: i64) {
+        self.gone.insert(at);
     }
 
     /// Whether a line of the record carries `uuid`.
@@ -336,22 +354,38 @@ impl Record {
     /// begins no turn, and one in a turn leaves it at work. A message queued and not
     /// taken is a turn not over; a late ancestor begins none. The agents a turn's
     /// boundary counts are that turn's, and the next turn's work counts none until its
-    /// own boundary does.
+    /// own boundary does. Where the process that wrote it was proved gone ([`Record::gone_at`]),
+    /// its queue and its agents are emptied there, and its last answer ends no turn again,
+    /// as the product's reader empties them at a relaunch.
     fn replay(&self, at: i64) -> Replayed<'_> {
         let mut queues = Queues::default();
         let (mut open, mut agents, mut last) = (false, 0, None);
         // The answer that may end the turn, and the boundary that ended it (its parent).
         let mut candidate: Option<Option<&str>> = None;
         let mut ended: Option<(Option<&str>, Option<&str>)> = None;
+        let mut gone = self.gone.range(..=at).peekable();
         for entry in self
             .entries
             .iter()
             .filter(|entry| entry.at.is_none_or(|said| said <= at))
         {
+            let relaunched = entry.at.is_some_and(|said| {
+                let mut crossed = false;
+                while gone.next_if(|gone| **gone < said).is_some() {
+                    crossed = true;
+                }
+                crossed
+            });
+            if relaunched {
+                (queues, candidate, agents) = (Queues::default(), None, 0);
+            }
             match &entry.kind {
-                Kind::Output if last.is_some_and(|said| follows_its_command(said, entry)) => {
+                Kind::Output | Kind::Printed
+                    if last.is_some_and(|said| follows_its_command(said, entry)) =>
+                {
                     (open, candidate, ended, agents) = (false, None, None, 0);
                 }
+                Kind::Printed => continue,
                 Kind::Prompt | Kind::Output => {
                     let late = ended.is_some_and(|(parent, answer)| {
                         answer.is_some_and(|answer| {
@@ -402,6 +436,9 @@ impl Record {
             }
             last = Some(entry);
         }
+        if gone.next().is_some() {
+            (queues, agents) = (Queues::default(), 0);
+        }
         Replayed {
             open,
             queued: queues.turns(),
@@ -450,8 +487,9 @@ impl Record {
     /// since Claude Code compacted the conversation (a job's start or end, or a count
     /// of agents, aside, and the records of each command after it that runs no model:
     /// what it printed, the command, and the words before it, which a `/compact` typed
-    /// at the prompt writes after its summary). A command that may go on to the model
-    /// is no such thing: a turn may be at work after it.
+    /// at the prompt writes after its summary, and what a command the system writes
+    /// whole printed, which began no turn). A command that may go on to the model is
+    /// no such thing: a turn may be at work after it.
     pub fn ends_in_compaction(&self) -> bool {
         let mut said = self
             .entries
@@ -464,11 +502,19 @@ impl Record {
                 )
             })
             .peekable();
-        while said.next_if(|entry| entry.kind == Kind::Output).is_some() {
-            if said.next_if(|entry| quiet(entry)).is_none() {
+        while let Some(output) =
+            said.next_if(|entry| matches!(entry.kind, Kind::Output | Kind::Printed))
+        {
+            let its_command = |entry: &&Entry| {
+                quiet(entry) && entry.uuid.is_some() && entry.uuid == output.parent
+            };
+            if said.next_if(its_command).is_some() {
+                said.next_if(|entry| {
+                    entry.kind == Kind::Prompt && entry.content.starts_with(CAVEAT)
+                });
+            } else if output.kind == Kind::Output {
                 return false;
             }
-            said.next_if(|entry| entry.kind == Kind::Prompt && entry.content.starts_with(CAVEAT));
         }
         said.next()
             .is_some_and(|entry| entry.kind == Kind::Compaction)
@@ -668,7 +714,7 @@ fn claude_entries(line: &Value, names: &Names) -> Vec<Entry> {
                     .is_some_and(|text| OUTPUTS.iter().any(|tag| text.starts_with(tag))) =>
         {
             vec![entry(
-                Kind::Output,
+                Kind::Printed,
                 line["content"].as_str().unwrap_or_default(),
             )]
         }

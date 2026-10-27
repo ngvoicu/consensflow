@@ -21,7 +21,9 @@ fn shown(code: Option<u32>, signal: Option<&str>, tail: Option<&[&str]>) -> Show
         signal: signal.map(str::to_owned),
         tail: tail.map(|lines| lines.iter().map(|line| (*line).to_owned()).collect()),
         background: Vec::new(),
+        possibly_left: Vec::new(),
         survivor: None,
+        pasted: false,
     }
 }
 
@@ -259,16 +261,16 @@ fn a_windows_status_is_written_as_windows_writes_it_and_a_program_s_own_code_as_
 
 #[test]
 fn what_else_is_said_goes_between_how_the_program_ended_and_its_screen() {
-    let besides = " with background work still running: sleep 9";
+    let besides = " with background work running, which its close ended: sleep 9";
     assert_eq!(
         shown(Some(3), None, Some(&["panicked"])).after_with("@zeus's window closed", besides),
-        "@zeus's window closed (exit code 3) with background work still running: sleep 9; \
+        "@zeus's window closed (exit code 3) with background work running, which its close ended: sleep 9; \
          its screen ended with: \"panicked\""
     );
     // A host that said nothing leaves it as it was said.
     assert_eq!(
         Shown::default().after_with("@zeus's window closed", besides),
-        "@zeus's window closed with background work still running: sleep 9"
+        "@zeus's window closed with background work running, which its close ended: sleep 9"
     );
     assert_eq!(
         shown(Some(3), None, Some(&["panicked"])).after_with("gone", ""),
@@ -441,5 +443,122 @@ fn a_snapshot_answer_gives_its_tail_when_it_was_a_success() {
     assert_eq!(
         Shown::from_snapshot(&json!({ "ok": true, "tail": "not a list" })),
         Shown::default()
+    );
+}
+
+#[test]
+fn what_changes_by_itself_in_an_outage_is_folded_and_every_other_number_kept() {
+    let key = |words: &str| words_key(words);
+    assert_eq!(
+        key("Overloaded, retry in 12s"),
+        key("Overloaded, retry in 7s")
+    );
+    assert_eq!(key("retrying in 30 s"), key("retrying in 5 minutes"));
+    assert_eq!(key("limit resets at 14:05"), key("limit resets at 9:30:12"));
+    assert_eq!(
+        key("Overloaded (request_id: req_011CVabcd1234efgh5678)"),
+        key("Overloaded (request_id: req_011CWzyxw9876vuts5432)")
+    );
+    assert_ne!(key("model gpt-5 not found"), key("model gpt-6 not found"));
+    assert_ne!(
+        key("API Error: 500 Internal error"),
+        key("API Error: 502 Internal error")
+    );
+    assert_eq!(
+        key("rate_limit_exceeded_error"),
+        "rate_limit_exceeded_error"
+    ); // A model's id, a dated one, and a code joined by `_` are the failure's own.
+    for kept in [
+        "model claude-sonnet-5-5 not found",
+        "model claude-sonnet-4-5-20250929 not found",
+        "model gpt-5-codex-high not found",
+        "ERR_HTTP2_GOAWAY_SESSION",
+    ] {
+        assert_eq!(key(kept), kept);
+    }
+    // A completion's, a response's, a hex and a UUID id change by themselves.
+    for (one, other) in [
+        (
+            "id chatcmpl-AbC123dEf456GhI789",
+            "id chatcmpl-ZyX987wVu654TsR321",
+        ),
+        (
+            "id resp_68af1c2d3e4f5a6b7c8d9e0f",
+            "id resp_11aa22bb33cc44dd55ee66ff",
+        ),
+        (
+            "trace 9f86d081884c7d659a2feaa0c55ad015",
+            "trace 2c26b46b68ffc68ff99b453c1d304134",
+        ),
+        (
+            "session 123e4567-e89b-12d3-a456-426614174000",
+            "session 9b2f1c3e-0d4a-4b5c-8e6f-7a8b9c0d1e2f",
+        ),
+    ] {
+        assert_eq!(key(one), key(other), "{one}");
+    }
+}
+
+#[test]
+fn what_a_screen_says_is_the_windows_lines_after_the_newest_paste() {
+    // A long wake-up's tail and its error above a short wake-up's header, body and
+    // error (Calliope's re-check T-300, P2-R1): the newest paste's error alone.
+    let pastes = [
+        Paste {
+            id: 9,
+            text: "[ConsensFlow m-9 · note from ConsensFlow]\nWake up".to_owned(),
+        },
+        Paste {
+            id: 8,
+            text: "[ConsensFlow m-8 · note from ConsensFlow]\nitem 14 of the board\nitem 15 of the board"
+                .to_owned(),
+        },
+    ];
+    let screen = shown(
+        None,
+        None,
+        Some(&[
+            "item 14 of the board",
+            "item 15 of the board",
+            "Error: x",
+            "[ConsensFlow m-9 · note from ConsensFlow]",
+            "Wake up",
+            "Error: x",
+            "status: idle",
+        ]),
+    );
+    assert_eq!(
+        screen.without_pastes(&pastes).after("failed"),
+        "failed; its screen ended with: \"Error: x / status: idle\""
+    );
+}
+
+#[test]
+fn a_footers_counters_are_folded_and_keep_one_failure_one() {
+    let key = |words: &str| words_key(words);
+    assert_eq!(
+        key("Error: x / 12% context left"),
+        key("Error: x / 9% context left")
+    );
+    assert_eq!(key("Error: x / $0.03 spent"), key("Error: x / $0.11 spent"));
+    assert_eq!(key("Error: x / 1.2k tokens"), key("Error: x / 34k tokens"));
+    assert_eq!(
+        key("Error: x / 12,345 tokens"),
+        key("Error: x / 13,001 tokens")
+    );
+    assert_ne!(key("API Error: 500"), key("API Error: 502"));
+    // A count that ends a model's id, and a list of codes, are the failure's own.
+    assert_ne!(
+        key("model gpt-4-32k not found"),
+        key("model gpt-4-8k not found")
+    );
+    assert_ne!(
+        key("model o3-mini-2k not found"),
+        key("model o3-mini-4k not found")
+    );
+    assert_ne!(key("retried on 500,502,503"), key("retried on 500,502,504"));
+    assert_eq!(
+        key("1.2k tokens and 3k left"),
+        "#count tokens and #count left"
     );
 }

@@ -1,7 +1,8 @@
 //! `read_on_with`: each line read by the parser it is given. A parser that
 //! builds part of a line fails where `from_slice_lossy` fails, and nowhere
-//! else, so a look fails at the same record, in the same sentence: the
-//! record is malformed, as Node said, or it is JSON this build cannot hold.
+//! else, so a look passes over the same torn lines (malformed, where Node
+//! failed), and fails at the same record, in the same sentence, where it is
+//! JSON this build cannot hold.
 
 use std::fs;
 use std::path::Path;
@@ -49,7 +50,8 @@ fn nested(depth: usize) -> String {
 }
 
 #[test]
-fn a_parser_that_keeps_part_of_a_line_fails_a_look_where_a_whole_one_does_in_the_same_sentence() {
+fn a_parser_that_keeps_part_of_a_line_fails_a_look_where_a_whole_one_does_and_passes_over_the_same_lines(
+) {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("t.jsonl");
     let deep = format!(r#"{{"a":1,"zz":{}}}"#, nested(200));
@@ -64,12 +66,6 @@ fn a_parser_that_keeps_part_of_a_line_fails_a_look_where_a_whole_one_does_in_the
             r#"{"a":1,"b":-1e999}"#,
             "JSON this build cannot hold at record 1",
         ),
-        // Malformed, wherever, and past what would not be held either.
-        (r#"{"a":1,"zz":[1,}"#, "malformed JSONL at record 1"),
-        (r#"{"a":1,"zz":01}"#, "malformed JSONL at record 1"),
-        (r#"{"zz":1e999,"a":}"#, "malformed JSONL at record 1"),
-        ("{\"a\":\"two\nlines\"}", "malformed JSONL at record 1"),
-        ("not JSON", "malformed JSONL at record 1"),
     ];
     for (line, said) in lines {
         fs::write(&file, format!("{{\"a\":0}}\n{line}\n{{\"a\":2}}\n")).unwrap();
@@ -78,14 +74,33 @@ fn a_parser_that_keeps_part_of_a_line_fails_a_look_where_a_whole_one_does_in_the
         assert!(sentence.starts_with(said), "{line}: {sentence}");
         assert_eq!(kept.unwrap_err(), sentence, "{line}");
     }
-    // The first line that fails is the failure, whichever the second would be.
+    // Malformed, wherever, and past what would not be held either: torn, and
+    // passed over by both, the record after it read.
+    for line in [
+        r#"{"a":1,"zz":[1,}"#,
+        r#"{"a":1,"zz":01}"#,
+        r#"{"zz":1e999,"a":}"#,
+        "{\"a\":\"two\nlines\"}",
+        "not JSON",
+    ] {
+        fs::write(&file, format!("{{\"a\":0}}\n{line}\n{{\"a\":2}}\n")).unwrap();
+        let [whole, kept] = both(&file);
+        let read = vec![(json!({ "a": 0 }), 0), (json!({ "a": 2 }), 1)];
+        assert_eq!(whole, Ok(read.clone()), "{line}");
+        assert_eq!(kept, Ok(read), "{line}");
+    }
+    // A line this build cannot hold fails the look, before a torn line or after.
     for (first, second, said) in [
         (
             deep.as_str(),
             "not JSON",
             "JSON this build cannot hold at record 1",
         ),
-        ("not JSON", deep.as_str(), "malformed JSONL at record 1"),
+        (
+            "not JSON",
+            deep.as_str(),
+            "JSON this build cannot hold at record 1",
+        ),
     ] {
         fs::write(&file, format!("{{\"a\":0}}\n{first}\n{second}\n")).unwrap();
         let [whole, kept] = both(&file);
@@ -129,25 +144,19 @@ fn the_unterminated_last_line_is_read_by_the_parser_it_is_given() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("t.jsonl");
     // Whole JSON already: visited, and remembered. Not whole yet: waited for.
-    // Never JSON: a failure. Too deep for a value: a failure of its own.
-    for (last, visits, failure) in [
-        (r#"{"a":1,"zz":[1]}"#, 2, None),
-        (r#"{"a":1,"zz":[1"#, 1, None),
-        (r#"{"a":1,"#, 1, None),
-        (r#"{"a":1} x"#, 1, Some("malformed JSONL at record 1")),
-        ("[1,}", 1, Some("malformed JSONL at record 1")),
+    // Never JSON: a torn line, which waits for its newline as well. Too deep
+    // for a value: a failure.
+    for (last, visits) in [
+        (r#"{"a":1,"zz":[1]}"#, 2),
+        (r#"{"a":1,"zz":[1"#, 1),
+        (r#"{"a":1,"#, 1),
+        (r#"{"a":1} x"#, 1),
+        ("[1,}", 1),
     ] {
         fs::write(&file, format!("{{\"a\":0}}\n{last}")).unwrap();
         let [whole, kept] = both(&file);
-        assert_eq!(
-            whole.as_ref().map(Vec::len).map_err(String::clone),
-            kept.as_ref().map(Vec::len).map_err(String::clone),
-            "{last}"
-        );
-        match failure {
-            None => assert_eq!(kept.unwrap().len(), visits, "{last}"),
-            Some(said) => assert_eq!(kept.unwrap_err(), said, "{last}"),
-        }
+        assert_eq!(whole.map(|read| read.len()), Ok(visits), "{last}");
+        assert_eq!(kept.map(|read| read.len()), Ok(visits), "{last}");
     }
     let deep = format!(r#"{{"a":1,"zz":{}}}"#, nested(200));
     fs::write(&file, format!("{{\"a\":0}}\n{deep}")).unwrap();

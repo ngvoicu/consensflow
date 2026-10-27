@@ -76,11 +76,9 @@ meant = "what_is_not_a_queued_answer_for_the_caller_is_left_as_it_is_and_wakes_n
 runs = ["daemon-lib-routes-answers"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/api/routes/answers.rs"
-find = '''
-                && message.recipient_id == caller.participant.id
-        }) {'''
-replace = "        }) {"
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = 'message.recipient_id == recipient && message.state == "queued"'
+replace = 'message.state == "queued"'
 
 [[plant]]
 name = "read: cf says what it wrote before it has written it"

@@ -314,11 +314,11 @@ runs = ["sign-mac"]
 [[plant.edit]]
 file = "tools/cf-release/src/sign_mac/signing.rs"
 find = '''
-    codesign(tools, signing, app, &["--options", "runtime"])
-}'''
+        &["--options", "runtime", "--entitlements", &entitlements],
+'''
 replace = '''
-    codesign(tools, signing, app, &[])
-}'''
+        &["--entitlements", &entitlements],
+'''
 
 [[plant]]
 name = "deletion: a verb is given the first line of an argument"
@@ -330,49 +330,6 @@ builds = true
 file = "crates/cf/src/standalone/agent.rs"
 find = "            input.insert(key.to_owned(), Value::from(text));"
 replace = '            input.insert(key.to_owned(), Value::from(text.lines().next().unwrap_or("")));'
-
-# The page's console text.
-[[plant]]
-name = "deletion: the page spells an em dash as a hyphen"
-meant = "spells every code point the console changes as the table has it"
-runs = ["console-text"]
-
-[[plant.edit]]
-file = "app/ui/core/console-text.js"
-find = "    '—': '--',"
-replace = "    '—': '-',"
-
-[[plant]]
-name = "deletion: the page does not compose a text before it spells it"
-meant = "spells the texts that compose or decompose as a whole as the table has them, and null as null"
-runs = ["console-text"]
-
-[[plant.edit]]
-file = "app/ui/core/console-text.js"
-find = "text.normalize('NFC')"
-replace = "text"
-
-[[plant]]
-name = "deletion: the page changes a letter"
-meant = "leaves every other code point as it is"
-runs = ["console-text"]
-
-[[plant.edit]]
-file = "app/ui/core/console-text.js"
-find = 'if (code < 0x80 || /\p{L}/u.test(character)) return character'
-replace = "if (code < 0x80) return character"
-
-[[plant]]
-name = "deletion: the page’s module imports something"
-meant = "imports nothing, so the page loads it as it is"
-runs = ["console-text"]
-
-[[plant.edit]]
-file = "app/ui/core/console-text.js"
-find = "const CONSOLE_ASCII = new Map("
-replace = '''
-import { join } from 'node:path'
-const CONSOLE_ASCII = new Map('''
 
 # The Node a bare `node` runs on, for an app started before Pi's installer put its own on the
 # PATH (T-34, P3-1), what follows a shim's script (P3-2) and what a Node is (P3-4).

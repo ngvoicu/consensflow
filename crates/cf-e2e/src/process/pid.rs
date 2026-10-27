@@ -13,8 +13,8 @@ use std::io;
 
 use super::Run;
 
-/// A signal a case sends. Windows has no `Interrupt`, `Stop` or `Continue`, and
-/// its `Terminate` is a kill.
+/// A signal a case sends. Windows has no `Interrupt`, `Hangup`, `Stop` or `Continue`,
+/// and its `Terminate` is a kill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
     /// SIGTERM: the polite end, which a window's supervisor answers by ending
@@ -22,6 +22,9 @@ pub enum Signal {
     Terminate,
     /// SIGINT: the interrupt a terminal sends.
     Interrupt,
+    /// SIGHUP: a terminal hung up, which the pane host sends right after SIGTERM
+    /// when it closes a window.
+    Hangup,
     /// SIGKILL: the end nothing answers to.
     Kill,
     /// SIGSTOP: the program is stopped where it is, and runs no more until it is
@@ -39,6 +42,7 @@ pub fn signal(pid: u32, signal: Signal) -> io::Result<()> {
     let sent = match signal {
         Signal::Terminate => Sent::SIGTERM,
         Signal::Interrupt => Sent::SIGINT,
+        Signal::Hangup => Sent::SIGHUP,
         Signal::Kill => Sent::SIGKILL,
         Signal::Stop => Sent::SIGSTOP,
         Signal::Continue => Sent::SIGCONT,
@@ -92,6 +96,61 @@ pub fn started(pid: u32) -> Option<String> {
     (ran.code == Some(0) && !said.is_empty()).then(|| said.to_owned())
 }
 
+/// What the process `pid` is, in the words of `ps`: its state (`Z` is a process that has
+/// ended and is not yet reaped), its parent, how long it has run and what it runs. None
+/// where it is not there or the system will not say. For an error that names a process
+/// that was not to be there, so that the next one says what it was.
+#[cfg(unix)]
+pub fn described(pid: u32) -> Option<String> {
+    let ran = Run::new("ps")
+        .args(["-o", "stat=,ppid=,etime=,command=", "-p", &pid.to_string()])
+        .inheriting_env()
+        .run()
+        .ok()?;
+    let said = ran.stdout.trim();
+    (ran.code == Some(0) && !said.is_empty()).then(|| {
+        let mut rest = said;
+        let mut word = || {
+            rest = rest.trim_start();
+            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            let (word, tail) = rest.split_at(end);
+            rest = tail;
+            word
+        };
+        let (state, parent, ran_for) = (word(), word(), word());
+        let command = rest.trim_start();
+        format!("state {state}, parent {parent}, running for {ran_for}, command {command}")
+    })
+}
+
+/// How long the process `pid` has run, in whole seconds: the `etime` of `ps`. None where
+/// it is not there or the system will not say. A process that has run for less than
+/// another is one that began after it.
+#[cfg(unix)]
+pub fn age(pid: u32) -> Option<std::time::Duration> {
+    let ran = Run::new("ps")
+        .args(["-o", "etime=", "-p", &pid.to_string()])
+        .inheriting_env()
+        .run()
+        .ok()?;
+    (ran.code == Some(0))
+        .then(|| elapsed(ran.stdout.trim()))
+        .flatten()
+}
+
+/// The time `ps` says in `[[dd-]hh:]mm:ss`.
+#[cfg(unix)]
+fn elapsed(said: &str) -> Option<std::time::Duration> {
+    let (days, clock) = said.split_once('-').map_or((0, said), |(days, clock)| {
+        (days.parse().unwrap_or(0), clock)
+    });
+    let mut seconds = 0_u64;
+    for part in clock.split(':') {
+        seconds = seconds * 60 + part.parse::<u64>().ok()?;
+    }
+    Some(std::time::Duration::from_secs(days * 86_400 + seconds))
+}
+
 #[cfg(unix)]
 fn as_pid(pid: u32) -> io::Result<nix::unistd::Pid> {
     i32::try_from(pid)
@@ -108,7 +167,10 @@ fn as_pid(pid: u32) -> io::Result<nix::unistd::Pid> {
 /// is what ends a process there.
 #[cfg(windows)]
 pub fn signal(pid: u32, signal: Signal) -> io::Result<()> {
-    if matches!(signal, Signal::Interrupt | Signal::Stop | Signal::Continue) {
+    if matches!(
+        signal,
+        Signal::Interrupt | Signal::Hangup | Signal::Stop | Signal::Continue
+    ) {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
             format!("Windows has no {signal:?} to send"),

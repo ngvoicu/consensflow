@@ -37,6 +37,10 @@ const WINDOWED: [&str; 3] = ["working", "waiting", "paused"];
 /// coming up.
 const QUEUED: &str = "queued";
 
+/// A task in this state is on the board for a window nobody has yet: a `tell` adds
+/// its words to the brief the window that takes it is given.
+const OPEN: &str = "open";
+
 /// What a task's title says in place of its brief's first line while the brief
 /// waits at the human's gate, for a caller who did not write it.
 pub const GATED: &str = "(this waits for the human to pass it on)";
@@ -243,11 +247,13 @@ fn done(
 /// its answer comes back as a message; the chief resumes the task with its
 /// words. An urgent question pauses its task itself, in the same step. A task
 /// still queued, its window not up yet, is not stopped: the words are kept for
-/// the window, and go in after its brief (`Ledger::tell_queued`). Which of the
-/// two it is, is read again once the words are in: the task may have gone on
-/// while they came (its brief arrived, its resume queued it again). A task that
-/// went where no tell reaches is told as it was read, and the ledger refuses it
-/// in its own words.
+/// the window, and go in after its brief (`Ledger::tell_queued`). A task still
+/// open has no window to keep them for, nor a message to carry them: they are
+/// added to its brief (`Ledger::tell_open`), and the answer holds the task
+/// alone. Which of the three it is, is read again once the words are in: the
+/// task may have gone on while they came (its brief arrived, its resume queued
+/// it again, the daemon gave it a window). A task that went where no tell
+/// reaches is told as it was read, and the ledger refuses it in its own words.
 fn tell(
     context: &Context,
     caller: &Caller,
@@ -259,9 +265,20 @@ fn tell(
     let telling = fresh
         .as_ref()
         .map(|thread| &thread.task)
-        .filter(|now| reaches(now))
+        .filter(|now| tellable(now))
         .unwrap_or(&task.task);
     let state = telling.state.as_str();
+    if state == OPEN {
+        let told = context.ledger.borrow_mut().tell_open(
+            caller.project.id,
+            number,
+            &caller.participant.handle,
+            words.unwrap_or_default(),
+        )?;
+        let mut answer = Map::new();
+        answer.insert("task".to_owned(), value(&TaskSummary::from(&told))?);
+        return Ok(Answer::ok(Value::Object(answer)));
+    }
     let window = match &telling.assignee {
         Some(assignee) if reaches(telling) => assignee,
         _ => {
@@ -313,10 +330,11 @@ fn tell(
 
 /// `POST /api/tasks/<n>/finish`: what the worker of a working task said last is its result,
 /// and what its turn left running is not ended (the owner's decision of 2026-10-18: the
-/// chief can finish any working task). Only the engine reads the window, so it is asked,
-/// and answers with the task done, or with why it is not one to finish (not working, no
-/// member's open window works on it, no complete answer since its latest message). `jobs`
-/// and `agents` count what the worker's harness still counted running.
+/// chief can finish any working task; a paused one too, whose worker's turn ended with an
+/// answer after the tell that paused it). Only the engine reads the window, so it is asked,
+/// and answers with the task done, or with why it is not one to finish (neither working nor
+/// paused, no member's open window works on it, no complete answer since its latest message).
+/// `jobs` and `agents` count what the worker's harness still counted running.
 async fn finish(context: &Context, caller: &Caller, task: &TaskThread) -> Result<Answer, Failure> {
     let asked = (context.finish)(
         caller.project.id,
@@ -336,6 +354,12 @@ async fn finish(context: &Context, caller: &Caller, task: &TaskThread) -> Result
 /// or one coming up, which it keeps the words for.
 fn reaches(task: &TaskView) -> bool {
     task.assignee.is_some() && (WINDOWED.contains(&task.state.as_str()) || task.state == QUEUED)
+}
+
+/// Whether a tell reaches the task at all: its window, or, for a task still open, its
+/// brief, which the words are added to.
+fn tellable(task: &TaskView) -> bool {
+    task.state == OPEN || reaches(task)
 }
 
 /// The moves of a task a coordinator makes with the ledger's own words: accept

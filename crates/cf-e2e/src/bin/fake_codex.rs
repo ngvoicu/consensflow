@@ -11,11 +11,13 @@
 //! Each run writes what it was given, and what it saw, to `CF_TEST_CODEX_LOG`.
 //! `CF_TEST_CODEX_BACKEND` says how the server goes: `fail` at once, `die` once a
 //! thread starts, `spawns` starts programs (`children`) for as long as it lives once a
-//! thread starts, `orphans` starts one whose parent has gone; with `CF_TEST_CODEX_QUESTION` it asks its client a question when
+//! thread starts, `orphans` starts one whose parent has gone, `deaf` takes neither SIGTERM nor
+//! SIGHUP (Codex's own server stalled in its shutdown for 10 s and more when it was closed soon
+//! after it started, T-542) and ends only when it is killed; with `CF_TEST_CODEX_QUESTION` it asks its client a question when
 //! a thread starts; while the file `CF_TEST_CODEX_RESUME_HANGS` names is there, it
 //! never answers a resume, and `CF_TEST_CODEX_RESUME_MS` answers one that many
 //! milliseconds late. `CF_TEST_CODEX_TUI=wait` has the TUI wait for its window to
-//! end it.
+//! end it. A thread another server still holds is resumed read-only (`agent`).
 //!
 //! The server listens where it is told, as Codex's does: on a Unix socket
 //! (`unix://<path>`), or on loopback (`ws://127.0.0.1:0`, Windows'), where it
@@ -134,6 +136,9 @@ fn server(args: &[String]) -> ExitCode {
         let _ = writeln!(std::io::stderr(), "not logged in");
         return ExitCode::FAILURE;
     }
+    if how == "deaf" {
+        deaf();
+    }
     let behavior = Behavior {
         die: how == "die",
         spawns: how == "spawns",
@@ -150,6 +155,24 @@ fn server(args: &[String]) -> ExitCode {
         None => on_loopback(option(args, "--ws-token-sha256"), behavior, &agent),
     }
 }
+
+/// The server takes neither SIGTERM nor SIGHUP from here on: they are blocked before
+/// any thread of its starts, so every thread has them blocked, and they wait unseen.
+/// Only a kill ends it. Windows sends no signal to ask a program to end.
+#[cfg(unix)]
+fn deaf() {
+    use nix::sys::signal::{SigSet, Signal};
+
+    let mut signals = SigSet::empty();
+    signals.add(Signal::SIGTERM);
+    signals.add(Signal::SIGHUP);
+    if let Err(failed) = signals.thread_block() {
+        fail(&format!("could not block SIGTERM and SIGHUP: {failed}"));
+    }
+}
+
+#[cfg(not(unix))]
+fn deaf() {}
 
 /// How the server goes once a thread starts.
 #[derive(Clone, Copy)]
@@ -338,9 +361,14 @@ fn resumed(id: &Value, params: &Value, agent: &Arc<Agent>) -> Value {
         thread::sleep(Duration::from_millis(slow));
     }
     if agent.resume(thread) {
+        // A thread another server still holds is this one's to read, not to work in.
+        let read_only = !agent.hold();
+        if read_only {
+            record(json!({ "run": "server", "readOnly": thread }));
+        }
         result(
             id,
-            json!({ "thread": { "id": thread, "turns": [], "status": { "type": "idle" } } }),
+            json!({ "thread": { "id": thread, "turns": [], "status": { "type": "idle" } }, "readOnly": read_only }),
         )
     } else {
         json!({

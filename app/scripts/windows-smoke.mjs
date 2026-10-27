@@ -9,12 +9,15 @@
  *
  *   node app/scripts/windows-smoke.mjs <path to ConsensFlow.exe>
  *
+ * Last, the page's renderer is crashed, and the page must come back by itself.
+ *
  * It runs beside an installed ConsensFlow: its own home, its own WebView2
  * data folder, and the page reached over WebView2's remote debugging port.
- * It needs a desktop session (over SSH, start it from a scheduled task).
+ * It needs a desktop session: over SSH, run it with windows-smoke-desktop.mjs, which
+ * runs it from a scheduled task on the user's desktop.
  */
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from '@playwright/test'
@@ -93,6 +96,22 @@ do {
     .filter(Boolean)
 }
 
+/** The WebView2 renderer processes under the app of `pid`: its page's, and its frames'. */
+function rendererPids(pid) {
+  const script = `
+$tree = @(${pid})
+do {
+  $before = $tree.Count
+  $tree = @($tree + (Get-CimInstance Win32_Process | Where-Object { $tree -contains $_.ParentProcessId } | ForEach-Object { $_.ProcessId })) | Sort-Object -Unique
+} while ($tree.Count -gt $before)
+Get-CimInstance Win32_Process | Where-Object { $tree -contains $_.ProcessId -and $_.Name -eq 'msedgewebview2.exe' -and $_.CommandLine -match '--type=renderer' } | ForEach-Object { $_.ProcessId }
+`
+  return execFileSync('powershell', ['-NoProfile', '-Command', script], { encoding: 'utf8' })
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map(Number)
+}
+
 let browser
 try {
   await until('the debugging port', async () => (await fetch(`http://127.0.0.1:${PORT}/json/version`)).ok)
@@ -125,6 +144,56 @@ try {
   check(
     !classes.some((name) => /^(ConsoleWindowClass|CASCADIA_HOSTING_WINDOW_CLASS|PseudoConsoleWindow)$/.test(name)),
     'no window of the app is a console',
+  )
+
+  // A page whose process failed is loaded again (app/src-tauri/src/page_crash.rs): a page
+  // that is gone acknowledges no window's output, and the pane host stops reading a window
+  // that is owed 1 MiB of it. The page's renderers are ended from outside, as a crash ends
+  // them (a crash asked of the page itself over the debugging port takes Playwright's own
+  // session down with it), with Playwright away; the page that comes back is a new one (the
+  // mark set on the old is gone) showing the board.
+  await main.evaluate(() => {
+    window.__beforeTheCrash = true
+  })
+  // Away while it happens: a page that goes and comes back under an attached session
+  // throws inside Playwright, out of reach of any catch.
+  await browser.close()
+  browser = undefined
+  const renderers = rendererPids(app.pid)
+  console.log(`the app's WebView2 renderers: ${renderers.join(', ') || 'none'}`)
+  for (const pid of renderers) {
+    try {
+      execFileSync('taskkill', ['/PID', String(pid), '/F'], { stdio: 'ignore' })
+    } catch {}
+  }
+  await sleep(3000)
+  // A web view whose page is gone may not answer the debugging port at all: that is the
+  // page not loaded again too.
+  const loadedAgain = await until(
+    'the page loaded again after its process failed',
+    async () => {
+      browser ??= await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`, { timeout: 5000 })
+      for (const page of pages().filter((page) => page.url().startsWith('http://tauri.localhost'))) {
+        const fresh = await page.evaluate(
+          () => window.__beforeTheCrash === undefined && document.querySelector('#settings-button') !== null,
+        )
+        if (fresh) return true
+      }
+      return null
+    },
+    30_000,
+  ).catch(() => false)
+  check(loadedAgain, 'a page whose process failed is loaded again and shows the board')
+  const log = (() => {
+    try {
+      return readFileSync(join(root, 'home', 'app', 'app.log'), 'utf8')
+    } catch {
+      return ''
+    }
+  })()
+  check(
+    /the page's process (ended|stopped answering) \(kind \d\): loading it again/.test(log),
+    "the app's log says it loaded the page again",
   )
 } catch (cause) {
   check(false, cause.message)

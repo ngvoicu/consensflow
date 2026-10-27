@@ -5,6 +5,8 @@ use std::fmt;
 use cf_base::js;
 use cf_base::text::{utf16_len, utf16_prefix};
 
+use crate::delivery_text::put_there_by_claude;
+
 /// A harness as the pages name it (`HARNESS_NAMES`): its own word when it has
 /// no name of its own.
 pub(super) fn name_of(harness: &str) -> &str {
@@ -59,6 +61,19 @@ pub(super) fn delivered(text: &str) -> Option<Header<'_>> {
             id: &after[..digits],
         })
     })
+}
+
+/// What the human had typed ahead of the delivery whose header is `header` in `text`: the
+/// text before it, unless that is only what Claude Code put there itself (the placeholders
+/// of the images it attached to the paste, the opening of its wrapper), which is no word of
+/// the human's.
+pub(super) fn typed_before<'a>(text: &'a str, header: &Header<'_>) -> &'a str {
+    let before = &text[..header.at];
+    if put_there_by_claude(before) {
+        ""
+    } else {
+        before
+    }
 }
 
 /// A value as a template literal writes it: `null` for none.

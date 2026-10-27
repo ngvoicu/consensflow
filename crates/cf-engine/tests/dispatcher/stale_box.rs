@@ -350,6 +350,9 @@ fn a_box_emptied_counts_as_empty_until_a_paste_goes_in() {
 /// The same review (P3-5): a pane that would not take the key that empties its
 /// box held its queue silently for ever. Each key refused spends an attempt of
 /// the delivery, as a refused paste does, and the last fails it, the human told.
+/// The words resumed T-1, which is paused again, never failed, its requester told
+/// why (wt/give-up-paths: the words that resume a task and never reach its window
+/// pause it again, whatever kept them out).
 #[test]
 fn a_box_that_will_not_take_its_key_fails_its_delivery_as_a_refused_paste_does() {
     let context = Context::new();
@@ -371,14 +374,33 @@ fn a_box_that_will_not_take_its_key_fails_its_delivery_as_a_refused_paste_does()
         "{:?}",
         again.reason
     );
-    assert_eq!(context.task(tiers.project.id, 1).task.state, "failed");
+    assert_paused_again(&tiers, &again);
+}
+
+/// T-1 is paused again by the words that resumed it, `again`, which failed: its
+/// requester, the chief, is told so, with why they did not reach the window.
+fn assert_paused_again(tiers: &Tiers<'_>, again: &MessageView) {
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let why = again.reason.as_deref().expect("why they failed");
+    let said = format!(
+        "T-1 is paused: the words that resumed it, m-{}, did not reach @zeus-amber-pine's window: {why}",
+        again.id
+    );
+    assert!(
+        tiers
+            .notes("chief")
+            .iter()
+            .any(|note| note.starts_with(&said)),
+        "{said:?} in {:#?}",
+        tiers.notes("chief")
+    );
 }
 
 /// Calliope's review of 2026-10-21, round 12 (P3-1): a window whose screen never
 /// went quiet for the key that empties its box held its queue for good, no attempt
 /// spent, the human told nothing. Once the wait outlasts the arrival window, the
 /// delivery is begun and the attempt fails; the last fails it, as a key the host
-/// did not take does.
+/// did not take does, and T-1, which the words resumed, is paused again.
 #[test]
 fn a_window_that_never_goes_quiet_for_the_key_fails_its_delivery_in_the_end() {
     let context = Context::new();
@@ -405,7 +427,7 @@ fn a_window_that_never_goes_quiet_for_the_key_fails_its_delivery_in_the_end() {
         "{:?}",
         again.reason
     );
-    assert_eq!(context.task(tiers.project.id, 1).task.state, "failed");
+    assert_paused_again(&tiers, &again);
 }
 
 /// The same review (P3-2): the window's record, copied by ConsensFlow, held the

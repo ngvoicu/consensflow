@@ -111,14 +111,14 @@ impl Stage {
 fn known(reading: &Reading) -> Record {
     match reading {
         Reading::Known(record) => record.clone(),
-        Reading::Unknown(reason) => panic!("unknown: {reason}"),
+        Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
     }
 }
 
 /// Why a reading says it is unknown, or a failure of the test.
 fn reason(reading: &Reading) -> &str {
     match reading {
-        Reading::Unknown(reason) => reason,
+        Reading::Unknown(reason) | Reading::Missing(reason) => reason,
         Reading::Known(record) => panic!("known: {record:?}"),
     }
 }

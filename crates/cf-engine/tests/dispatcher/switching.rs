@@ -291,29 +291,24 @@ fn never_gives_the_new_chief_the_note_that_asked_the_old_one_where_things_stand(
     let project = context.with_staff(&["zeus"]);
     context.pass().unwrap();
     context.adapter.busy("chief");
-    let asking = |n: usize| {
-        let chief = chief_of(&context, project.id).id;
-        let inbox = context.ledger.borrow().inbox(chief, 100).unwrap();
+    let old_chief = chief_of(&context, project.id).id;
+    let asking = || {
+        let inbox = context.ledger.borrow().inbox(old_chief, 100).unwrap();
         inbox
             .into_iter()
             .filter(|message| message.body.contains("Write down where things stand"))
-            .nth(n)
-            .unwrap()
+            .count()
     };
-    // Asked twice while the chief works: the second ask replaces the first.
+    // Asked twice while the chief works: the second ask replaces the first, and
+    // neither writes its note, which is written only when it is pasted.
     context
         .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Turn, true)
         .unwrap();
-    let first = asking(0);
     context
         .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Turn, true)
         .unwrap();
-    assert_eq!(
-        context.message(first.id).state,
-        "cancelled",
-        "replaced, never sent"
-    );
     context.pass().unwrap();
+    assert_eq!(asking(), 0, "never written while the chief works");
     // The human does not wait for the answer: Switch chief, now.
     context
         .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Now, false)
@@ -322,7 +317,7 @@ fn never_gives_the_new_chief_the_note_that_asked_the_old_one_where_things_stand(
         chief_of(&context, project.id).harness.as_deref(),
         Some("codex")
     );
-    assert_eq!(context.message(asking(0).id).state, "cancelled");
+    assert_eq!(asking(), 0, "nor once the chief was switched");
     context.pass().unwrap();
     context.codex.answer("chief", "I have taken over.");
     context.pass().unwrap();
@@ -372,5 +367,68 @@ fn switches_a_chief_out_of_quota_at_once_and_the_new_chief_is_not_out() {
         context.close(),
         SUITES,
         "switches a chief out of quota at once, and the new chief is not out",
+    );
+}
+
+/// The note that asks the chief where things stand is written only when it is
+/// pasted, with the chief at rest (T-351, finding 5 of T-350's review): queued
+/// while the chief was in its turn, a `cf inbox read` there received it, and the
+/// switch, which waits for an answer after the note's paste, went at once. Not
+/// held to Node's trace: Node wrote the note when the switch was asked.
+#[test]
+fn writes_the_note_that_asks_where_things_stand_only_when_it_pastes_it_with_the_chief_at_rest() {
+    let context = with_codex();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.adapter.busy("chief");
+    context.pass().unwrap();
+    let chief = chief_of(&context, project.id).id;
+    let asking = || {
+        context
+            .ledger
+            .borrow()
+            .inbox(chief, 100)
+            .unwrap()
+            .into_iter()
+            .filter(|message| message.body.contains("Write down where things stand"))
+            .collect::<Vec<_>>()
+    };
+    context
+        .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Turn, true)
+        .unwrap();
+    context.pass().unwrap();
+    assert!(
+        asking().is_empty(),
+        "nothing a `cf inbox read` in the chief's turn could take: {:?}",
+        asking()
+    );
+
+    // The turn ends: the note is written and pasted at once.
+    context.adapter.with("chief", |agent| agent.settled = true);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let written = asking();
+    assert_eq!(written.len(), 1, "{written:?}");
+    assert_eq!(written[0].state, "delivered");
+    assert_match(
+        &context.adapter.agent("chief").items.last().unwrap().text,
+        r"moving this project's chief to codex \(astraeus\) once you answer\. Write down where things stand",
+    );
+
+    // At rest with no answer after the paste, the switch waits.
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        chief_of(&context, project.id).harness.as_deref(),
+        Some("claude-code"),
+        "it has not answered yet"
+    );
+    context
+        .adapter
+        .answer("chief", "Where things stand: the parser is half done.");
+    context.pass().unwrap();
+    assert_eq!(
+        chief_of(&context, project.id).harness.as_deref(),
+        Some("codex")
     );
 }

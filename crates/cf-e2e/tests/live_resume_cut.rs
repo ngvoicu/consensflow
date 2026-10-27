@@ -56,7 +56,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cf_e2e::live::agents::{self, Models};
-use cf_e2e::live::machine::live_folder_in;
 use cf_e2e::live::members::{named, rig_for, Account, LongCommand};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, ask, installed, window, Harness, Installed, Log};
@@ -208,10 +207,6 @@ fn a_window_resumed_on_a_conversation_the_quit_cut_is_watched_and_takes_a_second
             live::KEEP,
             rig.keep_home().display()
         ));
-    }
-    if let Some(home) = rig.var("HOME") {
-        // What Claude kept of the folder, which its memory is read by the next run, goes with it.
-        rig.forget_claude_memory_of(&live_folder_in(Path::new(home), FOLDER)?);
     }
     let mut checks = Vec::new();
     for install in &installs {

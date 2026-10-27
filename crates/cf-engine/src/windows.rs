@@ -2,30 +2,34 @@
 //! `started`), look (`observe`, `drawn`), and close (`retire`, `close_if_free`,
 //! `close_own`). It owns the record's window part, the generation of each pane,
 //! and the chief's relaunch backoff. What a window owes a stop of its task, and
-//! how it is interrupted, is `stops`; the work its turn left running, which is
-//! ended as its task's result is taken, is `background`.
+//! how it is interrupted, is `stops`; the work its turn left running, which goes
+//! on until its window closes, is `background`.
 
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use cf_harness::contract::{Input, Interrupt, Launch, LaunchId, Observed, Pane, Window};
+use cf_harness::contract::{
+    FirstMessage, Input, Interrupt, Launch, LaunchId, Observed, Pane, Window,
+};
 use cf_harness::seams::Time;
 use cf_ledger::{
     Begun, ConversationView, HandOver, MessageView, NewNote, ParticipantView, ProjectView, Stop,
 };
 use cf_proto::agents::Harness;
-use cf_proto::panes::Servers;
+use cf_proto::bridge::DEADLINE;
+use cf_proto::panes::{Servers, CLOSE_GRACE};
 use cf_proto::trace::WindowEvent;
+use futures_util::future::{select, Either};
 use serde_json::{json, Value};
 
 use crate::deliveries::{Admitting, Delivering};
-use crate::delivery_text::{brief_first, delivery_text};
+use crate::delivery_text::brief_first;
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
 use crate::role_change::{Compared, Prelude};
-use crate::runtime::{caught, returning};
+use crate::runtime::{begin, caught, returning};
 use crate::seams::{EngineError, SavedAgent};
 use crate::shown::Shown;
 use crate::specs::{ChiefSpecs, RoleText};
@@ -45,6 +49,39 @@ const DRAWN_QUIET_MS: f64 = 1_500.0;
 /// with each failure, up to the most.
 const RELAUNCH_MS: i64 = 5_000;
 const RELAUNCH_MAX_MS: i64 = 5 * 60_000;
+
+/// How long a member's launch given up waits for its window's kill to be answered
+/// before it settles without the exit ([`Dispatcher::close_own_within`]). The pane host
+/// answers once the window's programs are gone: on the Mac in about 7 ms, and in the
+/// whole close grace ([`CLOSE_GRACE`], 10 s; 10.02 s measured) where the window leaves
+/// a job that ignores the request to end; on Windows (zeewin) in 2 to 10 ms, its tree
+/// ended at once (T-77, `kill_answer_times_with_the_real_grace` in `cf-panes`). Three
+/// times the longest, derived from the grace so that the two move together (T-414 P3-6).
+const KILL_ANSWER_WAIT: Duration = Duration::from_secs(3 * CLOSE_GRACE.as_secs());
+
+/// How long a window whose kill the host took is waited for its exit
+/// ([`Dispatcher::exit_overdue`]). The host answers the kill once the window's programs are
+/// gone, and tells the exit once its output has ended, a second at most after
+/// (`cf-panes`' `ENDED_WAIT`); the kill's own wait is ample for that too.
+const EXIT_WAIT: Duration = KILL_ANSWER_WAIT;
+
+/// A close of the engine's own under way ([`Dispatcher::close_own`]): the window it
+/// closes, and, where a member's give-up closes it, why the window was given up, which
+/// the words told to the window are said to wait for the resume for, and the message
+/// the give-up settles itself (`settling`), which they are not named with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OwnExit {
+    pub(crate) pane: Pane,
+    pub(crate) why: Option<String>,
+    pub(crate) settling: Option<i64>,
+}
+
+impl WindowPart {
+    /// The engine's own close of `pane`, where it is one.
+    pub(crate) fn own_exit_of(&self, pane: &Pane) -> Option<&OwnExit> {
+        self.own_exit.as_ref().filter(|own| own.pane == *pane)
+    }
+}
 
 /// What a window is doing, as the board and the trace say it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,16 +140,28 @@ impl Activity {
 pub(crate) struct Opening {
     pub(crate) pane: Pane,
     pub(crate) exited: Option<Shown>,
+    /// The conversation its program will write to, where it goes on with one the ledger
+    /// holds: none for one opening on a new conversation, which no window wrote to yet.
+    pub(crate) conversation: Option<i64>,
 }
 
-/// The engine's own kill of a window, on its way, and the task (its project and
-/// number) whose pause an exit that came before the kill's answer marked as the
+/// The engine's own kill of a window, on its way, and the task (its project, number
+/// and the stop its pause is) whose pause an exit that came before the kill's answer
+/// marked as the
 /// suspension's (the host's close waits for the program to end, and tells the
 /// exit as it ends): the mark stands if the kill was taken, and goes if it was
-/// refused, for that exit was the window's own (`kill_and_settle`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// refused, for that exit was the window's own (`kill_and_settle`). Only that
+/// window's: a give-up goes on while its kill waits, and the record's later window
+/// may be killed meanwhile, whose answer is its own (T-509: the earlier kill, refused
+/// at last, took back the later one's mark). A kill of the window that is taken ends
+/// every kill of it under way: the engine ended the window, and no other kill's
+/// refusal says otherwise (Calliope's P3-3 of T-510: a give-up's kill and the Close's
+/// each kept an entry, the Close's answer took the give-up's, and its refusal later
+/// took back the Close's mark).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Killing {
-    pub(crate) paused: Option<(i64, i64)>,
+    pub(crate) pane: Pane,
+    pub(crate) paused: Option<(i64, i64, i64)>,
 }
 
 /// The chief's window failing to start, tried again ever more slowly: how
@@ -152,10 +201,15 @@ pub(crate) struct WindowPart {
     pub(crate) token: Option<String>,
     /// A kill is on its way.
     pub(crate) retiring: bool,
-    /// Its exit is the engine's own (`close_own`): a chief's closes no project.
-    pub(crate) own_exit: bool,
-    /// The engine's own kill of it waits for the host's answer.
-    pub(crate) killing: Option<Killing>,
+    /// When the host took the kill of `retire`, whose exit is waited for no longer than
+    /// [`EXIT_WAIT`] ([`Dispatcher::exit_overdue`]): none where the exit came first.
+    pub(crate) kill_taken: Option<i64>,
+    /// The window whose exit is the engine's own (`close_own`): a chief's closes no
+    /// project. Only that window's: a close whose kill was never answered leaves it
+    /// set, and a later window of the record is no close of the engine's (T-414 P3-8).
+    pub(crate) own_exit: Option<OwnExit>,
+    /// The engine's own kills of its windows that wait for the host's answer.
+    pub(crate) killing: Vec<Killing>,
     /// Why the engine closes it, where the pause note of the task it was working
     /// on is to say more than that it closed: with its project, when the chief's
     /// window closed by itself.
@@ -177,6 +231,12 @@ pub(crate) struct WindowPart {
     pub(crate) named: bool,
     /// Where it stands with its harness's question about trusting its folder.
     pub(crate) trust: Trusting,
+    /// How many keys ConsensFlow pressed into it toward a yes to its harness's questions.
+    pub(crate) trust_keys: usize,
+    /// Whether the first question was read with its choice placed: only that is a
+    /// question whose yes is carried to the project's other windows, the only ones a key
+    /// of ConsensFlow's can answer.
+    pub(crate) trust_sure: bool,
     /// The last stop this window process paid: its task and the sequence. It
     /// dies with the window, and a window opened later owes nothing for the
     /// stops asked before it opened.
@@ -194,15 +254,40 @@ pub(crate) struct WindowPart {
     /// The stop it ignored in every round, while it lasts.
     pub(crate) unstopped: Option<Unstopped>,
     pub(crate) activity: Activity,
-    /// The pane of the last window that ended, and whether the host proved its
-    /// program gone ([`Shown::gone`]): none until the host said, which it may
-    /// do after the engine's own close has settled the window.
-    pub(crate) last_exit: Option<(Pane, Option<bool>)>,
+    /// The conversation the window's program writes to, by its id: the one it opened
+    /// on, or the one the human switched it to since (`transcripts`). Whether that
+    /// program is gone is kept on it when the window ends ([`Shown::gone`],
+    /// `ownership`); none for a window opened on a conversation that was never written
+    /// down (its participant was forgotten as it opened).
+    pub(crate) conversation: Option<i64>,
+    /// The pane of the last window that ended and the conversation it wrote to,
+    /// which the host's word on how it ended may come after, once the engine's own
+    /// close has settled the window ([`Dispatcher::heard_exit`]).
+    pub(crate) last_exit: Option<(Pane, Option<i64>)>,
+    /// It opened on a conversation whose last window's program the host never proved
+    /// gone: what that program had queued may stay in its record for good, and read its
+    /// turns as never over (T-526). Its requester is told once where a turn looks finished
+    /// all the same (`turn_end`).
+    pub(crate) unproven: bool,
     /// The task whose work the window holds, by its number (`ownership`): no other
     /// task's message goes into it.
     pub(crate) owner: Option<i64>,
     /// The task whose requester was told it waits for this window to close.
     pub(crate) told_waiting: Option<i64>,
+    /// The window of its last launch whose open the host never answered by the open's
+    /// deadline: the host may have started its program since, or may yet, and it would
+    /// run on the conversation the next window goes on with (a Codex thread one client
+    /// holds alone). It is ended before another window of the participant opens
+    /// ([`Dispatcher::end_abandoned`]).
+    pub(crate) abandoned: Option<Abandoned>,
+}
+
+/// A window whose open the host never answered by its deadline, which the engine ends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Abandoned {
+    pub(crate) pane: Pane,
+    /// Whether the trace said its kill failed: once, though it is asked at every step.
+    pub(crate) told: bool,
 }
 
 impl Default for WindowPart {
@@ -219,8 +304,9 @@ impl Default for WindowPart {
             launch_id: None,
             token: None,
             retiring: false,
-            own_exit: false,
-            killing: None,
+            kill_taken: None,
+            own_exit: None,
+            killing: Vec::new(),
             closed_with: None,
             pinned: false,
             hidden: false,
@@ -230,13 +316,18 @@ impl Default for WindowPart {
             drawn: false,
             named: false,
             trust: Trusting::Past,
+            trust_keys: 0,
+            trust_sure: false,
             stopped: None,
             interrupted: None,
             unstopped: None,
             activity: Activity::of(ActivityState::Closed),
+            conversation: None,
             last_exit: None,
+            unproven: false,
             owner: None,
             told_waiting: None,
+            abandoned: None,
         }
     }
 }
@@ -294,6 +385,17 @@ fn assign(env: &mut Vec<(String, String)>, key: &str, value: &str) {
     }
 }
 
+/// A launch's first message as its window is to be given it: one delivered once
+/// the window is up is owed, with its text and the rows its paste was begun with,
+/// which an Enter pressed once more for it sends with it (`arrival`).
+fn owe(mut delivering: Delivering, planned: &Planned) -> Delivering {
+    if let Some(text) = &planned.owed {
+        delivering.owed = Some(text.clone());
+        delivering.carried.clone_from(&planned.carried);
+    }
+    delivering
+}
+
 /// What a launch was prepared with: the window, the keys that interrupt it,
 /// how it takes what it is handed, how its harness keeps its own processes and which harness it is, how its pane
 /// opens, the conversation it goes on with if there is one, and the stop its task
@@ -313,9 +415,11 @@ struct Planned {
     stop: Option<Stop>,
     /// The rows the first message's paste was begun with.
     carried: Vec<i64>,
-    /// The first message goes in once the window is up, not on its command line
-    /// ([`Adapter::first_message_once_up`]).
-    first_once_up: bool,
+    /// How the window is given its first message ([`Adapter::first_message`]).
+    first: FirstMessage,
+    /// The first message's text, where the window is delivered it once it is up
+    /// ([`FirstMessage::Delivered`]): it goes on the launch's [`Delivering`] as owed.
+    owed: Option<String>,
     /// What goes into the window before anything else of its queue once it is up,
     /// in this order ([`Compared::prelude`]).
     prelude: Option<Prelude>,
@@ -350,15 +454,20 @@ impl Dispatcher {
             window.window = None;
             window.pane = None;
             window.retiring = false;
+            window.kill_taken = None;
             window.hidden = false;
             window.settled = false;
             window.stopped = None;
             window.interrupted = None;
             window.unstopped = None;
             window.owner = None;
+            window.conversation = None;
+            window.unproven = false;
             window.told_waiting = None;
             window.activity = Activity::of(ActivityState::Closed);
             window.trust = Trusting::Past;
+            window.trust_keys = 0;
+            window.trust_sure = false;
             taken
         };
         // What its task was held for went with it: a task held again in a window opened
@@ -439,6 +548,11 @@ impl Dispatcher {
         participant: &ParticipantView,
         message: Option<MessageView>,
     ) -> Result<(), EngineError> {
+        // A window whose open went unanswered is ended before another opens; until the
+        // host says it has, the launch waits for the next step.
+        if !self.end_abandoned(record).await? {
+            return Ok(());
+        }
         record.window.borrow_mut().launches += 1;
         let harness = participant.harness.clone().unwrap_or_default();
         // A role the window took before it closed, though its arrival was never
@@ -486,8 +600,13 @@ impl Dispatcher {
             chief: participant.role == "chief",
             queued: false,
             free_since: None,
+            turned: false,
             entered_again: false,
             carried: Vec::new(),
+            session: None,
+            // Owed once the plan says the window is delivered it (`owe`).
+            owed: None,
+            late: false,
         });
         // What fails with a launch that does not come up: its first message, or
         // the one that would have been, which the role goes ahead of. A member's
@@ -531,11 +650,13 @@ impl Dispatcher {
         // message the launch was for went back to its queue: the window opens with
         // no first message, and that one goes after the note that says the role.
         let prelude = planned.prelude.clone();
-        let delivering = delivering.filter(|_| {
-            prelude
-                .as_ref()
-                .is_none_or(|prelude| prelude.displaced.is_none())
-        });
+        let delivering = delivering
+            .filter(|_| {
+                prelude
+                    .as_ref()
+                    .is_none_or(|prelude| prelude.displaced.is_none())
+            })
+            .map(|delivering| owe(delivering, &planned));
         if self.launch_over(
             record,
             participant,
@@ -561,11 +682,32 @@ impl Dispatcher {
             assign(&mut env, key, value);
         }
         assign(&mut env, "CONSENSFLOW_TOKEN", &token);
+        // The program of a window that opens on a conversation will write to it: what
+        // was proven of the last one on it holds no more, kept so before anything of
+        // the new one runs, so that a restart while it is open does not take it for
+        // gone (`ownership`). A host that refuses the open ran nothing, and the proof
+        // is kept again; one whose answer never came may have, or may yet (kluris,
+        // 2026-10-26: it started three seconds after the deadline). A window on a new
+        // conversation leaves the one before as it was.
+        let resumed = resume.is_some() && planned.native_session == resume;
+        let resumed_on = planned
+            .conversation
+            .as_ref()
+            .filter(|_| resumed)
+            .map(|conversation| conversation.id);
+        let proven = match resumed_on {
+            Some(id) => self.seams.ledger.borrow().program_gone(id)?,
+            None => false,
+        };
+        if let Some(id) = resumed_on {
+            self.seams.ledger.borrow_mut().set_program_gone(id, false)?;
+        }
         // The host watches a window's process before it answers the open, so
         // an exit can come first, even in the same read: the exit finds it here.
         record.window.borrow_mut().opening = Some(Opening {
             pane: pane.clone(),
             exited: None,
+            conversation: resumed_on,
         });
         // `.catch(...)` made a promise of its own to wait on, a turn after
         // the host's answer.
@@ -586,6 +728,9 @@ impl Dispatcher {
         let pid = match opened {
             Ok(Opened::Open { pid }) => pid,
             Ok(Opened::Refused { error }) => {
+                if let Some(id) = resumed_on.filter(|_| proven) {
+                    self.seams.ledger.borrow_mut().set_program_gone(id, true)?;
+                }
                 return self.not_opened(
                     record,
                     project,
@@ -595,6 +740,27 @@ impl Dispatcher {
                     &launch_id,
                     &error,
                 );
+            }
+            // The host goes on with an open it did not answer in time: the window's
+            // program may run, on the conversation and with whatever its command line
+            // gave it, and nobody would see what it does. It is the participant's to
+            // end before another of its windows opens.
+            Ok(Opened::Unanswered) => {
+                record.window.borrow_mut().abandoned = Some(Abandoned {
+                    pane: pane.clone(),
+                    told: false,
+                });
+                let failed = self.not_opened(
+                    record,
+                    project,
+                    participant,
+                    failing,
+                    &token,
+                    &launch_id,
+                    DEADLINE,
+                );
+                self.end_abandoned(record).await?;
+                return failed;
             }
             Err(error) => {
                 return self.not_opened(
@@ -617,6 +783,7 @@ impl Dispatcher {
                 part.pane = Some(pane.clone());
                 part.launch_id = Some(launch_id);
                 part.token = Some(token);
+                part.conversation = resumed_on;
             }
             // One that exited before its open was answered has gone already.
             if let Some(shown) = exited {
@@ -624,7 +791,6 @@ impl Dispatcher {
             }
             return Ok(());
         }
-        let resumed = resume.is_some() && planned.native_session == resume;
         let mut conversation_id = planned
             .conversation
             .as_ref()
@@ -649,6 +815,18 @@ impl Dispatcher {
                     .set_conversation_role_text(started.id, instructions)?;
             }
         }
+        // A turn begins with the first message: what the record lost so far is not its. A
+        // conversation begun afresh has lost nothing, whatever the last one's record did
+        // (Calliope's P3 (d), T-624).
+        {
+            let mut delivery = record.delivery.borrow_mut();
+            if !resumed {
+                delivery.lost = 0;
+            }
+            if let Some(first) = first.as_ref() {
+                delivery.lost_before = Some((first.id, delivery.lost));
+            }
+        }
         {
             let mut part = record.window.borrow_mut();
             part.window = Some(Rc::clone(&planned.window));
@@ -664,12 +842,14 @@ impl Dispatcher {
             part.named = false;
             part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));
             part.owner = planned.owner;
+            part.conversation = conversation_id;
+            part.unproven = resumed_on.is_some() && !proven;
         }
         // The first message that goes in once the window is up, where there is one.
         let posted = delivering
             .as_ref()
             .map(|first| first.message)
-            .filter(|_| planned.first_once_up);
+            .filter(|_| planned.first == FirstMessage::Started);
         {
             let mut delivery = record.delivery.borrow_mut();
             delivery.delivering = delivering;
@@ -683,6 +863,12 @@ impl Dispatcher {
         // A harness that asks whether to trust the window's folder is answered, or
         // the human told, as its window shows the question (`trust`).
         self.watch_trust(record, project, participant, &pane).await;
+        // A Claude window where Claude Code's computer use is on, while ConsensFlow lacks
+        // a permission it needs: the human is told once (`computer_use`). What fails to be
+        // written down is the log's, not the launch's.
+        if let Err(cause) = self.tell_computer_use_once(project, participant) {
+            self.write_down(&cause);
+        }
         // The adapter's `started` is an `async` function, and `.catch(...)`
         // made a promise of its own to wait on.
         let admitting = Admitting::new(self, project.id);
@@ -816,7 +1002,7 @@ impl Dispatcher {
             )? {
                 return Ok(None);
             }
-            self.kept_apart(project, participant, record, found, before.as_ref(), first)?
+            self.kept_apart(project, participant, found, before.as_ref(), first)?
         };
         // The task whose work the window holds: its first message's, or what its
         // conversation was last given where it goes on with one.
@@ -879,6 +1065,10 @@ impl Dispatcher {
             .as_ref()
             .map(|begun| self.launch_text(begun, resume))
             .transpose()?;
+        // What the window is given as it opens or posts once up; a window delivered
+        // its first message is given none on its way (`FirstMessage`).
+        let first_message = adapter.first_message();
+        let delivered = first_message == FirstMessage::Delivered;
         // A chief whose project has specs on is told where its Specmint skill
         // is, and its window is given the skill there.
         let RoleText {
@@ -888,13 +1078,12 @@ impl Dispatcher {
             Some(role) => role,
             None => self.role_text(project, participant, &*adapter)?,
         };
-        // Its last window's program was proven gone: nothing of it writes on.
-        let previous_gone = record
-            .window
-            .borrow()
-            .last_exit
-            .as_ref()
-            .is_some_and(|(_, gone)| *gone == Some(true));
+        // The program of the last window on its conversation was proven gone: nothing
+        // of it writes on.
+        let previous_gone = match &conversation {
+            Some(conversation) => self.seams.ledger.borrow().program_gone(conversation.id)?,
+            None => false,
+        };
         let launch = Launch {
             id: launch_id,
             project: project.id,
@@ -903,7 +1092,7 @@ impl Dispatcher {
             directory: &project.directory,
             resume,
             previous_gone,
-            message: text.as_deref(),
+            message: text.as_deref().filter(|_| !delivered),
             agent: saved.as_ref().map(SavedAgent::agent),
             instructions: &instructions,
             specs: specs.as_ref().map(ChiefSpecs::launch),
@@ -937,26 +1126,27 @@ impl Dispatcher {
                 .flat_map(|begun| &begun.carried)
                 .map(|row| row.id)
                 .collect(),
-            first_once_up: adapter.first_message_once_up(),
+            first: first_message,
+            owed: text.filter(|_| delivered),
             prelude,
             first_instructions: adapter.keeps_first_instructions().then_some(instructions),
             owner,
         }))
     }
 
-    /// Whether a launch's first message, which goes in on the command line its
-    /// window opens with, is handed over now, as its pane is asked for: as the
-    /// ledger admits it, which marks it handed (the project is open, and nothing of
-    /// its paste was withdrawn since it was begun). One it turns away goes back to
+    /// Whether a launch's first message, which its window reads as it opens
+    /// ([`FirstMessage::Opened`]), is handed over now, as its pane is asked for: as
+    /// the ledger admits it, which marks it handed (the project is open, and nothing
+    /// of its paste was withdrawn since it was begun). One it turns away goes back to
     /// its queue, unless it was withdrawn itself, and the launch is over. A launch
-    /// with no first message on its command line hands nothing over now: one that
-    /// goes in once the window is up is admitted as it is posted.
+    /// whose window takes it once up hands nothing over now: it is admitted as it is
+    /// posted ([`FirstMessage::Started`]) or delivered ([`FirstMessage::Delivered`]).
     fn handed_on_open(
         &self,
         delivering: Option<&Delivering>,
         planned: &Planned,
     ) -> Result<bool, EngineError> {
-        let Some(first) = delivering.filter(|_| !planned.first_once_up) else {
+        let Some(first) = delivering.filter(|_| planned.first == FirstMessage::Opened) else {
             return Ok(true);
         };
         let handed = self
@@ -998,7 +1188,7 @@ impl Dispatcher {
                 project,
                 participant,
                 None,
-                &format!("{agent} is no longer among your agents"),
+                &self.gone_because(agent),
             )?;
         }
         Ok(())
@@ -1094,7 +1284,7 @@ impl Dispatcher {
     /// window received goes in first ([`Dispatcher::brief_given_first`]). A
     /// resumed conversation has it already.
     fn launch_text(&self, first: &Begun, resume: Option<&str>) -> Result<String, EngineError> {
-        let text = delivery_text(&first.message, &first.carried);
+        let text = self.delivery_text_of(&first.message, &first.carried)?;
         Ok(match self.brief_given_first(&first.message)? {
             Some(brief) if resume.is_none() => format!("{brief}{text}"),
             _ => text,
@@ -1281,11 +1471,81 @@ impl Dispatcher {
             Some(pane) => self.kill(record, &pane).await?,
             None => false,
         };
-        if !killed {
-            record.window.borrow_mut().retiring = false;
+        {
+            let mut part = record.window.borrow_mut();
+            if !killed {
+                part.retiring = false;
+            } else if part.retiring {
+                // Still closing: its exit has not come yet, which it may before the answer.
+                part.kill_taken = Some(self.now());
+            }
         }
         self.changed();
         Ok(killed)
+    }
+
+    /// A window closing by `retire` whose exit the host still owes, looked at in a pass:
+    /// once [`EXIT_WAIT`] has gone by since the host took its kill, its exit is settled
+    /// as the engine's own close settles one (`kill_and_settle`), knowing nothing of how
+    /// it ended, and the host's word, should it come later, is kept as for that close
+    /// (`heard_exit`). Without the bound, a close whose exit never came left the window
+    /// retiring for good: never looked at, reused or released (Astraeus on turn-end-min,
+    /// T-487).
+    pub(crate) async fn exit_overdue(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+    ) -> Result<(), EngineError> {
+        let pane = {
+            let part = record.window.borrow();
+            let overdue = part
+                .kill_taken
+                .is_some_and(|taken| self.now() - taken >= EXIT_WAIT.as_millis() as i64);
+            match (overdue, &part.pane) {
+                (true, Some(pane)) => pane.clone(),
+                _ => return Ok(()),
+            }
+        };
+        // Boxed, as `kill_and_settle`'s: an exit may close windows in turn.
+        Box::pin(self.exited(&pane, Shown::default())).await
+    }
+
+    /// Ends the window whose open went unanswered ([`WindowPart::abandoned`]): whether
+    /// none is left. The host's kill ends it where it has opened, its programs and what
+    /// they started, and where its open has not reached the host yet, the host never
+    /// opens it (`cf_panes`' cancelled windows); either way the window is nothing more
+    /// of the participant's. A kill the host refused, or did not answer, leaves it, and
+    /// the participant's next step asks again.
+    pub(crate) async fn end_abandoned(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+    ) -> Result<bool, EngineError> {
+        let Some(Abandoned { pane, told }) = record.window.borrow().abandoned.clone() else {
+            return Ok(true);
+        };
+        let killed = returning(self.seams.host.kill(&pane)).await;
+        let error = match killed {
+            Ok(Killed::Killed) => {
+                let mut window = record.window.borrow_mut();
+                if window
+                    .abandoned
+                    .as_ref()
+                    .is_some_and(|abandoned| abandoned.pane == pane)
+                {
+                    window.abandoned = None;
+                }
+                return Ok(true);
+            }
+            Ok(Killed::Refused { error }) => error,
+            Err(error) => error.message,
+        };
+        // Said once: the kill is asked again at every step until the host takes it.
+        if !told {
+            if let Some(abandoned) = record.window.borrow_mut().abandoned.as_mut() {
+                abandoned.told = abandoned.pane == pane;
+            }
+            self.trace_window(record, WindowEvent::KillFailed { error: Some(error) })?;
+        }
+        Ok(false)
     }
 
     /// Kills a window: whether the pane host took the kill; the trace says
@@ -1348,10 +1608,78 @@ impl Dispatcher {
         record: &Rc<Record>,
         pane: &Pane,
     ) -> Result<bool, EngineError> {
-        record.window.borrow_mut().own_exit = true;
+        self.close_own_for(record, pane, None, None).await
+    }
+
+    /// [`Dispatcher::close_own`], `why` the window is closed and the message it settles
+    /// itself where a give-up closes it.
+    async fn close_own_for(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        pane: &Pane,
+        why: Option<String>,
+        settling: Option<i64>,
+    ) -> Result<bool, EngineError> {
+        record.window.borrow_mut().own_exit = Some(OwnExit {
+            pane: pane.clone(),
+            why,
+            settling,
+        });
         let went = self.kill_and_settle(record, pane).await;
-        record.window.borrow_mut().own_exit = false;
+        let mut window = record.window.borrow_mut();
+        if window.own_exit_of(pane).is_some() {
+            window.own_exit = None;
+        }
         went
+    }
+
+    /// [`Dispatcher::close_own`], its kill's answer waited for no longer than
+    /// [`KILL_ANSWER_WAIT`]: none where the host gave none by then, and the close goes
+    /// on apart, its exit settled whenever it comes and what it fails with told to the
+    /// log, as the host's own exit's is. The pane host's kill is a request with no
+    /// deadline (the chief's restart, 8bb0a465, left the kill unawaited for it).
+    ///
+    /// The one rule of every member's give-up of a window: one unfit for work
+    /// ([`Dispatcher::give_up_unfit`]), one that never came up
+    /// ([`Dispatcher::give_up_unstarted`]) and one that could not be told its role
+    /// ([`Dispatcher::abandon_launch`]). Each closes the window with this before the
+    /// message the launch was for goes, so that the exit pauses the task and words told
+    /// to the window wait for its resume, said to its requester and the human; a kill
+    /// refused, or not answered in its time, leaves no exit, and the message fails as
+    /// before. None is held for a kill that never answers. A chief's give-up waits for
+    /// its kill ([`Dispatcher::close_own`]). `why` the window is given up is what the
+    /// words told to it are said to wait for the resume for, in the note of the pause
+    /// its exit makes; `settling` the message the give-up settles itself, which they are
+    /// not named with there.
+    pub(crate) async fn close_own_within(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        pane: &Pane,
+        why: &str,
+        settling: Option<i64>,
+    ) -> Result<Option<bool>, EngineError> {
+        let (this, held, gone, why) = (
+            Rc::clone(self),
+            Rc::clone(record),
+            pane.clone(),
+            why.to_owned(),
+        );
+        let closing = begin(&*self.seams.spawn, async move {
+            this.close_own_for(&held, &gone, Some(why), settling).await
+        })
+        .await;
+        match select(closing, self.seams.time.sleep(KILL_ANSWER_WAIT)).await {
+            Either::Left((went, _)) => went.map(Some),
+            Either::Right(((), closing)) => {
+                let this = Rc::clone(self);
+                self.seams.spawn.spawn(Box::pin(async move {
+                    if let Err(cause) = closing.await {
+                        this.write_down(&cause);
+                    }
+                }));
+                Ok(None)
+            }
+        }
     }
 
     async fn kill_and_settle(
@@ -1360,21 +1688,40 @@ impl Dispatcher {
         pane: &Pane,
     ) -> Result<bool, EngineError> {
         if !record.window.borrow().retiring {
-            record.window.borrow_mut().killing = Some(Killing::default());
+            // The kill is marked before anything is awaited, the look at the screen
+            // included: an exit that comes while the Close looks is the Close's, as one
+            // that comes while its kill is answered is, and a kill that then fails takes
+            // the mark off the task that exit paused (resume.rs, both reviews of 2026-10-16
+            // and the re-check of 2026-10-25).
+            record.window.borrow_mut().killing.push(Killing {
+                pane: pane.clone(),
+                paused: None,
+            });
+            // The exit is settled here, and says nothing of the screen the window ends
+            // with: where it was asking, the human's yes in it is read off the screen now.
+            self.bank_yes_before_close(record, pane).await;
             let killed = self.kill(record, pane).await;
-            let paused = record
-                .window
-                .borrow_mut()
-                .killing
-                .take()
-                .and_then(|killing| killing.paused);
-            if !matches!(killed, Ok(true)) {
+            let taken = matches!(killed, Ok(true));
+            let paused = {
+                let mut window = record.window.borrow_mut();
+                if taken {
+                    window.killing.retain(|killing| killing.pane != *pane);
+                    None
+                } else {
+                    let at = window
+                        .killing
+                        .iter()
+                        .position(|killing| killing.pane == *pane);
+                    at.and_then(|at| window.killing.remove(at).paused)
+                }
+            };
+            if !taken {
                 // Refused: an exit that came meanwhile was the window's own.
-                if let Some((project, number)) = paused {
+                if let Some((project, number, stop)) = paused {
                     self.seams
                         .ledger
                         .borrow_mut()
-                        .unmark_pause(project, number)?;
+                        .unmark_pause(project, number, stop)?;
                 }
                 return killed;
             }
@@ -1387,5 +1734,16 @@ impl Dispatcher {
             Box::pin(self.exited(pane, Shown::default())).await?;
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_kills_answer_is_waited_for_three_times_the_grace_the_host_gives_a_close() {
+        assert_eq!(KILL_ANSWER_WAIT, CLOSE_GRACE * 3);
+        assert!(KILL_ANSWER_WAIT > CLOSE_GRACE + Duration::from_secs(5));
     }
 }

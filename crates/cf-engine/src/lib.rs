@@ -17,6 +17,7 @@
 mod arrival;
 mod background;
 mod chief_switch;
+pub mod computer_use;
 mod deliveries;
 pub mod delivery_text;
 pub mod dispatcher;
@@ -34,6 +35,7 @@ pub mod seams;
 mod shown;
 mod specs;
 mod stalls;
+pub mod steps;
 mod stops;
 mod taken_back;
 mod transcripts;

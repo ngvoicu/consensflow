@@ -1,4 +1,5 @@
 import { button, element, icon, iconButton, redraw } from '../dom.js'
+import { notePanes } from './computer-use.js'
 import { preview, render } from './markdown.js'
 
 /**
@@ -22,6 +23,8 @@ const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'open']
 const PAUSABLE = ['open', 'queued', 'working', 'waiting']
 /** What the human may give back to the board for another member of its tier. */
 const REASSIGNABLE = ['queued', 'working', 'waiting', 'paused']
+/** The states in which the human may take what a worker said last as the task's result. */
+const FINISHABLE = ['working', 'paused']
 /** What is over, accepted or not: the human may delete it from the board. */
 const FINISHED = ['accepted', 'failed', 'cancelled']
 /** The columns, in reading order; whatever is over, accepted or not, shares the last one. */
@@ -346,6 +349,14 @@ export const identity = (participant, agent) =>
 export function laneStatus(lane, board, now) {
   const { participant, activity } = lane
   if (lane.agentMissing) {
+    // One a release took out of the catalog cannot be defined again: its harness no longer has its model.
+    if (lane.agentRetired) {
+      const pick =
+        participant.role === 'chief'
+          ? 'Switch the chief to another agent'
+          : `Remove @${participant.handle} from the staff and add another agent`
+      return ['missing', `${participant.agent} left the catalog: ${lane.agentRetired}. ${pick}`]
+    }
     const remedy =
       participant.role === 'chief'
         ? 'switch the chief'
@@ -362,12 +373,14 @@ export function laneStatus(lane, board, now) {
   if (lane.unstopped) {
     return ['unstopped', `Did not stop for T-${lane.unstopped.task}: still on its earlier turn`]
   }
+  // What the human typed and did not send holds a message whether or not the window
+  // is out of quota: the lane says both, or the hold hides behind the wait (T-288).
+  const holding = 'A message waits until you send or erase what you typed here'
   if (outOfQuota(participant, now)) {
-    return ['out', `Out of quota until ${backAt(participant.outUntil, now)}`]
+    const out = `Out of quota until ${backAt(participant.outUntil, now)}`
+    return ['out', lane.holding ? `${out}. ${holding}` : out]
   }
-  if (lane.holding) {
-    return ['holding', 'A message waits until you send or erase what you typed here']
-  }
+  if (lane.holding) return ['holding', holding]
   const state = activity?.state ?? 'closed'
   if (state === 'waiting' && activity.reason) return [state, `Waiting: ${activity.reason}`]
   // Its task goes on in the background: the window rests, and that is not idleness.
@@ -411,8 +424,13 @@ const acts = (board) => board.project.state === 'open'
 
 /**
  * The finished tasks on a board as Delete finished takes them: those that
- * may go, and those kept because a task not yet finished needs them, each
- * with the tasks that do. The daemon decides again when it deletes them.
+ * may go, and those kept, each with the tasks that need it. Deleting a task
+ * only takes it off the board: what waits for it reads its state as before.
+ * So an accepted task goes though others need it (it is accepted for good),
+ * and so does a cancelled one (it never will be); a failed one is kept while
+ * a task not yet finished needs it, for the chief can reopen it and then
+ * accept it, and a deleted task is not reopened. The daemon decides again
+ * when it deletes them.
  */
 function finishedTasks(board) {
   const tasks = [...board.open, ...board.lanes.flatMap((lane) => lane.tasks)].sort(
@@ -423,13 +441,15 @@ function finishedTasks(board) {
     .filter((task) => FINISHED.includes(task.state))
     .map((task) => ({
       number: task.number,
+      state: task.state,
       neededBy: unfinished
         .filter((other) => other.needs.some((need) => need.number === task.number))
         .map((other) => other.number),
     }))
+  const kept = (task) => task.state === 'failed' && task.neededBy.length > 0
   return {
-    deletable: finished.filter((task) => task.neededBy.length === 0).map((task) => task.number),
-    kept: finished.filter((task) => task.neededBy.length > 0),
+    deletable: finished.filter((task) => !kept(task)).map((task) => task.number),
+    kept: finished.filter(kept),
   }
 }
 
@@ -634,6 +654,18 @@ export class BoardView {
         button('Open task', 'quiet-button', () => this.#actions.onOpenTask(message.taskNumber)),
       )
     }
+    // A note that ConsensFlow lacks a permission Claude Code's computer use needs: the way to
+    // the System Settings pane of each it names.
+    for (const { pane, name } of notePanes(message)) {
+      actions.append(
+        button(
+          'Open System Settings',
+          'primary-button',
+          () => this.#actions.onSystemSettings(pane),
+          `Open System Settings for ${name}`,
+        ),
+      )
+    }
     if (!gated && acts(board)) {
       actions.append(
         button(
@@ -717,11 +749,14 @@ export class BoardView {
   }
 
   /**
-   * The Finished heading's control: every finished task that may go leaves
-   * the board, once the human confirms; nothing while the project is closed.
+   * The Finished heading's control, while the column holds a task: every
+   * finished task that may go leaves the board, once the human confirms, and
+   * the dialog says what stays and why, or that nothing may go; nothing while
+   * the project is closed.
    */
   #deleteFinished(board) {
-    if (!acts(board) || finishedTasks(board).deletable.length === 0) return []
+    const { deletable, kept } = finishedTasks(board)
+    if (!acts(board) || deletable.length + kept.length === 0) return []
     return [
       iconButton(
         ICONS.remove,
@@ -1167,12 +1202,13 @@ export class TaskDrawer {
         ),
       )
     }
-    // Any working task of a member's: what its worker said last becomes the result, at the
-    // human's word (the chief has the same in `cf task finish`), whatever the window's
-    // reader says of its turn. It ends nothing the turn left running, which ends with
+    // Any working or paused task of a member's: what its worker said last becomes the result,
+    // at the human's word (the chief has the same in `cf task finish`), whatever the window's
+    // reader says of its turn. A paused task's is the answer its turn on a tell ended with,
+    // which the human is told (T-442). It ends nothing the turn left running, which ends with
     // its window, or outlives it where the host cannot tell what is the window's: the
     // button promises no end of it.
-    if (task.state === 'working' && task.assignee !== null && task.assignee !== 'chief') {
+    if (FINISHABLE.includes(task.state) && task.assignee !== null && task.assignee !== 'chief') {
       actions.push(
         button(
           'Finish',

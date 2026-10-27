@@ -24,7 +24,12 @@
 //! and the paste a window went with, which its harness's record may show it took
 //! (`window_went_with_a_paste`), and a header quoted in a window's words, which is
 //! no paste (`quoted_headers`), and the shapes a harness's record keeps a paste in
-//! (`paste_shapes`).
+//! (`paste_shapes`), the quota wait that keeps a member's task with its
+//! window whoever else is free (`quota_waits`), and an account's quota as every
+//! window's on it, and what waits for a window out of quota said to the human
+//! (`quota_accounts`), and a window whose turn is over, which no stop interrupts
+//! or closes (`nothing_to_stop`), and a read of a window that fails or comes too late, which is
+//! unknown, and a pass that leaves a window whose read hangs to it (`unknown_looks`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -40,11 +45,16 @@ mod chief_not_up;
 mod chiefs;
 mod closed_given_nothing;
 mod closing;
+mod computer_use;
 mod decided_results;
 mod deleted_sessions;
 mod deliveries;
+mod exit_overdue;
+mod exit_proof;
 mod exit_unsettled;
+mod failure_reasons;
 mod final_answer;
+mod first_delivered;
 mod fixtures;
 mod follow_ups;
 mod interrupts;
@@ -52,22 +62,32 @@ mod lanes;
 mod launch_stops;
 mod launch_wait;
 mod looks;
+mod looks_finished;
+mod lost_lines;
 mod meeting_main;
 mod no_adapter;
 mod not_ready;
+mod nothing_to_stop;
+mod open_deadline;
 mod out_of_quota;
 mod own_steps;
 mod participant_leaves;
 mod paste_shapes;
 mod pause_notes;
+mod paused_answers;
+mod paused_left;
 mod pending_agents;
 mod queued_tells;
 mod quota;
+mod quota_accounts;
+mod quota_waits;
 mod quoted_headers;
+mod read_in_the_inbox;
 mod receipts;
 mod restart;
 mod resumable;
 mod resume;
+mod retired_agents;
 mod review;
 mod role_change;
 mod schedules;
@@ -76,6 +96,7 @@ mod servers;
 mod session_windows;
 mod sessions;
 mod several_roles;
+mod shared;
 mod slow_records;
 mod specs;
 mod stale_box;
@@ -91,12 +112,14 @@ mod tasks;
 mod testers;
 mod the_dispatcher;
 mod throws_early;
+mod told_once;
 mod trace_untold;
 mod traces;
 mod turn_end;
 mod turns_at_seams;
 mod undeliverable;
 mod unfit;
+mod unknown_looks;
 mod unreadable_agents;
 mod unsent;
 mod unstarted;

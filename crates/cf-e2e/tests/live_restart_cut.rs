@@ -28,12 +28,20 @@
 //!   reaches it. Whether it came up by itself, or was given up and opened again (the
 //!   human told it could not start), is said: the second is ConsensFlow's bound
 //!   holding, and a finding about the harness.
+//! - A chief at rest with a background job (`--rest-job`): a real harness is the chief,
+//!   and its one member the stand-in. The chief starts the long command in the
+//!   background and its turn ends with the command running; the human closes the
+//!   project (the Close ends the window, and the job with it) and resumes it. The chief
+//!   comes back told nothing of a cut turn: background work is rest (T-814, poker-lab's
+//!   and sites's chiefs, told their turns were cut, went to work on their own). What the
+//!   harness itself says on the resume of the job its last program left is said.
 //!
 //! ```text
 //! cargo xtask live restart-cut                     a Claude chief, and a Claude worker
 //! cargo xtask live restart-cut --chief pi          Pi is the chief (only Claude and Pi can be)
 //! cargo xtask live restart-cut --worker codex      Codex is the worker (any harness can be)
 //! cargo xtask live restart-cut --rest codex        Codex is the chief, at rest when the app quits
+//! cargo xtask live restart-cut --rest-job claude   Claude is the chief, at rest with a background job, closed
 //! cargo xtask live restart-cut claude pi codex     each is the chief where it can be, and the worker
 //! ```
 //!
@@ -76,17 +84,26 @@ const UP: Duration = Duration::from_secs(240);
 /// How often the board is looked at.
 const LOOK: Duration = Duration::from_millis(500);
 
-/// What the daemon tells a chief whose turn the quit cut.
-const CHIEF_CUT: &str =
-    "ConsensFlow stopped in the middle of your turn, which was cut. Go on where you stopped.";
+/// How the daemon's note to a chief whose turn the quit cut begins: what follows names
+/// the turn, where the record shows the message that began it.
+const CHIEF_CUT: &str = "ConsensFlow stopped in the middle of your turn, which was cut";
 
 /// What the daemon's note to the human begins with when the chief's window did not
 /// come up.
 const NOT_UP: &str = "The chief could not start: ";
 
-/// What the daemon tells a worker whose turn the quit cut on the task `number`.
+/// How the daemon's note to a worker whose turn the quit cut on the task `number` begins.
 fn worker_cut(number: i64) -> String {
-    format!("ConsensFlow stopped while you were working on T-{number}. Go on where you stopped.")
+    format!("ConsensFlow stopped while you were working on T-{number}")
+}
+
+/// What the human asks the window: to start the long command in the background and
+/// not wait for it, so that its turn ends with the command running.
+fn the_background_ask() -> String {
+    format!(
+        "Start this exact command with your shell tool, in the background (do not wait for it to finish), and then reply with exactly one line: STARTED\n{}",
+        LONG.text()
+    )
 }
 
 /// What the human asks the window: to run the long command and wait for it.
@@ -103,6 +120,8 @@ fn the_ask() -> String {
 struct Cases {
     chiefs: Vec<Harness>,
     rested: Vec<Harness>,
+    /// The chiefs at rest with a background job, closed and resumed.
+    jobbed: Vec<Harness>,
     workers: Vec<Harness>,
 }
 
@@ -113,28 +132,31 @@ fn once(list: &mut Vec<Harness>, harness: Harness) {
     }
 }
 
-/// The cases a run is asked for: those `--chief` (Claude or Pi), `--rest` (any
-/// harness), `--worker` (any harness) and the harnesses named bare (a chief where it
-/// can be one, and a worker) say; a Claude chief and a Claude worker when none is said.
+/// The cases a run is asked for: those `--chief` (Claude or Pi), `--rest` and
+/// `--rest-job` (any harness), `--worker` (any harness) and the harnesses named bare (a
+/// chief where it can be one, and a worker) say; a Claude chief and a Claude worker when
+/// none is said.
 fn cases(
     chiefs: &[String],
-    rested: &[String],
+    (rested, jobbed): (&[String], &[String]),
     workers: &[String],
     named: &[String],
 ) -> Result<Cases> {
-    if [chiefs, rested, workers, named]
+    if [chiefs, rested, jobbed, workers, named]
         .iter()
         .all(|asked| asked.is_empty())
     {
         return Ok(Cases {
             chiefs: vec![Harness::Claude],
             rested: Vec::new(),
+            jobbed: Vec::new(),
             workers: vec![Harness::Claude],
         });
     }
     let mut asked = Cases {
         chiefs: Vec::new(),
         rested: Vec::new(),
+        jobbed: Vec::new(),
         workers: Vec::new(),
     };
     for word in chiefs {
@@ -146,6 +168,12 @@ fn cases(
     for word in rested {
         match Harness::from_name(word) {
             Some(chief) => once(&mut asked.rested, chief),
+            None => return Err(Error::Daemon(format!("no such chief: {word}"))),
+        }
+    }
+    for word in jobbed {
+        match Harness::from_name(word) {
+            Some(chief) => once(&mut asked.jobbed, chief),
             None => return Err(Error::Daemon(format!("no such chief: {word}"))),
         }
     }
@@ -178,6 +206,12 @@ fn chief_plan(chief: Harness) -> Plan {
 /// What the check opens for a chief at rest: as for a chief, in a folder of its own.
 fn rest_plan(chief: Harness) -> Plan {
     Plan::new("restart-rest", member_as(chief, "chief")).with(stand_in_worker())
+}
+
+/// What the check opens for a chief at rest with a background job: as for a chief, in a
+/// folder of its own.
+fn job_plan(chief: Harness) -> Plan {
+    Plan::new("restart-rest-job", member_as(chief, "chief")).with(stand_in_worker())
 }
 
 /// What the check opens for a worker: a project whose chief is the stand-in, which
@@ -240,12 +274,18 @@ fn state_of(lane: &Value) -> String {
         .to_owned()
 }
 
-/// Whether `message` is a note from ConsensFlow itself that says `words`.
+/// Whether `message` is a note from ConsensFlow itself that begins with `words`, its
+/// sentence ending or going on to name the turn after them.
 fn says(message: &Value, words: &str) -> bool {
-    message["kind"] == "note" && message["sender"].is_null() && message["body"] == words
+    message["kind"] == "note"
+        && message["sender"].is_null()
+        && message["body"]
+            .as_str()
+            .and_then(|body| body.strip_prefix(words))
+            .is_some_and(|rest| rest.starts_with(['.', ',', ':']))
 }
 
-/// The notes in the inbox of `participant` that say `words`, oldest first.
+/// The notes in the inbox of `participant` that begin with `words`, oldest first.
 fn notes_saying(members: &Members, participant: &str, words: &str) -> Result<Vec<Value>> {
     let mut notes: Vec<Value> = members
         .inbox(Some(participant))?
@@ -572,6 +612,116 @@ fn drive_chief_at_rest(mut members: Members, log: &Log) -> Result<Account> {
     Ok(case)
 }
 
+/// The chief starts the long command in the background, and its turn ends with the
+/// command running; the human closes the project and resumes it. The chief comes back
+/// told nothing of a cut turn, and reads idle; what its harness says itself of the job
+/// its last program left is said.
+fn drive_chief_at_rest_with_a_job(mut members: Members, log: &Log) -> Result<Account> {
+    let mut case = Account::new();
+    case.say(format!("trust: {}", members.trust().unwrap_or("none")));
+    members.add(STAND_IN_WORKER, &[])?;
+
+    let pane = members.lane("chief")?["pane"].clone();
+    members.paste(&pane, &ask::window_text(&the_background_ask())?)?;
+    let at_rest = find(
+        log,
+        "the chief at rest with its command running",
+        WORK,
+        Duration::from_millis(200),
+        || {
+            let running = !in_window(&members, "chief")?.is_empty();
+            Ok((running && state_of(&members.lane("chief")?) == "idle").then_some(()))
+        },
+    )?;
+    if at_rest.is_none() {
+        case.fail(format!(
+            "the chief never came to rest with its command running: its lane reads {}; {}",
+            members.lane("chief")?["activity"],
+            members.tail(pane["id"].as_str().unwrap_or_default())
+        ));
+        end_in_window(&members, "chief", &mut case)?;
+        case.closed(members.close());
+        return Ok(case);
+    }
+    sleep(Duration::from_secs(3));
+    let left = in_window(&members, "chief")?;
+    case.say(format!(
+        "before the Close: the chief's lane reads {}, {} process(es) of its background command run",
+        state_of(&members.lane("chief")?),
+        left.len()
+    ));
+
+    // The human's Close: every window ends, the chief's job with it.
+    let closed = members.page("project.close", serde_json::json!({}))?;
+    if closed["ok"] != true {
+        case.fail(format!("project.close: {closed}"));
+    }
+    let shut = find(log, "the project to close", WORK, LOOK, || {
+        Ok((!members.is_open()? && members.window_of("chief")?.is_none()).then_some(()))
+    })?;
+    case.check(
+        "the Close ends the chief's window",
+        shut.is_some(),
+        format!(
+            "the chief's lane reads {}",
+            members.lane("chief")?["activity"]
+        ),
+    );
+    ended(&mut case, &end_chosen(&left));
+
+    // The human's Resume: the chief comes back told nothing of a cut turn.
+    members.resume()?;
+    let mut samples: Vec<(String, Instant)> = Vec::new();
+    let began = Instant::now();
+    let idle = find(
+        log,
+        "the resumed chief's lane to read idle",
+        UP,
+        LOOK,
+        || {
+            let state = state_of(&members.lane("chief")?);
+            if samples.last().is_none_or(|(last, _)| *last != state) {
+                samples.push((state.clone(), Instant::now()));
+            }
+            Ok((state == "idle").then_some(()))
+        },
+    )?;
+    case.check(
+        "the chief comes back and reads idle",
+        idle.is_some(),
+        format!(
+            "after the Resume its lane reads: {}",
+            reads(&samples, began)
+        ),
+    );
+    let told = notes_saying(&members, "chief", CHIEF_CUT)?.len();
+    case.check(
+        "a chief at rest with a background job is told nothing of a cut turn",
+        told == 0,
+        format!("{told} notes say its turn was cut"),
+    );
+    let to_go_on: Vec<String> = members
+        .inbox(Some("chief"))?
+        .into_iter()
+        .filter(|message| message["sender"].is_null())
+        .filter_map(|message| message["body"].as_str().map(str::to_owned))
+        .filter(|body| body.contains("Go on where you stopped"))
+        .collect();
+    case.check(
+        "nothing of ConsensFlow's tells it to go on",
+        to_go_on.is_empty(),
+        format!("{to_go_on:?}"),
+    );
+    let lane = members.lane("chief")?;
+    case.say(format!(
+        "the chief's screen: {}",
+        members.tail(lane["pane"]["id"].as_str().unwrap_or_default())
+    ));
+    end_in_window(&members, "chief", &mut case)?;
+    case.closed(members.close());
+    Ok(case)
+}
+
 /// The worker is cut in a command, the app is quit and started again, and the human's
 /// Resume brings the worker back, told so once; it goes on, and its result reaches the
 /// chief.
@@ -734,7 +884,7 @@ fn a_window_the_quit_cut_in_a_turn_comes_back_on_the_humans_resume_told_so_once_
     ask::prepare()?;
     let asked = cases(
         &live::list("chief"),
-        &live::list("rest"),
+        (&live::list("rest"), &live::list("rest-job")),
         &live::list("worker"),
         &live::list("harness"),
     )?;
@@ -763,6 +913,20 @@ fn a_window_the_quit_cut_in_a_turn_comes_back_on_the_humans_resume_told_so_once_
             "chief at rest",
             "a chief at rest when the app quit comes back told nothing, reads idle and is given what waits for it",
             "the chief at rest when the app quit was not brought back as it should",
+            &case,
+            &log,
+        ));
+    }
+    for chief in asked.jobbed {
+        let scoped = log.scoped(format!("{} chief at rest with a job", chief.name()));
+        let case = run(&job_plan(chief), &scoped, |members| {
+            drive_chief_at_rest_with_a_job(members, &scoped)
+        });
+        checks.push(checked(
+            chief,
+            "chief at rest with a job",
+            "a chief at rest with a background job, closed and resumed, is told nothing of a cut turn and reads idle",
+            "the chief at rest with a background job was not brought back as it should",
             &case,
             &log,
         ));
@@ -807,63 +971,81 @@ mod tests {
     fn a_claude_chief_and_a_claude_worker_run_unless_told_and_only_claude_or_pi_can_be_a_chief_cut_in_a_command(
     ) {
         assert_eq!(
-            cases(&[], &[], &[], &[]).unwrap(),
+            cases(&[], (&[], &[]), &[], &[]).unwrap(),
             Cases {
                 chiefs: vec![Harness::Claude],
                 rested: vec![],
+                jobbed: vec![],
                 workers: vec![Harness::Claude]
             }
         );
         // A flag runs the cases it names alone, each once.
         assert_eq!(
-            cases(&words(&["pi", "claude", "pi"]), &[], &[], &[]).unwrap(),
+            cases(&words(&["pi", "claude", "pi"]), (&[], &[]), &[], &[]).unwrap(),
             Cases {
                 chiefs: vec![Harness::Pi, Harness::Claude],
                 rested: vec![],
+                jobbed: vec![],
                 workers: vec![]
             }
         );
         assert_eq!(
-            cases(&[], &[], &words(&["codex", "devin", "codex"]), &[]).unwrap(),
+            cases(&[], (&[], &[]), &words(&["codex", "devin", "codex"]), &[]).unwrap(),
             Cases {
                 chiefs: vec![],
                 rested: vec![],
+                jobbed: vec![],
                 workers: vec![Harness::Codex, Harness::Devin]
             }
         );
         // Any harness can be the chief at rest: Codex was the field's.
         assert_eq!(
-            cases(&[], &words(&["codex", "pi", "codex"]), &[], &[]).unwrap(),
+            cases(&[], (&words(&["codex", "pi", "codex"]), &[]), &[], &[]).unwrap(),
             Cases {
                 chiefs: vec![],
                 rested: vec![Harness::Codex, Harness::Pi],
+                jobbed: vec![],
                 workers: vec![]
             }
         );
         // A harness named bare is a chief where it can be, and a worker.
         assert_eq!(
-            cases(&[], &[], &[], &words(&["codex", "pi", "claude"])).unwrap(),
+            cases(&[], (&[], &[]), &[], &words(&["codex", "pi", "claude"])).unwrap(),
             Cases {
                 chiefs: vec![Harness::Pi, Harness::Claude],
                 rested: vec![],
+                jobbed: vec![],
                 workers: vec![Harness::Codex, Harness::Pi, Harness::Claude]
             }
         );
         for wrong in ["codex", "opencode", "devin", "nobody"] {
-            let failed = cases(&words(&[wrong]), &[], &[], &[])
+            let failed = cases(&words(&[wrong]), (&[], &[]), &[], &[])
                 .unwrap_err()
                 .to_string();
             assert_eq!(failed, format!("no such chief: {wrong}"));
         }
-        let failed = cases(&[], &words(&["nobody"]), &[], &[])
+        let failed = cases(&[], (&words(&["nobody"]), &[]), &[], &[])
             .unwrap_err()
             .to_string();
         assert_eq!(failed, "no such chief: nobody");
-        let failed = cases(&[], &[], &words(&["nobody"]), &[])
+        assert_eq!(
+            cases(&[], (&[], &words(&["claude", "claude"])), &[], &[]).unwrap(),
+            Cases {
+                chiefs: vec![],
+                rested: vec![],
+                jobbed: vec![Harness::Claude],
+                workers: vec![]
+            }
+        );
+        let failed = cases(&[], (&[], &words(&["nobody"])), &[], &[])
+            .unwrap_err()
+            .to_string();
+        assert_eq!(failed, "no such chief: nobody");
+        let failed = cases(&[], (&[], &[]), &words(&["nobody"]), &[])
             .unwrap_err()
             .to_string();
         assert_eq!(failed, "no such worker: nobody");
-        let failed = cases(&[], &[], &[], &words(&["nobody"]))
+        let failed = cases(&[], (&[], &[]), &[], &words(&["nobody"]))
             .unwrap_err()
             .to_string();
         assert_eq!(failed, "no such harness: nobody");
@@ -921,15 +1103,18 @@ mod tests {
 
     #[test]
     fn what_a_window_is_told_when_its_turn_was_cut_is_what_the_daemon_writes() {
-        assert_eq!(
-            worker_cut(3),
-            "ConsensFlow stopped while you were working on T-3. Go on where you stopped."
-        );
-        let note = serde_json::json!({
-            "kind": "note", "sender": null, "state": "delivered", "body": worker_cut(3)
-        });
-        assert!(says(&note, &worker_cut(3)));
-        assert!(!says(&note, &worker_cut(4)));
+        let written = "ConsensFlow stopped while you were working on T-3. Go on where you stopped.";
+        let named = "ConsensFlow stopped while you were working on T-3, in the turn that began with \"Go\". Go on where you stopped.";
+        let chief = "ConsensFlow stopped in the middle of your turn, which was cut: the turn that began with \"Go\". Go on where you stopped.";
+        let note = |body: &str| serde_json::json!({ "kind": "note", "sender": null, "state": "delivered", "body": body });
+        assert!(says(&note(written), &worker_cut(3)));
+        assert!(says(&note(named), &worker_cut(3)));
+        assert!(says(&note(chief), CHIEF_CUT));
+        assert!(!says(&note(written), &worker_cut(4)));
+        assert!(!says(
+            &note("ConsensFlow stopped while you were working on T-30. Go on where you stopped."),
+            &worker_cut(3)
+        ));
         // A note of a participant's is no word of the daemon's.
         let theirs = serde_json::json!({
             "kind": "note", "sender": "chief", "state": "delivered", "body": worker_cut(3)

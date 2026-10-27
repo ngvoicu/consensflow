@@ -5,6 +5,13 @@
 //! end: `PASS` when every check passed, else the checks that failed. The status is
 //! 1 when any run did not pass, and 130 when the matrix was stopped.
 //!
+//! A machine the runner shares (zeewin2) may stop taking runs while the matrix goes on:
+//! poker-lab's job takes the laptop, or its disk falls below the floor. The run that is refused
+//! stops the matrix (the next would be refused as well): the evals after it are `not run`, said
+//! so in the summary and in a line that says where to go on, and the status is 75, the
+//! refusal's own. The matrix does not move to another machine by itself: a copy there may
+//! not be built, nor its harnesses signed in.
+//!
 //! A run is [`run`](super::run::run) on the machine, the eval started there as
 //! `cargo xtask eval ...` in the copy (`--build` builds the copy before the first
 //! run that goes). What the eval says is read for its checks (`PASS …` and `FAIL …`
@@ -24,7 +31,7 @@ use cf_base::time::{iso, Clock};
 use super::interrupt::Interrupt;
 use super::machine::Machine;
 use super::options::{MatrixOptions, Options, Pair, DEFAULT_DIR};
-use super::run::Outcome;
+use super::run::{Outcome, REFUSED};
 use super::{Error, STOPPED};
 use crate::context::Context;
 use crate::dispatch::Console;
@@ -68,6 +75,8 @@ pub fn run(
     let folder = logs_in(&context.root, clock);
     fs::create_dir_all(&folder).map_err(Error::files("make", &folder))?;
     let mut results: Vec<(String, Verdict)> = Vec::new();
+    // Why the machine refused a run, once one was: no run after it goes.
+    let mut refused: Option<String> = None;
     // Built once, before the first run that goes.
     let mut build = options.build;
     for scenario in &options.scenarios {
@@ -84,6 +93,10 @@ pub fn run(
                 ));
                 continue;
             }
+            if let Some(why) = &refused {
+                results.push((name, not_run(why)));
+                continue;
+            }
             writeln!(console.out, "{name}…").map_err(Error::Output)?;
             let log = folder.join(format!("{scenario}-{}-{}.log", pair.chief, pair.staff));
             let run = Options {
@@ -93,10 +106,17 @@ pub fn run(
                 inside: ".".to_owned(),
                 env: options.env.clone(),
                 command: eval(options, scenario, pair),
+                wait: options.wait,
             };
             build = false;
-            let Some(verdict) = once(remote, &run, &log)? else {
-                return Ok(STOPPED);
+            let verdict = match once(remote, &run, &log)? {
+                Done::Stopped => return Ok(STOPPED),
+                Done::Refused(why) => {
+                    let verdict = not_run(&why);
+                    refused = Some(why);
+                    verdict
+                }
+                Done::Ran(verdict) => verdict,
             };
             writeln!(console.out, "  {}", verdict.line).map_err(Error::Output)?;
             results.push((name, verdict));
@@ -106,7 +126,33 @@ pub fn run(
     for (name, verdict) in &results {
         writeln!(console.out, "{name:<36} {}", verdict.line).map_err(Error::Output)?;
     }
+    if let Some(why) = refused {
+        writeln!(
+            console.out,
+            "\nstopped: {why}\nThe runs marked `not run` did not start: run them again when the machine is free, or with --machine zeewin (its copy built, with --build)."
+        )
+        .map_err(Error::Output)?;
+        return Ok(REFUSED);
+    }
     Ok(i32::from(!results.iter().all(|(_, verdict)| verdict.ok)))
+}
+
+/// What a run the machine refused, and every run after it, came to.
+fn not_run(why: &str) -> Verdict {
+    Verdict {
+        ok: false,
+        line: format!("not run: {why}"),
+    }
+}
+
+/// How one run of the matrix ended.
+enum Done {
+    /// It ran, and came to this.
+    Ran(Verdict),
+    /// The machine refused it: nothing was sent.
+    Refused(String),
+    /// This program was stopped.
+    Stopped,
 }
 
 /// Where the logs of a matrix begun now are kept: the time, as the folder's name.
@@ -180,9 +226,8 @@ impl Write for Said<'_> {
     }
 }
 
-/// One run on `remote`, its output kept in `log`: what it came to, or none if
-/// this program was stopped.
-fn once(remote: &mut dyn Remote, run: &Options, log: &Path) -> Result<Option<Verdict>, Error> {
+/// One run on `remote`, its output kept in `log`: what it came to.
+fn once(remote: &mut dyn Remote, run: &Options, log: &Path) -> Result<Done, Error> {
     let file = File::create(log).map_err(Error::files("make", log))?;
     let said = RefCell::new(Log {
         file,
@@ -200,7 +245,8 @@ fn once(remote: &mut dyn Remote, run: &Options, log: &Path) -> Result<Option<Ver
     };
     let Log { mut file, text } = said.into_inner();
     let (status, extra) = match ended {
-        Ok(Outcome::Stopped) => return Ok(None),
+        Ok(Outcome::Stopped) => return Ok(Done::Stopped),
+        Ok(Outcome::Refused(why)) => return Ok(Done::Refused(why)),
         Ok(Outcome::Exited(status)) => (status, String::new()),
         // It could not start, or went wrong on the way: the reason is for the log.
         Err(error) => {
@@ -211,7 +257,7 @@ fn once(remote: &mut dyn Remote, run: &Options, log: &Path) -> Result<Option<Ver
         }
     };
     let text = String::from_utf8_lossy(&text).into_owned() + &extra;
-    Ok(Some(verdict(&text, status, log)))
+    Ok(Done::Ran(verdict(&text, status, log)))
 }
 
 /// What an eval's output says it came to: its checks (`PASS …`, `FAIL …`), and

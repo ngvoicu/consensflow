@@ -36,6 +36,40 @@ fn the_daemon_is_the_bundled_cf_running_ui_and_nothing_of_the_apps_is_added_to_i
     );
 }
 
+/// The daemon runs as long as the app does, and the app opens sockets and pipes on its other
+/// threads as it starts it. On macOS std makes each close-on-exec in a second step, and a
+/// program started between the two holds it for good: the daemon would hold a connection of the
+/// app's, and what the app closed would not be closed. Here a descriptor is left in that moment
+/// while the daemon starts, and the daemon is asked whether it has it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_daemon_holds_nothing_of_the_apps_but_its_streams_whatever_was_open_as_it_started() {
+    use std::os::fd::AsRawFd;
+
+    let folder = tempfile::tempdir().expect("a folder");
+    let stray = std::fs::File::open("/dev/null").expect("a file");
+    let fd = stray.as_raw_fd();
+    // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+    assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+    let cf = login_shell(
+        folder.path(),
+        &format!("if [ -e /dev/fd/{fd} ]; then echo held; else echo clear; fi"),
+    );
+    // The script was written a moment ago, and a program started on another thread meanwhile
+    // can hold it open for writing: such a start is refused, and tried again.
+    let said = (0..50)
+        .find_map(|_| match command_for(&cf).output() {
+            Ok(output) => Some(output),
+            Err(refused) if refused.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::sleep(Duration::from_millis(100));
+                None
+            }
+            Err(refused) => panic!("the daemon was not started: {refused}"),
+        })
+        .expect("the daemon started");
+    assert_eq!(String::from_utf8_lossy(&said.stdout), "clear\n");
+}
+
 #[test]
 fn the_cf_is_the_one_in_the_clis_folder_of_the_bundle_or_the_portable_runtime() {
     let cf = if cfg!(windows) { "cf.exe" } else { "cf" };
@@ -98,7 +132,34 @@ fn the_login_path_is_read_past_what_login_files_print() {
     );
 }
 
-/// The pid a shell wrote in `file`, once it has.
+/// The login shell is asked as the app starts, while its other threads open sockets and
+/// pipes, and what a login file starts may run on after it: here a descriptor is left open and
+/// not close-on-exec while the shell is asked, and the shell says, as its PATH, whether it has it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_login_shell_holds_nothing_of_the_apps_but_its_streams() {
+    use std::os::fd::AsRawFd;
+
+    let home = tempfile::tempdir().expect("home");
+    let stray = std::fs::File::open("/dev/null").expect("a file");
+    let fd = stray.as_raw_fd();
+    // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+    assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+    let shell = login_shell(
+        home.path(),
+        &format!(
+            "if [ -e /dev/fd/{fd} ]; then PATH=held; else PATH=clear; fi; export PATH; exec /bin/sh -c \"$2\""
+        ),
+    );
+    assert_eq!(
+        login_path_in(&shell, Duration::from_secs(5), &LoginLookup::default()).as_deref(),
+        Some("clear")
+    );
+}
+
+/// The pid a shell wrote in `file`, once it has. How soon a shell runs is the machine's
+/// (a loaded one took seconds to start a script), not what is tested: the bound is for a
+/// shell that never does.
 #[cfg(unix)]
 fn pid_in(file: &Path) -> i32 {
     let started = Instant::now();
@@ -110,7 +171,7 @@ fn pid_in(file: &Path) -> i32 {
             return pid;
         }
         assert!(
-            started.elapsed() < Duration::from_secs(10),
+            started.elapsed() < Duration::from_secs(60),
             "the shell never ran"
         );
         thread::sleep(Duration::from_millis(20));
@@ -120,7 +181,7 @@ fn pid_in(file: &Path) -> i32 {
 /// Ends the process `pid`, which a test left running.
 #[cfg(unix)]
 fn kill(pid: i32) {
-    let _ = Command::new("/bin/kill")
+    let _ = crate::testing::command("/bin/kill")
         .args(["-9", &pid.to_string()])
         .status();
 }
@@ -129,6 +190,12 @@ fn kill(pid: i32) {
 /// PATH the app was started with; the app's start does not wait on it. Only
 /// the shell is ended: what its login files started is the user's, an
 /// `ssh-agent -D` that other programs use, say (the reviews of 2026-10-16).
+///
+/// The shell that hangs is not given a time to run in: it is a slow start of a loaded
+/// machine that kills it, at the time it is given, before it has started anything
+/// (T-581: "the shell never ran" in the gate at a load of 50 to 150, the shell killed
+/// at 300 ms before its first command). What it started is looked for when it says it
+/// did, and the shell is ended then, as the app's quit ends it.
 #[cfg(unix)]
 #[test]
 fn a_login_shell_that_fails_or_hangs_gives_no_path_and_leaves_what_it_started() {
@@ -140,21 +207,52 @@ fn a_login_shell_that_fails_or_hangs_gives_no_path_and_leaves_what_it_started() 
         None
     );
 
-    let waited_for = home.path().join("waited-for.pid");
-    let hanging = login_shell(
+    // A shell that hangs is not waited for beyond its time, though a program it started
+    // holds its output as long as it lives (30 s here): the time is up long before.
+    let held = home.path().join("held.pid");
+    let holding = login_shell(
         home.path(),
-        &format!("/bin/sleep 30 & echo $! > '{}'; wait", waited_for.display()),
+        &format!("/bin/sleep 30 & echo $! > '{}'; wait", held.display()),
     );
     let started = Instant::now();
     assert_eq!(
-        login_path_in(&hanging, Duration::from_millis(300), &lookup),
+        login_path_in(
+            &holding,
+            Duration::from_millis(300),
+            &LoginLookup::default()
+        ),
         None
     );
     assert!(
-        started.elapsed() < Duration::from_secs(2),
+        started.elapsed() < Duration::from_secs(20),
         "the shell held up the start"
     );
+    if let Some(held) = std::fs::read_to_string(&held)
+        .ok()
+        .and_then(|said| said.trim().parse().ok())
+    {
+        kill(held);
+    }
+
+    // What the shell started is left running when the shell is ended. It starts slowly, as a
+    // loaded machine's does; the time it is given is long, and it is ended when it has
+    // started what it started, as the app's quit ends it.
+    let waited_for = home.path().join("waited-for.pid");
+    let hanging = login_shell(
+        home.path(),
+        &format!(
+            "/bin/sleep 1; /bin/sleep 30 & echo $! > '{}'; wait",
+            waited_for.display()
+        ),
+    );
+    let asking = std::sync::Arc::new(LoginLookup::default());
+    let asked = {
+        let (asking, hanging) = (std::sync::Arc::clone(&asking), hanging.clone());
+        thread::spawn(move || login_path_in(&hanging, Duration::from_secs(120), &asking))
+    };
     let agent = pid_in(&waited_for);
+    asking.end();
+    assert_eq!(asked.join().expect("the lookup ended"), None);
     // Given a moment to be ended, as it would have been with the shell.
     thread::sleep(Duration::from_millis(200));
     let left = cf_panes::pty::process_exists(agent);
@@ -210,10 +308,10 @@ fn a_lookup_the_app_has_quit_starts_no_shell() {
     std::fs::remove_file(&started).expect("the shell ran once");
     lookup.end();
     assert_eq!(login_path_in(&shell, Duration::from_secs(5), &lookup), None);
-    let mut asked = Command::new(&shell);
+    let mut asked = crate::testing::command(&shell);
     asked.stdout(Stdio::piped());
     assert!(lookup.start(&mut asked).is_none(), "a shell was started");
-    assert!(lookup.status().is_err(), "a shell is held");
+    assert!(lookup.lock().shells.is_empty(), "a shell is held");
     thread::sleep(Duration::from_millis(300));
     assert!(!started.exists(), "a shell ran after the quit");
 }
@@ -226,7 +324,7 @@ fn a_lookup_the_app_has_quit_starts_no_shell() {
 fn ending_a_lookup_ends_the_shell_it_asks_at_once_and_only_it() {
     let home = tempfile::tempdir().expect("home");
     let sleeper = home.path().join("sleeper.pid");
-    let mut shell = Command::new("/bin/sh");
+    let mut shell = crate::testing::command("/bin/sh");
     shell
         .args([
             "-c",
@@ -234,19 +332,22 @@ fn ending_a_lookup_ends_the_shell_it_asks_at_once_and_only_it() {
         ])
         .stdout(Stdio::piped());
     let lookup = LoginLookup::default();
-    let _output = lookup.start(&mut shell).expect("the shell is started");
+    let started = lookup.start(&mut shell).expect("the shell is started");
     let agent = pid_in(&sleeper);
     lookup.end();
     let until = Instant::now() + Duration::from_secs(3);
     let mut ended = false;
     while Instant::now() < until {
-        if lookup.status().is_ok_and(|status| status.is_some()) {
+        if lookup
+            .status(started.asked)
+            .is_ok_and(|status| status.is_some())
+        {
             ended = true;
             break;
         }
         thread::sleep(Duration::from_millis(20));
     }
-    lookup.finish();
+    lookup.finish(started.asked);
     let left = cf_panes::pty::process_exists(agent);
     kill(agent);
     assert!(ended, "the shell outlived the quit");
@@ -262,18 +363,21 @@ fn ending_a_lookup_ends_the_shell_it_asks_at_once_and_only_it() {
 fn a_lookup_given_up_on_has_ended_its_shell_before_a_quit_can_miss_it() {
     let home = tempfile::tempdir().expect("home");
     let beat = home.path().join("beat");
-    let mut shell = Command::new("/bin/sh");
+    let mut shell = crate::testing::command("/bin/sh");
     shell
         .args([
             "-c",
             &format!(
-                "i=0; while :; do i=$((i+1)); echo $i > '{}'; /bin/sleep 0.05; done",
+                "i=0; while kill -0 $PPID 2>/dev/null; do i=$((i+1)); echo $i > '{}'; /bin/sleep 0.05; done",
                 beat.display()
             ),
         ])
         .stdout(Stdio::piped());
     let lookup = LoginLookup::default();
-    let _output = lookup.start(&mut shell).expect("the shell is started");
+    let asked = lookup
+        .start(&mut shell)
+        .expect("the shell is started")
+        .asked;
     let started = Instant::now();
     while !beat.exists() {
         assert!(
@@ -283,7 +387,7 @@ fn a_lookup_given_up_on_has_ended_its_shell_before_a_quit_can_miss_it() {
         thread::sleep(Duration::from_millis(20));
     }
     let mut stopped = false;
-    lookup.finish_with(|| {
+    lookup.finish_with(asked, || {
         // The quit comes here, and the app could end with it.
         lookup.end();
         let before = std::fs::read_to_string(&beat).unwrap_or_default();
@@ -318,14 +422,23 @@ fn finder(shell: Option<&Path>, folders: &[PathBuf]) -> Env {
 #[cfg(unix)]
 fn the_daemons(app: &Env, timeout: Duration) -> (Command, Option<String>) {
     let mut command = command_for(Path::new("/bundle/cli/bin/cf"));
-    let said = on_login_path(&mut command, app, timeout, &LoginLookup::default());
+    let said = on_login_environment(&mut command, app, timeout, &LoginLookup::default());
     (command, said)
 }
 
-/// The PATH the daemon's `command` is given, and nothing else.
+/// The variables the daemon's `command` is given.
 #[cfg(unix)]
 fn given(command: &Command) -> Vec<(String, String)> {
     described(command).2
+}
+
+/// The value the daemon's `command` is given of the variable `name`.
+#[cfg(unix)]
+fn given_of(command: &Command, name: &str) -> Option<String> {
+    given(command)
+        .into_iter()
+        .find(|(held, _)| held == name)
+        .map(|(_, value)| value)
 }
 
 /// A loaded machine's login shell, slower than the five seconds it was
@@ -346,7 +459,7 @@ fn a_login_shell_slower_than_five_seconds_still_gives_its_path() {
         LOGIN_PATH_TIMEOUT,
     );
     assert!(started.elapsed() >= Duration::from_secs(6), "it answered");
-    assert_eq!(given(&command), [("PATH".to_owned(), login)]);
+    assert_eq!(given_of(&command, "PATH"), Some(login));
     assert_eq!(said, None);
 }
 
@@ -491,8 +604,10 @@ fn a_shell_that_ends_without_its_path_while_what_it_started_writes_on_is_given_u
     let shell = login_shell(
         home.path(),
         &format!(
-            "/bin/sh -c 'echo $$ > {}; while :; do echo noise; /bin/sleep 0.2; done' & exit 0",
-            writer.display()
+            "/bin/sh -c 'echo $$ > {}; while {}; do echo noise; /bin/sleep 0.2; done' & exit 0",
+            writer.display(),
+            // Its parent is the shell that exits at once: its owner is the test.
+            cf_base::fixture::owner_there(std::process::id())
         ),
     );
     let (sent, ended) = mpsc::channel();
@@ -522,4 +637,370 @@ fn a_verbatim_windows_path_is_spelled_plainly() {
         plain_path(PathBuf::from("/Applications/ConsensFlow.app/cf")),
         PathBuf::from("/Applications/ConsensFlow.app/cf")
     );
+}
+
+/// A stand-in for a shell whose interactive rc file runs `rc` before the command it
+/// is given, as zsh runs `.zshrc` for `-i`; started without `-i` it runs the command
+/// alone, as a login shell's `-lc` does.
+#[cfg(unix)]
+fn shell_with_rc(home: &Path, rc: &str) -> PathBuf {
+    login_shell(
+        home,
+        &format!("case \"$1\" in *i*) {rc} ;; esac\nexec /bin/sh -c \"$2\""),
+    )
+}
+
+/// What a terminal's shell gives a harness, a member window has (T-540): a
+/// variable only the interactive rc exports reaches the daemon, a value of any
+/// bytes as it is, and the app's log says nothing of it.
+#[cfg(unix)]
+#[test]
+fn a_variable_only_the_interactive_shell_sets_reaches_the_daemon_as_it_is_and_is_not_logged() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "export PARITY_ONLY_INTERACTIVE='a value = with = signs\nand a second line'; \
+         export LANG=en_GB.UTF-8; export PATH=\"/rc/bin:$PATH\"",
+    );
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    assert_eq!(
+        given_of(&command, "PARITY_ONLY_INTERACTIVE").as_deref(),
+        Some("a value = with = signs\nand a second line")
+    );
+    assert_eq!(given_of(&command, "LANG").as_deref(), Some("en_GB.UTF-8"));
+    let path = given_of(&command, "PATH").expect("a PATH");
+    assert!(path.starts_with("/rc/bin:"), "{path}");
+    assert_eq!(said, None, "the log says nothing of a shell that answered");
+}
+
+/// What says where the shell was, how deep, its last command and its terminal is no
+/// pane's, and is not taken.
+#[cfg(unix)]
+#[test]
+fn the_shells_place_depth_last_command_and_terminal_are_not_taken() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "cd /; export OLDPWD=/tmp SHLVL=7 TERM=dumb TERM_PROGRAM=iTerm.app TERMINFO=/x \
+         PARITY_KEPT=yes",
+    );
+    let (command, _) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    let names: Vec<String> = given(&command).into_iter().map(|(name, _)| name).collect();
+    for dropped in [
+        "PWD",
+        "OLDPWD",
+        "SHLVL",
+        "_",
+        "TERM",
+        "TERM_PROGRAM",
+        "TERMINFO",
+    ] {
+        assert!(
+            !names.iter().any(|name| name == dropped),
+            "{dropped} was taken"
+        );
+    }
+    assert_eq!(given_of(&command, "PARITY_KEPT").as_deref(), Some("yes"));
+}
+
+/// An interactive rc that hangs (one that `exec`s a terminal multiplexer, say) costs
+/// the start no more than its one limit, both questions together, and the daemon still
+/// gets the login shell's PATH: it is never worse off than before the environment was
+/// asked.
+#[cfg(unix)]
+#[test]
+fn an_interactive_rc_that_hangs_falls_back_to_the_login_path_within_its_time() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(home.path(), "exec /bin/sleep 30");
+    let started = Instant::now();
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(2));
+    assert!(
+        started.elapsed() < Duration::from_millis(3_500),
+        "the start waited {:?}, past its one limit",
+        started.elapsed()
+    );
+    assert_eq!(given_of(&command, "PATH"), std::env::var("PATH").ok());
+    assert_eq!(given_of(&command, "PARITY_ONLY_INTERACTIVE"), None);
+    assert_eq!(said, None);
+}
+
+/// An entry of `env -0` is a variable by its first `=`; one with no name is none.
+#[test]
+fn an_entry_is_named_by_its_first_equals_sign_and_one_without_a_name_is_none() {
+    assert_eq!(
+        variable(b"A=b=c"),
+        Some((OsString::from("A"), OsString::from("b=c")))
+    );
+    assert_eq!(
+        variable(b"EMPTY="),
+        Some((OsString::from("EMPTY"), OsString::new()))
+    );
+    assert_eq!(variable(b"=x"), None);
+    assert_eq!(variable(b"no-equals"), None);
+}
+
+/// The PowerShell a Windows terminal opens: PowerShell 7 where a folder of the PATH has
+/// it, else Windows PowerShell, under the system's root.
+#[test]
+fn the_powershell_asked_is_pwsh_where_the_path_has_it_else_windows_powershell() {
+    let folder = tempfile::tempdir().expect("a folder");
+    let other = tempfile::tempdir().expect("another");
+    let env = |path: &[&Path]| {
+        Env::from_vars([
+            (
+                std::ffi::OsString::from("PATH"),
+                std::env::join_paths(path).expect("a PATH"),
+            ),
+            (
+                std::ffi::OsString::from("SystemRoot"),
+                std::ffi::OsString::from("/Windows-root"),
+            ),
+        ])
+    };
+    assert_eq!(
+        powershell_of(&env(&[other.path(), folder.path()])),
+        Path::new("/Windows-root").join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+    );
+    let pwsh = folder.path().join("pwsh.exe");
+    std::fs::write(&pwsh, "").expect("a pwsh");
+    assert_eq!(powershell_of(&env(&[other.path(), folder.path()])), pwsh);
+}
+
+/// Windows names its PATH `Path`: an environment that has it is taken whole.
+#[test]
+fn a_printed_environment_is_taken_by_its_path_whatever_its_case() {
+    let printed = b"Path=C:\\Windows\0SystemRoot=C:\\Windows\0PWD=/x\0";
+    let vars = taken(printed).expect("taken");
+    let names: Vec<String> = vars
+        .iter()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["Path", "SystemRoot"]);
+    assert_eq!(taken(b"SystemRoot=C:\\Windows\0"), None, "no PATH: none");
+}
+
+/// The real Windows PowerShell answers what this process has, as a terminal's gives it:
+/// its Path and SystemRoot come back as they are, within the time.
+#[cfg(windows)]
+#[test]
+fn windows_powershell_says_its_environment_in_utf8_between_the_markers() {
+    let env = Env::from_process();
+    let started = Instant::now();
+    let vars = profile_environment_in(
+        &powershell_of(&env),
+        Duration::from_secs(60),
+        &LoginLookup::default(),
+    )
+    .expect("PowerShell gave its environment");
+    assert!(started.elapsed() < Duration::from_secs(60));
+    let value = |name: &str| {
+        vars.iter()
+            .find(|(held, _)| held.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.clone())
+    };
+    assert_eq!(value("SystemRoot"), std::env::var_os("SystemRoot"));
+    assert!(value("PATH").is_some_and(|path| !path.is_empty()));
+}
+
+/// What the app sets for itself wins over the rc, and the rc over what the app was started
+/// with: ConsensFlow's own variables and the loader's are never taken, nor a Claude
+/// session's identity, while a harness's home is, as in a terminal.
+#[cfg(unix)]
+#[test]
+fn consensflows_own_the_loaders_and_a_claude_sessions_variables_are_never_taken_and_a_harness_home_is(
+) {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "export CONSENSFLOW_HOME=/rc/home CF_ANYTHING=1 DYLD_INSERT_LIBRARIES=/x.dylib \
+         LD_PRELOAD=/x.so CLAUDECODE=1 CLAUDE_CODE_SESSION_ID=s1 \
+         CLAUDE_CONFIG_DIR=/rc/claude CODEX_HOME=/rc/codex",
+    );
+    let (command, _) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    for never in [
+        "CONSENSFLOW_HOME",
+        "CF_ANYTHING",
+        "DYLD_INSERT_LIBRARIES",
+        "LD_PRELOAD",
+        "CLAUDECODE",
+        "CLAUDE_CODE_SESSION_ID",
+    ] {
+        assert_eq!(given_of(&command, never), None, "{never} was taken");
+    }
+    assert_eq!(
+        given_of(&command, "CLAUDE_CONFIG_DIR").as_deref(),
+        Some("/rc/claude")
+    );
+    assert_eq!(
+        given_of(&command, "CODEX_HOME").as_deref(),
+        Some("/rc/codex")
+    );
+}
+
+/// A run that starts the app with a harness home of its own keeps it, whatever the rc
+/// says: the daemon is not given the rc's, nor told its name, so it and every window keep
+/// the app's. A home the app has none of is the rc's.
+#[cfg(unix)]
+#[test]
+fn a_harness_home_the_app_was_started_with_is_kept_over_the_rcs() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "export CLAUDE_CONFIG_DIR=/rc/claude CODEX_HOME=/rc/codex",
+    );
+    let mut vars: Vec<(OsString, OsString)> = finder(Some(shell.as_path()), &[])
+        .iter()
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .collect();
+    vars.push(("CLAUDE_CONFIG_DIR".into(), "/test/claude".into()));
+    let (command, _) = the_daemons(&Env::from_vars(vars), Duration::from_secs(10));
+    assert_eq!(
+        given_of(&command, "CLAUDE_CONFIG_DIR"),
+        None,
+        "the app's is kept"
+    );
+    assert_eq!(
+        given_of(&command, "CODEX_HOME").as_deref(),
+        Some("/rc/codex"),
+        "a home the app has none of is the rc's"
+    );
+    let names = given_of(&command, TERMINAL_ENV).unwrap_or_default();
+    assert!(!names.contains("CLAUDE_CONFIG_DIR"), "{names}");
+    assert!(names.contains("CODEX_HOME"), "{names}");
+}
+
+/// The daemon is told which names it was given of the terminal's environment, by name
+/// only and without the PATH, which it gives every pane itself: so that each window's
+/// pane gets them too.
+#[cfg(unix)]
+#[test]
+fn the_daemon_is_told_the_names_it_was_given_and_never_their_values() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = shell_with_rc(
+        home.path(),
+        "export PARITY_SECRET=do-not-print LANG=en_GB.UTF-8 PATH=\"/rc/bin:$PATH\"",
+    );
+    let (command, _) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(10));
+    let said = given_of(&command, TERMINAL_ENV).expect("the names");
+    let names: Vec<String> = serde_json::from_str(&said).expect("a list of names");
+    assert!(
+        names.iter().any(|name| name == "PARITY_SECRET"),
+        "{names:?}"
+    );
+    assert!(names.iter().any(|name| name == "LANG"), "{names:?}");
+    assert!(
+        !names.iter().any(|name| name.eq_ignore_ascii_case("PATH")),
+        "{names:?}"
+    );
+    assert!(!said.contains("do-not-print"), "a value crossed: {said}");
+    // A shell that gave nothing names nothing.
+    let failing = login_shell(home.path(), "/bin/sh -c \"$2\"; exit 3");
+    let (command, _) = the_daemons(
+        &finder(Some(failing.as_path()), &[]),
+        Duration::from_secs(5),
+    );
+    assert_eq!(given_of(&command, TERMINAL_ENV), None);
+}
+
+/// On Windows the PowerShell asked has no console window of its own: started from a
+/// windowed app, one would flash up at every start for as long as the profile takes.
+#[cfg(windows)]
+#[test]
+fn the_powershell_asked_has_no_console_window() {
+    let marker = marker("window");
+    let script = format!(
+        "Add-Type -Namespace Cf -Name Console -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern System.IntPtr GetConsoleWindow();'; \
+         [Console]::Out.Write('{marker}' + [Cf.Console]::GetConsoleWindow() + '{marker}')"
+    );
+    let env = Env::from_process();
+    let said = asked(
+        &powershell_of(&env),
+        &[
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &script,
+        ],
+        &marker,
+        Duration::from_secs(60),
+        &LoginLookup::default(),
+    )
+    .expect("PowerShell answered");
+    assert_eq!(
+        String::from_utf8_lossy(&said),
+        "0",
+        "it had a console window"
+    );
+}
+
+/// A shell whose login files hang too is given one limit in all, not one for each
+/// question: the start waits no longer than `LOGIN_PATH_TIMEOUT` says.
+#[cfg(unix)]
+#[test]
+fn a_shell_that_hangs_on_every_question_costs_the_start_one_limit() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = login_shell(home.path(), "exec /bin/sleep 30");
+    let started = Instant::now();
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(2));
+    assert!(
+        started.elapsed() < Duration::from_millis(3_500),
+        "the start waited {:?}",
+        started.elapsed()
+    );
+    assert_eq!(given_of(&command, "PATH").as_deref(), Some(FINDER_PATH));
+    assert!(said.is_some(), "the log says the shell gave none");
+}
+
+/// Login files that are slow, which both questions run, leave the interactive one its
+/// whole limit: the two are asked at once, not one after the other, and the start still
+/// waits one limit at most.
+#[cfg(unix)]
+#[test]
+fn slow_login_files_leave_the_interactive_question_its_whole_limit() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = login_shell(
+        home.path(),
+        "/bin/sleep 2.5\ncase \"$1\" in *i*) export PARITY_ONLY_INTERACTIVE=1 ;; esac\nexec /bin/sh -c \"$2\"",
+    );
+    let started = Instant::now();
+    let (command, said) = the_daemons(&finder(Some(shell.as_path()), &[]), Duration::from_secs(4));
+    assert!(
+        started.elapsed() < Duration::from_millis(5_500),
+        "the start waited {:?}, past its one limit",
+        started.elapsed()
+    );
+    assert_eq!(
+        given_of(&command, "PARITY_ONLY_INTERACTIVE").as_deref(),
+        Some("1"),
+        "the interactive question ran out of time behind the login one"
+    );
+    assert_eq!(said, None);
+}
+
+/// The app's quit ends every shell the lookup asks, when it asks two at once.
+#[cfg(unix)]
+#[test]
+fn ending_a_lookup_ends_both_shells_it_asks_at_once() {
+    let lookup = LoginLookup::default();
+    let mut first = Command::new("/bin/sleep");
+    first.arg("30").stdout(Stdio::piped());
+    let mut second = Command::new("/bin/sleep");
+    second.arg("30").stdout(Stdio::piped());
+    let one = lookup.start(&mut first).expect("the first is started");
+    let two = lookup.start(&mut second).expect("the second is started");
+    assert_ne!(one.asked, two.asked);
+    lookup.end();
+    let until = Instant::now() + Duration::from_secs(3);
+    let ended = |asked| lookup.status(asked).is_ok_and(|status| status.is_some());
+    while Instant::now() < until && !(ended(one.asked) && ended(two.asked)) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        ended(one.asked) && ended(two.asked),
+        "a shell outlived the quit"
+    );
+    lookup.finish(one.asked);
+    lookup.finish(two.asked);
+    assert!(lookup.lock().shells.is_empty(), "a shell is still held");
 }

@@ -110,6 +110,24 @@ once, with the reason here and in the commit.
   recording has one (the feed of the one 1.x scenario is offline), so none moved
   for it.
 
+- **An OpenCode window keeps the human's skill paths** (2026-10-25, T-540's
+  harness parity). OpenCode reads `OPENCODE_CONFIG_CONTENT` after its global and
+  project files, and a list in it replaces theirs, so a window told only of the
+  role's skills folder lost the `skills.paths` the human's files name, which the
+  same OpenCode opened in a terminal in that folder has. Node's adapter merged the
+  role into the environment's configuration alone. The Rust adapter asks OpenCode
+  its configuration for the window's folder first (`opencode debug config`, run
+  there with the environment's configuration and its updates off), and puts the
+  paths it names before the role's; an OpenCode that cannot be asked, or answers
+  no configuration with a list of texts there, gives none, and the window goes on
+  as it did. `launch/` moved for it in both platforms' recordings, in 155 of the
+  158 OpenCode scenarios: each of their 159 prepares that get past the version
+  gained a `ran` of `opencode debug config`, right after its `opencode --version`,
+  in the folder the window works in (the stand-ins answer nothing: the question
+  fails, and the launch goes on). Nothing else moved: with that `ran` taken out,
+  each record reads as it did, and the other 357 scenarios are as they were, byte
+  for byte.
+
 - **A Devin wire log replaced** (2026-10-16, Astra's and Sol's reviews of the fix of
   the field report B1). Node took a wire log that shrank for one replaced and read it
   from its start, and any other for the one it had read: one as long as the last was
@@ -170,6 +188,22 @@ once, with the reason here and in the commit.
   stayed in flight; the record now names no agent, and the turn is settled. Its
   one look read `inFlight: true` and `settlement: in-flight`, and reads `false`
   and `settled` now; its items, `failed` and `quota` are Node's.
+
+- **No first message on a command line** (2026-10-24, T-432). A worker sent SIGINT
+  to every process whose `ps` line matched "xtask plants", and two other workers'
+  Claude windows closed: Node's adapters gave Claude Code, Pi and Codex their
+  window's first message, a task's brief, as the last argument of the window's
+  command line, which every process on the machine reads (`/bin/ps` is set-uid root
+  on macOS) and every kill or wait by pattern matches. Claude Code's, Pi's and
+  Codex's windows now open with none, and are delivered it once they are up as
+  every later message is (`FirstMessage::Delivered`); Devin still reads its own from
+  a file, and OpenCode is still posted its own. Pi's role text goes by its file,
+  which `--append-system-prompt` reads where the path names one. `launch/` moved for
+  it: in `tables.json`, the 162 windows of Claude Code, Pi and Codex given a seed
+  lost it from the end of their arguments; in each platform's scenarios, the 108
+  launches of those three given a message lost it from the end of their `argv`, and
+  Pi's 59 launches name the role's file after `--append-system-prompt` in place of
+  its text (the file `--skill` names). Nothing else of a step moved.
 
 ## The launch scenarios
 
@@ -268,3 +302,22 @@ its `error`), what still waits, and the calls it made, by program (`capture`), b
 harness (`latest`) and by address (`fetch`), each in its own order: which of two
 harnesses asks first is up to the runtime. A path under the folder is `$ROOT/…`,
 and the hash that names a bundle of an extension is `$HASH`.
+
+- **A torn line of a record or a wire log** (2026-10-22, T-223 and T-248, from
+  T-187's dry run and Calliope's reviews T-213 and T-246). A short write (a full
+  disk, a process killed in a large write) leaves part of a record, and the next
+  append makes one line of it and itself, which is not JSON for good. Node failed
+  every look at a record holding one (`malformed JSONL at record N`), and every read
+  of a Devin wire log holding one. The harnesses go on past such a line, and so does
+  Rust: `shared/record/jsonl.rs` passes it over once a record follows it or its wait
+  is over, and `devin/wire.rs` passes it over as `devin/wire_log.rs` did. `records/`
+  moved for it in 12 looks, which `tests/records/main.rs` holds to what Rust reads
+  instead. `launch/` moved for it in three steps of two scenarios, in both
+  platforms' recordings, which now carry a `kept` difference there: `devin: a wire
+  log with a line that is no JSON names no conversation, however many follow it`,
+  step 5 (whose `kept` names the operation it settles, `op` 3, the `started` the
+  minute's wait ends), where Node's answer is that Devin never said which session it
+  opened and Rust's the session the line after it names; and `devin: a message is
+  refused for a log that is not there, and for one that cannot be read`, steps 8 and
+  10, where Node refused the message as the conversation unavailable and Rust as
+  another conversation displayed, the torn line saying nothing.

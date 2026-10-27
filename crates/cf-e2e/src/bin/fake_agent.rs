@@ -4,6 +4,10 @@
 //! does: a bracketed paste followed by Enter is one message. What it answers a
 //! message with is told in `reply`.
 //!
+//! A paste that has lines that are the paths of images it can read is made into
+//! attachments, as Claude's input box makes them: a `[Image #N]` for each at the head of
+//! the message, the lines gone, and a record of the paths after it (`images`).
+//!
 //! The window of the participant `CF_TEST_NO_LOGIN` names has no login: it
 //! prints that and stays, doing nothing else (`CF_TEST_NO_LOGIN_EXITS`: and
 //! ends with the code 3). A key pressed in a turn (the Escape that stops it) is
@@ -34,22 +38,55 @@
 //! not yet paid. Control-C once clears what is typed, and twice ends the window.
 //! A window with `CF_TEST_ANSWER_MS` set takes that long to write its answer once
 //! its work is done, so that a case can do something while the turn is still open
-//! in the record: quit the app, as a human may at any moment. A turn that runs a
+//! in the record: quit the app, as a human may at any moment. One with
+//! `CF_TEST_REST_MS` set takes that long, once its answer is written, to end its turn
+//! in the record (the stop hooks' summary) and to say it is at rest (its status file
+//! says `busy` until then), so that a case that goes on at the answer, and not at
+//! the rest, is always in the shape a loaded machine made rare. A turn that runs a
 //! command (`RUN`, in `tool`) works until the command ends, and Escape stops it
 //! and, as the line says, the command with it or not. A turn that runs a build
 //! (`BUILD`, in `build`) waits for it as for a command, and the build leaves a
 //! daemon running, as Gradle's does: the program is the build too (`--build`).
+//! A message with a line `TORN <words>` tears its record as it works, as a short
+//! write does: the first half of the record of a tool it runs, a moment, and the
+//! tool's result appended to it, one line that is not JSON for good; then it
+//! answers the message as it would have.
 //! `/compact` typed alone compacts the conversation as Claude Code 2.1.303 does
 //! while idle: the bare command as it is typed, its boundary and its summary, then
 //! the command's own records and what it printed, in the record, and no turn; with
 //! nothing said since the conversation began or was last compacted it compacts
-//! nothing, as 2.1.304 does, and says so as the system's record.
+//! nothing, as 2.1.304 does, and says so as the system's record. `/compact` with words
+//! after it compacts too, the words its instructions, as Claude Code's does. A window
+//! with `CF_TEST_COMPACT_MS` set compacts for that long after its bare command, and an
+//! Escape in that time cancels it as Claude Code 2.1.310 does: the words before a
+//! command, a sibling of the bare command, and no more, and the `/compact` put back in
+//! its input box, where what is pasted next goes after it.
+//!
+//! A window refused for quota with `CF_TEST_AUTO_CONTINUE_MS` set (milliseconds,
+//! or `<member> <milliseconds>` for that member's windows alone) continues by
+//! itself, as Claude Code 2.1.278 and later do: the refusal is followed by the
+//! notice that it continues automatically, and once its account has quota again
+//! (`CF_TEST_QUOTA_FILE` is gone) and that many milliseconds have passed, it says
+//! the limit was reset and takes a turn on the meta prompt Claude sends
+//! (`AUTO_CONTINUE`), queued behind any turn it is in, as Claude's timer is.
 //!
 //! The window of a participant `CF_TEST_TRUST` names, opened in a git repository it
 //! was never told to trust, asks whether to trust it first, as Claude Code does
 //! (`trust`); with `CF_TEST_SAYS_FIRST` it prints those words before its first line,
 //! and with `CF_TEST_PLAIN_PROMPT` its first line does not say it is in
-//! full-permission mode, as a prompt drawn otherwise.
+//! full-permission mode, as a prompt drawn otherwise. The window of a participant
+//! `CF_TEST_QUOTES_BEFORE_PROMPT` names draws a conversation that quotes the
+//! question's choices for 1.5 s before its first line, as a resumed window does,
+//! the `❯` on the first with `CF_TEST_QUOTES_THE_CURSOR` (the question of a trusted
+//! folder's grants with `CF_TEST_QUOTES_THE_GRANTS`), and its input box above that line. With `CF_TEST_TRUST_IDLE_WHILE_ASKING` a window says it is idle while it
+//! asks, as a Claude Code that writes its status before its question would.
+//!
+//! The window of a participant `CF_TEST_INPUT_BOX` names draws Claude Code's input
+//! box, and opens its model picker for `/model` (`input_box`); one `CF_TEST_SUGGESTION`
+//! names shows a suggestion in its empty box, and one `CF_TEST_SLOW_DRAW` names draws
+//! its box seconds late.
+//!
+//! Started with `--noise` first, it is a window that prints as fast as it can (`noise`).
 //!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
@@ -65,6 +102,12 @@ mod args;
 mod background;
 #[path = "fake_agent/build.rs"]
 mod build;
+#[path = "fake_agent/images.rs"]
+mod images;
+#[path = "fake_agent/input_box.rs"]
+mod input_box;
+#[path = "fake_agent/noise.rs"]
+mod noise;
 #[path = "fake_agent/records.rs"]
 mod records;
 #[path = "fake_agent/reply.rs"]
@@ -88,8 +131,9 @@ mod trust;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -99,7 +143,7 @@ use regex::Regex;
 use serde_json::json;
 
 use agents::Agents;
-use background::{Jobs, Server};
+use background::{Jobs, Server, THINKING};
 use records::{note_process, Records, INTERRUPTED};
 use reply::{is_session_of, reply_to, Reply, Window};
 use steps::Tasks;
@@ -114,6 +158,33 @@ const NO_LOGIN: &str =
 /// What a window the provider refuses says, in the record Claude writes for it.
 const LIMIT: &str = "You've hit your limit. Resets in 2 hours.";
 
+/// The meta prompt Claude Code sends by itself once a refused account has quota
+/// again (2.1.278 and later; this Mac's transcripts).
+const AUTO_CONTINUE: &str =
+    "Your claude.ai usage limit has reset. Continue the task you were working on.";
+
+/// What the window's own timer queues as a turn when it continues by itself: no
+/// message anyone types.
+const AUTO_CONTINUE_MARK: &str = "\u{1}auto-continue";
+
+/// Whether the window's timer is set to continue by itself: once at a time, as
+/// Claude has one.
+static CONTINUING: AtomicBool = AtomicBool::new(false);
+
+/// A conversation that quotes the question's two choices, each a line of its own, with
+/// no input box below it yet, as a list or as the dialog draws them, and how long it
+/// stands before the window's prompt.
+const QUOTES_THE_CHOICES: &str =
+    " ⏺ The dialog offers:\r\n   - No, exit\r\n   - Yes, I trust this folder\r\n";
+const QUOTES_THE_DIALOG: &str =
+    " ⏺ The dialog reads:\r\n ❯ No, exit\r\n   Yes, I trust this folder\r\n";
+const QUOTES_THE_GRANTS: &str = " ⏺ The dialog reads:\r\n ❯ No, continue without these permissions\r\n   Yes, I trust this folder\r\n";
+const QUOTED_BEFORE_PROMPT: std::time::Duration = std::time::Duration::from_millis(1_500);
+
+/// How long a torn record's half stays unfinished before the next record is
+/// appended to it: two of the daemon's looks.
+const SHORT_WRITE: Duration = Duration::from_secs(2);
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // The work a window left running is this program, with a word first that no
@@ -124,6 +195,10 @@ fn main() -> ExitCode {
     // The build a turn's command runs, which leaves a daemon of its own.
     if args.first().map(String::as_str) == Some(build::BUILD) {
         return build::run(&args[1..]);
+    }
+    // A window that prints as fast as it can (`noise`).
+    if args.first().map(String::as_str) == Some(noise::NOISE) {
+        return noise::run(&args[1..]);
     }
     // The shell of a command a harness detaches, which a session of its own is made for.
     #[cfg(unix)]
@@ -202,10 +277,26 @@ fn run(
 
     // Claude Code's question about a folder it was never told to trust comes first.
     let asking = named("CF_TEST_TRUST");
+    let draws_box = named("CF_TEST_INPUT_BOX");
+    let suggests = named("CF_TEST_SUGGESTION");
+    let draws_slowly = named("CF_TEST_SLOW_DRAW");
     if asking {
         trust::bring_the_record_back(records.transcript());
+        // A Claude Code that writes its status before its question reads at rest.
+        if own_var("CF_TEST_TRUST_IDLE_WHILE_ASKING").is_some() {
+            records
+                .status(pid, "idle")
+                .map_err(|failed| failed.to_string())?;
+        }
     }
     let grows = asking && own_var("CF_TEST_RECORD_GROWS_ON_NO").is_some();
+    // A harness whose status says idle from its start, the question on its screen or
+    // not yet drawn: nothing but the screen tells that it asks.
+    if asking && own_var("CF_TEST_TRUST_IDLE_FIRST").is_some() {
+        records
+            .status(pid, "idle")
+            .map_err(|failed| failed.to_string())?;
+    }
     // Its terminal is read from the start, raw, as a TUI reads it: the question
     // before the prompt takes its keys from the same reader.
     let mut keys = Keys::start();
@@ -230,10 +321,28 @@ fn run(
     if let trust::Answer::Exit = answer {
         leave(&status_file, 0);
     }
+    // Then, in a trusted folder, the dialog of a server of its `.mcp.json`.
+    trust::ask_server(Path::new(&config), asking, &mut keys)?;
     if asking {
         if let Some(said) = own_var("CF_TEST_SAYS_FIRST") {
             say(&format!("{said}\n")).map_err(|failed| failed.to_string())?;
         }
+    }
+    // A resumed window draws its conversation before its prompt: here one that quotes
+    // the question's two choices, each a line of its own, for as long as Claude Code
+    // 2.1.307 took on a chief's conversation (`cargo xtask live folder-trust`).
+    let quotes = named("CF_TEST_QUOTES_BEFORE_PROMPT");
+    if quotes {
+        let quote = if own_var("CF_TEST_QUOTES_THE_GRANTS").is_some() {
+            QUOTES_THE_GRANTS
+        } else if own_var("CF_TEST_QUOTES_THE_CURSOR").is_some() {
+            QUOTES_THE_DIALOG
+        } else {
+            QUOTES_THE_CHOICES
+        };
+        say(quote).map_err(|failed| failed.to_string())?;
+        std::thread::sleep(QUOTED_BEFORE_PROMPT);
+        say(" ❯ \r\n").map_err(|failed| failed.to_string())?;
     }
     records
         .status(pid, "idle")
@@ -252,6 +361,10 @@ fn run(
     };
     say(&format!("fake agent {said} on {}{mode}\n", launch.session))
         .map_err(|failed| failed.to_string())?;
+    if let (trust::Answer::Yes, Some(after)) = (&answer, trust::leaves_after()) {
+        thread::sleep(after);
+        leave(&status_file, 0);
+    }
 
     let (turns, queued) = mpsc::channel::<String>();
     let stop = Arc::new(Stop::default());
@@ -267,8 +380,11 @@ fn run(
         wake: turns.clone(),
         stop: Arc::clone(&stop),
         agents: Agents::default(),
+        seeded: launch.seed.is_some(),
         tasks: Tasks::default(),
+        put_back: Arc::new(Mutex::new(None)),
     };
+    let put_back = Arc::clone(&window.put_back);
     // A server the harness starts with its window, before any turn, as an MCP
     // server may be (one that is late begins with the first message instead).
     window.server.as_the_window_opens(&window.jobs)?;
@@ -295,6 +411,9 @@ fn run(
         let _ = turns.send(seed.clone());
     }
 
+    // Claude Code's input box and its model picker, drawn as it draws them.
+    let mut input_box = draws_box.then(|| input_box::InputBox::new(suggests, draws_slowly));
+
     // Raw input, like a real TUI: a bracketed paste is text, Enter outside one
     // submits, and an Escape that nothing follows is the key.
     loop {
@@ -305,15 +424,36 @@ fn run(
         for event in events {
             match event {
                 Event::Submit(text) => {
-                    let _ = turns.send(text);
+                    if !input_box.as_mut().is_some_and(|shown| shown.takes(&text)) {
+                        let _ = turns.send(text);
+                    }
                 }
                 // A real TUI draws what was pasted, and a paste's Enter waits for that.
                 Event::Pasted(characters) => {
-                    let _ = say(&format!("[pasted, {characters} characters]\n"));
+                    let below = input_box.as_mut().map_or("", input_box::InputBox::below);
+                    let _ = say(&format!("{below}[pasted, {characters} characters]\n"));
                 }
-                Event::Escape => stop.press(),
+                Event::Escape => {
+                    if !input_box
+                        .as_mut()
+                        .is_some_and(|shown| shown.escape(&mut keys))
+                    {
+                        stop.press();
+                    }
+                }
                 Event::Interrupt => leave(&status_file, 0),
             }
+        }
+        // What a cancelled command put back in the box, as Claude Code puts it back.
+        if let Some(text) = put_back
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
+            keys.put_back(&text);
+        }
+        if let Some(shown) = input_box.as_mut() {
+            let _ = shown.draw(keys.typed(), say);
         }
     }
 }
@@ -334,6 +474,21 @@ fn wait_of(text: Option<&str>) -> Duration {
 /// Waits as long as the variable `name` says.
 fn wait_as_told(name: &str) {
     thread::sleep(wait_of(own_var(name).as_deref()));
+}
+
+/// How long after its account has quota again the window of `participant`
+/// continues by itself, as `said` tells: its milliseconds for every window, or
+/// for the windows of each member it names (`<member> <milliseconds>`, a comma
+/// between them) alone, and none for any other, which waits for ConsensFlow to
+/// resume it (an account whose windows' timers fire apart).
+fn continues_after(said: &str, participant: &str) -> Option<Duration> {
+    if !said.contains(' ') {
+        return Some(wait_of(Some(said)));
+    }
+    said.split(',')
+        .filter_map(|pair| pair.trim().split_once(' '))
+        .find(|(member, _)| is_session_of(participant, member))
+        .map(|(_, wait)| wait_of(Some(wait)))
 }
 
 /// How late the window of `participant` comes up: the milliseconds `said`
@@ -369,12 +524,34 @@ const NOTHING_TO_COMPACT: &str = "There is nothing in the conversation to compac
 const CAVEAT: &str = "<local-command-caveat>The messages below were made by a command the user ran; do not answer them.</local-command-caveat>";
 
 /// One message: the window works on it and is idle again once it is answered
-/// or an Escape stopped it. `/compact` typed alone is no message: the window
-/// compacts its conversation as Claude Code does while idle (`compact`), and runs
-/// no turn (the long run's compaction, which its watch finds in the record).
+/// or an Escape stopped it. `/compact` is no message, alone or with words after it
+/// (its instructions): the window compacts its conversation as Claude Code does
+/// while idle (`compact`), and runs no turn (the long run's compaction, which its
+/// watch finds in the record).
 fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<(), String> {
-    if text.trim() == COMPACT {
-        return compact(records, pid);
+    if is_compact(text) {
+        // Its time, which an Escape cuts short.
+        let compacting = || {
+            window.stop.begin();
+            let stopped = window
+                .stop
+                .work(wait_of(own_var("CF_TEST_COMPACT_MS").as_deref()));
+            window.stop.end();
+            stopped
+        };
+        if compact(records, pid, text, compacting)? {
+            // Claude Code puts the command back in its input box.
+            *window
+                .put_back
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(text.trim().to_owned());
+        }
+        return Ok(());
+    }
+    if text == AUTO_CONTINUE_MARK {
+        records
+            .append(pid, notice("Usage limit reset · continuing automatically"))
+            .map_err(|cause| cause.to_string())?;
     }
     // Written to the transcript alone, a notification is no turn: the window stays as it is.
     if let Some(notification) = steps::for_the_transcript_alone(text) {
@@ -387,23 +564,41 @@ fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Re
     done
 }
 
-/// The conversation compacted while idle, as Claude Code 2.1.303 writes it (the
-/// long run of 2026-10-19, whose chief read at work after it for 80 minutes): busy
-/// while it compacts, with the bare `/compact` written as it is typed; then the
-/// boundary, whose chain starts afresh, the summary, the words before the command,
-/// the command and what it printed, each the child of the one before it, and the
-/// hook that ran as the conversation began again; and idle. A conversation with
-/// nothing said since it began or was last compacted is not compacted
-/// (`nothing_to_compact`).
-fn compact(records: &mut Records, pid: u32) -> Result<(), String> {
+/// Whether `text`, sent, is `/compact`: alone, or with words after it, whatever
+/// follows the command's name (a paste that went in after it in the box).
+fn is_compact(text: &str) -> bool {
+    text.trim().strip_prefix(COMPACT).is_some_and(|rest| {
+        !rest.starts_with(|next: char| next.is_alphanumeric() || next == '-' || next == '_')
+    })
+}
+
+/// The conversation compacted while idle on `typed` (`/compact` and its words), as
+/// Claude Code 2.1.303 writes it (the long run of 2026-10-19, whose chief read at work
+/// after it for 80 minutes): busy while it compacts, with the bare command written as
+/// it is typed; then the boundary, whose chain starts afresh, the summary, the words
+/// before the command, the command and what it printed, each the child of the one
+/// before it, and the hook that ran as the conversation began again; and idle. A
+/// conversation with nothing said since it began or was last compacted is not
+/// compacted (`nothing_to_compact`). `compacting` is its time, and says whether an
+/// Escape cut it short, which cancels it (`cancelled`): whether it was.
+fn compact(
+    records: &mut Records,
+    pid: u32,
+    typed: &str,
+    compacting: impl FnOnce() -> bool,
+) -> Result<bool, String> {
     if !records.said() {
-        return nothing_to_compact(records, pid);
+        return nothing_to_compact(records, pid).map(|()| false);
     }
     let failed = |cause: io::Error| cause.to_string();
     records.status(pid, "busy").map_err(failed)?;
+    let parent = records.last_uuid(pid);
     records
-        .append(pid, user(COMPACT, json!({})))
+        .append(pid, user(typed.trim(), json!({ "parentUuid": parent })))
         .map_err(failed)?;
+    if compacting() {
+        return cancelled(records, pid, &parent).map(|()| true);
+    }
     let boundary = json!({
         "type": "system", "subtype": "compact_boundary", "isSidechain": false,
         "parentUuid": null, "logicalParentUuid": records.last_uuid(pid),
@@ -433,6 +628,21 @@ fn compact(records: &mut Records, pid: u32) -> Result<(), String> {
         records.append(pid, record).map_err(failed)?;
     }
     records.compacted();
+    records.status(pid, "idle").map_err(failed).map(|()| false)
+}
+
+/// A compaction cancelled with Escape, as Claude Code 2.1.310 writes it (`cargo xtask
+/// live commands-at-rest`, `cancelled`): after the bare command, the words before a
+/// command alone, a sibling of it (`parent` its parent), no boundary and no more. Claude
+/// Code puts the command back in its input box (`take_turn`).
+fn cancelled(records: &mut Records, pid: u32, parent: &str) -> Result<(), String> {
+    let failed = |cause: io::Error| cause.to_string();
+    records
+        .append(
+            pid,
+            user(CAVEAT, json!({ "isMeta": true, "parentUuid": parent })),
+        )
+        .map_err(failed)?;
     records.status(pid, "idle").map_err(failed)
 }
 
@@ -480,6 +690,38 @@ fn user(content: &str, fields: serde_json::Value) -> serde_json::Value {
     record
 }
 
+/// The records a message `text` is written as. What wakes the window when a job it
+/// started in the background ends is queued by Claude Code and taken as the turn it
+/// begins, as its own: no paste, so no path in it is made an attachment. Any other message
+/// is as Claude's input box keeps it: a paste that names images is attached to it, with a
+/// record of their paths after it, unless it is the first message of a launch
+/// (`launched`: no paste, Claude Code 2.1.308 keeps its paths as they are). The prompt
+/// Claude Code sends by itself once a refused account has quota again (`meta`) is its own,
+/// and says so (`isMeta`).
+fn record_message(
+    records: &mut Records,
+    pid: u32,
+    launched: bool,
+    meta: bool,
+    text: &str,
+) -> io::Result<()> {
+    if steps::is_notification(text) {
+        return steps::write_notification(records, pid, text);
+    }
+    let written = if launched {
+        vec![images::unattached(text)]
+    } else {
+        images::user_records(text, || records.next_image())
+    };
+    for mut record in written {
+        if meta {
+            record["isMeta"] = json!(true);
+        }
+        records.append(pid, record)?;
+    }
+    Ok(())
+}
+
 /// A turn: the window is busy (not in the hooks of its prompt, where Claude's
 /// status reads idle), records the message, answers it, and is idle, or busy
 /// still while the background agents it started run, as Claude Code is.
@@ -493,18 +735,9 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
     if hooks.is_none() {
         records.status(pid, "busy").map_err(failed)?;
     }
-    if steps::is_notification(text) {
-        // What wakes the window when a job it started in the background ends: Claude Code
-        // queues it and takes it as the turn it begins, as its own.
-        steps::write_notification(records, pid, text).map_err(failed)?;
-    } else {
-        records
-            .append(
-                pid,
-                json!({ "type": "user", "message": { "role": "user", "content": text } }),
-            )
-            .map_err(failed)?;
-    }
+    let continuing = text == AUTO_CONTINUE_MARK;
+    let text = if continuing { AUTO_CONTINUE } else { text };
+    record_message(records, pid, first && window.seeded, continuing, text).map_err(failed)?;
     // The harness starts its servers as it takes the first message, which now shows.
     if first {
         window.server.as_the_first_message_shows(&window.jobs);
@@ -516,6 +749,9 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
             return Ok(());
         }
         records.status(pid, "busy").map_err(failed)?;
+    }
+    if text.lines().any(|line| line.starts_with("TORN ")) {
+        tear(records, pid, window).map_err(failed)?;
     }
     // What it did before it answers: the steps a worker's progress is, among them the call
     // that runs a job in the background or arms a monitor, and what it answers.
@@ -563,6 +799,7 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                     }),
                 )
                 .map_err(failed)?;
+            continue_later(records, pid, window).map_err(failed)?;
         }
         Reply::Text(reply) => {
             // The work is done (a `cf` it ran has answered) and the answer is
@@ -582,6 +819,9 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                     }),
                 )
                 .map_err(failed)?;
+            // The answer is in the record, and the turn is not yet ended in it, nor the
+            // window at rest.
+            wait_as_told("CF_TEST_REST_MS");
             records
                 .append(
                     pid,
@@ -625,9 +865,133 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
     records.status(pid, status).map_err(failed)
 }
 
+/// A notice of Claude Code's own, as the system's record.
+fn notice(content: &str) -> serde_json::Value {
+    json!({
+        "type": "system", "subtype": "informational", "level": "notice",
+        "isSidechain": false, "isMeta": false, "content": content,
+    })
+}
+
+/// After a refusal, a window told to (`CF_TEST_AUTO_CONTINUE_MS`) says it will
+/// continue by itself, and its timer queues the turn that does once the account
+/// has quota again and the milliseconds have passed.
+fn continue_later(records: &mut Records, pid: u32, window: &Window) -> io::Result<()> {
+    let Some(after) = own_var("CF_TEST_AUTO_CONTINUE_MS")
+        .and_then(|said| continues_after(&said, &window.participant))
+    else {
+        return Ok(());
+    };
+    records.append(
+        pid,
+        notice("Usage limit reached · continuing automatically at the reset · esc to cancel"),
+    )?;
+    if CONTINUING.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+    let wake = window.wake.clone();
+    thread::spawn(move || {
+        let account = own_var("CF_TEST_QUOTA_FILE");
+        while account
+            .as_deref()
+            .is_some_and(|file| Path::new(file).exists())
+        {
+            thread::sleep(Duration::from_millis(200));
+        }
+        thread::sleep(after);
+        CONTINUING.store(false, Ordering::SeqCst);
+        let _ = wake.send(AUTO_CONTINUE_MARK.to_owned());
+    });
+    Ok(())
+}
+
+/// A record torn as a short write tears it: the first half of the assistant's
+/// call of a tool, and once a moment has passed the tool's result appended to it.
+fn tear(records: &mut Records, pid: u32, window: &Window) -> io::Result<()> {
+    thread::sleep(THINKING);
+    let tool = format!("{}-torn-{pid}", window.session);
+    records.cut_short(
+        pid,
+        json!({
+            "type": "assistant",
+            "message": {
+                "id": format!("{tool}-message"),
+                "role": "assistant",
+                "content": [{ "type": "tool_use", "id": tool, "name": "Bash", "input": { "command": "true" } }],
+            },
+        }),
+    )?;
+    thread::sleep(SHORT_WRITE);
+    records.append(
+        pid,
+        json!({
+            "type": "user",
+            "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": tool, "content": "" }] },
+        }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The records `text` is written as, in a conversation of its own.
+    fn recorded(text: &str, launched: bool) -> Vec<serde_json::Value> {
+        let config = tempfile::tempdir().unwrap();
+        let mut records = Records::new(config.path(), "s", 7).unwrap();
+        record_message(&mut records, 7, launched, false, text).unwrap();
+        written_from(config.path(), 0)
+    }
+
+    #[test]
+    fn a_first_message_given_as_an_argument_is_no_paste_and_keeps_the_path_of_an_image_in_it() {
+        // Claude Code 2.1.308 makes no attachment of the first message of a launch given as an
+        // argument of the program (the probe of 2026-10-22, T-265): a window the kit seeds so
+        // (`Open::seed`) keeps it as it was. ConsensFlow's windows are handed their brief once up,
+        // as a paste (T-432), whose pictures are attached (T-681).
+        let folder = tempfile::tempdir().unwrap();
+        let picture = folder.path().join("reference.png");
+        std::fs::write(&picture, cf_e2e::png::SMALL).unwrap();
+        let brief = format!("Reply with exactly: DONE\n{}", picture.display());
+        let seeded = recorded(&brief, true);
+        assert_eq!(seeded.len(), 1, "{seeded:?}");
+        assert_eq!(seeded[0]["message"]["content"], brief.as_str());
+        let pasted = recorded(&brief, false);
+        assert!(pasted[0].to_string().contains("[Image #1]"), "{pasted:?}");
+    }
+
+    #[test]
+    fn a_notification_that_names_a_picture_is_written_as_a_notification_and_no_paste_attaches_it() {
+        // Alpha.3 merged the notification's records (turn-end) with the images a paste is
+        // made into (T-215): a notification is a turn Claude Code begins by itself, so
+        // the path in its report is no attachment, where the same words pasted are one.
+        let folder = tempfile::tempdir().unwrap();
+        let picture = folder.path().join("hero.png");
+        std::fs::write(&picture, cf_e2e::png::SMALL).unwrap();
+        let report = format!("Saved:\n{}\nDone", picture.display());
+        let notified = steps::notification("b1", &report);
+        let written = recorded(&notified, false);
+        assert_eq!(
+            written
+                .iter()
+                .map(|record| record["operation"].as_str().or(record["type"].as_str()))
+                .collect::<Vec<_>>(),
+            [Some("enqueue"), Some("user")]
+        );
+        assert_eq!(written[1]["promptSource"], "system");
+        assert_eq!(written[1]["message"]["content"], notified.as_str());
+        assert!(
+            !written
+                .iter()
+                .any(|record| record.to_string().contains("[Image")),
+            "{written:?}"
+        );
+        // The same words pasted are attached, so that the notification's is no accident
+        // of there being no picture.
+        let pasted = recorded(&format!("{report}\nlook"), false);
+        assert_eq!(pasted.len(), 2, "{pasted:?}");
+        assert!(pasted[0].to_string().contains("[Image #1]"), "{pasted:?}");
+    }
 
     #[test]
     fn a_message_stays_in_the_hooks_of_its_prompt_as_long_as_its_line_says() {
@@ -689,7 +1053,7 @@ mod tests {
         let config = tempfile::tempdir().unwrap();
         let mut records = Records::new(config.path(), "s", 7).unwrap();
         told(&mut records);
-        compact(&mut records, 7).unwrap();
+        compact(&mut records, 7, COMPACT, || false).unwrap();
         let written = written_from(config.path(), 1);
         assert_eq!(
             written.iter().map(shape).collect::<Vec<_>>(),
@@ -724,6 +1088,52 @@ mod tests {
     }
 
     #[test]
+    fn a_compaction_cancelled_writes_the_words_before_a_command_beside_the_bare_command_and_no_more(
+    ) {
+        let config = tempfile::tempdir().unwrap();
+        let mut records = Records::new(config.path(), "s", 7).unwrap();
+        told(&mut records);
+        let before = records.last_uuid(7);
+        assert!(compact(&mut records, 7, "/compact", || true).unwrap());
+        let written = written_from(config.path(), 1);
+        assert_eq!(
+            written.iter().map(shape).collect::<Vec<_>>(),
+            ["user /compact", "user <local-command-caveat"]
+        );
+        // Siblings: the bare command and the words have the same parent.
+        assert_eq!(written[0]["parentUuid"], json!(before));
+        assert_eq!(written[1]["parentUuid"], json!(before));
+        assert_eq!(written[1]["isMeta"], true);
+        let status: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(records.status_file()).unwrap()).unwrap();
+        assert_eq!(status["status"], "idle");
+        // Nothing was compacted: a `/compact` with instructions compacts what was said.
+        assert!(!compact(&mut records, 7, "/compact keep the plan", || false).unwrap());
+        let compacted = written_from(config.path(), 3);
+        assert_eq!(shape(&compacted[0]), "user /compact keep the plan");
+        assert_eq!(
+            shape(&compacted[1]),
+            "compact_boundary Conversation compacted"
+        );
+        for typed in [
+            "/compact",
+            " /compact\n",
+            "/compact keep it",
+            "/compact\nand this",
+            "/compact[ConsensFlow m-1 · T-1 · result from @worker]",
+        ] {
+            assert!(is_compact(typed), "{typed:?}");
+        }
+        for not in [
+            "/compacted",
+            "please /compact",
+            "[ConsensFlow m-1] /compact",
+        ] {
+            assert!(!is_compact(not), "{not:?}");
+        }
+    }
+
+    #[test]
     fn a_compaction_with_nothing_said_since_the_last_writes_what_claude_2_1_304_does_and_no_turn() {
         let config = tempfile::tempdir().unwrap();
         let mut records = Records::new(config.path(), "s", 7).unwrap();
@@ -733,7 +1143,7 @@ mod tests {
             "local_command <local-command-stdout",
         ];
         // A conversation with nothing said in it.
-        compact(&mut records, 7).unwrap();
+        compact(&mut records, 7, COMPACT, || false).unwrap();
         let written = written_from(config.path(), 0);
         assert_eq!(written.iter().map(shape).collect::<Vec<_>>(), refused);
         assert!(written.iter().all(|record| record["isSidechain"] == false));
@@ -753,16 +1163,43 @@ mod tests {
         assert_eq!(status["status"], "idle");
         // Something said is compacted; a /compact right after that finds nothing again.
         told(&mut records);
-        compact(&mut records, 7).unwrap();
+        compact(&mut records, 7, COMPACT, || false).unwrap();
         let compacted = written_from(config.path(), 4);
         assert_eq!(shape(&compacted[0]), "user /compact");
         assert_eq!(compacted.len(), 7);
-        compact(&mut records, 7).unwrap();
+        compact(&mut records, 7, COMPACT, || false).unwrap();
         let again = written_from(config.path(), 11);
         assert_eq!(again.iter().map(shape).collect::<Vec<_>>(), refused);
         // A conversation the window is resumed on has what was said in it.
         let resumed = Records::new(config.path(), "s", 8).unwrap();
         assert!(resumed.said());
+    }
+
+    #[test]
+    fn a_window_continues_by_itself_after_its_milliseconds_or_its_members_alone() {
+        assert_eq!(
+            continues_after("1000", "chief"),
+            Some(Duration::from_millis(1000))
+        );
+        let said = "worker 1000";
+        assert_eq!(
+            continues_after(said, "worker-amber-pine"),
+            Some(Duration::from_millis(1000))
+        );
+        for participant in ["chief", "workers-amber", "reviewer-amber-pine"] {
+            assert_eq!(continues_after(said, participant), None, "{participant}");
+        }
+        // Each member its own timer.
+        let said = "chief 500,worker 8000";
+        assert_eq!(
+            continues_after(said, "chief"),
+            Some(Duration::from_millis(500))
+        );
+        assert_eq!(
+            continues_after(said, "worker-amber-pine"),
+            Some(Duration::from_millis(8000))
+        );
+        assert_eq!(continues_after(said, "reviewer-amber-pine"), None);
     }
 
     #[test]

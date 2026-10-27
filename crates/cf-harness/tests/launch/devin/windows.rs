@@ -1,7 +1,7 @@
 //! How a Devin window names the conversation it opened, how a message reaches
 //! it, and what its own wire log and record say (Node's Devin adapter suite).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::fs;
 use std::rc::Rc;
 use std::time::Duration;
@@ -41,6 +41,36 @@ fn learns_the_session_this_window_opened_from_its_own_wire_log() {
     // The window is on that conversation from then on: its record is read there.
     assert!(finished(window.observe()).unwrap().settled);
     assert_eq!(*looked.looked.borrow(), ["mild-coin"]);
+}
+
+#[test]
+fn a_torn_line_of_its_wire_log_before_the_session_s_line_neither_stops_the_launch_nor_a_paste() {
+    // A short write left half of the log's first record, and Devin's next append
+    // made one line of it and itself, before its window named the conversation it
+    // opened (the brain's issue a-torn-transcript-line-stops-...; T-246).
+    let home = Home::new();
+    let adapter = home.adapter();
+    let window = window(&adapter, &Request::default());
+    let first = shows("another-one");
+    home.selects("another-one");
+    fs::write(home.wire(), &first[..first.len() / 2]).unwrap();
+    home.appends(&shows("another-one"));
+    home.appends(&shows("mild-coin"));
+    assert_eq!(
+        finished(window.started(&ScriptedHost::default())),
+        Ok(Some("mild-coin".to_owned())),
+        "the launch learns its session past the torn line"
+    );
+    let host = AnsweringHost::new(|op| {
+        Ok(match op {
+            "pane.snapshot" => json!({ "ok": true, "pasteInFlight": false, "unsent": false }),
+            _ => json!({ "ok": true }),
+        })
+    });
+    assert_eq!(
+        finished(window.deliver(&host, &pane(), "hi")).unwrap(),
+        Admission::Admitted { queued: false }
+    );
 }
 
 /// How many milliseconds a window opened on `request` waits for Devin's wire
@@ -142,6 +172,62 @@ fn pastes_only_into_the_conversation_it_knows_and_never_into_what_the_human_has_
         finished(window.ready(&host, &pane())),
         Ok(Readiness::Held(Held::Unsent))
     );
+}
+
+/// Keys the human typed into Devin's model picker and left with Escape count as
+/// unsent, though its input box shows its hint again (T-288, `cargo xtask live
+/// escape-unsent`): read empty, with the human's last key a second past, the window
+/// is ready and its paste says at which count the box read empty. Words in the box,
+/// or a key a moment ago, still hold it.
+#[test]
+fn a_window_whose_input_box_shows_its_hint_takes_the_paste_over_keys_left_in_its_picker() {
+    const RULE: &str = "────────────────────────────────────────";
+    let home = Home::new();
+    let adapter = home.adapter();
+    let window = window(&adapter, &Request::resumed("mild-coin"));
+    home.selects("mild-coin");
+    let typed_in_box =
+        RefCell::new("❭ Ask Devin to build features, fix bugs, or work on your code".to_owned());
+    let quiet = Cell::new(2_000_u64);
+    let cursor = RefCell::new(Value::Null);
+    let host = AnsweringHost::new(|op| {
+        Ok(match op {
+            "pane.snapshot" => json!({
+                "ok": true, "pasteInFlight": false, "unsent": true,
+                "typed": 9, "typedQuietMs": quiet.get(), "outputQuietMs": 1_000,
+                "bottom": ["❭ /model", "", format!("{RULE} (bypass permissions on) ─"),
+                    typed_in_box.borrow().clone(), RULE, "SWE-2 Medium"],
+                "cursor": cursor.borrow().clone(),
+            }),
+            _ => json!({ "ok": true }),
+        })
+    });
+    let ready = || finished(window.ready(&host, &pane()));
+    assert_eq!(ready(), Ok(Readiness::Ready));
+    assert_eq!(
+        finished(window.deliver(&host, &pane(), "hi")),
+        Ok(Admission::Admitted { queued: false })
+    );
+    assert_eq!(
+        host.asked.borrow().last().unwrap(),
+        &(
+            "pane.write_paste".to_owned(),
+            json!({ "id": "s1-zeus", "generation": 2, "body": "hi", "readEmpty": 9 })
+        )
+    );
+    quiet.set(200);
+    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
+    quiet.set(2_000);
+    // A hint in other words, which a Devin update may give it: the cursor at the box's
+    // start and nothing after it drawn plain says it is one (T-330).
+    *typed_in_box.borrow_mut() = "❭ Ask Devin anything about your code".to_owned();
+    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
+    *cursor.borrow_mut() = json!({ "line": 3, "col": 2, "shown": true, "plainAfter": 0 });
+    assert_eq!(ready(), Ok(Readiness::Ready));
+    // Words typed and the cursor moved back to their start (Home) are drawn plain.
+    *typed_in_box.borrow_mut() = "❭ probe words".to_owned();
+    *cursor.borrow_mut() = json!({ "line": 3, "col": 2, "shown": true, "plainAfter": 10 });
+    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
 }
 
 /// Both reviews of 2026-10-16, round 4: a paste asks the host whether it still

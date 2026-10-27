@@ -11,6 +11,13 @@
 //! the turn goes on beside the connections, one at a time, and writes what Codex
 //! writes of one: it started, the message, the answer, it is complete.
 //!
+//! A thread is one server's at a time, as Codex's is: the server that begins its
+//! rollout, or resumes it, holds it (a lock in `thread-locks/` of `CODEX_HOME`, out of
+//! the way of what reads the rollouts, names its process),
+//! and while that process lives another server asked to resume the thread answers
+//! with it read-only, as Codex answered the window a second client opened on a thread
+//! another held ("open in another app", kluris, 2026-10-26: [`Agent::hold`]).
+//!
 //! A thread keeps the instructions it began with. The server is given the role's
 //! text as Codex is (`-c developer_instructions=…`), and the first turn of a thread
 //! it starts writes it into the rollout as the developer's message. A thread it
@@ -20,7 +27,14 @@
 //!
 //! What a turn does is what the stand-in agent's does: the `SLEEP <seconds>` line of
 //! its message is how long it works, `Reply with exactly: X` is its answer, and
-//! anything else is acknowledged. The thread is the same in every run unless
+//! anything else is acknowledged. A message that says `QUOTA-OUT` is refused for
+//! the usage limit, as the stand-in agent's is (`CF_TEST_QUOTA_OUT` names the
+//! member whose sessions are refused, while `CF_TEST_QUOTA_FILE`, when it is set,
+//! is there): the turn works as long as it says and ends as Codex 0.163 ends one
+//! its limit cut, with `usage_limit_exceeded` and no answer. One that says
+//! `MODEL-BUSY` works as long as it says and fails as a real rollout's turn did when
+//! its model was at capacity: `server_overloaded`, with the error's words and no
+//! answer. The thread is the same in every run unless
 //! `CF_TEST_CODEX_THREADS` says `unique`, which a window the daemon opens needs
 //! (two of them in one `CODEX_HOME` would share a rollout). The servers Codex opens
 //! with its window are `CF_TEST_CODEX_SERVERS` of them, and the first starts
@@ -35,6 +49,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use cf_e2e::live::members::{Identity, Machine, ThisMachine};
 use cf_e2e::process::own_var;
 use cf_e2e::{files, pattern};
 use regex::Regex;
@@ -161,6 +176,35 @@ impl Agent {
         thread::spawn(move || agent.turn(&text));
     }
 
+    /// Whether this server holds its thread, which it takes where no other server that
+    /// still runs does: the thread's lock names the one that holds it, by its process
+    /// and when that began. A thread with no rollout yet is nobody's.
+    pub fn hold(&self) -> bool {
+        let Some(home) = self.home.as_ref().filter(|_| held(&self.rollout).is_some()) else {
+            return true;
+        };
+        let locks = home.join("thread-locks");
+        let _ = fs::create_dir_all(&locks);
+        let lock = locks.join(self.thread());
+        let ours = ThisMachine.identity(std::process::id()).ok().flatten();
+        let holder = fs::read_to_string(&lock).ok().and_then(|text| {
+            let (pid, started) = text.trim().split_once(' ')?;
+            Some(Identity {
+                pid: pid.parse().ok()?,
+                started: started.parse().ok()?,
+            })
+        });
+        if let Some(holder) = holder.filter(|holder| Some(*holder) != ours) {
+            if ThisMachine.identity(holder.pid).ok().flatten() == Some(holder) {
+                return false;
+            }
+        }
+        if let Some(ours) = ours {
+            let _ = fs::write(&lock, format!("{} {}\n", ours.pid, ours.started));
+        }
+        true
+    }
+
     /// The thread's first turn begins its rollout, as Codex's does with what it ran
     /// in: a thread that has had none has no rollout to resume.
     fn begin_rollout(&self) {
@@ -176,6 +220,7 @@ impl Agent {
             }
             *rollout = Some(path);
         }
+        self.hold();
         self.write(
             "session_meta",
             json!({ "session_id": thread, "id": thread, "originator": "codex-tui" }),
@@ -248,6 +293,38 @@ impl Agent {
         }
         let (work, said) = what_it_says(text);
         thread::sleep(work.saturating_sub(began.elapsed()));
+        if refused(text) {
+            self.write(
+                "event_msg",
+                json!({
+                    "type": "task_complete",
+                    "turn_id": turn,
+                    "last_agent_message": null,
+                    "error": {
+                        "message": "You've hit your usage limit. Try again later.",
+                        "codex_error_info": "usage_limit_exceeded",
+                    },
+                    "completed_at": jiff::Timestamp::now().as_second(),
+                }),
+            );
+            return;
+        }
+        if text.contains("MODEL-BUSY") {
+            self.write(
+                "event_msg",
+                json!({
+                    "type": "task_complete",
+                    "turn_id": turn,
+                    "last_agent_message": null,
+                    "error": {
+                        "message": "The stand-in model is busy. Pick another model.",
+                        "codex_error_info": "server_overloaded",
+                    },
+                    "completed_at": jiff::Timestamp::now().as_second(),
+                }),
+            );
+            return;
+        }
         self.write(
             "event_msg",
             json!({
@@ -303,6 +380,20 @@ impl Agent {
             .open(&path)
             .and_then(|mut file| file.write_all(line.as_bytes()));
     }
+}
+
+/// Whether the usage limit refuses this window the message `text`: it says
+/// `QUOTA-OUT`, the window is a session of the member `CF_TEST_QUOTA_OUT` names,
+/// and the account is the refused one (`CF_TEST_QUOTA_FILE`, when it is set, is
+/// still there).
+fn refused(text: &str) -> bool {
+    let member = own_var("CF_TEST_QUOTA_OUT").unwrap_or_default();
+    let participant = own_var("CONSENSFLOW_PARTICIPANT").unwrap_or_default();
+    let account = own_var("CF_TEST_QUOTA_FILE").is_none_or(|file| Path::new(&file).exists());
+    text.contains("QUOTA-OUT")
+        && !member.is_empty()
+        && account
+        && (participant == member || participant.starts_with(&format!("{member}-")))
 }
 
 /// The id of an item of the model's, as Codex numbers them.

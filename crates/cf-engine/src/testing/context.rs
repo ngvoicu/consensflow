@@ -7,7 +7,7 @@
 //! Node trace of the same test to be held against.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -29,8 +29,8 @@ use super::host::FakeHost;
 use super::operations::{answer, nothing};
 use super::recorder::Recorder;
 use super::seams::{
-    CountingLaunchIds, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv, FakeRoles,
-    FakeRoster, FakeTrace,
+    CountingLaunchIds, FakeComputerUse, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv,
+    FakeRoles, FakeRoster, FakeTrace,
 };
 use super::time::TestTime;
 use crate::dispatcher::Dispatcher;
@@ -122,6 +122,8 @@ pub struct Context {
     pub trace: Rc<FakeTrace>,
     pub log: Rc<FakeLog>,
     pub launch_files: Rc<FakeLaunchFiles>,
+    /// What the machine says of computer use: none of it, unless a test says so.
+    pub computer_use: Rc<FakeComputerUse>,
     pub dispatcher: Rc<Dispatcher>,
     /// What the engine is made with, for the engines a restart makes.
     pub(super) seams: Seams,
@@ -161,6 +163,7 @@ impl Context {
         let roster = Rc::new(FakeRoster {
             recorder: recorder.clone(),
             gone: RefCell::new(HashSet::new()),
+            retired: RefCell::new(HashMap::new()),
             designers: RefCell::new(HashSet::new()),
             broken: Cell::new(false),
             model: RefCell::new(None),
@@ -186,6 +189,7 @@ impl Context {
             recorder: recorder.clone(),
             forgotten: RefCell::new(Vec::new()),
         });
+        let computer_use = Rc::new(FakeComputerUse::default());
         let seams = Seams {
             ledger: Rc::clone(&ledger),
             host: Rc::clone(&host) as Rc<_>,
@@ -207,9 +211,11 @@ impl Context {
             log: Rc::clone(&log) as Rc<_>,
             launch_files: Rc::clone(&launch_files) as Rc<_>,
             spawn: Rc::clone(&executor) as Rc<_>,
+            computer_use: Rc::clone(&computer_use) as Rc<_>,
             limits: Limits {
                 arrival_ms: 30_000,
                 launch_ms: 120_000,
+                open_ms: 60_000,
                 max_attempts: 3,
             },
         };
@@ -230,6 +236,7 @@ impl Context {
             trace,
             log,
             launch_files,
+            computer_use,
             dispatcher,
             seams,
             restarted: RefCell::new(Vec::new()),

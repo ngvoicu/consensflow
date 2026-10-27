@@ -123,6 +123,13 @@ pub(super) struct Machine {
     churning: Option<(i32, Cell<i32>)>,
     sent: RefCell<Vec<(i32, i32)>>,
     sent_to_groups: RefCell<Vec<(i32, i32)>>,
+    /// The processes that carry the window's marker, and the marker.
+    marked: Vec<i32>,
+    marker: String,
+    /// Numbers held by processes the table does not hold: another user's, or a zombie.
+    held: Vec<i32>,
+    /// Processes of the table whose numbers another process has taken since it was read.
+    taken: Vec<i32>,
 }
 
 impl Machine {
@@ -136,7 +143,31 @@ impl Machine {
             churning: None,
             sent: RefCell::default(),
             sent_to_groups: RefCell::default(),
+            marked: Vec::new(),
+            marker: String::new(),
+            held: Vec::new(),
+            taken: Vec::new(),
         }
+    }
+
+    /// The machine, where the processes `pids` carry `marker` in their environment.
+    pub fn marking(mut self, marker: &str, pids: &[i32]) -> Self {
+        marker.clone_into(&mut self.marker);
+        self.marked = pids.to_vec();
+        self
+    }
+
+    /// The machine, where processes the table does not hold have the numbers `pids`.
+    pub fn holding(mut self, pids: &[i32]) -> Self {
+        self.held = pids.to_vec();
+        self
+    }
+
+    /// The machine, where the processes `pids` of the table have ended since it was read and
+    /// others have their numbers: none of them runs.
+    pub fn taking(mut self, pids: &[i32]) -> Self {
+        self.taken = pids.to_vec();
+        self
     }
 
     /// The machine, with a process `pid` that `parent` started and no look can read.
@@ -210,16 +241,15 @@ impl System for Machine {
         Ok(self.processes.clone())
     }
 
-    /// A process of the table runs until it is sent SIGKILL.
+    /// A process of the table runs until it is sent SIGKILL, unless its number was taken.
     fn runs(&self, key: ProcessKey) -> bool {
-        self.processes
+        self.processes.iter().any(|process| {
+            key_of(process.identity) == key && !self.taken.contains(&process.identity.pid)
+        }) && !self
+            .sent
+            .borrow()
             .iter()
-            .any(|process| key_of(process.identity) == key)
-            && !self
-                .sent
-                .borrow()
-                .iter()
-                .any(|(pid, signal)| u32::try_from(*pid) == Ok(key.pid) && *signal == libc::SIGKILL)
+            .any(|(pid, signal)| u32::try_from(*pid) == Ok(key.pid) && *signal == libc::SIGKILL)
     }
 
     fn children(&self, pid: i32) -> io::Result<Vec<i32>> {
@@ -289,5 +319,18 @@ impl System for Machine {
     fn send_group(&self, group: i32, signal: i32) -> io::Result<()> {
         self.sent_to_groups.borrow_mut().push((group, signal));
         Ok(())
+    }
+
+    fn carries(&self, pid: i32, marker: &str) -> bool {
+        !marker.is_empty() && marker == self.marker && self.marked.contains(&pid)
+    }
+
+    fn nobody_holds(&self, pid: i32) -> bool {
+        pid > 1
+            && !self.held.contains(&pid)
+            && !self
+                .processes
+                .iter()
+                .any(|process| process.identity.pid == pid)
     }
 }

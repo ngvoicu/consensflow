@@ -33,4 +33,6 @@ pub mod pane_handlers;
 mod process_tree;
 pub mod pty;
 pub mod screen;
+#[cfg(all(test, unix))]
+mod testing;
 pub mod validation;

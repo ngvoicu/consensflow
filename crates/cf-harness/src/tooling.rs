@@ -10,6 +10,7 @@
 //! | `op` | the question | the answer |
 //! |---|---|---|
 //! | `records` | `kind`, `session`, `env`: what the harness's own record of the conversation says | `{reading, settled}`: the reading as [`records::answers`] writes it, and whether the window's turn is over, as the dispatcher reads it |
+//! | `turn_cut` | `kind`, `session`, `env`: the record of a conversation whose window is closed, as the human's Resume reads it | `{cut, began, words}`: whether its turn was cut ([`Records::turn_cut`](crate::contract::Records::turn_cut)), null where the record cannot tell, and of a cut turn when the message that began it came and its words, where the record holds it |
 //! | `start` | `agent` (`kind`, `model`, `effort`, `thinking`), `session`, `seed`: the harness's own window on a new conversation, or with `resume` true on the one `session` names | `{command, args, prompt?, env, dropEnv}`, or null for a kind with no window of its own |
 //! | `window_text` | `text`: as a window can take it | the text |
 //! | `console_text` | `text`: as Windows' console carries it to a window | the text |
@@ -20,19 +21,26 @@
 //! | `newest_session` | `kind`, `workspace`, `since`, `env`: the newest top-level conversation a harness of that kind (OpenCode, Devin or Codex) opened in `workspace` at or after `since` (milliseconds), from its own store | the session's id, or null while there is none |
 //! | `specmint` | `kind`, `variant`, `env`: where the harness has the Specmint variant installed for its user (the adapter's own look, in the places the harness reads), with a home that is the one `env` names | `{installed, skill}`: whether the harness has it, and the file of its `SKILL.md` (where ConsensFlow's own copy would be written, for a launch of a made-up id, where it has none) |
 //! | `devin_launch` | `launch` (a lowercase uuid), `role`, `directory`, `resume`, `message`, `agent` (`model`, `effort`), `instructions` (the role's text), `cf` (the `cf` its session hook runs), `env`: a Devin window as the adapter prepares it for that role | `{command, args, env, dropEnv, session}` as `start` answers, the command being the program the adapter found: its `--config` (the owner's, with ConsensFlow's hooks) and the launch's files are written under the ConsensFlow home `env` names, and Devin is asked its version, as it is at every launch |
+//! | `pi_launch` | `launch`, `role`, `directory`, `resume`, `message`, `agent` (`model`, `thinking`), `instructions`, `env`: a Pi window as the adapter prepares it for that role | `{command, args, env, dropEnv, session}` as `devin_launch` answers: its extension and role skill are written under the ConsensFlow home `env` names, and the `APPEND_SYSTEM.md` Pi would find by itself in `directory` or the agent folder is given before the role's text |
 //! | `devin_ready` | `wire`: the wire log of a Devin window's launch | `{shown, mode, command}`: what the daemon's readiness reads of it (the conversation the window shows, the permission mode it is in) and the command the window is given before it is ready for work (`/bypass` where the wire says the normal mode), or null |
+//! | `devin_took` | `env`, `session`, `pasted`, `atMs`: Devin's store, a window's conversation, the text the window was given as it was pasted and when | `{took, prompts}`: whether the TUI took that text, as the engine asks the window after a paste (a history row of the session, written since, that begins with it whole), and how many history rows the session has |
 //! | `devin_readiness` | `wire`, `session`, `pane` (`id`, `generation`), `withinMs`, `everyMs`: a Devin window that is open, asked whether it is ready as the engine asks it, until it is ready or unfit or the time is up; the pane host it asks is the asker's, a request a line of the output and its answer a line of the input (`readiness`) | `{answers, ready}`: what the looks answered, in order (`ready`, `held: …`, `unfit: …`, one that came again in a row said once), and whether the last was ready |
 //! | `devin_hooks` | `cf`, `member`: the hooks ConsensFlow adds to the owner's in a Devin launch (a member's, or the chief's), its session hook run by `cf` | `{event: [entry]}`: each event with the entries added, as the launch's config has them written |
-//! | `trust` | `kind`, `screen` (a window's last lines), and `directory` where asked: what the engine reads there of the harness's question about trusting the window's folder | `{key, prompt}`: the key it presses next toward a yes (`down`, `enter`), or null where the lines show no such question or the harness never asks one, and whether they are the harness's prompt; with `directory`, `trusts` too: `{folder, inside}`, what a yes trusts for a window opened in that project's folder |
+//! | `devin_config` | `env`: the owner's own config of Devin, read as the adapter reads it for a launch, in the config folder `env` names | the config, an object: its comments and trailing commas left out, and an empty one where there is none |
+//! | `trust` | `kind`, `screen` (a window's last lines), and `directory` where asked: what the engine reads there of the harness's question about trusting the window's folder | `{key, prompt, grants, servers}`: the key it presses next toward a yes (`down`, `up`, `enter`), or null where the lines show no such question or the harness never asks one, whether they are the harness's prompt, and whether the question is the one of a trusted folder's grants or Claude's dialog of new servers of `.mcp.json`; with `directory`, `trusts` too: `{folder, inside, servers_above}`, what a yes trusts for a window opened in that project's folder, and the nearest folder above it whose `.mcp.json` Claude reads too |
+//! | `input_box` | `kind`, `screen` (a window's last lines as drawn, the pane host's `bottom`): what the adapter reads of the window's input box there | `"empty"`, `"holds"`, or null where it reads no box |
 //!
-//! The last eight are the evals' and the live tests' own: the program a window
+//! The last nine are the evals' and the live tests' own: the program a window
 //! opens on, which the daemon asks `cf_process::pane_argv` for, the
 //! conversation a window of a harness that names its own opened, which only
 //! its store says, the Specmint skill a chief's window is given, which the
 //! live test of specs names the copy it was given by, the Devin window a
 //! member is given, whole, which `start` leaves bare (no config, no hooks, no
-//! first message), and what the daemon's readiness makes of that window's
-//! permission mode, read and then done, and the key the engine presses into a
+//! first message), what the daemon's readiness makes of that window's
+//! permission mode, read and then done, whether its TUI took a paste, as the
+//! engine reads it after the paste, the owner's Devin config as a launch reads
+//! it, which the live test of a compacted turn sets a threshold in, and the key
+//! the engine presses into a
 //! harness's question about trusting a window's folder, which the live test of
 //! folder trust holds against the real harnesses' screens.
 
@@ -50,17 +58,19 @@ use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 
 use crate::claude::install;
-use crate::contract::{Agent, Input, Interrupt, LaunchId, Skill};
+use crate::contract::{Agent, Input, Interrupt, LaunchId, Question, Records, Skill, TurnLeft};
 use crate::launch::adapter;
 use crate::records::{self, Options};
+use crate::shared::input_box::{self, InputBox};
 use crate::shared::record_state::record_state;
 use crate::shared::{trust, window_args};
-use crate::testing::Fakes;
+use crate::testing::{finished, Fakes};
 
 /// The answer to `question`, or why it cannot be answered.
 pub fn answer(question: &Value) -> Result<Value, String> {
     match text(question, "op")? {
         "records" => read_record(question),
+        "turn_cut" => turn_cut(question),
         "start" => start(question),
         "window_text" => Ok(json!(window_text(text(question, "text")?))),
         "console_text" => Ok(json!(console_text(text(question, "text")?))),
@@ -71,12 +81,16 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "newest_session" => newest_session(question),
         "specmint" => specmint(question),
         "devin_launch" => launch::devin_launch(question),
+        "pi_launch" => launch::pi_launch(question),
         "devin_ready" => launch::devin_ready(question),
+        "devin_took" => launch::devin_took(question),
         "devin_readiness" => readiness::devin_readiness(question),
         "devin_hooks" => launch::devin_hooks(question),
+        "devin_config" => launch::devin_config(question),
         "trust" => trust(question),
+        "input_box" => input_box(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, devin_ready, devin_readiness, devin_hooks and trust"
+            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust and input_box"
         )),
     }
 }
@@ -111,9 +125,13 @@ fn env(question: &Value) -> Result<Env, String> {
     )))
 }
 
-/// The key the engine presses next toward a yes to the harness's question about
-/// trusting a window's folder, read in the window's last lines as the engine reads
-/// them: null where they show none, or the harness never asks one.
+/// Whether the window's last lines show the harness's question about trusting its
+/// folder, as the engine reads them, and the key it presses next toward a yes: null
+/// where they show none, the harness never asks one, or its choice cannot be placed;
+/// whether it is the question of a trusted folder's grants, whether it is the
+/// dialog of new servers of `.mcp.json`, and whether it names the question's choices
+/// (`names`): a prompt that does is read as the engine reads it, below a conversation
+/// that quoted the question, and its yes is not banked.
 fn trust(question: &Value) -> Result<Value, String> {
     let screen: Vec<String> = question
         .get("screen")
@@ -122,21 +140,63 @@ fn trust(question: &Value) -> Result<Value, String> {
         .iter()
         .filter_map(|line| line.as_str().map(str::to_owned))
         .collect();
-    let (key, prompt) = match harness(text(question, "kind")?)? {
+    let (key, prompt, names) = match harness(text(question, "kind")?)? {
         Harness::Claude => (
             crate::claude::trust::toward_trust(&screen),
             crate::claude::trust::shows_prompt(&screen),
+            crate::claude::trust::names_choices(&screen),
         ),
-        Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin => (None, false),
+        Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin => (None, false, false),
     };
-    let key = key.map(|key| if key == trust::ENTER { "enter" } else { "down" });
-    let mut answer = json!({ "key": key, "prompt": prompt });
-    // What a yes trusts, for a window opened in a project's folder `directory`.
+    let pressed = match key {
+        Some(
+            Question::Toward(key) | Question::Grants(Some(key)) | Question::Servers(Some(key)),
+        ) => Some(match key {
+            trust::ENTER => "enter",
+            trust::UP => "up",
+            _ => "down",
+        }),
+        Some(Question::Unplaced | Question::Grants(None) | Question::Servers(None)) | None => None,
+    };
+    let mut answer =
+        json!({ "asks": key.is_some(), "key": pressed, "prompt": prompt, "names": names });
+    answer["grants"] = json!(matches!(key, Some(Question::Grants(_))));
+    answer["servers"] = json!(matches!(key, Some(Question::Servers(_))));
+    // What a yes trusts, for a window opened in a project's folder `directory`, and the
+    // folder above it whose servers Claude Code asks of as well.
     if let Some(directory) = optional(question, "directory") {
-        let trust::Trusts { folder, inside } = trust::trusts(directory);
-        answer["trusts"] = json!({ "folder": folder, "inside": inside });
+        let trust::Trusts {
+            folder,
+            inside,
+            servers_above,
+        } = trust::trusts(directory);
+        answer["trusts"] =
+            json!({ "folder": folder, "inside": inside, "servers_above": servers_above });
     }
     Ok(answer)
+}
+
+/// What the adapter reads of a window's input box in `screen` (its last lines as
+/// drawn): `empty`, `holds`, or null where it reads none.
+fn input_box(question: &Value) -> Result<Value, String> {
+    let screen: Vec<String> = question
+        .get("screen")
+        .and_then(Value::as_array)
+        .ok_or("the question names no screen")?
+        .iter()
+        .filter_map(|line| line.as_str().map(str::to_owned))
+        .collect();
+    Ok(
+        match input_box::read(
+            harness(text(question, "kind")?)?,
+            &screen,
+            input_box::Cursor::of(question.get("cursor")),
+        ) {
+            Some(InputBox::Empty) => json!("empty"),
+            Some(InputBox::Holds) => json!("holds"),
+            None => Value::Null,
+        },
+    )
 }
 
 /// What the harness's own record of a conversation says, read whole once.
@@ -151,6 +211,25 @@ fn read_record(question: &Value) -> Result<Value, String> {
     );
     let settled = record_state(reading.clone()).settled;
     Ok(json!({ "reading": &*reading, "settled": settled }))
+}
+
+/// Whether the turn of the conversation the question names was cut, as the human's
+/// Resume reads its record with no window open.
+fn turn_cut(question: &Value) -> Result<Value, String> {
+    let records = Fakes::new(&env(question)?).records;
+    let left = finished(records.turn_cut(
+        harness(text(question, "kind")?)?,
+        text(question, "session")?,
+    ));
+    Ok(match left {
+        None => json!({ "cut": null }),
+        Some(TurnLeft::AtRest) => json!({ "cut": false }),
+        Some(TurnLeft::Cut(opening)) => json!({
+            "cut": true,
+            "began": opening.as_ref().and_then(|opening| opening.at.clone()),
+            "words": opening.map(|opening| opening.words),
+        }),
+    })
 }
 
 /// The harness's own window on a new conversation, or, when the question says

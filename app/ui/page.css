@@ -650,6 +650,13 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 /* Settings, Specs: the Specmint this build brings, its version and its variants. */
 .specmint { gap: 8px; }
 .specmint .specmint-version { margin: 0; font-size: 13px; }
+.computer-use .computer-use-head { margin: 0 0 4px; font-size: 13px; font-weight: 700; }
+.computer-use .computer-use-line { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.computer-use-grants { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.computer-use-grant { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; }
+.computer-use-grant button { margin-left: auto; }
+.computer-use-missing { color: var(--buoy); font-weight: 700; }
+.computer-use-permissions > .dialog-help { margin: 6px 0 0; }
 .specmint .staff { margin: 0; }
 .member-confirm { color: var(--buoy); font-size: 12px; margin-right: 8px; }
 /* Each part of a task is a panel of its own, headed by what it is. */
@@ -897,8 +904,9 @@ dialog::backdrop { background: rgba(4, 12, 15, .6); }
 .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
 /* What the daemon refused, said under the field the human typed in. */
 .dialog-refusal { margin: 0; font-size: 12px; color: var(--buoy); }
-/* What a delete keeps on the board, and why. */
-.dialog-kept { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; color: var(--amber); }
+/* What a delete takes, and what it keeps on the board and why; a long list scrolls. */
+.dialog-note { margin: 0; font-size: 12px; color: var(--foam); overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto; }
+.dialog-kept { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; color: var(--amber); max-height: 30vh; overflow-y: auto; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
 .icon-button:hover { color: var(--foam); border-color: var(--foam); }
 .icon-button.danger-button { color: var(--buoy); border-color: rgba(255, 120, 104, .55); }

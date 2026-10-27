@@ -99,6 +99,8 @@ end
             .join(".github")
             .join("workflows");
         let paths: Vec<_> = files().iter().map(|file| folder.join(file)).collect();
+        // Bare, as this crate's tests start every program (see `cf_publish::testing`'s words: this
+        // crate takes no dependency beyond its two).
         let ran = match Command::new("ruby").arg(&script).args(&paths).output() {
             Ok(ran) => ran,
             Err(_) => {

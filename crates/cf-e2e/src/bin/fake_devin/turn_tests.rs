@@ -18,6 +18,8 @@ fn a_message_is_answered_with_the_word_it_asks_for_and_otherwise_acknowledged_by
             work: Duration::ZERO,
             background: None,
             file: None,
+            cf: None,
+            compact: false,
             crash: None,
             answer: "WORKER_OK".to_owned()
         }
@@ -34,6 +36,24 @@ fn a_message_is_answered_with_the_word_it_asks_for_and_otherwise_acknowledged_by
 }
 
 #[test]
+fn a_cf_line_runs_cf_with_its_text_as_one_word_and_a_compact_line_is_compacted() {
+    let quick = Pace::default();
+    let plan = plan_of(
+        "[ConsensFlow m-1 · T-5 · task from @chief]\nSLEEP 5 COMPACT CF ask :: Which one? :: this",
+        quick,
+    );
+    assert_eq!(plan.work, Duration::from_secs(5));
+    assert!(plan.compact);
+    assert_eq!(
+        plan.cf,
+        Some(vec!["ask".to_owned(), "Which one? :: this".to_owned()])
+    );
+    let plain = plan_of("CF task list", quick);
+    assert!(!plain.compact);
+    assert_eq!(plain.cf, Some(vec!["task".to_owned(), "list".to_owned()]));
+}
+
+#[test]
 fn a_sleep_line_works_that_long_before_it_does_what_the_words_after_it_say() {
     let quick = Pace::default();
     let plan = plan_of(
@@ -47,6 +67,8 @@ fn a_sleep_line_works_that_long_before_it_does_what_the_words_after_it_say() {
             work: Duration::from_secs(120),
             background: None,
             file: None,
+            cf: None,
+            compact: false,
             crash: None,
             answer: "T5_DONE".to_owned()
         }
@@ -80,6 +102,8 @@ fn a_file_line_has_the_turns_tool_make_the_file_and_a_turn_that_goes_on_takes_no
             work: Duration::from_secs(600),
             background: None,
             file: Some("made.txt".to_owned()),
+            cf: None,
+            compact: false,
             crash: None,
             answer: "DONE".to_owned()
         }
@@ -128,6 +152,8 @@ fn a_think_line_is_a_silence_that_long_before_the_first_word_whatever_the_pace_a
             work: Duration::from_secs(2),
             background: None,
             file: None,
+            cf: None,
+            compact: false,
             crash: None,
             answer: "BUSY".to_owned()
         }
@@ -162,6 +188,8 @@ fn a_background_line_leaves_a_command_running_that_long_and_does_what_the_words_
             work: Duration::ZERO,
             background: Some(600),
             file: None,
+            cf: None,
+            compact: false,
             crash: None,
             answer: "LEFT_IT".to_owned()
         }
@@ -481,4 +509,46 @@ fn a_turn_that_leaves_a_command_runs_it_once_the_model_has_spoken_and_the_agent_
         !cf_e2e::process::is_alive(pid)
     });
     assert!(gone, "the command ran its two seconds");
+}
+
+/// `/new`: the turns after it go into the conversation it opened, on the wire and in the
+/// store, and what ran before it stays in the one left.
+#[test]
+fn the_turns_after_a_new_conversation_go_into_it_and_the_ones_before_stay_in_the_one_left() {
+    let mut case = case();
+    case.window.take("Reply with exactly: BEFORE").unwrap();
+    let opened = Store::open(&case.folder.path().join("sessions.db"), "bright-dune").unwrap();
+    case.window.switch(opened, "bright-dune");
+    case.window.take("Reply with exactly: AFTER").unwrap();
+    let db = Connection::open(case.folder.path().join("sessions.db")).unwrap();
+    let said_in = |session: &str| -> Vec<String> {
+        db.prepare("SELECT chat_message FROM message_nodes WHERE session_id = ? ORDER BY row_id")
+            .unwrap()
+            .query_map([session], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    let (left, new) = (said_in("calm-river"), said_in("bright-dune"));
+    assert!(
+        left.iter().any(|message| message.contains("BEFORE")),
+        "{left:?}"
+    );
+    assert!(
+        !left.iter().any(|message| message.contains("AFTER")),
+        "{left:?}"
+    );
+    assert!(
+        new.iter().any(|message| message.contains("AFTER")),
+        "{new:?}"
+    );
+    let wire = std::fs::read_to_string(case.folder.path().join("wire.jsonl")).unwrap();
+    let ended_in = |words: &str| {
+        wire.lines()
+            .filter(|line| line.contains("\"cause\""))
+            .nth(usize::from(words == "AFTER"))
+            .map(|line| serde_json::from_str::<Value>(line).unwrap()["sessionId"].clone())
+    };
+    assert_eq!(ended_in("BEFORE"), Some(Value::from("calm-river")));
+    assert_eq!(ended_in("AFTER"), Some(Value::from("bright-dune")));
 }

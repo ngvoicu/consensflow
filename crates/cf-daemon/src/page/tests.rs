@@ -25,6 +25,8 @@ struct Rig {
     spawn: Rc<DaemonSpawn>,
     /// The engine and the ledger the page is given.
     kit: Context,
+    /// The System Settings panes the page asked to open, which none is.
+    opened: Rc<RefCell<Vec<crate::computer_use::Pane>>>,
 }
 
 /// Called inside the local set the test runs in: the executor's driver is
@@ -48,12 +50,23 @@ fn rig_with(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs) -> Rig {
     let kit = Context::new();
     let kicks = Rc::new(Cell::new(0));
     let counted = Rc::clone(&kicks);
+    let opened = Rc::new(RefCell::new(Vec::new()));
+    let noted = Rc::clone(&opened);
+    let grants_of = crate::computer_use::grants_of(&env);
     let page = Rc::new(Page {
         ledger: Rc::clone(&kit.ledger),
         engine: engine.unwrap_or_else(|| Rc::new(Rc::clone(&kit.dispatcher))),
         env,
         kick: Rc::new(move || counted.set(counted.get() + 1)),
         specs,
+        computer_use: ComputerUsePage {
+            machine: Rc::clone(&kit.computer_use) as Rc<_>,
+            open: Rc::new(move |pane| {
+                noted.borrow_mut().push(pane);
+                Box::pin(async { Ok(()) })
+            }),
+            grants_of,
+        },
     });
     Rig {
         home,
@@ -61,6 +74,7 @@ fn rig_with(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs) -> Rig {
         page,
         spawn,
         kit,
+        opened,
     }
 }
 
@@ -376,6 +390,8 @@ async fn an_operation_is_begun_where_its_frame_is_read_and_its_turns_end_before_
 }
 
 mod app_specs;
+mod computer_use;
+mod deleting;
 mod describing;
 mod gate;
 mod held;

@@ -9,7 +9,11 @@
 use std::ffi::OsString;
 
 use super::machine::{Machine, NAMES};
+use super::queue::DEFAULT_WAIT_MINUTES;
 use super::script::{parse_env, Refusal};
+
+/// The longest a run may be told to wait for a machine, in minutes: a day.
+const MAX_WAIT_MINUTES: u32 = 24 * 60;
 
 /// The folder of the copy under the profile there, unless `--dir` names another.
 pub const DEFAULT_DIR: &str = "consensflow-build";
@@ -30,6 +34,9 @@ pub struct Options {
     pub env: Vec<(String, String)>,
     /// The command and its words, as they were given.
     pub command: Vec<String>,
+    /// How long the run waits for its turn at a busy machine, in minutes; 0 asks once and is
+    /// refused at once (`--wait`).
+    pub wait: u32,
 }
 
 /// What a matrix of evals on the machine is asked for.
@@ -45,6 +52,8 @@ pub struct MatrixOptions {
     pub claude_model: Option<String>,
     /// A Pi member's model, on the machine's own signed-in provider.
     pub pi_model: Option<String>,
+    /// As [`Options`]'s: how long each run waits for its turn.
+    pub wait: u32,
 }
 
 /// A chief and the staff it works with: `devin:devin`, `claude:devin,pi`.
@@ -71,13 +80,15 @@ impl Options {
         if !word_characters(inside, &['.', '/']) || inside.split('/').any(|part| part == "..") {
             return Err(format!("--in is a folder of the copy: {inside}"));
         }
+        let (env, wait) = (named(&words)?, wait_of(&words)?);
         Ok(Self {
             machine,
             build: words.flag("build"),
             dir: dir.to_owned(),
             inside: inside.to_owned(),
-            env: named(&words)?,
+            env,
             command: words.rest,
+            wait,
         })
     }
 }
@@ -94,6 +105,7 @@ impl MatrixOptions {
         }
         // Said well before the first run, not by the first one that fails on it.
         let env = named(&words)?;
+        let wait = wait_of(&words)?;
         let pairs = pairs
             .iter()
             .map(|pair| {
@@ -114,20 +126,23 @@ impl MatrixOptions {
             pairs,
             claude_model: words.one("claude-model").map(str::to_owned),
             pi_model: words.one("pi-model").map(str::to_owned),
+            wait,
         })
     }
 }
 
 const USAGE: &str = "windows takes the command to run there after a --: \
-    cargo xtask windows [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--env NAME=VALUE] -- <command>";
+    cargo xtask windows [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--wait MINUTES] [--env NAME=VALUE] -- <command>";
 
 const MATRIX_USAGE: &str = "windows-matrix takes a --scenario <name> and a \
     --pair <chief>:<staff> (each as many times as there are): cargo xtask windows-matrix \
-    [--machine zeewin2|zeewin | --host <ssh host>] [--env NAME=VALUE] --scenario <name>... --pair <chief>:<staff>...";
+    [--machine zeewin2|zeewin | --host <ssh host>] [--wait MINUTES] [--env NAME=VALUE] --scenario <name>... --pair <chief>:<staff>...";
 
 /// The machine the words name: by `--machine`, one of [`NAMES`]; by `--host`, an ssh host
 /// reached as zeewin is (it is given to `ssh` and `scp` as a word, so it may not be one that
-/// they would take for an option); none when they name neither, and never both.
+/// they would take for an option), unless it is one of [`NAMES`], which is that machine with
+/// its guards and its Node (the laptop is poker-lab's too); none when they name neither, and
+/// never both.
 fn machine_of(words: &Words) -> Result<Option<Machine>, String> {
     match (words.one("machine"), words.one("host")) {
         (Some(_), Some(_)) => Err("--machine and --host name the same thing: give one".into()),
@@ -138,9 +153,26 @@ fn machine_of(words: &Words) -> Result<Option<Machine>, String> {
             "--host is an ssh host, not an option of ssh: {host}"
         )),
         (None, Some("")) => Err("--host is an ssh host, not an empty word".into()),
-        (None, Some(host)) => Ok(Some(Machine::at(host))),
+        (None, Some(host)) => Ok(Some(
+            Machine::named(host).unwrap_or_else(|| Machine::at(host)),
+        )),
         (None, None) => Ok(None),
     }
+}
+
+/// How long the run waits for its turn at a busy machine: `--wait MINUTES` (0 to ask once), else
+/// [`DEFAULT_WAIT_MINUTES`].
+fn wait_of(words: &Words) -> Result<u32, String> {
+    let Some(given) = words.one("wait") else {
+        return Ok(DEFAULT_WAIT_MINUTES);
+    };
+    given
+        .parse::<u32>()
+        .ok()
+        .filter(|minutes| *minutes <= MAX_WAIT_MINUTES)
+        .ok_or_else(|| {
+            format!("--wait is the minutes to wait for a turn, 0 to {MAX_WAIT_MINUTES}: {given}")
+        })
 }
 
 /// The variables the words name, as `parse_env` reads them.
@@ -175,16 +207,17 @@ enum Command {
     Refused,
 }
 
-const HOST_OPTIONS: [(&str, Takes); 6] = [
+const HOST_OPTIONS: [(&str, Takes); 7] = [
     ("machine", Takes::One),
     ("host", Takes::One),
     ("build", Takes::Nothing),
     ("dir", Takes::One),
     ("in", Takes::One),
     ("env", Takes::Many),
+    ("wait", Takes::One),
 ];
 
-const MATRIX_OPTIONS: [(&str, Takes); 8] = [
+const MATRIX_OPTIONS: [(&str, Takes); 9] = [
     ("machine", Takes::One),
     ("host", Takes::One),
     ("build", Takes::Nothing),
@@ -193,6 +226,7 @@ const MATRIX_OPTIONS: [(&str, Takes); 8] = [
     ("claude-model", Takes::One),
     ("pi-model", Takes::One),
     ("env", Takes::Many),
+    ("wait", Takes::One),
 ];
 
 /// What the words said: each option with the texts it was given (a flag, none), and what was left.

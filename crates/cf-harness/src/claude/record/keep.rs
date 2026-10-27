@@ -90,6 +90,7 @@ pub(super) static RECORD: Keep = Keep::Members(&[
     ("turnOrigin", &Keep::Scalar),
     ("origin", &ORIGIN),
     ("isMeta", &Keep::Scalar),
+    ("turnCompanion", &Keep::Scalar),
     ("isCompactSummary", &Keep::Scalar),
     ("queueTranscriptOnly", &Keep::Scalar),
     ("level", &Keep::Scalar),

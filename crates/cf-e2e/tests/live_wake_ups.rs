@@ -14,9 +14,9 @@
 //! (never `~/.consensflow`), one rig for each chief, one chief after another.
 //! The interval is the one the human sets, a minute, the least a wake-up may
 //! wait: no variable or switch shortens it. The windows run the machine's
-//! harnesses and read their logins where they are; Claude Code starts with no
-//! `CLAUDE_CONFIG_DIR`, through the wrapper that adds `--strict-mcp-config
-//! --no-chrome`.
+//! harnesses and read their logins where they are; Claude Code runs on a config
+//! folder of the run's own with a copy of the machine's login ([`cf_e2e::live::login`]),
+//! through the wrapper that adds `--strict-mcp-config --no-chrome`.
 //!
 //! What each chief is held to is read from the evidence, never from what it
 //! said: the daemon's own event file (the wake-ups queued, when, and what moved

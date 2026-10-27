@@ -201,6 +201,27 @@ fn a_hook_that_was_cancelled_keeps_what_a_hook_that_ran_does_and_any_other_attac
 }
 
 #[test]
+fn a_request_claude_code_kept_keeps_only_its_type_and_its_session() {
+    // 2.1.310 keeps what it sent the API, the instructions and the folders among it.
+    let text = [
+        json!({ "type": "api-request-blob", "sessionId": SESSION, "blob": [{ "type": "text", "text": "cwd /Users/jane/app" }], "message": { "role": "user", "content": "jane@example.com" } }),
+        json!({ "type": "api-request-shape", "shape": { "system": 3 }, "sessionId": SESSION }),
+        json!({ "type": "api-request", "requestId": "req_1", "sessionId": SESSION, "timestamp": "2026-10-26T09:00:00.000Z" }),
+        json!({ "type": "user", "sessionId": SESSION, "message": { "role": "user", "content": "kept" } }),
+    ];
+    let kept = read(&scrub(&transcript(&text)).unwrap());
+    assert_eq!(
+        kept[..3],
+        [
+            json!({ "type": "api-request-blob", "sessionId": "$SESSION" }),
+            json!({ "type": "api-request-shape", "sessionId": "$SESSION" }),
+            json!({ "type": "api-request", "sessionId": "$SESSION" }),
+        ]
+    );
+    assert_eq!(kept[3]["message"]["content"], "kept");
+}
+
+#[test]
 fn a_transcript_that_cannot_be_made_a_fixture_is_said_why() {
     let said = |text: &str| scrub(text).unwrap_err().to_string();
     assert_eq!(said(""), "no record names its session");

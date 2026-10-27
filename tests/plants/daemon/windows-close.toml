@@ -64,7 +64,8 @@
 #   the sources as planted, so its plants say `builds`.
 #
 # - the stand-in Codex's plugin servers and workers write their process whole from the moment their
-#   file is there (`crates/cf-e2e/src/bin/fake_codex/servers.rs`), and the case that waits for the
+#   file is there (`cf_e2e::files::say_its_process`, in `crates/cf-e2e/src/files.rs`, which the
+#   stand-in agent's jobs and builds use too), and the case that waits for the
 #   file waits for a number (`stand_ins::pid_in`): the flake of `ParseIntError`, an empty file read
 #   between its making and its writing (3.0.6, item 8).
 #
@@ -205,8 +206,8 @@ runs = ["engine-closing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "let because = if own {"
-replace = "let because = if own && false {"
+find = '''let because = if own.is_some() {'''
+replace = '''let because = if own.is_some() && false {'''
 
 [[plant]]
 name = "windows close: the late exit of a window the engine closed pauses its session's queued task"
@@ -405,6 +406,8 @@ replace = '''
 name = "windows close: the host tells the daemon and retires the pane as it did, by retire_exited"
 meant = "a_program_whose_console_host_died_is_ended_and_gone_before_the_daemon_hears_its_window_closed"
 runs = ["panes-handlers-windows", "headless-cleans-up"]
+# Its meant test is Windows' alone (T-487's plan, integration B round 2).
+platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
@@ -555,15 +558,16 @@ meant = "the_stand_in_codexs_plugin_server_and_worker_write_their_process_whole_
 runs = ["rig-stand-in-codex"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/bin/fake_codex/servers.rs"
+file = "crates/cf-e2e/src/files.rs"
 find = '''
-    let writing = format!("{file}.pid.writing");
-    fs::write(&writing, std::process::id().to_string())?;
-    fs::rename(writing, format!("{file}.pid"))'''
+    let mut writing = file.as_os_str().to_owned();
+    writing.push(".writing");
+    fs::write(&writing, text)?;
+    fs::rename(writing, file)'''
 replace = '''
-    let mut made = fs::File::create(format!("{file}.pid"))?;
-    thread::sleep(Duration::from_millis(300));
-    made.write_all(std::process::id().to_string().as_bytes())'''
+    let mut made = fs::File::create(file)?;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    io::Write::write_all(&mut made, text.as_bytes())'''
 
 [[plant]]
 name = "windows close: the stand-in Codex's worker never says its process"
@@ -573,7 +577,7 @@ runs = ["rig-stand-in-codex"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_codex/servers.rs"
 find = '''
-    if let Err(failed) = say_its_process(file) {
+    if let Err(failed) = cf_e2e::files::say_its_process(Path::new(file)) {
         return refuse(&failed.to_string());
     }
     thread::sleep(Duration::from_secs(seconds));'''

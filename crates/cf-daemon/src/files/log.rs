@@ -14,11 +14,12 @@ use cf_base::time::{iso, Clock, SystemClock};
 /// How big the log may get before it is moved aside: 5 MB.
 pub const LIMIT: u64 = 5_000_000;
 
-/// The log of a home.
+/// The log of a home. One may go to another thread: the records' thread
+/// writes to the home's log with a log of its own.
 pub struct Log {
     file: PathBuf,
     limit: u64,
-    clock: RefCell<Box<dyn Clock>>,
+    clock: RefCell<Box<dyn Clock + Send>>,
 }
 
 impl Log {
@@ -29,7 +30,7 @@ impl Log {
 
     /// A log in `file` that moves it aside past `limit` bytes and reads the
     /// time on `clock`.
-    pub fn with_clock(file: PathBuf, limit: u64, clock: Box<dyn Clock>) -> Self {
+    pub fn with_clock(file: PathBuf, limit: u64, clock: Box<dyn Clock + Send>) -> Self {
         Self {
             file,
             limit,

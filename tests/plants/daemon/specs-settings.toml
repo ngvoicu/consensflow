@@ -437,17 +437,17 @@ runs = ["settings-daemon-agents-page"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/screens/pages/agents.html"
-find = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and OpenCode</label>
+find = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi, OpenCode and Devin</label>
 '''
-replace = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and OpenCode</label>
+replace = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi, OpenCode and Devin</label>
   <label class="own-harness"><input type="checkbox" name="specs"> Plan big work as specs in every project that does not say otherwise</label>
 '''
 
 [[plant.edit]]
 file = "crates/cf-daemon/tests/goldens/pages/agents.html"
-find = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and OpenCode</label>
+find = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi, OpenCode and Devin</label>
 '''
-replace = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and OpenCode</label>
+replace = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi, OpenCode and Devin</label>
   <label class="own-harness"><input type="checkbox" name="specs"> Plan big work as specs in every project that does not say otherwise</label>
 '''
 
@@ -651,8 +651,16 @@ runs = ["settings-page-sections"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "    const [calls] = await Promise.all([this.#wakeUp.read(project), this.#page.readSpecs()])"
-replace = "    const calls = await this.#wakeUp.read(project)"
+find = '''
+      this.#wakeUp.read(project),
+      this.#page.readSpecs(),
+      this.#computerUse.read(project),
+'''
+replace = '''
+      this.#wakeUp.read(project),
+      null,
+      this.#computerUse.read(project),
+'''
 
 [[plant]]
 name = "specs settings: New project does not read what the app says as it opens"
@@ -661,9 +669,13 @@ runs = ["settings-page-new-project"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''      this.#page.readSpecs(),
+find = '''
+      this.#page.daemon('staff.last'),
+      this.#page.readSpecs(),
 '''
-replace = ""
+replace = '''
+      this.#page.daemon('staff.last'),
+'''
 
 [[plant]]
 name = "specs settings: a project that said a variant the Specmint does not have loses it"
@@ -786,11 +798,11 @@ runs = ["settings-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''        if record.window.borrow().retiring {
-            return Ok(());
+            return self.exit_overdue(record).await;
         }
         // A participant forgotten while the step waits is done with.'''
 replace = '''        if record.window.borrow().retiring {
-            return Ok(());
+            return self.exit_overdue(record).await;
         }
         if participant.role == "chief" && self.seams.roster.app_specs().on {
             self.retire(record).await?;

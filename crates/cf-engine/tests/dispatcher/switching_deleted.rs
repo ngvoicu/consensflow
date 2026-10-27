@@ -87,15 +87,21 @@ fn hands_nothing_to_an_old_chief_whose_switch_waited_for_its_turns_end_once_its_
         .switch_chief(old.id, to("codex", "astraeus"), SwitchWhen::Turn, true)
         .unwrap();
     let old_chief = chief_of(&context, old.id).id;
-    let asked = context
-        .ledger
-        .borrow()
-        .inbox(old_chief, 100)
-        .unwrap()
-        .into_iter()
-        .find(|message| message.body.contains("Write down where things stand"))
-        .unwrap();
-    assert_eq!(asked.state, "queued", "the note waits for the turn to end");
+    let asking = |chief: i64| {
+        context
+            .ledger
+            .borrow()
+            .inbox(chief, 100)
+            .unwrap()
+            .into_iter()
+            .filter(|message| message.body.contains("Write down where things stand"))
+            .count()
+    };
+    assert_eq!(
+        asking(old_chief),
+        0,
+        "the note is written only when it is pasted, at the turn's end"
+    );
     // The turn ends, and the next look at the old window waits on its harness.
     context.adapter.answer("chief", "Done with that");
     let launch = context.adapter.agent("chief").launch;
@@ -103,14 +109,16 @@ fn hands_nothing_to_an_old_chief_whose_switch_waited_for_its_turns_end_once_its_
     let looking = context.begin_pass();
     let replaced = replace_project(&context, &old);
     let welcome = context.note_from_consensflow(replaced.fresh.id, "chief", "Welcome");
-    assert_ne!(
-        welcome.id, asked.id,
-        "the ledger never gives the note's id again"
-    );
     held.open();
     context.settle();
     looking.take().unwrap().unwrap();
     replaced.gone();
+    let new_chief = chief_of(&context, replaced.fresh.id).id;
+    assert_eq!(
+        asking(new_chief),
+        0,
+        "no note for the old switch is written to the project created meanwhile"
+    );
     assert_eq!(
         context.message(welcome.id).state,
         "queued",

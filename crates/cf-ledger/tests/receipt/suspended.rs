@@ -669,12 +669,23 @@ fn resumed_and_paused_again(w: &mut World, number: i64) {
 }
 
 /// The chief resumes T-`number`, and the words that resume it are given up, their
-/// attempts spent: the task fails with them (Astra's review of 2026-10-17).
+/// attempts spent (Astra's review of 2026-10-17): they fail, and the task is paused
+/// again, by a pause of its own (wt/give-up-paths: it failed with them before).
 fn resumed_and_its_words_given_up(w: &mut World, number: i64) {
     let words = w.resume(number, "Go on").message.expect("its words").id;
     w.begin(words);
     w.ledger
         .fail_delivery(words, "the window never showed it")
+        .expect("given up");
+    assert_eq!(w.message(words).state, "failed");
+    assert_eq!(w.state(number), "paused");
+}
+
+/// The chief resumes T-`number`, and the daemon gives up on it: it fails.
+fn resumed_and_given_up(w: &mut World, number: i64) {
+    w.resume(number, "Go on");
+    w.ledger
+        .give_up_task(w.project, number, "the harness reported a failure")
         .expect("given up");
     assert_eq!(w.state(number), "failed");
 }
@@ -694,11 +705,12 @@ fn taken_back(w: &mut World, number: i64) {
 #[test]
 fn a_pause_note_on_its_way_whose_task_moved_on_says_its_warning_again_if_it_goes_back_or_is_given_up(
 ) {
-    let cases: [(&str, MoveOn); 4] = [
+    let cases: [(&str, MoveOn); 5] = [
         ("resumed", resumed),
         ("was taken back", taken_back),
         ("was paused again", resumed_and_paused_again),
-        ("failed", resumed_and_its_words_given_up),
+        ("was paused again", resumed_and_its_words_given_up),
+        ("failed", resumed_and_given_up),
     ];
     for (why, moved) in cases {
         for given_up in [false, true] {
@@ -1242,4 +1254,114 @@ fn a_ledger_from_before_the_mark_keeps_every_paused_task_paused_through_a_resume
         "queued",
         "and the chief is still to be told of it"
     );
+}
+
+/// Calliope's P3 on T-442's round 2: the Resume of a project leaves a task of a window that
+/// holds several paused (`leave_several_paused`), and the note that gives its requester the
+/// answer of the window's turn on a tell says it is paused still: a task that stays paused
+/// has not moved on, so the note is not written again in the words of one that has.
+#[test]
+fn the_answer_note_of_a_task_that_stays_paused_through_the_resume_stays_in_the_words_of_a_paused_task(
+) {
+    let mut w = world();
+    let (first, second) = holding_two(&mut w);
+    let session = session_of(&w, first);
+    closed_with(&mut w, &[first, second], CLOSED);
+    let note = w
+        .ledger
+        .note_paused_answer(w.project, first, &session, 7, "Parser done")
+        .expect("the ledger")
+        .expect("a note");
+    assert!(note
+        .body
+        .starts_with(&format!("T-{first} is paused, and @")));
+
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+
+    assert_eq!([w.state(first), w.state(second)], ["paused", "paused"]);
+    let kept = w.message(note.id);
+    assert_eq!(
+        (kept.state.as_str(), kept.body.as_str()),
+        ("queued", note.body.as_str()),
+        "the same words: the task is paused still"
+    );
+}
+
+/// Calliope's landing rule 2 of T-414: the words that resume a paused task, given up
+/// while its project is suspended (on their way at a quit, settled at the start), pause
+/// it again as a pause of ConsensFlow's own, never the suspension's: the Resume of the
+/// project leaves it paused, for its requester to resume.
+#[test]
+fn a_resume_whose_words_are_given_up_in_a_suspended_project_is_paused_again_for_its_requester() {
+    let mut w = world();
+    let number = at_work(&mut w, "zeus");
+    w.pause(number);
+    let words = w.resume(number, "Go on").message.expect("its words").id;
+    w.begin(words);
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("suspended");
+    w.ledger
+        .fail_delivery(words, "the window never showed it")
+        .expect("given up");
+    assert_eq!(w.state(number), "paused");
+    assert_eq!(mark_of(&mut w, number), 0, "no pause of the suspension's");
+
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+    assert_eq!(w.state(number), "paused", "its requester's to resume");
+}
+
+/// The engine takes back the mark of a pause its Close made only where it is that
+/// pause, by its stop: T-1 paused with the project, resumed with it, and paused with it
+/// again by a second Close keeps the second mark when the first is taken back, and the
+/// next Resume resumes it (Calliope's P3-2 of T-510: the mark was taken back whatever
+/// pause the task held).
+#[test]
+fn a_mark_taken_back_is_of_its_own_pause_alone() {
+    let mut w = world();
+    let number = at_work(&mut w, "zeus");
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("closed");
+    let first = w
+        .ledger
+        .pause_with_project(w.project, number, CLOSED)
+        .expect("paused with the project");
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+    assert_eq!(w.state(number), "working");
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("closed again");
+    let second = w
+        .ledger
+        .pause_with_project(w.project, number, CLOSED)
+        .expect("paused with the project again");
+    assert_eq!(second.seq, first.seq + 1, "two pauses, two stops");
+
+    w.ledger
+        .unmark_pause(w.project, number, first.seq)
+        .expect("the first taken back");
+    assert_eq!(mark_of(&mut w, number), 1, "the second's mark stands");
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+    assert_eq!(w.state(number), "working");
+
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("closed a third time");
+    let third = w
+        .ledger
+        .pause_with_project(w.project, number, CLOSED)
+        .expect("paused with the project a third time");
+    w.ledger
+        .unmark_pause(w.project, number, third.seq)
+        .expect("its own taken back");
+    assert_eq!(mark_of(&mut w, number), 0);
 }

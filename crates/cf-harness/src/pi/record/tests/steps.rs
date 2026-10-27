@@ -182,7 +182,7 @@ fn the_time_of_a_refusal_is_what_number_makes_of_the_message_time() {
             Reading::Known(record) => {
                 Ok(serde_json::to_value(record.quota.as_deref()).unwrap()["at"].clone())
             }
-            Reading::Unknown(reason) => Err(reason.clone()),
+            Reading::Unknown(reason) | Reading::Missing(reason) => Err(reason.clone()),
         }
     };
     let ok = |at: &str| Ok(json!(at));
@@ -350,4 +350,105 @@ fn text_is_the_text_blocks_a_line_each_and_a_user_of_white_space_is_no_turn() {
         let mut stage = Stage::with(&[header(), user("u1", text)]);
         assert_eq!(!stage.at(0).items.is_empty(), is_a_turn, "{text:?}");
     }
+}
+
+#[test]
+fn a_failed_step_keeps_pis_words_for_it_and_the_next_message_drops_them() {
+    let failed = || failing("a1", &json!("Model gpt-0-nonesuch not found"), &json!(0));
+    let mut stage = Stage::with(&[header(), user("u1", "go"), failed()]);
+    let record = stage.at(0);
+    assert!(record.failed);
+    assert_eq!(
+        record.failure.as_deref(),
+        Some("Model gpt-0-nonesuch not found")
+    );
+    // `provider error` is Node's word for none: Pi said nothing, so neither does the record.
+    let mut silent = Stage::with(&[
+        header(),
+        message(
+            "a1",
+            json!({ "role": "assistant", "stopReason": "error", "content": [] }),
+        ),
+    ]);
+    let record = silent.at(0);
+    assert!(record.failed);
+    assert_eq!(record.failure, None);
+    stage.write(&[header(), user("u1", "go"), failed(), user("u2", "again")]);
+    assert_eq!(stage.at(0).failure, None);
+}
+
+#[test]
+fn a_record_whose_newline_a_short_write_dropped_keeps_its_place_and_its_time() {
+    // A message with no time of its own is at its place among the records; the
+    // next append, the newline before it lost, ran on from it (T-246).
+    let untimed = |id: &str, text: &str| {
+        let mut record = user(id, text);
+        record.as_object_mut().unwrap().remove("timestamp");
+        record
+    };
+    let mut stage = Stage::new();
+    stage.write_text(&format!("{}\n{}", header(), untimed("u1", "hello")));
+    let before = stage.at(0).items;
+    assert_eq!(before.len(), 1);
+    stage.write_text(&format!(
+        "{}\n{}{}\n",
+        header(),
+        untimed("u1", "hello"),
+        untimed("u2", "again")
+    ));
+    let after = stage.at(0);
+    assert_eq!(after.items.len(), 2);
+    assert_eq!(after.items[0], before[0], "the same id, at the same place");
+    assert_eq!(after.items[1].at, Some(json!(2)));
+    assert!(after.lines.lost.is_empty());
+    // Each item with its record's place, the header's at 0.
+    assert_eq!(after.lines.places, Some(vec![1, 2]));
+}
+
+/// The step Pi writes of its own when a run fails or is aborted before the model's
+/// first token (`handleRunFailure`, Pi 1.4.0): an empty text, no usage, and how
+/// the run ended.
+fn of_its_own(id: &str, stop: &str) -> Value {
+    message(
+        id,
+        json!({ "role": "assistant", "stopReason": stop, "content": [{ "type": "text", "text": "" }],
+            "usage": { "input": 0, "output": 0, "totalTokens": 0 },
+            "errorMessage": "Request was aborted" }),
+    )
+}
+
+#[test]
+fn a_step_pi_wrote_with_no_model_behind_it_is_synthetic_and_one_the_model_began_is_not() {
+    // T-530: the check that a window got a turn through took a step Pi writes of its
+    // own, at an Escape before the model's first token, for an answer: it is over,
+    // not failed, and dated when Pi wrote it.
+    for stop in ["aborted", "error"] {
+        let record = Stage::with(&[header(), user("u1", "go"), of_its_own("a1", stop)]).at(0);
+        let step = record.items.last().unwrap();
+        assert_eq!(
+            (step.role, step.synthetic),
+            (Role::Assistant, true),
+            "{stop}"
+        );
+    }
+    // A provider's abort keeps what had come: nothing, or the model's first words.
+    let aborted = |content: Value| {
+        let step = message(
+            "a1",
+            json!({ "role": "assistant", "stopReason": "aborted", "content": content }),
+        );
+        let record = Stage::with(&[header(), user("u1", "go"), step]).at(0);
+        record.items.last().unwrap().synthetic
+    };
+    assert!(aborted(json!([])));
+    assert!(!aborted(json!([{ "type": "text", "text": "Reading the" }])));
+    assert!(!aborted(
+        json!([{ "type": "thinking", "thinking": "The user wants" }])
+    ));
+    assert!(!aborted(
+        json!([{ "type": "toolCall", "id": "c1", "name": "read" }])
+    ));
+    // A step that stopped is the model's, whatever it says.
+    let record = Stage::with(&[header(), user("u1", "go"), assistant("a1", "stop", "")]).at(0);
+    assert!(!record.items.last().unwrap().synthetic);
 }

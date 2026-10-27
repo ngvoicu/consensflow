@@ -16,6 +16,7 @@ use std::sync::Arc;
 use cf_base::env::Env;
 use cf_proto::agents::Harness;
 
+use super::boundary::Boundary;
 use super::reading::Reading;
 
 /// What a look is told besides the conversation: what a reader may weigh
@@ -24,11 +25,12 @@ use super::reading::Reading;
 pub struct Options {
     /// Where Pi's extension keeps its evidence of a window's turns.
     pub pi_settlement: Option<PiSettlement>,
-    /// How many bytes the transcript held when ConsensFlow last started the
-    /// window's program on the conversation, the window it was on closed
-    /// first: what is before it was written by a process that is gone, and the
-    /// rest by the one that runs. Claude's reader reads it (`queues`).
-    pub relaunched_at: Option<u64>,
+    /// Where the transcript ended when ConsensFlow last started the window's
+    /// program on the conversation, the window it was on closed first: what is
+    /// before it was written by a process that is gone, and the rest by the one
+    /// that runs, in a transcript that still holds what it held there. Claude's
+    /// reader reads it (`queues`).
+    pub relaunched: Option<Boundary>,
 }
 
 /// Where Pi's extension keeps its evidence of a window's turns, and which
@@ -147,6 +149,9 @@ mod tests {
 
     /// A cache over counting readers, which reads no conversation without
     /// a session.
+    // Its error is only ever `Reading::Unknown` or `Reading::Missing`, a reason string, never a
+    // record (3.0.6-alpha.3's integration B, T-664).
+    #[allow(clippy::result_large_err)]
     fn cache(idle_ms: i64) -> Cache {
         let opened = AtomicUsize::new(0);
         Cache::new(
@@ -164,7 +169,7 @@ mod tests {
 
     fn said(reading: &Reading) -> &str {
         match reading {
-            Reading::Unknown(reason) => reason,
+            Reading::Unknown(reason) | Reading::Missing(reason) => reason,
             Reading::Known(_) => "known",
         }
     }
@@ -226,6 +231,9 @@ mod tests {
     }
 
     #[test]
+    // Its error is only ever `Reading::Unknown` or `Reading::Missing`, a reason string, never a
+    // record (3.0.6-alpha.3's integration B, T-664).
+    #[allow(clippy::result_large_err)]
     fn each_look_hands_its_own_options_and_its_time_to_the_reader() {
         let env = Env::default();
         let mut cache = Cache::new(Box::new(|_, _, _| Ok(Box::new(Telling))), IDLE_MS, 0);
@@ -234,28 +242,31 @@ mod tests {
                 directory: None,
                 launch_id: Some(launch_id.to_owned()),
             }),
-            relaunched_at: None,
+            relaunched: None,
         };
         let first = cache.look(Harness::Pi, "a", &env, &settlement("one"), 5);
         let second = cache.look(Harness::Pi, "a", &env, &settlement("two"), 7);
         let third = cache.look(Harness::Pi, "a", &env, &Options::default(), 9);
         let relaunched = Options {
-            relaunched_at: Some(12),
+            relaunched: Some(Boundary {
+                at: 12,
+                edge: Arc::from(&b"}\n"[..]),
+            }),
             ..Options::default()
         };
         let fourth = cache.look(Harness::Claude, "a", &env, &relaunched, 11);
         assert_eq!(
             said(&first),
-            r#"Options { pi_settlement: Some(PiSettlement { directory: None, launch_id: Some("one") }), relaunched_at: None } at 5"#
+            r#"Options { pi_settlement: Some(PiSettlement { directory: None, launch_id: Some("one") }), relaunched: None } at 5"#
         );
-        assert!(said(&second).ends_with(r#"Some("two") }), relaunched_at: None } at 7"#));
+        assert!(said(&second).ends_with(r#"Some("two") }), relaunched: None } at 7"#));
         assert_eq!(
             said(&third),
-            "Options { pi_settlement: None, relaunched_at: None } at 9"
+            "Options { pi_settlement: None, relaunched: None } at 9"
         );
         assert_eq!(
             said(&fourth),
-            "Options { pi_settlement: None, relaunched_at: Some(12) } at 11"
+            "Options { pi_settlement: None, relaunched: Some(Boundary { at: 12, edge: [125, 10] }) } at 11"
         );
     }
 

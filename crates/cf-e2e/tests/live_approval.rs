@@ -9,10 +9,11 @@
 //! The native daemon and the real pane host run in a home of the run's own
 //! (never `~/.consensflow`), one rig for each project, one project after
 //! another. The windows run the machine's harnesses and read their logins where
-//! they are (the machine's home, and `CODEX_HOME`; Claude Code with no
-//! `CLAUDE_CONFIG_DIR`, started through a wrapper that adds
-//! `--strict-mcp-config --no-chrome`), and know nothing of the shell that runs
-//! this: the rig gives them an environment of its own.
+//! they are (the machine's home, and `CODEX_HOME`; Claude Code on a config folder
+//! of the run's own with a copy of the machine's login ([`cf_e2e::live::login`]),
+//! started through a wrapper that adds `--strict-mcp-config --no-chrome`), and
+//! know nothing of the shell that runs this: the rig gives them an environment of
+//! its own.
 //!
 //! Five projects, a harness the chief of each ([`plan`]): the worker, the
 //! advisor and the reviewer are the next three after it in the order of

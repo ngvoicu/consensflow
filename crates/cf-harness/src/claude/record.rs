@@ -10,7 +10,7 @@
 //! A turn is settled once the transcript says it ended, with no tool call or
 //! queued message open: natively (an API error, an interrupt, the output of a
 //! command typed at Claude's prompt that runs no model, a `/clear`'s or a
-//! `/compact`'s), or
+//! `/compact`'s, a compaction cancelled with Escape), or
 //! by the boundary record a turn that answered writes after its stop hooks
 //! ran (a `turn_duration`, or a `stop_hook_summary` that did not prevent
 //! continuation). A turn that has begun and not ended is in flight.
@@ -20,10 +20,18 @@
 //! went with it, and no record says so. ConsensFlow knows where a process
 //! ended, as it closes a window before it starts the program again on the
 //! window's conversation: a look is told how long the transcript was then
-//! (`Options::relaunched_at`), and the queue is empty from that byte on, what
+//! (`Options::relaunched`), and the queue is empty from that byte on, what
 //! the new process queued after it kept (`queues`). A reader keeps the latest
 //! it was told, as a look that tells none (the engine's own, of a window it
-//! does not hold) knows no better. Claude Code's own close of the turn the old
+//! does not hold) knows no better. The length holds in the transcript it was
+//! taken of, which still has the bytes it was taken after
+//! ([`Boundary::held_by`]), checked whenever the transcript is read from its
+//! start: one written anew without them has other bytes there, and what the
+//! running process wrote in it would be cut, so its boundary is void, and the
+//! process's next start tells a boundary of its own, shorter or not (both
+//! reviews of round 2 of the relaunch boundary, 2026-10-18). A void boundary
+//! clears nothing: what the old process left open holds the turn, and Finish
+//! takes the answer. Claude Code's own close of the turn the old
 //! process was cut in (`No response requested.`) is no answer: the item is the
 //! harness's commentary.
 //!
@@ -64,8 +72,8 @@ mod tests;
 mod text;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::path::Path;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use cf_base::env::Env;
 use cf_base::json::from_slice_lossy_keeping;
@@ -74,6 +82,7 @@ use serde_json::Value;
 
 use super::paths::transcript;
 use crate::shared::quota::Quota;
+use crate::shared::record::boundary::Boundary;
 use crate::shared::record::cache::{Look, Options};
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
@@ -93,43 +102,74 @@ pub fn reader(session: &str, env: &Env, local: &TimeZone) -> Box<dyn Look + Send
     let env = env.clone();
     let reading: Arc<str> = Arc::from(session);
     let local = local.clone();
-    let relaunched = Arc::new(AtomicU64::new(0));
+    let relaunched = Arc::new(Mutex::new(None));
     let told = Arc::clone(&relaunched);
     Box::new(Relaunched {
         reader: TranscriptReader::new(
             Followed::new(
                 Box::new(move || transcript(&locating, &env)),
-                Box::new(move || {
-                    let at = told.load(Ordering::Relaxed);
+                Box::new(move |file: &Path| {
+                    let at = checked(lock(&told).as_ref(), file);
                     Transcript::new(Arc::clone(&reading), local.clone(), at)
                 }),
             ),
             format!("claude session {session}"),
         ),
-        at: relaunched,
+        told: relaunched,
     })
 }
 
-/// A transcript's reader, and the byte the latest process ConsensFlow started
-/// on its conversation began at (0 for none told), which a state made afresh
-/// begins with.
+/// A transcript's reader, and where the latest process ConsensFlow started on
+/// its conversation began (none told), which a state made afresh begins with
+/// where the transcript it reads holds it.
 struct Relaunched {
     reader: TranscriptReader<Transcript>,
-    at: Arc<AtomicU64>,
+    told: Arc<Mutex<Option<Boundary>>>,
 }
 
 impl Look for Relaunched {
-    /// A look told of a later start than the reader knows has its state told
-    /// too, or read again from the transcript's start where it read past it.
+    /// A look told of a later start than the reader knows, or of any where the
+    /// one it knows no longer holds, has its state told too, or read again from
+    /// the transcript's start where it read past it. An earlier start told late
+    /// changes nothing: in a transcript that holds the later one, it is before it.
     fn look(&mut self, options: &Options, now_ms: i64) -> Arc<Reading> {
-        if let Some(at) = options
-            .relaunched_at
-            .filter(|at| *at > self.at.load(Ordering::Relaxed))
-        {
-            self.at.store(at, Ordering::Relaxed);
-            self.reader.retell(|state| state.relaunched(at));
+        if let Some(boundary) = options.relaunched.as_ref() {
+            let mut told = lock(&self.told);
+            let later = match told.as_ref() {
+                None => true,
+                Some(known) => boundary.at > known.at || !self.reader.holds(known),
+            };
+            if later && told.as_ref() != Some(boundary) {
+                *told = Some(boundary.clone());
+                drop(told);
+                // One the transcript does not hold is read from its start, where the
+                // state made afresh is told none.
+                self.reader.retell(|state, file| {
+                    checked(Some(boundary), file).is_some_and(|at| state.relaunched(at))
+                });
+            }
         }
         self.reader.look(options, now_ms)
+    }
+}
+
+/// The byte the boundary `told` is at, where `file` holds it: none where it was
+/// taken of a transcript `file` is no longer, or none was told.
+fn checked(told: Option<&Boundary>, file: &Path) -> Option<u64> {
+    told.filter(|told| told.at > 0 && told.held_by(file))
+        .map(|told| told.at)
+}
+
+/// What `told` holds, a panic of another holder's notwithstanding.
+fn lock(told: &Mutex<Option<Boundary>>) -> std::sync::MutexGuard<'_, Option<Boundary>> {
+    told.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+impl TranscriptReader<Transcript> {
+    /// Whether the transcript the reader reads holds `boundary`, so far as it
+    /// knows: one it has not found yet is not told otherwise.
+    fn holds(&self, boundary: &Boundary) -> bool {
+        self.file().is_none_or(|file| boundary.held_by(file))
     }
 }
 
@@ -162,7 +202,8 @@ struct Transcript {
     terminal: Option<Terminal>,
     /// The native id of the message the latest assistant record belongs to.
     active_assistant: Option<Arc<str>>,
-    failed: bool,
+    /// The latest turn failed: the API refused it, in these words.
+    failure: Option<String>,
     quota: Option<Arc<Quota>>,
     /// The records visited.
     count: usize,
@@ -175,6 +216,17 @@ struct Transcript {
     relaunch: Option<Relaunch>,
     /// The byte the line of the latest record visited begins at.
     last_at: Option<u64>,
+    /// The bare `/compact` that began the turn, while nothing has moved it since:
+    /// what a cancel of the compaction ends.
+    typed_compact: Option<TypedCompact>,
+    /// The turn ended at such a cancel, and Claude Code put the `/compact` back in
+    /// its input box (`Lines::put_back`), until a record moves the turn again.
+    put_back: bool,
+}
+
+/// A `/compact` as it was typed: the record it is a child of.
+struct TypedCompact {
+    parent: Arc<str>,
 }
 
 /// A process ConsensFlow started on the conversation: the byte the transcript
@@ -217,8 +269,8 @@ struct Pending {
 impl Transcript {
     /// What the transcript of `session` says before any record, where the
     /// latest process ConsensFlow started on it began at the byte
-    /// `relaunched_at` (none where 0).
-    fn new(session: Arc<str>, local: TimeZone, relaunched_at: u64) -> Self {
+    /// `relaunched_at`, if one did where it holds.
+    fn new(session: Arc<str>, local: TimeZone, relaunched_at: Option<u64>) -> Self {
         Self {
             session,
             local,
@@ -233,17 +285,16 @@ impl Transcript {
             candidate: None,
             terminal: None,
             active_assistant: None,
-            failed: false,
+            failure: None,
             quota: None,
             count: 0,
             ancestry: Ancestry::default(),
             pending: Vec::new(),
             keys: Keys::default(),
-            relaunch: (relaunched_at > 0).then_some(Relaunch {
-                at: relaunched_at,
-                reached: false,
-            }),
+            relaunch: relaunched_at.map(|at| Relaunch { at, reached: false }),
             last_at: None,
+            typed_compact: None,
+            put_back: false,
         }
     }
 
@@ -275,6 +326,9 @@ impl Transcript {
             self.queues.restart();
             self.jobs.retire();
             self.open_tools.clear();
+            // The process that cancelled a compaction, and its input box, are gone.
+            self.typed_compact = None;
+            self.put_back = false;
             if let Some(candidate) = self.candidate.take() {
                 self.hooks.remove(&candidate.item_id);
             }
@@ -291,6 +345,17 @@ impl Transcript {
             && self.open_tools.is_empty()
             && self.queues.turns() == 0
             && self.hooks.is_empty()
+    }
+
+    /// Whether what holds the turn open is Claude Code's notifications alone, queued
+    /// or taken after the turn ended: no turn is open, no call, no stop hook to come,
+    /// and no message of anyone's waits.
+    fn held_by_notices(&self) -> bool {
+        self.terminal.is_some()
+            && !self.turn_open
+            && self.open_tools.is_empty()
+            && self.hooks.is_empty()
+            && self.queues.only_notices()
     }
 
     /// Whether the turn is settled, in flight, or unknown, in that order of
@@ -367,9 +432,12 @@ impl Answer for Transcript {
         }
         let settlement = self.settlement();
         let mut record = Record::new();
-        record.items = self.items.sorted()?;
+        let (items, places) = self.items.sorted()?;
+        record.items = items;
+        record.lines.places = Some(places);
         record.in_flight = settlement == Settlement::InFlight;
-        record.failed = self.failed;
+        record.failed = self.failure.is_some();
+        record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
         record.quota = self.quota.clone();
         record.settlement = settlement;
         // The jobs are those Claude Code has said no end of, whenever the record is
@@ -388,6 +456,8 @@ impl Answer for Transcript {
             noticed: self.jobs.noticed_count(),
         };
         record.monitors = self.jobs.monitors();
+        record.lines.put_back = self.put_back && settlement == Settlement::Settled;
+        record.lines.held_by_notices = settlement == Settlement::InFlight && self.held_by_notices();
         Ok(record)
     }
 }

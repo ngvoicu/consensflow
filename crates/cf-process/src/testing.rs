@@ -57,11 +57,30 @@ pub(crate) async fn pids_written_to_soon(file: &Path, count: usize) -> Vec<u32> 
     panic!("the program never wrote {count} pids to {}", file.display());
 }
 
-/// Whether the process `pid` is gone within `within`: one the system reaps
-/// as it ends (an orphan is its init's) is gone as soon as it is.
+/// Whether the process `pid` runs: `alive` says so of a zombie too, a process that has ended and
+/// waits to be reaped, which its parent (an orphan's is init, and a loaded machine's takes
+/// seconds over it) has not yet. Nothing runs that has ended (T-581: 2 of 5 runs of the
+/// ender tests at a load of 100 read a killed `sleep` as left running).
+pub(crate) fn running(pid: u32) -> bool {
+    alive(pid) && !is_zombie(pid)
+}
+
+#[cfg(unix)]
+fn is_zombie(pid: u32) -> bool {
+    i32::try_from(pid).is_ok_and(crate::table::is_zombie)
+}
+
+/// Windows has no zombie: a process that has ended is not alive.
+#[cfg(not(unix))]
+fn is_zombie(_pid: u32) -> bool {
+    false
+}
+
+/// Whether the process `pid` is gone within `within`: one that has ended is gone, though the
+/// system has not reaped it yet.
 pub(crate) fn gone_within(pid: u32, within: Duration) -> bool {
     let until = Instant::now() + within;
-    while alive(pid) {
+    while running(pid) {
         if Instant::now() >= until {
             return false;
         }
@@ -88,6 +107,85 @@ impl Drop for Survivors {
             if alive(pid) {
                 terminate(pid, Ending::Forced);
             }
+        }
+    }
+}
+
+/// Set in a process [`alone`] started: a test run otherwise does nothing.
+#[cfg(unix)]
+const ALONE: &str = "CF_PROCESS_ALONE";
+
+/// Runs the test `name` of this binary in a process of its own, started by `through` (a program
+/// and its words, such as `sandbox-exec` and its profile, or none): a test that no program of
+/// another test may hold anything of, or that sets up its process as no other test beside it
+/// would survive. It is an ignored test that does nothing unless [`is_alone`].
+#[cfg(unix)]
+pub(crate) fn alone(through: &[&str], name: &str) {
+    let test = std::env::current_exe().unwrap();
+    let mut command = match through {
+        [] => command(&test),
+        [program, words @ ..] => {
+            let mut command = command(program);
+            command.args(words).arg(&test);
+            command
+        }
+    };
+    let ran = command
+        .args([
+            "--exact",
+            name,
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(ALONE, "1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&ran.stdout),
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert!(ran.status.success(), "{said}");
+    assert!(said.contains("1 passed"), "the test did not run: {said}");
+    assert!(said.contains(RAN), "the test's body did not run: {said}");
+}
+
+/// Whether this process is one [`alone`] started.
+#[cfg(unix)]
+#[allow(clippy::disallowed_methods)] // Libtest has no other word for it.
+pub(crate) fn is_alone() -> bool {
+    std::env::var_os(ALONE).is_some()
+}
+
+/// The command a test starts `program` with: holding only its streams, as every program this
+/// crate starts does, for the tests run side by side and a program of one would hold what another
+/// closed. The tests that start a program bare say why: the window shown, a measurement, a stress.
+#[cfg(unix)]
+#[allow(clippy::disallowed_methods)] // The tests' own programs.
+pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    crate::hold_only_the_streams(&mut command);
+    command
+}
+
+/// What a test [`alone`] ran says once its body has run to its end: the run that started it
+/// asserts it, so a body that returned at once (the variable lost on the way) is no pass.
+#[cfg(unix)]
+pub(crate) const RAN: &str = "the test ran alone to its end";
+
+/// Says [`RAN`] as it is dropped, at the end of the body it was made at the start of, unless the
+/// body panicked.
+#[cfg(unix)]
+pub(crate) struct Ran;
+
+#[cfg(unix)]
+impl Drop for Ran {
+    #[allow(clippy::print_stdout)] // To the run that started this one, which reads it.
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            println!("{RAN}");
         }
     }
 }
@@ -140,7 +238,8 @@ fn keeps_starting_every(folder: &Path, pace: Duration) -> Run {
 /// The program [`keeps_starting_programs`] runs, and no test of its own.
 #[test]
 #[ignore = "a program the tests of ending a program start"]
-// The helper starts what the test ends, and waits for none of it.
+// The helper starts what the test ends, and waits for none of it. Bare: what an installer's
+// script starts holds the script's streams, and the helper is that script.
 #[allow(clippy::disallowed_methods, clippy::zombie_processes)]
 fn helper_keeps_starting_programs() {
     use std::io::Write;
@@ -199,14 +298,13 @@ pub(crate) fn pids_so_far(file: &Path) -> Vec<u32> {
 
 /// Which of the pids written to `file` are still running, asked again for `within` at
 /// most until none is: the file is read each time, for a program may be writing it still.
-/// Waited for on the runtime that ran the program, which reaps a child that was dropped
-/// as it turns: a child not reaped is a zombie, and reads as running.
+/// A process that has ended is not running whether or not it has been reaped.
 pub(crate) async fn left_running(file: &Path, within: Duration) -> Vec<u32> {
     let until = Instant::now() + within;
     loop {
         let left: Vec<u32> = pids_so_far(file)
             .into_iter()
-            .filter(|&pid| alive(pid))
+            .filter(|&pid| running(pid))
             .collect();
         if left.is_empty() || Instant::now() >= until {
             return left;
@@ -462,4 +560,28 @@ fn helper_holds_a_file_and_many_threads() {
     std::fs::write(ready, "").unwrap();
     std::thread::sleep(Duration::from_secs(60));
     drop(held);
+}
+
+/// A process that has ended and is not reaped yet is not running, as the tests that wait for what
+/// a capture ended ask it (T-581).
+#[cfg(unix)]
+#[test]
+fn a_process_that_has_ended_and_is_not_reaped_yet_is_gone_though_it_reads_alive() {
+    use crate::spawning::StartedUnderTheLock as _;
+    let mut sleeper = command("/bin/sleep").arg("30").spawn_locked().unwrap();
+    let pid = sleeper.id();
+    assert!(running(pid));
+    terminate(pid, Ending::Forced);
+    // Not waited for: the system keeps it, a zombie, until its parent does.
+    assert!(
+        gone_within(pid, Duration::from_secs(5)),
+        "a process that has ended is gone, reaped or not"
+    );
+    assert!(
+        alive(pid),
+        "and a zombie is still there for the system's `kill(pid, 0)`"
+    );
+    assert!(!running(pid));
+    sleeper.wait().unwrap();
+    assert!(!alive(pid));
 }
