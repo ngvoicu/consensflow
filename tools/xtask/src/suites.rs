@@ -554,6 +554,35 @@ mod tests {
         assert_eq!(shard::SHARD, "CF_TEST_SHARD");
     }
 
+    /// A shard says its time against its step's limit (T-836): the limit it is told is the
+    /// step's own `timeout-minutes`, so that a change of either is a change of both.
+    #[test]
+    fn the_limit_a_shard_is_told_is_its_steps_timeout() {
+        let jobs = jobs(&workflow());
+        let (_, daemons) = jobs
+            .iter()
+            .find(|(_, lines)| {
+                lines
+                    .iter()
+                    .any(|line| line == "- run: npm run test:daemons")
+            })
+            .expect("no job runs npm run test:daemons");
+        let step: Vec<&String> = daemons
+            .iter()
+            .skip_while(|line| *line != "- run: npm run test:daemons")
+            .skip(1)
+            .take_while(|line| !line.starts_with("- "))
+            .collect();
+        let value = |key: &str| {
+            step.iter()
+                .find_map(|line| line.strip_prefix(&format!("{key}: ")))
+                .unwrap_or_else(|| panic!("the step has no {key}: {step:?}"))
+                .to_owned()
+        };
+        assert_eq!(value(shard::LIMIT), value("timeout-minutes"), "{step:?}");
+        assert!(value("timeout-minutes").parse::<u64>().is_ok());
+    }
+
     /// The check a release and a branch rule trust, `gate (<os>)`: it waits for
     /// every other job of the workflow, runs whatever they did, and passes only
     /// when each passed: a job that failed, was cancelled or was skipped fails it,
