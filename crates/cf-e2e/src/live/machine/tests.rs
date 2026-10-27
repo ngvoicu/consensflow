@@ -543,10 +543,37 @@ fn a_config_seeded_in_an_empty_folder_holds_the_trust_alone() {
     let held: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(config.path().join(".claude.json")).unwrap())
             .unwrap();
-    assert_eq!(
-        held["projects"].as_object().map(|projects| projects.len()),
-        Some(1)
+    // The root of the live folders alone, by the one separator or by both (Windows').
+    let folders: std::collections::BTreeSet<String> = held["projects"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|folder| folder.replace('\\', "/"))
+        .collect();
+    assert_eq!(folders.len(), 1, "{held}");
+}
+
+#[test]
+fn a_windows_home_is_trusted_by_each_separator_claude_code_may_look_a_folder_up_by() {
+    let config = tempfile::tempdir().unwrap();
+    seed_claude_trust(config.path(), Path::new(r"C:\Users\AGV")).unwrap();
+    let held: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(config.path().join(".claude.json")).unwrap())
+            .unwrap();
+    let projects = held["projects"].as_object().unwrap();
+    assert!(
+        projects.contains_key("C:/Users/AGV/.consensflow-candidate/live"),
+        "{held}"
     );
+    assert!(
+        projects
+            .keys()
+            .any(|folder| folder.starts_with(r"C:\Users\AGV")),
+        "{held}"
+    );
+    assert!(projects
+        .values()
+        .all(|entry| entry["hasTrustDialogAccepted"] == true));
 }
 
 #[test]
