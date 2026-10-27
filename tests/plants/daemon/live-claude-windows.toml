@@ -1,0 +1,115 @@
+# The live kit runs Claude Code on Windows (T-835, T-611's re-add). A Windows machine had no copy of
+# Claude's login (`live/login.rs`: none there), so a live run's Claude windows ran on the owner's own
+# config, and the wrapper and the shim, which are shell scripts, refused Windows
+# (`live/machine/wrapper.rs`), so no suite that starts Claude could run there. Now the login is read from
+# `%USERPROFILE%\.claude\.credentials.json` as on Linux and copied into a config folder of the run's own,
+# and each wrapper is a `.cmd` in npm's shape that names Node and a script written beside it (the shape
+# cf-evals wrote for itself, now the kit's), which starts the real Claude with the isolation flags, or the
+# stand-in for a window of a fake model. One plant takes one rule out; a test of it fails. Every name holds
+# `windows live`.
+
+[run]
+live-wrapper = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::wrapper"]
+live-login = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::login"]
+live-trust = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::tests"]
+live-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "stand_in::"]
+
+[[plant]]
+name = "windows live: a window of a fake model is started on the real Claude all the same"
+meant = "the_script_starts_the_stand_in_for_a_window_of_a_fake_model_and_ends_as_the_program_does"
+runs = ["live-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''            "const [file, ...args] = fake ? stand_in : real".to_owned(),'''
+replace = '''            "const [file, ...args] = real".to_owned(),'''
+
+[[plant]]
+name = "windows live: the chief's stand-in model is not the stand-in's on Windows"
+meant = "the_script_of_a_shim_starts_the_stand_in_for_the_model_of_one_and_the_real_program_for_every_other"
+runs = ["live-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''                [STAND_IN_WORKER_MODEL, STAND_IN_CHIEF_MODEL]'''
+replace = '''                [STAND_IN_WORKER_MODEL]'''
+
+[[plant]]
+name = "windows live: the window's words go before the flags the wrapper adds"
+meant = "the_script_starts_the_real_program_with_its_flags_first_and_every_word_the_window_gave_it"
+runs = ["live-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''        "const child = spawn(file, [...args, ...process.argv.slice(2)], { stdio: 'inherit' })"'''
+replace = '''        "const child = spawn(file, [...process.argv.slice(2), ...args], { stdio: 'inherit' })"'''
+
+[[plant]]
+name = "windows live: the wrapper ends 0 whatever the program ended with"
+meant = "the_script_starts_the_stand_in_for_a_window_of_a_fake_model_and_ends_as_the_program_does"
+runs = ["live-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''        "child.on('exit', (code) => process.exit(code ?? 1))".to_owned(),'''
+replace = '''        "child.on('exit', (code) => process.exit(0))".to_owned(),'''
+
+[[plant]]
+name = "windows live: the real Claude is started without the flags that shut the human's servers out"
+meant = "the_real_claude_is_started_with_its_servers_file_first_and_the_flags_that_shut_the_rest_out"
+runs = ["live-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''    words.extend(ISOLATION.map(str::to_owned));'''
+replace = '''    words.extend(ISOLATION.map(str::to_owned).into_iter().take(0));'''
+
+[[plant]]
+name = "windows live: the wrapper's cmd does not pass the window's arguments on"
+meant = "a_windows_wrapper_is_a_cmd_in_the_shape_of_an_npm_shim_that_names_node_and_the_script_it_runs"
+runs = ["live-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''        "@echo off\r\nREM {why}\r\n\"{}\" \"{}\" %*\r\n",'''
+replace = '''        "@echo off\r\nREM {why}\r\n\"{}\" \"{}\"\r\n",'''
+
+[[plant]]
+name = "windows live: a folder of the run written with Windows' separator is the owner's"
+meant = "a_folder_of_a_run_is_known_by_the_separator_windows_wrote_it_with_as_well_as_by_ours"
+runs = ["live-login"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''    let path = path.replace('\\', "/");'''
+replace = '''    let path = path.to_owned();'''
+
+[[plant]]
+name = "windows live: a machine that is not a Mac has no login file below its home"
+meant = "the_login_is_in_the_keychain_on_a_mac_and_in_a_file_of_the_users_claude_folder_elsewhere"
+runs = ["live-login"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''        Some(Self::File(home?.join(".claude").join(".credentials.json")))'''
+replace = '''        Some(Self::File(home?.join(".claude.json")))'''
+
+[[plant]]
+name = "windows live: the live root is trusted by the Windows separator alone"
+meant = "a_windows_home_is_trusted_by_each_separator_claude_code_may_look_a_folder_up_by"
+runs = ["live-trust"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    for key in [slashed, root] {'''
+replace = '''    for key in [root] {'''
+
+[[plant]]
+name = "windows live: a stand-in that is a cmd of the run's own is named by a shim of itself"
+meant = "a_stand_in_that_is_a_cmd_of_the_runs_own_is_the_shim_already_and_any_other_is_named_by_one"
+runs = ["live-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/stand_in.rs"
+find = '''    if is_cmd {'''
+replace = '''    if false && is_cmd {'''
