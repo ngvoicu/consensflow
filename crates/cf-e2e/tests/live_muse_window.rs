@@ -1,6 +1,7 @@
 //! Live: a Muse member's window as the daemon opens one, on the real model. It is opt-in
 //! (`cargo xtask live muse-window`): it spends the Muse account's allowance on a worker of
-//! `muse-spark-1.3` at `minimal` (contributor mode off), and needs Muse Code installed and
+//! Muse's cheap model, `muse-spark-1.3` at `minimal` (contributor mode off; `--models
+//! muse=<model>:<effort>` names another), and needs Muse Code installed and
 //! logged in, so it is ignored unless asked for and is no part of `check` or of CI. Mac
 //! only for now: no Windows machine has Muse yet (MUS-20).
 //!
@@ -33,9 +34,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::{self, Log};
+use cf_e2e::live::{self, agents, Harness, Log};
 use cf_e2e::muse::members::{
-    in_its_turn, last_resumed, message_with, pane_of, project, the_session, worker, MODEL,
+    in_its_turn, last_resumed, message_with, pane_of, project, the_session, worker,
 };
 use cf_e2e::muse::{self, deliveries, has, messages, moved_away, records, shape, terminals};
 use cf_e2e::process::own_var;
@@ -63,10 +64,13 @@ fn secs(n: u64) -> Duration {
     Duration::from_secs(n)
 }
 
-/// What a live case is run with: the machine's Muse and the person's home.
+/// What a live case is run with: the machine's Muse, the person's home, and the worker's
+/// agent (its model and effort, as the run names them), which the log says it ran on.
 struct Live {
     install: muse::Installed,
     home: PathBuf,
+    agent: Value,
+    model: String,
 }
 
 impl Live {
@@ -110,13 +114,13 @@ impl Live {
     }
 }
 
-/// Every session of the rig, held to the model the worker was launched on: one Muse moved
-/// to another model on its own stops the run.
-fn still_on_its_model(rig: &Rig) -> Result {
+/// Every session of the rig, held to the model `launched` the worker was launched on:
+/// one Muse moved to another model on its own stops the run.
+fn still_on(rig: &Rig, launched: &str) -> Result {
     for (id, log) in rig.muse_sessions() {
-        if let Some(model) = moved_away(&records(&log), MODEL) {
+        if let Some(model) = moved_away(&records(&log), launched) {
             return Err(Error::Daemon(format!(
-                "Muse moved session {id} from {MODEL} to {model} on its own: the run stops (MUS-24)"
+                "Muse moved session {id} from {launched} to {model} on its own: the run stops (MUS-24)"
             )));
         }
     }
@@ -153,7 +157,7 @@ fn done(rig: &Rig, project: &Project<'_>, number: i64, within: Duration) -> Resu
 
 fn result_case(live: &Live) -> Result<String> {
     let rig = Rig::start(live.config())?;
-    let project = project(&rig)?;
+    let project = project(&rig, &live.agent)?;
     dispatch(&rig, &project, "Reply with exactly: T1_DONE")?;
     done(&rig, &project, 1, secs(240))?;
     let task = project.task(1)?;
@@ -166,7 +170,7 @@ fn result_case(live: &Live) -> Result<String> {
         terminals(&log) == ["completed"],
         format!("{:?}", terminals(&log)),
     )?;
-    still_on_its_model(&rig)?;
+    still_on(&rig, &live.model)?;
     let said = shape_of(&rig);
     rig.close()?;
     Ok(said)
@@ -174,7 +178,7 @@ fn result_case(live: &Live) -> Result<String> {
 
 fn early_case(live: &Live) -> Result<String> {
     let rig = Rig::start(live.config())?;
-    let project = project(&rig)?;
+    let project = project(&rig, &live.agent)?;
     dispatch(&rig, &project, "Reply with exactly: T1_DONE")?;
     // The pause goes in the moment the log has the turn begun, before its first token.
     rig.wait_for("the turn to begin", secs(240), || {
@@ -210,7 +214,7 @@ fn early_case(live: &Live) -> Result<String> {
     let alone = words
         .last()
         .is_some_and(|last| last.matches("Reply with exactly: T1_DONE").count() == 1);
-    still_on_its_model(&rig)?;
+    still_on(&rig, &live.model)?;
     let id = pane_of(&project)?["id"]
         .as_str()
         .unwrap_or_default()
@@ -230,7 +234,7 @@ fn early_case(live: &Live) -> Result<String> {
 
 fn tell_case(live: &Live) -> Result<String> {
     let rig = Rig::start(live.config())?;
-    let project = project(&rig)?;
+    let project = project(&rig, &live.agent)?;
     dispatch(&rig, &project, LONG)?;
     in_its_turn(&rig, &project, 1, secs(240))?;
     // Into the shell command: the stop comes after the model's first output.
@@ -257,7 +261,7 @@ fn tell_case(live: &Live) -> Result<String> {
     let alone = words
         .last()
         .is_some_and(|last| last.contains("HANDED_OVER") && !last.contains("sleep 25"));
-    still_on_its_model(&rig)?;
+    still_on(&rig, &live.model)?;
     let said = format!(
         "the tell given {} time(s), turns {:?}, retracted {}, deliveries {:?}, the question alone {alone}\n{}",
         told["attempts"], terminals(&log), has(&log, "run/run_retracted"), deliveries(&log), shape_of(&rig)
@@ -273,7 +277,7 @@ fn tell_case(live: &Live) -> Result<String> {
 
 fn steer_case(live: &Live) -> Result<String> {
     let rig = Rig::start(live.config())?;
-    let project = project(&rig)?;
+    let project = project(&rig, &live.agent)?;
     dispatch(&rig, &project, LONG)?;
     in_its_turn(&rig, &project, 1, secs(240))?;
     rig.wait_for("the shell command to run", secs(120), || {
@@ -311,7 +315,7 @@ fn steer_case(live: &Live) -> Result<String> {
     let at_once = deliveries(&the_session(&rig).1);
     done(&rig, &project, 1, secs(300))?;
     let (_, log) = the_session(&rig);
-    still_on_its_model(&rig)?;
+    still_on(&rig, &live.model)?;
     let said = format!(
         "deliveries {at_once:?}, turns {:?}, the result {}\n{}",
         terminals(&log),
@@ -331,7 +335,7 @@ fn steer_case(live: &Live) -> Result<String> {
 fn cut_case(live: &Live) -> Result<String> {
     let config = live.config();
     let rig = Rig::start(config.clone())?;
-    let project = project(&rig)?;
+    let project = project(&rig, &live.agent)?;
     let id = project.id();
     dispatch(&rig, &project, LONG)?;
     in_its_turn(&rig, &project, 1, secs(240))?;
@@ -356,7 +360,7 @@ fn cut_case(live: &Live) -> Result<String> {
     })?;
     done(&rig, &project, 1, secs(300))?;
     let (same, log) = the_session(&rig);
-    still_on_its_model(&rig)?;
+    still_on(&rig, &live.model)?;
     let said = format!(
         "the note given {} time(s), resumed on the session {}, turns {:?}\n{}",
         received.unwrap_or_default()["attempts"],
@@ -375,7 +379,7 @@ fn cut_case(live: &Live) -> Result<String> {
 fn after_case(live: &Live, restart: bool) -> Result<String> {
     let config = live.config();
     let rig = Rig::start(config.clone())?;
-    let project = project(&rig)?;
+    let project = project(&rig, &live.agent)?;
     let id = project.id();
     dispatch(&rig, &project, "Reply with exactly: T1_DONE")?;
     done(&rig, &project, 1, secs(240))?;
@@ -401,7 +405,7 @@ fn after_case(live: &Live, restart: bool) -> Result<String> {
     done(&rig, &project, 2, secs(240))?;
     let (same, log) = the_session(&rig);
     let words = messages(&log);
-    still_on_its_model(&rig)?;
+    still_on(&rig, &live.model)?;
     let said = format!(
         "resumed on the session {}, messages {}, turns {:?}, T-2's result {}\n{}",
         last_resumed(&rig, &session),
@@ -420,7 +424,7 @@ fn after_case(live: &Live, restart: bool) -> Result<String> {
 
 fn rest_case(live: &Live) -> Result<String> {
     let rig = Rig::start(live.config())?;
-    let project = project(&rig)?;
+    let project = project(&rig, &live.agent)?;
     dispatch(&rig, &project, "Reply with exactly: T1_DONE")?;
     rig.wait_for("the turn to begin", secs(240), || {
         Ok(rig
@@ -439,7 +443,7 @@ fn rest_case(live: &Live) -> Result<String> {
     std::thread::sleep(secs(8));
     let id = pane["id"].as_str().unwrap_or_default().to_owned();
     let (_, log) = the_session(&rig);
-    still_on_its_model(&rig)?;
+    still_on(&rig, &live.model)?;
     let said = format!(
         "T-1 {state} after the human's Escape, its pause {}, the daemon's Escapes {}, turns {:?}, retracted {}\n{}",
         paused["ok"], rig.keys_pressed(&id, &[27]), terminals(&log), has(&log, "run/run_retracted"), shape_of(&rig)
@@ -452,13 +456,18 @@ fn rest_case(live: &Live) -> Result<String> {
 #[test]
 #[ignore = "opt-in: spends the Muse account's allowance; cargo xtask live muse-window"]
 fn each_case_of_a_muse_members_window_holds_on_the_real_model() -> Result {
-    let log = Log::own_agents(
-        "live muse-window",
-        "its Muse worker runs on muse-spark-1.3 at minimal, contributor mode off",
-    )?;
+    let log = Log::begin("live muse-window")?;
     let install = muse::installed().map_err(Error::Daemon)?;
     let home = PathBuf::from(own_var("HOME").ok_or_else(|| Error::Daemon("no home".to_owned()))?);
-    let live = Live { install, home };
+    let agent = agents::agent(Harness::Muse);
+    log.launched(&agents::row(Harness::Muse, "standard"));
+    let model = agents::model(Harness::Muse).name;
+    let live = Live {
+        install,
+        home,
+        agent,
+        model,
+    };
     let asked = live::list("case");
     let mut checks = Vec::new();
     for case in CASES

@@ -11,7 +11,7 @@
 use std::time::Duration;
 
 use cf_e2e::muse::members::{
-    in_its_turn, last_resumed, message_with, pane_of, project, the_session, worker,
+    echo_worker, in_its_turn, last_resumed, message_with, pane_of, project, the_session, worker,
 };
 use cf_e2e::muse::{self, deliveries, has, messages, terminals};
 use cf_e2e::rig::{Config, Project, Rig};
@@ -43,7 +43,7 @@ fn a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole() ->
         return Ok(());
     };
     let rig = Rig::start(config)?;
-    let project = project(&rig)?;
+    let project = project(&rig, &echo_worker())?;
     rig.tell(
         project.id(),
         "DISPATCH --tier standard Reply with exactly: T1_DONE",
@@ -107,7 +107,7 @@ fn an_interrupt_before_the_first_word_takes_the_brief_back_and_the_resume_goes_i
         return Ok(());
     };
     let rig = Rig::start(config)?;
-    let project = project(&rig)?;
+    let project = project(&rig, &echo_worker())?;
     rig.tell(
         project.id(),
         "DISPATCH --tier standard Reply with exactly: T1_DONE",
@@ -156,7 +156,7 @@ fn a_tell_while_the_turn_works_stops_it_takes_the_brief_back_and_goes_in_alone_o
         return Ok(());
     };
     let rig = Rig::start(config)?;
-    let project = project(&rig)?;
+    let project = project(&rig, &echo_worker())?;
     rig.tell(
         project.id(),
         "DISPATCH --tier standard Reply with exactly: T1_DONE",
@@ -218,7 +218,7 @@ fn words_that_land_in_a_turn_at_work_are_the_turn_s_at_once_and_its_task_ends_on
         return Ok(());
     };
     let rig = Rig::start(config)?;
-    let project = project(&rig)?;
+    let project = project(&rig, &echo_worker())?;
     rig.tell(
         project.id(),
         "DISPATCH --tier standard Reply with exactly: T1_DONE",
@@ -262,7 +262,7 @@ fn a_muse_worker_cut_by_the_app_s_quit_is_resumed_on_its_session_with_the_note_p
         return Ok(());
     };
     let rig = Rig::start(config.clone())?;
-    let project = project(&rig)?;
+    let project = project(&rig, &echo_worker())?;
     let id = project.id();
     rig.tell(id, "DISPATCH --tier standard Reply with exactly: T1_DONE")?;
     in_its_turn(&rig, &project, 1, secs(90))?;
@@ -314,7 +314,7 @@ fn a_task_put_after_another_opens_the_worker_again_on_the_same_conversation() ->
         return Ok(());
     };
     let rig = Rig::start(config)?;
-    let project = project(&rig)?;
+    let project = project(&rig, &echo_worker())?;
     rig.tell(
         project.id(),
         "DISPATCH --tier standard Reply with exactly: T1_DONE",
@@ -353,7 +353,7 @@ fn a_conversation_the_app_quit_at_rest_is_gone_on_with_after_the_restart() -> Ou
         return Ok(());
     };
     let rig = Rig::start(config.clone())?;
-    let project = project(&rig)?;
+    let project = project(&rig, &echo_worker())?;
     let id = project.id();
     rig.tell(id, "DISPATCH --tier standard Reply with exactly: T1_DONE")?;
     rig.wait_for("T-1 to be answered", secs(120), || {
@@ -397,7 +397,7 @@ fn a_stop_that_finds_the_muse_window_at_rest_is_paid_with_no_key() -> Outcome {
         return Ok(());
     };
     let rig = Rig::start(config)?;
-    let project = project(&rig)?;
+    let project = project(&rig, &echo_worker())?;
     rig.tell(
         project.id(),
         "DISPATCH --tier standard Reply with exactly: T1_DONE",

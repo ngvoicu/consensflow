@@ -322,9 +322,9 @@ pub fn shape(records: &[Value]) -> Vec<String> {
         .collect()
 }
 
-/// A project of the rig's with a chief on the stand-in `claude` and a Muse worker on
-/// `muse-spark-1.3` at `minimal` (the live tests' model; the rig's echo Muse takes both
-/// out), and what its cases read of it.
+/// A project of the rig's with a chief on the stand-in `claude` and a Muse worker (the
+/// live tests' on the model the run names, the echo rig's on `muse-spark-1.3` at
+/// `minimal`, which the rig's echo Muse takes out), and what its cases read of it.
 pub mod members {
     use std::time::Duration;
 
@@ -338,22 +338,22 @@ pub mod members {
     /// The worker's agent, as the roster names it.
     pub const WORKER: &str = "muse-worker";
 
-    /// The model and effort the worker runs on.
-    pub const MODEL: &str = "muse-spark-1.3";
-    pub const EFFORT: &str = "minimal";
+    /// The worker of the echo rig's cases: the live tests' model and effort.
+    pub fn echo_worker() -> Value {
+        json!({ "kind": "muse", "model": "muse-spark-1.3", "effort": "minimal" })
+    }
 
-    /// The project of a case: the roster written, the chief's project opened, the Muse
-    /// worker added.
-    pub fn project(rig: &Rig) -> Result<Project<'_>> {
+    /// The project of a case: the roster written, its worker `agent` (its kind, model
+    /// and effort) under [`WORKER`], the chief's project opened, the Muse worker added.
+    pub fn project<'a>(rig: &'a Rig, agent: &Value) -> Result<Project<'a>> {
+        let mut worker = agent.clone();
+        if let Some(fields) = worker.as_object_mut() {
+            fields.insert("id".to_owned(), json!(WORKER));
+            fields.insert("workTier".to_owned(), json!("standard"));
+        }
         let roster = json!({
             "schemaVersion": 1,
-            "agents": [
-                { "id": "chief", "kind": "claude-code", "model": "fake-chief" },
-                {
-                    "id": WORKER, "kind": "muse", "model": MODEL,
-                    "effort": EFFORT, "workTier": "standard",
-                },
-            ],
+            "agents": [{ "id": "chief", "kind": "claude-code", "model": "fake-chief" }, worker],
         });
         files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
         let project = Project::open(rig, "chief", json!({}))?;
