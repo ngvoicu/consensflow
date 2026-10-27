@@ -1813,8 +1813,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture.rs"
-find = "        group.end(Ending::Forced);\n        child.wait().await\n    }\n    #[cfg(not(unix))]"
-replace = "        if !group.ended() {\n            group.end(Ending::Forced);\n        }\n        child.wait().await\n    }\n    #[cfg(not(unix))]"
+find = "        group.end(Ending::Forced);\n        group.stragglers_forced().await;\n        child.wait().await\n    }\n    #[cfg(not(unix))]"
+replace = "        if !group.ended() {\n            group.end(Ending::Forced);\n            group.stragglers_forced().await;\n        }\n        child.wait().await\n    }\n    #[cfg(not(unix))]"
 
 [[plant]]
 name = "tooling: nextest is given the variables of its own this run was given, which win over its config"
