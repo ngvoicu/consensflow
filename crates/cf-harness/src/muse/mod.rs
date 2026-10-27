@@ -4,8 +4,11 @@
 
 mod adapter;
 pub(crate) mod index;
+pub mod models;
+mod msp;
 pub(crate) mod paths;
 pub mod record;
+pub mod usage;
 pub(crate) mod version;
 
 pub use adapter::MuseAdapter;

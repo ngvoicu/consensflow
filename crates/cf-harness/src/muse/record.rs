@@ -291,7 +291,7 @@ impl Log {
                     // Where the account refused for what only its human cures, the failure
                     // is said in plain words (MUS-23), not as the API said it.
                     End::Failed { reason } => {
-                        let plain = self.provisional.failed(&run, reason.as_deref(), at);
+                        let plain = self.provisional.failed(&run, event, reason.as_deref(), at);
                         End::Failed {
                             reason: plain.map(str::to_owned).or(reason),
                         }

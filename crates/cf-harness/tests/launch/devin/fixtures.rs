@@ -358,6 +358,7 @@ pub(super) fn settled(session: &str) -> Record {
         failed: false,
         failure: None,
         took_back: false,
+        model_moved: None,
         quota: None,
         settlement: Settlement::Settled,
         pending: Default::default(),

@@ -358,6 +358,7 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         failed: false,
         failure: None,
         took_back: false,
+        model_moved: None,
         quota,
         settlement,
         pending: Default::default(),

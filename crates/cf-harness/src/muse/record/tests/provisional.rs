@@ -296,3 +296,47 @@ fn a_402_is_no_quota_and_an_account_whose_login_is_refused_is_unavailable_too() 
         assert_eq!(because, plain, "{reason}");
     }
 }
+
+#[test]
+fn a_refusal_that_names_its_limit_and_reset_is_exhausted_until_then_and_the_second_wording_is_one()
+{
+    // Provisional (MUS-14): the wire's `error.quota` (`QuotaDetail`: `{limitKind, resetsAtMs}`)
+    // is never seen in the log of a run; where a terminal carries it, its reset is the reset.
+    let refused = |event: serde_json::Value| {
+        record_of(&[
+            run(2, "t1", json!({ "kind": "started" })),
+            run(3, "t1", event),
+        ])
+    };
+    for carried in [
+        json!({ "kind": "terminal", "terminal": "failed", "reason": "stopped",
+                "quota": { "limitKind": "tierLimit", "resetsAtMs": 1_793_051_801_000_u64 } }),
+        json!({ "kind": "terminal", "terminal": "failed", "reason": "stopped",
+                "error": { "kind": "modelError", "quota": { "limitKind": "tierLimit", "resetsAtMs": 1_793_051_801_000_u64 } } }),
+    ] {
+        let quota = refused(carried).quota;
+        let Some(quota) = quota.as_deref() else {
+            panic!("no quota");
+        };
+        assert_eq!(quota.resets_at(), Some("2026-10-26T21:56:41.000Z"));
+        assert!(matches!(quota, Quota::Exhausted { .. }));
+    }
+    // Muse's own words for a limit, both of the sentences its screen says.
+    for reason in [
+        "This turn stopped because your usage limit was reached.",
+        "Usage limit reached",
+    ] {
+        let quota =
+            refused(json!({ "kind": "terminal", "terminal": "failed", "reason": reason })).quota;
+        assert!(
+            matches!(
+                quota.as_deref(),
+                Some(Quota::Exhausted {
+                    resets_at: None,
+                    ..
+                })
+            ),
+            "{reason}"
+        );
+    }
+}

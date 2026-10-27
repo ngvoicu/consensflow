@@ -364,6 +364,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             failed: false,
             failure: agent.failure.clone(),
             took_back: false,
+            model_moved: None,
             quota: None,
             settlement: Settlement::Unknown,
             pending: agent.pending,

@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use super::super::usage::wire_quota;
 use super::field;
 use crate::shared::quota::{account_refusal, Quota, Refusal};
 use crate::shared::record::jsonl::Stop;
@@ -162,10 +163,20 @@ impl Provisional {
     pub(super) fn failed(
         &mut self,
         run: &Arc<str>,
+        event: Option<&Value>,
         reason: Option<&str>,
         at: &Value,
     ) -> Option<&'static str> {
         let at = at.as_str().map(str::to_owned);
+        // The wire's own word on a limit (`error.quota`, `{limitKind, resetsAtMs}`) names its
+        // reset, which no words do. Provisional: never seen in a log, only in the schema.
+        let detail = field(event, "quota").or_else(|| field(field(event, "error"), "quota"));
+        if let Some(refusal) =
+            detail.and_then(|detail| wire_quota(detail, at.as_deref()).ok().flatten())
+        {
+            self.refusals.insert(Arc::clone(run), Arc::new(refusal));
+            return None;
+        }
         let (refusal, plain) = match refused_for(reason?)? {
             Refused::Limit => (
                 Quota::Exhausted {
@@ -244,10 +255,14 @@ fn refused_for(reason: &str) -> Option<Refused> {
     if let Some(refusal) = account_refusal(reason, api_status(&lower)) {
         return Some(Refused::Account(refusal));
     }
-    ["api error 429", "usage limit reached"]
-        .iter()
-        .any(|words| lower.contains(words))
-        .then_some(Refused::Limit)
+    [
+        "api error 429",
+        "usage limit reached",
+        "usage limit was reached",
+    ]
+    .iter()
+    .any(|words| lower.contains(words))
+    .then_some(Refused::Limit)
 }
 
 /// The status of `API error <status>`, in a lowercased reason.

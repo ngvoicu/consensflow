@@ -4,7 +4,9 @@
 //! the human's Try again now brings it back.
 
 use cf_engine::testing::Context;
-use cf_harness::records::Quota;
+use std::sync::Arc;
+
+use cf_harness::records::{Level, Quota};
 
 use crate::fixtures::{after, assert_match, now, placed, Tiers};
 
@@ -144,4 +146,47 @@ fn the_human_saying_the_account_works_again_brings_the_member_back_and_its_task_
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "paused");
     assert_eq!(human_notes(&tiers).len(), 2);
+}
+
+#[test]
+fn an_allowance_the_harness_shows_again_brings_an_unavailable_member_back_a_still_full_one_does_not(
+) {
+    // Muse's `usage` says the account has an allowance (MUS-23): that is the harness's own word
+    // that the refusal is over, and no human's is needed. A count that says used up is not.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context
+        .adapter
+        .refuse("zeus-amber-pine", unavailable(&context));
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let usage = |level, used: u64| Quota::Usage {
+        level,
+        used_percent: Some(used.into()),
+        resets_at: None,
+    };
+    context.adapter.with("zeus-amber-pine", |agent| {
+        agent.failed = false;
+        agent.quota = Some(Arc::new(usage(Level::Exhausted, 100)));
+    });
+    context.pass().unwrap();
+    assert!(
+        tiers.out_until("zeus").is_some(),
+        "a count used up is no allowance"
+    );
+    context.adapter.with("zeus-amber-pine", |agent| {
+        agent.quota = Some(Arc::new(usage(Level::Ok, 3)));
+    });
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), None, "its allowance is back");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        placed(&tiers.task(1).task),
+        ("working", Some("zeus-amber-pine")),
+        "its task went on"
+    );
 }

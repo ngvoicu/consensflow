@@ -1196,12 +1196,20 @@ impl Dispatcher {
         }
         let mut out = self.is_out(&owner);
         let mut returned = None;
-        // A window that got a turn through after its member was marked out says the quota is back.
-        if out && self.answered_since(&owner, &observed) {
+        // A window that got a turn through after its member was marked out says the quota is
+        // back, and so does the harness's own count of an allowance, for an account that
+        // was unavailable with no reset to wait for (MUS-23: Muse's `usage`).
+        let answered = out && self.answered_since(&owner, &observed);
+        if answered || (out && self.shows_an_allowance(&owner, &observed)) {
+            let because = if answered {
+                format!("@{} answered again", participant.handle)
+            } else {
+                format!("@{} shows an allowance again", participant.handle)
+            };
             self.seams
                 .ledger
                 .borrow_mut()
-                .mark_back(owner.id, &format!("@{} answered again", participant.handle))?;
+                .mark_back(owner.id, &because)?;
             returned.clone_from(&owner.out_until);
             self.changed();
             out = false;

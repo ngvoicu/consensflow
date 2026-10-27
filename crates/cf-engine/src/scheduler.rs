@@ -401,6 +401,21 @@ impl Dispatcher {
         last_answer(observed).is_some_and(|at| after(&at, since))
     }
 
+    /// Whether a window of a member whose account is unavailable shows the harness's own
+    /// count of an allowance, not used up: the refusal that made it unavailable is over, with
+    /// no human to say so (Muse's `usage`, MUS-23). A member out for a quota that resets
+    /// waits for its reset, whatever a count in an old record says.
+    pub(crate) fn shows_an_allowance(&self, owner: &ParticipantView, observed: &Observed) -> bool {
+        owner.out_until.as_deref().is_some_and(never)
+            && matches!(
+                observed.quota.as_deref(),
+                Some(Quota::Usage {
+                    level: Level::Ok | Level::Low,
+                    ..
+                })
+            )
+    }
+
     /// Whether a window's last turn ended in a refusal its member is past
     /// now: the turn was cut short, and failed nothing.
     pub(crate) fn cut_short(&self, observed: &Observed) -> bool {
