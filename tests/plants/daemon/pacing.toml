@@ -1,12 +1,27 @@
 # Paced delivery (3.0.7, `chief-meeting`): a board message goes into a window once, and its
 # arrival is proven from the harness's own record. A message Claude Code takes into a turn
 # under way is the user's item of its record, which begins no turn (CMT-02): a human's alone,
-# in the main conversation, its words a text or blocks. One plant takes one rule out; a test
-# of it fails.
+# in the main conversation, its words a text or blocks. A message is typed in only once the
+# window has read at rest, from a record that was read, on one last item, for the settle, the
+# human's keys quiet as long, and a fresh look before the paste reads it so (CMT-03 to CMT-06);
+# a member's question goes first (CMT-07); the looks are in the events (CMT-08); a record that
+# holds the header after the hand-over is never pasted over (CMT-23). One plant takes one rule
+# out; a test of it fails.
 
 [run]
 # The Claude reader's own tests: what each record says of a turn.
 pacing-claude-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+# The engine's pacing and arrival cases (`tests/dispatcher/pacing.rs`, `unproven.rs`).
+pacing-kit = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "pacing::", "unproven::"]
+# The ledger's order of a queue.
+pacing-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "questions_first"]
+# Codex's broker, and what its window makes of it.
+pacing-broker = ["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "broker::tests::delivery"]
+pacing-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "codex::windows"]
+# Pi's channel.
+pacing-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "pi::"]
+# The pane host's count of the human's keys.
+pacing-panes = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter"]
 
 [[plant]]
 name = "pacing reader: a message Claude takes into a turn under way is no item, and its arrival never shows"
@@ -70,3 +85,215 @@ find = '''
     ("prompt", &Keep::Items(&BLOCK)),'''
 replace = '''
     ("prompt", &Keep::Items(&BLOCK)),'''
+
+[[plant]]
+name = "pacing gate: a message goes at the first look at rest, with no settle"
+meant = "a_message_waits_until_the_window_has_read_at_rest_for_the_settle"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "        if rest_ms < settle {"
+replace = "        if rest_ms < 0 {"
+
+[[plant]]
+name = "pacing gate: a new last item of the record goes on with the rest before it"
+meant = "a_new_last_item_starts_the_settle_again"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "            .filter(|rest| rest.frontier == frontier && rest.look + 1 == looked)"
+replace = "            .filter(|rest| rest.look + 1 == looked)"
+
+[[plant]]
+name = "pacing gate: no fresh look before the paste"
+meant = "a_fresh_look_before_the_paste_that_finds_a_new_item_hands_nothing_over"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = '''
+        let paced = record.delivery.borrow().paced.clone();
+        let Some(paced) = paced.filter(|paced| paced.message == message) else {'''
+replace = '''
+        let paced = record.delivery.borrow().paced.clone();
+        let Some(paced) = paced.filter(|paced| paced.message == message && false) else {'''
+
+[[plant]]
+name = "pacing gate: a record that could not be read is rest"
+meant = "an_unreadable_record_is_never_rest_with_a_settle_or_without"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "        if !(idle && read(observed)) || at_work {"
+replace = "        if !idle || at_work {"
+
+[[plant]]
+name = "pacing gate: the harness's word that its window is at work is not asked"
+meant = "a_window_whose_harness_says_it_is_at_work_is_given_nothing_whatever_its_record_says"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "        if !(idle && read(observed)) || at_work {"
+replace = "        if !(idle && read(observed)) {"
+
+[[plant]]
+name = "pacing gate: the human's keys are not waited on"
+meant = "a_key_of_the_humans_within_the_settle_holds_the_message"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "        if typed_quiet_ms.is_some_and(|quiet| quiet < settle) {"
+replace = "        if typed_quiet_ms.is_some_and(|quiet| quiet < 0) {"
+
+[[plant]]
+name = "pacing gate: a harness with no idle word is not held to a quiet screen"
+meant = "a_harness_with_no_idle_word_of_its_own_waits_for_a_quiet_screen_too_and_says_so"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "        if fallback && output_quiet_ms.is_none_or(|quiet| quiet < settle) {"
+replace = "        if fallback && output_quiet_ms.is_none_or(|quiet| quiet < 0) {"
+
+[[plant]]
+name = "pacing gate: the chief's urgent tell waits for the settle"
+meant = "an_urgent_tell_goes_at_the_first_look_at_rest"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = '''
+        message.urgent
+            || prelude'''
+replace = '''
+        false
+            || prelude'''
+
+[[plant]]
+name = "pacing gate: a harness's busy refusal spends an attempt"
+meant = "a_harness_that_refuses_a_message_for_being_busy_spends_no_attempt"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                .retry_delivery(message.id, reason, true)?;"
+replace = "                .retry_delivery(message.id, reason, false)?;"
+
+[[plant]]
+name = "pacing evidence: delivery.begun says nothing of the look that let it go"
+meant = "the_look_that_lets_a_message_go_is_in_its_delivery_begun"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        let begun = match self.paced_look(record, message.id) {"
+replace = "        let begun = match self.paced_look(record, message.id).filter(|_| false) {"
+
+[[plant]]
+name = "pacing evidence: a retry says nothing of what its looks read"
+meant = "a_header_the_record_held_before_the_hand_over_proves_nothing_and_the_paste_goes_again"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        self.settle_failure_looked(delivering, &because, true, Some(&look))"
+replace = "        self.settle_failure_looked(delivering, &because, true, Some(&look).filter(|_| false))"
+
+[[plant]]
+name = "unproven: a record that holds the header after the hand-over is pasted over"
+meant = "a_record_that_holds_the_header_after_the_hand_over_takes_it_for_arrived_and_never_pastes_it_again"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if self.arrived_unproven(record, delivering.message)? {"
+replace = "        if false && self.arrived_unproven(record, delivering.message)? {"
+
+[[plant]]
+name = "unproven: a header the record held before the hand-over is taken for the message's"
+meant = "a_header_the_record_held_before_the_hand_over_proves_nothing_and_the_paste_goes_again"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "                .copied_items_since(record.id, &marker_of(message), &handed)?"
+replace = "                .copied_items_since(record.id, &marker_of(message), &handed[..0])?"
+
+[[plant]]
+name = "questions first: every queue goes oldest first"
+meant = "a_members_question_goes_ahead_of_older_messages_and_the_rest_go_oldest_first"
+runs = ["pacing-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "       ORDER BY NOT (m.kind = 'question' AND m.urgent = 0), m.id LIMIT 1\","
+replace = "       ORDER BY m.id LIMIT 1\","
+
+[[plant]]
+name = "questions first: an urgent question goes first too"
+meant = "an_urgent_question_keeps_its_place_by_age"
+runs = ["pacing-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "       ORDER BY NOT (m.kind = 'question' AND m.urgent = 0), m.id LIMIT 1\","
+replace = "       ORDER BY NOT (m.kind = 'question'), m.id LIMIT 1\","
+
+[[plant]]
+name = "codex: the broker says nothing of whether its thread is idle"
+meant = "the_session_view_says_whether_codex_last_said_the_shown_thread_is_idle"
+runs = ["pacing-broker"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/mod.rs"
+find = "            idle: state.idle(),"
+replace = "            idle: None,"
+
+[[plant]]
+name = "codex: the window is never at work by the broker's word"
+meant = "a_window_is_at_work_while_the_broker_says_codex_last_called_its_thread_busy"
+runs = ["pacing-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "                    .is_some_and(|shown| shown.idle == Some(false)),"
+replace = "                    .is_some_and(|shown| shown.idle == Some(false) && false),"
+
+[[plant]]
+name = "pi: a refusal for Pi being at work is a refusal"
+meant = "a_refusal_of_the_extension_s_for_pi_being_at_work_is_busy_and_any_other_a_refusal"
+runs = ["pacing-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = "            if sent.busy() {"
+replace = "            if sent.busy() && false {"
+
+[[plant]]
+name = "panes: the daemon's own keys start the human's quiet again"
+meant = "the_human_s_keys_alone_start_the_quiet_the_pacing_waits_on"
+runs = ["pacing-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = '''
+        writer
+            .write(pane, bytes)
+            .map_err(|error| fail_input(&state, pane, error, false))
+    }
+
+    /// A paste and its Enter, held while the human's keys left text unsent,'''
+replace = '''
+        writer
+            .write(pane, bytes)
+            .map_err(|error| fail_input(&state, pane, error, false))?;
+        lock_state(&state)?.typed_at = Some(Instant::now());
+        Ok(())
+    }
+
+    /// A paste and its Enter, held while the human's keys left text unsent,'''

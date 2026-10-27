@@ -15,8 +15,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Admission, Held, Observed, Over, Pane, PaneHost, Question, Readiness, Trusts, Waiting, Window,
-    Work, NOT_ADMITTED,
+    Admission, Held, InputBox, Observed, Over, Pane, PaneHost, Question, Readiness, Trusts, Waiting,
+    Window, Work, NOT_ADMITTED,
 };
 use cf_harness::records::{Item, Lines, Reading, Record, Role, Settlement};
 use serde_json::{json, Value};
@@ -325,6 +325,16 @@ impl Window for FakeWindow {
     /// Not written down: the JavaScript fake was never asked.
     fn at_work(&self) -> bool {
         self.fake.of_launch(&self.launch, |agent| agent.at_work)
+    }
+
+    /// Not written down: the JavaScript fake was never asked.
+    fn input_box<'a>(
+        &'a self,
+        _host: &'a dyn PaneHost,
+        _pane: &'a Pane,
+    ) -> Work<'a, Option<InputBox>> {
+        let held = self.fake.input_box.get();
+        Box::pin(async move { held })
     }
 
     /// Not written down: the JavaScript fake was never asked.

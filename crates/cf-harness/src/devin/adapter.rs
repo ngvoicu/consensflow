@@ -693,6 +693,14 @@ impl Window for DevinWindow {
         self.history().is_some_and(|seen| seen.took)
     }
 
+    fn input_box<'a>(
+        &'a self,
+        host: &'a dyn PaneHost,
+        pane: &'a Pane,
+    ) -> Work<'a, Option<input_box::InputBox>> {
+        Box::pin(input_box::on_screen(host, pane, Harness::Devin))
+    }
+
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
         Box::pin(async move {
             let Some(session) = self.session.borrow().clone() else {

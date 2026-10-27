@@ -87,7 +87,7 @@
 use std::rc::Rc;
 
 use cf_base::js;
-use cf_harness::contract::{Input, Observed, Pane};
+use cf_harness::contract::{Input, InputBox, Observed, Pane};
 use cf_harness::records::{Reading, Role, Settlement};
 use cf_ledger::NewNote;
 use cf_proto::ledger::MessageView;
@@ -331,6 +331,11 @@ impl Dispatcher {
         if self.arrived_unproven(record, delivering.message)? {
             return Ok(());
         }
+        // Nor does a paste go again that is still there for the window: on its way to
+        // its record, in its input box, or on its screen (CMT-24).
+        if self.paste_still_there(record, delivering.message).await? {
+            return Ok(());
+        }
         record.delivery.borrow_mut().delivering = None;
         // A paste the harness record never showed after the whole window, the
         // window at rest all of it, did not land: sending it again is how it
@@ -361,6 +366,82 @@ impl Dispatcher {
         };
         let look = self.arrival_look(record, observed, delivering.message, rested);
         self.settle_failure_looked(delivering, &because, true, Some(&look))
+    }
+
+    /// Whether the paste of `message`, which the record never showed in its whole wait,
+    /// is still there for the window (3.0.7 chief-meeting, CMT-24, T-760's F4: on a loaded
+    /// Mac, m-3093 and m-4273 had no record of their paste for 177 s and 196 s, and were
+    /// pasted again). It is where the window's screen printed within the last
+    /// [`ENTER_AGAIN_QUIET_MS`] (a window that draws is at work, or taking the paste in), and
+    /// where its input box holds it: then an Enter is pressed once more, as the hand-over's
+    /// is ([`Dispatcher::enter_again`], whose guards keep the human's own words from going
+    /// with it). Either way its rest begins again, and nothing is pasted: a paste goes
+    /// again only where it is gone from the screen as from the record. Only a paste is
+    /// asked of: what a harness took through a channel of its own is its record's.
+    async fn paste_still_there(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        message: i64,
+    ) -> Result<bool, EngineError> {
+        if !self.pasted(record) {
+            return Ok(false);
+        }
+        let (window, pane) = {
+            let part = record.window.borrow();
+            (part.window.clone(), part.pane.clone())
+        };
+        let (Some(window), Some(pane)) = (window, pane) else {
+            return Ok(false);
+        };
+        let printing = record
+            .delivery
+            .borrow()
+            .watched
+            .filter(|watched| watched.message == message)
+            .and_then(|watched| watched.output_quiet_ms)
+            .is_some_and(|quiet| (quiet as f64) < ENTER_AGAIN_QUIET_MS);
+        let boxed = if printing {
+            None
+        } else {
+            returning(window.input_box(&*self.seams.host, &pane)).await
+        };
+        let on_its_way = record
+            .delivery
+            .borrow()
+            .delivering
+            .as_ref()
+            .is_some_and(|delivering| delivering.message == message);
+        if self.forgotten(record) || !on_its_way {
+            return Ok(true);
+        }
+        let held = boxed == Some(InputBox::Holds);
+        if !(printing || held) {
+            return Ok(false);
+        }
+        if held {
+            self.enter_again(record, message).await?;
+        }
+        let now = self.now();
+        if let Some(delivering) = record
+            .delivery
+            .borrow_mut()
+            .delivering
+            .as_mut()
+            .filter(|delivering| delivering.message == message)
+        {
+            // A whole wait from now, the half hour's too: the next ask comes no sooner.
+            delivering.rested_since = Some(now);
+            delivering.free_since = Some(now);
+        }
+        self.seams.log.warn(&format!(
+            "m-{message} was to go again, its record never having shown it: its window {}; it waits once more, and is not pasted again",
+            if held {
+                "holds it in its input box, and Enter was pressed once more"
+            } else {
+                "printed on its screen within the last seconds"
+            }
+        ));
+        Ok(true)
     }
 
     /// A look at the window while `delivering` is on its way: the time since the last

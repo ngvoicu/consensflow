@@ -74,6 +74,8 @@
     "live:harnesses": "cargo xtask live harnesses",
     "live:pi-parity": "cargo xtask live pi-parity",
     "live:absorbed": "cargo xtask live absorbed",
+    "live:pacing": "cargo xtask live pacing",
+    "live:stopped": "cargo xtask live stopped",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },

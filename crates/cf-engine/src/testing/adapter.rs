@@ -23,8 +23,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, FirstMessage, Input, Interrupt, Launch, Over, Prepared, Readiness, Skill,
-    Trusts, Waiting, Window, Work,
+    Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, Over, Prepared,
+    Readiness, Skill, Trusts, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
@@ -284,6 +284,9 @@ pub struct FakeAdapter {
     /// (`Window::idle_word`): every harness's but one with no such word, whose
     /// windows are read at rest by the pacing's fallback.
     pub idle_word: Cell<bool>,
+    /// What its windows' input box holds on their screen (`Window::input_box`): none,
+    /// as a window whose box no reader reads, unless a test says.
+    pub input_box: Cell<Option<InputBox>>,
 }
 
 impl FakeAdapter {
@@ -356,6 +359,7 @@ impl FakeAdapter {
             trusts: RefCell::new(None),
             says_places: Cell::new(true),
             idle_word: Cell::new(true),
+            input_box: Cell::new(None),
         })
     }
 

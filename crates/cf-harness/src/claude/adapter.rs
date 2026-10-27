@@ -578,6 +578,14 @@ impl Window for ClaudeWindow {
         })
     }
 
+    fn input_box<'a>(
+        &'a self,
+        host: &'a dyn PaneHost,
+        pane: &'a Pane,
+    ) -> Work<'a, Option<InputBox>> {
+        Box::pin(input_box::on_screen(host, pane, Harness::Claude))
+    }
+
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
         Box::pin(async move {
             // Claude's status first, then the conversation, which is then

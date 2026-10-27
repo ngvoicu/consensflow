@@ -18,6 +18,8 @@ use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
+/// What an input box on the screen holds ([`Window::input_box`]).
+pub use crate::shared::input_box::InputBox;
 use crate::records::{
     Boundary, Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement,
 };
@@ -474,6 +476,17 @@ pub trait Window {
     /// such word, or said none.
     fn at_work(&self) -> bool {
         false
+    }
+    /// What the window's input box holds on its screen now, where its harness takes a
+    /// message pasted into that box (Claude Code, Devin): a paste whose Enter did not take
+    /// still sits there (3.0.7 chief-meeting, CMT-24). None where the screen shows no box
+    /// its reader knows, or the harness takes its messages through a channel of its own.
+    fn input_box<'a>(
+        &'a self,
+        _host: &'a dyn PaneHost,
+        _pane: &'a Pane,
+    ) -> Work<'a, Option<InputBox>> {
+        Box::pin(async { None })
     }
 }
 
