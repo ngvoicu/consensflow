@@ -387,7 +387,7 @@ replace = "    if ($false) {"
 
 [[plant]]
 name = "installers: install.ps1 stops an open ConsensFlow that does not close"
-meant = "install.ps1 in Windows PowerShell › on Windows › that stays open is never stopped, and nothing is installed"
+meant = "install.ps1 in Windows PowerShell › on Windows › an open ConsensFlow › that stays open is never stopped, and nothing is installed"
 runs = ["ps1"]
 platforms = ["windows"]
 
@@ -398,7 +398,7 @@ replace = '''                Get-CfOpen $dir | Stop-Process -Force'''
 
 [[plant]]
 name = "installers: install.ps1 asks the ConsensFlow it runs inside to close"
-meant = "install.ps1 in Windows PowerShell › on Windows › that the install runs inside is not asked to close: the install is refused"
+meant = "install.ps1 in Windows PowerShell › on Windows › an open ConsensFlow › that the install runs inside is not asked to close: the install is refused"
 runs = ["ps1"]
 platforms = ["windows"]
 
