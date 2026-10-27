@@ -75,7 +75,10 @@ pub(crate) fn next_delivery_of(
 }
 
 /// The head of the participant's queue that may go now, of the one row `only`
-/// when it names one.
+/// when it names one. A member's question goes ahead of the rest, as its member
+/// is blocked on it, and the rest go oldest first; an urgent question is the
+/// chief's `cf tell`, no member's question, and keeps its place by age (3.0.7
+/// chief-meeting, CMT-07).
 fn next_delivery_among(
     store: &Store,
     participant_id: i64,
@@ -112,7 +115,7 @@ fn next_delivery_among(
          ))
          AND NOT {}
          AND (?3 IS NULL OR m.id = ?3)
-       ORDER BY m.id LIMIT 1",
+       ORDER BY NOT (m.kind = 'question' AND m.urgent = 0), m.id LIMIT 1",
             sql_list(&HELD_TASK_STATES),
             behind_held_words("m")
         ))?
