@@ -5,6 +5,9 @@
 //!   picture under each name in the window's folder and answers the absolute path of
 //!   each, a line apiece, and then the words, as the designer's role asks its result
 //!   to begin (`skill/core/staff.md`).
+//! - A line `LONG <characters>` is a worker whose result is a report of that many characters,
+//!   lines of a few dozen words as a worker's are, with no picture: a message that Claude
+//!   Code is given in pieces when the machine is loaded (T-763's live case).
 //! - A line `DISPATCH --tier standard <task>` (or `DISPATCH --review --tier
 //!   standard <task>`, and `--test` the same) runs `cf task add` with those
 //!   words and the task (`\n` in it becomes a line break), with this window's
@@ -284,6 +287,7 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static VERB: OnceLock<Regex> = OnceLock::new();
     static REFUSED: OnceLock<Regex> = OnceLock::new();
     static SAVED: OnceLock<Regex> = OnceLock::new();
+    static LONG: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
     static RESULTS: OnceLock<Regex> = OnceLock::new();
 
@@ -468,6 +472,12 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     if refused(text, window, pattern::once(&REFUSED, "QUOTA-OUT")) {
         return Ok(Reply::Refused);
     }
+    if let Some(long) = pattern::once(&LONG, r"(?m)^LONG (\d+)$").captures(text) {
+        let length = long[1]
+            .parse::<usize>()
+            .map_err(|failed| failed.to_string())?;
+        return Ok(Reply::Text(a_report(length)));
+    }
     if let Some(saved) = pattern::once(&SAVED, r"(?m)^SAVED (\S+) (.+)$").captures(text) {
         let folder = std::env::current_dir().map_err(|failed| failed.to_string())?;
         return saved_in(&folder, &saved[1], &saved[2]).map(Reply::Text);
@@ -479,6 +489,22 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         "noted: {}",
         text.split('\n').next().unwrap_or_default()
     )))
+}
+
+/// A worker's report of at least `length` characters: numbered lines of words, whole lines, the
+/// last one ending the report.
+fn a_report(length: usize) -> String {
+    let mut lines = Vec::new();
+    let mut written = 0;
+    for section in 1.. {
+        let line = format!("{section}. Section {section} \u{2014} headings, links and the footer all match the page that was asked for.");
+        written += line.chars().count() + 1;
+        lines.push(line);
+        if written >= length {
+            break;
+        }
+    }
+    lines.join("\n")
 }
 
 /// An image designer's answer: a picture saved under each of `names` (a comma
@@ -624,6 +650,28 @@ mod tests {
         assert!(saved_in(&folder.path().join("none"), "a.png", "x")
             .unwrap_err()
             .starts_with("SAVED a.png: "));
+    }
+
+    #[test]
+    fn a_long_worker_answers_a_report_of_the_length_it_was_asked_for_in_whole_lines() {
+        let report = text(reply_to("LONG 12000", &window()));
+        let length = report.chars().count();
+        assert!(
+            (12_000..12_000 + 100).contains(&length),
+            "{length} characters"
+        );
+        assert!(report
+            .lines()
+            .all(|line| line.starts_with(|c: char| c.is_ascii_digit())));
+        assert!(report.lines().count() > 100);
+        assert!(!report.contains("[Image"), "no picture, so no attachment");
+        assert!(!report.contains('/'), "no path");
+        // Anywhere in the message, as a task delivered to a window has its header first.
+        let reply = reply_to(
+            "[ConsensFlow m-4 \u{b7} T-1 \u{b7} task from @chief]\nLONG 100",
+            &window(),
+        );
+        assert!(text(reply).starts_with("1. Section 1"));
     }
 
     #[test]
