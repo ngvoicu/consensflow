@@ -49,6 +49,7 @@
     "live:devin-resume": "cargo xtask live devin-resume",
     "live:devin-wire": "cargo xtask live devin-wire",
     "live:resume-fresh": "cargo xtask live resume-fresh",
+    "live:reopened": "cargo xtask live reopened",
     "live:restart-cut": "cargo xtask live restart-cut",
     "live:door": "cargo xtask live door",
     "live:hook-status": "cargo xtask live door claude --hold 90",

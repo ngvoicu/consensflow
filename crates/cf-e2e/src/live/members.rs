@@ -397,6 +397,15 @@ impl Members {
         )
     }
 
+    /// Ends the program of the window `pane`, with whatever turn it has at work, as the
+    /// app's quit does to every window (`pane.kill`): the daemon sees it exit.
+    pub fn cut(&self, pane: &Value) -> Result<Value> {
+        self.rig.host(
+            "pane.kill",
+            json!({ "id": pane["id"], "generation": pane["generation"] }),
+        )
+    }
+
     /// The human's Pause of the task, and when it was made.
     pub fn pause(&self, task: i64) -> Result<Paused> {
         let made_ms = jiff::Timestamp::now().as_millisecond();
