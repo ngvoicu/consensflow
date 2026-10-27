@@ -65,7 +65,8 @@
 //! Devin member's window opened again after a cut, asked to write, edit and run `cf`,
 //! `live_resume_fresh`
 //! a chief closed and resumed, whether it never had a turn or the human's typed
-//! turn was closed on at once, `live_bench` the
+//! turn was closed on at once, `live_reopened` a worker's window opened again
+//! with no task, which reads at rest until it has a turn of its own, `live_bench` the
 //! board between a real chief and real workers, `live_designer` a real Codex
 //! drawing an image, `live_approval` real harnesses in every seat of five
 //! projects sending what the human approves, behind the approval gate, and

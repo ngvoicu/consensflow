@@ -114,8 +114,8 @@ runs = ["harness-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = "            if self.begun_on_the_store(&observed) {"
-replace = "            if false && self.begun_on_the_store(&observed) {"
+find = "            } else if self.begun_on_the_store(&observed) {"
+replace = "            } else if false && self.begun_on_the_store(&observed) {"
 
 [[plant]]
 name = "devin arrival: a turn whose agent never says a word reads at work for good"

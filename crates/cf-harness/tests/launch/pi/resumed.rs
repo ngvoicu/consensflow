@@ -68,6 +68,20 @@ fn cut_before_an_answer() -> Arc<Reading> {
     )
 }
 
+/// The record of a turn that failed (the provider's error ended it): the user's message
+/// and an assistant step with no answer. Pi's reader cannot settle a failed turn, so
+/// the record says nothing of its end.
+fn failed_before_an_answer() -> Arc<Reading> {
+    reading(
+        vec![
+            item("u1", Role::User, "Count to forty", true),
+            item("a1", Role::Assistant, "", false),
+        ],
+        Settlement::Unknown,
+        None,
+    )
+}
+
 /// A record that is whatever the test says it is now.
 struct Changing {
     reading: RefCell<Arc<Reading>>,
@@ -138,6 +152,25 @@ fn a_window_opened_again_on_a_turn_the_quit_cut_is_at_rest_once_its_extension_ha
         settles(&home);
         assert!(settled(&window), "Pi settled, with the record as it was");
     }
+}
+
+#[test]
+fn a_window_opened_again_on_a_turn_its_record_cannot_end_is_at_rest_once_its_extension_has_seen_no_turn_of_it(
+) {
+    // T-722: a failed turn is no turn in flight, and the record never settles it; the
+    // window read as at work for as long as it was open.
+    let home = Home::new();
+    let (_record, window) = resumed(&home, failed_before_an_answer(), None);
+    shows(&home, SESSION);
+    assert!(
+        settled(&window),
+        "no process is in the turn that failed, and the extension has seen none begin"
+    );
+
+    begins_a_turn(&home, SESSION);
+    assert!(!settled(&window), "a turn is at work");
+    settles(&home);
+    assert!(settled(&window), "Pi settled, with the record as it was");
 }
 
 #[test]
