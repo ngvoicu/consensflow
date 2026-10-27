@@ -61,7 +61,7 @@ pub(super) fn pinned(executable: &str, env: &Env) -> Result<String, String> {
     if Version::of(&line).is_some_and(|found| !found.supported()) {
         return Err(version::required());
     }
-    let real = fs::canonicalize(launcher).unwrap_or_else(|_| launcher.to_owned());
+    let real = really(launcher);
     let suffix = if env.on_windows() { ".exe" } else { "" };
     let binary = real.with_file_name(format!("muse-bin-{line}{suffix}"));
     Ok(if binary.is_file() {
@@ -69,6 +69,18 @@ pub(super) fn pinned(executable: &str, env: &Env) -> Result<String, String> {
     } else {
         executable.to_owned()
     })
+}
+
+/// Where `launcher` really is: the file a link names (Homebrew's and the human's own
+/// links), and the path as found where it is no link, as Windows' canonical form is
+/// one of its own (`\\?\C:\…`) that no window was opened on before.
+fn really(launcher: &Path) -> PathBuf {
+    let linked = fs::symlink_metadata(launcher).is_ok_and(|meta| meta.file_type().is_symlink());
+    if linked {
+        fs::canonicalize(launcher).unwrap_or_else(|_| launcher.to_owned())
+    } else {
+        launcher.to_owned()
+    }
 }
 
 /// `value` as one word of a shell's line, as `quote` quotes it.

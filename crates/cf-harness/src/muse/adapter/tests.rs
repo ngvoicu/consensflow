@@ -100,7 +100,12 @@ fn a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_it
     let env = installed(home.path(), Some("1.4.13-R6996.1"));
     let prepared = prepared(&env, None).unwrap();
     let argv = &prepared.argv;
-    let binary = fs::canonicalize(home.path().join(".local/bin/muse-bin-1.4.13-R6996.1")).unwrap();
+    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    let binary = home
+        .path()
+        .join(".local")
+        .join("bin")
+        .join(format!("muse-bin-1.4.13-R6996.1{suffix}"));
     assert_eq!(argv[0], binary.to_string_lossy());
     assert_eq!(
         argv[3..],

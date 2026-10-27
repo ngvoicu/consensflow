@@ -828,3 +828,37 @@ platforms = ["macos"]
 file = "crates/cf-harness/src/muse/window.rs"
 find = '''            self.restored.set(took_back);'''
 replace = '''            self.restored.set(false);'''
+
+# The window's session: a /clear's, which no hook and no pid says, by the chain of its log.
+[[plant]]
+name = "muse: a cleared session is never followed"
+meant = "a_window_that_was_cleared_shows_the_last_session_of_the_chain_started_from_its_own"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''            Some((next, _)) => shown.clone_from(next),'''
+replace = '''            Some((_, _)) => break,'''
+
+# The window: what it shows is followed down the chain of its /clears.
+[[plant]]
+name = "muse: a window reads the session it was told, not the one its /clear started"
+meant = "a_window_cleared_with_no_hook_and_no_word_of_its_process_is_followed_by_its_log"
+runs = ["muse-unsent"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/window.rs"
+find = '''        Some(cleared_into(&from, self.launched_ms, &self.env))'''
+replace = '''        Some(from)'''
+
+# What a launch runs: a launcher that is a link is followed to its folder.
+[[plant]]
+name = "muse: a launcher that is a link is read where the link is"
+meant = "a_launcher_that_is_a_link_runs_the_binary_beside_the_file_it_names"
+runs = ["muse-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '''    let linked = fs::symlink_metadata(launcher).is_ok_and(|meta| meta.file_type().is_symlink());'''
+replace = '''    let linked = fs::symlink_metadata(launcher).is_ok_and(|meta| meta.file_type().is_symlink()) && false;'''

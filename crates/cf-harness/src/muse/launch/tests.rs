@@ -15,8 +15,36 @@ fn install(dir: &Path, line: &str, binaries: &[&str]) -> String {
     bin.join("muse").to_string_lossy().into_owned()
 }
 
-fn unix() -> Env {
-    Env::from_vars([("HOME", "/h")])
+/// The environment of this machine's kind: Windows' says so.
+fn here() -> Env {
+    if cfg!(windows) {
+        Env::from_vars([("HOME", "/h"), ("OS", "Windows_NT")])
+    } else {
+        Env::from_vars([("HOME", "/h")])
+    }
+}
+
+/// A binary's file name on this machine: `.exe` on Windows.
+fn binary_name(name: &str) -> String {
+    if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_launcher_that_is_a_link_runs_the_binary_beside_the_file_it_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let launcher = install(dir.path(), "1.4.13-R6996.1", &["muse-bin-1.4.13-R6996.1"]);
+    let link = dir.path().join("muse");
+    std::os::unix::fs::symlink(&launcher, &link).unwrap();
+    let binary = fs::canonicalize(dir.path().join("bin/muse-bin-1.4.13-R6996.1")).unwrap();
+    assert_eq!(
+        pinned(&link.to_string_lossy(), &here()).unwrap(),
+        binary.to_string_lossy()
+    );
 }
 
 #[test]
@@ -25,23 +53,29 @@ fn a_window_runs_the_binary_its_launcher_names_and_never_the_launcher_where_it_i
     let launcher = install(
         dir.path(),
         "1.4.13-R6996.1",
-        &["muse-bin-1.4.13-R6996.1", "muse-bin-1.4.12-R6000"],
+        &[
+            &binary_name("muse-bin-1.4.13-R6996.1"),
+            "muse-bin-1.4.12-R6000",
+        ],
     );
-    let binary = fs::canonicalize(dir.path().join("bin/muse-bin-1.4.13-R6996.1")).unwrap();
+    let binary = dir
+        .path()
+        .join("bin")
+        .join(binary_name("muse-bin-1.4.13-R6996.1"));
     assert_eq!(
-        pinned(&launcher, &unix()).unwrap(),
+        pinned(&launcher, &here()).unwrap(),
         binary.to_string_lossy()
     );
     // A version line naming a binary that is not there: the launcher is run itself.
     let other = tempfile::tempdir().unwrap();
     let alone = install(other.path(), "1.4.14-R7000", &[]);
-    assert_eq!(pinned(&alone, &unix()).unwrap(), alone);
+    assert_eq!(pinned(&alone, &here()).unwrap(), alone);
     // No version file: the program found.
     let bare = tempfile::tempdir().unwrap();
     let program = bare.path().join("muse");
     fs::write(&program, "#!/bin/sh\n").unwrap();
     let program = program.to_string_lossy().into_owned();
-    assert_eq!(pinned(&program, &unix()).unwrap(), program);
+    assert_eq!(pinned(&program, &here()).unwrap(), program);
 }
 
 #[test]
@@ -49,7 +83,7 @@ fn an_older_muse_than_consensflow_reads_is_refused_in_the_words_of_the_version_f
     let dir = tempfile::tempdir().unwrap();
     let launcher = install(dir.path(), "1.4.12-R6000", &["muse-bin-1.4.12-R6000"]);
     assert_eq!(
-        pinned(&launcher, &unix()).unwrap_err(),
+        pinned(&launcher, &here()).unwrap_err(),
         "Muse Code 1.4.13 or newer is required. Update Muse Code before opening a pane."
     );
 }

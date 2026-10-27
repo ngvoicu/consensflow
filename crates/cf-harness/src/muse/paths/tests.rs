@@ -127,3 +127,51 @@ fn a_window_s_session_is_the_newest_its_process_opened_since_its_launch() {
     );
     assert_eq!(opened_by(40_085, launched, &env).as_deref(), Some(cleared));
 }
+
+/// A session log under `day` started from `previous` by a `/clear`: no route facts.
+fn cleared(sessions: &Path, day: &str, id: &str, previous: &str) {
+    let folder = sessions.join(day).join(id);
+    fs::create_dir_all(&folder).unwrap();
+    let started = serde_json::json!({
+        "schema_version": 1, "stream": { "kind": "session", "id": id },
+        "payload_type": "session.started",
+        "payload": { "kind": "session_started", "previous_session_stream": { "kind": "session", "id": previous } },
+    });
+    fs::write(
+        folder.join("session.jsonl"),
+        format!("{{\"retained_frame\":true}}\n{started}\n"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_window_that_was_cleared_shows_the_last_session_of_the_chain_started_from_its_own() {
+    let home = tempfile::tempdir().unwrap();
+    let env = env_of(&[("XDG_DATA_HOME", home.path().to_str().unwrap())]);
+    let sessions = home.path().join("muse").join("sessions");
+    let launched = 0x01a1_7bc7_6aab_i64;
+    let own = "01a17bc7-6ab0-7000-8000-000000000002";
+    opened(&sessions, "2026/10/27", own, 40_085);
+    assert_eq!(cleared_into(own, launched, &env), own, "never cleared");
+    let first = "01a17bc8-0000-7000-8000-000000000003";
+    let second = "01a17bc9-0000-7000-8000-000000000004";
+    cleared(&sessions, "2026/10/27", first, own);
+    cleared(&sessions, "2026/10/27", second, first);
+    // Another window's session cleared, and one older than the launch: neither is ours.
+    cleared(
+        &sessions,
+        "2026/10/27",
+        "01a17bca-0000-7000-8000-000000000005",
+        "01a17000-0000-7000-8000-00000000000a",
+    );
+    cleared(
+        &sessions,
+        "2026/10/26",
+        "01a17000-0000-7000-8000-000000000006",
+        second,
+    );
+    assert_eq!(cleared_into(own, launched, &env), second);
+    assert_eq!(cleared_into(first, launched, &env), second);
+    // A cleared session's log names no process: it is never found by the pid.
+    assert_eq!(opened_by(40_085, launched, &env).as_deref(), Some(own));
+}

@@ -372,3 +372,37 @@ fn a_session_the_window_s_process_opens_after_its_hook_spoke_is_the_one_it_shows
     let observed = finished(window.observe()).unwrap();
     assert_eq!(observed.switched.as_deref(), Some(cleared.as_str()));
 }
+
+#[test]
+fn a_window_cleared_with_no_hook_and_no_word_of_its_process_is_followed_by_its_log() {
+    let home = Home::new();
+    let session = v7(100);
+    home.log(&session, 40_085, "");
+    let window = home.window(Some(&session), None);
+    window.opened(&pane(), Some(40_085));
+    assert_eq!(finished(window.observe()).unwrap().switched, None);
+    // `/clear`: a new session started from the window's, its log naming no process, and
+    // no SessionStart hook for it (Muse 1.4.13).
+    let cleared = v7(4_000);
+    let folder = home
+        .dir
+        .path()
+        .join("data/muse/sessions/2026/09/19")
+        .join(&cleared);
+    fs::create_dir_all(&folder).unwrap();
+    let started = json!({
+        "schema_version": 1, "stream": { "kind": "session", "id": cleared },
+        "payload_type": "session.started",
+        "payload": { "kind": "session_started", "previous_session_stream": { "kind": "session", "id": session } },
+    });
+    fs::write(folder.join("session.jsonl"), format!("{started}\n")).unwrap();
+    let observed = finished(window.observe()).unwrap();
+    assert_eq!(observed.switched.as_deref(), Some(cleared.as_str()));
+    let host = ScriptedHost::default();
+    assert_eq!(
+        finished(window.ready(&host, &pane())).unwrap(),
+        Readiness::Held(Held::ShowsAnother)
+    );
+    window.follow(&cleared);
+    assert_eq!(finished(window.observe()).unwrap().switched, None);
+}

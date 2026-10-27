@@ -5,8 +5,11 @@
 //! about a second in (`runtime.session.route_facts` names the process: [`opened_by`]);
 //! its SessionStart hook says it too, but only at the session's first prompt, which a
 //! window opened with no first message may not have for a long time. A session the
-//! window starts or resumes from inside (`/clear`, `/resume`) is the hook's word,
-//! written down at its first prompt (`session_hook`): the window is followed there.
+//! window resumes from inside (`/resume`) is the hook's word, written down at its first
+//! prompt (`session_hook`); one a `/clear` starts is said by its log alone, which names
+//! the session it was started from (`previous_session_stream`), for Muse 1.4.13 runs no
+//! SessionStart hook for it, so ConsensFlow cannot give it its role text. The window is
+//! followed there.
 //!
 //! A resumed window's first message is pasted once its prompt shows, for `muse resume`
 //! takes none. A message is pasted, and Enter sends it; one pasted while a turn works
@@ -31,7 +34,7 @@ use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
 use serde_json::Value;
 
-use super::paths::{begun_ms, opened_by};
+use super::paths::{begun_ms, cleared_into, opened_by};
 use super::screen;
 use super::session_hook::last_said;
 use crate::contract::{
@@ -110,15 +113,16 @@ impl MuseWindow {
 
     /// The session the window shows now, as it last said it: the session its process
     /// opened latest since its launch, or the one its hook wrote down, whichever came
-    /// later (a `/clear` opens a session at once, and its hook says it at its first
-    /// prompt; a `/resume` of an older one is said only by the hook). None where
-    /// neither has said one.
+    /// later (a `/resume` of an older one is said only by the hook), else the one it is
+    /// known on; and from there, the last of the sessions a `/clear` started from it
+    /// ([`cleared_into`]: Muse runs no hook for those, and their logs name no process).
+    /// None where nothing has said one.
     fn shown(&self) -> Option<String> {
         let opened = self
             .pid
             .get()
             .and_then(|pid| opened_by(pid, self.launched_ms, &self.env));
-        match (last_said(&self.said), opened) {
+        let said = match (last_said(&self.said), opened) {
             (Some((said, at)), Some(opened)) => {
                 Some(if begun_ms(&opened).is_some_and(|begun| begun > at) {
                     opened
@@ -128,7 +132,9 @@ impl MuseWindow {
             }
             (Some((said, _)), None) => Some(said),
             (None, opened) => opened,
-        }
+        };
+        let from = said.or_else(|| self.session.borrow().clone())?;
+        Some(cleared_into(&from, self.launched_ms, &self.env))
     }
 
     /// The window's last lines as the pane host draws them, and where its cursor is:

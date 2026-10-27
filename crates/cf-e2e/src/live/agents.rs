@@ -92,7 +92,7 @@ fn cheap(harness: Harness) -> (&'static str, Option<&'static str>) {
         Harness::Pi => ("openrouter/meta/muse-spark-1.3", None),
         Harness::Devin => ("swe-2", Some("medium")),
         Harness::Codex => ("gpt-5.6-luna", None),
-        // Gabriel's testing model of 2026-10-26: not a contributor model, at its least
+        // The owner's testing model of 2026-10-26: not a contributor model, at its least
         // effort (the contributor model measured no saving, T-718).
         Harness::Muse => ("muse-spark-1.3", Some("minimal")),
     }
