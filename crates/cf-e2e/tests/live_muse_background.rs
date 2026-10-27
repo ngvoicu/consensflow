@@ -456,7 +456,13 @@ fn look(id: &str, env: &BTreeMap<String, String>, ended: usize) -> Result<Option
 #[test]
 #[ignore = "live: one real Muse turn on the owner's login (cargo xtask live muse-background)"]
 fn a_command_a_muse_turn_leaves_running_holds_the_task_until_it_ends() -> Outcome {
-    let log = Log::new("live muse-background");
+    // Its one window runs the model the owner chose for Muse's live runs, never the
+    // shared models of `--models`, which no Muse window is asked for yet.
+    let log = Log::own_agents(
+        "live muse-background",
+        "it runs Muse on muse-spark-1.3 at minimal",
+    )
+    .map_err(|failed| failed.to_string())?;
     let binary = binary()?;
     // The harness code is built before anything is spent.
     ask::prepare().map_err(|failed| failed.to_string())?;
