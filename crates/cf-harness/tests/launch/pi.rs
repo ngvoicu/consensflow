@@ -551,6 +551,7 @@ fn settled_record(text: &str) -> Arc<Reading> {
         complete: true,
         at: None,
         commentary: false,
+        synthetic: false,
         compaction: false,
     };
     let items = vec![item("1", Role::User), item("2", Role::Assistant)];

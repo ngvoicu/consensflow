@@ -137,6 +137,9 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
         items.push(Placed {
             item: Item {
                 compaction,
+                // A message the model has not begun: made before its reply, and kept
+                // when the request failed or was aborted before a token.
+                synthetic: !the_model_wrote(parts),
                 ..item(row, Role::Assistant, text, complete, at)?
             },
             seq,
@@ -316,7 +319,25 @@ fn item(
         complete,
         at,
         commentary: false,
+        synthetic: false,
         compaction: false,
+    })
+}
+
+/// Whether an assistant's message holds anything of the model's: words, its
+/// reasoning, a tool call. A `step-start` is OpenCode's own.
+fn the_model_wrote(parts: &[Part<'_>]) -> bool {
+    parts.iter().any(|(_, part)| {
+        let said = || {
+            part.get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| !js::trim(text).is_empty())
+        };
+        match part.get("type").and_then(Value::as_str) {
+            Some("tool") => true,
+            Some("text" | "reasoning") => said(),
+            _ => false,
+        }
     })
 }
 

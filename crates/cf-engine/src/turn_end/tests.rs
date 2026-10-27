@@ -10,6 +10,7 @@ fn item(text: &str, commentary: bool) -> Item {
         complete: true,
         at: None,
         commentary,
+        synthetic: false,
         compaction: false,
     }
 }

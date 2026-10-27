@@ -152,6 +152,45 @@ fn a_chief_marked_out_after_the_turn_that_got_through_stays_out() {
 }
 
 #[test]
+fn a_chief_stays_out_when_its_members_window_only_closes_a_turn_the_quit_cut_and_is_back_at_its_answer(
+) {
+    // T-530: Claude Code's own close of a cut turn, written when the window's next
+    // message comes, was read as a turn through on the account.
+    let context = Context::new();
+    context.adapter.one_account.set(true);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let resets_at = after(&context, 48 * 3_600_000);
+    context
+        .adapter
+        .refuse("chief", exhausted(Some(&now(&context)), Some(&resets_at)));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), Some(resets_at.clone()));
+    assert_eq!(tiers.out_until("zeus"), None);
+    // The app's quit cut zeus's turn; opened again on its conversation, its window is
+    // given its next message, whose turn is still on its way.
+    context.advance(60_000);
+    context
+        .adapter
+        .closes_a_cut_turn(&session, "Go on where you stopped.", &now(&context));
+    context.pass().unwrap();
+    assert_eq!(
+        tiers.out_until("chief"),
+        Some(resets_at),
+        "Claude's own close of the cut turn is no news of the account"
+    );
+    context.advance(5_000);
+    context
+        .adapter
+        .writes(&session, "Going on.", &now(&context));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), None, "back at zeus's answer");
+}
+
+#[test]
 fn a_chief_stays_out_when_its_harness_may_log_windows_into_several_accounts() {
     let context = Context::new();
     let (tiers, session) = out_together(&context);

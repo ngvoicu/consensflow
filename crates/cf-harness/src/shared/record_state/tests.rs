@@ -38,6 +38,7 @@ fn reading_of(record: &Value) -> Option<Reading> {
             complete: item["complete"].as_bool()?,
             at: None,
             commentary: false,
+            synthetic: false,
             compaction: false,
         });
     }

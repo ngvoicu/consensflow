@@ -86,6 +86,7 @@ impl Chain {
                     complete: role != Role::Assistant,
                     at,
                     commentary: false,
+                    synthetic: false,
                     compaction: false,
                 },
                 request: request.clone(),

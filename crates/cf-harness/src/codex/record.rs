@@ -507,6 +507,7 @@ impl Rollout {
                 complete,
                 at: Some(at),
                 commentary: false,
+                synthetic: false,
                 compaction: false,
             },
             final_text: None,

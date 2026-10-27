@@ -94,7 +94,7 @@ impl Transcript {
         self.active_assistant = Some(Arc::clone(&message_id));
         let item = self.items.assistant(Arc::clone(&message_id), at, seq);
         if record.closes_a_cut_turn {
-            self.items.commentary(item);
+            self.items.synthetic(item);
         }
         // The record's uuid is asked for even of a record that says nothing.
         let uuid = id_of(record.uuid.as_ref(), "claude record", seq)?;
