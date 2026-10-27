@@ -159,11 +159,7 @@ impl Rig {
 
     fn program(&self, name: &str, body: &str) {
         let path = self.bin.path().join(name);
-        let body = if name == "ssh" {
-            crate::windows::testing::ssh_stand_in(body)
-        } else {
-            body.to_owned()
-        };
+        let body = crate::windows::testing::stand_in(name, body);
         fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -657,4 +653,72 @@ fn a_case_names_a_queue_folder_of_its_own() {
     let rig = Rig::new();
     let queues = rig.context.env.path("CF_WINDOWS_QUEUES").unwrap();
     assert!(queues.starts_with(rig.bin.path()), "{queues:?}");
+}
+
+/// What the rig's `ssh` and `scp` were given, a line for each: the program, then all its words.
+fn calls(rig: &Rig) -> Vec<String> {
+    fs::read_to_string(rig.bin.path().join("log.calls"))
+        .map(|text| text.lines().map(str::to_owned).collect())
+        .unwrap_or_default()
+}
+
+/// What a run's connections are given: they end 135 s after the peer's last word.
+const RUN_BOUNDS: &str =
+    "-o ConnectTimeout=30 -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=8";
+
+#[test]
+fn the_listing_and_every_copy_of_the_reports_end_when_the_peer_goes_silent() {
+    let rig = Rig::new();
+    rig.remote("a.md", "x");
+    rig.lists(&[("a.md", 1)]);
+    let (ended, _) = rig.bring();
+    ended.unwrap();
+    let calls = calls(&rig);
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(
+        calls[0].starts_with(&format!("ssh {RUN_BOUNDS} zeewin ")),
+        "{calls:?}"
+    );
+    assert!(
+        calls[1].starts_with(&format!("scp -q {RUN_BOUNDS} zeewin:")),
+        "{calls:?}"
+    );
+}
+
+#[test]
+fn a_listing_whose_connection_went_silent_says_so_and_not_that_ssh_failed() {
+    let rig = Rig::new();
+    rig.program(
+        "ssh",
+        r#"echo "Timeout, server $1 not responding." >&2; exit 255"#,
+    );
+    let (ended, said) = rig.bring();
+    ended.unwrap();
+    assert_eq!(
+        said,
+        "windows: the reports on the machine could not be listed, and none was brought back: the connection to zeewin went silent for 135 s\n"
+    );
+}
+
+#[test]
+fn a_copy_whose_connection_went_silent_is_said_and_the_others_are_not_tried() {
+    let rig = Rig::new();
+    for name in ["a.md", "b.md", "c.md"] {
+        rig.remote(name, "x");
+    }
+    rig.lists(&[("a.md", 1), ("b.md", 1), ("c.md", 1)]);
+    rig.program(
+        "scp",
+        r#"printf 'scp\t%s\t%s\n' "$2" "$3" >> "$CF_LOG"; echo "Timeout, server zeewin not responding." >&2; exit 255"#,
+    );
+    let (ended, said) = rig.bring();
+    ended.unwrap();
+    assert_eq!(
+        copied(&rig.log()),
+        ["zeewin:consensflow-build/evals/reports/a.md"]
+    );
+    assert_eq!(
+        said,
+        "windows: the report a.md could not be brought back: the connection to zeewin went silent for 135 s, and the others are not tried\n"
+    );
 }

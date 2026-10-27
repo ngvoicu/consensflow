@@ -18,7 +18,7 @@ ASK='$d = Join-Path $env:USERPROFILE "consensflow-build"; $of = @(Get-Content (J
   while :; do
     if [ $started = 0 ] && grep -q '^== linger' "$log" 2>/dev/null; then started=1; fi
     if [ $started = 1 ]; then
-      printf '%s mac=%s %s\n' "$(date +%T)" "$(date +%s)" "$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$machine" "$ASK" 2>&1 | tr -d '\r' | head -1)" >> "$poll"
+      printf '%s mac=%s %s\n' "$(date +%T)" "$(date +%s)" "$(ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=5 -o ServerAliveCountMax=1 "$machine" "$ASK" 2>&1 | tr -d '\r' | head -1)" >> "$poll"
     fi
     sleep 1
   done ) &

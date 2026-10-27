@@ -213,6 +213,7 @@ fn shown(ended: &Ended) -> String {
         Ended::Stopped => "stopped".into(),
         Ended::Unwritten(cause) => format!("unwritten: {cause}"),
         Ended::WrongTree(said) => format!("another tree: {said}"),
+        Ended::Silent => "silent".into(),
     }
 }
 
@@ -421,7 +422,7 @@ fn a_status_a_stop_may_have_made_waits_a_moment_for_the_stop_and_another_does_no
     // With nothing said by the machine: what ssh ends with when the Ctrl-C ended
     // it (a signal, or its own 255), and the stop is heard a moment after: within
     // the grace, which here is long, for the wait ends when the stop is heard.
-    let answer = |code, interrupt: &Interrupt| shown(&exited(code, None, true, interrupt).0);
+    let answer = |code, interrupt: &Interrupt| shown(&exited(code, None, true, false, interrupt).0);
     let interrupt = Interrupt::graced(Duration::from_secs(60));
     let late = interrupt.clone();
     let telling = thread::spawn(move || {
@@ -447,7 +448,7 @@ fn what_ssh_did_when_the_machine_said_nothing_is_told_in_a_note_whatever_it_did(
     // may give (Windows'): neither is a status to answer, and both are told.
     let none = Interrupt::default();
     let told = |code| {
-        let (ended, note) = exited(code, None, true, &none);
+        let (ended, note) = exited(code, None, true, false, &none);
         (shown(&ended), note.unwrap())
     };
     let no_line = "no `== exit N` line ended the output";
@@ -484,13 +485,16 @@ fn what_the_machine_said_is_the_answer_before_ssh_or_a_stop_is_looked_at() {
     let heard = Interrupt::default();
     heard.raise();
     for code in [None, Some(255), Some(1), Some(0)] {
-        assert_eq!(shown(&exited(code, Some(7), true, &heard).0), "exited 7");
+        assert_eq!(
+            shown(&exited(code, Some(7), true, false, &heard).0),
+            "exited 7"
+        );
     }
     // Nor is a stop waited for, where it was not heard.
     let patient = Interrupt::graced(Duration::from_secs(60));
     let started = Instant::now();
     assert_eq!(
-        shown(&exited(Some(255), Some(0), true, &patient).0),
+        shown(&exited(Some(255), Some(0), true, false, &patient).0),
         "exited 0"
     );
     assert!(started.elapsed() < Duration::from_secs(30));
@@ -585,4 +589,29 @@ fn a_tree_that_was_said_does_not_change_what_a_failed_run_answers() {
         err,
         "windows: no `== exit N` line ended the output, so ssh's own status is the answer: 3\n"
     );
+}
+
+#[test]
+fn a_connection_that_ssh_gave_up_on_for_its_silence_is_no_end_of_the_command() {
+    // ssh says it on its error stream and ends with 255, and the machine has said nothing of how
+    // the command ended: the run is not over there, and what it came to is not known.
+    let (ended, err) = exits("255", "!Timeout, server zeewin2 not responding.");
+    assert_eq!(format!("{ended:?}"), "Silent");
+    // What ssh said is shown as it came; the silence is no note on a status.
+    assert_eq!(err, "Timeout, server zeewin2 not responding.\r\n");
+}
+
+#[test]
+fn the_words_of_a_silent_peer_are_not_silence_unless_ssh_ended_with_255_without_the_commands_line()
+{
+    // The command ended, and said how: its status, whatever it printed.
+    let said = "!Timeout, server zeewin2 not responding.|== exit 3";
+    assert_eq!(shown(&exits("1", said).0), "exited 3");
+    // ssh's own failure, and a line of a command that is not ssh's: nothing marks the silence.
+    for status in ["1", "0", "7"] {
+        let (ended, _) = exits(status, "!Timeout, server zeewin2 not responding.");
+        assert_ne!(format!("{ended:?}"), "Silent", "ssh {status}");
+    }
+    let (ended, _) = exits("255", "!Connection to zeewin2 closed by remote host.");
+    assert_eq!(shown(&ended), "exited 255");
 }

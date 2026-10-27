@@ -39,3 +39,30 @@ pub fn ssh_stand_in(body: &str) -> String {
         format!("{ASKS_STATE}{body}")
     }
 }
+
+/// What an `ssh` or `scp` stand-in does before anything else: writes down every word it was
+/// given (`all`), as a line `<program> <words>` of `$CF_LOG.calls`, and then leaves out the
+/// options the runner puts before the host and the files (`-o <option>`, after scp's `-q`), so
+/// that the stand-in reads its host and its command, or its files, where it always did. The
+/// cases that look at the options read the calls.
+#[cfg(unix)]
+pub const NOTES_THE_CALL_AND_LEAVES_OUT_THE_OPTIONS: &str = r#"all="$*"; printf '%s %s\n' "${0##*/}" "$all" >> "$CF_LOG.calls"
+quiet=; if [ "$1" = -q ]; then quiet=-q; shift; fi
+while [ "$1" = -o ]; do shift 2; done
+if [ -n "$quiet" ]; then set -- -q "$@"; fi
+"#;
+
+/// The body of the `ssh` or `scp` stand-in a case writes: `body`, after what every stand-in does
+/// first ([`NOTES_THE_CALL_AND_LEAVES_OUT_THE_OPTIONS`]), and for `ssh` after the answer to the
+/// machine's state ([`ssh_stand_in`]).
+#[cfg(unix)]
+pub fn stand_in(name: &str, body: &str) -> String {
+    match name {
+        "ssh" => format!(
+            "{NOTES_THE_CALL_AND_LEAVES_OUT_THE_OPTIONS}{}",
+            ssh_stand_in(body)
+        ),
+        "scp" => format!("{NOTES_THE_CALL_AND_LEAVES_OUT_THE_OPTIONS}{body}"),
+        _ => body.to_owned(),
+    }
+}

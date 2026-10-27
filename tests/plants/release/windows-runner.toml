@@ -53,6 +53,7 @@
 [run]
 xtask-lib-windows = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "windows::"]
 xtask-test-windows = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "windows"]
+xtask-test-ssh-and-scp = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "ssh_and_scp"]
 
 # What the copy keeps.
 
@@ -1219,7 +1220,7 @@ runs = ["xtask-lib-windows"]
 [[plant.edit]]
 file = "tools/xtask/src/windows/fetch.rs"
 find = '''
-            Err(said) => writeln!(
+            Err(Failed::Said(said)) => writeln!(
                 console.err,
                 "windows: the report {} could not be brought back: {said}",
                 file.name
@@ -1227,7 +1228,7 @@ find = '''
             .map_err(Error::Output)?,
 '''
 replace = '''
-            Err(said) => {
+            Err(Failed::Said(said)) => {
                 return writeln!(
                     console.err,
                     "windows: the report {} could not be brought back: {said}",
@@ -1375,9 +1376,9 @@ meant = "a_run_on_zeewin2_goes_through_its_own_ssh_server_as_zeewins_does_with_c
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/machine.rs"
-find = '''        .args(["-o", &timeout, "-o", "BatchMode=yes"])'''
-replace = '''        .args(["-o", "BatchMode=yes"])'''
+file = "tools/xtask/src/windows/reach.rs"
+find = "    connect_s: 5,"
+replace = "    connect_s: 0,"
 
 [[plant]]
 name = "windows runner: a run goes on zeewin2 short of disk"
@@ -1555,9 +1556,9 @@ meant = "both_probes_of_the_laptop_are_bounded_alike"
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/machine.rs"
-find = '''        .args(["-o", &timeout, "-o", "BatchMode=yes"])'''
-replace = '''        .args(["-o", &timeout])'''
+file = "tools/xtask/src/windows/reach.rs"
+find = '''"BatchMode=yes".into(),'''
+replace = '''"BatchMode=no".into(),'''
 
 [[plant]]
 name = "windows runner: the probes wait for a silent peer for ever"
@@ -1565,9 +1566,9 @@ meant = "both_probes_of_the_laptop_are_bounded_alike"
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/machine.rs"
-find = '''        .args(["-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=1"])'''
-replace = ""
+file = "tools/xtask/src/windows/reach.rs"
+find = "    unanswered: 1,"
+replace = "    unanswered: 1000,"
 
 [[plant]]
 name = "windows runner: a zeelin that connected and cannot say is taken for not running"
@@ -1971,3 +1972,244 @@ runs = ["xtask-lib-windows"]
 file = "tools/xtask/src/windows/script.rs"
 find = "            (\"command\", &single_quoted(script.command)),"
 replace = "            (\"command\", &script.command.replace('\\'', \"''\")),"
+
+
+# A connection to a peer that went silent ends (T-804, 2026-10-27): the listing of a refused run's
+# reports went over a connection that had died, and ssh waited for it for two hours (the system's
+# keepalive), with the lead tool's queue for both machines held by the run. Every `ssh` and `scp` of the
+# runner is built in `reach.rs`, with `BatchMode`, `ConnectTimeout`, `ServerAliveInterval` and
+# `ServerAliveCountMax`; a connection that ssh gave up for its silence is told as that, and the run
+# on the machine is ended there if the machine can be asked.
+
+[[plant]]
+name = "windows runner: a run's connection does not ask whether the peer is there"
+meant = "every_connection_a_run_makes_ends_when_the_peer_goes_silent"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/reach.rs"
+find = '    alive_s: 15,'
+replace = '    alive_s: 0,'
+
+[[plant]]
+name = "windows runner: a blip of half a minute ends a run that is alive on the machine"
+meant = "a_blip_of_under_a_minute_is_not_the_end_of_a_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/reach.rs"
+find = '    unanswered: 8,'
+replace = '    unanswered: 1,'
+
+[[plant]]
+name = "windows runner: a silent peer is waited for more than twenty minutes"
+meant = "a_blip_of_under_a_minute_is_not_the_end_of_a_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/reach.rs"
+find = '    unanswered: 8,'
+replace = '    unanswered: 80,'
+
+[[plant]]
+name = "windows runner: a connection may ask a person a question"
+meant = "every_connection_a_run_makes_ends_when_the_peer_goes_silent"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/reach.rs"
+find = '"BatchMode=yes".into(),'
+replace = '"BatchMode=no".into(),'
+
+[[plant]]
+name = "windows runner: a connection waits for the system's time to be made"
+meant = "every_connection_a_run_makes_ends_when_the_peer_goes_silent"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/reach.rs"
+find = '    connect_s: 30,'
+replace = '    connect_s: 0,'
+
+[[plant]]
+name = "windows runner: a probe waits as long for the peer as a run does"
+meant = "a_probe_asks_for_a_short_answer"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/reach.rs"
+find = '    alive_s: 5,'
+replace = '    alive_s: 15,'
+
+[[plant]]
+name = "windows runner: any line that begins as ssh's words about a silent peer is taken for them"
+meant = "what_ssh_says_of_a_peer_it_gave_up_on_is_known_by_its_words"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/reach.rs"
+find = 'line.starts_with(SILENCE_MARK) && line.ends_with(" not responding.")'
+replace = 'line.starts_with(SILENCE_MARK)'
+
+[[plant]]
+name = "windows runner: the run's ssh is built apart from the place that bounds it"
+meant = "ssh_and_scp_are_built_in_the_one_place_that_gives_them_the_bounds"
+runs = ["xtask-test-ssh-and-scp"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run.rs"
+find = '    reach::ssh(context, host, reach::RUN).arg(line)'
+replace = '    Invocation::new("ssh", &context.root).arg(host).arg(line)'
+
+[[plant]]
+name = "windows runner: the tree is sent by an scp that is built apart from the place that bounds it"
+meant = "ssh_and_scp_are_built_in_the_one_place_that_gives_them_the_bounds"
+runs = ["xtask-test-ssh-and-scp"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run.rs"
+find = 'reach::scp(context, reach::RUN)'
+replace = 'Invocation::new("scp", &context.root).arg("-q")'
+
+[[plant]]
+name = "windows runner: the reports are brought back by an scp that is built apart from the place that bounds it"
+meant = "ssh_and_scp_are_built_in_the_one_place_that_gives_them_the_bounds"
+runs = ["xtask-test-ssh-and-scp"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = 'reach::scp(context, reach::RUN)'
+replace = 'Invocation::new("scp", &context.root).arg("-q")'
+
+[[plant]]
+name = "windows runner: the machine is probed by an ssh that is built apart from the place that bounds it"
+meant = "ssh_and_scp_are_built_in_the_one_place_that_gives_them_the_bounds"
+runs = ["xtask-test-ssh-and-scp"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '    reach::ssh(context, host, reach::PROBE)'
+replace = '    Invocation::new("ssh", &context.root).arg(host)'
+
+[[plant]]
+name = "windows runner: a script's ssh waits for a silent peer"
+meant = "a_script_that_runs_ssh_or_scp_gives_it_the_bounds_too"
+runs = ["xtask-test-ssh-and-scp"]
+
+[[plant.edit]]
+file = "tools/xtask/windows-linger.sh"
+find = ' -o ServerAliveInterval=5 -o ServerAliveCountMax=1'
+replace = ''
+
+[[plant]]
+name = "windows runner: the ssh that ends a run there waits for a silent peer"
+meant = "the_ssh_that_ends_a_run_there_ends_when_the_peer_goes_silent_too"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run.rs"
+find = '    let stop = ssh(context, &machine.host, &plan.stop);'
+replace = '    let stop = Invocation::new("ssh", &context.root).arg(&machine.host).arg(&plan.stop);'
+
+[[plant]]
+name = "windows runner: the listing of the reports waits for a silent peer"
+meant = "the_listing_and_every_copy_of_the_reports_end_when_the_peer_goes_silent"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = 'process::capture(&run::ssh(context, &machine.host, &line), &context.env)?'
+replace = 'process::capture(&Invocation::new("ssh", &context.root).arg(&machine.host).arg(&line), &context.env)?'
+
+[[plant]]
+name = "windows runner: a connection ssh gave up for its silence is taken for a command that ended with 255"
+meant = "a_connection_that_ssh_gave_up_on_for_its_silence_is_no_end_of_the_command"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/session.rs"
+find = '    if silent && code == Some(255) {'
+replace = '    if silent && code == Some(254) {'
+
+[[plant]]
+name = "windows runner: the words of a silent peer are silence whatever ssh ended with"
+meant = "the_words_of_a_silent_peer_are_not_silence_unless_ssh_ended_with_255_without_the_commands_line"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/session.rs"
+find = '    if silent && code == Some(255) {'
+replace = '    if silent {'
+
+[[plant]]
+name = "windows runner: a run whose connection went silent is not asked to end there"
+meant = "a_run_whose_connection_went_silent_says_so_and_asks_the_machine_to_end_the_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run.rs"
+find = '''            let ended = end_there(context, machine, &plan)?;
+            Err(Error::Silent(format!('''
+replace = '''            let ended = Ending::Ended;
+            Err(Error::Silent(format!('''
+
+[[plant]]
+name = "windows runner: a connection that went silent ends with the status of a failed test"
+meant = "a_run_whose_connection_went_silent_says_so_and_asks_the_machine_to_end_the_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows.rs"
+find = '            Self::Silent(_) => SILENT,'
+replace = '            Self::Silent(_) => 1,'
+
+[[plant]]
+name = "windows runner: a tree whose sending went silent is told as a step that failed"
+meant = "a_tree_whose_sending_went_silent_is_said_and_nothing_is_started_on_the_machine"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/run.rs"
+find = '        if reach::went_silent(&sent.stderr) {'
+replace = '        if reach::went_silent(&sent.stdout) {'
+
+[[plant]]
+name = "windows runner: a listing that went silent is told as an ssh that failed"
+meant = "a_listing_whose_connection_went_silent_says_so_and_not_that_ssh_failed"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = 'reach::went_silent(&listed.stderr)'
+replace = 'reach::went_silent(&listed.stdout)'
+
+[[plant]]
+name = "windows runner: the copies of the reports go on after one went silent"
+meant = "a_copy_whose_connection_went_silent_is_said_and_the_others_are_not_tried"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = '''                .map_err(Error::Output)?;
+                break;'''
+replace = '                .map_err(Error::Output)?;'
+
+[[plant]]
+name = "windows runner: a zeelin whose connection went silent is told as an ssh that failed"
+meant = "a_zeelin_whose_connection_went_silent_is_told_as_that_and_the_run_is_refused_all_the_same"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "let why = if reach::went_silent(&answer.stderr) {"
+replace = "let why = if reach::went_silent(&answer.stdout) {"
+
+[[plant]]
+name = "windows runner: a zeewin2 whose connection went silent when asked its disk is told as an ssh that failed"
+meant = "a_zeewin2_whose_connection_went_silent_when_asked_what_it_has_free_is_told_as_that"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = "            if reach::went_silent(&answer.stderr) {"
+replace = "            if reach::went_silent(&answer.stdout) {"

@@ -121,11 +121,7 @@ impl Rig {
     /// A program of the machine this runs on, which is this script.
     fn program(&self, name: &str, body: &str) {
         let path = self.bin.path().join(name);
-        let body = if name == "ssh" {
-            crate::windows::testing::ssh_stand_in(body)
-        } else {
-            body.to_owned()
-        };
+        let body = crate::windows::testing::stand_in(name, body);
         fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -329,7 +325,7 @@ fn laptop(zeelin: &str, free_gib: u64) -> String {
     let run = machine(0);
     format!(
         r#"for word; do host=$last; last=$word; done
-printf '%s\n' "$*" >> "$CF_LOG.words"
+printf '%s\n' "$all" >> "$CF_LOG.words"
 case "$host" in
   zeelin)
     printf 'ssh\t%s\t%s\n' "$host" "$last" >> "$CF_LOG"
@@ -1089,7 +1085,7 @@ fn laptop_with_a_job_while_poker_is_there() -> String {
     let run = machine(0);
     format!(
         r#"for word; do host=$last; last=$word; done
-printf '%s\n' "$*" >> "$CF_LOG.words"
+printf '%s\n' "$all" >> "$CF_LOG.words"
 case "$host" in
   zeelin)
     printf 'ssh\t%s\t%s\n' "$host" "$last" >> "$CF_LOG"
@@ -1424,4 +1420,147 @@ fn a_case_joins_and_reads_no_queue_but_its_own_whatever_the_home_folder_holds() 
     rig.program("ssh", &machine(0));
     let (ended, _, err) = run_it(&rig, &Interrupt::default());
     assert_eq!(ended.unwrap(), Outcome::Exited(0), "{err}");
+}
+
+/// What the rig's `ssh` and `scp` were given, a line for each: the program, then all its words
+/// (`all`, which the stand-ins write down before they leave the options out).
+fn calls(rig: &Rig) -> Vec<String> {
+    fs::read_to_string(rig.bin.path().join("log.calls"))
+        .map(|text| text.lines().map(str::to_owned).collect())
+        .unwrap_or_default()
+}
+
+/// What the machine is asked with: the bounds of a probe, which waits for a short answer.
+const PROBE_BOUNDS: &str =
+    "-o ConnectTimeout=5 -o BatchMode=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=1";
+
+/// What a run's connections are given: they end 135 s after the peer's last word, and not
+/// before: the laptop is reached over a tunnel through Wi-Fi, which drops for a minute at times.
+const RUN_BOUNDS: &str =
+    "-o ConnectTimeout=30 -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=8";
+
+#[test]
+fn every_connection_a_run_makes_ends_when_the_peer_goes_silent() {
+    let rig = Rig::new();
+    rig.program("scp", KEEPS);
+    rig.program("ssh", &machine(0));
+    let (ended, ..) = run_it(&rig, &Interrupt::default());
+    assert_eq!(ended.unwrap(), Outcome::Exited(0));
+    // The machine is asked first, then the tree is sent, then the run is asked: each of the three
+    // with the bounds, and the two that wait on a long transfer or a long run with the long ones.
+    let calls = calls(&rig);
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    assert!(
+        calls[0].starts_with(&format!("ssh {PROBE_BOUNDS} zeewin ")),
+        "{calls:?}"
+    );
+    assert!(
+        calls[1].starts_with(&format!("scp -q {RUN_BOUNDS} ")),
+        "{calls:?}"
+    );
+    assert!(
+        calls[2].starts_with(&format!("ssh {RUN_BOUNDS} zeewin ")),
+        "{calls:?}"
+    );
+}
+
+#[test]
+fn the_ssh_that_ends_a_run_there_ends_when_the_peer_goes_silent_too() {
+    let rig = Rig::new();
+    rig.program("scp", KEEPS);
+    rig.program("ssh", &another_tree(0));
+    let (ended, ..) = run_it(&rig, &Interrupt::default());
+    assert!(ended.is_err());
+    // The probe, the tree, the run, and the machine asked to end it.
+    let calls = calls(&rig);
+    assert_eq!(calls.len(), 4, "{calls:?}");
+    assert!(
+        calls[3].starts_with(&format!("ssh {RUN_BOUNDS} zeewin ")),
+        "{calls:?}"
+    );
+}
+
+/// An ssh whose peer went silent: it says a word, and then what ssh says when it gives a silent
+/// peer up, and ends with 255, which is ssh's own. Asked a second time (to end the run there) it
+/// ends with `stop`.
+fn goes_silent(stop: i32) -> String {
+    format!(
+        r#"printf 'ssh\t%s\t%s\n' "$1" "$2" >> "$CF_LOG"
+if [ -e "$CF_FIRST" ]; then exit {stop}; fi
+: > "$CF_FIRST"
+echo "out"; echo "Timeout, server $1 not responding." >&2; exit 255"#
+    )
+}
+
+#[test]
+fn a_run_whose_connection_went_silent_says_so_and_asks_the_machine_to_end_the_run() {
+    let rig = Rig::new();
+    rig.program("scp", KEEPS);
+    rig.program("ssh", &goes_silent(0));
+    let (ended, out, err) = run_it(&rig, &Interrupt::default());
+    assert_eq!(out, "out\n");
+    // What ssh said of it is shown as it came; the run's own words are not a note on a status.
+    assert_eq!(err, "Timeout, server zeewin not responding.\n");
+    let error = ended.unwrap_err();
+    assert!(matches!(error, Error::Silent(_)), "{error}");
+    assert_eq!(
+        error.to_string(),
+        "the connection to zeewin went silent for 135 s and ssh ended it, so how the command ended is not known: the run was ended there"
+    );
+    assert_eq!(error.status(), 69);
+    // The run, and then the machine asked to end it.
+    let log = rig.log();
+    assert_eq!(log.len(), 3, "{log:?}");
+    let ends: Vec<&str> = log[2].split('\t').collect();
+    assert_eq!(decoded(ends[2]), stop_script(DEFAULT_DIR, &id_in(&log)));
+}
+
+#[test]
+fn a_run_whose_connection_went_silent_and_whose_end_could_not_be_asked_for_says_it_may_go_on() {
+    let rig = Rig::new();
+    rig.program("scp", KEEPS);
+    rig.program("ssh", &goes_silent(255));
+    let (ended, ..) = run_it(&rig, &Interrupt::default());
+    let said = ended.unwrap_err().to_string();
+    assert!(
+        said.starts_with("the connection to zeewin went silent for 135 s and ssh ended it"),
+        "{said}"
+    );
+    assert!(
+        said.ends_with("the run may still be going on the machine: ssh ended with status 255 when asked to end it"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_tree_whose_sending_went_silent_is_said_and_nothing_is_started_on_the_machine() {
+    let rig = Rig::new();
+    rig.program(
+        "scp",
+        r#"echo "Timeout, server zeewin not responding." >&2; exit 255"#,
+    );
+    rig.program("ssh", &machine(0));
+    let (ended, ..) = run_it(&rig, &Interrupt::default());
+    let error = ended.unwrap_err();
+    assert!(matches!(error, Error::Silent(_)), "{error}");
+    assert_eq!(
+        error.to_string(),
+        "the connection to zeewin went silent for 135 s while the tree was being sent, and ssh ended it: nothing was started there"
+    );
+    assert_eq!(error.status(), 69);
+    // Only the machine's state was asked: nothing was run, and nothing is to be ended.
+    assert!(rig.log().is_empty(), "{:?}", rig.log());
+}
+
+#[test]
+fn the_words_ssh_says_of_a_silent_peer_are_no_silence_where_the_command_said_how_it_ended() {
+    // A command that prints them itself, and ends with 3: its own words, and its own status.
+    let rig = Rig::new();
+    rig.program("scp", KEEPS);
+    rig.program(
+        "ssh",
+        r#"echo "Timeout, server x not responding." >&2; echo "== tree $(tar -xzOf "$CF_TARBALL" .windows-tree)"; echo "== exit 3"; exit 1"#,
+    );
+    let (ended, ..) = run_it(&rig, &Interrupt::default());
+    assert_eq!(ended.unwrap(), Outcome::Exited(3));
 }

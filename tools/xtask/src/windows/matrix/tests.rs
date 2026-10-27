@@ -6,7 +6,6 @@ use std::collections::VecDeque;
 use cf_base::time::parse;
 
 use super::*;
-use crate::process::Invocation;
 use crate::windows::testing::strings;
 
 /// The time the matrix is begun at, as the folder of its logs names it.
@@ -303,11 +302,11 @@ fn a_run_that_could_not_start_is_a_line_of_no_verdict_with_its_reason_in_its_log
     let mut machine = Scripted::new(vec![Answer {
         out: "",
         err: "",
-        ended: Err(Error::step(
-            &Invocation::new("scp", "."),
-            255,
-            "Connection refused",
-        )),
+        ended: Err(Error::Step {
+            step: "scp".into(),
+            status: 255,
+            said: ": Connection refused".into(),
+        }),
     }]);
     let (status, out, root) = go(&options, &mut machine);
     assert_eq!(status, 1);

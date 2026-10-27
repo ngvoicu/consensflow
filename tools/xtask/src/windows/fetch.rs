@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 use super::interrupt::Interrupt;
 use super::machine::Machine;
 use super::options::Options;
+use super::reach;
 use super::run::{self, Outcome};
 use super::script::reports_script;
 use super::Error;
@@ -115,10 +116,14 @@ fn bring_back(
     let line = run::powershell(&reports_script(&options.dir))?;
     let listed = process::capture(&run::ssh(context, &machine.host, &line), &context.env)?;
     if listed.code != 0 {
+        let why = if reach::went_silent(&listed.stderr) {
+            reach::silent_words(&machine.host, reach::RUN)
+        } else {
+            format!("ssh ended with status {}", listed.code)
+        };
         writeln!(
             console.err,
-            "windows: the reports on the machine could not be listed, and none was brought back: ssh ended with status {}",
-            listed.code
+            "windows: the reports on the machine could not be listed, and none was brought back: {why}"
         )
         .map_err(Error::Output)?;
         return Ok(());
@@ -140,12 +145,23 @@ fn bring_back(
         }
         match fetch(context, machine, options, &file, &to) {
             Ok(()) => brought.push(file.name),
-            Err(said) => writeln!(
+            Err(Failed::Said(said)) => writeln!(
                 console.err,
                 "windows: the report {} could not be brought back: {said}",
                 file.name
             )
             .map_err(Error::Output)?,
+            // The machine does not answer, and would not for the next: each would wait for the
+            // connection, and the run is held until they have.
+            Err(Failed::Silent(said)) => {
+                writeln!(
+                    console.err,
+                    "windows: the report {} could not be brought back: {said}, and the others are not tried",
+                    file.name
+                )
+                .map_err(Error::Output)?;
+                break;
+            }
         }
     }
     if let Some(told) = told(&brought, in_main) {
@@ -202,6 +218,26 @@ fn told(brought: &[String], in_main: bool) -> Option<String> {
     ))
 }
 
+/// Why a file could not be brought back.
+enum Failed {
+    /// For this reason, which is this file's.
+    Said(String),
+    /// Because the connection went silent and was ended, told as that.
+    Silent(String),
+}
+
+impl From<String> for Failed {
+    fn from(said: String) -> Self {
+        Self::Said(said)
+    }
+}
+
+impl From<&str> for Failed {
+    fn from(said: &str) -> Self {
+        Self::Said(said.to_owned())
+    }
+}
+
 /// Copies `file` from the machine to `to`: to a name of its own first, which is `to` once the
 /// size is the one listed (a copy that stopped half way is no report); why not, if it could not.
 fn fetch(
@@ -210,18 +246,24 @@ fn fetch(
     options: &Options,
     file: &Listed,
     to: &Path,
-) -> Result<(), String> {
+) -> Result<(), Failed> {
     let folder = to.parent().ok_or("it has no folder")?;
     fs::create_dir_all(folder).map_err(|cause| format!("{}: {cause}", folder.display()))?;
     let part = partial(to);
-    let scp = Invocation::new("scp", &context.root)
-        .arg("-q")
+    let scp = reach::scp(context, reach::RUN)
         .arg(format!(
             "{}:{}/evals/reports/{}",
             machine.host, options.dir, file.name
         ))
         .arg(&part);
     let copied = process::capture(&scp, &context.env).map_err(|failure| failure.to_string())?;
+    if copied.code != 0 && reach::went_silent(&copied.stderr) {
+        let _ = fs::remove_file(&part);
+        return Err(Failed::Silent(reach::silent_words(
+            &machine.host,
+            reach::RUN,
+        )));
+    }
     let result = if copied.code != 0 {
         Err(format!(
             "scp ended with status {}{}",
@@ -244,7 +286,7 @@ fn fetch(
     if result.is_err() {
         let _ = fs::remove_file(&part);
     }
-    result
+    Ok(result?)
 }
 
 /// The name a copy of `to` is made under until it is whole.
