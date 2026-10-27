@@ -51,7 +51,8 @@
 //! and leaves out the rest. Either way the window goes on. Its keys are written down as
 //! the question's are; with `CF_TEST_TRUST_SERVER_DROPS_FIRST_KEY` set it ignores the
 //! first key it is given, and with `CF_TEST_TRUST_SERVER_REFUSES` an Enter leaves every
-//! server out, whatever the cursor is on.
+//! server out, whatever the cursor is on. With `CF_TEST_TRUST_IDLE_FIRST` set its status says idle from its
+//! start, before the question, so that only the screen tells that it asks.
 
 use std::fs;
 use std::io::{self, Write};

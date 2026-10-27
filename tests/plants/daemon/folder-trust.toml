@@ -210,10 +210,9 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
-            if record.window.borrow().trust != Trusting::Past {
-                return Ok(());
-            }'''
-replace = ""
+            if trust.asks() || (trust == Trusting::Looking && delivering.owed.is_none()) {'''
+replace = '''
+            if trust == Trusting::Looking && delivering.owed.is_none() {'''
 
 [[plant]]
 name = "folder trust: a first message the question held keeps the time it spent waiting"
@@ -824,13 +823,13 @@ find = '''
                             )?;
                             self.changed();
                         }
-                    } else if self.now() - began > ASKS_WITHIN_MS {'''
+                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {'''
 replace = '''
                             )?;
                             self.changed();
                             break (false, false);
                         }
-                    } else if self.now() - began > ASKS_WITHIN_MS {'''
+                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {'''
 
 [[plant]]
 name = "folder trust: a prompt below a conversation that quoted the dialog banks a yes (round 6, T-299)"
@@ -999,7 +998,7 @@ replace = '    answer["grants"] = json!(false);'
 
 [[plant]]
 name = "folder trust: the live suite has no case of grants whose yes would trust a repository outside the project (T-354, T-381)"
-meant = "claude_must_ask_where_nobody_answered_above_and_in_a_repository_nobody_answered_and_no_harness_ever_elsewhere"
+meant = "claude_must_ask_in_a_repository_nobody_answered_and_of_grants_and_servers_and_no_harness_ever_elsewhere"
 runs = ["folder-trust-live-cases"]
 
 [[plant.edit]]
@@ -1378,7 +1377,7 @@ replace = '''
 
 [[plant]]
 name = "folder trust: the live suite has no case of two servers (T-383)"
-meant = "claude_must_ask_where_nobody_answered_above_and_in_a_repository_nobody_answered_and_no_harness_ever_elsewhere"
+meant = "claude_must_ask_in_a_repository_nobody_answered_and_of_grants_and_servers_and_no_harness_ever_elsewhere"
 runs = ["folder-trust-live-cases"]
 
 [[plant.edit]]

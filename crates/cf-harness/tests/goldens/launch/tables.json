@@ -445,8 +445,7 @@
           "--session-id",
           "S-1",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -467,8 +466,7 @@
           "--resume",
           "S-1",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -489,8 +487,7 @@
           "--session-id",
           "S-1",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -511,8 +508,7 @@
           "--resume",
           "S-1",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -1016,8 +1012,7 @@
           "--model",
           "m-1",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -1041,8 +1036,7 @@
           "--model",
           "m-1",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -1066,8 +1060,7 @@
           "--model",
           "m-1",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -1091,8 +1084,7 @@
           "--model",
           "m-1",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -1647,8 +1639,7 @@
           "--effort",
           "high",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -1675,8 +1666,7 @@
           "--effort",
           "high",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -1703,8 +1693,7 @@
           "--effort",
           "high",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -1731,8 +1720,7 @@
           "--effort",
           "high",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -2273,8 +2261,7 @@
           "--model",
           "m-1",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -2299,8 +2286,7 @@
           "--model",
           "m-1",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -2325,8 +2311,7 @@
           "--model",
           "m-1",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -2351,8 +2336,7 @@
           "--model",
           "m-1",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -2944,8 +2928,7 @@
           "--effort",
           "max",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -2973,8 +2956,7 @@
           "--effort",
           "max",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -3002,8 +2984,7 @@
           "--effort",
           "max",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -3031,8 +3012,7 @@
           "--effort",
           "max",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -3536,8 +3516,7 @@
           "--effort",
           "high",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -3561,8 +3540,7 @@
           "--effort",
           "high",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -3586,8 +3564,7 @@
           "--effort",
           "high",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -3611,8 +3588,7 @@
           "--effort",
           "high",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -4102,8 +4078,7 @@
           "--session-id",
           "S-1",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -4125,8 +4100,7 @@
           "--resume",
           "S-1",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -4148,8 +4122,7 @@
           "--session-id",
           "S-1",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -4171,8 +4144,7 @@
           "--resume",
           "S-1",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -4662,8 +4634,7 @@
           "--session-id",
           "S-1",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -4685,8 +4656,7 @@
           "--resume",
           "S-1",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -4708,8 +4678,7 @@
           "--session-id",
           "S-1",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -4731,8 +4700,7 @@
           "--resume",
           "S-1",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -5273,8 +5241,7 @@
           "--model",
           "m-1",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -5299,8 +5266,7 @@
           "--model",
           "m-1",
           "--permission-mode",
-          "bypassPermissions",
-          "Go on"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -5325,8 +5291,7 @@
           "--model",
           "m-1",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -5351,8 +5316,7 @@
           "--model",
           "m-1",
           "--permission-mode",
-          "bypassPermissions",
-          " -x \"quoted\" é"
+          "bypassPermissions"
         ],
         "env": {},
         "dropEnv": [
@@ -5455,8 +5419,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -5483,8 +5446,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -5610,8 +5572,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -5642,8 +5603,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -5757,8 +5717,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -5785,8 +5744,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -5931,8 +5889,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -5952,8 +5909,7 @@
         "args": [
           "resume",
           "S-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -5971,8 +5927,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -5992,8 +5947,7 @@
         "args": [
           "resume",
           "S-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -6111,8 +6065,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -6143,8 +6096,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -6286,8 +6238,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -6322,8 +6273,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -6453,8 +6403,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -6485,8 +6434,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -6653,8 +6601,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -6677,8 +6624,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -6699,8 +6645,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -6723,8 +6668,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -6857,8 +6801,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -6893,8 +6836,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -7052,8 +6994,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -7092,8 +7033,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -7239,8 +7179,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -7275,8 +7214,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -7465,8 +7403,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -7492,8 +7429,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -7517,8 +7453,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -7544,8 +7479,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -7670,8 +7604,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -7704,8 +7637,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -7855,8 +7787,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -7893,8 +7824,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -8032,8 +7962,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -8066,8 +7995,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -8242,8 +8170,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -8267,8 +8194,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -8290,8 +8216,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -8315,8 +8240,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -8456,8 +8380,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"max\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -8494,8 +8417,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"max\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -8661,8 +8583,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"max\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -8703,8 +8624,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"max\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -8858,8 +8778,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"max\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -8896,8 +8815,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"max\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9094,8 +9012,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"max\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9122,8 +9039,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"max\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9148,8 +9064,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"max\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9176,8 +9091,7 @@
           "m-1",
           "-c",
           "model_reasoning_effort=\"max\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9295,8 +9209,7 @@
         "args": [
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9327,8 +9240,7 @@
         "args": [
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9470,8 +9382,7 @@
         "args": [
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9506,8 +9417,7 @@
         "args": [
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9637,8 +9547,7 @@
         "args": [
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9669,8 +9578,7 @@
         "args": [
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9837,8 +9745,7 @@
         "args": [
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9861,8 +9768,7 @@
           "S-1",
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9883,8 +9789,7 @@
         "args": [
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -9907,8 +9812,7 @@
           "S-1",
           "-c",
           "model_reasoning_effort=\"high\"",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10018,8 +9922,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10048,8 +9951,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10183,8 +10085,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10217,8 +10118,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10340,8 +10240,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10370,8 +10269,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10524,8 +10422,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10546,8 +10443,7 @@
         "args": [
           "resume",
           "S-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10566,8 +10462,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10588,8 +10483,7 @@
         "args": [
           "resume",
           "S-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10699,8 +10593,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10729,8 +10622,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10864,8 +10756,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -10898,8 +10789,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11021,8 +10911,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11051,8 +10940,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11205,8 +11093,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11227,8 +11114,7 @@
         "args": [
           "resume",
           "S-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11247,8 +11133,7 @@
       "window": {
         "command": "codex",
         "args": [
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11269,8 +11154,7 @@
         "args": [
           "resume",
           "S-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11395,8 +11279,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11429,8 +11312,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11580,8 +11462,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11618,8 +11499,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11757,8 +11637,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11791,8 +11670,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11967,8 +11845,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -11992,8 +11869,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          "Go on"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -12015,8 +11891,7 @@
         "args": [
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -12040,8 +11915,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--dangerously-bypass-approvals-and-sandbox",
-          " -x \"quoted\" é"
+          "--dangerously-bypass-approvals-and-sandbox"
         ],
         "env": {},
         "dropEnv": [
@@ -12475,8 +12349,7 @@
         "args": [
           "--session-id",
           "S-1",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -12494,8 +12367,7 @@
         "args": [
           "--session-id",
           "S-1",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -12513,8 +12385,7 @@
         "args": [
           "--session-id",
           "S-1",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -12532,8 +12403,7 @@
         "args": [
           "--session-id",
           "S-1",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -13016,8 +12886,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -13038,8 +12907,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -13060,8 +12928,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -13082,8 +12949,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -13603,8 +13469,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -13626,8 +13491,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -13649,8 +13513,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -13672,8 +13535,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -14207,8 +14069,7 @@
           "m-1",
           "--thinking",
           "medium",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -14232,8 +14093,7 @@
           "m-1",
           "--thinking",
           "medium",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -14257,8 +14117,7 @@
           "m-1",
           "--thinking",
           "medium",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -14282,8 +14141,7 @@
           "m-1",
           "--thinking",
           "medium",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -14854,8 +14712,7 @@
           "m-1",
           "--thinking",
           "low",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -14880,8 +14737,7 @@
           "m-1",
           "--thinking",
           "low",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -14906,8 +14762,7 @@
           "m-1",
           "--thinking",
           "low",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -14932,8 +14787,7 @@
           "m-1",
           "--thinking",
           "low",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -15402,8 +15256,7 @@
         "args": [
           "--session-id",
           "S-1",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -15422,8 +15275,7 @@
         "args": [
           "--session-id",
           "S-1",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -15442,8 +15294,7 @@
         "args": [
           "--session-id",
           "S-1",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -15462,8 +15313,7 @@
         "args": [
           "--session-id",
           "S-1",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -15946,8 +15796,7 @@
           "S-1",
           "--thinking",
           "high",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -15968,8 +15817,7 @@
           "S-1",
           "--thinking",
           "high",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -15990,8 +15838,7 @@
           "S-1",
           "--thinking",
           "high",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -16012,8 +15859,7 @@
           "S-1",
           "--thinking",
           "high",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -16482,8 +16328,7 @@
         "args": [
           "--session-id",
           "S-1",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -16502,8 +16347,7 @@
         "args": [
           "--session-id",
           "S-1",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -16522,8 +16366,7 @@
         "args": [
           "--session-id",
           "S-1",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -16542,8 +16385,7 @@
         "args": [
           "--session-id",
           "S-1",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -17063,8 +16905,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -17086,8 +16927,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--approve",
-          "Go on"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -17109,8 +16949,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []
@@ -17132,8 +16971,7 @@
           "S-1",
           "--model",
           "m-1",
-          "--approve",
-          " -x \"quoted\" é"
+          "--approve"
         ],
         "env": {},
         "dropEnv": []

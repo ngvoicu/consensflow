@@ -219,6 +219,22 @@ pub(crate) enum Watching {
     Seen(CommandsSeen),
 }
 
+/// Whether `record`'s window has still to show its launch's first message: owed it until
+/// it is up ([`Dispatcher::hand_first`]), or handed it and its record not showing it yet.
+/// Such a window has not begun the turn that message begins, and what its record holds
+/// after the latest message delivered answers one before it: a window the Resume opened
+/// again on its conversation, read at rest before its words to go on are in, ends on the
+/// answer written before the Close (T-405's L10; the sweep of T-523, Calliope's P3-4 on
+/// T-432). It is no result, at the turn's end nor for Finish.
+pub(crate) fn first_on_its_way(record: &Record) -> bool {
+    record
+        .delivery
+        .borrow()
+        .delivering
+        .as_ref()
+        .is_some_and(|delivering| delivering.launch)
+}
+
 impl Dispatcher {
     /// A worker's turn, looked at: whether it is over with an answer to its task's latest
     /// message, and what that comes to ([`Turn`]). A turn that failed is its task's
@@ -249,6 +265,9 @@ impl Dispatcher {
             self.tell_paused_answer(project, participant, observed, watching)?;
             return Ok(Turn::Open);
         };
+        if first_on_its_way(record) {
+            return Ok(Turn::Open);
+        }
         let items = observed.items();
         let Some(start) = self.delivered_at(participant.id, &thread, items)? else {
             return Ok(Turn::Open);

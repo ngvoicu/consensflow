@@ -206,12 +206,26 @@ impl Dispatcher {
             return Ok(());
         };
         if delivering.launch {
-            // A first message waits as long as its window asks whether to trust its
-            // folder, and has its whole time once it is past that (`trust`).
-            if record.window.borrow().trust != Trusting::Past {
+            // A first message waits as long as its window asks one of the questions its
+            // harness asks as it starts (its folder's trust, its folder's grants, the
+            // project's new MCP servers), and has its whole time once it is past them
+            // (`trust`). One still owed to a window that has neither asked nor shown its
+            // prompt spends its time meanwhile: a window that shows neither is never ready
+            // for it.
+            let trust = record.window.borrow().trust;
+            if trust.asks() || (trust == Trusting::Looking && delivering.owed.is_none()) {
                 return Ok(());
             }
             let waited = self.now() - delivering.since;
+            // One handed over by a paste once its window was up is pressed Enter for
+            // once more, as any paste is; one its window read as it opened never is.
+            if delivering.late
+                && !delivering.entered_again
+                && waited > ENTER_AGAIN_MS
+                && self.pasted(record)
+            {
+                return self.enter_again(record, delivering.message).await;
+            }
             // The chief's window is the human's: however long it takes to
             // show its first message (the handoff), it is never closed for that.
             if delivering.chief || waited <= self.seams.limits.launch_ms {
@@ -226,7 +240,13 @@ impl Dispatcher {
             }
             let (this, held) = (Rc::clone(self), Rc::clone(record));
             let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
-            let because = "the window never showed its first message";
+            // A window delivered its first message once up that never took it was
+            // never ready for it (`hand_first`).
+            let because = if delivering.owed.is_some() {
+                "the window was never ready for its first message"
+            } else {
+                "the window never showed its first message"
+            };
             self.settle_failure(
                 delivering,
                 &self.unstarted_because(record, because, &shown),

@@ -165,6 +165,36 @@ fn secs(n: u64) -> Duration {
     Duration::from_secs(n)
 }
 
+/// What the window of the conversation `session` was told first, as the stand-in
+/// recorded it: the text of the first user message of its record, waited for up to
+/// 30 s. A window is given its first message once it is up, on no word of its command
+/// line (T-432).
+fn first_told(rig: &cf_e2e::rig::Rig, session: &str) -> String {
+    let read = || {
+        rig.transcript(session)
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .find(|row| row["type"] == "user")
+            .and_then(|row| row["message"]["content"].as_str().map(str::to_owned))
+    };
+    let _ = rig.wait_for(
+        "the window's record to hold its first message",
+        secs(30),
+        || Ok(read().is_some()),
+    );
+    read().unwrap_or_default()
+}
+
+/// Whether a word of the command line of the window `frame` opened holds `text`.
+fn on_command_line(frame: &serde_json::Value, text: &str) -> bool {
+    frame["argv"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .any(|word| word.contains(text))
+}
+
 /// The conversation a window was launched with: the word after `--session-id`
 /// in its command line.
 fn session_of(frame: &serde_json::Value) -> String {

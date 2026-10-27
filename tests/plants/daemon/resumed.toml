@@ -39,14 +39,14 @@ find = '                    let at_rest = at_prompt && (settled || empty || left
 replace = '                    let at_rest = at_prompt && (settled || empty) || by_press;'
 
 [[plant]]
-name = "resumed: a window given a message of its own is read at rest by the turn before it"
-meant = "claude::resumed::a_window_opened_with_a_message_of_its_own_is_not_read_at_rest_by_the_turn_the_quit_cut"
+name = "resumed: a window opened for a message it is pasted once up reads the turn the quit cut as its own (T-432)"
+meant = "claude::resumed::a_window_opened_for_a_message_it_is_pasted_once_up_is_read_at_rest_by_the_turn_the_quit_cut"
 runs = ["harness-launch-claude-resumed"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '            let left_open = if resumable && launch.message.is_none() {'
-replace = '            let left_open = if resumable {'
+find = '            let left_open = if resumable {'
+replace = '            let left_open = if resumable && launch.message.is_none() {'
 
 [[plant]]
 name = "resumed: a window that shows another conversation keeps the turn it was opened on"
@@ -118,14 +118,14 @@ find = '                && shown.as_deref() == Some(session.as_str())'
 replace = '                && true'
 
 [[plant]]
-name = "resumed: a Pi window given a message of its own is read at rest by the turn before it"
-meant = "pi::resumed::a_window_opened_with_a_message_of_its_own_is_not_read_at_rest_by_the_turn_the_quit_cut"
+name = "resumed: a Pi window opened for a message its inbox gives it once up reads the turn the quit cut as its own (T-432)"
+meant = "pi::resumed::a_window_opened_for_a_message_it_is_given_once_up_is_read_at_rest_by_the_turn_the_quit_cut"
 runs = ["harness-launch-pi-resumed"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/adapter.rs"
-find = '            let left_open = if launch.resume.is_some() && launch.message.is_none() {'
-replace = '            let left_open = if launch.resume.is_some() {'
+find = '            let left_open = if launch.resume.is_some() {'
+replace = '            let left_open = if launch.resume.is_some() && launch.message.is_none() {'
 
 [[plant]]
 name = "resumed: a Pi window that follows another conversation keeps the turn it was opened on"

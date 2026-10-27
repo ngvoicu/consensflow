@@ -805,11 +805,19 @@ impl Dispatcher {
             None => project,
             Some(delivering) => {
                 let launches = record.window.borrow().launches;
+                // A first message the window was to be handed once up, which its record
+                // does not show (`settle_gone`), owed it still or pasted a moment before,
+                // reached no conversation when the window closed with its project: it
+                // waits for the Resume, as one turned away at its hand-over does
+                // (`hand_first`). One whose window ended by itself in an open project
+                // fails, as a launch that did not come up does.
+                let closed_with_project = project.state != "open";
                 // A paste its harness's record shows it took is confirmed (`in_flight`).
                 let (this, told) = (Rc::clone(self), because.clone());
                 self.settle_gone(delivering, move |delivering| {
+                    let once_up = delivering.owed.is_some() || delivering.late;
                     // A chief's first message (a handoff, most often) waits for its next window.
-                    if delivering.chief {
+                    if delivering.chief || (once_up && closed_with_project) {
                         this.give_back(delivering.message, &told)
                     } else {
                         let retry = !delivering.launch;
@@ -1261,6 +1269,24 @@ impl Dispatcher {
             // A refusal for quota is the quota's to say; any other failure is the human's to hear.
             self.tell_chief_failed(project, participant, record, &observed)
                 .await?;
+        }
+        // A launch's first message that its window is delivered once it is up goes
+        // in as soon as the window is past any question of trusting its folder, has
+        // drawn and is at rest, its project open (`hand_first`).
+        let owed = record
+            .delivery
+            .borrow()
+            .delivering
+            .as_ref()
+            .is_some_and(|delivering| delivering.owed.is_some());
+        if owed {
+            if !drawing && observed.settled && observed.waiting.is_none() && project.state == "open"
+            {
+                let (this, held) = (Rc::clone(self), Rc::clone(record));
+                self.act(record, async move { this.hand_first(&held).await })
+                    .await;
+            }
+            return Ok(());
         }
         let free = record.delivery.borrow().delivering.is_none()
             && observed.settled

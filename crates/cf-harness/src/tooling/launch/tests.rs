@@ -315,10 +315,12 @@ fn a_members_pi_window_is_the_adapters_whole_with_the_users_own_append_file_befo
         .filter(|pair| pair[0] == "--append-system-prompt")
         .map(|pair| pair[1].as_str())
         .collect();
-    assert_eq!(
-        appended,
-        [shown(&agent.join("APPEND_SYSTEM.md")).as_str(), ROLE]
-    );
+    // The role by its file (T-432): no role text is an argument, which every process on
+    // the machine reads. Pi reads the file where the path names one.
+    assert_eq!(appended.len(), 2, "{appended:?}");
+    assert_eq!(appended[0], shown(&agent.join("APPEND_SYSTEM.md")));
+    assert!(appended[1].ends_with("SKILL.md"), "{appended:?}");
+    assert_eq!(fs::read_to_string(appended[1]).unwrap(), ROLE);
     let tail = &args[args.len() - 7..];
     assert_eq!(tail[0], "--session-id");
     assert_eq!(launched["session"], json!(tail[1].clone()));

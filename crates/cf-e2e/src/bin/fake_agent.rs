@@ -281,6 +281,13 @@ fn run(
         }
     }
     let grows = asking && own_var("CF_TEST_RECORD_GROWS_ON_NO").is_some();
+    // A harness whose status says idle from its start, the question on its screen or
+    // not yet drawn: nothing but the screen tells that it asks.
+    if asking && own_var("CF_TEST_TRUST_IDLE_FIRST").is_some() {
+        records
+            .status(pid, "idle")
+            .map_err(|failed| failed.to_string())?;
+    }
     // Its terminal is read from the start, raw, as a TUI reads it: the question
     // before the prompt takes its keys from the same reader.
     let mut keys = Keys::start();
@@ -862,6 +869,23 @@ mod tests {
         let mut records = Records::new(config.path(), "s", 7).unwrap();
         record_message(&mut records, 7, launched, false, text).unwrap();
         written_from(config.path(), 0)
+    }
+
+    #[test]
+    fn a_first_message_given_as_an_argument_is_no_paste_and_keeps_the_path_of_an_image_in_it() {
+        // Claude Code 2.1.308 makes no attachment of the first message of a launch given as an
+        // argument of the program (the probe of 2026-10-22, T-265): a window the kit seeds so
+        // (`Open::seed`) keeps it as it was. ConsensFlow's windows are handed their brief once up,
+        // as a paste (T-432), whose pictures are attached (T-681).
+        let folder = tempfile::tempdir().unwrap();
+        let picture = folder.path().join("reference.png");
+        std::fs::write(&picture, cf_e2e::png::SMALL).unwrap();
+        let brief = format!("Reply with exactly: DONE\n{}", picture.display());
+        let seeded = recorded(&brief, true);
+        assert_eq!(seeded.len(), 1, "{seeded:?}");
+        assert_eq!(seeded[0]["message"]["content"], brief.as_str());
+        let pasted = recorded(&brief, false);
+        assert!(pasted[0].to_string().contains("[Image #1]"), "{pasted:?}");
     }
 
     #[test]
