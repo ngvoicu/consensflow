@@ -57,22 +57,44 @@ impl Transcript {
         Ok(())
     }
 
-    /// The main conversation's assistant answered from `model`: where it names another than
-    /// the last, and the human typed no `/model` since, Claude Code moved it itself (a fallback
-    /// model on overload, a remap of one it retired). Provisional (MUS-24): neither was ever
-    /// recorded here.
-    fn answered_from(&mut self, model: &Arc<str>, at: Option<&Value>) {
+    /// The main conversation's assistant answered from `model`.
+    ///
+    /// What holds the window is Claude Code's own `fallback` block, the one word it gives of
+    /// switching on its own (a fallback model on overload; seen in the wild, 2.1.205). A
+    /// model that only changes in the records (`message.model` drifts when an alias is
+    /// repointed from under a running session, at a restart on another model, at each flip
+    /// of `opusplan`) is a drift, which is told and never held on: of 1013 transcripts,
+    /// 26 changes had no `/model` or `/fast` between and all but the real fallbacks were
+    /// those (T-816). The human's own `/model` or `/fast` puts the model where they chose, and
+    /// ends what was held or told before it.
+    fn answered_from(
+        &mut self,
+        model: &Arc<str>,
+        fallback: Option<&(Arc<str>, Arc<str>)>,
+        at: Option<&Value>,
+    ) {
         let asked = std::mem::take(&mut self.model_asked);
-        if let Some(from) = self.model.replace(Arc::clone(model)) {
-            if from != *model && !asked {
-                self.model_moved = Some(Arc::new(ModelMoved {
-                    from: from.to_string(),
-                    to: model.to_string(),
-                    because: "Claude Code switched models mid-conversation (a fallback model, or a remap)"
-                        .to_owned(),
-                    at: at.and_then(Value::as_str).map(str::to_owned),
-                }));
-            }
+        let previous = self.model.replace(Arc::clone(model));
+        let at = at.and_then(Value::as_str).map(str::to_owned);
+        if let Some((from, to)) = fallback {
+            self.model_moved = Some(Arc::new(ModelMoved {
+                from: from.to_string(),
+                to: to.to_string(),
+                because: "Claude Code fell back to another model (its own `fallback` record)"
+                    .to_owned(),
+                at,
+            }));
+            self.model_drift = None;
+        } else if asked {
+            self.model_moved = None;
+            self.model_drift = None;
+        } else if let Some(from) = previous.filter(|from| from != model) {
+            self.model_drift = Some(Arc::new(ModelMoved {
+                from: from.to_string(),
+                to: model.to_string(),
+                because: "its records name another model with no word of Claude Code's own for it (an alias repointed, a restart, or opusplan)".to_owned(),
+                at,
+            }));
         }
     }
 
@@ -106,7 +128,7 @@ impl Transcript {
         // The latest assistant record has the last word on quota.
         self.quota = None;
         if let Some(model) = &record.model {
-            self.answered_from(model, record.at.as_ref());
+            self.answered_from(model, record.fallback.as_ref(), record.at.as_ref());
         }
         let message_id = id_of(record.message_id.as_ref(), "claude message", seq)?;
         self.active_assistant = Some(Arc::clone(&message_id));

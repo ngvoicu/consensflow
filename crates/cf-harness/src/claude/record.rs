@@ -289,6 +289,8 @@ impl Transcript {
             // change across it is its launch's, and the baseline is what the launch runs.
             self.model = None;
             self.model_asked = false;
+            self.model_moved = None;
+            self.model_drift = None;
             self.open_tools.clear();
             if let Some(candidate) = self.candidate.take() {
                 self.hooks.remove(&candidate.item_id);
@@ -390,6 +392,7 @@ impl Answer for Transcript {
         record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
         record.quota = self.quota.clone();
         record.model_moved.clone_from(&self.model_moved);
+        record.model_drift.clone_from(&self.model_drift);
         record.settlement = settlement;
         // The jobs are those Claude Code has said no end of, whenever the record is
         // read: Finish takes a turn still under way, and says what runs (Astraeus on

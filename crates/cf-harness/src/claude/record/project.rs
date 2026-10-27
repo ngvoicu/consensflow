@@ -103,6 +103,10 @@ pub(super) struct Assistant {
     /// The model a message of the main conversation says it was written by, where it names
     /// one (not Claude Code's own `<synthetic>` messages, nor an API error's).
     pub(super) model: Option<Arc<str>>,
+    /// Claude Code's own record that it moved the conversation to another model: a
+    /// `fallback` block, `{type, from: {model}, to: {model}}` (seen in the wild, 2.1.205),
+    /// of the main conversation. The only word of its own that it switched (T-816).
+    pub(super) fallback: Option<(Arc<str>, Arc<str>)>,
 }
 
 /// A block of an assistant's content that opens or closes a call.
@@ -335,6 +339,18 @@ fn assistant(record: &Value, session: &str) -> Projected {
         .and_then(Value::as_str)
         .filter(|model| main && !refused && !model.is_empty() && *model != "<synthetic>")
         .map(Arc::from);
+    let fallback = self::blocks(content)
+        .iter()
+        .filter(|block| main && !refused && kind(block) == Some("fallback"))
+        .find_map(|block| {
+            let model = |side: &str| {
+                field(block.get(side), "model")
+                    .and_then(Value::as_str)
+                    .filter(|model| !model.is_empty())
+                    .map(Arc::from)
+            };
+            Some((model("from")?, model("to")?))
+        });
     let rate_limited = status == Some(429.0)
         || record.get("error").and_then(Value::as_str) == Some("rate_limit")
         || spent;
@@ -351,6 +367,7 @@ fn assistant(record: &Value, session: &str) -> Projected {
         refused,
         rate_limited,
         model,
+        fallback,
         account: if refused && !rate_limited {
             account_refusal(&text, status)
         } else {
