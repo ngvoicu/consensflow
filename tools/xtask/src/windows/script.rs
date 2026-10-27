@@ -269,7 +269,24 @@ fn is_name(name: &str) -> bool {
 
 /// `text` as PowerShell takes it between single quotes.
 fn quoted(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "''"))
+    format!("'{}'", single_quoted(text))
+}
+
+/// The quotes PowerShell ends a single-quoted string at: the apostrophe and the four
+/// typographic single quotes, which it reads as one (a plant's name "a worker’s turn" ended
+/// the run's command there, integration B round 2, T-800).
+const SINGLE_QUOTES: [char; 5] = ['\'', '\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'];
+
+/// `text` as it goes between PowerShell's single quotes: each quote said twice.
+fn single_quoted(text: &str) -> String {
+    let mut said = String::with_capacity(text.len());
+    for c in text.chars() {
+        if SINGLE_QUOTES.contains(&c) {
+            said.push(c);
+        }
+        said.push(c);
+    }
+    said
 }
 
 /// The script as `powershell -EncodedCommand` takes it, or the refusal that says it will not fit.
@@ -403,7 +420,7 @@ pub fn run_script(script: &Script) -> String {
             ("prepare", &prepare.join(", ")),
             ("given", &given),
             ("inside", script.inside),
-            ("command", &script.command.replace('\'', "''")),
+            ("command", &single_quoted(script.command)),
             ("crlf", "\r\n"),
         ],
     )

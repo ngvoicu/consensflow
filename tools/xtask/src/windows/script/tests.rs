@@ -295,6 +295,28 @@ fn a_quote_in_a_value_is_said_again_and_everything_else_is_taken_as_it_is() {
     assert!(text.contains("$env:C = '$x `y` %z% \"q\" & |'\n"));
 }
 
+/// PowerShell reads the typographic single quotes as quotes too: a plant named "a worker’s
+/// turn" ended the run's command at its quote, on zeewin2 (integration B round 2, T-800). A
+/// variable's value is ASCII (`parse_env`), so the command is where one can come.
+#[test]
+fn a_typographic_quote_in_the_command_is_said_again_as_an_apostrophe_is() {
+    let text = script(
+        &[],
+        &command_line(&[
+            "cargo",
+            "xtask",
+            "plants",
+            "daemon",
+            "a worker\u{2019}s turn",
+        ]),
+        &[],
+    );
+    assert!(
+        text.contains("'cargo xtask plants daemon \"a worker\u{2019}\u{2019}s turn\"'"),
+        "{text}"
+    );
+}
+
 #[test]
 fn the_variables_keep_the_order_they_were_named_in() {
     let env = parse_env(&strings(&["Z=1", "A=2", "M=3"])).unwrap();

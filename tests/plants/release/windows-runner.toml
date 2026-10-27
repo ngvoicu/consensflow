@@ -1958,3 +1958,16 @@ file = "tools/xtask/src/windows/queue.rs"
 find = "            Some(before) => MACHINE_LOOK_MS[before.min(1)],"
 replace = "            Some(_) => LOOK_MS,"
 
+
+# Integration B round 2 (T-800): PowerShell ends a single-quoted string at a typographic single quote too; a
+# plant's name with one ("a worker’s turn") ended the run's command there, on zeewin2.
+
+[[plant]]
+name = "windows runner: a typographic quote in the command is said once, and ends PowerShell's string"
+meant = "a_typographic_quote_in_the_command_is_said_again_as_an_apostrophe_is"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "            (\"command\", &single_quoted(script.command)),"
+replace = "            (\"command\", &script.command.replace('\\'', \"''\")),"
