@@ -699,7 +699,7 @@ fn what_the_engine_is_told_of_a_refused_window_that_muse_moved_is_the_move_besid
         let log = fixture(name);
         let observed =
             crate::shared::record_state::record_state(fresh_reading(&session_of(log), log));
-        let Some(Quota::Unavailable { because, .. }) = observed.quota.as_deref() else {
+        let Some(Quota::Moved { because, .. }) = observed.quota.as_deref() else {
             panic!("{name}: {:?}", observed.quota);
         };
         assert!(
@@ -710,4 +710,57 @@ fn what_the_engine_is_told_of_a_refused_window_that_muse_moved_is_the_move_besid
         );
         assert!(observed.failed, "{name}");
     }
+}
+
+#[test]
+fn a_move_ends_where_the_launch_or_the_human_puts_the_model_back() {
+    // T-816 P2-1: the move was read for good, so a restored model still read as moved, a
+    // fresh window's record held it, and the requester was never told the task went on.
+    let command = |sequence: u64, command: &str| {
+        json!({
+            "schema_version": 1, "id": format!("r{sequence}"), "sequence": sequence,
+            "stream": { "kind": "session", "id": "s1" },
+            "payload_type": "command.invoked",
+            "payload": { "kind": "command_invoked", "record": { "command": command } },
+        })
+    };
+    let moved = reconfigure(5, "muse-spark-1.3", "muse-spark-1.3-contributor", "startup");
+    assert!(record_of(&[metadata("1.4.13"), moved.clone()])
+        .model_moved
+        .is_some());
+    // A resume restores the model the launch named: Muse reconfigures from what the stored
+    // session held (previous source `replay`), and the window is on the launch's again.
+    let restored = reconfigure(7, "muse-spark-1.3-contributor", "muse-spark-1.3", "replay");
+    assert_eq!(
+        record_of(&[metadata("1.4.13"), moved.clone(), restored]).model_moved,
+        None
+    );
+    // The human puts it back with `/model`: theirs, and the move before it is over.
+    let theirs = reconfigure(
+        7,
+        "muse-spark-1.3-contributor",
+        "muse-spark-1.3",
+        "model_reconfigure",
+    );
+    assert_eq!(
+        record_of(&[
+            metadata("1.4.13"),
+            moved.clone(),
+            command(6, "/model muse-spark-1.3"),
+            theirs,
+        ])
+        .model_moved,
+        None
+    );
+    // A later move of Muse's own is read again.
+    let again = reconfigure(
+        9,
+        "muse-spark-1.3",
+        "muse-spark-1.3-contributor",
+        "model_reconfigure",
+    );
+    let restored = reconfigure(7, "muse-spark-1.3-contributor", "muse-spark-1.3", "replay");
+    assert!(record_of(&[metadata("1.4.13"), moved, restored, again])
+        .model_moved
+        .is_some());
 }

@@ -190,7 +190,7 @@ fn a_window_whose_harness_moved_its_model_on_its_own_is_read_as_unavailable_unti
     let observed = record_state(Arc::new(Reading::Known(record.clone())));
     assert_eq!(
         observed.quota.as_deref(),
-        Some(&Quota::Unavailable {
+        Some(&Quota::Moved {
             at: Some("2026-10-26T15:46:19.674Z".to_owned()),
             because: "its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own after its turn failed), a model nobody chose".to_owned(),
         })

@@ -283,6 +283,36 @@ fn a_model_codex_rerouted_a_turn_to_is_a_move_nobody_chose() {
     assert_eq!(read_ok(&[started(json!("t1"))]).model_moved, None);
 }
 
+#[test]
+fn a_turn_that_begins_after_a_reroute_ends_it_and_one_inside_the_turn_does_not() {
+    // T-816 P2-1: a reroute is a turn's. Held for, it is over where the human's Try again
+    // starts another turn; read for good, the window was held again at every look.
+    let rerouted = |from: &str, to: &str| {
+        json!({
+            "timestamp": AT,
+            "type": "event_msg",
+            "payload": { "type": "model_reroute", "from_model": from, "to_model": to,
+                         "reason": "high_risk_cyber_activity" },
+        })
+    };
+    let inside = read_ok(&[started(json!("t1")), rerouted("gpt-6-astra", "gpt-6-safe")]);
+    assert!(inside.model_moved.is_some());
+    let after = read_ok(&[
+        started(json!("t1")),
+        rerouted("gpt-6-astra", "gpt-6-safe"),
+        started(json!("t2")),
+    ]);
+    assert_eq!(after.model_moved, None, "the next turn began");
+    // And one that is rerouted again says so again.
+    let again = read_ok(&[
+        started(json!("t1")),
+        rerouted("gpt-6-astra", "gpt-6-safe"),
+        started(json!("t2")),
+        rerouted("gpt-6-astra", "gpt-6-safe"),
+    ]);
+    assert!(again.model_moved.is_some());
+}
+
 fn read_ok(records: &[Value]) -> Record {
     read(records).unwrap()
 }

@@ -142,11 +142,12 @@ impl ModelMoved {
         )
     }
 
-    /// The move as the account refusing for what only the human cures: the window is
-    /// marked out until they say it may go on, and nothing is sent to it meanwhile, as to
-    /// an account whose billing was refused ([`Quota::Unavailable`]).
+    /// The move as the engine holds on it ([`Quota::Moved`]): the window is marked out
+    /// until the human says it may go on, and nothing is sent to it meanwhile, as to an
+    /// account whose billing was refused ([`Quota::Unavailable`]), though no teammate's turn
+    /// and no allowance releases it: only their word for that member.
     pub fn as_quota(&self) -> Quota {
-        Quota::Unavailable {
+        Quota::Moved {
             at: self.at.clone(),
             because: self.words(),
         }

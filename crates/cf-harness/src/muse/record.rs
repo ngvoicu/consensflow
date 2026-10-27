@@ -330,6 +330,11 @@ impl Log {
         let restoring =
             field(field(record, "previous"), "source").and_then(Value::as_str) == Some("replay");
         let asked = std::mem::take(&mut self.models.asked);
+        // The model is back on the launch's (a resume's replay) or on the one the human chose
+        // (`/model`): what was moved before is over (T-816 P2-1).
+        if restoring || asked {
+            self.models.moved = None;
+        }
         if from == to || restoring || asked {
             return;
         }

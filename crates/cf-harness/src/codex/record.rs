@@ -278,6 +278,9 @@ impl Rollout {
                 }
             }
             Some("task_started") => {
+                // A reroute is a turn's: the next turn to begin (the human's Try again, or
+                // their own words) is on its model again until it says otherwise (T-816).
+                self.rerouted = None;
                 self.current_turn = named.clone();
                 self.latest_turn = named.clone();
                 self.named_turn(&named, "task_started", seq)?.started = true;
