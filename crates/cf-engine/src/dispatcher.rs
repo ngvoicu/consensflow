@@ -998,9 +998,12 @@ impl Dispatcher {
 
     /// Whether the program of a window of participant `id` that ended is gone, kept on
     /// `conversation`, the one it wrote to. Not where another window of that
-    /// participant has opened, or is opening, since (`ended` is the record of the one
-    /// that ended, which still holds its pane): that window's program may write to it
-    /// now, and its own exit says whether it is gone (Calliope's P3-1 on 0181cd9a).
+    /// participant has opened, or is opening, on that conversation since (`ended` is the
+    /// record of the one that ended, which still holds its pane): that window's program
+    /// may write to it now, and its own exit says whether it is gone (Calliope's P3-1 on
+    /// 0181cd9a). A window on another conversation writes nothing to this one (her P3-1 on
+    /// 46664f52: a session brought back on a new conversation lost its own window's proof
+    /// while the deleted session's window still waited for its kill).
     fn keep_proof(
         &self,
         id: i64,
@@ -1018,7 +1021,12 @@ impl Dispatcher {
                 .filter(|record| ended.is_none_or(|ended| !Rc::ptr_eq(record, ended)))
                 .any(|record| {
                     let window = record.window.borrow();
-                    window.pane.is_some() || window.opening.is_some()
+                    let on = Some(conversation);
+                    (window.pane.is_some() && window.conversation == on)
+                        || window
+                            .opening
+                            .as_ref()
+                            .is_some_and(|opening| opening.conversation == on)
                 })
         };
         if !windowed {
