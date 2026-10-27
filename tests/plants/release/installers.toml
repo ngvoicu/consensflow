@@ -1312,7 +1312,7 @@ replace = '''                if false; then'''
 
 [[plant]]
 name = "installers: install.sh deletes the app an earlier install moved aside where nothing is installed"
-meant = "a .previous with no app where the app goes is put back, and the install goes on from it"
+meant = "a .previous with no app where the app goes is put back first: the install then finds that app, and keeps it, newer than the release"
 runs = [["node", "--test", "--test-name-pattern", "earlier install left", "tests/install-sh.test.mjs"]]
 platforms = ["macos"]
 
@@ -1345,7 +1345,7 @@ replace = '''                    :'''
 
 [[plant]]
 name = "installers: install.sh puts the app moved aside back without a word"
-meant = "a .previous with no app where the app goes is put back, and the install goes on from it"
+meant = "a .previous with no app where the app goes is put back first: the install then finds that app, and keeps it, newer than the release"
 runs = [["node", "--test", "--test-name-pattern", "earlier install left", "tests/install-sh.test.mjs"]]
 platforms = ["macos"]
 

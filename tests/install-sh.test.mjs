@@ -1058,7 +1058,7 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       })
     }
 
-    test('a .previous with no app where the app goes is put back, and the install goes on from it', async () => {
+    test('a .previous with no app where the app goes is put back first: the install then finds that app, and keeps it, newer than the release', async () => {
       const at = freshCase()
       const pid = await deadPid()
       leftover(at, `.ConsensFlow.app.previous.${pid}`, '3.0.8')
