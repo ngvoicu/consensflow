@@ -170,17 +170,52 @@ fn block_after(lines: &[&str]) -> String {
     script.join("\n")
 }
 
-/// The text of the job `name`, to the next job.
+/// A line of a workflow's text that is only a comment (or empty), which ends nothing.
+fn is_blank(line: &str) -> bool {
+    line.trim().is_empty() || line.trim_start().starts_with('#')
+}
+
+/// The job a line of a workflow's text opens, if it is a job's own line: two spaces in, a name, a
+/// colon, and nothing after it but a comment.
+pub fn job_header(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("  ")?;
+    if rest.starts_with([' ', '#']) {
+        return None;
+    }
+    let (name, after) = rest.split_once(':')?;
+    let after = after.trim();
+    (after.is_empty() || after.starts_with('#')).then_some(name)
+}
+
+/// The names of the jobs of a workflow's text, in order.
+pub fn job_names(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut in_jobs = false;
+    for line in text.lines() {
+        if line.trim_end() == "jobs:" {
+            in_jobs = true;
+        } else if is_blank(line) {
+            continue;
+        } else if !line.starts_with(' ') {
+            in_jobs = false;
+        } else if let Some(name) = job_header(line).filter(|_| in_jobs) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// The text of the job `name`, to the next job: a comment or a blank line ends nothing, and the
+/// job's own line may have a comment after its colon.
 pub fn job(text: &str, name: &str) -> String {
     let lines: Vec<&str> = text.split('\n').collect();
-    let header = format!("  {name}:");
     let start = lines
         .iter()
-        .position(|line| *line == header)
+        .position(|line| job_header(line) == Some(name))
         .unwrap_or_else(|| panic!("the workflow has no job {name}"));
     let end = lines[start + 1..]
         .iter()
-        .position(|line| indent_of(line) == 2 && !line.trim().is_empty())
+        .position(|line| !is_blank(line) && indent_of(line) <= 2)
         .map_or(lines.len(), |at| start + 1 + at);
     lines[start..end].join("\n")
 }
@@ -258,15 +293,27 @@ impl StepText {
             )
     }
 
+    /// Whether it has a `run:`, as its first line (`      - run: …`) or at its keys' level.
+    pub fn runs(&self) -> bool {
+        self.run_at().is_some()
+    }
+
+    fn run_at(&self) -> Option<(usize, &str)> {
+        self.lines.iter().enumerate().find_map(|(at, line)| {
+            line.strip_prefix("        run: ")
+                .or_else(|| line.strip_prefix("      - run: "))
+                .map(|rest| (at, rest))
+        })
+    }
+
     /// The script of its `run:`, a block (`run: |`) or a line.
     pub fn script(&self) -> String {
-        let lines: Vec<&str> = self.lines.iter().map(String::as_str).collect();
-        let run = lines
-            .iter()
-            .position(|line| line.starts_with("        run: "))
-            .expect("the step has a run");
-        match lines[run].trim_start_matches("        run: ") {
-            "|" => block_after(&lines[run + 1..]),
+        let (run, first) = self.run_at().expect("the step has a run");
+        match first {
+            "|" => {
+                let lines: Vec<&str> = self.lines.iter().map(String::as_str).collect();
+                block_after(&lines[run + 1..])
+            }
             line => line.to_string(),
         }
     }
