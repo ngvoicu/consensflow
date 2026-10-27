@@ -153,6 +153,8 @@ mod rows_a_paste_carried_pasted_again_after_a_restart;
 mod tasks_left_paused_by_a_close_and_resume;
 #[path = "regressions/tell_refused_for_a_queued_task.rs"]
 mod tell_refused_for_a_queued_task;
+#[path = "regressions/the_finished_column_could_not_be_cleared_while_its_tasks_were_needed.rs"]
+mod the_finished_column_could_not_be_cleared_while_its_tasks_were_needed;
 #[cfg(unix)]
 #[path = "regressions/whole_history_across_a_compaction_and_a_switch.rs"]
 mod whole_history_across_a_compaction_and_a_switch;

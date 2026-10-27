@@ -424,8 +424,13 @@ const acts = (board) => board.project.state === 'open'
 
 /**
  * The finished tasks on a board as Delete finished takes them: those that
- * may go, and those kept because a task not yet finished needs them, each
- * with the tasks that do. The daemon decides again when it deletes them.
+ * may go, and those kept, each with the tasks that need it. Deleting a task
+ * only takes it off the board: what waits for it reads its state as before.
+ * So an accepted task goes though others need it (it is accepted for good),
+ * and so does a cancelled one (it never will be); a failed one is kept while
+ * a task not yet finished needs it, for the chief can reopen it and then
+ * accept it, and a deleted task is not reopened. The daemon decides again
+ * when it deletes them.
  */
 function finishedTasks(board) {
   const tasks = [...board.open, ...board.lanes.flatMap((lane) => lane.tasks)].sort(
@@ -436,13 +441,15 @@ function finishedTasks(board) {
     .filter((task) => FINISHED.includes(task.state))
     .map((task) => ({
       number: task.number,
+      state: task.state,
       neededBy: unfinished
         .filter((other) => other.needs.some((need) => need.number === task.number))
         .map((other) => other.number),
     }))
+  const kept = (task) => task.state === 'failed' && task.neededBy.length > 0
   return {
-    deletable: finished.filter((task) => task.neededBy.length === 0).map((task) => task.number),
-    kept: finished.filter((task) => task.neededBy.length > 0),
+    deletable: finished.filter((task) => !kept(task)).map((task) => task.number),
+    kept: finished.filter(kept),
   }
 }
 
@@ -742,11 +749,14 @@ export class BoardView {
   }
 
   /**
-   * The Finished heading's control: every finished task that may go leaves
-   * the board, once the human confirms; nothing while the project is closed.
+   * The Finished heading's control, while the column holds a task: every
+   * finished task that may go leaves the board, once the human confirms, and
+   * the dialog says what stays and why, or that nothing may go; nothing while
+   * the project is closed.
    */
   #deleteFinished(board) {
-    if (!acts(board) || finishedTasks(board).deletable.length === 0) return []
+    const { deletable, kept } = finishedTasks(board)
+    if (!acts(board) || deletable.length + kept.length === 0) return []
     return [
       iconButton(
         ICONS.remove,

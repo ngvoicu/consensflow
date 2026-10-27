@@ -106,10 +106,12 @@
   <dialog id="delete-tasks-dialog" class="settings" aria-labelledby="delete-tasks-title">
     <form class="dialog-form" method="dialog">
       <h2 id="delete-tasks-title">Delete these tasks?</h2>
-      <p class="dialog-help">A deleted task leaves the board and cf task list for good. The ledger keeps it: the chief can still read it, its brief, result and thread, with cf task get. This cannot be undone.</p>
+      <p class="dialog-help" id="delete-tasks-help">A deleted task leaves the board and cf task list for good. The ledger keeps it: the chief can still read it, its brief, result and thread, with cf task get. This cannot be undone.</p>
+      <p class="dialog-note" id="delete-tasks-nothing" hidden>Nothing is deleted. A failed task stays on the board while a task not yet finished needs it: the chief can reopen it, and once it is accepted those tasks go on. It can go when they are finished or cancelled.</p>
+      <p class="dialog-note" id="delete-tasks-going" hidden></p>
       <ul class="dialog-kept" id="delete-tasks-kept" aria-label="Kept on the board" hidden></ul>
       <div class="dialog-actions">
-        <button class="quiet-button" type="submit" value="keep">Keep</button>
+        <button class="quiet-button" type="submit" value="keep" id="delete-tasks-keep">Keep</button>
         <button class="danger-button" type="button" id="delete-tasks-confirm">Delete for good</button>
       </div>
     </form>
